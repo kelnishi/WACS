@@ -95,5 +95,148 @@ namespace Wacs.ComponentModel.Bindgen.Test
             Assert.Throws<System.InvalidOperationException>(
                 () => WitForward.EmitFromText(noWorld));
         }
+
+        // -----------------------------------------------------
+        //                Host-mode smoke tests
+        // -----------------------------------------------------
+
+        private const string HostModeWit = @"
+            package wasi:demo@0.2.3;
+            interface env {
+                get-args: func() -> list<string>;
+                initial-cwd: func() -> option<string>;
+            }
+        ";
+
+        [Fact]
+        public void EmitHost_produces_an_interface_per_wit_interface()
+        {
+            var packages = Wacs.ComponentModel.WIT.WitLoader
+                .LoadFiles(WriteScratch(HostModeWit));
+            var sources = WitForward
+                .EmitHostInterfacesFromPackages(packages);
+            Assert.NotEmpty(sources);
+            // One C# file per WIT interface; this fixture has one.
+            Assert.Single(sources);
+            Assert.Equal("Env.g.cs", sources[0].FileName);
+        }
+
+        [Fact]
+        public void EmitHost_uses_faithful_Option_and_list_mappings()
+        {
+            var packages = Wacs.ComponentModel.WIT.WitLoader
+                .LoadFiles(WriteScratch(HostModeWit));
+            var src = WitForward
+                .EmitHostInterfacesFromPackages(packages)[0]
+                .Content;
+            // initial-cwd's option<string> must lift to Option<string>,
+            // not nullable string. Faithful mapping is the project's
+            // explicit choice.
+            Assert.Contains("Option<string>", src);
+            // get-args' list<string> must be string[].
+            Assert.Contains("string[]", src);
+            // Each method carries a [WitSource(...)] attribute.
+            Assert.Contains("[WitSource(@\"", src);
+        }
+
+        [Fact]
+        public void EmitHost_namespace_derives_from_package_name()
+        {
+            var packages = Wacs.ComponentModel.WIT.WitLoader
+                .LoadFiles(WriteScratch(HostModeWit));
+            var src = WitForward
+                .EmitHostInterfacesFromPackages(packages)[0]
+                .Content;
+            // Sanity: namespace declaration starts with our root.
+            Assert.Contains("namespace Wasi.", src);
+        }
+
+        [Fact]
+        public void EmitHost_dump_for_debugging()
+        {
+            var packages = Wacs.ComponentModel.WIT.WitLoader
+                .LoadFiles(WriteScratch(HostModeWit));
+            var src = WitForward
+                .EmitHostInterfacesFromPackages(packages)[0]
+                .Content;
+            // Useful when debugging — gets surfaced in test output.
+            Assert.True(src.Length > 0, "Empty emission:\n" + src);
+            // Always pass; the failure assertion above only fires
+            // on truly empty output. Use `dotnet test --logger
+            // console;verbosity=detailed` to see the dump.
+            System.Console.WriteLine(src);
+        }
+
+        [Fact]
+        public void EmitHost_real_wasi_random_compiles_shape()
+        {
+            // Cross-check against the actual vendored WASI WIT
+            // for wasi:random — small, no resources, exercises
+            // primitives + list<u8>.
+            var witDir = FindWitDir("Wacs.WASI.Preview2/wit");
+            if (witDir == null)
+            {
+                // Test can run from the bindgen test project's
+                // bin dir; if we can't locate the WIT root,
+                // skip rather than fail.
+                return;
+            }
+            var sources = WitForward
+                .EmitHostInterfacesFromDirectory(witDir);
+            // Random emits 3 interfaces: random, insecure,
+            // insecure-seed.
+            var randomFile = sources.FirstOrDefault(s =>
+                s.FileName == "Random.g.cs");
+            Assert.NotNull(randomFile);
+            // get-random-bytes(len: u64) -> list<u8>
+            Assert.Contains("byte[]", randomFile!.Content);
+            Assert.Contains("ulong", randomFile.Content);
+            Assert.Contains("[WitSource(@\"interface random\"",
+                randomFile.Content);
+        }
+
+        [Fact]
+        public void EmitHost_full_wasi_preview2_does_not_throw()
+        {
+            // Full smoke test: every vendored WASI 0.2.3 WIT file
+            // emits without exception. Regression guard for
+            // unhandled CtValType subclasses (records inside
+            // variants, etc.).
+            var witDir = FindWitDir("Wacs.WASI.Preview2/wit");
+            if (witDir == null) return;
+            var sources = WitForward
+                .EmitHostInterfacesFromDirectory(witDir);
+            // Sanity: at least one file per top-level WASI
+            // namespace plus their dep tree.
+            Assert.NotEmpty(sources);
+            // Each emitted file should declare a namespace.
+            foreach (var s in sources)
+                Assert.Contains("namespace ", s.Content);
+        }
+
+        private static string? FindWitDir(string suffix)
+        {
+            var d = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (d != null)
+            {
+                var candidate = Path.Combine(d.FullName, suffix);
+                if (Directory.Exists(candidate)) return candidate;
+                d = d.Parent;
+            }
+            return null;
+        }
+
+        // -----------------------------------------------------
+
+        private static System.Collections.Generic.IEnumerable<string>
+            WriteScratch(string witText)
+        {
+            var dir = Path.Combine(Path.GetTempPath(),
+                "wacs-host-emit-" + System.Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            var file = Path.Combine(dir, "demo.wit");
+            File.WriteAllText(file, witText);
+            return new[] { file };
+        }
     }
 }
