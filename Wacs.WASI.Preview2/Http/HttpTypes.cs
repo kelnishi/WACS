@@ -104,13 +104,19 @@ namespace Wacs.WASI.Preview2.Http
             return false;
         }
 
-        /// <summary>Append a (key, value) entry. Host-side
-        /// helper not bound to WIT yet (the WIT
-        /// <c>append(field-key, field-value)</c> will route
-        /// here once the binder accepts byte[] alongside
-        /// string on a void+result wrapper).</summary>
-        public void AppendEntry(string name, byte[] value)
+        /// <summary>Append a (key, value) entry. WIT
+        /// <c>append(field-key, field-value)
+        ///   -&gt; result&lt;_, header-error&gt;</c>.</summary>
+        [WasiErrorResult]
+        public virtual void Append(string name, byte[] value)
             => _entries.Add((name, value));
+
+        /// <summary>Host-side alias for
+        /// <see cref="Append(string, byte[])"/> kept for
+        /// fixture setup paths that pre-seed the entry list
+        /// without going through the canon-lower wire.</summary>
+        public void AppendEntry(string name, byte[] value)
+            => Append(name, value);
 
         /// <summary>Remove every entry matching
         /// <paramref name="name"/> (case-insensitive).</summary>

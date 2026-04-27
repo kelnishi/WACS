@@ -10,4 +10,7 @@ world demo {
     /// Calls fields.has(handle, "X-Present"); returns the
     /// bool as u32.
     export ask-has: func(handle: u32) -> u32;
+    /// Calls fields.append(handle, "X-New", "value");
+    /// returns the outer disc byte (0 = Ok).
+    export ask-append: func(handle: u32) -> u32;
 }

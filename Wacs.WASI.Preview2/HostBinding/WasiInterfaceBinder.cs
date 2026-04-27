@@ -2227,13 +2227,15 @@ namespace Wacs.WASI.Preview2.HostBinding
             // wire slots — variant flat-lowering: 1 disc +
             // 11 joined-case payload slots, all i32),
             // NewTimestamp (3 wire slots: variant disc +
-            // datetime seconds(i64) + nanoseconds(i32)), or
-            // AccessType (2 wire slots: variant disc + modes).
+            // datetime seconds(i64) + nanoseconds(i32)),
+            // AccessType (2 wire slots: variant disc + modes),
+            // or byte[] (2 wire slots: ptr + len).
             // Aggregates (records, lists) stay deferred.
             foreach (var p in paramInfos)
                 if (!IsPrimitive(p.ParameterType)
                     && !p.ParameterType.IsEnum
                     && p.ParameterType != typeof(string)
+                    && p.ParameterType != typeof(byte[])
                     && p.ParameterType.GetCustomAttribute<
                         WasiResourceAttribute>() == null
                     && p.ParameterType != typeof(
@@ -2251,7 +2253,8 @@ namespace Wacs.WASI.Preview2.HostBinding
             int paramSlotCount = 0;
             foreach (var p in paramInfos)
             {
-                if (p.ParameterType == typeof(string))
+                if (p.ParameterType == typeof(string)
+                    || p.ParameterType == typeof(byte[]))
                     paramSlotCount += 2;
                 else if (p.ParameterType == typeof(
                     Wacs.WASI.Preview2.Sockets.IpSocketAddress))
@@ -2271,10 +2274,11 @@ namespace Wacs.WASI.Preview2.HostBinding
             int wi = 2;
             foreach (var p in paramInfos)
             {
-                if (p.ParameterType == typeof(string))
+                if (p.ParameterType == typeof(string)
+                    || p.ParameterType == typeof(byte[]))
                 {
-                    wireParamTypes[wi++] = typeof(int);
-                    wireParamTypes[wi++] = typeof(int);
+                    wireParamTypes[wi++] = typeof(int);   // ptr
+                    wireParamTypes[wi++] = typeof(int);   // len
                 }
                 else if (p.ParameterType.GetCustomAttribute<
                     WasiResourceAttribute>() != null)
@@ -2332,7 +2336,8 @@ namespace Wacs.WASI.Preview2.HostBinding
             wi = 2;
             for (int i = 0; i < paramInfos.Length; i++)
             {
-                if (paramInfos[i].ParameterType == typeof(string))
+                if (paramInfos[i].ParameterType == typeof(string)
+                    || paramInfos[i].ParameterType == typeof(byte[]))
                 {
                     lambdaParams[wi++] = Expression.Parameter(
                         typeof(int), paramInfos[i].Name + "_ptr");
@@ -2418,6 +2423,11 @@ namespace Wacs.WASI.Preview2.HostBinding
 
             wi = 2;
             var argExprs = new Expression[paramInfos.Length];
+            // Cache the helper that copies a slice of memory
+            // into a fresh byte[] (used for byte[] params).
+            var sliceCopyMethod = typeof(WasiInterfaceBinder)
+                .GetMethod(nameof(CopyMemorySlice),
+                    BindingFlags.Static | BindingFlags.NonPublic)!;
             for (int i = 0; i < paramInfos.Length; i++)
             {
                 if (paramInfos[i].ParameterType == typeof(string))
@@ -2426,6 +2436,15 @@ namespace Wacs.WASI.Preview2.HostBinding
                     var lenParam = lambdaParams[wi++];
                     argExprs[i] = Expression.Convert(
                         Expression.Call(encodingUtf8, getStringMethod,
+                            memoryAccess, ptrParam, lenParam),
+                        typeof(object));
+                }
+                else if (paramInfos[i].ParameterType == typeof(byte[]))
+                {
+                    var ptrParam = lambdaParams[wi++];
+                    var lenParam = lambdaParams[wi++];
+                    argExprs[i] = Expression.Convert(
+                        Expression.Call(sliceCopyMethod,
                             memoryAccess, ptrParam, lenParam),
                         typeof(object));
                 }
@@ -3533,6 +3552,20 @@ namespace Wacs.WASI.Preview2.HostBinding
                 return new Wacs.WASI.Preview2.Filesystem.AccessTypeAccess(
                     (Wacs.WASI.Preview2.Filesystem.AccessModes)modes);
             return new Wacs.WASI.Preview2.Filesystem.AccessTypeExists();
+        }
+
+        /// <summary>Copy a slice of linear memory into a
+        /// fresh byte[]. Used to decode byte[] params (WIT
+        /// list<u8>) at the host boundary — the binder reads
+        /// (ptr, len) wire slots and calls this helper to
+        /// produce a managed array the host method can take
+        /// ownership of without aliasing guest memory.</summary>
+        private static byte[] CopyMemorySlice(byte[] memory, int ptr, int len)
+        {
+            var slice = new byte[len];
+            if (len > 0)
+                System.Array.Copy(memory, ptr, slice, 0, len);
+            return slice;
         }
 
         /// <summary>Decode a flat-lowered

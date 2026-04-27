@@ -93,6 +93,34 @@ namespace Wacs.WASI.Preview2.Test
         }
 
         [Fact]
+        public void Fields_append_decodes_string_and_byte_array_params()
+        {
+            // Fixture: ask-append(handle) calls fields.append
+            // (handle, "X-New", "value"). Stub captures both
+            // via override of Append; test asserts the entry
+            // landed in the field collection.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-fields-component", "httpfields.component.wasm"));
+            var resources = new ResourceContext();
+            var fields = new Fields();
+            int handle = resources.TableFor(typeof(Fields))
+                .Allocate(fields);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<Fields>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-append", (uint)handle)!);
+            Assert.Single(fields.Entries);
+            Assert.Equal("X-New", fields.Entries[0].Key);
+            Assert.Equal(System.Text.Encoding.UTF8.GetBytes("value"),
+                fields.Entries[0].Value);
+        }
+
+        [Fact]
         public void Fields_clone_returns_fresh_resource_handle()
         {
             // Fixture: ask-clone(handle) calls fields.clone,
