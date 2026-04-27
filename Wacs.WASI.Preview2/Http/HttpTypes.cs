@@ -235,10 +235,28 @@ namespace Wacs.WASI.Preview2.Http
         [WasiMethodName("path-with-query")]
         public virtual string? PathWithQuery() => _pathWithQuery;
 
+        /// <summary>WIT <c>set-path-with-query: func(
+        ///   path-with-query: option&lt;string&gt;)
+        ///   -&gt; result&lt;_, _&gt;</c>.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("set-path-with-query")]
+        public virtual void SetPathWithQuery(
+            [WasiOptionalParam] string? pathWithQuery)
+            => _pathWithQuery = pathWithQuery;
+
         /// <summary>Authority (host:port) for the request.
         /// Null when not set.</summary>
         [WasiOptionalReturn]
         public virtual string? Authority() => _authority;
+
+        /// <summary>WIT <c>set-authority: func(
+        ///   authority: option&lt;string&gt;)
+        ///   -&gt; result&lt;_, _&gt;</c>.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("set-authority")]
+        public virtual void SetAuthority(
+            [WasiOptionalParam] string? authority)
+            => _authority = authority;
 
         /// <summary>Take ownership of the request body for
         /// writing. Per WIT semantics the body can only be
