@@ -823,6 +823,20 @@ namespace Wacs.WASI.Preview2.HostBinding
                 return;
             }
 
+            // [WasiFutureIncomingResponseResult] →
+            // option<result<result<own<incoming-response>,
+            // error-code>, _>>. 56-byte retArea, similar
+            // structure to future-trailers but with result-
+            // inside-result instead of option-inside-result.
+            if (m.GetCustomAttribute<
+                WasiFutureIncomingResponseResultAttribute>() != null)
+            {
+                BindFutureIncomingResponseGetMethod(
+                    runtime, namespaceName, importName, table,
+                    resourceType, m, resources);
+                return;
+            }
+
             // [WasiUnitResult] + void return →
             // result<_, _> on a resource method. Wire is
             // flat-return i32 (just the disc) instead of the
@@ -1540,6 +1554,83 @@ namespace Wacs.WASI.Preview2.HostBinding
                     memory[retAreaPtr + p] = 0;
                 int trailerHandle = trailersTable.Allocate(tup.Item2);
                 WriteI32LE(memory, retAreaPtr + 20, trailerHandle);
+            }
+
+            runtime.BindHostFunction<Action<ExecContext, int, int>>(
+                (namespaceName, importName), Body);
+        }
+
+        /// <summary>Resource method canon-lowering to WIT
+        /// <c>option&lt;result&lt;result&lt;own&lt;incoming-
+        /// response&gt;, error-code&gt;, _&gt;&gt;</c> — the
+        /// future-incoming-response.get shape. Host method
+        /// returns <c>(bool ready, IncomingResponse? response)</c>.
+        ///
+        /// <para>retArea is 56 bytes (align 8):
+        /// <list type="bullet">
+        /// <item>0:  outer option disc (1B)</item>
+        /// <item>1-7: padding</item>
+        /// <item>8:  outer result disc (1B) — 0=Ok</item>
+        /// <item>9-15: padding (outer-payload at +16)</item>
+        /// <item>16: inner result disc (1B) — 0=Ok</item>
+        /// <item>17-23: padding (inner-payload at +24)</item>
+        /// <item>24: own<incoming-response> handle (4B)</item>
+        /// <item>28-55: error-code payload area (zeroed)</item>
+        /// </list>
+        /// State encoding for v0:
+        /// <list type="bullet">
+        /// <item>(false, _) → outer disc=0</item>
+        /// <item>(true, resp) → outer=1, outer-result=0,
+        /// inner-result=0, handle at +24</item>
+        /// </list>
+        /// Outer Err (already-consumed) and inner Err
+        /// (error-code) are not surfaced in v0.</para></summary>
+        private static void BindFutureIncomingResponseGetMethod(
+            WasmRuntime runtime, string namespaceName,
+            string importName, ResourceTable selfTable,
+            Type resourceType, MethodInfo m,
+            ResourceContext resources)
+        {
+            var responseType = typeof(
+                Wacs.WASI.Preview2.Http.IncomingResponse);
+            var responseTable = resources.TableFor(responseType);
+
+            void Body(ExecContext ctx, int handle, int retAreaPtr)
+            {
+                var inst = selfTable.Get(handle);
+                var ret = m.Invoke(inst, Array.Empty<object?>());
+                if (ret == null)
+                    throw new InvalidOperationException(
+                        "[WasiFutureIncomingResponseResult] "
+                        + "method '" + m.Name + "' returned "
+                        + "null — expected (bool ready, "
+                        + "IncomingResponse? response).");
+                var tup = (System.ValueTuple<bool,
+                    Wacs.WASI.Preview2.Http.IncomingResponse?>)ret;
+                var memory = ctx.DefaultMemory.Data;
+                if (!tup.Item1)
+                {
+                    memory[retAreaPtr] = 0;        // outer None
+                    return;
+                }
+                if (tup.Item2 == null)
+                    throw new InvalidOperationException(
+                        "[WasiFutureIncomingResponseResult] "
+                        + "method '" + m.Name + "' returned "
+                        + "(true, null) — when ready=true the "
+                        + "response handle must be non-null "
+                        + "(v0 doesn't surface inner Err).");
+                memory[retAreaPtr] = 1;            // outer Some
+                for (int p = 1; p <= 7; p++)
+                    memory[retAreaPtr + p] = 0;
+                memory[retAreaPtr + 8] = 0;        // outer Ok
+                for (int p = 9; p <= 15; p++)
+                    memory[retAreaPtr + p] = 0;
+                memory[retAreaPtr + 16] = 0;       // inner Ok
+                for (int p = 17; p <= 23; p++)
+                    memory[retAreaPtr + p] = 0;
+                int respHandle = responseTable.Allocate(tup.Item2);
+                WriteI32LE(memory, retAreaPtr + 24, respHandle);
             }
 
             runtime.BindHostFunction<Action<ExecContext, int, int>>(

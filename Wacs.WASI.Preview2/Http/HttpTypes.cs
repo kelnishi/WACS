@@ -566,6 +566,23 @@ namespace Wacs.WASI.Preview2.Http
         /// returns an always-ready pollable.</summary>
         public virtual Pollable Subscribe() => new Pollable();
 
+        /// <summary>WIT <c>get: func() -&gt; option&lt;result&lt;
+        ///   result&lt;own&lt;incoming-response&gt;,
+        ///                error-code&gt;,
+        ///   _&gt;&gt;</c>. Tuple return shape:
+        /// <list type="bullet">
+        /// <item><c>(false, _)</c> → outer None (still pending)</item>
+        /// <item><c>(true, response)</c> → ready with response</item>
+        /// </list>
+        /// Default impl: ready with a fresh
+        /// <see cref="IncomingResponse"/> stub. v0 surfaces
+        /// only the always-Ok subset; inner Err (error-code)
+        /// and outer Err (already-consumed) follow when the
+        /// error-code variant payload encoder lands.</summary>
+        [WasiFutureIncomingResponseResult]
+        public virtual (bool ready, IncomingResponse? response) Get()
+            => (true, new IncomingResponse());
+
         public virtual void Dispose() { }
     }
 

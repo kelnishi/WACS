@@ -1311,6 +1311,74 @@ namespace Wacs.WASI.Preview2.Test
             }
         }
 
+        private sealed class StagedFutureResponse : FutureIncomingResponse
+        {
+            public bool Ready;
+            public IncomingResponse? Response;
+            public override (bool ready, IncomingResponse? response) Get()
+                => (Ready, Response);
+        }
+
+        [Fact]
+        public void FutureIncomingResponse_get_writes_three_state_retArea()
+        {
+            // Tests the deeply nested option<result<result<own
+            // <incoming-response>, error-code>, _>> retArea
+            // encoder. Two states exercised:
+            //   not-ready  → outer disc=0
+            //   ready      → outer=1, outer-result=0,
+            //                inner-result=0, handle at +24
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-future-response-get-component",
+                "futureresp.component.wasm"));
+
+            // Subtest 1: not ready
+            {
+                var resources = new ResourceContext();
+                var fr = new StagedFutureResponse { Ready = false };
+                int hFr = resources.TableFor(typeof(FutureIncomingResponse))
+                    .Allocate(fr);
+                var ci = ComponentInstance.Instantiate(bytes, runtime =>
+                {
+                    runtime.BindWasiResource<FutureIncomingResponse>(
+                        "wasi:http/types@0.2.3", resources);
+                    runtime.BindWasiResource<IncomingResponse>(
+                        "wasi:http/types@0.2.3", resources);
+                });
+                Assert.Equal(0u, (uint)ci.Invoke(
+                    "ask-outer-disc", (uint)hFr)!);
+            }
+
+            // Subtest 2: ready with response
+            {
+                var resources = new ResourceContext();
+                var resp = new IncomingResponse();
+                var fr = new StagedFutureResponse { Ready = true,
+                    Response = resp };
+                int hFr = resources.TableFor(typeof(FutureIncomingResponse))
+                    .Allocate(fr);
+                var ci = ComponentInstance.Instantiate(bytes, runtime =>
+                {
+                    runtime.BindWasiResource<FutureIncomingResponse>(
+                        "wasi:http/types@0.2.3", resources);
+                    runtime.BindWasiResource<IncomingResponse>(
+                        "wasi:http/types@0.2.3", resources);
+                });
+                Assert.Equal(1u, (uint)ci.Invoke(
+                    "ask-outer-disc", (uint)hFr)!);
+                Assert.Equal(0u, (uint)ci.Invoke(
+                    "ask-outer-result-disc", (uint)hFr)!);
+                Assert.Equal(0u, (uint)ci.Invoke(
+                    "ask-inner-result-disc", (uint)hFr)!);
+                uint hResp = (uint)ci.Invoke(
+                    "ask-response-handle", (uint)hFr)!;
+                Assert.NotEqual(0u, hResp);
+                Assert.Same(resp,
+                    resources.TableFor(typeof(IncomingResponse))
+                        .Get((int)hResp));
+            }
+        }
+
         [Fact]
         public void Http_resource_markers_are_allocatable()
         {

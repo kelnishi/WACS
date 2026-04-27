@@ -1,0 +1,13 @@
+package local:futureresp;
+world demo {
+    import wasi:http/types@0.2.3;
+    /// Calls future-incoming-response.get(handle); returns
+    /// the outer option disc (0=None/pending, 1=Some).
+    export ask-outer-disc: func(fr: u32) -> u32;
+    /// Returns the outer result disc at offset 8 (0=Ok).
+    export ask-outer-result-disc: func(fr: u32) -> u32;
+    /// Returns the inner result disc at offset 16 (0=Ok).
+    export ask-inner-result-disc: func(fr: u32) -> u32;
+    /// Returns the response handle at offset 24.
+    export ask-response-handle: func(fr: u32) -> u32;
+}
