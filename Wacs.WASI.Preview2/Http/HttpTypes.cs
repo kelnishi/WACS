@@ -277,6 +277,12 @@ namespace Wacs.WASI.Preview2.Http
     [WasiResource("incoming-request")]
     public class IncomingRequest : IDisposable
     {
+        protected HttpMethod _method = new HttpMethodGet();
+
+        /// <summary>HTTP request method on the server side.
+        /// WIT <c>method() -&gt; method</c>.</summary>
+        public virtual HttpMethod Method() => _method;
+
         public virtual Fields Headers() => new Fields();
 
         [WasiOptionalReturn]
