@@ -91,6 +91,15 @@ namespace Wacs.WASI.Preview2.Http
             = new System.Collections.Generic.List<
                 (string Key, byte[] Value)>();
 
+        /// <summary>WIT <c>constructor()</c> — guest calls
+        /// <c>[constructor]fields</c> to create a fresh empty
+        /// fields collection. The auto-binder registers this
+        /// factory under that import name and table-allocates
+        /// the returned instance, handing back the i32 handle.
+        /// </summary>
+        [WasiConstructor]
+        public static Fields New() => new Fields();
+
         /// <summary>True iff there is at least one entry
         /// with key matching <paramref name="name"/> (case-
         /// insensitive). WIT

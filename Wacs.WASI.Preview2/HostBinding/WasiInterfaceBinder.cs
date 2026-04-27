@@ -692,6 +692,21 @@ namespace Wacs.WASI.Preview2.HostBinding
                     witName, table, resourceType, m, resources);
             }
 
+            // [constructor]Name — static factory methods
+            // tagged [WasiConstructor]. Register one bind
+            // per matching method. v0 supports the zero-arg
+            // shape (Fields() pattern); parameterized
+            // constructors land when the call site requires
+            // them.
+            foreach (var m in resourceType.GetMethods(
+                BindingFlags.Public | BindingFlags.Static))
+            {
+                if (m.GetCustomAttribute<
+                    WasiConstructorAttribute>() == null) continue;
+                BindResourceConstructor(runtime, namespaceName,
+                    witName, table, resourceType, m);
+            }
+
             // [resource-drop]Name — wasm passes i32 handle,
             // we drop the table entry (and Dispose).
             BindResourceDrop(runtime, namespaceName, witName, table);
@@ -3088,6 +3103,46 @@ namespace Wacs.WASI.Preview2.HostBinding
             }
 
             runtime.BindHostFunction<Action<ExecContext, int, int, int>>(
+                (namespaceName, importName), Body);
+        }
+
+        /// <summary>Register the <c>[constructor]T</c> handler
+        /// — wasm calls into the static factory method tagged
+        /// <see cref="WasiConstructorAttribute"/>; we allocate
+        /// the returned instance into the resource table and
+        /// hand back its handle. v0 supports the zero-arg
+        /// constructor shape; parameterized constructors land
+        /// when a v0 call site needs them.</summary>
+        private static void BindResourceConstructor(
+            WasmRuntime runtime, string namespaceName,
+            string witResourceName, ResourceTable table,
+            Type resourceType, MethodInfo factory)
+        {
+            if (factory.GetParameters().Length != 0)
+                throw new InvalidOperationException(
+                    "Resource constructor '" + factory.Name
+                    + "' on type " + resourceType
+                    + " must be parameterless. Parameterized "
+                    + "constructors are a follow-up.");
+            if (factory.ReturnType != resourceType)
+                throw new InvalidOperationException(
+                    "Resource constructor '" + factory.Name
+                    + "' must return its declaring type "
+                    + resourceType + ".");
+            var importName = "[constructor]" + witResourceName;
+
+            int Body(ExecContext _)
+            {
+                var inst = factory.Invoke(null,
+                    Array.Empty<object?>());
+                if (inst == null)
+                    throw new InvalidOperationException(
+                        "Resource constructor '" + factory.Name
+                        + "' returned null.");
+                return table.Allocate(inst);
+            }
+
+            runtime.BindHostFunction<Func<ExecContext, int>>(
                 (namespaceName, importName), Body);
         }
 

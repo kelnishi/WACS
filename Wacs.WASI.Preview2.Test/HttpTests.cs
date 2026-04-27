@@ -866,6 +866,32 @@ namespace Wacs.WASI.Preview2.Test
         }
 
         [Fact]
+        public void Fields_constructor_yields_fresh_handle()
+        {
+            // Fixture: ask-new() calls [constructor]fields()
+            // and returns the new handle. The auto-binder
+            // walks Fields' static methods, finds
+            // [WasiConstructor] on Fields.New, and registers
+            // the import. Each call allocates a new instance
+            // and table-allocates its handle.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-fieldsctor-component",
+                "httpfieldsctor.component.wasm"));
+            var resources = new ResourceContext();
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<Fields>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            uint h = (uint)ci.Invoke("ask-new")!;
+            Assert.NotEqual(0u, h);
+            var inst = resources.TableFor(typeof(Fields)).Get((int)h);
+            Assert.IsType<Fields>(inst);
+        }
+
+        [Fact]
         public void Http_resource_markers_are_allocatable()
         {
             // Smoke test: every wasi:http resource type can
