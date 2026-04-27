@@ -6,6 +6,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
+using Wacs.ComponentModel.Runtime;
 using Wacs.Core.Runtime;
 using Wacs.WASI.Preview2.HostBinding;
 using Wacs.WASI.Preview2.HostBinding.CanonicalAbi;
@@ -16,8 +17,10 @@ namespace Wacs.WASI.Preview2.Filesystem
     public sealed partial class FilesystemBindings
     {
         // wasi:filesystem/types@0.2.3 — descriptor resource.
-        // 25 methods total. Each binding line wires one wire
-        // shape to its host method.
+        // Each binding line wires one wire shape to its host
+        // method on Descriptor. Host methods return
+        // Result<X, ErrorCode>; the Write* helpers encode both
+        // branches of the canonical-ABI result variant.
         private static void BindDescriptor(WasmRuntime runtime,
             ResourceContext resources, Realloc alloc)
         {
@@ -31,63 +34,59 @@ namespace Wacs.WASI.Preview2.Filesystem
                 (_, h) => descriptors.Drop(h));
 
             // get-type → result<descriptor-type, error-code> (2 bytes)
+            // Host-side method routes through the explicit-interface
+            // member (IDescriptor.GetType) to avoid clashing with
+            // object.GetType — use the IDescriptor cast.
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (Ns, "[method]descriptor.get-type"),
                 (ctx, handle, retArea) =>
                 {
-                    var d = (Descriptor)descriptors.Get(handle);
-                    WriteOkU8(ctx.Memory(), retArea, (byte)d.GetDescriptorType());
+                    var d = (IDescriptor)descriptors.Get(handle);
+                    WriteResultDescriptorType(ctx.Memory(), retArea,
+                        d.GetType());
                 });
 
-            // get-flags → result<descriptor-flags, error-code> (2 bytes,
-            //   flags-up-to-8-bits widens to u8 here).
+            // get-flags → result<descriptor-flags, error-code> (2 bytes)
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (Ns, "[method]descriptor.get-flags"),
                 (ctx, handle, retArea) =>
                 {
                     var d = (Descriptor)descriptors.Get(handle);
-                    WriteOkU8(ctx.Memory(), retArea, (byte)d.GetFlags());
+                    WriteResultDescriptorFlags(ctx.Memory(), retArea,
+                        d.GetFlags());
                 });
 
             // sync → result<_, error-code> (2 bytes)
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (Ns, "[method]descriptor.sync"),
                 (ctx, handle, retArea) =>
-                {
-                    ((Descriptor)descriptors.Get(handle)).Sync();
-                    WriteOkUnit(ctx.Memory(), retArea);
-                });
+                    WriteResultUnit(ctx.Memory(), retArea,
+                        ((Descriptor)descriptors.Get(handle)).Sync()));
 
             // sync-data → result<_, error-code>
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (Ns, "[method]descriptor.sync-data"),
                 (ctx, handle, retArea) =>
-                {
-                    ((Descriptor)descriptors.Get(handle)).SyncData();
-                    WriteOkUnit(ctx.Memory(), retArea);
-                });
+                    WriteResultUnit(ctx.Memory(), retArea,
+                        ((Descriptor)descriptors.Get(handle)).SyncData()));
 
             // set-size: func(size: u64) -> result<_, error-code>
             runtime.BindHostFunction<Action<ExecContext, int, long, int>>(
                 (Ns, "[method]descriptor.set-size"),
                 (ctx, handle, size, retArea) =>
-                {
-                    ((Descriptor)descriptors.Get(handle))
-                        .SetSize((ulong)size);
-                    WriteOkUnit(ctx.Memory(), retArea);
-                });
+                    WriteResultUnit(ctx.Memory(), retArea,
+                        ((Descriptor)descriptors.Get(handle))
+                            .SetSize((ulong)size)));
 
             // read: func(length: u64, offset: u64)
             //   -> result<tuple<list<u8>, bool>, error-code>  (16 bytes)
             runtime.BindHostFunction<Action<ExecContext, int, long, long, int>>(
                 (Ns, "[method]descriptor.read"),
                 (ctx, handle, length, offset, retArea) =>
-                {
-                    var (data, eof) = ((Descriptor)descriptors.Get(handle))
-                        .Read((ulong)length, (ulong)offset);
-                    WriteOkBytesEofTuple(ctx.Memory, retArea,
-                        data, eof, alloc);
-                });
+                    WriteResultBytesEofTuple(ctx.Memory, retArea,
+                        ((Descriptor)descriptors.Get(handle))
+                            .Read((ulong)length, (ulong)offset),
+                        alloc));
 
             // write: func(buffer: list<u8>, offset: u64)
             //   -> result<u64, error-code>
@@ -96,9 +95,9 @@ namespace Wacs.WASI.Preview2.Filesystem
                 (ctx, handle, ptr, len, offset, retArea) =>
                 {
                     var data = ctx.ReadByteArray(ptr, len);
-                    var written = ((Descriptor)descriptors.Get(handle))
-                        .Write(data, (ulong)offset);
-                    WriteOkU64(ctx.Memory(), retArea, written);
+                    WriteResultU64(ctx.Memory(), retArea,
+                        ((Descriptor)descriptors.Get(handle))
+                            .Write(data, (ulong)offset));
                 });
 
             // read-via-stream: func(offset: u64)
@@ -107,10 +106,13 @@ namespace Wacs.WASI.Preview2.Filesystem
                 (Ns, "[method]descriptor.read-via-stream"),
                 (ctx, handle, offset, retArea) =>
                 {
-                    var stream = ((Descriptor)descriptors.Get(handle))
-                        .ReadViaStream((ulong)offset);
-                    WriteOkHandle(ctx.Memory(), retArea,
-                        inputs.Allocate(stream));
+                    var d = (IDescriptor)descriptors.Get(handle);
+                    var r = d.ReadViaStream((ulong)offset);
+                    WriteResultHandle(ctx.Memory(), retArea,
+                        r.IsOk
+                            ? Result<int, ErrorCode>.FromOk(
+                                inputs.Allocate(r.Ok))
+                            : Result<int, ErrorCode>.FromErr(r.Err));
                 });
 
             // write-via-stream: func(offset: u64)
@@ -119,10 +121,13 @@ namespace Wacs.WASI.Preview2.Filesystem
                 (Ns, "[method]descriptor.write-via-stream"),
                 (ctx, handle, offset, retArea) =>
                 {
-                    var stream = ((Descriptor)descriptors.Get(handle))
-                        .WriteViaStream((ulong)offset);
-                    WriteOkHandle(ctx.Memory(), retArea,
-                        outputs.Allocate(stream));
+                    var d = (IDescriptor)descriptors.Get(handle);
+                    var r = d.WriteViaStream((ulong)offset);
+                    WriteResultHandle(ctx.Memory(), retArea,
+                        r.IsOk
+                            ? Result<int, ErrorCode>.FromOk(
+                                outputs.Allocate(r.Ok))
+                            : Result<int, ErrorCode>.FromErr(r.Err));
                 });
 
             // append-via-stream: func()
@@ -131,10 +136,13 @@ namespace Wacs.WASI.Preview2.Filesystem
                 (Ns, "[method]descriptor.append-via-stream"),
                 (ctx, handle, retArea) =>
                 {
-                    var stream = ((Descriptor)descriptors.Get(handle))
-                        .AppendViaStream();
-                    WriteOkHandle(ctx.Memory(), retArea,
-                        outputs.Allocate(stream));
+                    var d = (IDescriptor)descriptors.Get(handle);
+                    var r = d.AppendViaStream();
+                    WriteResultHandle(ctx.Memory(), retArea,
+                        r.IsOk
+                            ? Result<int, ErrorCode>.FromOk(
+                                outputs.Allocate(r.Ok))
+                            : Result<int, ErrorCode>.FromErr(r.Err));
                 });
 
             // create-directory-at, remove-directory-at, unlink-file-at:
@@ -142,39 +150,31 @@ namespace Wacs.WASI.Preview2.Filesystem
             runtime.BindHostFunction<Action<ExecContext, int, int, int, int>>(
                 (Ns, "[method]descriptor.create-directory-at"),
                 (ctx, handle, ptr, len, retArea) =>
-                {
-                    ((Descriptor)descriptors.Get(handle))
-                        .CreateDirectoryAt(ctx.ReadUtf8String(ptr, len));
-                    WriteOkUnit(ctx.Memory(), retArea);
-                });
+                    WriteResultUnit(ctx.Memory(), retArea,
+                        ((Descriptor)descriptors.Get(handle))
+                            .CreateDirectoryAt(ctx.ReadUtf8String(ptr, len))));
             runtime.BindHostFunction<Action<ExecContext, int, int, int, int>>(
                 (Ns, "[method]descriptor.remove-directory-at"),
                 (ctx, handle, ptr, len, retArea) =>
-                {
-                    ((Descriptor)descriptors.Get(handle))
-                        .RemoveDirectoryAt(ctx.ReadUtf8String(ptr, len));
-                    WriteOkUnit(ctx.Memory(), retArea);
-                });
+                    WriteResultUnit(ctx.Memory(), retArea,
+                        ((Descriptor)descriptors.Get(handle))
+                            .RemoveDirectoryAt(ctx.ReadUtf8String(ptr, len))));
             runtime.BindHostFunction<Action<ExecContext, int, int, int, int>>(
                 (Ns, "[method]descriptor.unlink-file-at"),
                 (ctx, handle, ptr, len, retArea) =>
-                {
-                    ((Descriptor)descriptors.Get(handle))
-                        .UnlinkFileAt(ctx.ReadUtf8String(ptr, len));
-                    WriteOkUnit(ctx.Memory(), retArea);
-                });
+                    WriteResultUnit(ctx.Memory(), retArea,
+                        ((Descriptor)descriptors.Get(handle))
+                            .UnlinkFileAt(ctx.ReadUtf8String(ptr, len))));
 
             // symlink-at: func(old-path: string, new-path: string)
             //   -> result<_, error-code>
             runtime.BindHostFunction<Action<ExecContext, int, int, int, int, int, int>>(
                 (Ns, "[method]descriptor.symlink-at"),
                 (ctx, handle, oldPtr, oldLen, newPtr, newLen, retArea) =>
-                {
-                    ((Descriptor)descriptors.Get(handle)).SymlinkAt(
-                        ctx.ReadUtf8String(oldPtr, oldLen),
-                        ctx.ReadUtf8String(newPtr, newLen));
-                    WriteOkUnit(ctx.Memory(), retArea);
-                });
+                    WriteResultUnit(ctx.Memory(), retArea,
+                        ((Descriptor)descriptors.Get(handle)).SymlinkAt(
+                            ctx.ReadUtf8String(oldPtr, oldLen),
+                            ctx.ReadUtf8String(newPtr, newLen))));
 
             // link-at: func(old-path-flags: path-flags, old-path: string,
             //              new-descriptor: borrow<descriptor>,
@@ -185,14 +185,12 @@ namespace Wacs.WASI.Preview2.Filesystem
                 (Ns, "[method]descriptor.link-at"),
                 (ctx, handle, pathFlags, oldPtr, oldLen,
                     newDesc, newPtr, newLen, retArea) =>
-                {
-                    ((Descriptor)descriptors.Get(handle)).LinkAt(
-                        (PathFlags)(uint)pathFlags,
-                        ctx.ReadUtf8String(oldPtr, oldLen),
-                        (Descriptor)descriptors.Get(newDesc),
-                        ctx.ReadUtf8String(newPtr, newLen));
-                    WriteOkUnit(ctx.Memory(), retArea);
-                });
+                    WriteResultUnit(ctx.Memory(), retArea,
+                        ((Descriptor)descriptors.Get(handle)).LinkAt(
+                            (PathFlags)(uint)pathFlags,
+                            ctx.ReadUtf8String(oldPtr, oldLen),
+                            (Descriptor)descriptors.Get(newDesc),
+                            ctx.ReadUtf8String(newPtr, newLen))));
 
             // rename-at: func(old-path: string,
             //                new-descriptor: borrow<descriptor>,
@@ -203,13 +201,11 @@ namespace Wacs.WASI.Preview2.Filesystem
                 (Ns, "[method]descriptor.rename-at"),
                 (ctx, handle, oldPtr, oldLen, newDesc, newPtr, newLen,
                     retArea) =>
-                {
-                    ((Descriptor)descriptors.Get(handle)).RenameAt(
-                        ctx.ReadUtf8String(oldPtr, oldLen),
-                        (Descriptor)descriptors.Get(newDesc),
-                        ctx.ReadUtf8String(newPtr, newLen));
-                    WriteOkUnit(ctx.Memory(), retArea);
-                });
+                    WriteResultUnit(ctx.Memory(), retArea,
+                        ((Descriptor)descriptors.Get(handle)).RenameAt(
+                            ctx.ReadUtf8String(oldPtr, oldLen),
+                            (Descriptor)descriptors.Get(newDesc),
+                            ctx.ReadUtf8String(newPtr, newLen))));
 
             // open-at: func(path-flags, path, open-flags, descriptor-flags)
             //   -> result<own<descriptor>, error-code>
@@ -219,68 +215,62 @@ namespace Wacs.WASI.Preview2.Filesystem
                 (ctx, handle, pathFlags, ptr, len, openFlags, descFlags,
                     retArea) =>
                 {
-                    var d = ((Descriptor)descriptors.Get(handle)).OpenAt(
+                    var r = ((Descriptor)descriptors.Get(handle)).OpenAt(
                         (PathFlags)(uint)pathFlags,
                         ctx.ReadUtf8String(ptr, len),
                         (OpenFlags)(uint)openFlags,
                         (DescriptorFlags)(uint)descFlags);
-                    WriteOkHandle(ctx.Memory(), retArea,
-                        descriptors.Allocate(d));
+                    WriteResultHandle(ctx.Memory(), retArea,
+                        r.IsOk
+                            ? Result<int, ErrorCode>.FromOk(
+                                descriptors.Allocate(r.Ok))
+                            : Result<int, ErrorCode>.FromErr(r.Err));
                 });
 
             // readlink-at: func(path: string) -> result<string, error-code>
             runtime.BindHostFunction<Action<ExecContext, int, int, int, int>>(
                 (Ns, "[method]descriptor.readlink-at"),
                 (ctx, handle, ptr, len, retArea) =>
-                {
-                    var s = ((Descriptor)descriptors.Get(handle))
-                        .ReadlinkAt(ctx.ReadUtf8String(ptr, len));
-                    WriteOkString(ctx.Memory, retArea, s, alloc);
-                });
+                    WriteResultString(ctx.Memory, retArea,
+                        ((Descriptor)descriptors.Get(handle))
+                            .ReadlinkAt(ctx.ReadUtf8String(ptr, len)),
+                        alloc));
 
             // stat: func() -> result<descriptor-stat, error-code> (104 bytes)
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (Ns, "[method]descriptor.stat"),
                 (ctx, handle, retArea) =>
-                {
-                    var s = ((Descriptor)descriptors.Get(handle)).Stat();
-                    WriteOkDescriptorStat(ctx.Memory(), retArea, s);
-                });
+                    WriteResultDescriptorStat(ctx.Memory(), retArea,
+                        ((Descriptor)descriptors.Get(handle)).Stat()));
 
             // stat-at: func(path-flags, path)
             //   -> result<descriptor-stat, error-code>
             runtime.BindHostFunction<Action<ExecContext, int, int, int, int, int>>(
                 (Ns, "[method]descriptor.stat-at"),
                 (ctx, handle, pathFlags, ptr, len, retArea) =>
-                {
-                    var s = ((Descriptor)descriptors.Get(handle)).StatAt(
-                        (PathFlags)(uint)pathFlags,
-                        ctx.ReadUtf8String(ptr, len));
-                    WriteOkDescriptorStat(ctx.Memory(), retArea, s);
-                });
+                    WriteResultDescriptorStat(ctx.Memory(), retArea,
+                        ((Descriptor)descriptors.Get(handle)).StatAt(
+                            (PathFlags)(uint)pathFlags,
+                            ctx.ReadUtf8String(ptr, len))));
 
             // metadata-hash: func() -> result<metadata-hash-value, error-code>
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (Ns, "[method]descriptor.metadata-hash"),
                 (ctx, handle, retArea) =>
-                {
-                    var h = ((Descriptor)descriptors.Get(handle))
-                        .MetadataHash();
-                    WriteOkMetadataHash(ctx.Memory(), retArea, h);
-                });
+                    WriteResultMetadataHash(ctx.Memory(), retArea,
+                        ((Descriptor)descriptors.Get(handle))
+                            .MetadataHash()));
 
             // metadata-hash-at: func(path-flags, path)
             //   -> result<metadata-hash-value, error-code>
             runtime.BindHostFunction<Action<ExecContext, int, int, int, int, int>>(
                 (Ns, "[method]descriptor.metadata-hash-at"),
                 (ctx, handle, pathFlags, ptr, len, retArea) =>
-                {
-                    var h = ((Descriptor)descriptors.Get(handle))
-                        .MetadataHashAt(
-                            (PathFlags)(uint)pathFlags,
-                            ctx.ReadUtf8String(ptr, len));
-                    WriteOkMetadataHash(ctx.Memory(), retArea, h);
-                });
+                    WriteResultMetadataHash(ctx.Memory(), retArea,
+                        ((Descriptor)descriptors.Get(handle))
+                            .MetadataHashAt(
+                                (PathFlags)(uint)pathFlags,
+                                ctx.ReadUtf8String(ptr, len))));
 
             // read-directory: func()
             //   -> result<own<directory-entry-stream>, error-code>
@@ -288,9 +278,13 @@ namespace Wacs.WASI.Preview2.Filesystem
                 (Ns, "[method]descriptor.read-directory"),
                 (ctx, handle, retArea) =>
                 {
-                    var s = ((Descriptor)descriptors.Get(handle))
-                        .ReadDirectory();
-                    WriteOkHandle(ctx.Memory(), retArea, dirs.Allocate(s));
+                    var d = (IDescriptor)descriptors.Get(handle);
+                    var r = d.ReadDirectory();
+                    WriteResultHandle(ctx.Memory(), retArea,
+                        r.IsOk
+                            ? Result<int, ErrorCode>.FromOk(
+                                dirs.Allocate(r.Ok))
+                            : Result<int, ErrorCode>.FromErr(r.Err));
                 });
 
             // advise: func(offset: u64, length: u64, advice: advice)
@@ -298,16 +292,18 @@ namespace Wacs.WASI.Preview2.Filesystem
             runtime.BindHostFunction<Action<ExecContext, int, long, long, int, int>>(
                 (Ns, "[method]descriptor.advise"),
                 (ctx, handle, offset, length, advice, retArea) =>
-                {
-                    ((Descriptor)descriptors.Get(handle)).Advise(
-                        (ulong)offset, (ulong)length, (Advice)(byte)advice);
-                    WriteOkUnit(ctx.Memory(), retArea);
-                });
+                    WriteResultUnit(ctx.Memory(), retArea,
+                        ((Descriptor)descriptors.Get(handle)).Advise(
+                            (ulong)offset, (ulong)length,
+                            (Advice)(byte)advice)));
 
             // access-at: func(path-flags, path, type: access-type)
             //   -> result<_, error-code>
             // Wire form: (handle i32, pathFlags i32, ptr i32, len i32,
             //             accessDisc i32, accessModes i32, retArea i32)
+            // NOT in the v0.2.3 WIT — host-only convenience method
+            // retained for backwards-compatibility with earlier tests.
+            // Default impl is a no-op, so the encoder always writes Ok.
             runtime.BindHostFunction<Action<ExecContext, int, int, int, int,
                 int, int, int>>(
                 (Ns, "[method]descriptor.access-at"),
@@ -318,7 +314,8 @@ namespace Wacs.WASI.Preview2.Filesystem
                         (PathFlags)(uint)pathFlags,
                         ctx.ReadUtf8String(ptr, len),
                         DecodeAccessType(accDisc, accModes));
-                    WriteOkUnit(ctx.Memory(), retArea);
+                    WriteResultUnit(ctx.Memory(), retArea,
+                        Result<Unit, ErrorCode>.FromOk(Unit.Value));
                 });
 
             // set-times: func(data-access: new-timestamp,
@@ -335,12 +332,10 @@ namespace Wacs.WASI.Preview2.Filesystem
                     aDisc, aSec, aNano,
                     mDisc, mSec, mNano,
                     retArea) =>
-                {
-                    ((Descriptor)descriptors.Get(handle)).SetTimes(
-                        DecodeNewTimestamp(aDisc, aSec, aNano),
-                        DecodeNewTimestamp(mDisc, mSec, mNano));
-                    WriteOkUnit(ctx.Memory(), retArea);
-                });
+                    WriteResultUnit(ctx.Memory(), retArea,
+                        ((Descriptor)descriptors.Get(handle)).SetTimes(
+                            DecodeNewTimestamp(aDisc, aSec, aNano),
+                            DecodeNewTimestamp(mDisc, mSec, mNano))));
 
             // set-times-at: func(path-flags, path,
             //                   data-access: new-timestamp,
@@ -355,14 +350,12 @@ namespace Wacs.WASI.Preview2.Filesystem
                     aDisc, aSec, aNano,
                     mDisc, mSec, mNano,
                     retArea) =>
-                {
-                    ((Descriptor)descriptors.Get(handle)).SetTimesAt(
-                        (PathFlags)(uint)pathFlags,
-                        ctx.ReadUtf8String(ptr, len),
-                        DecodeNewTimestamp(aDisc, aSec, aNano),
-                        DecodeNewTimestamp(mDisc, mSec, mNano));
-                    WriteOkUnit(ctx.Memory(), retArea);
-                });
+                    WriteResultUnit(ctx.Memory(), retArea,
+                        ((Descriptor)descriptors.Get(handle)).SetTimesAt(
+                            (PathFlags)(uint)pathFlags,
+                            ctx.ReadUtf8String(ptr, len),
+                            DecodeNewTimestamp(aDisc, aSec, aNano),
+                            DecodeNewTimestamp(mDisc, mSec, mNano))));
 
             // is-same-object: func(other: borrow<descriptor>) -> bool
             // Note: NOT result-wrapped — a plain bool return.

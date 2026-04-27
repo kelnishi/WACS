@@ -6,6 +6,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
+using Wacs.ComponentModel.Runtime;
 using Wacs.Core.Runtime;
 using Wacs.WASI.Preview2.HostBinding;
 using Wacs.WASI.Preview2.HostBinding.CanonicalAbi;
@@ -33,14 +34,14 @@ namespace Wacs.WASI.Preview2.Filesystem
                     var err = (Error)errors.Get(handle);
                     var code = impl.FilesystemErrorCode(err);
                     var mem = ctx.Memory();
-                    if (code == null)
+                    if (!code.HasValue)
                     {
                         mem[retArea] = 0;
                         mem[retArea + 1] = 0;
                         return;
                     }
                     mem[retArea] = 1;
-                    mem[retArea + 1] = (byte)code.Value;
+                    mem[retArea + 1] = (byte)(int)code.Value;
                 });
         }
     }

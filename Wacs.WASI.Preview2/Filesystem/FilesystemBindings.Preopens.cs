@@ -34,13 +34,19 @@ namespace Wacs.WASI.Preview2.Filesystem
                 (ctx, retArea) =>
                 {
                     var entries = impl.GetDirectories()
-                        ?? System.Array.Empty<(Descriptor, string)>();
+                        ?? System.Array.Empty<(IDescriptor, string)>();
                     int count = entries.Length;
                     int arrayPtr = count == 0 ? 0
                         : alloc.Allocate(4, count * 12);
                     for (int i = 0; i < count; i++)
                     {
-                        int handle = descriptors.Allocate(entries[i].Item1);
+                        // Descriptor table is keyed on the host class
+                        // type; cast the IDescriptor returned by the
+                        // impl down to the concrete Descriptor for
+                        // allocation. Hosts that need richer impls
+                        // can subclass Descriptor.
+                        int handle = descriptors.Allocate(
+                            (Descriptor)entries[i].Item1);
                         var (sPtr, sLen) = MemoryWriter
                             .WriteUtf8StringAllocated(
                                 ctx.Memory, entries[i].Item2, alloc);
