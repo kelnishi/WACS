@@ -59,8 +59,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<Fields>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(0u, (uint)ci.Invoke(
@@ -85,8 +84,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<Fields>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(1u, (uint)ci.Invoke(
@@ -109,8 +107,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<Fields>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(0u, (uint)ci.Invoke(
@@ -144,8 +141,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<Fields>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(2u, (uint)ci.Invoke(
@@ -178,8 +174,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<Fields>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(2u, (uint)ci.Invoke(
@@ -206,8 +201,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<Fields>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(0u, (uint)ci.Invoke(
@@ -240,8 +234,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<Fields>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(1u, (uint)ci.Invoke(
@@ -272,8 +265,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<OutgoingRequest>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(2u, (uint)ci.Invoke(
@@ -295,8 +287,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<OutgoingRequest>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(9u, (uint)ci.Invoke(
@@ -328,8 +319,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<RequestOptions>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             // Some
@@ -351,8 +341,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<RequestOptions>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             // None disc=0
@@ -384,8 +373,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<OutgoingRequest>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             // path: Some("/abc") → disc=1 + first byte '/'=0x2F
@@ -409,8 +397,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<OutgoingRequest>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             // None disc=0 + payload byte stays 0 → 0.
@@ -437,12 +424,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<IncomingResponse>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<OutgoingResponse>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<Fields>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(418u, (uint)ci.Invoke(
@@ -466,12 +448,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<IncomingResponse>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<OutgoingResponse>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<Fields>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(404u, (uint)ci.Invoke(
@@ -491,12 +468,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<IncomingResponse>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<OutgoingResponse>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<Fields>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(1u, (uint)ci.Invoke(
@@ -526,14 +498,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<OutgoingRequest>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<IncomingResponse>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<OutgoingBody>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<IncomingBody>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
                 new StreamBindings(resources).BindToRuntime(runtime);
             });
 
@@ -559,14 +524,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<OutgoingRequest>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<IncomingResponse>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<OutgoingBody>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<IncomingBody>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
                 new StreamBindings(resources).BindToRuntime(runtime);
             });
 
@@ -614,12 +572,7 @@ namespace Wacs.WASI.Preview2.Test
                 runtime.BindWasiInstance(
                     "wasi:http/outgoing-handler@0.2.3",
                     handler, resources);
-                runtime.BindWasiResource<OutgoingRequest>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<RequestOptions>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<FutureIncomingResponse>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(0u, (uint)ci.Invoke(
@@ -651,12 +604,7 @@ namespace Wacs.WASI.Preview2.Test
                 runtime.BindWasiInstance(
                     "wasi:http/outgoing-handler@0.2.3",
                     handler, resources);
-                runtime.BindWasiResource<OutgoingRequest>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<RequestOptions>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<FutureIncomingResponse>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(0u, (uint)ci.Invoke(
@@ -695,10 +643,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<OutgoingBody>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<Fields>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(0u, (uint)ci.Invoke(
@@ -727,10 +672,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<OutgoingBody>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<Fields>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(0u, (uint)ci.Invoke(
@@ -770,10 +712,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<IncomingBody>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<FutureTrailers>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             uint hTrailers = (uint)ci.Invoke(
@@ -818,10 +757,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<ResponseOutparam>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<OutgoingResponse>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(0u, (uint)ci.Invoke(
@@ -847,10 +783,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<ResponseOutparam>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<OutgoingResponse>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(0u, (uint)ci.Invoke(
@@ -875,8 +808,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<Fields>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             uint h = (uint)ci.Invoke("ask-new")!;
@@ -903,14 +835,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<Fields>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<RequestOptions>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<OutgoingRequest>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<OutgoingResponse>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             uint hOpts = (uint)ci.Invoke("ask-new-request-options")!;
@@ -953,8 +878,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<RequestOptions>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             // None — clears the timeout (already null but
@@ -992,8 +916,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<OutgoingRequest>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             // None — leaves _pathWithQuery null.
@@ -1031,8 +954,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<OutgoingRequest>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             // Get
@@ -1080,8 +1002,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<OutgoingRequest>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             // None
@@ -1132,8 +1053,7 @@ namespace Wacs.WASI.Preview2.Test
                     .Allocate(req);
                 var ci = ComponentInstance.Instantiate(bytes, runtime =>
                 {
-                    runtime.BindWasiResource<OutgoingRequest>(
-                        "wasi:http/types@0.2.3", resources);
+                    new HttpTypes(resources).BindToRuntime(runtime);
                 });
                 Assert.Equal(0u, (uint)ci.Invoke(
                     "ask-scheme-disc", (uint)hReq)!);
@@ -1147,8 +1067,7 @@ namespace Wacs.WASI.Preview2.Test
                     .Allocate(req);
                 var ci = ComponentInstance.Instantiate(bytes, runtime =>
                 {
-                    runtime.BindWasiResource<OutgoingRequest>(
-                        "wasi:http/types@0.2.3", resources);
+                    new HttpTypes(resources).BindToRuntime(runtime);
                 });
                 Assert.Equal(1u, (uint)ci.Invoke(
                     "ask-scheme-disc", (uint)hReq)!);
@@ -1167,8 +1086,7 @@ namespace Wacs.WASI.Preview2.Test
                     .Allocate(req);
                 var ci = ComponentInstance.Instantiate(bytes, runtime =>
                 {
-                    runtime.BindWasiResource<OutgoingRequest>(
-                        "wasi:http/types@0.2.3", resources);
+                    new HttpTypes(resources).BindToRuntime(runtime);
                 });
                 Assert.Equal(1u, (uint)ci.Invoke(
                     "ask-scheme-disc", (uint)hReq)!);
@@ -1198,8 +1116,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<Fields>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             uint h = (uint)ci.Invoke("ask-from-list")!;
@@ -1246,10 +1163,7 @@ namespace Wacs.WASI.Preview2.Test
                     .Allocate(ft);
                 var ci = ComponentInstance.Instantiate(bytes, runtime =>
                 {
-                    runtime.BindWasiResource<FutureTrailers>(
-                        "wasi:http/types@0.2.3", resources);
-                    runtime.BindWasiResource<Fields>(
-                        "wasi:http/types@0.2.3", resources);
+                    new HttpTypes(resources).BindToRuntime(runtime);
                 });
                 Assert.Equal(0u, (uint)ci.Invoke(
                     "ask-outer-disc", (uint)hFt)!);
@@ -1264,10 +1178,7 @@ namespace Wacs.WASI.Preview2.Test
                     .Allocate(ft);
                 var ci = ComponentInstance.Instantiate(bytes, runtime =>
                 {
-                    runtime.BindWasiResource<FutureTrailers>(
-                        "wasi:http/types@0.2.3", resources);
-                    runtime.BindWasiResource<Fields>(
-                        "wasi:http/types@0.2.3", resources);
+                    new HttpTypes(resources).BindToRuntime(runtime);
                 });
                 Assert.Equal(1u, (uint)ci.Invoke(
                     "ask-outer-disc", (uint)hFt)!);
@@ -1287,10 +1198,7 @@ namespace Wacs.WASI.Preview2.Test
                     .Allocate(ft);
                 var ci = ComponentInstance.Instantiate(bytes, runtime =>
                 {
-                    runtime.BindWasiResource<FutureTrailers>(
-                        "wasi:http/types@0.2.3", resources);
-                    runtime.BindWasiResource<Fields>(
-                        "wasi:http/types@0.2.3", resources);
+                    new HttpTypes(resources).BindToRuntime(runtime);
                 });
                 Assert.Equal(1u, (uint)ci.Invoke(
                     "ask-outer-disc", (uint)hFt)!);
@@ -1334,10 +1242,7 @@ namespace Wacs.WASI.Preview2.Test
                     .Allocate(fr);
                 var ci = ComponentInstance.Instantiate(bytes, runtime =>
                 {
-                    runtime.BindWasiResource<FutureIncomingResponse>(
-                        "wasi:http/types@0.2.3", resources);
-                    runtime.BindWasiResource<IncomingResponse>(
-                        "wasi:http/types@0.2.3", resources);
+                    new HttpTypes(resources).BindToRuntime(runtime);
                 });
                 Assert.Equal(0u, (uint)ci.Invoke(
                     "ask-outer-disc", (uint)hFr)!);
@@ -1353,10 +1258,7 @@ namespace Wacs.WASI.Preview2.Test
                     .Allocate(fr);
                 var ci = ComponentInstance.Instantiate(bytes, runtime =>
                 {
-                    runtime.BindWasiResource<FutureIncomingResponse>(
-                        "wasi:http/types@0.2.3", resources);
-                    runtime.BindWasiResource<IncomingResponse>(
-                        "wasi:http/types@0.2.3", resources);
+                    new HttpTypes(resources).BindToRuntime(runtime);
                 });
                 Assert.Equal(1u, (uint)ci.Invoke(
                     "ask-outer-disc", (uint)hFr)!);
@@ -1398,8 +1300,7 @@ namespace Wacs.WASI.Preview2.Test
         {
             return ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiInstance(
-                    "wasi:http/types@0.2.3", mapper, resources);
+                new HttpTypes(resources, mapper).BindToRuntime(runtime);
                 new IoBindings(resources).BindToRuntime(runtime);
             });
         }
@@ -1520,10 +1421,9 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiInstance(
-                    "wasi:http/types@0.2.3",
-                    new HttpErrorCodeMapperSource(),
-                    resources);
+                new HttpTypes(resources,
+                    new HttpErrorCodeMapperSource())
+                    .BindToRuntime(runtime);
                 new IoBindings(resources).BindToRuntime(runtime);
             });
 
@@ -1571,12 +1471,7 @@ namespace Wacs.WASI.Preview2.Test
                 runtime.BindWasiInstance(
                     "wasi:http/outgoing-handler@0.2.3",
                     handler, resources);
-                runtime.BindWasiResource<OutgoingRequest>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<RequestOptions>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<FutureIncomingResponse>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             // Ok path: outer disc=0, handle at +8.
@@ -1611,12 +1506,7 @@ namespace Wacs.WASI.Preview2.Test
                 runtime.BindWasiInstance(
                     "wasi:http/outgoing-handler@0.2.3",
                     handler, resources);
-                runtime.BindWasiResource<OutgoingRequest>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<RequestOptions>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<FutureIncomingResponse>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(1u, (uint)ci.Invoke(
@@ -1650,12 +1540,7 @@ namespace Wacs.WASI.Preview2.Test
                 runtime.BindWasiInstance(
                     "wasi:http/outgoing-handler@0.2.3",
                     handler, resources);
-                runtime.BindWasiResource<OutgoingRequest>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<RequestOptions>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<FutureIncomingResponse>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(1u, (uint)ci.Invoke(
@@ -1705,10 +1590,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(ft);
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<FutureTrailers>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<Fields>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             // outer=1 (Some), result=1 (Err) at fixture's
@@ -1750,10 +1632,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(fr);
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<FutureIncomingResponse>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<IncomingResponse>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(1u, (uint)ci.Invoke(
@@ -1800,10 +1679,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(fr);
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<FutureIncomingResponse>(
-                    "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<IncomingResponse>(
-                    "wasi:http/types@0.2.3", resources);
+                new HttpTypes(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(1u, (uint)ci.Invoke(
