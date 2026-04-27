@@ -584,6 +584,93 @@ namespace Wacs.WASI.Preview2.Test
                 typeof(InputStream)).Count);
         }
 
+        private sealed class CapturingHandler : IOutgoingHandler
+        {
+            public OutgoingRequest? CapturedRequest;
+            public RequestOptions? CapturedOptions;
+
+            [WasiErrorResult]
+            public FutureIncomingResponse Handle(
+                OutgoingRequest request,
+                [WasiOptionalParam] RequestOptions? options)
+            {
+                CapturedRequest = request;
+                CapturedOptions = options;
+                return new FutureIncomingResponse();
+            }
+        }
+
+        [Fact]
+        public void OutgoingHandler_handle_with_no_options()
+        {
+            // Fixture: ask-handle-none(req) calls handle(req,
+            // None) — passes option-disc=0 + handle=0 for
+            // the option<own<request-options>> param. Stub
+            // captures the resolved request + options (null).
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-handler-component", "httphandler.component.wasm"));
+            var resources = new ResourceContext();
+            var handler = new CapturingHandler();
+            var req = new OutgoingRequest();
+            int hReq = resources.TableFor(typeof(OutgoingRequest))
+                .Allocate(req);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiInstance(
+                    "wasi:http/outgoing-handler@0.2.3",
+                    handler, resources);
+                runtime.BindWasiResource<OutgoingRequest>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<RequestOptions>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<FutureIncomingResponse>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-handle-none", (uint)hReq)!);
+            Assert.Same(req, handler.CapturedRequest);
+            Assert.Null(handler.CapturedOptions);
+        }
+
+        [Fact]
+        public void OutgoingHandler_handle_with_some_options()
+        {
+            // Same fixture, ask-handle-some(req, opts) →
+            // handle(req, Some(opts)) — passes option-disc=1
+            // + opts handle. Stub captures both resolved
+            // resources.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-handler-component", "httphandler.component.wasm"));
+            var resources = new ResourceContext();
+            var handler = new CapturingHandler();
+            var req = new OutgoingRequest();
+            var opts = new RequestOptions();
+            int hReq = resources.TableFor(typeof(OutgoingRequest))
+                .Allocate(req);
+            int hOpts = resources.TableFor(typeof(RequestOptions))
+                .Allocate(opts);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiInstance(
+                    "wasi:http/outgoing-handler@0.2.3",
+                    handler, resources);
+                runtime.BindWasiResource<OutgoingRequest>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<RequestOptions>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<FutureIncomingResponse>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-handle-some", (uint)hReq, (uint)hOpts)!);
+            Assert.Same(req, handler.CapturedRequest);
+            Assert.Same(opts, handler.CapturedOptions);
+        }
+
         [Fact]
         public void Http_resource_markers_are_allocatable()
         {
