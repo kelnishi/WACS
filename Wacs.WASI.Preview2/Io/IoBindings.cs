@@ -68,7 +68,7 @@ namespace Wacs.WASI.Preview2.Io
                 {
                     var inst = (Error)errors.Get(handle);
                     var (ptr, len) = MemoryWriter.WriteUtf8StringAllocated(
-                        ctx.Memory(), inst.ToDebugString(), alloc);
+                        ctx.Memory, inst.ToDebugString(), alloc);
                     ctx.WriteI32LE(retArea, ptr);
                     ctx.WriteI32LE(retArea + 4, len);
                 });

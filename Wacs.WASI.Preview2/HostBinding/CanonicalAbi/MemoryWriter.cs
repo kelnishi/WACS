@@ -98,24 +98,34 @@ namespace Wacs.WASI.Preview2.HostBinding.CanonicalAbi
         /// a buffer through <paramref name="alloc"/>, copy into
         /// it, and return the (ptr, byteCount) pair the canon-
         /// lowered <c>string</c> wire form expects. Empty string
-        /// uses ptr=0; non-empty allocates with align=1.</summary>
+        /// uses ptr=0; non-empty allocates with align=1.
+        ///
+        /// <para>Takes a delegate that re-fetches the live memory
+        /// buffer rather than a captured <c>byte[]</c> reference,
+        /// because <paramref name="alloc"/> may trigger
+        /// <c>memory.grow</c> in the guest, which replaces the
+        /// underlying array. Callers in WASIp1-style binders
+        /// pass <c>ctx.Memory</c> as the delegate.</para></summary>
         public static (int ptr, int len) WriteUtf8StringAllocated(
-            byte[] memory, string s, Realloc alloc)
+            Func<byte[]> getMemory, string s, Realloc alloc)
         {
             var bytes = Encoding.UTF8.GetBytes(s ?? "");
             int dataPtr = bytes.Length == 0 ? 0
                 : alloc.Allocate(1, bytes.Length);
             if (bytes.Length > 0)
-                Array.Copy(bytes, 0, memory, dataPtr, bytes.Length);
+                Array.Copy(bytes, 0, getMemory(), dataPtr, bytes.Length);
             return (dataPtr, bytes.Length);
         }
 
         /// <summary>Write the canon-lowered <c>option&lt;string&gt;</c>
         /// retArea form at <paramref name="offset"/>: 1B disc + 3B
-        /// padding + 4B ptr + 4B len. Total 12 bytes.</summary>
-        public static void WriteOptionString(byte[] memory, int offset,
-            string? value, Realloc alloc)
+        /// padding + 4B ptr + 4B len. Total 12 bytes. The
+        /// <paramref name="getMemory"/> delegate refetches the
+        /// live linear-memory buffer (alloc may grow).</summary>
+        public static void WriteOptionString(Func<byte[]> getMemory,
+            int offset, string? value, Realloc alloc)
         {
+            var memory = getMemory();
             if (value == null)
             {
                 memory[offset] = 0;
@@ -125,7 +135,9 @@ namespace Wacs.WASI.Preview2.HostBinding.CanonicalAbi
             memory[offset + 1] = 0;
             memory[offset + 2] = 0;
             memory[offset + 3] = 0;
-            var (ptr, len) = WriteUtf8StringAllocated(memory, value, alloc);
+            var (ptr, len) = WriteUtf8StringAllocated(getMemory, value, alloc);
+            // Refetch — alloc may have grown memory.
+            memory = getMemory();
             WriteI32LE(memory, offset + 4, ptr);
             WriteI32LE(memory, offset + 8, len);
         }

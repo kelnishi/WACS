@@ -105,10 +105,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(desc);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<Descriptor>(
-                    "wasi:filesystem/types@0.2.3", resources);
-            });
+                new FilesystemBindings(resources).BindToRuntime(runtime));
 
             Assert.Equal(0u, (uint)ci.Invoke("ask-sync", (uint)handle)!);
             Assert.Equal(1, desc.SyncCalls);
@@ -125,10 +122,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(desc);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<Descriptor>(
-                    "wasi:filesystem/types@0.2.3", resources);
-            });
+                new FilesystemBindings(resources).BindToRuntime(runtime));
 
             Assert.Equal(0u, (uint)ci.Invoke("ask-set-size",
                 (uint)handle, 4096UL)!);
@@ -160,10 +154,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(desc);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<Descriptor>(
-                    "wasi:filesystem/types@0.2.3", resources);
-            });
+                new FilesystemBindings(resources).BindToRuntime(runtime));
 
             Assert.Equal("/links/target/src",
                 ci.Invoke("ask-readlink", (uint)handle));
@@ -216,8 +207,8 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiInstance(
-                    "wasi:filesystem/types@0.2.3", fec, resources);
+                new FilesystemBindings(resources, errorCode: fec)
+                    .BindToRuntime(runtime);
                 new IoBindings(resources).BindToRuntime(runtime);
             });
 
@@ -238,8 +229,8 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiInstance(
-                    "wasi:filesystem/types@0.2.3", fec, resources);
+                new FilesystemBindings(resources, errorCode: fec)
+                    .BindToRuntime(runtime);
                 new IoBindings(resources).BindToRuntime(runtime);
             });
 
@@ -264,10 +255,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(desc);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<Descriptor>(
-                    "wasi:filesystem/types@0.2.3", resources);
-            });
+                new FilesystemBindings(resources).BindToRuntime(runtime));
 
             Assert.Equal(3u, (uint)ci.Invoke(
                 "ask-flags", (uint)handle)!);
@@ -297,10 +285,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(desc);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<Descriptor>(
-                    "wasi:filesystem/types@0.2.3", resources);
-            });
+                new FilesystemBindings(resources).BindToRuntime(runtime));
 
             // First call: access(readable | writable)
             Assert.Equal(0u, (uint)ci.Invoke(
@@ -347,10 +332,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(desc);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<Descriptor>(
-                    "wasi:filesystem/types@0.2.3", resources);
-            });
+                new FilesystemBindings(resources).BindToRuntime(runtime));
 
             Assert.Equal(0u, (uint)ci.Invoke(
                 "ask-set-times", (uint)handle)!);
@@ -392,10 +374,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(desc);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<Descriptor>(
-                    "wasi:filesystem/types@0.2.3", resources);
-            });
+                new FilesystemBindings(resources).BindToRuntime(runtime));
 
             Assert.Equal((uint)DescriptorType.RegularFile,
                 (uint)ci.Invoke("ask-stat-type", (uint)handle)!);
@@ -435,12 +414,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(desc);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<Descriptor>(
-                    "wasi:filesystem/types@0.2.3", resources);
-                runtime.BindWasiResource<DirectoryEntryStream>(
-                    "wasi:filesystem/types@0.2.3", resources);
-            });
+                new FilesystemBindings(resources).BindToRuntime(runtime));
 
             uint result = (uint)ci.Invoke(
                 "ask-readdir", (uint)handle)!;
@@ -480,10 +454,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(desc);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<Descriptor>(
-                    "wasi:filesystem/types@0.2.3", resources);
-            });
+                new FilesystemBindings(resources).BindToRuntime(runtime));
 
             Assert.Equal(0x1122334455667788UL,
                 (ulong)ci.Invoke("ask-meta-lower", (uint)handle)!);
@@ -527,10 +498,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(desc);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<Descriptor>(
-                    "wasi:filesystem/types@0.2.3", resources);
-            });
+                new FilesystemBindings(resources).BindToRuntime(runtime));
 
             Assert.Equal(11u, (uint)ci.Invoke("ask-read", (uint)handle)!);
         }
@@ -565,10 +533,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(desc);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<Descriptor>(
-                    "wasi:filesystem/types@0.2.3", resources);
-            });
+                new FilesystemBindings(resources).BindToRuntime(runtime));
 
             Assert.Equal(5UL, (ulong)ci.Invoke(
                 "ask-write", (uint)handle)!);
@@ -592,10 +557,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(desc);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<Descriptor>(
-                    "wasi:filesystem/types@0.2.3", resources);
-            });
+                new FilesystemBindings(resources).BindToRuntime(runtime));
 
             Assert.Equal((uint)DescriptorType.Directory,
                 (uint)ci.Invoke("ask-type", (uint)handle)!);
@@ -634,10 +596,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(desc);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<Descriptor>(
-                    "wasi:filesystem/types@0.2.3", resources);
-            });
+                new FilesystemBindings(resources).BindToRuntime(runtime));
 
             Assert.Equal(0u, (uint)ci.Invoke("ask-mutate", (uint)handle)!);
             Assert.Equal(new[] { "child" }, desc.Created);
@@ -678,10 +637,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(other);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<Descriptor>(
-                    "wasi:filesystem/types@0.2.3", resources);
-            });
+                new FilesystemBindings(resources).BindToRuntime(runtime));
 
             Assert.Equal(0u, (uint)ci.Invoke(
                 "ask-rename", (uint)hSelf, (uint)hOther)!);
@@ -715,10 +671,7 @@ namespace Wacs.WASI.Preview2.Test
             int hC = table.Allocate(c);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<Descriptor>(
-                    "wasi:filesystem/types@0.2.3", resources);
-            });
+                new FilesystemBindings(resources).BindToRuntime(runtime));
 
             Assert.Equal(1u, (uint)ci.Invoke(
                 "ask-same", (uint)hA, (uint)hB)!);
@@ -749,10 +702,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(desc);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<Descriptor>(
-                    "wasi:filesystem/types@0.2.3", resources);
-            });
+                new FilesystemBindings(resources).BindToRuntime(runtime));
 
             Assert.Equal(0u, (uint)ci.Invoke(
                 "ask-symlink", (uint)handle)!);
@@ -799,10 +749,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(desc);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<Descriptor>(
-                    "wasi:filesystem/types@0.2.3", resources);
-            });
+                new FilesystemBindings(resources).BindToRuntime(runtime));
 
             uint returned = (uint)ci.Invoke(
                 "ask-open", (uint)handle)!;
@@ -836,8 +783,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<Descriptor>(
-                    "wasi:filesystem/types@0.2.3", resources);
+                new FilesystemBindings(resources).BindToRuntime(runtime);
                 new StreamBindings(resources).BindToRuntime(runtime);
             });
 
