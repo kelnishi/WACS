@@ -6,6 +6,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System.Collections.Generic;
+using Wacs.ComponentModel.Runtime;
 using SysEnv = System.Environment;
 
 namespace Wacs.WASI.Preview2.Cli
@@ -44,9 +45,12 @@ namespace Wacs.WASI.Preview2.Cli
             return result;
         }
 
-        public string? InitialCwd()
+        public Option<string> InitialCwd()
         {
-            return SysEnv.CurrentDirectory;
+            var cwd = SysEnv.CurrentDirectory;
+            return cwd == null
+                ? Option<string>.None
+                : Option<string>.Some(cwd);
         }
     }
 }

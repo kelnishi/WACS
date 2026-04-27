@@ -32,8 +32,10 @@ namespace Wacs.WASI.Preview2.Test
         {
             private readonly bool _isTerminal;
             public StubTerminalStdin(bool isTerminal) { _isTerminal = isTerminal; }
-            public TerminalInput? GetTerminalStdin() =>
-                _isTerminal ? new TerminalInput() : null;
+            public Option<ITerminalInput> GetTerminalStdin() =>
+                _isTerminal
+                    ? Option<ITerminalInput>.Some(new TerminalInput())
+                    : Option<ITerminalInput>.None;
         }
 
         [Fact]

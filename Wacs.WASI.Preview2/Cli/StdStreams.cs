@@ -68,13 +68,17 @@ namespace Wacs.WASI.Preview2.Cli
     /// state between them is the caller's job.</summary>
     public sealed class Stdout : IStdout
     {
-        public OutputStream GetStdout() =>
+        // Returns IOutputStream (the generated faithful contract);
+        // the concrete instance is still the hand-written
+        // HostStream (which implements IOutputStream via
+        // OutputStream's explicit-interface stubs).
+        public IOutputStream GetStdout() =>
             new HostStream(Console.OpenStandardOutput());
     }
 
     public sealed class Stderr : IStderr
     {
-        public OutputStream GetStderr() =>
+        public IOutputStream GetStderr() =>
             new HostStream(Console.OpenStandardError());
     }
 
@@ -85,7 +89,7 @@ namespace Wacs.WASI.Preview2.Cli
     /// one.</summary>
     public sealed class Stdin : IStdin
     {
-        public InputStream GetStdin() =>
+        public IInputStream GetStdin() =>
             new HostInputStream(Console.OpenStandardInput());
     }
 
