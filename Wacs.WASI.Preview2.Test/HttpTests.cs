@@ -119,6 +119,66 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal(1, resources.TableFor(typeof(Fields)).Count);
         }
 
+        private sealed class ConfiguredOutgoingRequest : OutgoingRequest
+        {
+            public ConfiguredOutgoingRequest(string? path, string? authority)
+            {
+                _pathWithQuery = path;
+                _authority = authority;
+            }
+        }
+
+        [Fact]
+        public void OutgoingRequest_path_with_query_returns_option_string_some()
+        {
+            // Stub returns "/abc" for path; ask-path packs
+            // (option-disc=1, 'a'=0x61) → 0x6101.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-request-component", "httprequest.component.wasm"));
+            var resources = new ResourceContext();
+            var req = new ConfiguredOutgoingRequest(
+                "/abc", "host.example:8080");
+            int handle = resources.TableFor(typeof(OutgoingRequest))
+                .Allocate(req);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<OutgoingRequest>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            // path: Some("/abc") → disc=1 + first byte '/'=0x2F
+            Assert.Equal(0x2F01u, (uint)ci.Invoke(
+                "ask-path", (uint)handle)!);
+            // authority: Some("host.example:8080") →
+            //   disc=1 + 'h'=0x68
+            Assert.Equal(0x6801u, (uint)ci.Invoke(
+                "ask-authority", (uint)handle)!);
+        }
+
+        [Fact]
+        public void OutgoingRequest_path_with_query_returns_option_string_none()
+        {
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-request-component", "httprequest.component.wasm"));
+            var resources = new ResourceContext();
+            var req = new ConfiguredOutgoingRequest(null, null);
+            int handle = resources.TableFor(typeof(OutgoingRequest))
+                .Allocate(req);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<OutgoingRequest>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            // None disc=0 + payload byte stays 0 → 0.
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-path", (uint)handle)!);
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-authority", (uint)handle)!);
+        }
+
         private sealed class TeapotResponse : IncomingResponse
         {
             public override ushort Status() => 418;   // I'm a teapot

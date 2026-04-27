@@ -804,6 +804,14 @@ namespace Wacs.WASI.Preview2.HostBinding
             // continue inline.
             if (m.ReturnType == typeof(string))
             {
+                if (m.GetCustomAttribute<
+                    WasiOptionalReturnAttribute>() != null)
+                {
+                    BindOptionStringReturnResourceMethod(
+                        runtime, namespaceName, importName,
+                        table, resourceType, m);
+                    return;
+                }
                 BindStringReturnResourceMethod(runtime, namespaceName,
                     importName, table, resourceType, m);
                 return;
@@ -994,6 +1002,41 @@ namespace Wacs.WASI.Preview2.HostBinding
                             dataPtr, bytes.Length);
                     WriteI32LE(memory, retAreaPtr, dataPtr);
                     WriteI32LE(memory, retAreaPtr + 4, bytes.Length);
+                });
+        }
+
+        /// <summary>Resource method returning
+        /// <c>option&lt;string&gt;</c> — null lifts to disc=0,
+        /// non-null to disc=1 + (ptr, len) at offsets 4/8.
+        /// retArea is 12 bytes (1-byte option disc, 3 bytes
+        /// padding to 4-align, 4-byte ptr, 4-byte len).
+        /// Methods opt in via [WasiOptionalReturn].</summary>
+        private static void BindOptionStringReturnResourceMethod(
+            WasmRuntime runtime, string namespaceName,
+            string importName, ResourceTable table,
+            Type resourceType, MethodInfo m)
+        {
+            BindAggregateResourceMethod(runtime, namespaceName,
+                importName, table, resourceType, m,
+                (memory, retAreaPtr, ret, allocate) =>
+                {
+                    if (ret == null)
+                    {
+                        memory[retAreaPtr] = 0;     // None
+                        return;
+                    }
+                    memory[retAreaPtr] = 1;         // Some
+                    memory[retAreaPtr + 1] = 0;
+                    memory[retAreaPtr + 2] = 0;
+                    memory[retAreaPtr + 3] = 0;
+                    var bytes = System.Text.Encoding.UTF8.GetBytes((string)ret);
+                    var dataPtr = bytes.Length == 0 ? 0
+                        : allocate(1, bytes.Length);
+                    if (bytes.Length > 0)
+                        System.Array.Copy(bytes, 0, memory,
+                            dataPtr, bytes.Length);
+                    WriteI32LE(memory, retAreaPtr + 4, dataPtr);
+                    WriteI32LE(memory, retAreaPtr + 8, bytes.Length);
                 });
         }
 

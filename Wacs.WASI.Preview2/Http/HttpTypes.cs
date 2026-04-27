@@ -142,19 +142,29 @@ namespace Wacs.WASI.Preview2.Http
 
     /// <summary>WIT <c>wasi:http/types.outgoing-request</c>
     /// — a request being constructed for outbound dispatch.
-    /// v0 covers the headers/scheme/authority surface that
-    /// rides existing binder paths; method/path-with-query
-    /// (variant + option<string>) ride incrementally.
     /// </summary>
     [WasiResource("outgoing-request")]
     public class OutgoingRequest : IDisposable
     {
         protected Fields _headers = new Fields();
+        protected string? _pathWithQuery;
+        protected string? _authority;
 
         /// <summary>Per WIT semantics, returns ownership of
         /// the headers Fields to the guest. Default returns
         /// the configured _headers.</summary>
         public virtual Fields Headers() => _headers;
+
+        /// <summary>HTTP path + optional query string. Null
+        /// when no path is set yet.</summary>
+        [WasiOptionalReturn]
+        [WasiMethodName("path-with-query")]
+        public virtual string? PathWithQuery() => _pathWithQuery;
+
+        /// <summary>Authority (host:port) for the request.
+        /// Null when not set.</summary>
+        [WasiOptionalReturn]
+        public virtual string? Authority() => _authority;
 
         public virtual void Dispose() { }
     }
@@ -166,6 +176,13 @@ namespace Wacs.WASI.Preview2.Http
     public class IncomingRequest : IDisposable
     {
         public virtual Fields Headers() => new Fields();
+
+        [WasiOptionalReturn]
+        [WasiMethodName("path-with-query")]
+        public virtual string? PathWithQuery() => null;
+
+        [WasiOptionalReturn]
+        public virtual string? Authority() => null;
 
         public virtual void Dispose() { }
     }
