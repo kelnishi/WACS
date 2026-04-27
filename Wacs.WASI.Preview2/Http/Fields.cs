@@ -6,6 +6,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
+using Wacs.ComponentModel.Runtime;
 using Wacs.WASI.Preview2.HostBinding;
 
 namespace Wacs.WASI.Preview2.Http
@@ -14,16 +15,14 @@ namespace Wacs.WASI.Preview2.Http
     /// <c>wasi:http/types.fields</c> — case-insensitive
     /// HTTP header / trailer key-value collection.
     ///
-    /// <para>v0 base class is array-backed and mutable. The
-    /// WIT API has constructor + has/get/set/append/delete
-    /// /entries/clone surface; this v0 ships the methods
-    /// whose canon-lower shape rides existing binder paths
-    /// (delete + clone). has + append + entries land as
-    /// the binder gains string-param-on-primitive-return /
-    /// byte[]-param-on-void+result / list-of-(string,byte[])-
-    /// return support respectively.</para></summary>
+    /// <para>Implements the generated <see cref="IFields"/>
+    /// interface directly. Result-returning methods (set,
+    /// delete, append, from-list) return Result of Unit /
+    /// IFields over the generated <see cref="HeaderError"/>
+    /// variant. v0 always returns Ok — header-error Err side
+    /// not surfaced.</para></summary>
     [WasiResource("fields")]
-    public class Fields : IDisposable
+    public class Fields : IFields, IDisposable
     {
         private readonly System.Collections.Generic.List<
             (string Key, byte[] Value)> _entries
@@ -38,20 +37,34 @@ namespace Wacs.WASI.Preview2.Http
         /// </summary>
         public static Fields New() => new Fields();
 
+        /// <summary>Generated-interface constructor stub —
+        /// the WIT constructor is dispatched through
+        /// <see cref="New"/> by the binder; this satisfies
+        /// the IFields surface but is unused at runtime.</summary>
+        public virtual void Create() { }
+
         /// <summary>WIT <c>from-list: static func(
         ///   entries: list&lt;tuple&lt;field-key,
         ///                          field-value&gt;&gt;)
         ///   -&gt; result&lt;own&lt;fields&gt;,
         ///                header-error&gt;</c>. Bulk-construct
         /// a fields collection from a list of (key, value)
-        /// pairs. Imports under <c>[static]fields.from-list</c>;
-        /// the binder decodes each list element as 16 bytes
-        /// (key-ptr, key-len, val-ptr, val-len). v0 always
-        /// succeeds — header-error Err side not surfaced
-        /// (would carry invalid-syntax(tuple<string,
-        /// list<u8>>) / forbidden / immutable).</summary>
-        public static Fields FromList(
-            System.ValueTuple<string, byte[]>[] entries)
+        /// pairs. v0 always succeeds.</summary>
+        public virtual Result<IFields, HeaderError> FromList(
+            (string, byte[])[] entries)
+        {
+            var f = new Fields();
+            foreach (var (k, v) in entries)
+                f._entries.Add((k, v));
+            return Result<IFields, HeaderError>.FromOk(f);
+        }
+
+        /// <summary>Static factory matching the WIT
+        /// <c>[static]fields.from-list</c> wire shape;
+        /// the binder allocates the resource handle from the
+        /// returned concrete <see cref="Fields"/>.</summary>
+        public static Fields FromListStatic(
+            (string, byte[])[] entries)
         {
             var f = new Fields();
             foreach (var (k, v) in entries)
@@ -89,8 +102,12 @@ namespace Wacs.WASI.Preview2.Http
         /// <summary>Append a (key, value) entry. WIT
         /// <c>append(field-key, field-value)
         ///   -&gt; result&lt;_, header-error&gt;</c>.</summary>
-        public virtual void Append(string name, byte[] value)
-            => _entries.Add((name, value));
+        public virtual Result<Unit, HeaderError> Append(
+            string name, byte[] value)
+        {
+            _entries.Add((name, value));
+            return Result<Unit, HeaderError>.FromOk(Unit.Value);
+        }
 
         /// <summary>Replace all entries matching
         /// <paramref name="name"/> with the supplied list
@@ -98,12 +115,14 @@ namespace Wacs.WASI.Preview2.Http
         /// <c>set: func(name: field-key,
         ///              value: list&lt;field-value&gt;)
         ///   -&gt; result&lt;_, header-error&gt;</c>.</summary>
-        public virtual void Set(string name, byte[][] value)
+        public virtual Result<Unit, HeaderError> Set(
+            string name, byte[][] value)
         {
             _entries.RemoveAll(e => string.Equals(e.Key, name,
                 System.StringComparison.OrdinalIgnoreCase));
             foreach (var v in value)
                 _entries.Add((name, v));
+            return Result<Unit, HeaderError>.FromOk(Unit.Value);
         }
 
         /// <summary>Host-side alias for
@@ -111,18 +130,21 @@ namespace Wacs.WASI.Preview2.Http
         /// fixture setup paths that pre-seed the entry list
         /// without going through the canon-lower wire.</summary>
         public void AppendEntry(string name, byte[] value)
-            => Append(name, value);
+            => _entries.Add((name, value));
 
         /// <summary>Remove every entry matching
         /// <paramref name="name"/> (case-insensitive).</summary>
-        public virtual void Delete(string name)
-            => _entries.RemoveAll(e => string.Equals(e.Key, name,
+        public virtual Result<Unit, HeaderError> Delete(string name)
+        {
+            _entries.RemoveAll(e => string.Equals(e.Key, name,
                 System.StringComparison.OrdinalIgnoreCase));
+            return Result<Unit, HeaderError>.FromOk(Unit.Value);
+        }
 
         /// <summary>Deep-clone the entry list into a fresh
         /// Fields instance. WIT
         /// <c>clone: func() -&gt; fields</c>.</summary>
-        public virtual Fields Clone()
+        public virtual IFields Clone()
         {
             var copy = new Fields();
             foreach (var (k, v) in _entries)
@@ -132,23 +154,19 @@ namespace Wacs.WASI.Preview2.Http
 
         /// <summary>Host-side List<(Key, Value)> backing
         /// store accessor. Used by tests to inspect the
-        /// captured entry list; the WIT-bound entries() goes
-        /// through <see cref="EntriesArray"/> which returns
-        /// a fresh ValueTuple array (the shape the canon-
-        /// lower binder consumes).</summary>
+        /// captured entry list. Returns the live underlying
+        /// list (not a snapshot — mutations to Fields are
+        /// reflected here).</summary>
         public System.Collections.Generic.IReadOnlyList<
-            (string Key, byte[] Value)> Entries => _entries;
+            (string Key, byte[] Value)> EntriesList => _entries;
 
         /// <summary>WIT <c>entries: func() -&gt;
         ///   list&lt;tuple&lt;field-key, field-value&gt;&gt;</c>.
         /// Snapshot of the entry list as ValueTuple<string,
-        /// byte[]>[]; the binder writes the canon-lower form
-        /// (list-ptr, list-len) at retArea + element pairs
-        /// at the allocated array.</summary>
-        public virtual System.ValueTuple<string, byte[]>[] EntriesArray()
+        /// byte[]>[].</summary>
+        public virtual (string, byte[])[] Entries()
         {
-            var arr = new System.ValueTuple<string, byte[]>[
-                _entries.Count];
+            var arr = new (string, byte[])[_entries.Count];
             for (int i = 0; i < _entries.Count; i++)
                 arr[i] = (_entries[i].Key, _entries[i].Value);
             return arr;

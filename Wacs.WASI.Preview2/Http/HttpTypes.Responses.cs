@@ -6,6 +6,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
+using Wacs.ComponentModel.Runtime;
 using Wacs.Core.Runtime;
 using Wacs.WASI.Preview2.HostBinding;
 using Wacs.WASI.Preview2.HostBinding.CanonicalAbi;
@@ -15,8 +16,7 @@ namespace Wacs.WASI.Preview2.Http
     public sealed partial class HttpTypes
     {
         // wasi:http/types.outgoing-response — response under
-        // construction on the server side. Mutable status-code
-        // setter + body taking; headers borrowable.
+        // construction on the server side.
         private static void BindOutgoingResponse(WasmRuntime runtime,
             ResourceContext resources)
         {
@@ -28,8 +28,6 @@ namespace Wacs.WASI.Preview2.Http
                 (Ns, "[resource-drop]outgoing-response"),
                 (_, h) => responses.Drop(h));
 
-            // [constructor]outgoing-response(headers: own<headers>)
-            //   -> own<outgoing-response>.
             runtime.BindHostFunction<Func<ExecContext, int, int>>(
                 (Ns, "[constructor]outgoing-response"),
                 (_, hHeaders) =>
@@ -39,31 +37,29 @@ namespace Wacs.WASI.Preview2.Http
                 });
 
             // [method]outgoing-response.status-code() -> status-code.
-            // status-code is u16; bare return (no result wrap).
             runtime.BindHostFunction<Func<ExecContext, int, int>>(
                 (Ns, "[method]outgoing-response.status-code"),
                 (_, handle) =>
                     ((OutgoingResponse)responses.Get(handle)).StatusCode());
 
-            // [method]outgoing-response.set-status-code(
-            //   status-code: status-code) -> result<_, _>.
-            // Wire: (handle, value, retArea) → void.
-            // status-code is u16; widens to i32 on the wire.
+            // [method]outgoing-response.set-status-code -> result<_, _>.
+            // The fixture's wit makes this return a flat i32 disc
+            // OR a 1-byte retArea — looking at the existing
+            // binding, it uses 1-byte retArea form.
             runtime.BindHostFunction<Action<ExecContext, int, int, int>>(
                 (Ns, "[method]outgoing-response.set-status-code"),
                 (ctx, handle, value, retArea) =>
                 {
-                    ((OutgoingResponse)responses.Get(handle))
+                    var r = ((OutgoingResponse)responses.Get(handle))
                         .SetStatusCode((ushort)value);
-                    WriteOkUnit(ctx.Memory(), retArea);
+                    WriteResultUnit(ctx.Memory(), retArea, r);
                 });
 
-            // [method]outgoing-response.headers() -> own<headers>.
             runtime.BindHostFunction<Func<ExecContext, int, int>>(
                 (Ns, "[method]outgoing-response.headers"),
                 (_, handle) =>
                 {
-                    var h = ((OutgoingResponse)responses.Get(handle))
+                    var h = (Fields)((OutgoingResponse)responses.Get(handle))
                         .Headers();
                     return fields.Allocate(h);
                 });
@@ -74,16 +70,25 @@ namespace Wacs.WASI.Preview2.Http
                 (Ns, "[method]outgoing-response.body"),
                 (ctx, handle, retArea) =>
                 {
-                    var body = ((OutgoingResponse)responses.Get(handle))
-                        .Body();
-                    WriteOkHandle(ctx.Memory(), retArea,
-                        bodies.Allocate(body));
+                    var inst = (OutgoingResponse)responses.Get(handle);
+                    var r = inst.Body();
+                    if (r.IsOk)
+                    {
+                        var body = inst.BodyConcrete();
+                        int h = bodies.Allocate(body);
+                        WriteResultHandleBareErr(ctx.Memory(), retArea,
+                            Result<int, Unit>.FromOk(h));
+                    }
+                    else
+                    {
+                        WriteResultHandleBareErr(ctx.Memory(), retArea,
+                            Result<int, Unit>.FromErr(r.Err));
+                    }
                 });
         }
 
         // wasi:http/types.incoming-response — server-sent
-        // response received on the client side. Read-only;
-        // body taken once via consume().
+        // response received on the client side.
         private static void BindIncomingResponse(WasmRuntime runtime,
             ResourceContext resources)
         {
@@ -95,18 +100,16 @@ namespace Wacs.WASI.Preview2.Http
                 (Ns, "[resource-drop]incoming-response"),
                 (_, h) => responses.Drop(h));
 
-            // [method]incoming-response.status() -> status-code.
             runtime.BindHostFunction<Func<ExecContext, int, int>>(
                 (Ns, "[method]incoming-response.status"),
                 (_, handle) =>
                     ((IncomingResponse)responses.Get(handle)).Status());
 
-            // [method]incoming-response.headers() -> own<headers>.
             runtime.BindHostFunction<Func<ExecContext, int, int>>(
                 (Ns, "[method]incoming-response.headers"),
                 (_, handle) =>
                 {
-                    var h = ((IncomingResponse)responses.Get(handle))
+                    var h = (Fields)((IncomingResponse)responses.Get(handle))
                         .Headers();
                     return fields.Allocate(h);
                 });
@@ -117,10 +120,20 @@ namespace Wacs.WASI.Preview2.Http
                 (Ns, "[method]incoming-response.consume"),
                 (ctx, handle, retArea) =>
                 {
-                    var body = ((IncomingResponse)responses.Get(handle))
-                        .Consume();
-                    WriteOkHandle(ctx.Memory(), retArea,
-                        bodies.Allocate(body));
+                    var inst = (IncomingResponse)responses.Get(handle);
+                    var r = inst.Consume();
+                    if (r.IsOk)
+                    {
+                        var body = inst.ConsumeConcrete();
+                        int h = bodies.Allocate(body);
+                        WriteResultHandleBareErr(ctx.Memory(), retArea,
+                            Result<int, Unit>.FromOk(h));
+                    }
+                    else
+                    {
+                        WriteResultHandleBareErr(ctx.Memory(), retArea,
+                            Result<int, Unit>.FromErr(r.Err));
+                    }
                 });
         }
     }

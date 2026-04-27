@@ -6,6 +6,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
+using Wacs.ComponentModel.Runtime;
 using Wacs.Core.Runtime;
 using Wacs.WASI.Preview2.HostBinding;
 using Wacs.WASI.Preview2.HostBinding.CanonicalAbi;
@@ -25,14 +26,15 @@ namespace Wacs.WASI.Preview2.Http
     /// <item>Simplified (default): 8 bytes — 1B Ok-disc + 3B
     /// pad + 4B handle. Used by every fixture whose WIT
     /// declares a single-case <c>error-code</c> placeholder.
-    /// Throws from the host propagate as traps; the Err side
-    /// isn't exercised.</item>
+    /// On the Err path the binder writes outer disc=1 with the
+    /// remaining bytes zeroed (no error-code payload encoded
+    /// since the fixture's wit doesn't reserve room for one).
+    /// </item>
     /// <item>Spec (<paramref name="useSpecErrorCode"/>=true):
     /// 40 bytes, align 8 — 1B Ok-disc + 7B pad + Ok-handle at
-    /// +8 (with 28B trailing zero-fill). The host can throw
-    /// <see cref="WasiErrorCodeException"/> to write disc=1 +
-    /// the 32-byte canon-encoded error-code variant via
-    /// <see cref="ErrorCodeEncoder"/> at retArea+8.</item>
+    /// +8 (with 28B trailing zero-fill). The Err path writes
+    /// disc=1 + the 32-byte canon-encoded error-code variant
+    /// via <see cref="ErrorCodeEncoder"/> at retArea+8.</item>
     /// </list></para>
     /// </summary>
     public sealed class OutgoingHandlerBindings : IBindable
@@ -60,51 +62,69 @@ namespace Wacs.WASI.Preview2.Http
             var futures = _resources.Table<FutureIncomingResponse>();
             var alloc = new Realloc(runtime);
             bool spec = _useSpecErrorCode;
-            int okHandleOffset = spec ? 8 : 4;
 
             // handle(req, option<options>) ->
             //   result<own<future-incoming-response>, error-code>
             // Wire: handle(req) + optDisc + handle(opts) + retArea
-            // = 4 ints + ExecContext.
             runtime.BindHostFunction<Action<ExecContext, int, int, int, int>>(
                 (Ns, "handle"),
                 (ctx, hReq, optDisc, hOpts, retArea) =>
                 {
                     var req = (OutgoingRequest)requests.Get(hReq);
-                    RequestOptions? opts = optDisc == 0 ? null
-                        : (RequestOptions)options.Get(hOpts);
+                    Option<IRequestOptions> opts = optDisc == 0
+                        ? Option<IRequestOptions>.None
+                        : Option<IRequestOptions>.Some(
+                            (RequestOptions)options.Get(hOpts));
 
-                    FutureIncomingResponse result;
-                    try
+                    var result = _impl.Handle(req, opts);
+                    var mem = ctx.Memory();
+
+                    if (result.IsOk)
                     {
-                        result = _impl.Handle(req, opts);
-                    }
-                    catch (WasiErrorCodeException wec) when (spec)
-                    {
-                        var memErr = ctx.Memory();
-                        memErr[retArea] = 1;            // Err
-                        for (int p = 1; p < 8; p++)
-                            memErr[retArea + p] = 0;
-                        ErrorCodeEncoder.Write(memErr,
-                            retArea + 8, wec.Code,
-                            alloc.Allocate);
+                        // Ok path — allocate the future handle
+                        // and write it at the appropriate offset.
+                        int handle = futures.Allocate(
+                            (FutureIncomingResponse)result.Ok);
+                        if (spec)
+                        {
+                            // Spec layout: disc@+0, pad@+1..+7,
+                            // handle@+8, zero@+12..+39.
+                            mem[retArea] = 0;
+                            for (int p = 1; p < 8; p++)
+                                mem[retArea + p] = 0;
+                            MemoryWriter.WriteI32LE(mem,
+                                retArea + 8, handle);
+                            for (int p = 12; p < 40; p++)
+                                mem[retArea + p] = 0;
+                        }
+                        else
+                        {
+                            // Simplified: disc@+0, pad@+1..+3,
+                            // handle@+4.
+                            mem[retArea] = 0;
+                            mem[retArea + 1] = 0;
+                            mem[retArea + 2] = 0;
+                            mem[retArea + 3] = 0;
+                            MemoryWriter.WriteI32LE(mem,
+                                retArea + 4, handle);
+                        }
                         return;
                     }
 
-                    int handle = futures.Allocate(result);
-                    var mem = ctx.Memory();
-                    mem[retArea] = 0;                   // Ok
-                    for (int p = 1; p < okHandleOffset; p++)
-                        mem[retArea + p] = 0;
-                    MemoryWriter.WriteI32LE(mem,
-                        retArea + okHandleOffset, handle);
+                    // Err path
                     if (spec)
                     {
-                        // Zero the trailing variant-payload area
-                        // so the guest doesn't see stale Err
-                        // bytes from a prior call.
-                        for (int p = okHandleOffset + 4;
-                             p < 40; p++)
+                        mem[retArea] = 1;
+                        for (int p = 1; p < 8; p++)
+                            mem[retArea + p] = 0;
+                        ErrorCodeEncoder.Write(mem, retArea + 8,
+                            result.Err, alloc.Allocate);
+                    }
+                    else
+                    {
+                        // Simplified: outer disc=1 only.
+                        mem[retArea] = 1;
+                        for (int p = 1; p < 8; p++)
                             mem[retArea + p] = 0;
                     }
                 });

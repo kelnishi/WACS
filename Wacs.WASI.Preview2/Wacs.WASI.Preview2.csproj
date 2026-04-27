@@ -63,11 +63,13 @@
                          WitForHost="true" />
         <AdditionalFiles Include="wit\deps\sockets\**\*.wit"
                          WitForHost="true" />
+        <AdditionalFiles Include="wit\deps\http\**\*.wit"
+                         WitForHost="true" />
         <AdditionalFiles Include="wit\*.wit"
                          WitForHost="true" />
 
         <AdditionalFiles Include="wit\**\*.wit"
-                         Exclude="wit\deps\random\**\*.wit;wit\deps\clocks\**\*.wit;wit\deps\io\**\*.wit;wit\deps\filesystem\**\*.wit;wit\deps\sockets\**\*.wit;wit\*.wit"
+                         Exclude="wit\deps\random\**\*.wit;wit\deps\clocks\**\*.wit;wit\deps\io\**\*.wit;wit\deps\filesystem\**\*.wit;wit\deps\sockets\**\*.wit;wit\deps\http\**\*.wit;wit\*.wit"
                          WitForHost="false" />
 
         <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="WitForHost" />

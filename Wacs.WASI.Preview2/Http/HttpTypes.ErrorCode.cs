@@ -6,6 +6,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
+using Wacs.ComponentModel.Runtime;
 using Wacs.Core.Runtime;
 using Wacs.WASI.Preview2.HostBinding;
 using Wacs.WASI.Preview2.HostBinding.CanonicalAbi;
@@ -24,10 +25,6 @@ namespace Wacs.WASI.Preview2.Http
         //   +1..+7: pad
         //   +8..+39: error-code variant slot (32 bytes,
         //              ErrorCodeEncoder.Size).
-        //
-        // None writes only the outer disc; Some writes outer
-        // disc + dispatches to ErrorCodeEncoder for the variant
-        // case + payload.
         private static void BindHttpErrorCode(WasmRuntime runtime,
             ResourceContext resources, Realloc alloc,
             IHttpErrorCodeMapper impl)

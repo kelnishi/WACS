@@ -11,6 +11,29 @@ using Wacs.WASI.Preview2.HostBinding;
 using Wacs.WASI.Preview2.Http;
 using Wacs.WASI.Preview2.Io;
 using Xunit;
+// Compact aliases for the generated nested-variant case
+// classes so the existing test names (HttpMethodGet etc.)
+// continue to compile.
+using HttpMethod = Wacs.WASI.Preview2.Http.Method;
+using HttpMethodGet = Wacs.WASI.Preview2.Http.Method.MethodGet;
+using HttpMethodHead = Wacs.WASI.Preview2.Http.Method.MethodHead;
+using HttpMethodPost = Wacs.WASI.Preview2.Http.Method.MethodPost;
+using HttpMethodPut = Wacs.WASI.Preview2.Http.Method.MethodPut;
+using HttpMethodDelete = Wacs.WASI.Preview2.Http.Method.MethodDelete;
+using HttpMethodConnect = Wacs.WASI.Preview2.Http.Method.MethodConnect;
+using HttpMethodOptions = Wacs.WASI.Preview2.Http.Method.MethodOptions;
+using HttpMethodTrace = Wacs.WASI.Preview2.Http.Method.MethodTrace;
+using HttpMethodPatch = Wacs.WASI.Preview2.Http.Method.MethodPatch;
+using HttpMethodOther = Wacs.WASI.Preview2.Http.Method.MethodOther;
+using HttpScheme = Wacs.WASI.Preview2.Http.Scheme;
+using HttpSchemeHttp = Wacs.WASI.Preview2.Http.Scheme.SchemeHTTP;
+using HttpSchemeHttps = Wacs.WASI.Preview2.Http.Scheme.SchemeHTTPS;
+using HttpSchemeOther = Wacs.WASI.Preview2.Http.Scheme.SchemeOther;
+using ErrorCodeConnectionRefused = Wacs.WASI.Preview2.Http.ErrorCode.ErrorCodeConnectionRefused;
+using ErrorCodeConnectionTimeout = Wacs.WASI.Preview2.Http.ErrorCode.ErrorCodeConnectionTimeout;
+using ErrorCodeHttpResponseTimeout = Wacs.WASI.Preview2.Http.ErrorCode.ErrorCodeHTTPResponseTimeout;
+using ErrorCodeHttpRequestBodySize = Wacs.WASI.Preview2.Http.ErrorCode.ErrorCodeHTTPRequestBodySize;
+using ErrorCodeInternalError = Wacs.WASI.Preview2.Http.ErrorCode.ErrorCodeInternalError;
 
 namespace Wacs.WASI.Preview2.Test
 {
@@ -35,10 +58,10 @@ namespace Wacs.WASI.Preview2.Test
         private sealed class TrackingFields : Fields
         {
             public string? LastDeleted;
-            public override void Delete(string name)
+            public override Result<Unit, HeaderError> Delete(string name)
             {
                 LastDeleted = name;
-                base.Delete(name);
+                return base.Delete(name);
             }
         }
 
@@ -112,10 +135,10 @@ namespace Wacs.WASI.Preview2.Test
 
             Assert.Equal(0u, (uint)ci.Invoke(
                 "ask-append", (uint)handle)!);
-            Assert.Single(fields.Entries);
-            Assert.Equal("X-New", fields.Entries[0].Key);
+            Assert.Single(fields.EntriesList);
+            Assert.Equal("X-New", fields.EntriesList[0].Key);
             Assert.Equal(System.Text.Encoding.UTF8.GetBytes("value"),
-                fields.Entries[0].Value);
+                fields.EntriesList[0].Value);
         }
 
         [Fact]
@@ -209,13 +232,13 @@ namespace Wacs.WASI.Preview2.Test
             // After set: 2 entries, both keyed "X-Set", with
             // values "one" and "two". The original "OLD"
             // entry was wiped.
-            Assert.Equal(2, fields.Entries.Count);
-            Assert.Equal("X-Set", fields.Entries[0].Key);
+            Assert.Equal(2, fields.EntriesList.Count);
+            Assert.Equal("X-Set", fields.EntriesList[0].Key);
             Assert.Equal(System.Text.Encoding.UTF8.GetBytes("one"),
-                fields.Entries[0].Value);
-            Assert.Equal("X-Set", fields.Entries[1].Key);
+                fields.EntriesList[0].Value);
+            Assert.Equal("X-Set", fields.EntriesList[1].Key);
             Assert.Equal(System.Text.Encoding.UTF8.GetBytes("two"),
-                fields.Entries[1].Value);
+                fields.EntriesList[1].Value);
         }
 
         [Fact]
@@ -541,13 +564,16 @@ namespace Wacs.WASI.Preview2.Test
             public OutgoingRequest? CapturedRequest;
             public RequestOptions? CapturedOptions;
 
-            public FutureIncomingResponse Handle(
-                OutgoingRequest request,
-                RequestOptions? options)
+            public Result<IFutureIncomingResponse, ErrorCode> Handle(
+                IOutgoingRequest request,
+                Option<IRequestOptions> options)
             {
-                CapturedRequest = request;
-                CapturedOptions = options;
-                return new FutureIncomingResponse();
+                CapturedRequest = (OutgoingRequest)request;
+                CapturedOptions = options.HasValue
+                    ? (RequestOptions)options.Value
+                    : null;
+                return Result<IFutureIncomingResponse, ErrorCode>.FromOk(
+                    new FutureIncomingResponse());
             }
         }
 
@@ -615,7 +641,7 @@ namespace Wacs.WASI.Preview2.Test
             public bool FinishCalled;
             public Fields? CapturedTrailers;
 
-            public override void Finish(Fields? trailers)
+            public override void FinishImpl(Fields? trailers)
             {
                 FinishCalled = true;
                 CapturedTrailers = trailers;
@@ -683,7 +709,7 @@ namespace Wacs.WASI.Preview2.Test
             public bool FinishCalled;
             public FutureTrailers Trailers = new FutureTrailers();
 
-            public override FutureTrailers Finish()
+            public override FutureTrailers FinishConcrete()
             {
                 FinishCalled = true;
                 return Trailers;
@@ -726,7 +752,7 @@ namespace Wacs.WASI.Preview2.Test
             public bool SetCalled;
             public OutgoingResponse? CapturedResponse;
 
-            public override void Set(OutgoingResponse? response)
+            public override void SetImpl(OutgoingResponse? response)
             {
                 SetCalled = true;
                 CapturedResponse = response;
@@ -882,17 +908,18 @@ namespace Wacs.WASI.Preview2.Test
             // sticks).
             Assert.Equal(0u, (uint)ci.Invoke(
                 "ask-set-none", (uint)hOpts)!);
-            Assert.Null(opts.ConnectTimeout());
+            Assert.False(opts.ConnectTimeout().HasValue);
 
             // Some(12345)
             Assert.Equal(0u, (uint)ci.Invoke(
                 "ask-set-some", (uint)hOpts, 12345UL)!);
-            Assert.Equal(12345UL, opts.ConnectTimeout());
+            Assert.True(opts.ConnectTimeout().HasValue);
+            Assert.Equal(12345UL, opts.ConnectTimeout().Value);
 
             // None again — clears back.
             Assert.Equal(0u, (uint)ci.Invoke(
                 "ask-set-none", (uint)hOpts)!);
-            Assert.Null(opts.ConnectTimeout());
+            Assert.False(opts.ConnectTimeout().HasValue);
         }
 
         [Fact]
@@ -919,17 +946,19 @@ namespace Wacs.WASI.Preview2.Test
             // None — leaves _pathWithQuery null.
             Assert.Equal(0u, (uint)ci.Invoke(
                 "ask-set-path-none", (uint)hReq)!);
-            Assert.Null(req.PathWithQuery());
+            Assert.False(req.PathWithQuery().HasValue);
 
             // Some("/foo/bar?x=1")
             Assert.Equal(0u, (uint)ci.Invoke(
                 "ask-set-path-some", (uint)hReq)!);
-            Assert.Equal("/foo/bar?x=1", req.PathWithQuery());
+            Assert.True(req.PathWithQuery().HasValue);
+            Assert.Equal("/foo/bar?x=1", req.PathWithQuery().Value);
 
             // Some("example.com:443") via set-authority
             Assert.Equal(0u, (uint)ci.Invoke(
                 "ask-set-authority-some", (uint)hReq)!);
-            Assert.Equal("example.com:443", req.Authority());
+            Assert.True(req.Authority().HasValue);
+            Assert.Equal("example.com:443", req.Authority().Value);
         }
 
         [Fact]
@@ -968,14 +997,14 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal(0u, (uint)ci.Invoke(
                 "ask-set-other", (uint)hReq)!);
             var other = Assert.IsType<HttpMethodOther>(req.Method());
-            Assert.Equal("PURGE", other.Name);
+            Assert.Equal("PURGE", other.Value);
         }
 
         private sealed class CapturingOutgoingRequest : OutgoingRequest
         {
             public HttpScheme? CapturedScheme;
             public bool SetSchemeCalled;
-            public override void SetScheme(HttpScheme? scheme)
+            protected override void SetSchemeImpl(HttpScheme? scheme)
             {
                 SetSchemeCalled = true;
                 CapturedScheme = scheme;
@@ -1021,7 +1050,7 @@ namespace Wacs.WASI.Preview2.Test
                 "ask-set-other", (uint)hReq)!);
             Assert.True(req.SetSchemeCalled);
             var other = Assert.IsType<HttpSchemeOther>(req.CapturedScheme);
-            Assert.Equal("ftp", other.Name);
+            Assert.Equal("ftp", other.Value);
         }
 
         private sealed class SchemedOutgoingRequest : OutgoingRequest
@@ -1134,8 +1163,22 @@ namespace Wacs.WASI.Preview2.Test
         {
             public bool Ready;
             public Fields? Trailers;
-            public override (bool ready, Fields? trailers) Get()
-                => (Ready, Trailers);
+            public override Option<Result<Result<Option<IFields>,
+                ErrorCode>, Unit>> Get()
+            {
+                if (!Ready)
+                    return Option<Result<Result<Option<IFields>,
+                        ErrorCode>, Unit>>.None;
+                Option<IFields> inner = Trailers == null
+                    ? Option<IFields>.None
+                    : Option<IFields>.Some(Trailers);
+                return Option<Result<Result<Option<IFields>,
+                    ErrorCode>, Unit>>.Some(
+                    Result<Result<Option<IFields>, ErrorCode>,
+                        Unit>.FromOk(
+                        Result<Option<IFields>, ErrorCode>.FromOk(
+                            inner)));
+            }
         }
 
         [Fact]
@@ -1214,8 +1257,23 @@ namespace Wacs.WASI.Preview2.Test
         {
             public bool Ready;
             public IncomingResponse? Response;
-            public override (bool ready, IncomingResponse? response) Get()
-                => (Ready, Response);
+            public override Option<Result<Result<IIncomingResponse,
+                ErrorCode>, Unit>> Get()
+            {
+                if (!Ready)
+                    return Option<Result<Result<IIncomingResponse,
+                        ErrorCode>, Unit>>.None;
+                if (Response == null)
+                    throw new System.InvalidOperationException(
+                        "StagedFutureResponse: Ready=true requires "
+                        + "Response to be non-null.");
+                return Option<Result<Result<IIncomingResponse,
+                    ErrorCode>, Unit>>.Some(
+                    Result<Result<IIncomingResponse, ErrorCode>,
+                        Unit>.FromOk(
+                        Result<IIncomingResponse, ErrorCode>.FromOk(
+                            Response)));
+            }
         }
 
         [Fact]
@@ -1343,7 +1401,7 @@ namespace Wacs.WASI.Preview2.Test
                 Wacs.WASI.Preview2.Io.Error)).Allocate(ioErr);
             var mapper = new StagedHttpErrorCodeMapper {
                 Staged = new ErrorCodeHttpRequestBodySize(
-                    0xCAFEBABEDEADBEEFUL) };
+                    Option<ulong>.Some(0xCAFEBABEDEADBEEFUL)) };
             var ci = MakeErrCodeInstance(bytes, resources, mapper);
 
             Assert.Equal(1u, (uint)ci.Invoke(
@@ -1372,7 +1430,7 @@ namespace Wacs.WASI.Preview2.Test
                 Wacs.WASI.Preview2.Io.Error)).Allocate(ioErr);
             const string msg = "oops, host died";
             var mapper = new StagedHttpErrorCodeMapper {
-                Staged = new ErrorCodeInternalError(msg) };
+                Staged = new ErrorCodeInternalError(Option<string>.Some(msg)) };
             var ci = MakeErrCodeInstance(bytes, resources, mapper);
 
             Assert.Equal(1u, (uint)ci.Invoke(
@@ -1426,24 +1484,25 @@ namespace Wacs.WASI.Preview2.Test
                 "ask-http-error-code", (uint)hErr)!);
         }
 
-        // Handler that uses — opts in to
-        // the full WASI-HTTP error-code variant retArea
-        // layout (align 8, 40 bytes). Throws
-        // WasiErrorCodeException to drive the Err side
-        // through ErrorCodeEncoder.
+        // Handler that opts in to the full WASI-HTTP error-
+        // code variant retArea layout (align 8, 40 bytes).
+        // Returns Result<...>.FromErr(StagedError) to drive
+        // the Err side through ErrorCodeEncoder.
         private sealed class SpecHandler : IOutgoingHandler
         {
             public ErrorCode? StagedError;
             public FutureIncomingResponse Response =
                 new FutureIncomingResponse();
 
-            public FutureIncomingResponse Handle(
-                OutgoingRequest request,
-                RequestOptions? options)
+            public Result<IFutureIncomingResponse, ErrorCode> Handle(
+                IOutgoingRequest request,
+                Option<IRequestOptions> options)
             {
                 if (StagedError != null)
-                    throw new WasiErrorCodeException(StagedError);
-                return Response;
+                    return Result<IFutureIncomingResponse,
+                        ErrorCode>.FromErr(StagedError);
+                return Result<IFutureIncomingResponse,
+                    ErrorCode>.FromOk(Response);
             }
         }
 
@@ -1521,7 +1580,7 @@ namespace Wacs.WASI.Preview2.Test
                 "handlerspec.component.wasm"));
             var resources = new ResourceContext();
             var handler = new SpecHandler {
-                StagedError = new ErrorCodeInternalError(msg) };
+                StagedError = new ErrorCodeInternalError(Option<string>.Some(msg)) };
             var req = new OutgoingRequest();
             int hReq = resources.TableFor(typeof(OutgoingRequest))
                 .Allocate(req);
@@ -1554,13 +1613,20 @@ namespace Wacs.WASI.Preview2.Test
                 .GetString(bytesOut));
         }
 
-        // FutureTrailers stub that throws to surface Err.
+        // FutureTrailers stub that returns inner-Err to drive
+        // the error-code retArea path.
         private sealed class ErringTrailers : FutureTrailers
         {
             public ErrorCode Error =
                 new ErrorCodeConnectionTimeout();
-            public override (bool ready, Fields? trailers) Get()
-                => throw new WasiErrorCodeException(Error);
+            public override Option<Result<Result<Option<IFields>,
+                ErrorCode>, Unit>> Get()
+                => Option<Result<Result<Option<IFields>,
+                    ErrorCode>, Unit>>.Some(
+                    Result<Result<Option<IFields>, ErrorCode>,
+                        Unit>.FromOk(
+                        Result<Option<IFields>, ErrorCode>.FromErr(
+                            Error)));
         }
 
         [Fact]
@@ -1596,13 +1662,19 @@ namespace Wacs.WASI.Preview2.Test
                 "ask-inner-disc", (uint)hFt)!);
         }
 
-        // FutureIncomingResponse stub that throws Err.
+        // FutureIncomingResponse stub that returns inner-Err.
         private sealed class ErringFutureResponse : FutureIncomingResponse
         {
             public ErrorCode Error =
                 new ErrorCodeHttpResponseTimeout();
-            public override (bool ready, IncomingResponse? response) Get()
-                => throw new WasiErrorCodeException(Error);
+            public override Option<Result<Result<IIncomingResponse,
+                ErrorCode>, Unit>> Get()
+                => Option<Result<Result<IIncomingResponse,
+                    ErrorCode>, Unit>>.Some(
+                    Result<Result<IIncomingResponse, ErrorCode>,
+                        Unit>.FromOk(
+                        Result<IIncomingResponse, ErrorCode>.FromErr(
+                            Error)));
         }
 
         [Fact]
@@ -1640,13 +1712,17 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal(33u, raw & 0xFFu);  // disc 33 = HTTP-response-timeout
         }
 
-        // FutureIncomingResponse stub that throws the
-        // already-consumed signal on every Get() call.
+        // FutureIncomingResponse stub that returns outer-Err
+        // (already-consumed) on every Get() call.
         private sealed class ConsumedFutureResponse
             : FutureIncomingResponse
         {
-            public override (bool ready, IncomingResponse? response) Get()
-                => throw new WasiFutureAlreadyConsumedException();
+            public override Option<Result<Result<IIncomingResponse,
+                ErrorCode>, Unit>> Get()
+                => Option<Result<Result<IIncomingResponse,
+                    ErrorCode>, Unit>>.Some(
+                    Result<Result<IIncomingResponse, ErrorCode>,
+                        Unit>.FromErr(Unit.Value));
         }
 
         [Fact]

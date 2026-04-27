@@ -8,6 +8,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Text;
+using Wacs.ComponentModel.Runtime;
 
 namespace Wacs.WASI.Preview2.Http
 {
@@ -46,6 +47,61 @@ namespace Wacs.WASI.Preview2.Http
         /// and is padded out to the variant alignment.</summary>
         public const int PayloadOffset = 8;
 
+        /// <summary>WIT-spec discriminant byte for an
+        /// <see cref="ErrorCode"/> case. The generator emits
+        /// a flat nested-class hierarchy without a stored
+        /// discriminant; this maps each subtype back to its
+        /// case index per the spec WIT (0 = DNS-timeout,
+        /// 38 = internal-error).</summary>
+        public static byte Discriminant(ErrorCode value)
+        {
+            return value switch
+            {
+                ErrorCode.ErrorCodeDNSTimeout => 0,
+                ErrorCode.ErrorCodeDNSError => 1,
+                ErrorCode.ErrorCodeDestinationNotFound => 2,
+                ErrorCode.ErrorCodeDestinationUnavailable => 3,
+                ErrorCode.ErrorCodeDestinationIPProhibited => 4,
+                ErrorCode.ErrorCodeDestinationIPUnroutable => 5,
+                ErrorCode.ErrorCodeConnectionRefused => 6,
+                ErrorCode.ErrorCodeConnectionTerminated => 7,
+                ErrorCode.ErrorCodeConnectionTimeout => 8,
+                ErrorCode.ErrorCodeConnectionReadTimeout => 9,
+                ErrorCode.ErrorCodeConnectionWriteTimeout => 10,
+                ErrorCode.ErrorCodeConnectionLimitReached => 11,
+                ErrorCode.ErrorCodeTLSProtocolError => 12,
+                ErrorCode.ErrorCodeTLSCertificateError => 13,
+                ErrorCode.ErrorCodeTLSAlertReceived => 14,
+                ErrorCode.ErrorCodeHTTPRequestDenied => 15,
+                ErrorCode.ErrorCodeHTTPRequestLengthRequired => 16,
+                ErrorCode.ErrorCodeHTTPRequestBodySize => 17,
+                ErrorCode.ErrorCodeHTTPRequestMethodInvalid => 18,
+                ErrorCode.ErrorCodeHTTPRequestURIInvalid => 19,
+                ErrorCode.ErrorCodeHTTPRequestURITooLong => 20,
+                ErrorCode.ErrorCodeHTTPRequestHeaderSectionSize => 21,
+                ErrorCode.ErrorCodeHTTPRequestHeaderSize => 22,
+                ErrorCode.ErrorCodeHTTPRequestTrailerSectionSize => 23,
+                ErrorCode.ErrorCodeHTTPRequestTrailerSize => 24,
+                ErrorCode.ErrorCodeHTTPResponseIncomplete => 25,
+                ErrorCode.ErrorCodeHTTPResponseHeaderSectionSize => 26,
+                ErrorCode.ErrorCodeHTTPResponseHeaderSize => 27,
+                ErrorCode.ErrorCodeHTTPResponseBodySize => 28,
+                ErrorCode.ErrorCodeHTTPResponseTrailerSectionSize => 29,
+                ErrorCode.ErrorCodeHTTPResponseTrailerSize => 30,
+                ErrorCode.ErrorCodeHTTPResponseTransferCoding => 31,
+                ErrorCode.ErrorCodeHTTPResponseContentCoding => 32,
+                ErrorCode.ErrorCodeHTTPResponseTimeout => 33,
+                ErrorCode.ErrorCodeHTTPUpstreamResponseTimeout => 34,
+                ErrorCode.ErrorCodeHTTPProtocolError => 35,
+                ErrorCode.ErrorCodeLoopDetected => 36,
+                ErrorCode.ErrorCodeConfigurationError => 37,
+                ErrorCode.ErrorCodeInternalError => 38,
+                _ => throw new ArgumentException(
+                    "Unknown ErrorCode subclass: "
+                    + value.GetType()),
+            };
+        }
+
         /// <summary>Write the encoded form of
         /// <paramref name="value"/> at
         /// <paramref name="offset"/> within
@@ -68,98 +124,98 @@ namespace Wacs.WASI.Preview2.Http
             for (int i = 0; i < Size; i++)
                 memory[offset + i] = 0;
 
-            memory[offset] = value.Discriminant;
+            memory[offset] = Discriminant(value);
             int p = offset + PayloadOffset;
 
             switch (value)
             {
                 // No-payload cases — the disc byte is enough.
-                case ErrorCodeDnsTimeout:
-                case ErrorCodeDestinationNotFound:
-                case ErrorCodeDestinationUnavailable:
-                case ErrorCodeDestinationIpProhibited:
-                case ErrorCodeDestinationIpUnroutable:
-                case ErrorCodeConnectionRefused:
-                case ErrorCodeConnectionTerminated:
-                case ErrorCodeConnectionTimeout:
-                case ErrorCodeConnectionReadTimeout:
-                case ErrorCodeConnectionWriteTimeout:
-                case ErrorCodeConnectionLimitReached:
-                case ErrorCodeTlsProtocolError:
-                case ErrorCodeTlsCertificateError:
-                case ErrorCodeHttpRequestDenied:
-                case ErrorCodeHttpRequestLengthRequired:
-                case ErrorCodeHttpRequestMethodInvalid:
-                case ErrorCodeHttpRequestUriInvalid:
-                case ErrorCodeHttpRequestUriTooLong:
-                case ErrorCodeHttpResponseIncomplete:
-                case ErrorCodeHttpResponseTimeout:
-                case ErrorCodeHttpUpstreamResponseTimeout:
-                case ErrorCodeHttpProtocolError:
-                case ErrorCodeLoopDetected:
-                case ErrorCodeConfigurationError:
+                case ErrorCode.ErrorCodeDNSTimeout:
+                case ErrorCode.ErrorCodeDestinationNotFound:
+                case ErrorCode.ErrorCodeDestinationUnavailable:
+                case ErrorCode.ErrorCodeDestinationIPProhibited:
+                case ErrorCode.ErrorCodeDestinationIPUnroutable:
+                case ErrorCode.ErrorCodeConnectionRefused:
+                case ErrorCode.ErrorCodeConnectionTerminated:
+                case ErrorCode.ErrorCodeConnectionTimeout:
+                case ErrorCode.ErrorCodeConnectionReadTimeout:
+                case ErrorCode.ErrorCodeConnectionWriteTimeout:
+                case ErrorCode.ErrorCodeConnectionLimitReached:
+                case ErrorCode.ErrorCodeTLSProtocolError:
+                case ErrorCode.ErrorCodeTLSCertificateError:
+                case ErrorCode.ErrorCodeHTTPRequestDenied:
+                case ErrorCode.ErrorCodeHTTPRequestLengthRequired:
+                case ErrorCode.ErrorCodeHTTPRequestMethodInvalid:
+                case ErrorCode.ErrorCodeHTTPRequestURIInvalid:
+                case ErrorCode.ErrorCodeHTTPRequestURITooLong:
+                case ErrorCode.ErrorCodeHTTPResponseIncomplete:
+                case ErrorCode.ErrorCodeHTTPResponseTimeout:
+                case ErrorCode.ErrorCodeHTTPUpstreamResponseTimeout:
+                case ErrorCode.ErrorCodeHTTPProtocolError:
+                case ErrorCode.ErrorCodeLoopDetected:
+                case ErrorCode.ErrorCodeConfigurationError:
                     return;
 
-                case ErrorCodeDnsError d:
+                case ErrorCode.ErrorCodeDNSError d:
                     WriteDnsErrorPayload(memory, p,
-                        d.Payload, allocate);
+                        d.Value, allocate);
                     return;
 
-                case ErrorCodeTlsAlertReceived t:
+                case ErrorCode.ErrorCodeTLSAlertReceived t:
                     WriteTlsAlertReceivedPayload(memory, p,
-                        t.Payload, allocate);
+                        t.Value, allocate);
                     return;
 
-                case ErrorCodeHttpRequestBodySize x:
-                    WriteOptionU64(memory, p, x.Size);
+                case ErrorCode.ErrorCodeHTTPRequestBodySize x:
+                    WriteOptionU64(memory, p, x.Value);
                     return;
 
-                case ErrorCodeHttpRequestHeaderSectionSize x:
-                    WriteOptionU32(memory, p, x.Size);
+                case ErrorCode.ErrorCodeHTTPRequestHeaderSectionSize x:
+                    WriteOptionU32(memory, p, x.Value);
                     return;
 
-                case ErrorCodeHttpRequestHeaderSize x:
-                    WriteOptionFieldSize(memory, p, x.Field, allocate);
+                case ErrorCode.ErrorCodeHTTPRequestHeaderSize x:
+                    WriteOptionFieldSize(memory, p, x.Value, allocate);
                     return;
 
-                case ErrorCodeHttpRequestTrailerSectionSize x:
-                    WriteOptionU32(memory, p, x.Size);
+                case ErrorCode.ErrorCodeHTTPRequestTrailerSectionSize x:
+                    WriteOptionU32(memory, p, x.Value);
                     return;
 
-                case ErrorCodeHttpRequestTrailerSize x:
-                    WriteFieldSizePayload(memory, p, x.Field, allocate);
+                case ErrorCode.ErrorCodeHTTPRequestTrailerSize x:
+                    WriteFieldSizePayload(memory, p, x.Value, allocate);
                     return;
 
-                case ErrorCodeHttpResponseHeaderSectionSize x:
-                    WriteOptionU32(memory, p, x.Size);
+                case ErrorCode.ErrorCodeHTTPResponseHeaderSectionSize x:
+                    WriteOptionU32(memory, p, x.Value);
                     return;
 
-                case ErrorCodeHttpResponseHeaderSize x:
-                    WriteFieldSizePayload(memory, p, x.Field, allocate);
+                case ErrorCode.ErrorCodeHTTPResponseHeaderSize x:
+                    WriteFieldSizePayload(memory, p, x.Value, allocate);
                     return;
 
-                case ErrorCodeHttpResponseBodySize x:
-                    WriteOptionU64(memory, p, x.Size);
+                case ErrorCode.ErrorCodeHTTPResponseBodySize x:
+                    WriteOptionU64(memory, p, x.Value);
                     return;
 
-                case ErrorCodeHttpResponseTrailerSectionSize x:
-                    WriteOptionU32(memory, p, x.Size);
+                case ErrorCode.ErrorCodeHTTPResponseTrailerSectionSize x:
+                    WriteOptionU32(memory, p, x.Value);
                     return;
 
-                case ErrorCodeHttpResponseTrailerSize x:
-                    WriteFieldSizePayload(memory, p, x.Field, allocate);
+                case ErrorCode.ErrorCodeHTTPResponseTrailerSize x:
+                    WriteFieldSizePayload(memory, p, x.Value, allocate);
                     return;
 
-                case ErrorCodeHttpResponseTransferCoding x:
-                    WriteOptionString(memory, p, x.Coding, allocate);
+                case ErrorCode.ErrorCodeHTTPResponseTransferCoding x:
+                    WriteOptionString(memory, p, x.Value, allocate);
                     return;
 
-                case ErrorCodeHttpResponseContentCoding x:
-                    WriteOptionString(memory, p, x.Coding, allocate);
+                case ErrorCode.ErrorCodeHTTPResponseContentCoding x:
+                    WriteOptionString(memory, p, x.Value, allocate);
                     return;
 
-                case ErrorCodeInternalError x:
-                    WriteOptionString(memory, p, x.Description, allocate);
+                case ErrorCode.ErrorCodeInternalError x:
+                    WriteOptionString(memory, p, x.Value, allocate);
                     return;
 
                 default:
@@ -172,15 +228,16 @@ namespace Wacs.WASI.Preview2.Http
         // option<string>: 12 bytes — 1B disc + 3B padding +
         // 4B ptr + 4B len. ptr/len are zero when None.
         private static void WriteOptionString(byte[] memory,
-            int offset, string? s, Func<int, int, int> allocate)
+            int offset, Option<string> opt,
+            Func<int, int, int> allocate)
         {
-            if (s == null)
+            if (!opt.HasValue)
             {
                 memory[offset] = 0;
                 return;
             }
             memory[offset] = 1;
-            var bytes = Encoding.UTF8.GetBytes(s);
+            var bytes = Encoding.UTF8.GetBytes(opt.Value);
             int dataPtr = bytes.Length == 0 ? 0
                 : allocate(1, bytes.Length);
             if (bytes.Length > 0)
@@ -193,46 +250,46 @@ namespace Wacs.WASI.Preview2.Http
 
         // option<u8>: 2 bytes — disc + value.
         private static void WriteOptionU8(byte[] memory,
-            int offset, byte? v)
+            int offset, Option<byte> opt)
         {
-            if (v == null) { memory[offset] = 0; return; }
+            if (!opt.HasValue) { memory[offset] = 0; return; }
             memory[offset] = 1;
-            memory[offset + 1] = v.Value;
+            memory[offset + 1] = opt.Value;
         }
 
         // option<u16>: 4 bytes — disc + 1B padding + 2B value.
         private static void WriteOptionU16(byte[] memory,
-            int offset, ushort? v)
+            int offset, Option<ushort> opt)
         {
-            if (v == null) { memory[offset] = 0; return; }
+            if (!opt.HasValue) { memory[offset] = 0; return; }
             memory[offset] = 1;
             BinaryPrimitives.WriteUInt16LittleEndian(
-                memory.AsSpan(offset + 2, 2), v.Value);
+                memory.AsSpan(offset + 2, 2), opt.Value);
         }
 
         // option<u32>: 8 bytes — disc + 3B padding + 4B value.
         private static void WriteOptionU32(byte[] memory,
-            int offset, uint? v)
+            int offset, Option<uint> opt)
         {
-            if (v == null) { memory[offset] = 0; return; }
+            if (!opt.HasValue) { memory[offset] = 0; return; }
             memory[offset] = 1;
             BinaryPrimitives.WriteUInt32LittleEndian(
-                memory.AsSpan(offset + 4, 4), v.Value);
+                memory.AsSpan(offset + 4, 4), opt.Value);
         }
 
         // option<u64>: 16 bytes — disc + 7B padding + 8B value.
         private static void WriteOptionU64(byte[] memory,
-            int offset, ulong? v)
+            int offset, Option<ulong> opt)
         {
-            if (v == null) { memory[offset] = 0; return; }
+            if (!opt.HasValue) { memory[offset] = 0; return; }
             memory[offset] = 1;
             BinaryPrimitives.WriteUInt64LittleEndian(
-                memory.AsSpan(offset + 8, 8), v.Value);
+                memory.AsSpan(offset + 8, 8), opt.Value);
         }
 
         // DnsErrorPayload (16B align 4): rcode @0, info-code @12.
         private static void WriteDnsErrorPayload(byte[] memory,
-            int offset, DnsErrorPayload p,
+            int offset, DNSErrorPayload p,
             Func<int, int, int> allocate)
         {
             WriteOptionString(memory, offset, p.Rcode, allocate);
@@ -244,7 +301,7 @@ namespace Wacs.WASI.Preview2.Http
         // alert-message (option<string>) @4 (12 bytes).
         private static void WriteTlsAlertReceivedPayload(
             byte[] memory, int offset,
-            TlsAlertReceivedPayload p,
+            TLSAlertReceivedPayload p,
             Func<int, int, int> allocate)
         {
             WriteOptionU8(memory, offset, p.AlertId);
@@ -268,12 +325,12 @@ namespace Wacs.WASI.Preview2.Http
         // option<FieldSizePayload> (24B align 4): disc @0,
         // 3B padding, payload @4 (20 bytes).
         private static void WriteOptionFieldSize(byte[] memory,
-            int offset, FieldSizePayload? p,
+            int offset, Option<FieldSizePayload> p,
             Func<int, int, int> allocate)
         {
-            if (p == null) { memory[offset] = 0; return; }
+            if (!p.HasValue) { memory[offset] = 0; return; }
             memory[offset] = 1;
-            WriteFieldSizePayload(memory, offset + 4, p, allocate);
+            WriteFieldSizePayload(memory, offset + 4, p.Value, allocate);
         }
     }
 }

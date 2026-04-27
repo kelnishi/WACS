@@ -12,14 +12,14 @@ namespace Wacs.WASI.Preview2.Http
     ///   err: borrow&lt;io-error&gt;) -&gt; option&lt;error-code&gt;</c>.
     /// Translates an opaque io-error resource handle into an
     /// HTTP-shaped error-code if applicable. v0 always
-    /// returns None — no WACS-side mapping yet.</summary>
+    /// returns null (= None) — no WACS-side mapping yet.</summary>
     public interface IHttpErrorCodeMapper
     {
         ErrorCode? HttpErrorCode(Wacs.WASI.Preview2.Io.Error err);
     }
 
     /// <summary>Default <see cref="IHttpErrorCodeMapper"/> impl
-    /// — always returns None. Concrete hosts override to
+    /// — always returns null. Concrete hosts override to
     /// surface specific error-code mappings when their stream
     /// implementation produces a known error class.</summary>
     public sealed class HttpErrorCodeMapperSource : IHttpErrorCodeMapper
