@@ -1,0 +1,11 @@
+package local:setmethod;
+world demo {
+    import wasi:http/types@0.2.3;
+    /// Calls set-method(req, Get) — variant disc 0, no payload.
+    export ask-set-get: func(req: u32) -> u32;
+    /// Calls set-method(req, Post) — variant disc 2.
+    export ask-set-post: func(req: u32) -> u32;
+    /// Calls set-method(req, Other("PURGE")) — variant disc 9
+    /// with string payload at offset 256, len 5.
+    export ask-set-other: func(req: u32) -> u32;
+}

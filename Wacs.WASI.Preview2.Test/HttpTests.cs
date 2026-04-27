@@ -1019,6 +1019,46 @@ namespace Wacs.WASI.Preview2.Test
         }
 
         [Fact]
+        public void OutgoingRequest_set_method_with_no_payload_and_other_string()
+        {
+            // Fixture exercises HttpMethod variant param +
+            // bare result return. Three calls cover:
+            //   disc 0 (Get) — no payload
+            //   disc 2 (Post) — no payload
+            //   disc 9 (Other("PURGE")) — string payload via
+            //   joined-flat (ptr+len).
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-setmethod-component",
+                "setmethod.component.wasm"));
+            var resources = new ResourceContext();
+            var req = new OutgoingRequest();
+            int hReq = resources.TableFor(typeof(OutgoingRequest))
+                .Allocate(req);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<OutgoingRequest>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            // Get
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-set-get", (uint)hReq)!);
+            Assert.IsType<HttpMethodGet>(req.Method());
+
+            // Post
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-set-post", (uint)hReq)!);
+            Assert.IsType<HttpMethodPost>(req.Method());
+
+            // Other("PURGE")
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-set-other", (uint)hReq)!);
+            var other = Assert.IsType<HttpMethodOther>(req.Method());
+            Assert.Equal("PURGE", other.Name);
+        }
+
+        [Fact]
         public void Http_resource_markers_are_allocatable()
         {
             // Smoke test: every wasi:http resource type can

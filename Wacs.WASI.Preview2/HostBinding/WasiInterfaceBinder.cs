@@ -2522,6 +2522,20 @@ namespace Wacs.WASI.Preview2.HostBinding
             bool IsOptString(ParameterInfo p)
                 => p.GetCustomAttribute<WasiOptionalParamAttribute>() != null
                    && p.ParameterType == typeof(string);
+            // HttpMethod / HttpScheme variant param. Wire:
+            // 3 slots (disc + joined-flat ptr + len).
+            bool IsHttpMethodParam(ParameterInfo p)
+                => p.ParameterType ==
+                    typeof(Wacs.WASI.Preview2.Http.HttpMethod)
+                   || (p.ParameterType
+                       .IsSubclassOf(typeof(
+                           Wacs.WASI.Preview2.Http.HttpMethod)));
+            bool IsHttpSchemeParam(ParameterInfo p)
+                => p.ParameterType ==
+                    typeof(Wacs.WASI.Preview2.Http.HttpScheme)
+                   || (p.ParameterType
+                       .IsSubclassOf(typeof(
+                           Wacs.WASI.Preview2.Http.HttpScheme)));
             foreach (var p in paramInfos)
                 if (!IsPrimitive(p.ParameterType)
                     && !p.ParameterType.IsEnum
@@ -2533,6 +2547,8 @@ namespace Wacs.WASI.Preview2.HostBinding
                     && !IsOptResource(p)
                     && !IsOptPrimitive(p)
                     && !IsOptString(p)
+                    && !IsHttpMethodParam(p)
+                    && !IsHttpSchemeParam(p)
                     && p.ParameterType != typeof(
                         Wacs.WASI.Preview2.Sockets.IpSocketAddress)
                     && p.ParameterType != typeof(
@@ -2548,7 +2564,9 @@ namespace Wacs.WASI.Preview2.HostBinding
             int paramSlotCount = 0;
             foreach (var p in paramInfos)
             {
-                if (IsOptString(p))
+                if (IsOptString(p)
+                    || IsHttpMethodParam(p)
+                    || IsHttpSchemeParam(p))
                     paramSlotCount += 3;
                 else if (p.ParameterType == typeof(string)
                     || p.ParameterType == typeof(byte[])
@@ -2574,7 +2592,9 @@ namespace Wacs.WASI.Preview2.HostBinding
             int wi = 2;
             foreach (var p in paramInfos)
             {
-                if (IsOptString(p))
+                if (IsOptString(p)
+                    || IsHttpMethodParam(p)
+                    || IsHttpSchemeParam(p))
                 {
                     wireParamTypes[wi++] = typeof(int);   // disc
                     wireParamTypes[wi++] = typeof(int);   // ptr
@@ -2685,6 +2705,16 @@ namespace Wacs.WASI.Preview2.HostBinding
                 {
                     lambdaParams[wi++] = Expression.Parameter(
                         typeof(int), paramInfos[i].Name + "_optDisc");
+                    lambdaParams[wi++] = Expression.Parameter(
+                        typeof(int), paramInfos[i].Name + "_ptr");
+                    lambdaParams[wi++] = Expression.Parameter(
+                        typeof(int), paramInfos[i].Name + "_len");
+                }
+                else if (IsHttpMethodParam(paramInfos[i])
+                    || IsHttpSchemeParam(paramInfos[i]))
+                {
+                    lambdaParams[wi++] = Expression.Parameter(
+                        typeof(int), paramInfos[i].Name + "_disc");
                     lambdaParams[wi++] = Expression.Parameter(
                         typeof(int), paramInfos[i].Name + "_ptr");
                     lambdaParams[wi++] = Expression.Parameter(
@@ -2831,6 +2861,38 @@ namespace Wacs.WASI.Preview2.HostBinding
                             Expression.Constant(null,
                                 typeof(string)),
                             decoded),
+                        typeof(object));
+                }
+                else if (IsHttpMethodParam(paramInfos[i]))
+                {
+                    var decodeMeth = typeof(WasiInterfaceBinder)
+                        .GetMethod(
+                            nameof(DecodeHttpMethodFromFlatWire),
+                            BindingFlags.Static
+                                | BindingFlags.NonPublic)!;
+                    var discParam = lambdaParams[wi++];
+                    var ptrParam = lambdaParams[wi++];
+                    var lenParam = lambdaParams[wi++];
+                    argExprs[i] = Expression.Convert(
+                        Expression.Call(decodeMeth,
+                            memoryAccess, discParam,
+                            ptrParam, lenParam),
+                        typeof(object));
+                }
+                else if (IsHttpSchemeParam(paramInfos[i]))
+                {
+                    var decodeSch = typeof(WasiInterfaceBinder)
+                        .GetMethod(
+                            nameof(DecodeHttpSchemeFromFlatWire),
+                            BindingFlags.Static
+                                | BindingFlags.NonPublic)!;
+                    var discParam = lambdaParams[wi++];
+                    var ptrParam = lambdaParams[wi++];
+                    var lenParam = lambdaParams[wi++];
+                    argExprs[i] = Expression.Convert(
+                        Expression.Call(decodeSch,
+                            memoryAccess, discParam,
+                            ptrParam, lenParam),
                         typeof(object));
                 }
                 else if (paramInfos[i].ParameterType == typeof(string))
@@ -4177,6 +4239,59 @@ namespace Wacs.WASI.Preview2.HostBinding
                 return new Wacs.WASI.Preview2.Filesystem.AccessTypeAccess(
                     (Wacs.WASI.Preview2.Filesystem.AccessModes)modes);
             return new Wacs.WASI.Preview2.Filesystem.AccessTypeExists();
+        }
+
+        /// <summary>Decode the <c>method</c> variant from its
+        /// flat wire form: disc (i32) + joined-flat (i32 ptr +
+        /// i32 len). Cases 0–8 are no-payload (get/head/post/
+        /// put/delete/connect/options/trace/patch); case 9 is
+        /// <c>other(string)</c> with the (ptr,len) payload
+        /// pointing at UTF-8 bytes in linear memory.</summary>
+        private static Wacs.WASI.Preview2.Http.HttpMethod
+            DecodeHttpMethodFromFlatWire(byte[] memory,
+                int disc, int ptr, int len)
+        {
+            switch (disc)
+            {
+                case 0: return new Wacs.WASI.Preview2.Http.HttpMethodGet();
+                case 1: return new Wacs.WASI.Preview2.Http.HttpMethodHead();
+                case 2: return new Wacs.WASI.Preview2.Http.HttpMethodPost();
+                case 3: return new Wacs.WASI.Preview2.Http.HttpMethodPut();
+                case 4: return new Wacs.WASI.Preview2.Http.HttpMethodDelete();
+                case 5: return new Wacs.WASI.Preview2.Http.HttpMethodConnect();
+                case 6: return new Wacs.WASI.Preview2.Http.HttpMethodOptions();
+                case 7: return new Wacs.WASI.Preview2.Http.HttpMethodTrace();
+                case 8: return new Wacs.WASI.Preview2.Http.HttpMethodPatch();
+                case 9:
+                    var name = System.Text.Encoding.UTF8.GetString(
+                        memory, ptr, len);
+                    return new Wacs.WASI.Preview2.Http.HttpMethodOther(name);
+                default:
+                    throw new ArgumentException(
+                        "Unknown HttpMethod variant disc: " + disc);
+            }
+        }
+
+        /// <summary>Decode the <c>scheme</c> variant from its
+        /// flat wire form: disc (i32) + joined-flat (i32 ptr +
+        /// i32 len). Cases 0/1 are no-payload (HTTP/HTTPS);
+        /// case 2 is <c>other(string)</c>.</summary>
+        private static Wacs.WASI.Preview2.Http.HttpScheme
+            DecodeHttpSchemeFromFlatWire(byte[] memory,
+                int disc, int ptr, int len)
+        {
+            switch (disc)
+            {
+                case 0: return new Wacs.WASI.Preview2.Http.HttpSchemeHttp();
+                case 1: return new Wacs.WASI.Preview2.Http.HttpSchemeHttps();
+                case 2:
+                    var name = System.Text.Encoding.UTF8.GetString(
+                        memory, ptr, len);
+                    return new Wacs.WASI.Preview2.Http.HttpSchemeOther(name);
+                default:
+                    throw new ArgumentException(
+                        "Unknown HttpScheme variant disc: " + disc);
+            }
         }
 
         /// <summary>Copy a slice of linear memory into a
