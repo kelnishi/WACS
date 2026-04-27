@@ -233,6 +233,22 @@ namespace Wacs.WASI.Preview2.Http
         public virtual void SetMethod(HttpMethod method)
             => _method = method;
 
+        /// <summary>HTTP scheme for the request — null when
+        /// not set. WIT <c>scheme() -&gt; option&lt;scheme&gt;</c>.
+        /// </summary>
+        protected HttpScheme? _scheme;
+
+        /// <summary>WIT <c>set-scheme: func(
+        ///   scheme: option&lt;scheme&gt;) -&gt; result</c>.
+        /// option<variant> param: 4 wire slots
+        /// (option disc + variant disc + ptr + len). null
+        /// clears the scheme.</summary>
+        [WasiUnitResult]
+        [WasiMethodName("set-scheme")]
+        public virtual void SetScheme(
+            [WasiOptionalParam] HttpScheme? scheme)
+            => _scheme = scheme;
+
         /// <summary>Per WIT semantics, returns ownership of
         /// the headers Fields to the guest. Default returns
         /// the configured _headers.</summary>

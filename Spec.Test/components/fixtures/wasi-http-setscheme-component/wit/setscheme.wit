@@ -1,0 +1,12 @@
+package local:setscheme;
+world demo {
+    import wasi:http/types@0.2.3;
+    /// Calls set-scheme(req, None) — option disc 0.
+    export ask-set-none: func(req: u32) -> u32;
+    /// Calls set-scheme(req, Some(HTTPS)) — option disc 1,
+    /// variant disc 1, no payload.
+    export ask-set-https: func(req: u32) -> u32;
+    /// Calls set-scheme(req, Some(Other("ftp"))) — option
+    /// disc 1, variant disc 2, payload "ftp" at offset 256.
+    export ask-set-other: func(req: u32) -> u32;
+}

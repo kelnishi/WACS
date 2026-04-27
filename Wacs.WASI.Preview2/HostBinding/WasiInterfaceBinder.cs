@@ -2523,19 +2523,33 @@ namespace Wacs.WASI.Preview2.HostBinding
                 => p.GetCustomAttribute<WasiOptionalParamAttribute>() != null
                    && p.ParameterType == typeof(string);
             // HttpMethod / HttpScheme variant param. Wire:
-            // 3 slots (disc + joined-flat ptr + len).
+            // 3 slots (disc + joined-flat ptr + len). The
+            // [WasiOptionalParam] variant adds an outer option
+            // disc, taking it to 4 slots.
             bool IsHttpMethodParam(ParameterInfo p)
-                => p.ParameterType ==
-                    typeof(Wacs.WASI.Preview2.Http.HttpMethod)
-                   || (p.ParameterType
-                       .IsSubclassOf(typeof(
-                           Wacs.WASI.Preview2.Http.HttpMethod)));
+                => (p.ParameterType ==
+                        typeof(Wacs.WASI.Preview2.Http.HttpMethod)
+                    || (p.ParameterType
+                        .IsSubclassOf(typeof(
+                            Wacs.WASI.Preview2.Http.HttpMethod))))
+                   && p.GetCustomAttribute<
+                       WasiOptionalParamAttribute>() == null;
             bool IsHttpSchemeParam(ParameterInfo p)
-                => p.ParameterType ==
-                    typeof(Wacs.WASI.Preview2.Http.HttpScheme)
-                   || (p.ParameterType
-                       .IsSubclassOf(typeof(
-                           Wacs.WASI.Preview2.Http.HttpScheme)));
+                => (p.ParameterType ==
+                        typeof(Wacs.WASI.Preview2.Http.HttpScheme)
+                    || (p.ParameterType
+                        .IsSubclassOf(typeof(
+                            Wacs.WASI.Preview2.Http.HttpScheme))))
+                   && p.GetCustomAttribute<
+                       WasiOptionalParamAttribute>() == null;
+            bool IsOptHttpSchemeParam(ParameterInfo p)
+                => (p.ParameterType ==
+                        typeof(Wacs.WASI.Preview2.Http.HttpScheme)
+                    || (p.ParameterType
+                        .IsSubclassOf(typeof(
+                            Wacs.WASI.Preview2.Http.HttpScheme))))
+                   && p.GetCustomAttribute<
+                       WasiOptionalParamAttribute>() != null;
             foreach (var p in paramInfos)
                 if (!IsPrimitive(p.ParameterType)
                     && !p.ParameterType.IsEnum
@@ -2549,6 +2563,7 @@ namespace Wacs.WASI.Preview2.HostBinding
                     && !IsOptString(p)
                     && !IsHttpMethodParam(p)
                     && !IsHttpSchemeParam(p)
+                    && !IsOptHttpSchemeParam(p)
                     && p.ParameterType != typeof(
                         Wacs.WASI.Preview2.Sockets.IpSocketAddress)
                     && p.ParameterType != typeof(
@@ -2564,7 +2579,9 @@ namespace Wacs.WASI.Preview2.HostBinding
             int paramSlotCount = 0;
             foreach (var p in paramInfos)
             {
-                if (IsOptString(p)
+                if (IsOptHttpSchemeParam(p))
+                    paramSlotCount += 4;
+                else if (IsOptString(p)
                     || IsHttpMethodParam(p)
                     || IsHttpSchemeParam(p))
                     paramSlotCount += 3;
@@ -2592,7 +2609,14 @@ namespace Wacs.WASI.Preview2.HostBinding
             int wi = 2;
             foreach (var p in paramInfos)
             {
-                if (IsOptString(p)
+                if (IsOptHttpSchemeParam(p))
+                {
+                    wireParamTypes[wi++] = typeof(int);   // option disc
+                    wireParamTypes[wi++] = typeof(int);   // variant disc
+                    wireParamTypes[wi++] = typeof(int);   // ptr
+                    wireParamTypes[wi++] = typeof(int);   // len
+                }
+                else if (IsOptString(p)
                     || IsHttpMethodParam(p)
                     || IsHttpSchemeParam(p))
                 {
@@ -2713,6 +2737,17 @@ namespace Wacs.WASI.Preview2.HostBinding
                 else if (IsHttpMethodParam(paramInfos[i])
                     || IsHttpSchemeParam(paramInfos[i]))
                 {
+                    lambdaParams[wi++] = Expression.Parameter(
+                        typeof(int), paramInfos[i].Name + "_disc");
+                    lambdaParams[wi++] = Expression.Parameter(
+                        typeof(int), paramInfos[i].Name + "_ptr");
+                    lambdaParams[wi++] = Expression.Parameter(
+                        typeof(int), paramInfos[i].Name + "_len");
+                }
+                else if (IsOptHttpSchemeParam(paramInfos[i]))
+                {
+                    lambdaParams[wi++] = Expression.Parameter(
+                        typeof(int), paramInfos[i].Name + "_optDisc");
                     lambdaParams[wi++] = Expression.Parameter(
                         typeof(int), paramInfos[i].Name + "_disc");
                     lambdaParams[wi++] = Expression.Parameter(
@@ -2893,6 +2928,33 @@ namespace Wacs.WASI.Preview2.HostBinding
                         Expression.Call(decodeSch,
                             memoryAccess, discParam,
                             ptrParam, lenParam),
+                        typeof(object));
+                }
+                else if (IsOptHttpSchemeParam(paramInfos[i]))
+                {
+                    // option<scheme>: 4 wire slots — option
+                    // disc + variant flat (disc + ptr + len).
+                    // outer disc==0 → null; else decode the
+                    // variant.
+                    var decodeSch = typeof(WasiInterfaceBinder)
+                        .GetMethod(
+                            nameof(DecodeHttpSchemeFromFlatWire),
+                            BindingFlags.Static
+                                | BindingFlags.NonPublic)!;
+                    var optDiscParam = lambdaParams[wi++];
+                    var discParam = lambdaParams[wi++];
+                    var ptrParam = lambdaParams[wi++];
+                    var lenParam = lambdaParams[wi++];
+                    var decoded = Expression.Call(decodeSch,
+                        memoryAccess, discParam,
+                        ptrParam, lenParam);
+                    argExprs[i] = Expression.Convert(
+                        Expression.Condition(
+                            Expression.Equal(optDiscParam,
+                                Expression.Constant(0)),
+                            Expression.Constant(null,
+                                typeof(Wacs.WASI.Preview2.Http.HttpScheme)),
+                            decoded),
                         typeof(object));
                 }
                 else if (paramInfos[i].ParameterType == typeof(string))

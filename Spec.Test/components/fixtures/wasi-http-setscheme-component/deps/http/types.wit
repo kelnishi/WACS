@@ -1,0 +1,11 @@
+package wasi:http@0.2.3;
+interface types {
+    variant scheme {
+        %HTTP,
+        %HTTPS,
+        other(string),
+    }
+    resource outgoing-request {
+        set-scheme: func(scheme: option<scheme>) -> result;
+    }
+}
