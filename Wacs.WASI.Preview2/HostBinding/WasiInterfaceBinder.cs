@@ -791,6 +791,21 @@ namespace Wacs.WASI.Preview2.HostBinding
                 return;
             }
 
+            // [WasiUnitResult] + void return →
+            // result<_, _> on a resource method. Wire is
+            // flat-return i32 (just the disc) instead of the
+            // retArea memory write [WasiErrorResult] uses.
+            // Reuses the same binder with the unit-result flag.
+            if (m.GetCustomAttribute<WasiUnitResultAttribute>() != null
+                && m.ReturnType == typeof(void))
+            {
+                BindErrorResultVoidReturnResourceMethod(
+                    runtime, namespaceName, importName, table,
+                    resourceType, m, resources,
+                    unitResultFlatReturn: true);
+                return;
+            }
+
             // [WasiErrorResult]-tagged + ulong / byte[] return →
             // result<{u64|list<u8>}, error-code>. Wire layout
             // matches result<X, stream-error> at the Ok side
@@ -2452,17 +2467,22 @@ namespace Wacs.WASI.Preview2.HostBinding
                 new object[] { (namespaceName, importName), compiled });
         }
 
-        /// <summary>Resource method tagged
-        /// [WasiErrorResult] returning void —
-        /// result&lt;_, error-code&gt;. Wire shape: (handle,
-        /// ...primitive params, retAreaPtr) → void; retArea
-        /// is 2 bytes (1-byte outer disc + 1-byte inner
-        /// error-code disc when Err). Always-Ok in v0.</summary>
+        /// <summary>Resource method whose return is one of:
+        /// (a) [WasiErrorResult] void — result&lt;_, error-code&gt;
+        /// canon-lowered through retArea; wire form (handle,
+        /// ...params, retAreaPtr) → void.
+        /// (b) [WasiUnitResult] void — result&lt;_, _&gt; canon-
+        /// lowered as flat-return i32; wire form (handle,
+        /// ...params) → i32 (always 0 in v0; Ok disc).
+        /// The two shapes share param decoding — only the
+        /// trailing wire slot differs (retArea param vs i32
+        /// return).</summary>
         private static void BindErrorResultVoidReturnResourceMethod(
             WasmRuntime runtime, string namespaceName,
             string importName, ResourceTable selfTable,
             Type resourceType, MethodInfo m,
-            ResourceContext? resources = null)
+            ResourceContext? resources = null,
+            bool unitResultFlatReturn = false)
         {
             var paramInfos = m.GetParameters();
             // Each param: primitive / enum (1 wire slot),
@@ -2615,13 +2635,21 @@ namespace Wacs.WASI.Preview2.HostBinding
                     wireParamTypes[wi++] = ToWireType(p.ParameterType);
                 }
             }
+            // Last wireParamTypes slot is either the retArea
+            // i32 (Action shape) or the i32 return (Func shape).
+            // Both are typed i32; the difference only shows up
+            // when constructing the delegate type.
             wireParamTypes[wi] = typeof(int);
 
-            var delegateType = OpenActionType(wireParamTypes.Length)
-                .MakeGenericType(wireParamTypes);
+            Type delegateType = unitResultFlatReturn
+                ? OpenFuncType(wireParamTypes.Length)
+                    .MakeGenericType(wireParamTypes)
+                : OpenActionType(wireParamTypes.Length)
+                    .MakeGenericType(wireParamTypes);
 
-            void Body(ExecContext ctx, int handle, object?[] hostArgs,
-                int retAreaPtr)
+            // Action body: writes Ok disc to retArea memory.
+            void ActionBody(ExecContext ctx, int handle,
+                object?[] hostArgs, int retAreaPtr)
             {
                 var inst = selfTable.Get(handle);
                 m.Invoke(inst, hostArgs);
@@ -2630,7 +2658,24 @@ namespace Wacs.WASI.Preview2.HostBinding
                 memory[retAreaPtr + 1] = 0;   // padding
             }
 
-            var lambdaParams = new ParameterExpression[wireParamTypes.Length];
+            // Func body: invokes method; returns Ok disc as
+            // the wire i32. retArea is not touched.
+            int FuncBody(ExecContext _, int handle, object?[] hostArgs)
+            {
+                var inst = selfTable.Get(handle);
+                m.Invoke(inst, hostArgs);
+                return 0;   // Ok
+            }
+
+            // For Action: lambdaParams matches wireParamTypes
+            // length (last entry is retAreaPtr input).
+            // For Func: lambdaParams is one shorter (Func's
+            // last wireParamTypes slot is the return, not an
+            // input).
+            int lambdaSlotCount = unitResultFlatReturn
+                ? wireParamTypes.Length - 1
+                : wireParamTypes.Length;
+            var lambdaParams = new ParameterExpression[lambdaSlotCount];
             lambdaParams[0] = Expression.Parameter(typeof(ExecContext), "ctx");
             lambdaParams[1] = Expression.Parameter(typeof(int), "self");
             wi = 2;
@@ -2704,8 +2749,16 @@ namespace Wacs.WASI.Preview2.HostBinding
                         wireParamTypes[wi - 1], paramInfos[i].Name);
                 }
             }
-            var retAreaParam = Expression.Parameter(typeof(int), "retAreaPtr");
-            lambdaParams[wireParamTypes.Length - 1] = retAreaParam;
+            // Action shape: append retAreaPtr input. Func/unit-
+            // result shape: skip — last wireParamTypes slot is
+            // the i32 return, not an input.
+            ParameterExpression? retAreaParam = null;
+            if (!unitResultFlatReturn)
+            {
+                retAreaParam = Expression.Parameter(
+                    typeof(int), "retAreaPtr");
+                lambdaParams[wireParamTypes.Length - 1] = retAreaParam;
+            }
 
             var ctxParam = lambdaParams[0];
             var memoryProp = typeof(ExecContext).GetProperty(
@@ -2934,10 +2987,22 @@ namespace Wacs.WASI.Preview2.HostBinding
             }
 
             var argArr = Expression.NewArrayInit(typeof(object), argExprs);
-            var bodyTarget = Expression.Constant(
-                (Action<ExecContext, int, object?[], int>)Body);
-            var call = Expression.Invoke(bodyTarget,
-                lambdaParams[0], lambdaParams[1], argArr, retAreaParam);
+            Expression call;
+            if (unitResultFlatReturn)
+            {
+                var funcTarget = Expression.Constant(
+                    (Func<ExecContext, int, object?[], int>)FuncBody);
+                call = Expression.Invoke(funcTarget,
+                    lambdaParams[0], lambdaParams[1], argArr);
+            }
+            else
+            {
+                var actionTarget = Expression.Constant(
+                    (Action<ExecContext, int, object?[], int>)ActionBody);
+                call = Expression.Invoke(actionTarget,
+                    lambdaParams[0], lambdaParams[1], argArr,
+                    retAreaParam!);
+            }
             var lambda = Expression.Lambda(delegateType, call, lambdaParams);
             var compiled = lambda.Compile();
 
