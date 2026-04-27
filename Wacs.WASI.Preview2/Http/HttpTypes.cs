@@ -228,10 +228,28 @@ namespace Wacs.WASI.Preview2.Http
 
     /// <summary>WIT <c>wasi:http/types.request-options</c>
     /// — per-request transport tunables (timeouts etc.).
-    /// </summary>
+    /// All timeouts are option<duration> = option<u64>;
+    /// null means "no timeout".</summary>
     [WasiResource("request-options")]
     public class RequestOptions : IDisposable
     {
+        protected ulong? _connectTimeout;
+        protected ulong? _firstByteTimeout;
+        protected ulong? _betweenBytesTimeout;
+
+        [WasiOptionalReturn]
+        [WasiMethodName("connect-timeout")]
+        public virtual ulong? ConnectTimeout() => _connectTimeout;
+
+        [WasiOptionalReturn]
+        [WasiMethodName("first-byte-timeout")]
+        public virtual ulong? FirstByteTimeout() => _firstByteTimeout;
+
+        [WasiOptionalReturn]
+        [WasiMethodName("between-bytes-timeout")]
+        public virtual ulong? BetweenBytesTimeout()
+            => _betweenBytesTimeout;
+
         public virtual void Dispose() { }
     }
 

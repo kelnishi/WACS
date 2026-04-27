@@ -1,0 +1,7 @@
+package wasi:http@0.2.3;
+interface types {
+    type duration = u64;
+    resource request-options {
+        connect-timeout: func() -> option<duration>;
+    }
+}

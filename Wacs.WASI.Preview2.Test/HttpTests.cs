@@ -119,6 +119,61 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal(1, resources.TableFor(typeof(Fields)).Count);
         }
 
+        private sealed class TimeoutOptions : RequestOptions
+        {
+            public TimeoutOptions(ulong? connectTimeout)
+            {
+                _connectTimeout = connectTimeout;
+            }
+        }
+
+        [Fact]
+        public void RequestOptions_connect_timeout_returns_option_u64_some()
+        {
+            // Stub returns Some(5_000_000_000) — 5 second
+            // timeout in nanoseconds. Fixture reads (disc,
+            // u64 payload) at retArea+0/+8.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-reqopts-component", "httpreqopts.component.wasm"));
+            var resources = new ResourceContext();
+            var opts = new TimeoutOptions(5_000_000_000UL);
+            int handle = resources.TableFor(typeof(RequestOptions))
+                .Allocate(opts);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<RequestOptions>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            // Some
+            Assert.Equal(1u, (uint)ci.Invoke(
+                "ask-disc", (uint)handle)!);
+            Assert.Equal(5_000_000_000UL, (ulong)ci.Invoke(
+                "ask-timeout", (uint)handle)!);
+        }
+
+        [Fact]
+        public void RequestOptions_connect_timeout_returns_option_u64_none()
+        {
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-reqopts-component", "httpreqopts.component.wasm"));
+            var resources = new ResourceContext();
+            var opts = new TimeoutOptions(null);
+            int handle = resources.TableFor(typeof(RequestOptions))
+                .Allocate(opts);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<RequestOptions>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            // None disc=0
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-disc", (uint)handle)!);
+        }
+
         private sealed class ConfiguredOutgoingRequest : OutgoingRequest
         {
             public ConfiguredOutgoingRequest(string? path, string? authority)

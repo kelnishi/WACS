@@ -822,6 +822,21 @@ namespace Wacs.WASI.Preview2.HostBinding
                     importName, table, resourceType, m);
                 return;
             }
+            // option<primitive> return on resource method —
+            // Nullable<T> with [WasiOptionalReturn]. retArea:
+            // option disc + alignment padding + payload (size
+            // matches T's wire size).
+            if (m.GetCustomAttribute<WasiOptionalReturnAttribute>() != null
+                && m.ReturnType.IsGenericType
+                && m.ReturnType.GetGenericTypeDefinition()
+                    == typeof(Nullable<>)
+                && IsPrimitive(m.ReturnType.GetGenericArguments()[0]))
+            {
+                BindOptionPrimitiveReturnResourceMethod(
+                    runtime, namespaceName, importName,
+                    table, resourceType, m);
+                return;
+            }
             // Bare enum returns (no result wrapping) ride the
             // primitive path through ToWireType — wire form is
             // the underlying integer.
@@ -1002,6 +1017,43 @@ namespace Wacs.WASI.Preview2.HostBinding
                             dataPtr, bytes.Length);
                     WriteI32LE(memory, retAreaPtr, dataPtr);
                     WriteI32LE(memory, retAreaPtr + 4, bytes.Length);
+                });
+        }
+
+        /// <summary>Resource method returning
+        /// <c>option&lt;primitive&gt;</c> (option<u64>,
+        /// option<u32>, option<bool>, etc.). retArea size +
+        /// payload offset depend on the primitive's wire
+        /// width:
+        ///   u8 / bool: payload at +1, total 2
+        ///   u16:        payload at +2, total 4
+        ///   u32 / s32:  payload at +4, total 8
+        ///   u64 / s64:  payload at +8, total 16
+        /// null → disc=0; non-null → disc=1 + payload bytes
+        /// at the aligned offset.</summary>
+        private static void BindOptionPrimitiveReturnResourceMethod(
+            WasmRuntime runtime, string namespaceName,
+            string importName, ResourceTable table,
+            Type resourceType, MethodInfo m)
+        {
+            var inner = m.ReturnType.GetGenericArguments()[0];
+            int payloadSize = PrimitiveByteSize(inner);
+            int payloadOffset = AlignUp(1, payloadSize);
+            BindAggregateResourceMethod(runtime, namespaceName,
+                importName, table, resourceType, m,
+                (memory, retAreaPtr, ret, allocate) =>
+                {
+                    if (ret == null)
+                    {
+                        memory[retAreaPtr] = 0;     // None
+                        return;
+                    }
+                    memory[retAreaPtr] = 1;         // Some
+                    // Zero padding bytes between disc + payload.
+                    for (int i = 1; i < payloadOffset; i++)
+                        memory[retAreaPtr + i] = 0;
+                    WritePrimitiveLE(memory,
+                        retAreaPtr + payloadOffset, inner, ret);
                 });
         }
 
