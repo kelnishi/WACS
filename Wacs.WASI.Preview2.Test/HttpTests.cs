@@ -534,10 +534,7 @@ namespace Wacs.WASI.Preview2.Test
                     "wasi:http/types@0.2.3", resources);
                 runtime.BindWasiResource<IncomingBody>(
                     "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<OutputStream>(
-                    "wasi:io/streams@0.2.3", resources);
-                runtime.BindWasiResource<InputStream>(
-                    "wasi:io/streams@0.2.3", resources);
+                new StreamBindings(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(0u, (uint)ci.Invoke(
@@ -570,10 +567,7 @@ namespace Wacs.WASI.Preview2.Test
                     "wasi:http/types@0.2.3", resources);
                 runtime.BindWasiResource<IncomingBody>(
                     "wasi:http/types@0.2.3", resources);
-                runtime.BindWasiResource<OutputStream>(
-                    "wasi:io/streams@0.2.3", resources);
-                runtime.BindWasiResource<InputStream>(
-                    "wasi:io/streams@0.2.3", resources);
+                new StreamBindings(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(0u, (uint)ci.Invoke(

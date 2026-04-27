@@ -81,8 +81,7 @@ namespace Wacs.WASI.Preview2.Test
             {
                 new CliBindings(resources, stdout: stdout)
                     .BindToRuntime(runtime);
-                runtime.BindWasiResource<OutputStream>(
-                    "wasi:io/streams@0.2.3", resources);
+                new StreamBindings(resources).BindToRuntime(runtime);
             });
 
             ci.Invoke("greet");
