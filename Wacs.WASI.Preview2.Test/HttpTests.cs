@@ -671,6 +671,80 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Same(opts, handler.CapturedOptions);
         }
 
+        private sealed class CapturingOutgoingBody : OutgoingBody
+        {
+            public bool FinishCalled;
+            public Fields? CapturedTrailers;
+
+            public override void Finish(Fields? trailers)
+            {
+                FinishCalled = true;
+                CapturedTrailers = trailers;
+            }
+        }
+
+        [Fact]
+        public void OutgoingBody_finish_with_no_trailers()
+        {
+            // Fixture: ask-finish-none(body) calls
+            // [static]outgoing-body.finish(body, None) —
+            // option disc=0, handle=0 for the trailers
+            // param. Stub records the resolved trailers
+            // (null) and returns Ok.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-bodyfinish-component",
+                "httpbodyfinish.component.wasm"));
+            var resources = new ResourceContext();
+            var body = new CapturingOutgoingBody();
+            int hBody = resources.TableFor(typeof(OutgoingBody))
+                .Allocate(body);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<OutgoingBody>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<Fields>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-finish-none", (uint)hBody)!);
+            Assert.True(body.FinishCalled);
+            Assert.Null(body.CapturedTrailers);
+        }
+
+        [Fact]
+        public void OutgoingBody_finish_with_trailers()
+        {
+            // Same fixture, ask-finish-some(body, trailers)
+            // → finish(body, Some(trailers)). Option disc=1
+            // + a real fields handle. Stub captures the
+            // resolved Fields object.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-bodyfinish-component",
+                "httpbodyfinish.component.wasm"));
+            var resources = new ResourceContext();
+            var body = new CapturingOutgoingBody();
+            var trailers = new Fields();
+            int hBody = resources.TableFor(typeof(OutgoingBody))
+                .Allocate(body);
+            int hTrailers = resources.TableFor(typeof(Fields))
+                .Allocate(trailers);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<OutgoingBody>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<Fields>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-finish-some", (uint)hBody, (uint)hTrailers)!);
+            Assert.True(body.FinishCalled);
+            Assert.Same(trailers, body.CapturedTrailers);
+        }
+
         [Fact]
         public void Http_resource_markers_are_allocatable()
         {
