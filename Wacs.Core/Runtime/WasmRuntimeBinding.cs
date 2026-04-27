@@ -341,6 +341,43 @@ namespace Wacs.Core.Runtime
         private IAddress? GetBoundEntity((string module, string entity) id) =>
             _entityBindings.GetValueOrDefault(id);
 
+        /// <summary>
+        /// Enumerate every <c>(module, entity)</c> import currently
+        /// bound to this runtime. Used by the validation layer to
+        /// match a WIT contract against the actual binding
+        /// manifest produced by <c>IBindable.BindToRuntime</c>
+        /// calls.
+        /// </summary>
+        public IEnumerable<(string Module, string Entity)>
+            EnumerateBoundEntities()
+        {
+            foreach (var key in _entityBindings.Keys)
+                yield return key;
+        }
+
+        /// <summary>
+        /// Inspect the canonical-ABI-lowered function signature
+        /// recorded for a host-function binding. Returns
+        /// <c>true</c> when <paramref name="id"/> is bound to a
+        /// host function (skipping memory / table / global
+        /// imports); <paramref name="type"/> carries the
+        /// flat-lowered param + return wire types the runtime
+        /// will dispatch through.
+        /// </summary>
+        public bool TryGetBoundHostFunctionType(
+            (string module, string entity) id,
+            out FunctionType type)
+        {
+            if (_entityBindings.TryGetValue(id, out var addr)
+                && addr is FuncAddr fa)
+            {
+                type = Store[fa].Type;
+                return true;
+            }
+            type = null!;
+            return false;
+        }
+
         public void BindHostFunction<TDelegate>((string module, string entity) id, TDelegate func)
             where TDelegate : Delegate
         {
