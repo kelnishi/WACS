@@ -100,6 +100,30 @@ namespace Wacs.WASI.Preview2.Http
         [WasiConstructor]
         public static Fields New() => new Fields();
 
+        /// <summary>WIT <c>from-list: static func(
+        ///   entries: list&lt;tuple&lt;field-key,
+        ///                          field-value&gt;&gt;)
+        ///   -&gt; result&lt;own&lt;fields&gt;,
+        ///                header-error&gt;</c>. Bulk-construct
+        /// a fields collection from a list of (key, value)
+        /// pairs. Imports under <c>[static]fields.from-list</c>;
+        /// the binder decodes each list element as 16 bytes
+        /// (key-ptr, key-len, val-ptr, val-len). v0 always
+        /// succeeds — header-error Err side not surfaced
+        /// (would carry invalid-syntax(tuple<string,
+        /// list<u8>>) / forbidden / immutable).</summary>
+        [WasiStaticMethod]
+        [WasiMethodName("from-list")]
+        [WasiErrorResult]
+        public static Fields FromList(
+            System.ValueTuple<string, byte[]>[] entries)
+        {
+            var f = new Fields();
+            foreach (var (k, v) in entries)
+                f._entries.Add((k, v));
+            return f;
+        }
+
         /// <summary>True iff there is at least one entry
         /// with key matching <paramref name="name"/> (case-
         /// insensitive). WIT
