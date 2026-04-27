@@ -9,6 +9,7 @@ using System.IO;
 using Wacs.ComponentModel.Runtime;
 using Wacs.WASI.Preview2.HostBinding;
 using Wacs.WASI.Preview2.Http;
+using Wacs.WASI.Preview2.Io;
 using Xunit;
 
 namespace Wacs.WASI.Preview2.Test
@@ -504,6 +505,83 @@ namespace Wacs.WASI.Preview2.Test
             // guest; only the original IncomingResponse
             // handle remains.
             Assert.Equal(0, resources.TableFor(typeof(Fields)).Count);
+        }
+
+        [Fact]
+        public void OutgoingRequest_body_yields_outgoing_body_then_output_stream()
+        {
+            // Fixture: ask-write-chain(handle) calls
+            //   outgoing-request.body(handle) → outgoing-body
+            //   outgoing-body.write() → output-stream
+            // Drops both. Returns the outer-disc byte from
+            // body() (always-Ok = 0). Verifies the chain of
+            // resource-on-result calls hand back fresh
+            // resource handles each step.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-body-component", "httpbody.component.wasm"));
+            var resources = new ResourceContext();
+            var req = new OutgoingRequest();
+            int handle = resources.TableFor(typeof(OutgoingRequest))
+                .Allocate(req);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<OutgoingRequest>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<IncomingResponse>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<OutgoingBody>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<IncomingBody>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<OutputStream>(
+                    "wasi:io/streams@0.2.3", resources);
+                runtime.BindWasiResource<InputStream>(
+                    "wasi:io/streams@0.2.3", resources);
+            });
+
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-write-chain", (uint)handle)!);
+            // Both body + stream were dropped by the guest;
+            // tables empty modulo the original request.
+            Assert.Equal(0, resources.TableFor(
+                typeof(OutgoingBody)).Count);
+            Assert.Equal(0, resources.TableFor(
+                typeof(OutputStream)).Count);
+        }
+
+        [Fact]
+        public void IncomingResponse_consume_yields_incoming_body_then_input_stream()
+        {
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-body-component", "httpbody.component.wasm"));
+            var resources = new ResourceContext();
+            var resp = new IncomingResponse();
+            int handle = resources.TableFor(typeof(IncomingResponse))
+                .Allocate(resp);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<OutgoingRequest>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<IncomingResponse>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<OutgoingBody>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<IncomingBody>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<OutputStream>(
+                    "wasi:io/streams@0.2.3", resources);
+                runtime.BindWasiResource<InputStream>(
+                    "wasi:io/streams@0.2.3", resources);
+            });
+
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-read-chain", (uint)handle)!);
+            Assert.Equal(0, resources.TableFor(
+                typeof(IncomingBody)).Count);
+            Assert.Equal(0, resources.TableFor(
+                typeof(InputStream)).Count);
         }
 
         [Fact]
