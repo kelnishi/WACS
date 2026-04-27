@@ -55,9 +55,10 @@ namespace Wacs.WASI.Preview2.Test
             var bytes = File.ReadAllBytes(FindFixturePath(
                 "wasi-exit-component", "exit.component.wasm"));
             var exit = new ExitHandler();
+            var resources = new ResourceContext();
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-                runtime.BindWasiInstance(
-                    "wasi:cli/exit@0.2.3", exit));
+                new CliBindings(resources, exit: exit)
+                    .BindToRuntime(runtime));
 
             var ex1 = Assert.ThrowsAny<System.Exception>(() =>
                 ci.Invoke("call-exit-ok"));

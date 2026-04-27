@@ -50,8 +50,8 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiInstance(
-                    "wasi:cli/terminal-stdin@0.2.3", stub, resources);
+                new CliBindings(resources, terminalStdin: stub)
+                    .BindToRuntime(runtime);
                 runtime.BindWasiResource<TerminalInput>(
                     "wasi:cli/terminal-input@0.2.3", resources);
             });
@@ -71,8 +71,8 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiInstance(
-                    "wasi:cli/terminal-stdin@0.2.3", stub, resources);
+                new CliBindings(resources, terminalStdin: stub)
+                    .BindToRuntime(runtime);
                 runtime.BindWasiResource<TerminalInput>(
                     "wasi:cli/terminal-input@0.2.3", resources);
             });

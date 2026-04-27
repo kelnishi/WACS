@@ -79,8 +79,8 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiInstance(
-                    "wasi:cli/stdout@0.2.3", stdout, resources);
+                new CliBindings(resources, stdout: stdout)
+                    .BindToRuntime(runtime);
                 runtime.BindWasiResource<OutputStream>(
                     "wasi:io/streams@0.2.3", resources);
             });

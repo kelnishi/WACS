@@ -36,9 +36,10 @@ namespace Wacs.WASI.Preview2.Test
                 args: new[] { "alpha", "beta", "γ" },
                 cwd: "/home/test",
                 env: new[] { ("FOO", "1"), ("BAR", "x") });
+            var resources = new ResourceContext();
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-                runtime.BindWasiInstance(
-                    "wasi:cli/environment@0.2.3", stub));
+                new CliBindings(resources, environment: stub)
+                    .BindToRuntime(runtime));
 
             var args = (string[])ci.Invoke("get-args")!;
             Assert.Equal(new[] { "alpha", "beta", "γ" }, args);
@@ -53,9 +54,10 @@ namespace Wacs.WASI.Preview2.Test
                 args: System.Array.Empty<string>(),
                 cwd: "/some/path",
                 env: System.Array.Empty<(string, string)>());
+            var resources = new ResourceContext();
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-                runtime.BindWasiInstance(
-                    "wasi:cli/environment@0.2.3", stub));
+                new CliBindings(resources, environment: stub)
+                    .BindToRuntime(runtime));
             Assert.Equal("/some/path", ci.Invoke("get-cwd"));
         }
 
@@ -68,9 +70,10 @@ namespace Wacs.WASI.Preview2.Test
                 args: System.Array.Empty<string>(),
                 cwd: null,
                 env: System.Array.Empty<(string, string)>());
+            var resources = new ResourceContext();
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-                runtime.BindWasiInstance(
-                    "wasi:cli/environment@0.2.3", stub));
+                new CliBindings(resources, environment: stub)
+                    .BindToRuntime(runtime));
             Assert.Null(ci.Invoke("get-cwd"));
         }
 
@@ -83,9 +86,10 @@ namespace Wacs.WASI.Preview2.Test
                 args: System.Array.Empty<string>(),
                 cwd: null,
                 env: new[] { ("HOME", "/r"), ("PATH", "/usr/bin") });
+            var resources = new ResourceContext();
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-                runtime.BindWasiInstance(
-                    "wasi:cli/environment@0.2.3", stub));
+                new CliBindings(resources, environment: stub)
+                    .BindToRuntime(runtime));
 
             var pairs = ((string, string)[])ci.Invoke("get-env")!;
             Assert.Equal(2, pairs.Length);
