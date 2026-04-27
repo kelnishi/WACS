@@ -57,9 +57,10 @@ namespace Wacs.WASI.Preview2.Test
             var stub = new StubWallClock(
                 seconds: 1_700_000_000UL,
                 nanoseconds: 123_456_789U);
+            var resources = new ResourceContext();
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-                runtime.BindWasiInstance(
-                    "wasi:clocks/wall-clock@0.2.3", stub));
+                new ClockBindings(resources, wall: stub)
+                    .BindToRuntime(runtime));
 
             var tuple = ((ulong, uint))ci.Invoke("wall-now")!;
             Assert.Equal(1_700_000_000UL, tuple.Item1);
