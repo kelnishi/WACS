@@ -85,7 +85,7 @@ namespace Wacs.WASI.Preview2.Filesystem
                 {
                     var (data, eof) = ((Descriptor)descriptors.Get(handle))
                         .Read((ulong)length, (ulong)offset);
-                    WriteOkBytesEofTuple(ctx.Memory(), retArea,
+                    WriteOkBytesEofTuple(ctx.Memory, retArea,
                         data, eof, alloc);
                 });
 
