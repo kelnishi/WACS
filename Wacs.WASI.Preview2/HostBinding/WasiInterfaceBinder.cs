@@ -1846,6 +1846,22 @@ namespace Wacs.WASI.Preview2.HostBinding
                         Allocate);
                     return;
                 }
+                catch (System.Reflection.TargetInvocationException tie)
+                    when (tie.InnerException is
+                        WasiFutureAlreadyConsumedException)
+                {
+                    // Outer Some + outer Err (bare unit) —
+                    // the already-consumed state. No payload
+                    // beyond the two disc bytes; the rest of
+                    // the 56-byte retArea stays zeroed.
+                    memory[retAreaPtr] = 1;        // outer Some
+                    for (int p = 1; p <= 7; p++)
+                        memory[retAreaPtr + p] = 0;
+                    memory[retAreaPtr + 8] = 1;    // outer Err
+                    for (int p = 9; p <= 55; p++)
+                        memory[retAreaPtr + p] = 0;
+                    return;
+                }
                 if (ret == null)
                     throw new InvalidOperationException(
                         "[WasiFutureIncomingResponseResult] "

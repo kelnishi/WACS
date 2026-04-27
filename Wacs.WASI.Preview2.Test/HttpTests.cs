@@ -1781,6 +1781,47 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal(33u, raw & 0xFFu);  // disc 33 = HTTP-response-timeout
         }
 
+        // FutureIncomingResponse stub that throws the
+        // already-consumed signal on every Get() call.
+        private sealed class ConsumedFutureResponse
+            : FutureIncomingResponse
+        {
+            public override (bool ready, IncomingResponse? response) Get()
+                => throw new WasiFutureAlreadyConsumedException();
+        }
+
+        [Fact]
+        public void FutureIncomingResponse_get_outer_err_already_consumed()
+        {
+            // Throwing WasiFutureAlreadyConsumedException
+            // signals the outer-Err state of
+            // option<result<result<own<X>, error-code>, _>>:
+            //   outer option = Some
+            //   outer result = Err (bare unit, no payload)
+            // The fixture reads outer disc=1 + outer-result
+            // disc=1 + the rest of the 56-byte retArea
+            // staying zeroed.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-future-response-get-component",
+                "futureresp.component.wasm"));
+            var resources = new ResourceContext();
+            var fr = new ConsumedFutureResponse();
+            int hFr = resources.TableFor(typeof(FutureIncomingResponse))
+                .Allocate(fr);
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<FutureIncomingResponse>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<IncomingResponse>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            Assert.Equal(1u, (uint)ci.Invoke(
+                "ask-outer-disc", (uint)hFr)!);
+            Assert.Equal(1u, (uint)ci.Invoke(
+                "ask-outer-result-disc", (uint)hFr)!);
+        }
+
         [Fact]
         public void Http_resource_markers_are_allocatable()
         {
