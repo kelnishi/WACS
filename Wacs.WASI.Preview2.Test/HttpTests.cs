@@ -1187,6 +1187,42 @@ namespace Wacs.WASI.Preview2.Test
         }
 
         [Fact]
+        public void Fields_from_list_decodes_list_of_tuple_string_bytes()
+        {
+            // Fixture: ask-from-list calls
+            // [static]fields.from-list with two entries laid
+            // out at fixed memory offsets:
+            //   ("content-type", "text/plain")
+            //   ("authorization", "Bearer XYZ")
+            // The binder decodes list-ptr/list-len + per-elem
+            // 16 bytes (kPtr, kLen, vPtr, vLen). Test asserts
+            // both entries surface through Fields.Get().
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-fields-fromlist-component",
+                "fieldsfromlist.component.wasm"));
+            var resources = new ResourceContext();
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<Fields>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            uint h = (uint)ci.Invoke("ask-from-list")!;
+            Assert.NotEqual(0u, h);
+            var fields = (Fields)resources.TableFor(typeof(Fields))
+                .Get((int)h)!;
+            var ct = fields.Get("content-type");
+            Assert.Single(ct);
+            Assert.Equal("text/plain",
+                System.Text.Encoding.UTF8.GetString(ct[0]));
+            var auth = fields.Get("authorization");
+            Assert.Single(auth);
+            Assert.Equal("Bearer XYZ",
+                System.Text.Encoding.UTF8.GetString(auth[0]));
+        }
+
+        [Fact]
         public void Http_resource_markers_are_allocatable()
         {
             // Smoke test: every wasi:http resource type can

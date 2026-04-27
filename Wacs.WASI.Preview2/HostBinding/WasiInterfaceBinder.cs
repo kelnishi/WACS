@@ -694,17 +694,37 @@ namespace Wacs.WASI.Preview2.HostBinding
 
             // [constructor]Name — static factory methods
             // tagged [WasiConstructor]. Register one bind
-            // per matching method. v0 supports the zero-arg
-            // shape (Fields() pattern); parameterized
-            // constructors land when the call site requires
-            // them.
+            // per matching method. Constructors are always
+            // resource-typed returns; v0 admits zero-arg and
+            // own<resource>-only-param shapes.
+            //
+            // [static]Name.method-name — public-static C#
+            // methods tagged [WasiStaticMethod] (no
+            // [WasiConstructor] — that case is handled above).
+            // The wire form has NO leading self handle (true
+            // static dispatch). Currently routed to a focused
+            // shape-specific binder per method since the param
+            // and return shapes vary widely (e.g. fields.from-
+            // list is list<tuple<string, byte[]>> + result<own
+            // <fields>, header-error>).
             foreach (var m in resourceType.GetMethods(
                 BindingFlags.Public | BindingFlags.Static))
             {
                 if (m.GetCustomAttribute<
-                    WasiConstructorAttribute>() == null) continue;
-                BindResourceConstructor(runtime, namespaceName,
-                    witName, table, resourceType, m, resources);
+                    WasiConstructorAttribute>() != null)
+                {
+                    BindResourceConstructor(runtime, namespaceName,
+                        witName, table, resourceType, m, resources);
+                    continue;
+                }
+                if (m.GetCustomAttribute<
+                    WasiStaticMethodAttribute>() != null)
+                {
+                    BindResourceTrulyStaticMethod(runtime,
+                        namespaceName, witName, table,
+                        resourceType, m, resources);
+                    continue;
+                }
             }
 
             // [resource-drop]Name — wasm passes i32 handle,
@@ -3591,6 +3611,107 @@ namespace Wacs.WASI.Preview2.HostBinding
             var bindClosed = bindOpen.MakeGenericMethod(delegateType);
             bindClosed.Invoke(runtime,
                 new object[] { (namespaceName, importName), compiled });
+        }
+
+        /// <summary>Bind a public-static C# method tagged
+        /// [WasiStaticMethod] under <c>[static]Resource.method-
+        /// name</c>. Differs from [WasiStaticMethod] on an
+        /// instance method (which inherits the `this:` self-
+        /// handle wire param) — this path has NO self handle
+        /// in the wire form because the WIT definition is a
+        /// true `static func` without a `this:` param. Per-
+        /// method shapes are dispatched to focused binders;
+        /// from-list (list<tuple<string, byte[]>> param +
+        /// result<own<fields>, header-error>) is the v0 case.
+        /// </summary>
+        private static void BindResourceTrulyStaticMethod(
+            WasmRuntime runtime, string namespaceName,
+            string witResourceName, ResourceTable table,
+            Type resourceType, MethodInfo m,
+            ResourceContext resources)
+        {
+            var nameAttr = m.GetCustomAttribute<WasiMethodNameAttribute>();
+            var rawName = nameAttr?.WitName ?? ToKebabCase(m.Name);
+            var importName = "[static]" + witResourceName + "." + rawName;
+
+            // v0: only the from-list shape is admitted —
+            // single param of (string, byte[])[] +
+            // [WasiErrorResult]-tagged return of the resource
+            // type.
+            var paramInfos = m.GetParameters();
+            if (paramInfos.Length == 1
+                && paramInfos[0].ParameterType ==
+                    typeof(ValueTuple<string, byte[]>[])
+                && m.GetCustomAttribute<
+                    WasiErrorResultAttribute>() != null
+                && m.ReturnType == resourceType)
+            {
+                BindFieldsFromListStatic(runtime, namespaceName,
+                    importName, table, resourceType, m);
+                return;
+            }
+            throw new InvalidOperationException(
+                "[WasiStaticMethod] on public-static method '"
+                + m.Name + "' has unsupported shape — only "
+                + "from-list (list<tuple<string, byte[]>> "
+                + "param + [WasiErrorResult] resource return) "
+                + "ships in v0.");
+        }
+
+        /// <summary>Truly-static factory method shape used by
+        /// fields.from-list. Wire: (list-ptr, list-len,
+        /// retAreaPtr) → void. Each list element is 16 bytes:
+        /// (key-ptr, key-len, val-ptr, val-len) at align 4.
+        /// retArea is 8 bytes: outer disc (1B) + 3B padding +
+        /// own<fields> handle (4B). v0 always-Ok semantics
+        /// — header-error Err side not written.</summary>
+        private static void BindFieldsFromListStatic(
+            WasmRuntime runtime, string namespaceName,
+            string importName, ResourceTable table,
+            Type resourceType, MethodInfo m)
+        {
+            void Body(ExecContext ctx, int listPtr, int listLen,
+                int retAreaPtr)
+            {
+                var memory = ctx.DefaultMemory.Data;
+                var entries = new ValueTuple<string, byte[]>[listLen];
+                for (int i = 0; i < listLen; i++)
+                {
+                    int eb = listPtr + i * 16;
+                    int kPtr = (int)System.Buffers.Binary
+                        .BinaryPrimitives.ReadInt32LittleEndian(
+                            memory.AsSpan(eb, 4));
+                    int kLen = (int)System.Buffers.Binary
+                        .BinaryPrimitives.ReadInt32LittleEndian(
+                            memory.AsSpan(eb + 4, 4));
+                    int vPtr = (int)System.Buffers.Binary
+                        .BinaryPrimitives.ReadInt32LittleEndian(
+                            memory.AsSpan(eb + 8, 4));
+                    int vLen = (int)System.Buffers.Binary
+                        .BinaryPrimitives.ReadInt32LittleEndian(
+                            memory.AsSpan(eb + 12, 4));
+                    var key = System.Text.Encoding.UTF8.GetString(
+                        memory, kPtr, kLen);
+                    var val = new byte[vLen];
+                    if (vLen > 0)
+                        Array.Copy(memory, vPtr, val, 0, vLen);
+                    entries[i] = (key, val);
+                }
+                var inst = m.Invoke(null, new object?[] { entries });
+                if (inst == null)
+                    throw new InvalidOperationException(
+                        "[WasiStaticMethod] from-list returned "
+                        + "null — own<T> cannot be null.");
+                int handle = table.Allocate(inst);
+                memory[retAreaPtr] = 0;       // Ok
+                memory[retAreaPtr + 1] = 0;
+                memory[retAreaPtr + 2] = 0;
+                memory[retAreaPtr + 3] = 0;
+                WriteI32LE(memory, retAreaPtr + 4, handle);
+            }
+
+            runtime.BindHostFunction<Action<ExecContext, int, int, int>>(
+                (namespaceName, importName), Body);
         }
 
         /// <summary>Register the <c>[resource-drop]T</c> handler
