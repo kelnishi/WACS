@@ -45,13 +45,8 @@ namespace Wacs.WASI.Preview2.Test
             var factory = new TcpCreateSocket();
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiInstance(
-                    "wasi:sockets/tcp-create-socket@0.2.3",
-                    factory, resources);
-                runtime.BindWasiResource<TcpSocket>(
-                    "wasi:sockets/tcp@0.2.3", resources);
-            });
+                new SocketsBindings(resources, tcpCreate: factory)
+                    .BindToRuntime(runtime));
 
             // Ipv4 = 0
             Assert.Equal(0u, (uint)ci.Invoke("try-create", 0u)!);
@@ -85,8 +80,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<TcpSocket>(
-                    "wasi:sockets/tcp@0.2.3", resources);
+                new SocketsBindings(resources).BindToRuntime(runtime);
                 new IoBindings(resources).BindToRuntime(runtime);
             });
 
@@ -132,12 +126,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(net);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<TcpSocket>(
-                    "wasi:sockets/tcp@0.2.3", resources);
-                runtime.BindWasiResource<Network>(
-                    "wasi:sockets/network@0.2.3", resources);
-            });
+                new SocketsBindings(resources).BindToRuntime(runtime));
 
             Assert.Equal(0u, (uint)ci.Invoke(
                 "ask-bind", (uint)hSock, (uint)hNet)!);
@@ -166,12 +155,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(net);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<TcpSocket>(
-                    "wasi:sockets/tcp@0.2.3", resources);
-                runtime.BindWasiResource<Network>(
-                    "wasi:sockets/network@0.2.3", resources);
-            });
+                new SocketsBindings(resources).BindToRuntime(runtime));
 
             Assert.Equal(0u, (uint)ci.Invoke(
                 "ask-bind-v6", (uint)hSock, (uint)hNet)!);
@@ -222,10 +206,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(sock);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<TcpSocket>(
-                    "wasi:sockets/tcp@0.2.3", resources);
-            });
+                new SocketsBindings(resources).BindToRuntime(runtime));
 
             // Variant disc: ipv4 = 0
             Assert.Equal(0u, (uint)ci.Invoke(
@@ -255,10 +236,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(sock);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<TcpSocket>(
-                    "wasi:sockets/tcp@0.2.3", resources);
-            });
+                new SocketsBindings(resources).BindToRuntime(runtime));
 
             // Variant disc: ipv6 = 1
             Assert.Equal(1u, (uint)ci.Invoke(
@@ -284,8 +262,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<TcpSocket>(
-                    "wasi:sockets/tcp@0.2.3", resources);
+                new SocketsBindings(resources).BindToRuntime(runtime);
                 new StreamBindings(resources).BindToRuntime(runtime);
             });
 
@@ -316,8 +293,7 @@ namespace Wacs.WASI.Preview2.Test
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
-                runtime.BindWasiResource<TcpSocket>(
-                    "wasi:sockets/tcp@0.2.3", resources);
+                new SocketsBindings(resources).BindToRuntime(runtime);
                 new StreamBindings(resources).BindToRuntime(runtime);
             });
 
@@ -344,10 +320,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(sock);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<TcpSocket>(
-                    "wasi:sockets/tcp@0.2.3", resources);
-            });
+                new SocketsBindings(resources).BindToRuntime(runtime));
 
             Assert.Equal(5u, (uint)ci.Invoke(
                 "ask-keepalive", (uint)handle)!);
@@ -383,10 +356,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(sock);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<TcpSocket>(
-                    "wasi:sockets/tcp@0.2.3", resources);
-            });
+                new SocketsBindings(resources).BindToRuntime(runtime));
 
             uint result = (uint)ci.Invoke("ask-options", (uint)handle)!;
             Assert.Equal(1u, result & 0xff);
@@ -429,10 +399,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(sock);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<TcpSocket>(
-                    "wasi:sockets/tcp@0.2.3", resources);
-            });
+                new SocketsBindings(resources).BindToRuntime(runtime));
 
             Assert.Equal(0u, (uint)ci.Invoke("ask-listen", (uint)handle)!);
             Assert.Equal(1, sock.FinishBindCalls);
@@ -466,10 +433,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(stream);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<OutgoingDatagramStream>(
-                    "wasi:sockets/udp@0.2.3", resources);
-            });
+                new SocketsBindings(resources).BindToRuntime(runtime));
 
             // send returns count; stub returns input count = 1.
             Assert.Equal(1UL, (ulong)ci.Invoke(
@@ -517,10 +481,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(stream);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<IncomingDatagramStream>(
-                    "wasi:sockets/udp@0.2.3", resources);
-            });
+                new SocketsBindings(resources).BindToRuntime(runtime));
 
             // Count: 2 datagrams
             Assert.Equal(2u, (uint)ci.Invoke(
@@ -566,14 +527,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(sock);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<UdpSocket>(
-                    "wasi:sockets/udp@0.2.3", resources);
-                runtime.BindWasiResource<IncomingDatagramStream>(
-                    "wasi:sockets/udp@0.2.3", resources);
-                runtime.BindWasiResource<OutgoingDatagramStream>(
-                    "wasi:sockets/udp@0.2.3", resources);
-            });
+                new SocketsBindings(resources).BindToRuntime(runtime));
 
             Assert.Equal(2u, (uint)ci.Invoke(
                 "ask-stream-none", (uint)handle)!);
@@ -596,14 +550,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(sock);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<UdpSocket>(
-                    "wasi:sockets/udp@0.2.3", resources);
-                runtime.BindWasiResource<IncomingDatagramStream>(
-                    "wasi:sockets/udp@0.2.3", resources);
-                runtime.BindWasiResource<OutgoingDatagramStream>(
-                    "wasi:sockets/udp@0.2.3", resources);
-            });
+                new SocketsBindings(resources).BindToRuntime(runtime));
 
             Assert.Equal(2u, (uint)ci.Invoke(
                 "ask-stream-some", (uint)handle)!);
@@ -656,14 +603,8 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(net);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiInstance(
-                    "wasi:sockets/ip-name-lookup@0.2.3", lookup, resources);
-                runtime.BindWasiResource<Network>(
-                    "wasi:sockets/network@0.2.3", resources);
-                runtime.BindWasiResource<ResolveAddressStream>(
-                    "wasi:sockets/ip-name-lookup@0.2.3", resources);
-            });
+                new SocketsBindings(resources, ipNameLookup: lookup)
+                    .BindToRuntime(runtime));
 
             uint result = (uint)ci.Invoke("ask-lookup", (uint)hNet)!;
             // bit 0: stream non-zero
