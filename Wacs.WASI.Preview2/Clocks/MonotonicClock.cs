@@ -52,8 +52,8 @@ namespace Wacs.WASI.Preview2.Clocks
         /// Pollable — sufficient for guests that only need
         /// the wiring; concrete subclasses integrate with
         /// async timers.</summary>
-        public Pollable SubscribeInstant(ulong when) => new Pollable();
+        public IPollable SubscribeInstant(ulong when) => new Pollable();
 
-        public Pollable SubscribeDuration(ulong when) => new Pollable();
+        public IPollable SubscribeDuration(ulong when) => new Pollable();
     }
 }
