@@ -1406,9 +1406,7 @@ namespace Wacs.WASI.Preview2.Test
             {
                 runtime.BindWasiInstance(
                     "wasi:http/types@0.2.3", mapper, resources);
-                runtime.BindWasiResource<
-                    Wacs.WASI.Preview2.Io.Error>(
-                    "wasi:io/error@0.2.3", resources);
+                new IoBindings(resources).BindToRuntime(runtime);
             });
         }
 
@@ -1532,9 +1530,7 @@ namespace Wacs.WASI.Preview2.Test
                     "wasi:http/types@0.2.3",
                     new HttpErrorCodeMapperSource(),
                     resources);
-                runtime.BindWasiResource<
-                    Wacs.WASI.Preview2.Io.Error>(
-                    "wasi:io/error@0.2.3", resources);
+                new IoBindings(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(0u, (uint)ci.Invoke(

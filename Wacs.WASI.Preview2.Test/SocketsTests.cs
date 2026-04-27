@@ -87,8 +87,7 @@ namespace Wacs.WASI.Preview2.Test
             {
                 runtime.BindWasiResource<TcpSocket>(
                     "wasi:sockets/tcp@0.2.3", resources);
-                runtime.BindWasiResource<Pollable>(
-                    "wasi:io/poll@0.2.3", resources);
+                new IoBindings(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal((uint)IpAddressFamily.Ipv6,

@@ -91,8 +91,7 @@ namespace Wacs.WASI.Preview2.Test
             {
                 new ClockBindings(resources, monotonic: clock)
                     .BindToRuntime(runtime);
-                runtime.BindWasiResource<Pollable>(
-                    "wasi:io/poll@0.2.3", resources);
+                new IoBindings(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(0u, (uint)ci.Invoke("ask-subscribe")!);

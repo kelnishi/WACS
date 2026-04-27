@@ -78,12 +78,8 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(p2);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiInstance(
-                    "wasi:io/poll@0.2.3", poll, resources);
-                runtime.BindWasiResource<Pollable>(
-                    "wasi:io/poll@0.2.3", resources);
-            });
+                new IoBindings(resources, poll: poll)
+                    .BindToRuntime(runtime));
 
             Assert.Equal(2u, (uint)ci.Invoke(
                 "ask-poll", (uint)hA, (uint)hB)!);
@@ -107,10 +103,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(err);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<Error>(
-                    "wasi:io/error@0.2.3", resources);
-            });
+                new IoBindings(resources).BindToRuntime(runtime));
 
             var result = ci.Invoke("ask-debug", (uint)handle);
             Assert.Equal("disk full", result);

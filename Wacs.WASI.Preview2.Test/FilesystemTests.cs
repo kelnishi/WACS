@@ -218,8 +218,7 @@ namespace Wacs.WASI.Preview2.Test
             {
                 runtime.BindWasiInstance(
                     "wasi:filesystem/types@0.2.3", fec, resources);
-                runtime.BindWasiResource<Wacs.WASI.Preview2.Io.Error>(
-                    "wasi:io/error@0.2.3", resources);
+                new IoBindings(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(0x1401u, (uint)ci.Invoke(
@@ -241,8 +240,7 @@ namespace Wacs.WASI.Preview2.Test
             {
                 runtime.BindWasiInstance(
                     "wasi:filesystem/types@0.2.3", fec, resources);
-                runtime.BindWasiResource<Wacs.WASI.Preview2.Io.Error>(
-                    "wasi:io/error@0.2.3", resources);
+                new IoBindings(resources).BindToRuntime(runtime);
             });
 
             // None disc=0 + payload byte stays 0 → 0.
