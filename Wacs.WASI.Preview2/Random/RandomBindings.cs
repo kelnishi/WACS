@@ -26,12 +26,12 @@ namespace Wacs.WASI.Preview2.Random
     public sealed class RandomBindings : IBindable
     {
         private readonly IRandom? _random;
-        private readonly IInsecureRandom? _insecureRandom;
+        private readonly IInsecure? _insecureRandom;
         private readonly IInsecureSeed? _insecureSeed;
 
         public RandomBindings(
             IRandom? random = null,
-            IInsecureRandom? insecureRandom = null,
+            IInsecure? insecureRandom = null,
             IInsecureSeed? insecureSeed = null)
         {
             _random = random;
@@ -73,7 +73,7 @@ namespace Wacs.WASI.Preview2.Random
         //   get-insecure-random-bytes: func(len: u64) -> list<u8>
         //   get-insecure-random-u64: func() -> u64
         private static void BindInsecureRandom(WasmRuntime runtime,
-            Realloc alloc, IInsecureRandom impl)
+            Realloc alloc, IInsecure impl)
         {
             const string ns = "wasi:random/insecure@0.2.3";
 

@@ -44,30 +44,29 @@ namespace Wacs.ComponentModel.Bindgen.SourceGen
     {
         public void Initialize(IncrementalGeneratorInitializationContext context)
         {
-            // Pull every AdditionalFile flagged WitForHost=true.
-            // Each surfaces as a (path, content) pair the gen can
-            // funnel through WitLoader.
+            // Pull every .wit AdditionalFile, tagged with whether
+            // it should drive host-interface emission. Files
+            // without WitForHost=true still get parsed (so
+            // cross-package `use` chains resolve), they just
+            // don't contribute to the emitted output.
             var witFiles = context.AdditionalTextsProvider
                 .Combine(context.AnalyzerConfigOptionsProvider)
                 .Where(static pair =>
+                    pair.Left.Path.EndsWith(".wit",
+                        System.StringComparison.OrdinalIgnoreCase))
+                .Select(static (pair, ct) =>
                 {
+                    ct.ThrowIfCancellationRequested();
                     var (file, opts) = pair;
-                    if (!file.Path.EndsWith(".wit",
-                            System.StringComparison.OrdinalIgnoreCase))
-                        return false;
                     var fileOpts = opts.GetOptions(file);
-                    return fileOpts.TryGetValue(
+                    bool emit = fileOpts.TryGetValue(
                         "build_metadata.AdditionalFiles.WitForHost",
                         out var v)
                         && string.Equals(v, "true",
                             System.StringComparison.OrdinalIgnoreCase);
-                })
-                .Select(static (pair, ct) =>
-                {
-                    ct.ThrowIfCancellationRequested();
-                    var (file, _) = pair;
                     return (Path: file.Path,
-                            Text: file.GetText(ct)?.ToString() ?? "");
+                            Text: file.GetText(ct)?.ToString() ?? "",
+                            Emit: emit);
                 })
                 .Collect();
 
@@ -89,35 +88,32 @@ namespace Wacs.ComponentModel.Bindgen.SourceGen
         }
 
         private static void Execute(SourceProductionContext context,
-            System.Collections.Immutable.ImmutableArray<(string Path, string Text)> files,
+            System.Collections.Immutable.ImmutableArray<(string Path, string Text, bool Emit)> files,
             string? nsOverride)
         {
             if (files.IsDefaultOrEmpty) return;
 
-            // Parse each AdditionalFile's text in-memory and merge
-            // documents into packages — no disk I/O, satisfying
-            // RS1035 (analyzers must be deterministic + sandboxed).
-            // WitLoader.MergeDocuments handles the package-name
-            // attribution + cross-file resolution; the Path
-            // metadata only matters for diagnostics, not for
-            // resolution itself.
-            // Group files by their containing directory. Each
-            // directory is one WIT package context — headerless
-            // files attribute to the package declared by their
-            // sibling. Mirrors WitLoader.LoadDirectoryTree but
-            // works from in-memory paths so we don't touch disk.
-            var byDir = new Dictionary<string, List<(string Path, string Text)>>(
+            // Group files by directory (one package context per
+            // dir). Track which packages should drive emission
+            // (any file in the dir flagged WitForHost=true elects
+            // the whole package). Files NOT flagged still get
+            // parsed so cross-package `use` chains resolve, they
+            // just don't contribute to the emitted output.
+            var byDir = new Dictionary<string, List<(string Path, string Text, bool Emit)>>(
                 System.StringComparer.OrdinalIgnoreCase);
             foreach (var f in files)
             {
                 var dir = GetDirectoryName(f.Path);
                 if (!byDir.TryGetValue(dir, out var list))
                 {
-                    list = new List<(string, string)>();
+                    list = new List<(string, string, bool)>();
                     byDir[dir] = list;
                 }
                 list.Add(f);
             }
+
+            var emitPackageKeys =
+                new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
 
             IReadOnlyList<CtPackage> packages;
             try
@@ -125,10 +121,20 @@ namespace Wacs.ComponentModel.Bindgen.SourceGen
                 var allPkgs = new List<CtPackage>();
                 foreach (var group in byDir.Values)
                 {
+                    bool groupEmits = false;
                     var docs = new List<WitDocument>(group.Count);
                     foreach (var f in group)
+                    {
                         docs.Add(WitParser.Parse(f.Text));
-                    allPkgs.AddRange(WitLoader.MergeDocuments(docs));
+                        if (f.Emit) groupEmits = true;
+                    }
+                    var groupPkgs = WitLoader.MergeDocuments(docs);
+                    allPkgs.AddRange(groupPkgs);
+                    if (groupEmits)
+                    {
+                        foreach (var p in groupPkgs)
+                            emitPackageKeys.Add(p.Name.ToString());
+                    }
                 }
                 packages = WitLoader_MergeByQualifiedName(allPkgs);
                 // Resolve cross-package type refs (filling
@@ -154,6 +160,8 @@ namespace Wacs.ComponentModel.Bindgen.SourceGen
 
             foreach (var pkg in packages)
             {
+                if (!emitPackageKeys.Contains(pkg.Name.ToString()))
+                    continue;
                 IReadOnlyList<EmittedSource> sources;
                 try
                 {

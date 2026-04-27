@@ -10,14 +10,14 @@ using SysRandom = System.Random;
 namespace Wacs.WASI.Preview2.Random
 {
     /// <summary>
-    /// Default <see cref="IInsecureRandom"/> implementation
+    /// Default <see cref="IInsecure"/> implementation
     /// backed by <see cref="System.Random"/> — the BCL's
     /// non-cryptographic Mersenne Twister. Fast, not seeded
     /// from entropy by default, suitable for guests that just
     /// need "some randomness" without paying the CSPRNG
     /// overhead.
     /// </summary>
-    public sealed class InsecureRandom : IInsecureRandom
+    public sealed class InsecureRandom : IInsecure
     {
         // Random.Shared is .NET 6+; netstandard2.1 needs a
         // per-instance RNG. Marked as readonly to make the
