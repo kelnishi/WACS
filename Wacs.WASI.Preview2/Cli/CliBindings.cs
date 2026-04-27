@@ -7,6 +7,7 @@
 
 using System;
 using System.Text;
+using Wacs.ComponentModel.Runtime;
 using Wacs.Core.Runtime;
 using Wacs.WASI.Preview2.HostBinding;
 using Wacs.WASI.Preview2.HostBinding.CanonicalAbi;
@@ -126,8 +127,15 @@ namespace Wacs.WASI.Preview2.Cli
             runtime.BindHostFunction<Action<ExecContext, int>>(
                 (ns, "initial-cwd"),
                 (ctx, retArea) =>
+                {
+                    // IEnvironment.InitialCwd returns Option<string>
+                    // (faithful WIT mapping). MemoryWriter takes
+                    // a nullable string — translate via TryGet.
+                    var cwd = impl.InitialCwd();
+                    string? value = cwd.TryGetValue(out var v) ? v : null;
                     MemoryWriter.WriteOptionString(
-                        ctx.Memory, retArea, impl.InitialCwd(), alloc));
+                        ctx.Memory, retArea, value, alloc);
+                });
         }
 
         // wasi:cli/exit@0.2.3
@@ -140,7 +148,15 @@ namespace Wacs.WASI.Preview2.Cli
 
             runtime.BindHostFunction<Action<ExecContext, int>>(
                 (ns, "exit"),
-                (_, statusDisc) => impl.Exit(statusDisc != 0));
+                (_, statusDisc) =>
+                {
+                    // result<_, _> lowers to a single i32 disc.
+                    // disc=0 → Ok(()); disc=1 → Err(()).
+                    var status = statusDisc == 0
+                        ? Result<Unit, Unit>.FromOk(Unit.Value)
+                        : Result<Unit, Unit>.FromErr(Unit.Value);
+                    impl.Exit(status);
+                });
 
             runtime.BindHostFunction<Action<ExecContext, int>>(
                 (ns, "exit-with-code"),
@@ -183,6 +199,8 @@ namespace Wacs.WASI.Preview2.Cli
         // wasi:cli/terminal-stdin@0.2.3
         //   get-terminal-stdin: func() -> option<own<terminal-input>>
         // retArea: 8 bytes — disc(u8) + 3 pad + handle(i32).
+        // Generated impl returns Option<ITerminalInput> — TryGet
+        // unwraps to the concrete instance for table allocation.
         private static void BindTerminalStdin(WasmRuntime runtime,
             ResourceContext resources, ITerminalStdin impl)
         {
@@ -190,8 +208,12 @@ namespace Wacs.WASI.Preview2.Cli
             var t = resources.Table<TerminalInput>();
             runtime.BindHostFunction<Action<ExecContext, int>>(
                 (ns, "get-terminal-stdin"),
-                (ctx, retArea) => WriteOptionResource(
-                    ctx, retArea, impl.GetTerminalStdin(), t));
+                (ctx, retArea) =>
+                {
+                    var opt = impl.GetTerminalStdin();
+                    ITerminalInput? value = opt.TryGetValue(out var v) ? v : null;
+                    WriteOptionResource(ctx, retArea, value, t);
+                });
         }
 
         private static void BindTerminalStdout(WasmRuntime runtime,
@@ -201,8 +223,12 @@ namespace Wacs.WASI.Preview2.Cli
             var t = resources.Table<TerminalOutput>();
             runtime.BindHostFunction<Action<ExecContext, int>>(
                 (ns, "get-terminal-stdout"),
-                (ctx, retArea) => WriteOptionResource(
-                    ctx, retArea, impl.GetTerminalStdout(), t));
+                (ctx, retArea) =>
+                {
+                    var opt = impl.GetTerminalStdout();
+                    ITerminalOutput? value = opt.TryGetValue(out var v) ? v : null;
+                    WriteOptionResource(ctx, retArea, value, t);
+                });
         }
 
         private static void BindTerminalStderr(WasmRuntime runtime,
@@ -212,8 +238,12 @@ namespace Wacs.WASI.Preview2.Cli
             var t = resources.Table<TerminalOutput>();
             runtime.BindHostFunction<Action<ExecContext, int>>(
                 (ns, "get-terminal-stderr"),
-                (ctx, retArea) => WriteOptionResource(
-                    ctx, retArea, impl.GetTerminalStderr(), t));
+                (ctx, retArea) =>
+                {
+                    var opt = impl.GetTerminalStderr();
+                    ITerminalOutput? value = opt.TryGetValue(out var v) ? v : null;
+                    WriteOptionResource(ctx, retArea, value, t);
+                });
         }
 
         // ----- shared list/option encoders for the cli surface -----

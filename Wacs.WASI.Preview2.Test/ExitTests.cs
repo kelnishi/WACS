@@ -27,18 +27,20 @@ namespace Wacs.WASI.Preview2.Test
         [Fact]
         public void Default_Exit_throws_ExitException_with_zero_for_ok()
         {
-            // isErr=false → Ok → exit code 0.
+            // Ok(()) → exit code 0.
             var exit = new ExitHandler();
-            var ex = Assert.Throws<ExitException>(() => exit.Exit(false));
+            var ex = Assert.Throws<ExitException>(() => exit.Exit(
+                Result<Unit, Unit>.FromOk(Unit.Value)));
             Assert.Equal((byte)0, ex.ExitCode);
         }
 
         [Fact]
         public void Default_Exit_throws_ExitException_with_one_for_err()
         {
-            // isErr=true → Err → exit code 1.
+            // Err(()) → exit code 1.
             var exit = new ExitHandler();
-            var ex = Assert.Throws<ExitException>(() => exit.Exit(true));
+            var ex = Assert.Throws<ExitException>(() => exit.Exit(
+                Result<Unit, Unit>.FromErr(Unit.Value)));
             Assert.Equal((byte)1, ex.ExitCode);
         }
 

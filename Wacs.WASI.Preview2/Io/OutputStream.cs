@@ -6,6 +6,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
+using Wacs.ComponentModel.Runtime;
 using Wacs.WASI.Preview2.HostBinding;
 
 namespace Wacs.WASI.Preview2.Io
@@ -37,7 +38,7 @@ namespace Wacs.WASI.Preview2.Io
     /// to actually consume the bytes.</para>
     /// </summary>
     [WasiResource("output-stream")]
-    public class OutputStream : IDisposable
+    public class OutputStream : IOutputStream, IDisposable
     {
         /// <summary>Maximum bytes the host can accept right
         /// now without blocking. Default: large constant —
@@ -99,5 +100,49 @@ namespace Wacs.WASI.Preview2.Io
         public virtual Pollable Subscribe() => new Pollable();
 
         public virtual void Dispose() { }
+
+        // ----- IOutputStream (faithful Result-returning shape) -----
+        // Phase B4 shortcut: the hand-written OutputStream uses a
+        // throw-on-error idiom. Explicit-interface stubs throw
+        // NotImplementedException; bindings continue calling the
+        // virtual non-Result methods above. See InputStream.cs
+        // for the rationale.
+        Result<ulong, StreamError> IOutputStream.CheckWrite() =>
+            throw new NotImplementedException(
+                "OutputStream uses throw-on-error idiom; bindings call CheckWrite() directly.");
+
+        Result<Unit, StreamError> IOutputStream.Write(byte[] contents) =>
+            throw new NotImplementedException(
+                "OutputStream uses throw-on-error idiom; bindings call Write(byte[]) directly.");
+
+        Result<Unit, StreamError> IOutputStream.BlockingWriteAndFlush(byte[] contents) =>
+            throw new NotImplementedException(
+                "OutputStream uses throw-on-error idiom; bindings call BlockingWriteAndFlush(byte[]) directly.");
+
+        Result<Unit, StreamError> IOutputStream.Flush() =>
+            throw new NotImplementedException(
+                "OutputStream uses throw-on-error idiom; bindings call Flush() directly.");
+
+        Result<Unit, StreamError> IOutputStream.BlockingFlush() =>
+            throw new NotImplementedException(
+                "OutputStream uses throw-on-error idiom; bindings call BlockingFlush() directly.");
+
+        IPollable IOutputStream.Subscribe() => Subscribe();
+
+        Result<Unit, StreamError> IOutputStream.WriteZeroes(ulong len) =>
+            throw new NotImplementedException(
+                "OutputStream uses throw-on-error idiom; bindings call WriteZeroes(ulong) directly.");
+
+        Result<Unit, StreamError> IOutputStream.BlockingWriteZeroesAndFlush(ulong len) =>
+            throw new NotImplementedException(
+                "OutputStream uses throw-on-error idiom; bindings call BlockingWriteZeroesAndFlush(ulong) directly.");
+
+        Result<ulong, StreamError> IOutputStream.Splice(IInputStream src, ulong len) =>
+            throw new NotImplementedException(
+                "OutputStream uses throw-on-error idiom; bindings call Splice(InputStream, ulong) directly.");
+
+        Result<ulong, StreamError> IOutputStream.BlockingSplice(IInputStream src, ulong len) =>
+            throw new NotImplementedException(
+                "OutputStream uses throw-on-error idiom; bindings call BlockingSplice(InputStream, ulong) directly.");
     }
 }

@@ -41,7 +41,7 @@ namespace Wacs.WASI.Preview2.Test
             public readonly System.Collections.Generic.List<byte> All =
                 new System.Collections.Generic.List<byte>();
 
-            public OutputStream GetStdout() => new Capture(this);
+            public IOutputStream GetStdout() => new Capture(this);
 
             private sealed class Capture : OutputStream
             {

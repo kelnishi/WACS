@@ -5,6 +5,8 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+using Wacs.ComponentModel.Runtime;
+
 namespace Wacs.WASI.Preview2.Cli
 {
     /// <summary>
@@ -19,9 +21,15 @@ namespace Wacs.WASI.Preview2.Cli
     /// </summary>
     public sealed class ExitHandler : IExit
     {
-        public void Exit(bool isErr)
+        /// <summary>Exit with a result-shaped status. Ok →
+        /// exit code 0; Err → exit code 1. The faithful WIT
+        /// mapping <c>result&lt;_, _&gt;</c> →
+        /// <see cref="Result{Unit, Unit}"/> preserves the
+        /// 2-case discriminant the canonical ABI lowers to a
+        /// single i32.</summary>
+        public void Exit(Result<Unit, Unit> status)
         {
-            throw new ExitException(isErr ? (byte)1 : (byte)0);
+            throw new ExitException(status.IsOk ? (byte)0 : (byte)1);
         }
 
         public void ExitWithCode(byte statusCode)

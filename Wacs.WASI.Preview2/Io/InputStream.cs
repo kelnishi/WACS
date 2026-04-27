@@ -6,6 +6,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
+using Wacs.ComponentModel.Runtime;
 using Wacs.WASI.Preview2.HostBinding;
 
 namespace Wacs.WASI.Preview2.Io
@@ -30,7 +31,7 @@ namespace Wacs.WASI.Preview2.Io
     /// throwing propagates as wasm trap.</para>
     /// </summary>
     [WasiResource("input-stream")]
-    public class InputStream : IDisposable
+    public class InputStream : IInputStream, IDisposable
     {
         /// <summary>Read up to <paramref name="len"/> bytes
         /// from the stream. Empty array signals EOF (or no
@@ -50,5 +51,33 @@ namespace Wacs.WASI.Preview2.Io
         public virtual Pollable Subscribe() => new Pollable();
 
         public virtual void Dispose() { }
+
+        // ----- IInputStream (faithful Result-returning shape) -----
+        // Phase B4 shortcut: the hand-written InputStream uses a
+        // throw-on-error idiom (the binding catches and encodes
+        // Err). The generated IInputStream returns
+        // Result<T, StreamError> directly; reconciling requires
+        // refactoring every concrete subclass — deferred. The
+        // explicit-interface stubs throw NotImplementedException
+        // so any caller that does invoke them via the interface
+        // surface gets a clear error. The CliBindings layer
+        // continues calling the virtual non-Result methods above.
+        Result<byte[], StreamError> IInputStream.Read(ulong len) =>
+            throw new NotImplementedException(
+                "InputStream uses throw-on-error idiom; bindings call Read(ulong) directly.");
+
+        Result<byte[], StreamError> IInputStream.BlockingRead(ulong len) =>
+            throw new NotImplementedException(
+                "InputStream uses throw-on-error idiom; bindings call BlockingRead(ulong) directly.");
+
+        Result<ulong, StreamError> IInputStream.Skip(ulong len) =>
+            throw new NotImplementedException(
+                "InputStream uses throw-on-error idiom; bindings call Skip(ulong) directly.");
+
+        Result<ulong, StreamError> IInputStream.BlockingSkip(ulong len) =>
+            throw new NotImplementedException(
+                "InputStream uses throw-on-error idiom; bindings call BlockingSkip(ulong) directly.");
+
+        IPollable IInputStream.Subscribe() => Subscribe();
     }
 }
