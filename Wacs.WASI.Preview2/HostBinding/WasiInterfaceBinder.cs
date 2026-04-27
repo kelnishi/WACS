@@ -422,13 +422,22 @@ namespace Wacs.WASI.Preview2.HostBinding
         /// <summary>Canon-lower wrapper for a host method
         /// tagged <see cref="WasiErrorResultAttribute"/>
         /// returning a resource. Wire shape: void return,
-        /// retAreaPtr trailing param. retArea layout: 1-byte
-        /// outer disc + 3-byte padding + 4-byte handle (when
-        /// Ok). Ok-only semantics in v0 — host throwing
-        /// propagates as wasm trap; full Err mapping is a
-        /// follow-up. Per-param wire shape supports primitives
-        /// (including enum-typed ints) just like
-        /// <see cref="BindMethod"/>.</summary>
+        /// retAreaPtr trailing param. Two retArea layouts:
+        /// <list type="bullet">
+        /// <item>Without [WasiSpecErrorCode] — the legacy
+        /// simplified-error-code-WIT layout: outer disc at
+        /// +0, handle at +4 (8-byte retArea total). Host
+        /// throws propagate as traps.</item>
+        /// <item>With [WasiSpecErrorCode] — full WASI-HTTP
+        /// error-code layout (align 8): outer disc at +0,
+        /// 7B padding, Ok handle at +8 (40-byte retArea).
+        /// Host can throw <see cref="WasiErrorCodeException"/>
+        /// to write disc=1 + the 32-byte error-code variant
+        /// via <see cref="Wacs.WASI.Preview2.Http.ErrorCodeEncoder"/>
+        /// at retArea+8.</item>
+        /// </list>
+        /// Per-param wire shape supports primitives, strings,
+        /// resources, and option<own<resource>>.</summary>
         private static void BindErrorResultResourceReturnMethod(
             WasmRuntime runtime, string namespaceName,
             object impl, MethodInfo m, ResourceContext resources)
@@ -436,6 +445,8 @@ namespace Wacs.WASI.Preview2.HostBinding
             var importName = m.GetCustomAttribute<WasiMethodNameAttribute>()?
                 .WitName ?? ToKebabCase(m.Name);
             var paramInfos = m.GetParameters();
+            bool specErrorCode = m.GetCustomAttribute<
+                WasiSpecErrorCodeAttribute>() != null;
 
             // Param shapes: primitive / enum (1 wire slot),
             // string (2 wire slots), borrow<resource> or
@@ -500,22 +511,78 @@ namespace Wacs.WASI.Preview2.HostBinding
 
             var table = resources.TableFor(m.ReturnType);
 
+            // Lazy cabi_realloc — only resolved when the
+            // spec-layout Err path actually writes a string
+            // payload. Captured by the encoder allocator.
+            Wacs.Core.Runtime.Delegates.GenericFuncs? cabiRealloc = null;
+            int Allocate(int align, int size)
+            {
+                if (cabiRealloc == null)
+                {
+                    if (!runtime.TryGetExportedFunction(
+                            "cabi_realloc", out var addr))
+                        throw new InvalidOperationException(
+                            "Component does not export "
+                            + "cabi_realloc — required for "
+                            + "[WasiErrorResult] string Err "
+                            + "payloads.");
+                    cabiRealloc = runtime.CreateInvoker(
+                        addr, new InvokerOptions());
+                }
+                return cabiRealloc(0, 0, align, size)[0].Data.Int32;
+            }
+
+            // Ok handle offset depends on the variant
+            // alignment driven by error-code:
+            //   simplified single-case → align 4 → offset 4
+            //   full spec (option<u64>) → align 8 → offset 8
+            int okHandleOffset = specErrorCode ? 8 : 4;
+            int okPaddingEnd = okHandleOffset;
+
             void Body(ExecContext ctx, object?[] hostArgs, int retAreaPtr)
             {
-                var inst = m.Invoke(impl, hostArgs);
                 var memory = ctx.DefaultMemory.Data;
+                object? inst;
+                try
+                {
+                    inst = m.Invoke(impl, hostArgs);
+                }
+                catch (System.Reflection.TargetInvocationException tie)
+                    when (specErrorCode
+                        && tie.InnerException is
+                            WasiErrorCodeException wec)
+                {
+                    // Err path — outer disc=1 + 7B padding
+                    // + 32-byte error-code variant slot.
+                    memory[retAreaPtr] = 1;
+                    for (int p = 1; p < 8; p++)
+                        memory[retAreaPtr + p] = 0;
+                    Wacs.WASI.Preview2.Http.ErrorCodeEncoder.Write(
+                        memory, retAreaPtr + 8, wec.Code,
+                        Allocate);
+                    return;
+                }
                 if (inst == null)
                     throw new InvalidOperationException(
                         "[WasiErrorResult] host method '" + m.Name
                         + "' returned null — Ok payload must "
                         + "be non-null.");
                 var handle = table.Allocate(inst);
-                // Always-Ok: outer disc=0, handle at offset 4.
+                // Ok: outer disc=0 + alignment padding + handle.
                 memory[retAreaPtr] = 0;
-                memory[retAreaPtr + 1] = 0;
-                memory[retAreaPtr + 2] = 0;
-                memory[retAreaPtr + 3] = 0;
-                WriteI32LE(memory, retAreaPtr + 4, handle);
+                for (int p = 1; p < okPaddingEnd; p++)
+                    memory[retAreaPtr + p] = 0;
+                WriteI32LE(memory, retAreaPtr + okHandleOffset, handle);
+                // For spec layout, also zero the trailing
+                // bytes of the variant payload area (offsets
+                // okHandleOffset+4..retArea+39) so the guest
+                // doesn't see stale Err payload data.
+                if (specErrorCode)
+                {
+                    for (int p = okHandleOffset + 4;
+                         p < okHandleOffset + 32; p++)
+                        memory[retAreaPtr + p] = 0;
+                }
             }
 
             var lambdaParams = new ParameterExpression[paramTypes.Length];

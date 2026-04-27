@@ -1541,6 +1541,154 @@ namespace Wacs.WASI.Preview2.Test
                 "ask-http-error-code", (uint)hErr)!);
         }
 
+        // Handler that uses [WasiSpecErrorCode] — opts in to
+        // the full WASI-HTTP error-code variant retArea
+        // layout (align 8, 40 bytes). Throws
+        // WasiErrorCodeException to drive the Err side
+        // through ErrorCodeEncoder.
+        private sealed class SpecHandler : IOutgoingHandler
+        {
+            public ErrorCode? StagedError;
+            public FutureIncomingResponse Response =
+                new FutureIncomingResponse();
+
+            [WasiErrorResult]
+            [WasiSpecErrorCode]
+            public FutureIncomingResponse Handle(
+                OutgoingRequest request,
+                [WasiOptionalParam] RequestOptions? options)
+            {
+                if (StagedError != null)
+                    throw new WasiErrorCodeException(StagedError);
+                return Response;
+            }
+        }
+
+        [Fact]
+        public void OutgoingHandler_handle_spec_layout_writes_ok_at_offset_8()
+        {
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-handler-spec-component",
+                "handlerspec.component.wasm"));
+            var resources = new ResourceContext();
+            var handler = new SpecHandler();
+            var req = new OutgoingRequest();
+            int hReq = resources.TableFor(typeof(OutgoingRequest))
+                .Allocate(req);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiInstance(
+                    "wasi:http/outgoing-handler@0.2.3",
+                    handler, resources);
+                runtime.BindWasiResource<OutgoingRequest>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<RequestOptions>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<FutureIncomingResponse>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            // Ok path: outer disc=0, handle at +8.
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-outer-disc", (uint)hReq)!);
+            uint hResp = (uint)ci.Invoke(
+                "ask-ok-handle", (uint)hReq)!;
+            Assert.NotEqual(0u, hResp);
+            Assert.Same(handler.Response,
+                resources.TableFor(typeof(FutureIncomingResponse))
+                    .Get((int)hResp));
+        }
+
+        [Fact]
+        public void OutgoingHandler_handle_spec_layout_writes_err_no_payload()
+        {
+            // Throw connection-refused (disc 6, no payload).
+            // The encoder writes disc=6 at retArea+8;
+            // payload area at +16 stays zeroed.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-handler-spec-component",
+                "handlerspec.component.wasm"));
+            var resources = new ResourceContext();
+            var handler = new SpecHandler {
+                StagedError = new ErrorCodeConnectionRefused() };
+            var req = new OutgoingRequest();
+            int hReq = resources.TableFor(typeof(OutgoingRequest))
+                .Allocate(req);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiInstance(
+                    "wasi:http/outgoing-handler@0.2.3",
+                    handler, resources);
+                runtime.BindWasiResource<OutgoingRequest>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<RequestOptions>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<FutureIncomingResponse>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            Assert.Equal(1u, (uint)ci.Invoke(
+                "ask-outer-disc", (uint)hReq)!);
+            Assert.Equal(6u, (uint)ci.Invoke(
+                "ask-err-disc", (uint)hReq)!);
+            // Payload area at +16: option-disc reads 0
+            // (no-payload case leaves bytes zeroed).
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-err-payload-opt-disc", (uint)hReq)!);
+        }
+
+        [Fact]
+        public void OutgoingHandler_handle_spec_layout_writes_err_with_string_payload()
+        {
+            // Throw internal-error("upstream rejected") —
+            // disc 38 + option<string> payload.
+            const string msg = "upstream rejected";
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-handler-spec-component",
+                "handlerspec.component.wasm"));
+            var resources = new ResourceContext();
+            var handler = new SpecHandler {
+                StagedError = new ErrorCodeInternalError(msg) };
+            var req = new OutgoingRequest();
+            int hReq = resources.TableFor(typeof(OutgoingRequest))
+                .Allocate(req);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiInstance(
+                    "wasi:http/outgoing-handler@0.2.3",
+                    handler, resources);
+                runtime.BindWasiResource<OutgoingRequest>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<RequestOptions>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<FutureIncomingResponse>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            Assert.Equal(1u, (uint)ci.Invoke(
+                "ask-outer-disc", (uint)hReq)!);
+            Assert.Equal(38u, (uint)ci.Invoke(
+                "ask-err-disc", (uint)hReq)!);
+            // Payload at +16: option<string> Some
+            Assert.Equal(1u, (uint)ci.Invoke(
+                "ask-err-payload-opt-disc", (uint)hReq)!);
+            uint ptr = (uint)ci.Invoke(
+                "ask-err-payload-string-ptr", (uint)hReq)!;
+            uint len = (uint)ci.Invoke(
+                "ask-err-payload-string-len", (uint)hReq)!;
+            Assert.Equal((uint)msg.Length, len);
+            // Reconstruct the string byte-by-byte.
+            var bytesOut = new byte[len];
+            for (uint i = 0; i < len; i++)
+                bytesOut[i] = (byte)(uint)ci.Invoke(
+                    "read-byte", ptr + i)!;
+            Assert.Equal(msg, System.Text.Encoding.UTF8
+                .GetString(bytesOut));
+        }
+
         [Fact]
         public void Http_resource_markers_are_allocatable()
         {

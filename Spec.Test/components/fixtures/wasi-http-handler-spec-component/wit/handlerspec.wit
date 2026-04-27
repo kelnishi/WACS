@@ -1,0 +1,21 @@
+package local:handlerspec;
+world demo {
+    import wasi:http/types@0.2.3;
+    import wasi:http/outgoing-handler@0.2.3;
+    /// Calls handle(req, None) — full spec WIT layout
+    /// (40-byte retArea, align 8). Returns the outer disc.
+    export ask-outer-disc: func(req: u32) -> u32;
+    /// Returns the handle stored at retArea+8 when Ok.
+    export ask-ok-handle: func(req: u32) -> u32;
+    /// Returns the variant disc byte at retArea+8 when Err.
+    export ask-err-disc: func(req: u32) -> u32;
+    /// Returns the option<string>-disc byte at retArea+16
+    /// (used for internal-error case to verify Some payload).
+    export ask-err-payload-opt-disc: func(req: u32) -> u32;
+    /// Returns the option<string> ptr at retArea+20.
+    export ask-err-payload-string-ptr: func(req: u32) -> u32;
+    /// Returns the option<string> len at retArea+24.
+    export ask-err-payload-string-len: func(req: u32) -> u32;
+    /// Reads one byte at the given memory address.
+    export read-byte: func(addr: u32) -> u32;
+}
