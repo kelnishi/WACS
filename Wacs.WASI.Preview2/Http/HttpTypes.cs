@@ -149,6 +149,11 @@ namespace Wacs.WASI.Preview2.Http
         protected Fields _headers = new Fields();
         protected string? _pathWithQuery;
         protected string? _authority;
+        protected HttpMethod _method = new HttpMethodGet();
+
+        /// <summary>HTTP request method. WIT
+        /// <c>method() -&gt; method</c>.</summary>
+        public virtual HttpMethod Method() => _method;
 
         /// <summary>Per WIT semantics, returns ownership of
         /// the headers Fields to the guest. Default returns

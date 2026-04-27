@@ -1,0 +1,8 @@
+package local:httpmethod;
+world demo {
+    import wasi:http/types@0.2.3;
+    /// Calls method(handle); returns variant disc as u32.
+    export ask-disc: func(handle: u32) -> u32;
+    /// For "other" case: returns first byte of the payload string.
+    export ask-other-first: func(handle: u32) -> u32;
+}

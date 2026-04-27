@@ -119,6 +119,60 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal(1, resources.TableFor(typeof(Fields)).Count);
         }
 
+        private sealed class MethodOnlyRequest : OutgoingRequest
+        {
+            public MethodOnlyRequest(HttpMethod method)
+            {
+                _method = method;
+            }
+        }
+
+        [Fact]
+        public void OutgoingRequest_method_returns_named_variant_case()
+        {
+            // Stub returns POST. Variant disc 2 = post.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-method-component", "httpmethod.component.wasm"));
+            var resources = new ResourceContext();
+            var req = new MethodOnlyRequest(new HttpMethodPost());
+            int handle = resources.TableFor(typeof(OutgoingRequest))
+                .Allocate(req);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<OutgoingRequest>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            Assert.Equal(2u, (uint)ci.Invoke(
+                "ask-disc", (uint)handle)!);
+        }
+
+        [Fact]
+        public void OutgoingRequest_method_returns_other_string_payload()
+        {
+            // Stub returns Other("PURGE"). Variant disc 9 +
+            // string payload at +4/+8 holds "PURGE";
+            // ask-other-first yields 'P' = 0x50.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-method-component", "httpmethod.component.wasm"));
+            var resources = new ResourceContext();
+            var req = new MethodOnlyRequest(new HttpMethodOther("PURGE"));
+            int handle = resources.TableFor(typeof(OutgoingRequest))
+                .Allocate(req);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<OutgoingRequest>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            Assert.Equal(9u, (uint)ci.Invoke(
+                "ask-disc", (uint)handle)!);
+            Assert.Equal((uint)'P', (uint)ci.Invoke(
+                "ask-other-first", (uint)handle)!);
+        }
+
         private sealed class TimeoutOptions : RequestOptions
         {
             public TimeoutOptions(ulong? connectTimeout)
