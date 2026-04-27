@@ -1662,10 +1662,52 @@ namespace Wacs.WASI.Preview2.HostBinding
             var trailersType = typeof(Wacs.WASI.Preview2.Http.Fields);
             var trailersTable = resources.TableFor(trailersType);
 
+            // Lazy cabi_realloc — only resolved when a host
+            // override throws WasiErrorCodeException with a
+            // string-payload-bearing error-code case.
+            Wacs.Core.Runtime.Delegates.GenericFuncs? cabiRealloc = null;
+            int Allocate(int align, int size)
+            {
+                if (cabiRealloc == null)
+                {
+                    if (!runtime.TryGetExportedFunction(
+                            "cabi_realloc", out var addr))
+                        throw new InvalidOperationException(
+                            "Component does not export "
+                            + "cabi_realloc — required for "
+                            + "future-trailers.get error-code "
+                            + "payloads.");
+                    cabiRealloc = runtime.CreateInvoker(
+                        addr, new InvokerOptions());
+                }
+                return cabiRealloc(0, 0, align, size)[0].Data.Int32;
+            }
+
             void Body(ExecContext ctx, int handle, int retAreaPtr)
             {
-                var inst = selfTable.Get(handle);
-                var ret = m.Invoke(inst, Array.Empty<object?>());
+                var memory = ctx.DefaultMemory.Data;
+                object? ret;
+                try
+                {
+                    var inst = selfTable.Get(handle);
+                    ret = m.Invoke(inst, Array.Empty<object?>());
+                }
+                catch (System.Reflection.TargetInvocationException tie)
+                    when (tie.InnerException is
+                        WasiErrorCodeException wec)
+                {
+                    // Outer Some + inner Err(error-code).
+                    memory[retAreaPtr] = 1;        // outer Some
+                    for (int p = 1; p <= 7; p++)
+                        memory[retAreaPtr + p] = 0;
+                    memory[retAreaPtr + 8] = 1;    // result Err
+                    for (int p = 9; p <= 15; p++)
+                        memory[retAreaPtr + p] = 0;
+                    Wacs.WASI.Preview2.Http.ErrorCodeEncoder.Write(
+                        memory, retAreaPtr + 16, wec.Code,
+                        Allocate);
+                    return;
+                }
                 if (ret == null)
                     throw new InvalidOperationException(
                         "[WasiFutureTrailersResult] method '"
@@ -1673,7 +1715,6 @@ namespace Wacs.WASI.Preview2.HostBinding
                         + "(bool ready, Fields? trailers).");
                 var tup = (System.ValueTuple<bool,
                     Wacs.WASI.Preview2.Http.Fields?>)ret;
-                var memory = ctx.DefaultMemory.Data;
                 if (!tup.Item1)
                 {
                     // Outer None — guest interprets as "not
@@ -1695,6 +1736,9 @@ namespace Wacs.WASI.Preview2.HostBinding
                     for (int p = 17; p <= 19; p++)
                         memory[retAreaPtr + p] = 0;
                     WriteI32LE(memory, retAreaPtr + 20, 0);
+                    // Zero error-code area (24-47).
+                    for (int p = 24; p <= 47; p++)
+                        memory[retAreaPtr + p] = 0;
                     return;
                 }
                 // inner Some(handle).
@@ -1703,6 +1747,9 @@ namespace Wacs.WASI.Preview2.HostBinding
                     memory[retAreaPtr + p] = 0;
                 int trailerHandle = trailersTable.Allocate(tup.Item2);
                 WriteI32LE(memory, retAreaPtr + 20, trailerHandle);
+                // Zero error-code area (24-47).
+                for (int p = 24; p <= 47; p++)
+                    memory[retAreaPtr + p] = 0;
             }
 
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
@@ -1744,10 +1791,61 @@ namespace Wacs.WASI.Preview2.HostBinding
                 Wacs.WASI.Preview2.Http.IncomingResponse);
             var responseTable = resources.TableFor(responseType);
 
+            // Lazy cabi_realloc — only resolved when a host
+            // override throws WasiErrorCodeException with a
+            // string-payload-bearing case.
+            Wacs.Core.Runtime.Delegates.GenericFuncs? cabiRealloc = null;
+            int Allocate(int align, int size)
+            {
+                if (cabiRealloc == null)
+                {
+                    if (!runtime.TryGetExportedFunction(
+                            "cabi_realloc", out var addr))
+                        throw new InvalidOperationException(
+                            "Component does not export "
+                            + "cabi_realloc — required for "
+                            + "future-incoming-response.get "
+                            + "error-code payloads.");
+                    cabiRealloc = runtime.CreateInvoker(
+                        addr, new InvokerOptions());
+                }
+                return cabiRealloc(0, 0, align, size)[0].Data.Int32;
+            }
+
             void Body(ExecContext ctx, int handle, int retAreaPtr)
             {
-                var inst = selfTable.Get(handle);
-                var ret = m.Invoke(inst, Array.Empty<object?>());
+                var memory = ctx.DefaultMemory.Data;
+                object? ret;
+                try
+                {
+                    var inst = selfTable.Get(handle);
+                    ret = m.Invoke(inst, Array.Empty<object?>());
+                }
+                catch (System.Reflection.TargetInvocationException tie)
+                    when (tie.InnerException is
+                        WasiErrorCodeException wec)
+                {
+                    // Outer Some + outer Ok + inner Err.
+                    // Outer disc=1, padding 1-7,
+                    // outer-result disc=0 at +8 (we surface
+                    // through the outer Ok side because the
+                    // outer Err is bare unit/already-consumed),
+                    // inner-result disc=1 at +16, error-code
+                    // variant at +24.
+                    memory[retAreaPtr] = 1;
+                    for (int p = 1; p <= 7; p++)
+                        memory[retAreaPtr + p] = 0;
+                    memory[retAreaPtr + 8] = 0;     // outer Ok
+                    for (int p = 9; p <= 15; p++)
+                        memory[retAreaPtr + p] = 0;
+                    memory[retAreaPtr + 16] = 1;    // inner Err
+                    for (int p = 17; p <= 23; p++)
+                        memory[retAreaPtr + p] = 0;
+                    Wacs.WASI.Preview2.Http.ErrorCodeEncoder.Write(
+                        memory, retAreaPtr + 24, wec.Code,
+                        Allocate);
+                    return;
+                }
                 if (ret == null)
                     throw new InvalidOperationException(
                         "[WasiFutureIncomingResponseResult] "
@@ -1756,7 +1854,6 @@ namespace Wacs.WASI.Preview2.HostBinding
                         + "IncomingResponse? response).");
                 var tup = (System.ValueTuple<bool,
                     Wacs.WASI.Preview2.Http.IncomingResponse?>)ret;
-                var memory = ctx.DefaultMemory.Data;
                 if (!tup.Item1)
                 {
                     memory[retAreaPtr] = 0;        // outer None
@@ -1768,7 +1865,8 @@ namespace Wacs.WASI.Preview2.HostBinding
                         + "method '" + m.Name + "' returned "
                         + "(true, null) — when ready=true the "
                         + "response handle must be non-null "
-                        + "(v0 doesn't surface inner Err).");
+                        + "(use throw new WasiErrorCodeException "
+                        + "to surface inner Err instead).");
                 memory[retAreaPtr] = 1;            // outer Some
                 for (int p = 1; p <= 7; p++)
                     memory[retAreaPtr + p] = 0;
@@ -1780,6 +1878,9 @@ namespace Wacs.WASI.Preview2.HostBinding
                     memory[retAreaPtr + p] = 0;
                 int respHandle = responseTable.Allocate(tup.Item2);
                 WriteI32LE(memory, retAreaPtr + 24, respHandle);
+                // Zero error-code area (28-55).
+                for (int p = 28; p <= 55; p++)
+                    memory[retAreaPtr + p] = 0;
             }
 
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
@@ -3127,19 +3228,78 @@ namespace Wacs.WASI.Preview2.HostBinding
                 : OpenActionType(wireParamTypes.Length)
                     .MakeGenericType(wireParamTypes);
 
+            // Spec-layout error encoding: when [WasiSpecErrorCode]
+            // is set, the retArea is sized for the full WASI-HTTP
+            // error-code (align 8, 40 bytes). The host can throw
+            // WasiErrorCodeException to write disc=1 + the 32-byte
+            // variant slot at retArea+8.
+            bool specErrorCode = m.GetCustomAttribute<
+                WasiSpecErrorCodeAttribute>() != null;
+            Wacs.Core.Runtime.Delegates.GenericFuncs? cabiRealloc = null;
+            int Allocate(int align, int size)
+            {
+                if (cabiRealloc == null)
+                {
+                    if (!runtime.TryGetExportedFunction(
+                            "cabi_realloc", out var addr))
+                        throw new InvalidOperationException(
+                            "Component does not export "
+                            + "cabi_realloc — required for "
+                            + "[WasiSpecErrorCode] string Err "
+                            + "payloads.");
+                    cabiRealloc = runtime.CreateInvoker(
+                        addr, new InvokerOptions());
+                }
+                return cabiRealloc(0, 0, align, size)[0].Data.Int32;
+            }
+
             // Action body: writes Ok disc to retArea memory.
             void ActionBody(ExecContext ctx, int handle,
                 object?[] hostArgs, int retAreaPtr)
             {
-                var inst = selfTable.Get(handle);
-                m.Invoke(inst, hostArgs);
                 var memory = ctx.DefaultMemory.Data;
-                memory[retAreaPtr] = 0;       // Ok
-                memory[retAreaPtr + 1] = 0;   // padding
+                try
+                {
+                    var inst = selfTable.Get(handle);
+                    m.Invoke(inst, hostArgs);
+                }
+                catch (System.Reflection.TargetInvocationException tie)
+                    when (specErrorCode
+                        && tie.InnerException is
+                            WasiErrorCodeException wec)
+                {
+                    memory[retAreaPtr] = 1;          // Err
+                    for (int p = 1; p < 8; p++)
+                        memory[retAreaPtr + p] = 0;
+                    Wacs.WASI.Preview2.Http.ErrorCodeEncoder.Write(
+                        memory, retAreaPtr + 8, wec.Code,
+                        Allocate);
+                    return;
+                }
+                memory[retAreaPtr] = 0;          // Ok
+                if (specErrorCode)
+                {
+                    // Zero the spec-layout padding +
+                    // variant area (40-byte total retArea).
+                    for (int p = 1; p < 40; p++)
+                        memory[retAreaPtr + p] = 0;
+                }
+                else
+                {
+                    memory[retAreaPtr + 1] = 0;  // simplified: 2 byte retArea
+                }
             }
 
             // Func body: invokes method; returns Ok disc as
-            // the wire i32. retArea is not touched.
+            // the wire i32 (or Err disc if WasiErrorCodeException
+            // is thrown — for [WasiSpecErrorCode] +
+            // unit-result, the Err side still goes through the
+            // wire return rather than retArea, but encoding
+            // the variant payload requires a retArea slot
+            // which the unit-result shape doesn't provide.
+            // Throwing under unitResult+specErrorCode is
+            // therefore unsupported in v1 — host code should
+            // pick one shape or the other).
             int FuncBody(ExecContext _, int handle, object?[] hostArgs)
             {
                 var inst = selfTable.Get(handle);
