@@ -58,10 +58,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(stream);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<InputStream>(
-                    "wasi:io/streams@0.2.3", resources);
-            });
+                new StreamBindings(resources).BindToRuntime(runtime));
 
             var n = (uint)ci.Invoke("try-read", (uint)handle, 4UL)!;
             Assert.Equal(4u, n);

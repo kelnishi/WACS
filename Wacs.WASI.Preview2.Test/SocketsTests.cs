@@ -286,10 +286,7 @@ namespace Wacs.WASI.Preview2.Test
             {
                 runtime.BindWasiResource<TcpSocket>(
                     "wasi:sockets/tcp@0.2.3", resources);
-                runtime.BindWasiResource<InputStream>(
-                    "wasi:io/streams@0.2.3", resources);
-                runtime.BindWasiResource<OutputStream>(
-                    "wasi:io/streams@0.2.3", resources);
+                new StreamBindings(resources).BindToRuntime(runtime);
             });
 
             // Three non-zero handles allocated by accept.
@@ -321,10 +318,7 @@ namespace Wacs.WASI.Preview2.Test
             {
                 runtime.BindWasiResource<TcpSocket>(
                     "wasi:sockets/tcp@0.2.3", resources);
-                runtime.BindWasiResource<InputStream>(
-                    "wasi:io/streams@0.2.3", resources);
-                runtime.BindWasiResource<OutputStream>(
-                    "wasi:io/streams@0.2.3", resources);
+                new StreamBindings(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(2u, (uint)ci.Invoke(

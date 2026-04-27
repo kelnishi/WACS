@@ -838,8 +838,7 @@ namespace Wacs.WASI.Preview2.Test
             {
                 runtime.BindWasiResource<Descriptor>(
                     "wasi:filesystem/types@0.2.3", resources);
-                runtime.BindWasiResource<InputStream>(
-                    "wasi:io/streams@0.2.3", resources);
+                new StreamBindings(resources).BindToRuntime(runtime);
             });
 
             Assert.Equal(10u, (uint)ci.Invoke(

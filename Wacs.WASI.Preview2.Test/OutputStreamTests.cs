@@ -70,10 +70,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(stream);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<OutputStream>(
-                    "wasi:io/streams@0.2.3", resources);
-            });
+                new StreamBindings(resources).BindToRuntime(runtime));
 
             ci.Invoke("try-write", (uint)handle);
 
@@ -131,12 +128,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(source);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<OutputStream>(
-                    "wasi:io/streams@0.2.3", resources);
-                runtime.BindWasiResource<InputStream>(
-                    "wasi:io/streams@0.2.3", resources);
-            });
+                new StreamBindings(resources).BindToRuntime(runtime));
 
             // "hello, splice" = 13 bytes, len=32 caps at 13.
             Assert.Equal(13UL, (ulong)ci.Invoke(
@@ -170,10 +162,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(stream);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<OutputStream>(
-                    "wasi:io/streams@0.2.3", resources);
-            });
+                new StreamBindings(resources).BindToRuntime(runtime));
 
             Assert.Equal(0u, (uint)ci.Invoke(
                 "ask-zeroes", (uint)handle)!);
