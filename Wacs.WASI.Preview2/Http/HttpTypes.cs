@@ -352,6 +352,7 @@ namespace Wacs.WASI.Preview2.Http
     public class IncomingBody : IDisposable
     {
         protected InputStream? _stream;
+        protected FutureTrailers? _trailers;
 
         /// <summary>Take ownership of the read stream.
         /// WIT <c>%stream: func()
@@ -362,6 +363,17 @@ namespace Wacs.WASI.Preview2.Http
         [WasiMethodName("stream")]
         public virtual InputStream Stream()
             => _stream ??= new InputStream();
+
+        /// <summary>Take ownership of the trailers future.
+        /// WIT <c>finish: static func(this: own&lt;incoming-body&gt;)
+        ///   -&gt; own&lt;future-trailers&gt;</c>. Bare own
+        /// return — no result wrapper, just an i32 handle.
+        /// [WasiStaticMethod] swaps the import-name prefix to
+        /// [static]; the wire form is unchanged from a
+        /// zero-arg instance factory.</summary>
+        [WasiStaticMethod]
+        public virtual FutureTrailers Finish()
+            => _trailers ??= new FutureTrailers();
 
         public virtual void Dispose() { }
     }

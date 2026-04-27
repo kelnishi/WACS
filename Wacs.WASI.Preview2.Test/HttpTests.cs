@@ -745,6 +745,52 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Same(trailers, body.CapturedTrailers);
         }
 
+        private sealed class TrackingIncomingBody : IncomingBody
+        {
+            public bool FinishCalled;
+            public FutureTrailers Trailers = new FutureTrailers();
+
+            public override FutureTrailers Finish()
+            {
+                FinishCalled = true;
+                return Trailers;
+            }
+        }
+
+        [Fact]
+        public void IncomingBody_finish_yields_future_trailers_handle()
+        {
+            // Fixture: ask-finish(body) calls
+            // [static]incoming-body.finish(body) and returns
+            // the future-trailers handle. Stub returns a
+            // pinned FutureTrailers instance so the test can
+            // assert table-allocation succeeded and the
+            // returned handle resolves back to it.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-incomingbody-finish-component",
+                "httpincomingfinish.component.wasm"));
+            var resources = new ResourceContext();
+            var body = new TrackingIncomingBody();
+            int hBody = resources.TableFor(typeof(IncomingBody))
+                .Allocate(body);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<IncomingBody>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<FutureTrailers>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            uint hTrailers = (uint)ci.Invoke(
+                "ask-finish", (uint)hBody)!;
+            Assert.True(body.FinishCalled);
+            Assert.NotEqual(0u, hTrailers);
+            Assert.Same(body.Trailers,
+                resources.TableFor(typeof(FutureTrailers))
+                    .Get((int)hTrailers));
+        }
+
         [Fact]
         public void Http_resource_markers_are_allocatable()
         {
