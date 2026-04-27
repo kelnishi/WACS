@@ -957,6 +957,16 @@ namespace Wacs.WASI.Preview2.HostBinding
                 || m.ReturnType.IsSubclassOf(typeof(
                     Wacs.WASI.Preview2.Http.HttpScheme)))
             {
+                // [WasiOptionalReturn] + HttpScheme = option<scheme>;
+                // 16-byte retArea encoder.
+                if (m.GetCustomAttribute<
+                    WasiOptionalReturnAttribute>() != null)
+                {
+                    BindOptionHttpSchemeReturnResourceMethod(
+                        runtime, namespaceName, importName,
+                        table, resourceType, m);
+                    return;
+                }
                 BindHttpSchemeReturnResourceMethod(
                     runtime, namespaceName, importName,
                     table, resourceType, m);
@@ -1347,6 +1357,73 @@ namespace Wacs.WASI.Preview2.HostBinding
                             "Unknown HttpScheme subclass: "
                             + sch.GetType()),
                     };
+                });
+        }
+
+        /// <summary>Resource method returning
+        /// <c>option&lt;scheme&gt;</c>. retArea is 16 bytes:
+        /// option disc (1B) + 3B padding (to 4-align the inner
+        /// scheme variant) + scheme disc (1B) + 3B padding +
+        /// (str-ptr, str-len) at offsets 8/12. Inner scheme
+        /// payload is only meaningful when the scheme variant
+        /// is "other(string)" — named cases zero those slots.
+        /// </summary>
+        private static void BindOptionHttpSchemeReturnResourceMethod(
+            WasmRuntime runtime, string namespaceName,
+            string importName, ResourceTable table,
+            Type resourceType, MethodInfo m)
+        {
+            BindAggregateResourceMethod(runtime, namespaceName,
+                importName, table, resourceType, m,
+                (memory, retAreaPtr, ret, allocate) =>
+                {
+                    if (ret == null)
+                    {
+                        // None — only the option disc matters.
+                        memory[retAreaPtr] = 0;
+                        return;
+                    }
+                    memory[retAreaPtr] = 1;       // Some
+                    memory[retAreaPtr + 1] = 0;
+                    memory[retAreaPtr + 2] = 0;
+                    memory[retAreaPtr + 3] = 0;
+                    var sch = (Wacs.WASI.Preview2.Http.HttpScheme)ret;
+                    var (disc, payloadStr) = sch switch
+                    {
+                        Wacs.WASI.Preview2.Http.HttpSchemeHttp
+                            => ((byte)0, (string?)null),
+                        Wacs.WASI.Preview2.Http.HttpSchemeHttps
+                            => ((byte)1, (string?)null),
+                        Wacs.WASI.Preview2.Http.HttpSchemeOther o
+                            => ((byte)2, (string?)o.Name),
+                        _ => throw new ArgumentException(
+                            "Unknown HttpScheme subclass: "
+                            + sch.GetType()),
+                    };
+                    // Inner variant starts at retAreaPtr + 4.
+                    memory[retAreaPtr + 4] = disc;
+                    memory[retAreaPtr + 5] = 0;
+                    memory[retAreaPtr + 6] = 0;
+                    memory[retAreaPtr + 7] = 0;
+                    if (payloadStr != null)
+                    {
+                        var bytes = System.Text.Encoding.UTF8
+                            .GetBytes(payloadStr);
+                        int dataPtr = bytes.Length == 0 ? 0
+                            : allocate(1, bytes.Length);
+                        if (bytes.Length > 0)
+                            Array.Copy(bytes, 0, memory,
+                                dataPtr, bytes.Length);
+                        WriteI32LE(memory, retAreaPtr + 8, dataPtr);
+                        WriteI32LE(memory, retAreaPtr + 12,
+                            bytes.Length);
+                    }
+                    else
+                    {
+                        // Named case: zero the trailing slots.
+                        WriteI32LE(memory, retAreaPtr + 8, 0);
+                        WriteI32LE(memory, retAreaPtr + 12, 0);
+                    }
                 });
         }
 
