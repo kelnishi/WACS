@@ -839,6 +839,24 @@ namespace Wacs.WASI.Preview2.HostBinding
                 return;
             }
 
+            // void(this, [WasiResultParam] T? response) — the
+            // response-outparam.set shape. Single param, marker
+            // attribute, T is a resource. Wire: 2 slots
+            // (outer disc + handle); disc==0 resolves the
+            // handle, else null.
+            if (m.ReturnType == typeof(void)
+                && paramInfos.Length == 1
+                && paramInfos[0].GetCustomAttribute<
+                    WasiResultParamAttribute>() != null
+                && paramInfos[0].ParameterType.GetCustomAttribute<
+                    WasiResourceAttribute>() != null)
+            {
+                BindResultResourceParamVoidResourceMethod(
+                    runtime, namespaceName, importName, table,
+                    resourceType, m, resources);
+                return;
+            }
+
             // Aggregate-param resource methods are a follow-up
             // (write etc. are handled via [WasiStreamResult]).
             // Admitted: primitive (1 wire slot), borrow<resource>
@@ -3039,6 +3057,37 @@ namespace Wacs.WASI.Preview2.HostBinding
             }
 
             runtime.BindHostFunction<Func<ExecContext, int, int>>(
+                (namespaceName, importName), Body);
+        }
+
+        /// <summary>Resource method
+        /// <c>void M([WasiResultParam] T? response)</c> where T
+        /// is a resource — the response-outparam.set shape. Wire:
+        /// (self_handle, result_disc, payload_handle), no
+        /// return. disc==0 → resolve payload_handle through the
+        /// param-type table; disc!=0 → host gets null and the
+        /// payload-handle slot is ignored. Always-Ok semantics
+        /// for now; payload-bearing error-code variants are a
+        /// follow-up.</summary>
+        private static void BindResultResourceParamVoidResourceMethod(
+            WasmRuntime runtime, string namespaceName,
+            string importName, ResourceTable selfTable,
+            Type resourceType, MethodInfo m,
+            ResourceContext resources)
+        {
+            var paramType = m.GetParameters()[0].ParameterType;
+            var paramTable = resources.TableFor(paramType);
+
+            void Body(ExecContext _, int self, int disc, int handle)
+            {
+                var inst = selfTable.Get(self);
+                object? arg = disc == 0
+                    ? paramTable.Get(handle)
+                    : null;
+                m.Invoke(inst, new[] { arg });
+            }
+
+            runtime.BindHostFunction<Action<ExecContext, int, int, int>>(
                 (namespaceName, importName), Body);
         }
 

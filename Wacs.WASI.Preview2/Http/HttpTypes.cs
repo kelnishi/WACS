@@ -474,6 +474,19 @@ namespace Wacs.WASI.Preview2.Http
     [WasiResource("response-outparam")]
     public class ResponseOutparam : IDisposable
     {
+        /// <summary>Deliver the response into the outparam.
+        /// WIT <c>set: static func(param: own&lt;response-outparam&gt;,
+        ///   response: result&lt;own&lt;outgoing-response&gt;,
+        ///                       error-code&gt;)</c>.
+        /// v0 surfaces only the Ok side: when wire disc=0 the
+        /// host receives the resolved <see cref="OutgoingResponse"/>;
+        /// when disc!=0 the host receives null. Payload-bearing
+        /// error-code variants will follow when the binder
+        /// learns to decode them.</summary>
+        [WasiStaticMethod]
+        public virtual void Set(
+            [WasiResultParam] OutgoingResponse? response) { }
+
         public virtual void Dispose() { }
     }
 }
