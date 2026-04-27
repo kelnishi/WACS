@@ -6,6 +6,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
+using Wacs.ComponentModel.Runtime;
 using Wacs.Core.Runtime;
 using Wacs.WASI.Preview2.HostBinding;
 using Wacs.WASI.Preview2.HostBinding.CanonicalAbi;
@@ -30,7 +31,7 @@ namespace Wacs.WASI.Preview2.Http
                 (_, h) => requests.Drop(h));
 
             // [constructor]outgoing-request(headers: own<headers>)
-            //   -> own<outgoing-request>. Wire: (handlesIn) → handle.
+            //   -> own<outgoing-request>.
             runtime.BindHostFunction<Func<ExecContext, int, int>>(
                 (Ns, "[constructor]outgoing-request"),
                 (_, hHeaders) =>
@@ -40,8 +41,6 @@ namespace Wacs.WASI.Preview2.Http
                 });
 
             // [method]outgoing-request.method() -> method.
-            // Wire: (handle, retArea) → void. retArea = 12 bytes
-            // (variant disc + 3 pad + ptr + len).
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (Ns, "[method]outgoing-request.method"),
                 (ctx, handle, retArea) =>
@@ -51,21 +50,20 @@ namespace Wacs.WASI.Preview2.Http
                 });
 
             // [method]outgoing-request.set-method(method: method)
-            //   -> result<_, _>. Wire: (handle, disc, ptr, len)
-            //   → i32 (the result disc — always 0 in v0).
+            //   -> result<_, _>. Wire: returns the disc directly
+            //   (i32) since result<_, _> is flat-lifted.
             runtime.BindHostFunction<Func<ExecContext, int, int, int, int, int>>(
                 (Ns, "[method]outgoing-request.set-method"),
                 (ctx, handle, disc, ptr, len) =>
                 {
                     var mem = ctx.Memory();
                     var method = DecodeHttpMethodFlat(mem, disc, ptr, len);
-                    ((OutgoingRequest)requests.Get(handle)).SetMethod(method);
-                    return 0;
+                    var r = ((OutgoingRequest)requests.Get(handle))
+                        .SetMethod(method);
+                    return r.IsOk ? 0 : 1;
                 });
 
             // [method]outgoing-request.scheme() -> option<scheme>.
-            // retArea = 16 bytes (option disc + variant disc +
-            // ptr + len).
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (Ns, "[method]outgoing-request.scheme"),
                 (ctx, handle, retArea) =>
@@ -76,20 +74,25 @@ namespace Wacs.WASI.Preview2.Http
 
             // [method]outgoing-request.set-scheme(
             //   scheme: option<scheme>) -> result<_, _>.
-            // Wire: (handle, optDisc, varDisc, ptr, len) → i32.
             runtime.BindHostFunction<Func<ExecContext, int, int, int,
                 int, int, int>>(
                 (Ns, "[method]outgoing-request.set-scheme"),
                 (ctx, handle, optDisc, varDisc, ptr, len) =>
                 {
-                    HttpScheme? scheme = null;
+                    Option<Scheme> scheme;
                     if (optDisc != 0)
                     {
                         var mem = ctx.Memory();
-                        scheme = DecodeHttpSchemeFlat(mem, varDisc, ptr, len);
+                        scheme = Option<Scheme>.Some(
+                            DecodeHttpSchemeFlat(mem, varDisc, ptr, len));
                     }
-                    ((OutgoingRequest)requests.Get(handle)).SetScheme(scheme);
-                    return 0;
+                    else
+                    {
+                        scheme = Option<Scheme>.None;
+                    }
+                    var r = ((OutgoingRequest)requests.Get(handle))
+                        .SetScheme(scheme);
+                    return r.IsOk ? 0 : 1;
                 });
 
             // [method]outgoing-request.authority() -> option<string>.
@@ -103,17 +106,16 @@ namespace Wacs.WASI.Preview2.Http
 
             // [method]outgoing-request.set-authority(
             //   authority: option<string>) -> result<_, _>.
-            // Wire: (handle, optDisc, ptr, len, retArea) → void.
-            // retArea = 1 byte (just the result disc).
             runtime.BindHostFunction<Action<ExecContext, int, int, int, int, int>>(
                 (Ns, "[method]outgoing-request.set-authority"),
                 (ctx, handle, optDisc, ptr, len, retArea) =>
                 {
-                    string? value = optDisc == 0 ? null
-                        : ctx.ReadUtf8String(ptr, len);
-                    ((OutgoingRequest)requests.Get(handle))
+                    Option<string> value = optDisc == 0
+                        ? Option<string>.None
+                        : Option<string>.Some(ctx.ReadUtf8String(ptr, len));
+                    var r = ((OutgoingRequest)requests.Get(handle))
                         .SetAuthority(value);
-                    WriteOkUnit(ctx.Memory(), retArea);
+                    WriteResultUnit(ctx.Memory(), retArea, r);
                 });
 
             // [method]outgoing-request.path-with-query()
@@ -133,22 +135,21 @@ namespace Wacs.WASI.Preview2.Http
                 (Ns, "[method]outgoing-request.set-path-with-query"),
                 (ctx, handle, optDisc, ptr, len, retArea) =>
                 {
-                    string? value = optDisc == 0 ? null
-                        : ctx.ReadUtf8String(ptr, len);
-                    ((OutgoingRequest)requests.Get(handle))
+                    Option<string> value = optDisc == 0
+                        ? Option<string>.None
+                        : Option<string>.Some(ctx.ReadUtf8String(ptr, len));
+                    var r = ((OutgoingRequest)requests.Get(handle))
                         .SetPathWithQuery(value);
-                    WriteOkUnit(ctx.Memory(), retArea);
+                    WriteResultUnit(ctx.Memory(), retArea, r);
                 });
 
             // [method]outgoing-request.headers() -> own<headers>.
-            // Bare resource return (the WIT spec says the
-            // returned fields handle is "owned" — the guest
-            // takes responsibility for dropping it).
             runtime.BindHostFunction<Func<ExecContext, int, int>>(
                 (Ns, "[method]outgoing-request.headers"),
                 (_, handle) =>
                 {
-                    var h = ((OutgoingRequest)requests.Get(handle)).Headers();
+                    var h = (Fields)((OutgoingRequest)requests.Get(handle))
+                        .Headers();
                     return fields.Allocate(h);
                 });
 
@@ -158,9 +159,25 @@ namespace Wacs.WASI.Preview2.Http
                 (Ns, "[method]outgoing-request.body"),
                 (ctx, handle, retArea) =>
                 {
-                    var body = ((OutgoingRequest)requests.Get(handle)).Body();
-                    WriteOkHandle(ctx.Memory(), retArea,
-                        bodies.Allocate(body));
+                    var inst = (OutgoingRequest)requests.Get(handle);
+                    var r = inst.Body();
+                    if (r.IsOk)
+                    {
+                        // Downcast IOutgoingBody → concrete
+                        // OutgoingBody for resource-table allocate.
+                        // The concrete factory is BodyConcrete()
+                        // — call it directly to avoid double-cast
+                        // through the interface result.
+                        var body = inst.BodyConcrete();
+                        int h = bodies.Allocate(body);
+                        WriteResultHandleBareErr(ctx.Memory(), retArea,
+                            Result<int, Unit>.FromOk(h));
+                    }
+                    else
+                    {
+                        WriteResultHandleBareErr(ctx.Memory(), retArea,
+                            Result<int, Unit>.FromErr(r.Err));
+                    }
                 });
         }
 
@@ -178,7 +195,6 @@ namespace Wacs.WASI.Preview2.Http
                 (Ns, "[resource-drop]incoming-request"),
                 (_, h) => requests.Drop(h));
 
-            // [method]incoming-request.method() -> method.
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (Ns, "[method]incoming-request.method"),
                 (ctx, handle, retArea) =>
@@ -187,7 +203,6 @@ namespace Wacs.WASI.Preview2.Http
                     WriteHttpMethod(ctx, retArea, m, alloc);
                 });
 
-            // [method]incoming-request.scheme() -> option<scheme>.
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (Ns, "[method]incoming-request.scheme"),
                 (ctx, handle, retArea) =>
@@ -196,7 +211,6 @@ namespace Wacs.WASI.Preview2.Http
                     WriteOptionHttpScheme(ctx, retArea, s, alloc);
                 });
 
-            // [method]incoming-request.authority() -> option<string>.
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (Ns, "[method]incoming-request.authority"),
                 (ctx, handle, retArea) =>
@@ -205,8 +219,6 @@ namespace Wacs.WASI.Preview2.Http
                     WriteOptionString(ctx, retArea, s, alloc);
                 });
 
-            // [method]incoming-request.path-with-query()
-            //   -> option<string>.
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (Ns, "[method]incoming-request.path-with-query"),
                 (ctx, handle, retArea) =>
@@ -216,12 +228,11 @@ namespace Wacs.WASI.Preview2.Http
                     WriteOptionString(ctx, retArea, s, alloc);
                 });
 
-            // [method]incoming-request.headers() -> own<headers>.
             runtime.BindHostFunction<Func<ExecContext, int, int>>(
                 (Ns, "[method]incoming-request.headers"),
                 (_, handle) =>
                 {
-                    var h = ((IncomingRequest)requests.Get(handle))
+                    var h = (Fields)((IncomingRequest)requests.Get(handle))
                         .Headers();
                     return fields.Allocate(h);
                 });
@@ -232,10 +243,20 @@ namespace Wacs.WASI.Preview2.Http
                 (Ns, "[method]incoming-request.consume"),
                 (ctx, handle, retArea) =>
                 {
-                    var body = ((IncomingRequest)requests.Get(handle))
-                        .Consume();
-                    WriteOkHandle(ctx.Memory(), retArea,
-                        bodies.Allocate(body));
+                    var inst = (IncomingRequest)requests.Get(handle);
+                    var r = inst.Consume();
+                    if (r.IsOk)
+                    {
+                        var body = inst.ConsumeConcrete();
+                        int h = bodies.Allocate(body);
+                        WriteResultHandleBareErr(ctx.Memory(), retArea,
+                            Result<int, Unit>.FromOk(h));
+                    }
+                    else
+                    {
+                        WriteResultHandleBareErr(ctx.Memory(), retArea,
+                            Result<int, Unit>.FromErr(r.Err));
+                    }
                 });
         }
     }

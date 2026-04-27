@@ -6,6 +6,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
+using Wacs.ComponentModel.Runtime;
 using Wacs.WASI.Preview2.HostBinding;
 
 namespace Wacs.WASI.Preview2.Http
@@ -13,19 +14,26 @@ namespace Wacs.WASI.Preview2.Http
     /// <summary>WIT
     /// <c>wasi:http/types.response-outparam</c>.</summary>
     [WasiResource("response-outparam")]
-    public class ResponseOutparam : IDisposable
+    public class ResponseOutparam : IResponseOutparam, IDisposable
     {
         /// <summary>Deliver the response into the outparam.
         /// WIT <c>set: static func(param: own&lt;response-outparam&gt;,
         ///   response: result&lt;own&lt;outgoing-response&gt;,
-        ///                       error-code&gt;)</c>.
-        /// v0 surfaces only the Ok side: when wire disc=0 the
-        /// host receives the resolved <see cref="OutgoingResponse"/>;
-        /// when disc!=0 the host receives null. Payload-bearing
-        /// error-code variants will follow when the binder
-        /// learns to decode them.</summary>
-        public virtual void Set(
-            OutgoingResponse? response) { }
+        ///                       error-code&gt;)</c>.</summary>
+        public virtual void Set(IResponseOutparam param,
+            Result<IOutgoingResponse, ErrorCode> response)
+        {
+            // Subclasses override SetImpl to observe the
+            // response in the historical OutgoingResponse?
+            // shape (Ok → resolved response, Err → null).
+            SetImpl(response.IsOk
+                ? (OutgoingResponse?)response.Ok
+                : null);
+        }
+
+        /// <summary>Override hook — receives the resolved
+        /// response on Ok, null on Err. Default no-op.</summary>
+        public virtual void SetImpl(OutgoingResponse? response) { }
 
         public virtual void Dispose() { }
     }

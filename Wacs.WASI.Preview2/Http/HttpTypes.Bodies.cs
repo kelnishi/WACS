@@ -6,6 +6,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
+using Wacs.ComponentModel.Runtime;
 using Wacs.Core.Runtime;
 using Wacs.WASI.Preview2.HostBinding;
 using Wacs.WASI.Preview2.HostBinding.CanonicalAbi;
@@ -16,9 +17,7 @@ namespace Wacs.WASI.Preview2.Http
     public sealed partial class HttpTypes
     {
         // wasi:http/types.outgoing-body — write side of an
-        // HTTP body. Take the OutputStream once via write();
-        // mark complete with optional trailers via the static
-        // finish().
+        // HTTP body.
         private static void BindOutgoingBody(WasmRuntime runtime,
             ResourceContext resources)
         {
@@ -36,38 +35,43 @@ namespace Wacs.WASI.Preview2.Http
                 (Ns, "[method]outgoing-body.write"),
                 (ctx, handle, retArea) =>
                 {
-                    var stream = ((OutgoingBody)bodies.Get(handle)).Write();
-                    WriteOkHandle(ctx.Memory(), retArea,
-                        outputs.Allocate(stream));
+                    var inst = (OutgoingBody)bodies.Get(handle);
+                    var r = inst.Write();
+                    if (r.IsOk)
+                    {
+                        var stream = inst.WriteConcrete();
+                        int h = outputs.Allocate(stream);
+                        WriteResultHandleBareErr(ctx.Memory(), retArea,
+                            Result<int, Unit>.FromOk(h));
+                    }
+                    else
+                    {
+                        WriteResultHandleBareErr(ctx.Memory(), retArea,
+                            Result<int, Unit>.FromErr(r.Err));
+                    }
                 });
 
             // [static]outgoing-body.finish(this: own<outgoing-body>,
             //   trailers: option<own<trailers>>)
             //   -> result<_, error-code>.
-            // Wire: (selfHandle, optDisc, trailerHandle, retArea)
-            //   → void. retArea = 1 byte (just the result disc).
-            //
-            // The host method is declared as an instance method
-            // (taking trailers); the canon-lower wire form prefixes
-            // the receiver handle. on the host
-            // class only affects the import-name prefix
-            // ([static] vs [method]) — the wire shape is
-            // unchanged.
+            // The fixture's wit uses a placeholder single-case
+            // error-code, so retArea = 1 byte (just the outer
+            // disc).
             runtime.BindHostFunction<Action<ExecContext, int, int, int, int>>(
                 (Ns, "[static]outgoing-body.finish"),
                 (ctx, selfHandle, optDisc, trailerHandle, retArea) =>
                 {
-                    Fields? trailers = optDisc == 0 ? null
-                        : (Fields)fields.Get(trailerHandle);
+                    Option<IFields> trailers = optDisc == 0
+                        ? Option<IFields>.None
+                        : Option<IFields>.Some((Fields)fields.Get(trailerHandle));
                     var inst = (OutgoingBody)bodies.Get(selfHandle);
-                    inst.Finish(trailers);
-                    WriteOkUnit(ctx.Memory(), retArea);
+                    var r = inst.Finish(inst, trailers);
+                    WriteResultUnitPlaceholder(ctx.Memory(), retArea, r);
                 });
         }
 
         // wasi:http/types.incoming-body — read side of an
-        // HTTP body. Take the InputStream once via stream();
-        // surface the future-trailers via the static finish().
+        // HTTP body.
         private static void BindIncomingBody(WasmRuntime runtime,
             ResourceContext resources)
         {
@@ -81,26 +85,34 @@ namespace Wacs.WASI.Preview2.Http
 
             // [method]incoming-body.stream()
             //   -> result<own<input-stream>, _>.
-            // The host method is named Stream (% escapes the
-            // keyword in the WIT but the wire import-name is
-            // "stream").
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (Ns, "[method]incoming-body.stream"),
                 (ctx, handle, retArea) =>
                 {
-                    var stream = ((IncomingBody)bodies.Get(handle)).Stream();
-                    WriteOkHandle(ctx.Memory(), retArea,
-                        inputs.Allocate(stream));
+                    var inst = (IncomingBody)bodies.Get(handle);
+                    var r = inst.Stream();
+                    if (r.IsOk)
+                    {
+                        var stream = inst.StreamConcrete();
+                        int h = inputs.Allocate(stream);
+                        WriteResultHandleBareErr(ctx.Memory(), retArea,
+                            Result<int, Unit>.FromOk(h));
+                    }
+                    else
+                    {
+                        WriteResultHandleBareErr(ctx.Memory(), retArea,
+                            Result<int, Unit>.FromErr(r.Err));
+                    }
                 });
 
             // [static]incoming-body.finish(this: own<incoming-body>)
-            //   -> own<future-trailers>. Bare own return — no
-            // result wrapper.
+            //   -> own<future-trailers>. Bare own return.
             runtime.BindHostFunction<Func<ExecContext, int, int>>(
                 (Ns, "[static]incoming-body.finish"),
                 (_, selfHandle) =>
                 {
-                    var ft = ((IncomingBody)bodies.Get(selfHandle)).Finish();
+                    var inst = (IncomingBody)bodies.Get(selfHandle);
+                    var ft = inst.FinishConcrete();
                     return futureTrailers.Allocate(ft);
                 });
         }

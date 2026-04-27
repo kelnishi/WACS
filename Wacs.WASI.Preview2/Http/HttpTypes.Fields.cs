@@ -7,6 +7,7 @@
 
 using System;
 using System.Text;
+using Wacs.ComponentModel.Runtime;
 using Wacs.Core.Runtime;
 using Wacs.WASI.Preview2.HostBinding;
 using Wacs.WASI.Preview2.HostBinding.CanonicalAbi;
@@ -15,15 +16,13 @@ namespace Wacs.WASI.Preview2.Http
 {
     public sealed partial class HttpTypes
     {
-        // wasi:http/types.fields — header-list resource. The
-        // host class is stateful (mutable list of (key, value)
-        // pairs); guests issue [constructor]fields, plus the
-        // mutating methods append/set/delete and the read-side
-        // has/get/entries/clone. [static]fields.from-list
-        // bulk-constructs from a list<tuple<string, byte[]>>.
-        //
-        // All result-returning methods use the simplified-error
-        // retArea (just the outer Ok disc).
+        // wasi:http/types.fields — header-list resource.
+        // Result-returning methods land their Ok side in the
+        // simplified retArea (1 byte for set/append/delete,
+        // 8 bytes for from-list with own<fields> Ok-payload).
+        // The Err side (header-error) is decoded from the
+        // returned Result.IsOk and writes outer disc=1 with
+        // header-error payload zeroed (placeholder).
         private static void BindFields(WasmRuntime runtime,
             ResourceContext resources, Realloc alloc)
         {
@@ -40,10 +39,7 @@ namespace Wacs.WASI.Preview2.Http
 
             // [static]fields.from-list: takes a list<tuple<
             // string, byte[]>> param + result<own<fields>,
-            // header-error> return. Wire form: (listPtr,
-            // listLen, retAreaPtr) → void. Per-entry layout:
-            // 16 bytes (kPtr, kLen, vPtr, vLen) at align 4.
-            // retArea = 8 bytes (disc + 3 pad + handle).
+            // header-error> return. retArea = 8 bytes.
             runtime.BindHostFunction<Action<ExecContext, int, int, int>>(
                 (Ns, "[static]fields.from-list"),
                 (ctx, listPtr, listLen, retArea) =>
@@ -64,13 +60,21 @@ namespace Wacs.WASI.Preview2.Http
                             Array.Copy(mem, vPtr, val, 0, vLen);
                         entries[i] = (key, val);
                     }
-                    var inst = Fields.FromList(entries);
-                    WriteOkHandle(ctx.Memory(), retArea,
-                        fields.Allocate(inst));
+                    // Use the static factory (concrete-typed) so
+                    // the returned Fields can be table-allocated
+                    // directly. The IFields surface's FromList
+                    // returns Result<IFields, ...>; we can't
+                    // observe the Err side without a header-
+                    // error encoder, so v0 always-Ok via the
+                    // static factory matches the IFields default.
+                    var inst = Fields.FromListStatic(entries);
+                    int handle = fields.Allocate(inst);
+                    WriteResultHandleHeaderError(ctx.Memory(),
+                        retArea,
+                        Result<int, HeaderError>.FromOk(handle));
                 });
 
             // [method]fields.has(name: string) -> bool.
-            // Wire: (handle, namePtr, nameLen) → i32.
             runtime.BindHostFunction<Func<ExecContext, int, int, int, int>>(
                 (Ns, "[method]fields.has"),
                 (ctx, handle, namePtr, nameLen) =>
@@ -80,10 +84,6 @@ namespace Wacs.WASI.Preview2.Http
                 });
 
             // [method]fields.get(name: string) -> list<field-value>.
-            // Wire: (handle, namePtr, nameLen, retArea) → void.
-            // retArea = 8 bytes: (out-list-ptr, out-list-len).
-            // Each output element is 8 bytes (data-ptr, data-len)
-            // at align 4.
             runtime.BindHostFunction<Action<ExecContext, int, int, int, int>>(
                 (Ns, "[method]fields.get"),
                 (ctx, handle, namePtr, nameLen, retArea) =>
@@ -112,10 +112,8 @@ namespace Wacs.WASI.Preview2.Http
                     MemoryWriter.WriteI32LE(memEnd, retArea + 4, count);
                 });
 
-            // [method]fields.set(name: string, value: list<field-value>)
-            //   -> result<_, header-error>.
-            // Wire: (handle, namePtr, nameLen, listPtr, listLen,
-            //        retArea) → void.
+            // [method]fields.set -> result<_, header-error>.
+            // retArea = 1 byte (placeholder header-error).
             runtime.BindHostFunction<Action<ExecContext, int, int, int,
                 int, int, int>>(
                 (Ns, "[method]fields.set"),
@@ -124,23 +122,21 @@ namespace Wacs.WASI.Preview2.Http
                 {
                     var name = ctx.ReadUtf8String(namePtr, nameLen);
                     var values = ctx.ReadByteArrayList(listPtr, listLen);
-                    ((Fields)fields.Get(handle)).Set(name, values);
-                    WriteOkUnit(ctx.Memory(), retArea);
+                    var r = ((Fields)fields.Get(handle)).Set(name, values);
+                    WriteResultUnitHeaderError(ctx.Memory(), retArea, r);
                 });
 
-            // [method]fields.delete(name: string)
-            //   -> result<_, header-error>.
+            // [method]fields.delete -> result<_, header-error>.
             runtime.BindHostFunction<Action<ExecContext, int, int, int, int>>(
                 (Ns, "[method]fields.delete"),
                 (ctx, handle, namePtr, nameLen, retArea) =>
                 {
                     var name = ctx.ReadUtf8String(namePtr, nameLen);
-                    ((Fields)fields.Get(handle)).Delete(name);
-                    WriteOkUnit(ctx.Memory(), retArea);
+                    var r = ((Fields)fields.Get(handle)).Delete(name);
+                    WriteResultUnitHeaderError(ctx.Memory(), retArea, r);
                 });
 
-            // [method]fields.append(name: string, value: field-value)
-            //   -> result<_, header-error>.
+            // [method]fields.append -> result<_, header-error>.
             runtime.BindHostFunction<Action<ExecContext, int, int, int,
                 int, int, int>>(
                 (Ns, "[method]fields.append"),
@@ -149,21 +145,17 @@ namespace Wacs.WASI.Preview2.Http
                 {
                     var name = ctx.ReadUtf8String(namePtr, nameLen);
                     var value = ctx.ReadByteArray(valPtr, valLen);
-                    ((Fields)fields.Get(handle)).Append(name, value);
-                    WriteOkUnit(ctx.Memory(), retArea);
+                    var r = ((Fields)fields.Get(handle)).Append(name, value);
+                    WriteResultUnitHeaderError(ctx.Memory(), retArea, r);
                 });
 
             // [method]fields.entries() ->
             //   list<tuple<field-key, field-value>>.
-            // Wire: (handle, retArea) → void.
-            // retArea = 8 bytes (list-ptr, list-len). Each
-            // element 16 bytes (kPtr, kLen, vPtr, vLen) at
-            // align 4.
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (Ns, "[method]fields.entries"),
                 (ctx, handle, retArea) =>
                 {
-                    var arr = ((Fields)fields.Get(handle)).EntriesArray();
+                    var arr = ((Fields)fields.Get(handle)).Entries();
                     int count = arr.Length;
                     int arrayPtr = count == 0 ? 0
                         : alloc.Allocate(4, count * 16);
@@ -190,12 +182,13 @@ namespace Wacs.WASI.Preview2.Http
                 });
 
             // [method]fields.clone() -> own<fields>. Bare own
-            // return — no result wrapper, just an i32 handle.
+            // return — interface returns IFields, which we
+            // downcast to Fields for the resource table.
             runtime.BindHostFunction<Func<ExecContext, int, int>>(
                 (Ns, "[method]fields.clone"),
                 (_, handle) =>
                 {
-                    var clone = ((Fields)fields.Get(handle)).Clone();
+                    var clone = (Fields)((Fields)fields.Get(handle)).Clone();
                     return fields.Allocate(clone);
                 });
         }
