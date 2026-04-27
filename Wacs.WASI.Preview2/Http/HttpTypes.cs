@@ -224,6 +224,16 @@ namespace Wacs.WASI.Preview2.Http
         [WasiOptionalReturn]
         public virtual string? Authority() => _authority;
 
+        /// <summary>Take ownership of the request body for
+        /// writing. Per WIT semantics the body can only be
+        /// taken once; v0 default doesn't enforce that and
+        /// just returns a fresh OutgoingBody every call.</summary>
+        [WasiErrorResult]
+        public virtual OutgoingBody Body()
+            => _body ??= new OutgoingBody();
+
+        protected OutgoingBody? _body;
+
         public virtual void Dispose() { }
     }
 
@@ -241,6 +251,14 @@ namespace Wacs.WASI.Preview2.Http
 
         [WasiOptionalReturn]
         public virtual string? Authority() => null;
+
+        /// <summary>Take ownership of the request body for
+        /// reading.</summary>
+        [WasiErrorResult]
+        public virtual IncomingBody Consume()
+            => _body ??= new IncomingBody();
+
+        protected IncomingBody? _body;
 
         public virtual void Dispose() { }
     }
@@ -262,6 +280,14 @@ namespace Wacs.WASI.Preview2.Http
         /// empty Fields.</summary>
         public virtual Fields Headers() => new Fields();
 
+        /// <summary>Take ownership of the response body for
+        /// reading.</summary>
+        [WasiErrorResult]
+        public virtual IncomingBody Consume()
+            => _body ??= new IncomingBody();
+
+        protected IncomingBody? _body;
+
         public virtual void Dispose() { }
     }
 
@@ -280,6 +306,14 @@ namespace Wacs.WASI.Preview2.Http
             => _statusCode = statusCode;
 
         public virtual Fields Headers() => new Fields();
+
+        /// <summary>Take ownership of the response body for
+        /// writing.</summary>
+        [WasiErrorResult]
+        public virtual OutgoingBody Body()
+            => _body ??= new OutgoingBody();
+
+        protected OutgoingBody? _body;
 
         public virtual void Dispose() { }
     }
@@ -312,18 +346,42 @@ namespace Wacs.WASI.Preview2.Http
     }
 
     /// <summary>WIT <c>wasi:http/types.incoming-body</c>.
-    /// </summary>
+    /// Read side of an HTTP body — guest pulls bytes via
+    /// the <see cref="Stream"/> InputStream.</summary>
     [WasiResource("incoming-body")]
     public class IncomingBody : IDisposable
     {
+        protected InputStream? _stream;
+
+        /// <summary>Take ownership of the read stream.
+        /// WIT <c>%stream: func()
+        ///   -&gt; result&lt;own&lt;input-stream&gt;,
+        ///                _&gt;</c> (% escapes the keyword;
+        /// the wire import-name is "stream").</summary>
+        [WasiErrorResult]
+        [WasiMethodName("stream")]
+        public virtual InputStream Stream()
+            => _stream ??= new InputStream();
+
         public virtual void Dispose() { }
     }
 
     /// <summary>WIT <c>wasi:http/types.outgoing-body</c>.
-    /// </summary>
+    /// Write side of an HTTP body — guest pushes bytes via
+    /// the <see cref="Write"/> OutputStream.</summary>
     [WasiResource("outgoing-body")]
     public class OutgoingBody : IDisposable
     {
+        protected OutputStream? _stream;
+
+        /// <summary>Take ownership of the write stream.
+        /// WIT <c>write: func()
+        ///   -&gt; result&lt;own&lt;output-stream&gt;,
+        ///                _&gt;</c>.</summary>
+        [WasiErrorResult]
+        public virtual OutputStream Write()
+            => _stream ??= new OutputStream();
+
         public virtual void Dispose() { }
     }
 
