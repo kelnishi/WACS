@@ -837,6 +837,30 @@ namespace Wacs.WASI.Preview2.HostBinding
                     table, resourceType, m);
                 return;
             }
+            // HTTP method / scheme variant returns — 12-byte
+            // retArea (variant disc + 3 pad + (str-ptr, len)
+            // when the case is "other(string)"; payload bytes
+            // unused for the named cases).
+            if (m.ReturnType == typeof(
+                    Wacs.WASI.Preview2.Http.HttpMethod)
+                || m.ReturnType.IsSubclassOf(typeof(
+                    Wacs.WASI.Preview2.Http.HttpMethod)))
+            {
+                BindHttpMethodReturnResourceMethod(
+                    runtime, namespaceName, importName,
+                    table, resourceType, m);
+                return;
+            }
+            if (m.ReturnType == typeof(
+                    Wacs.WASI.Preview2.Http.HttpScheme)
+                || m.ReturnType.IsSubclassOf(typeof(
+                    Wacs.WASI.Preview2.Http.HttpScheme)))
+            {
+                BindHttpSchemeReturnResourceMethod(
+                    runtime, namespaceName, importName,
+                    table, resourceType, m);
+                return;
+            }
             // Bare enum returns (no result wrapping) ride the
             // primitive path through ToWireType — wire form is
             // the underlying integer.
@@ -1017,6 +1041,107 @@ namespace Wacs.WASI.Preview2.HostBinding
                             dataPtr, bytes.Length);
                     WriteI32LE(memory, retAreaPtr, dataPtr);
                     WriteI32LE(memory, retAreaPtr + 4, bytes.Length);
+                });
+        }
+
+        /// <summary>Resource method returning
+        /// <c>variant method</c> (HTTP method) or
+        /// <c>variant scheme</c> (HTTP scheme). Both variants
+        /// are 9-or-3 unit cases plus a final
+        /// "other(string)" case. retArea is 12 bytes:
+        /// 1-byte disc + 3 bytes padding + (str-ptr, str-len)
+        /// at offsets 4/8 (only meaningful for the "other"
+        /// case; named cases leave the trailing slots as zero).
+        /// </summary>
+        private static void BindHttpVariantReturnHelper(
+            WasmRuntime runtime, string namespaceName,
+            string importName, ResourceTable table,
+            Type resourceType, MethodInfo m,
+            Func<object, (byte disc, string? payloadStr)> mapper)
+        {
+            BindAggregateResourceMethod(runtime, namespaceName,
+                importName, table, resourceType, m,
+                (memory, retAreaPtr, ret, allocate) =>
+                {
+                    var (disc, payloadStr) = mapper(ret!);
+                    memory[retAreaPtr] = disc;
+                    memory[retAreaPtr + 1] = 0;
+                    memory[retAreaPtr + 2] = 0;
+                    memory[retAreaPtr + 3] = 0;
+                    if (payloadStr != null)
+                    {
+                        var bytes = System.Text.Encoding.UTF8
+                            .GetBytes(payloadStr);
+                        int dataPtr = bytes.Length == 0 ? 0
+                            : allocate(1, bytes.Length);
+                        if (bytes.Length > 0)
+                            Array.Copy(bytes, 0, memory,
+                                dataPtr, bytes.Length);
+                        WriteI32LE(memory, retAreaPtr + 4, dataPtr);
+                        WriteI32LE(memory, retAreaPtr + 8, bytes.Length);
+                    }
+                });
+        }
+
+        private static void BindHttpMethodReturnResourceMethod(
+            WasmRuntime runtime, string namespaceName,
+            string importName, ResourceTable table,
+            Type resourceType, MethodInfo m)
+        {
+            BindHttpVariantReturnHelper(runtime, namespaceName,
+                importName, table, resourceType, m, ret =>
+                {
+                    var meth = (Wacs.WASI.Preview2.Http.HttpMethod)ret;
+                    return meth switch
+                    {
+                        Wacs.WASI.Preview2.Http.HttpMethodGet
+                            => ((byte)0, (string?)null),
+                        Wacs.WASI.Preview2.Http.HttpMethodHead
+                            => ((byte)1, (string?)null),
+                        Wacs.WASI.Preview2.Http.HttpMethodPost
+                            => ((byte)2, (string?)null),
+                        Wacs.WASI.Preview2.Http.HttpMethodPut
+                            => ((byte)3, (string?)null),
+                        Wacs.WASI.Preview2.Http.HttpMethodDelete
+                            => ((byte)4, (string?)null),
+                        Wacs.WASI.Preview2.Http.HttpMethodConnect
+                            => ((byte)5, (string?)null),
+                        Wacs.WASI.Preview2.Http.HttpMethodOptions
+                            => ((byte)6, (string?)null),
+                        Wacs.WASI.Preview2.Http.HttpMethodTrace
+                            => ((byte)7, (string?)null),
+                        Wacs.WASI.Preview2.Http.HttpMethodPatch
+                            => ((byte)8, (string?)null),
+                        Wacs.WASI.Preview2.Http.HttpMethodOther o
+                            => ((byte)9, (string?)o.Name),
+                        _ => throw new ArgumentException(
+                            "Unknown HttpMethod subclass: "
+                            + meth.GetType()),
+                    };
+                });
+        }
+
+        private static void BindHttpSchemeReturnResourceMethod(
+            WasmRuntime runtime, string namespaceName,
+            string importName, ResourceTable table,
+            Type resourceType, MethodInfo m)
+        {
+            BindHttpVariantReturnHelper(runtime, namespaceName,
+                importName, table, resourceType, m, ret =>
+                {
+                    var sch = (Wacs.WASI.Preview2.Http.HttpScheme)ret;
+                    return sch switch
+                    {
+                        Wacs.WASI.Preview2.Http.HttpSchemeHttp
+                            => ((byte)0, (string?)null),
+                        Wacs.WASI.Preview2.Http.HttpSchemeHttps
+                            => ((byte)1, (string?)null),
+                        Wacs.WASI.Preview2.Http.HttpSchemeOther o
+                            => ((byte)2, (string?)o.Name),
+                        _ => throw new ArgumentException(
+                            "Unknown HttpScheme subclass: "
+                            + sch.GetType()),
+                    };
                 });
         }
 
