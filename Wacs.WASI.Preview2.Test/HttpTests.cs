@@ -1058,6 +1058,60 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Equal("PURGE", other.Name);
         }
 
+        private sealed class CapturingOutgoingRequest : OutgoingRequest
+        {
+            public HttpScheme? CapturedScheme;
+            public bool SetSchemeCalled;
+            public override void SetScheme(HttpScheme? scheme)
+            {
+                SetSchemeCalled = true;
+                CapturedScheme = scheme;
+            }
+        }
+
+        [Fact]
+        public void OutgoingRequest_set_scheme_with_option_variant()
+        {
+            // Fixture exercises option<scheme> param — 4
+            // wire slots: option disc + variant disc + ptr +
+            // len. Three calls: None, Some(HTTPS) (no
+            // payload), Some(Other("ftp")) (string payload).
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-setscheme-component",
+                "setscheme.component.wasm"));
+            var resources = new ResourceContext();
+            var req = new CapturingOutgoingRequest();
+            int hReq = resources.TableFor(typeof(OutgoingRequest))
+                .Allocate(req);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<OutgoingRequest>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            // None
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-set-none", (uint)hReq)!);
+            Assert.True(req.SetSchemeCalled);
+            Assert.Null(req.CapturedScheme);
+
+            // Some(HTTPS)
+            req.SetSchemeCalled = false;
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-set-https", (uint)hReq)!);
+            Assert.True(req.SetSchemeCalled);
+            Assert.IsType<HttpSchemeHttps>(req.CapturedScheme);
+
+            // Some(Other("ftp"))
+            req.SetSchemeCalled = false;
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-set-other", (uint)hReq)!);
+            Assert.True(req.SetSchemeCalled);
+            var other = Assert.IsType<HttpSchemeOther>(req.CapturedScheme);
+            Assert.Equal("ftp", other.Name);
+        }
+
         [Fact]
         public void Http_resource_markers_are_allocatable()
         {
