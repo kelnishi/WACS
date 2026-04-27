@@ -13,5 +13,6 @@ interface types {
             -> result<_, header-error>;
         delete: func(name: field-key) -> result<_, header-error>;
         clone: func() -> fields;
+        entries: func() -> list<tuple<field-key, field-value>>;
     }
 }

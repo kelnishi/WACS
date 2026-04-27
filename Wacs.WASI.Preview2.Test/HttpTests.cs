@@ -121,6 +121,41 @@ namespace Wacs.WASI.Preview2.Test
         }
 
         [Fact]
+        public void Fields_entries_returns_list_of_string_byte_array_pairs()
+        {
+            // Stub Fields seeded with two entries:
+            //   "X-Foo" / "bar"
+            //   "X-Baz" / "quux"
+            // ask-entries-len returns 2, ask-entries-first-key
+            // returns 'X' (first byte of "X-Foo"),
+            // ask-entries-first-val returns 'b' (first byte
+            // of "bar").
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-fields-component", "httpfields.component.wasm"));
+            var resources = new ResourceContext();
+            var fields = new Fields();
+            fields.AppendEntry("X-Foo",
+                System.Text.Encoding.UTF8.GetBytes("bar"));
+            fields.AppendEntry("X-Baz",
+                System.Text.Encoding.UTF8.GetBytes("quux"));
+            int handle = resources.TableFor(typeof(Fields))
+                .Allocate(fields);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<Fields>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            Assert.Equal(2u, (uint)ci.Invoke(
+                "ask-entries-len", (uint)handle)!);
+            Assert.Equal((uint)'X', (uint)ci.Invoke(
+                "ask-entries-first-key", (uint)handle)!);
+            Assert.Equal((uint)'b', (uint)ci.Invoke(
+                "ask-entries-first-val", (uint)handle)!);
+        }
+
+        [Fact]
         public void Fields_clone_returns_fresh_resource_handle()
         {
             // Fixture: ask-clone(handle) calls fields.clone,

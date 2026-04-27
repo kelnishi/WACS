@@ -136,12 +136,30 @@ namespace Wacs.WASI.Preview2.Http
             return copy;
         }
 
-        /// <summary>Snapshot of all (key, value) entries.
-        /// Host-side accessor — the WIT <c>entries()</c>
-        /// method needs list<tuple<string, list<u8>>> return
-        /// support.</summary>
+        /// <summary>Host-side List<(Key, Value)> backing
+        /// store accessor. Used by tests to inspect the
+        /// captured entry list; the WIT-bound entries() goes
+        /// through <see cref="EntriesArray"/> which returns
+        /// a fresh ValueTuple array (the shape the canon-
+        /// lower binder consumes).</summary>
         public System.Collections.Generic.IReadOnlyList<
             (string Key, byte[] Value)> Entries => _entries;
+
+        /// <summary>WIT <c>entries: func() -&gt;
+        ///   list&lt;tuple&lt;field-key, field-value&gt;&gt;</c>.
+        /// Snapshot of the entry list as ValueTuple<string,
+        /// byte[]>[]; the binder writes the canon-lower form
+        /// (list-ptr, list-len) at retArea + element pairs
+        /// at the allocated array.</summary>
+        [WasiMethodName("entries")]
+        public virtual System.ValueTuple<string, byte[]>[] EntriesArray()
+        {
+            var arr = new System.ValueTuple<string, byte[]>[
+                _entries.Count];
+            for (int i = 0; i < _entries.Count; i++)
+                arr[i] = (_entries[i].Key, _entries[i].Value);
+            return arr;
+        }
 
         public virtual void Dispose() { }
     }

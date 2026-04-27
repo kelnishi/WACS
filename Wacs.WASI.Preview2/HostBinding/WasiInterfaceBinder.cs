@@ -861,6 +861,17 @@ namespace Wacs.WASI.Preview2.HostBinding
                     table, resourceType, m);
                 return;
             }
+            // list<(string, byte[])> return — used by
+            // fields.entries() in wasi:http. Each element is
+            // 16 bytes: (string-ptr, string-len, bytes-ptr,
+            // bytes-len) at align 4.
+            if (m.ReturnType == typeof(ValueTuple<string, byte[]>[]))
+            {
+                BindStringByteArrayPairListReturnResourceMethod(
+                    runtime, namespaceName, importName,
+                    table, resourceType, m);
+                return;
+            }
             // Bare enum returns (no result wrapping) ride the
             // primitive path through ToWireType — wire form is
             // the underlying integer.
@@ -1041,6 +1052,54 @@ namespace Wacs.WASI.Preview2.HostBinding
                             dataPtr, bytes.Length);
                     WriteI32LE(memory, retAreaPtr, dataPtr);
                     WriteI32LE(memory, retAreaPtr + 4, bytes.Length);
+                });
+        }
+
+        /// <summary>Resource method returning
+        /// <c>list&lt;tuple&lt;string, list&lt;u8&gt;&gt;&gt;</c>
+        /// (string-byte-array pairs). Used by
+        /// fields.entries() in wasi:http. retArea is 8 bytes
+        /// (list-ptr, list-len); each element is 16 bytes
+        /// (string-ptr, string-len, bytes-ptr, bytes-len) at
+        /// align 4.</summary>
+        private static void BindStringByteArrayPairListReturnResourceMethod(
+            WasmRuntime runtime, string namespaceName,
+            string importName, ResourceTable table,
+            Type resourceType, MethodInfo m)
+        {
+            BindAggregateResourceMethod(runtime, namespaceName,
+                importName, table, resourceType, m,
+                (memory, retAreaPtr, ret, allocate) =>
+                {
+                    var arr = (ValueTuple<string, byte[]>[])ret!;
+                    int count = arr.Length;
+                    int arrayPtr = count == 0 ? 0
+                        : allocate(4, count * 16);
+                    for (int i = 0; i < count; i++)
+                    {
+                        var (key, value) = arr[i];
+                        var keyBytes = System.Text.Encoding.UTF8
+                            .GetBytes(key);
+                        int keyPtr = keyBytes.Length == 0 ? 0
+                            : allocate(1, keyBytes.Length);
+                        if (keyBytes.Length > 0)
+                            Array.Copy(keyBytes, 0, memory,
+                                keyPtr, keyBytes.Length);
+                        int valPtr = value.Length == 0 ? 0
+                            : allocate(1, value.Length);
+                        if (value.Length > 0)
+                            Array.Copy(value, 0, memory,
+                                valPtr, value.Length);
+                        WriteI32LE(memory, arrayPtr + i * 16, keyPtr);
+                        WriteI32LE(memory, arrayPtr + i * 16 + 4,
+                            keyBytes.Length);
+                        WriteI32LE(memory, arrayPtr + i * 16 + 8,
+                            valPtr);
+                        WriteI32LE(memory, arrayPtr + i * 16 + 12,
+                            value.Length);
+                    }
+                    WriteI32LE(memory, retAreaPtr, arrayPtr);
+                    WriteI32LE(memory, retAreaPtr + 4, count);
                 });
         }
 
