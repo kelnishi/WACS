@@ -13,4 +13,11 @@ world demo {
     /// Calls fields.append(handle, "X-New", "value");
     /// returns the outer disc byte (0 = Ok).
     export ask-append: func(handle: u32) -> u32;
+    /// Calls fields.entries(handle); returns the list-len
+    /// as u32.
+    export ask-entries-len: func(handle: u32) -> u32;
+    /// Returns first byte of the first entry's key.
+    export ask-entries-first-key: func(handle: u32) -> u32;
+    /// Returns first byte of the first entry's value.
+    export ask-entries-first-val: func(handle: u32) -> u32;
 }
