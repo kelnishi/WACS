@@ -213,6 +213,13 @@ namespace Wacs.WASI.Preview2.Http
         protected string? _authority;
         protected HttpMethod _method = new HttpMethodGet();
 
+        /// <summary>WIT <c>constructor(headers: own&lt;headers&gt;)</c>.
+        /// Guest passes a Fields handle; we adopt it on the
+        /// fresh request. Headers ownership transfers in.</summary>
+        [WasiConstructor]
+        public static OutgoingRequest New(Fields headers)
+            => new OutgoingRequest { _headers = headers };
+
         /// <summary>HTTP request method. WIT
         /// <c>method() -&gt; method</c>.</summary>
         public virtual HttpMethod Method() => _method;
@@ -306,6 +313,14 @@ namespace Wacs.WASI.Preview2.Http
     public class OutgoingResponse : IDisposable
     {
         protected ushort _statusCode = 200;
+        protected Fields _headers = new Fields();
+
+        /// <summary>WIT <c>constructor(headers: own&lt;headers&gt;)</c>.
+        /// Guest passes a Fields handle; ownership transfers
+        /// in on construction.</summary>
+        [WasiConstructor]
+        public static OutgoingResponse New(Fields headers)
+            => new OutgoingResponse { _headers = headers };
 
         public virtual ushort StatusCode() => _statusCode;
 
@@ -314,7 +329,7 @@ namespace Wacs.WASI.Preview2.Http
         public virtual void SetStatusCode(ushort statusCode)
             => _statusCode = statusCode;
 
-        public virtual Fields Headers() => new Fields();
+        public virtual Fields Headers() => _headers;
 
         /// <summary>Take ownership of the response body for
         /// writing.</summary>
@@ -337,6 +352,13 @@ namespace Wacs.WASI.Preview2.Http
         protected ulong? _connectTimeout;
         protected ulong? _firstByteTimeout;
         protected ulong? _betweenBytesTimeout;
+
+        /// <summary>WIT <c>constructor()</c> — zero-arg
+        /// factory; guests call <c>[constructor]request-options</c>
+        /// to get a fresh tunable bundle with all timeouts
+        /// unset.</summary>
+        [WasiConstructor]
+        public static RequestOptions New() => new RequestOptions();
 
         [WasiOptionalReturn]
         [WasiMethodName("connect-timeout")]

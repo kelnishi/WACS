@@ -704,7 +704,7 @@ namespace Wacs.WASI.Preview2.HostBinding
                 if (m.GetCustomAttribute<
                     WasiConstructorAttribute>() == null) continue;
                 BindResourceConstructor(runtime, namespaceName,
-                    witName, table, resourceType, m);
+                    witName, table, resourceType, m, resources);
             }
 
             // [resource-drop]Name — wasm passes i32 handle,
@@ -3110,31 +3110,63 @@ namespace Wacs.WASI.Preview2.HostBinding
         /// — wasm calls into the static factory method tagged
         /// <see cref="WasiConstructorAttribute"/>; we allocate
         /// the returned instance into the resource table and
-        /// hand back its handle. v0 supports the zero-arg
-        /// constructor shape; parameterized constructors land
-        /// when a v0 call site needs them.</summary>
+        /// hand back its handle. v0 admits zero-arg ctors and
+        /// own<resource>-only-param ctors (one or more
+        /// resource params). Each resource param is one i32
+        /// wire slot resolved through the per-type table.
+        /// Other param shapes (primitive / string / aggregate)
+        /// are follow-ups.</summary>
         private static void BindResourceConstructor(
             WasmRuntime runtime, string namespaceName,
             string witResourceName, ResourceTable table,
-            Type resourceType, MethodInfo factory)
+            Type resourceType, MethodInfo factory,
+            ResourceContext resources)
         {
-            if (factory.GetParameters().Length != 0)
-                throw new InvalidOperationException(
-                    "Resource constructor '" + factory.Name
-                    + "' on type " + resourceType
-                    + " must be parameterless. Parameterized "
-                    + "constructors are a follow-up.");
             if (factory.ReturnType != resourceType)
                 throw new InvalidOperationException(
                     "Resource constructor '" + factory.Name
                     + "' must return its declaring type "
                     + resourceType + ".");
+            var paramInfos = factory.GetParameters();
+            foreach (var p in paramInfos)
+                if (p.ParameterType.GetCustomAttribute<
+                    WasiResourceAttribute>() == null)
+                    throw new InvalidOperationException(
+                        "Resource constructor '" + factory.Name
+                        + "' takes unsupported param type "
+                        + p.ParameterType + " — only "
+                        + "own<resource> params ship in v0.");
             var importName = "[constructor]" + witResourceName;
 
-            int Body(ExecContext _)
+            // Zero-arg fast path keeps the existing wire shape.
+            if (paramInfos.Length == 0)
             {
-                var inst = factory.Invoke(null,
-                    Array.Empty<object?>());
+                int ZeroArg(ExecContext _)
+                {
+                    var inst = factory.Invoke(null,
+                        Array.Empty<object?>());
+                    if (inst == null)
+                        throw new InvalidOperationException(
+                            "Resource constructor '" + factory.Name
+                            + "' returned null.");
+                    return table.Allocate(inst);
+                }
+                runtime.BindHostFunction<Func<ExecContext, int>>(
+                    (namespaceName, importName), ZeroArg);
+                return;
+            }
+
+            // own<resource>-only param shape — wire slot per
+            // param is i32 (handle). Build an Action-shaped
+            // body via expression tree so we can take any
+            // arity in [1, 4].
+            var paramTables = new ResourceTable[paramInfos.Length];
+            for (int i = 0; i < paramInfos.Length; i++)
+                paramTables[i] = resources.TableFor(paramInfos[i].ParameterType);
+
+            int Body(ExecContext _, object?[] hostArgs)
+            {
+                var inst = factory.Invoke(null, hostArgs);
                 if (inst == null)
                     throw new InvalidOperationException(
                         "Resource constructor '" + factory.Name
@@ -3142,8 +3174,45 @@ namespace Wacs.WASI.Preview2.HostBinding
                 return table.Allocate(inst);
             }
 
-            runtime.BindHostFunction<Func<ExecContext, int>>(
-                (namespaceName, importName), Body);
+            // Wire signature: ExecContext + N i32 handles -> i32.
+            var wireTypes = new Type[paramInfos.Length + 2];
+            wireTypes[0] = typeof(ExecContext);
+            for (int i = 0; i < paramInfos.Length; i++)
+                wireTypes[i + 1] = typeof(int);
+            wireTypes[paramInfos.Length + 1] = typeof(int);
+
+            var lambdaParams = new ParameterExpression[paramInfos.Length + 1];
+            lambdaParams[0] = Expression.Parameter(typeof(ExecContext), "ctx");
+            var argExprs = new Expression[paramInfos.Length];
+            var getMethod = typeof(ResourceTable).GetMethod(
+                nameof(ResourceTable.Get))!;
+            for (int i = 0; i < paramInfos.Length; i++)
+            {
+                lambdaParams[i + 1] = Expression.Parameter(
+                    typeof(int), paramInfos[i].Name);
+                argExprs[i] = Expression.Convert(
+                    Expression.Call(
+                        Expression.Constant(paramTables[i]),
+                        getMethod, lambdaParams[i + 1]),
+                    typeof(object));
+            }
+            var argArr = Expression.NewArrayInit(typeof(object), argExprs);
+            var bodyDel = Expression.Constant(
+                (Func<ExecContext, object?[], int>)Body);
+            var call = Expression.Invoke(bodyDel,
+                lambdaParams[0], argArr);
+            var delegateType = OpenFuncType(wireTypes.Length)
+                .MakeGenericType(wireTypes);
+            var lambda = Expression.Lambda(delegateType, call, lambdaParams);
+            var compiled = lambda.Compile();
+
+            var bindOpen = typeof(WasmRuntime).GetMethods()
+                .First(mi => mi.Name == nameof(WasmRuntime.BindHostFunction)
+                    && mi.IsGenericMethod
+                    && mi.GetParameters().Length == 2);
+            var bindClosed = bindOpen.MakeGenericMethod(delegateType);
+            bindClosed.Invoke(runtime,
+                new object[] { (namespaceName, importName), compiled });
         }
 
         /// <summary>Register the <c>[resource-drop]T</c> handler

@@ -892,6 +892,56 @@ namespace Wacs.WASI.Preview2.Test
         }
 
         [Fact]
+        public void Constructors_zero_arg_and_resource_param()
+        {
+            // Fixture: three [constructor] imports — zero-arg
+            // request-options + own<fields>-param outgoing-request
+            // and outgoing-response. All three new shapes
+            // route through BindResourceConstructor's expression-
+            // tree path (param-bearing branch).
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-ctors-component",
+                "httpctors.component.wasm"));
+            var resources = new ResourceContext();
+            var headers = new Fields();
+            int hHeaders = resources.TableFor(typeof(Fields))
+                .Allocate(headers);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<Fields>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<RequestOptions>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<OutgoingRequest>(
+                    "wasi:http/types@0.2.3", resources);
+                runtime.BindWasiResource<OutgoingResponse>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            uint hOpts = (uint)ci.Invoke("ask-new-request-options")!;
+            uint hReq = (uint)ci.Invoke(
+                "ask-new-outgoing-request", (uint)hHeaders)!;
+            uint hResp = (uint)ci.Invoke(
+                "ask-new-outgoing-response", (uint)hHeaders)!;
+
+            Assert.NotEqual(0u, hOpts);
+            Assert.NotEqual(0u, hReq);
+            Assert.NotEqual(0u, hResp);
+            Assert.IsType<RequestOptions>(
+                resources.TableFor(typeof(RequestOptions))
+                    .Get((int)hOpts));
+            var req = (OutgoingRequest)resources
+                .TableFor(typeof(OutgoingRequest)).Get((int)hReq)!;
+            var resp = (OutgoingResponse)resources
+                .TableFor(typeof(OutgoingResponse)).Get((int)hResp)!;
+            // Headers ownership transferred in — the pinned
+            // Fields instance flows through to both.
+            Assert.Same(headers, req.Headers());
+            Assert.Same(headers, resp.Headers());
+        }
+
+        [Fact]
         public void Http_resource_markers_are_allocatable()
         {
             // Smoke test: every wasi:http resource type can
