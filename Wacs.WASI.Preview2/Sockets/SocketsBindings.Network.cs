@@ -33,12 +33,14 @@ namespace Wacs.WASI.Preview2.Sockets
             var nets = resources.Table<Network>();
             runtime.BindHostFunction<Func<ExecContext, int>>(
                 (InstanceNs, "instance-network"),
-                _ => nets.Allocate(impl.InstanceNetwork()));
+                _ => nets.Allocate((Network)impl.InstanceNetwork()));
         }
 
         // wasi:sockets/tcp-create-socket@0.2.3
         //   create-tcp-socket: func(address-family: ip-address-family)
         //     -> result<own<tcp-socket>, error-code>
+        // Result-returning host method: allocate the handle on Ok,
+        // propagate the ErrorCode on Err.
         private static void BindTcpCreateSocket(WasmRuntime runtime,
             ResourceContext resources, ITcpCreateSocket impl)
         {
@@ -47,10 +49,14 @@ namespace Wacs.WASI.Preview2.Sockets
                 (TcpCreateNs, "create-tcp-socket"),
                 (ctx, family, retArea) =>
                 {
-                    var s = impl.CreateTcpSocket(
+                    var r = impl.CreateTcpSocket(
                         (IpAddressFamily)family);
-                    WriteOkHandle(ctx.Memory(), retArea,
-                        socks.Allocate(s));
+                    var handleResult = r.IsOk
+                        ? Wacs.ComponentModel.Runtime.Result<int, ErrorCode>
+                            .FromOk(socks.Allocate((TcpSocket)r.Ok))
+                        : Wacs.ComponentModel.Runtime.Result<int, ErrorCode>
+                            .FromErr(r.Err);
+                    WriteResultHandle(ctx.Memory(), retArea, handleResult);
                 });
         }
 
@@ -65,10 +71,14 @@ namespace Wacs.WASI.Preview2.Sockets
                 (UdpCreateNs, "create-udp-socket"),
                 (ctx, family, retArea) =>
                 {
-                    var s = impl.CreateUdpSocket(
+                    var r = impl.CreateUdpSocket(
                         (IpAddressFamily)family);
-                    WriteOkHandle(ctx.Memory(), retArea,
-                        socks.Allocate(s));
+                    var handleResult = r.IsOk
+                        ? Wacs.ComponentModel.Runtime.Result<int, ErrorCode>
+                            .FromOk(socks.Allocate((UdpSocket)r.Ok))
+                        : Wacs.ComponentModel.Runtime.Result<int, ErrorCode>
+                            .FromErr(r.Err);
+                    WriteResultHandle(ctx.Memory(), retArea, handleResult);
                 });
         }
     }

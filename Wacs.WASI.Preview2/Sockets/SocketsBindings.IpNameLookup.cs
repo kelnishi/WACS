@@ -6,6 +6,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
+using Wacs.ComponentModel.Runtime;
 using Wacs.Core.Runtime;
 using Wacs.WASI.Preview2.HostBinding;
 using Wacs.WASI.Preview2.HostBinding.CanonicalAbi;
@@ -34,7 +35,8 @@ namespace Wacs.WASI.Preview2.Sockets
             runtime.BindHostFunction<Func<ExecContext, int, int>>(
                 (IpNameLookupNs, "[method]resolve-address-stream.subscribe"),
                 (_, h) => pollables.Allocate(
-                    ((ResolveAddressStream)streams.Get(h)).Subscribe()));
+                    (Pollable)((ResolveAddressStream)streams.Get(h))
+                        .Subscribe()));
 
             // resolve-next-address() ->
             //   result<option<ip-address>, error-code>.
@@ -49,12 +51,18 @@ namespace Wacs.WASI.Preview2.Sockets
                  "[method]resolve-address-stream.resolve-next-address"),
                 (ctx, h, retArea) =>
                 {
-                    var item = ((ResolveAddressStream)streams.Get(h))
+                    var r = ((ResolveAddressStream)streams.Get(h))
                         .ResolveNextAddress();
                     var mem = ctx.Memory();
+                    if (!r.IsOk)
+                    {
+                        WriteErrCode(mem, retArea, 22, r.Err);
+                        return;
+                    }
                     mem[retArea] = 0;       // outer Ok
                     mem[retArea + 1] = 0;   // pad
-                    if (item == null)
+                    var item = r.Ok;
+                    if (!item.HasValue)
                     {
                         mem[retArea + 2] = 0;     // option None
                         for (int i = 3; i < 22; i++)
@@ -63,31 +71,35 @@ namespace Wacs.WASI.Preview2.Sockets
                     }
                     mem[retArea + 2] = 1;       // option Some
                     mem[retArea + 3] = 0;
-                    if (item is Ipv4Address v4)
+                    if (item.Value is IpAddress.IpAddressIpv4 v4Case)
                     {
+                        var v4 = v4Case.Value;
                         mem[retArea + 4] = 0;   // variant ipv4
                         mem[retArea + 5] = 0;
-                        mem[retArea + 6] = v4.Address[0];
-                        mem[retArea + 7] = v4.Address[1];
-                        mem[retArea + 8] = v4.Address[2];
-                        mem[retArea + 9] = v4.Address[3];
+                        mem[retArea + 6] = v4.Item1;
+                        mem[retArea + 7] = v4.Item2;
+                        mem[retArea + 8] = v4.Item3;
+                        mem[retArea + 9] = v4.Item4;
                         for (int i = 10; i < 22; i++)
                             mem[retArea + i] = 0;
                     }
                     else
                     {
-                        var v6 = (Ipv6Address)item;
+                        var v6 = ((IpAddress.IpAddressIpv6)item.Value).Value;
                         mem[retArea + 4] = 1;   // variant ipv6
                         mem[retArea + 5] = 0;
-                        for (int k = 0; k < 8; k++)
-                            MemoryWriter.WriteU16LE(mem,
-                                retArea + 6 + k * 2, v6.Address[k]);
+                        MemoryWriter.WriteU16LE(mem, retArea + 6, v6.Item1);
+                        MemoryWriter.WriteU16LE(mem, retArea + 8, v6.Item2);
+                        MemoryWriter.WriteU16LE(mem, retArea + 10, v6.Item3);
+                        MemoryWriter.WriteU16LE(mem, retArea + 12, v6.Item4);
+                        MemoryWriter.WriteU16LE(mem, retArea + 14, v6.Item5);
+                        MemoryWriter.WriteU16LE(mem, retArea + 16, v6.Item6);
+                        MemoryWriter.WriteU16LE(mem, retArea + 18, v6.Item7);
+                        MemoryWriter.WriteU16LE(mem, retArea + 20, v6.Item8);
                     }
                 });
 
             if (impl == null) return;
-
-            var alloc = new Realloc(runtime);
 
             // resolve-addresses(net: borrow<network>, name: string)
             //   -> result<own<resolve-address-stream>, error-code>
@@ -97,10 +109,13 @@ namespace Wacs.WASI.Preview2.Sockets
                 (ctx, hNet, namePtr, nameLen, retArea) =>
                 {
                     var name = ctx.ReadUtf8String(namePtr, nameLen);
-                    var stream = impl.ResolveAddresses(
+                    var r = impl.ResolveAddresses(
                         (Network)nets.Get(hNet), name);
-                    WriteOkHandle(ctx.Memory(), retArea,
-                        streams.Allocate(stream));
+                    var handleResult = r.IsOk
+                        ? Result<int, ErrorCode>.FromOk(
+                            streams.Allocate((ResolveAddressStream)r.Ok))
+                        : Result<int, ErrorCode>.FromErr(r.Err);
+                    WriteResultHandle(ctx.Memory(), retArea, handleResult);
                 });
         }
     }

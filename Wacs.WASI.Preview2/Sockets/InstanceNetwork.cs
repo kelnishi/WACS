@@ -7,21 +7,11 @@
 
 namespace Wacs.WASI.Preview2.Sockets
 {
-    /// <summary>
-    /// Host-side surface for
-    /// <c>wasi:sockets/instance-network@0.2.x</c>.
-    /// <code>
-    /// interface instance-network {
-    ///     instance-network: func() -&gt; network;
-    /// }
-    /// </code>
-    /// Returns the instance-wide network capability the guest
-    /// can use to create sockets.
-    /// </summary>
-    public interface IInstanceNetwork
-    {
-        Network InstanceNetwork();
-    }
+    // The IInstanceNetwork interface is now emitted by the
+    // source generator from
+    // wit/deps/sockets/instance-network.wit. This file retains
+    // only the default conservative impl — the generated
+    // interface is authoritative.
 
     /// <summary>Default <see cref="IInstanceNetwork"/> impl —
     /// returns a fresh, empty Network capability. Hosts that
@@ -30,6 +20,6 @@ namespace Wacs.WASI.Preview2.Sockets
     /// policy.</summary>
     public sealed class InstanceNetworkSource : IInstanceNetwork
     {
-        public Network InstanceNetwork() => new Network();
+        public INetwork InstanceNetwork() => new Network();
     }
 }

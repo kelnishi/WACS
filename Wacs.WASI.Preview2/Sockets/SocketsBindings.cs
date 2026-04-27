@@ -6,6 +6,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
+using Wacs.ComponentModel.Runtime;
 using Wacs.Core.Runtime;
 using Wacs.WASI.Preview2.HostBinding;
 using Wacs.WASI.Preview2.HostBinding.CanonicalAbi;
@@ -32,6 +33,17 @@ namespace Wacs.WASI.Preview2.Sockets
     /// <item><c>wasi:sockets/udp-create-socket@0.2.3</c></item>
     /// <item><c>wasi:sockets/ip-name-lookup@0.2.3</c></item>
     /// </list></para>
+    ///
+    /// <para>Every host method that the WIT spec marks
+    /// <c>result&lt;X, error-code&gt;</c> returns
+    /// <see cref="Result{TOk,TErr}"/> over
+    /// <see cref="ErrorCode"/>; the bindings encode both
+    /// branches faithfully (Ok writes the payload, Err writes
+    /// outer disc=1 + the ErrorCode value at offset+1, with
+    /// the rest of the Ok-payload area zeroed). error-code is
+    /// a 21-case u8 enum (no payload), so result.align always
+    /// matches the Ok payload's alignment and the Err-side
+    /// shares the retArea size with the Ok-side.</para>
     /// </summary>
     public sealed partial class SocketsBindings : IBindable
     {
@@ -82,56 +94,111 @@ namespace Wacs.WASI.Preview2.Sockets
         // -----------------------------------------------------
         //   shared retArea encoders for result<X, error-code>
         // -----------------------------------------------------
-        // error-code is u8 align 1; result.align matches the
-        // Ok-side payload's alignment.
+        // error-code is a 21-case u8 enum (no payload), so it
+        // contributes align=1 to every result variant. The
+        // result.align therefore matches the Ok-side payload's
+        // alignment; Ok-payload offset = max_align. The Err
+        // side writes outer disc=1 at retArea+0, the
+        // ErrorCode byte at retArea+1, and zeroes the rest of
+        // the payload area.
 
-        // result<_, error-code>: 1 byte. Pad bytes are caller's
-        // responsibility when the variant alignment requires.
-        private static void WriteOkUnit(byte[] mem, int retArea)
+        // Encode the Err side: outer disc=1 at retArea+0,
+        // ErrorCode byte at retArea+1, zero through retArea+totalSize.
+        private static void WriteErrCode(byte[] mem, int retArea,
+            int totalSize, ErrorCode code)
         {
-            mem[retArea] = 0;
+            mem[retArea] = 1;
+            mem[retArea + 1] = (byte)code;
+            for (int i = 2; i < totalSize; i++) mem[retArea + i] = 0;
+        }
+
+        // result<_, error-code>: 2 bytes (1 disc + 1 byte).
+        private static void WriteResultUnit(byte[] mem, int retArea,
+            Result<Unit, ErrorCode> r)
+        {
+            if (r.IsOk)
+            {
+                mem[retArea] = 0;
+                mem[retArea + 1] = 0;
+                return;
+            }
+            WriteErrCode(mem, retArea, 2, r.Err);
         }
 
         // result<bool, error-code>: 2 bytes (disc + bool).
-        private static void WriteOkBool(byte[] mem, int retArea, bool value)
+        private static void WriteResultBool(byte[] mem, int retArea,
+            Result<bool, ErrorCode> r)
         {
-            mem[retArea] = 0;
-            mem[retArea + 1] = value ? (byte)1 : (byte)0;
+            if (r.IsOk)
+            {
+                mem[retArea] = 0;
+                mem[retArea + 1] = r.Ok ? (byte)1 : (byte)0;
+                return;
+            }
+            WriteErrCode(mem, retArea, 2, r.Err);
         }
 
         // result<u8, error-code>: 2 bytes (disc + u8).
-        private static void WriteOkU8(byte[] mem, int retArea, byte value)
+        private static void WriteResultU8(byte[] mem, int retArea,
+            Result<byte, ErrorCode> r)
         {
-            mem[retArea] = 0;
-            mem[retArea + 1] = value;
+            if (r.IsOk)
+            {
+                mem[retArea] = 0;
+                mem[retArea + 1] = r.Ok;
+                return;
+            }
+            WriteErrCode(mem, retArea, 2, r.Err);
         }
 
         // result<u32, error-code>: 8 bytes (disc + 3 pad + u32).
-        private static void WriteOkU32(byte[] mem, int retArea, uint value)
+        private static void WriteResultU32(byte[] mem, int retArea,
+            Result<uint, ErrorCode> r)
         {
-            mem[retArea] = 0;
-            mem[retArea + 1] = 0;
-            mem[retArea + 2] = 0;
-            mem[retArea + 3] = 0;
-            MemoryWriter.WriteU32LE(mem, retArea + 4, value);
+            if (r.IsOk)
+            {
+                mem[retArea] = 0;
+                mem[retArea + 1] = 0;
+                mem[retArea + 2] = 0;
+                mem[retArea + 3] = 0;
+                MemoryWriter.WriteU32LE(mem, retArea + 4, r.Ok);
+                return;
+            }
+            WriteErrCode(mem, retArea, 8, r.Err);
         }
 
         // result<u64, error-code>: 16 bytes (disc + 7 pad + u64).
-        private static void WriteOkU64(byte[] mem, int retArea, ulong value)
+        private static void WriteResultU64(byte[] mem, int retArea,
+            Result<ulong, ErrorCode> r)
         {
-            mem[retArea] = 0;
-            for (int i = 1; i < 8; i++) mem[retArea + i] = 0;
-            MemoryWriter.WriteU64LE(mem, retArea + 8, value);
+            if (r.IsOk)
+            {
+                mem[retArea] = 0;
+                for (int i = 1; i < 8; i++) mem[retArea + i] = 0;
+                MemoryWriter.WriteU64LE(mem, retArea + 8, r.Ok);
+                return;
+            }
+            WriteErrCode(mem, retArea, 16, r.Err);
         }
 
-        // result<own<X>, error-code>: 8 bytes (disc + 3 pad + handle).
-        private static void WriteOkHandle(byte[] mem, int retArea, int handle)
+        // result<own<X>, error-code>: 8 bytes (disc + 3 pad +
+        // handle). Caller supplies a Result<int, ErrorCode>
+        // whose Ok-side handle has already been allocated via
+        // the appropriate resource table; the encoder just
+        // writes the handle bits.
+        private static void WriteResultHandle(byte[] mem, int retArea,
+            Result<int, ErrorCode> r)
         {
-            mem[retArea] = 0;
-            mem[retArea + 1] = 0;
-            mem[retArea + 2] = 0;
-            mem[retArea + 3] = 0;
-            MemoryWriter.WriteI32LE(mem, retArea + 4, handle);
+            if (r.IsOk)
+            {
+                mem[retArea] = 0;
+                mem[retArea + 1] = 0;
+                mem[retArea + 2] = 0;
+                mem[retArea + 3] = 0;
+                MemoryWriter.WriteI32LE(mem, retArea + 4, r.Ok);
+                return;
+            }
+            WriteErrCode(mem, retArea, 8, r.Err);
         }
 
         // -----------------------------------------------------
@@ -149,18 +216,24 @@ namespace Wacs.WASI.Preview2.Sockets
             int s6, int s7, int s8, int s9, int s10, int s11)
         {
             if (disc == 0)
-                return new Ipv4SocketAddress(
-                    (ushort)s1,
-                    new byte[] {
-                        (byte)s2, (byte)s3, (byte)s4, (byte)s5,
+                return new IpSocketAddress.IpSocketAddressIpv4(
+                    new Ipv4SocketAddress {
+                        Port = (ushort)s1,
+                        Address = (
+                            (byte)s2, (byte)s3,
+                            (byte)s4, (byte)s5),
                     });
-            return new Ipv6SocketAddress(
-                (ushort)s1, (uint)s2,
-                new ushort[] {
-                    (ushort)s3, (ushort)s4, (ushort)s5, (ushort)s6,
-                    (ushort)s7, (ushort)s8, (ushort)s9, (ushort)s10,
-                },
-                (uint)s11);
+            return new IpSocketAddress.IpSocketAddressIpv6(
+                new Ipv6SocketAddress {
+                    Port = (ushort)s1,
+                    FlowInfo = (uint)s2,
+                    Address = (
+                        (ushort)s3, (ushort)s4,
+                        (ushort)s5, (ushort)s6,
+                        (ushort)s7, (ushort)s8,
+                        (ushort)s9, (ushort)s10),
+                    ScopeId = (uint)s11,
+                });
         }
 
         // Write a variant ip-socket-address record at <ptr>.
@@ -172,20 +245,22 @@ namespace Wacs.WASI.Preview2.Sockets
         private static void WriteIpSocketAddress(byte[] mem, int ptr,
             IpSocketAddress addr)
         {
-            if (addr is Ipv4SocketAddress v4)
+            if (addr is IpSocketAddress.IpSocketAddressIpv4 v4Case)
             {
+                var v4 = v4Case.Value;
                 mem[ptr] = 0;
                 mem[ptr + 1] = 0;
                 mem[ptr + 2] = 0;
                 mem[ptr + 3] = 0;
                 MemoryWriter.WriteU16LE(mem, ptr + 4, v4.Port);
-                mem[ptr + 6] = v4.Address[0];
-                mem[ptr + 7] = v4.Address[1];
-                mem[ptr + 8] = v4.Address[2];
-                mem[ptr + 9] = v4.Address[3];
+                mem[ptr + 6] = v4.Address.Item1;
+                mem[ptr + 7] = v4.Address.Item2;
+                mem[ptr + 8] = v4.Address.Item3;
+                mem[ptr + 9] = v4.Address.Item4;
                 return;
             }
-            var v6 = (Ipv6SocketAddress)addr;
+            var v6Case = (IpSocketAddress.IpSocketAddressIpv6)addr;
+            var v6 = v6Case.Value;
             mem[ptr] = 1;
             mem[ptr + 1] = 0;
             mem[ptr + 2] = 0;
@@ -194,10 +269,32 @@ namespace Wacs.WASI.Preview2.Sockets
             mem[ptr + 6] = 0;
             mem[ptr + 7] = 0;
             MemoryWriter.WriteU32LE(mem, ptr + 8, v6.FlowInfo);
-            for (int i = 0; i < 8; i++)
-                MemoryWriter.WriteU16LE(mem, ptr + 12 + i * 2,
-                    v6.Address[i]);
+            MemoryWriter.WriteU16LE(mem, ptr + 12, v6.Address.Item1);
+            MemoryWriter.WriteU16LE(mem, ptr + 14, v6.Address.Item2);
+            MemoryWriter.WriteU16LE(mem, ptr + 16, v6.Address.Item3);
+            MemoryWriter.WriteU16LE(mem, ptr + 18, v6.Address.Item4);
+            MemoryWriter.WriteU16LE(mem, ptr + 20, v6.Address.Item5);
+            MemoryWriter.WriteU16LE(mem, ptr + 22, v6.Address.Item6);
+            MemoryWriter.WriteU16LE(mem, ptr + 24, v6.Address.Item7);
+            MemoryWriter.WriteU16LE(mem, ptr + 26, v6.Address.Item8);
             MemoryWriter.WriteU32LE(mem, ptr + 28, v6.ScopeId);
+        }
+
+        // result<ip-socket-address, error-code>: 36 bytes.
+        // outer disc=0 + 3 pad + ip-socket-address (32B) at +4.
+        private static void WriteResultIpSocketAddress(byte[] mem, int retArea,
+            Result<IpSocketAddress, ErrorCode> r)
+        {
+            if (r.IsOk)
+            {
+                mem[retArea] = 0;
+                mem[retArea + 1] = 0;
+                mem[retArea + 2] = 0;
+                mem[retArea + 3] = 0;
+                WriteIpSocketAddress(mem, retArea + 4, r.Ok);
+                return;
+            }
+            WriteErrCode(mem, retArea, 36, r.Err);
         }
     }
 }
