@@ -75,16 +75,24 @@ namespace Wacs.ComponentModel.Types
             }
 
             // Pass 2: bind CtTypeRef.Target on every use import
-            // inside every interface.
-            foreach (var pkg in packageList)
+            // inside every interface. Run twice so downstream
+            // interfaces that re-export a name through an alias
+            // chain (e.g. filesystem.types reaches io/error via
+            // io/streams's alias) get the chain settled — first
+            // pass resolves the leaf packages, second pass picks
+            // up the multi-hop chains.
+            for (int round = 0; round < 2; round++)
             {
-                foreach (var iface in pkg.Interfaces)
+                foreach (var pkg in packageList)
                 {
-                    ResolveInterfaceUses(iface, ifaceIndex);
-                }
-                foreach (var world in pkg.Worlds)
-                {
-                    ResolveWorldUses(world, ifaceIndex);
+                    foreach (var iface in pkg.Interfaces)
+                    {
+                        ResolveInterfaceUses(iface, ifaceIndex);
+                    }
+                    foreach (var world in pkg.Worlds)
+                    {
+                        ResolveWorldUses(world, ifaceIndex);
+                    }
                 }
             }
         }
@@ -227,6 +235,20 @@ namespace Wacs.ComponentModel.Types
             foreach (var nt in iface.Types)
             {
                 if (nt.Name == name) return nt;
+            }
+            // Also search aliases — when interface A re-exports
+            // a name brought in via `use`, downstream interface B
+            // doing `use A.{name}` should follow the alias chain
+            // to the original definition. Follow the chain when
+            // the alias has a resolved target; otherwise return
+            // the alias itself (later resolution passes may
+            // settle the chain).
+            foreach (var nt in iface.Aliases)
+            {
+                if (nt.Name != name) continue;
+                if (nt.Type is CtTypeRef tr && tr.Target != null)
+                    return tr.Target;
+                return nt;
             }
             return null;
         }

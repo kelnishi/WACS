@@ -17,10 +17,31 @@
         <RepositoryType>git</RepositoryType>
         <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
         <IsAotCompatible Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net7.0'))">true</IsAotCompatible>
+        <!-- Persist source-gen output under obj/Generated for IDE
+             navigation + debugging. Doesn't affect compilation. -->
+        <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+        <CompilerGeneratedFilesOutputPath>obj/Generated</CompilerGeneratedFilesOutputPath>
     </PropertyGroup>
 
     <ItemGroup>
         <ProjectReference Include="..\Wacs.ComponentModel\Wacs.ComponentModel.csproj" />
+
+        <!-- WIT host-interface source generator. The Analyzer
+             form attaches the SourceGen DLL to the Roslyn
+             pipeline at compile time. ReferenceOutputAssembly=
+             false skips emitting a runtime reference (the
+             generator only runs at build). -->
+        <ProjectReference Include="..\Wacs.ComponentModel.Bindgen.SourceGen\Wacs.ComponentModel.Bindgen.SourceGen.csproj"
+                          OutputItemType="Analyzer"
+                          ReferenceOutputAssembly="false" />
+    </ItemGroup>
+
+    <!-- WIT files in wit/** are fed to the source generator.
+         WitForHost=true is the metadata flag the SourceGen
+         filters on. -->
+    <ItemGroup>
+        <AdditionalFiles Include="wit\**\*.wit" WitForHost="true" />
+        <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="WitForHost" />
     </ItemGroup>
 
 </Project>

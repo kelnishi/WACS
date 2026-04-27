@@ -65,6 +65,14 @@ namespace Wacs.ComponentModel.CSharpEmit
             CtInterfaceType iface, CtPackage owningPackage,
             EmitOptions options)
         {
+            // Push ambient state so EmitTypeRefInner can detect
+            // same-vs-cross-interface refs and route to the
+            // qualified-name path for the latter.
+            using var _ = EmitAmbient.Push(
+                worldNs: "",   // unused in host mode
+                iface: iface, options: options,
+                alwaysQualifyTypeRefs: false);
+
             var ns = ResolveNamespace(iface, options);
             var sb = new StringBuilder();
 
@@ -104,7 +112,11 @@ namespace Wacs.ComponentModel.CSharpEmit
 
             sb.AppendLine("}");
 
-            var fileName = ToPascal(iface.Name) + ".g.cs";
+            // Filename qualifies by namespace so collisions across
+            // packages (e.g. wasi:filesystem/types vs wasi:http/types)
+            // don't shadow each other in Roslyn's hint-name space.
+            var fileName = ns.Replace('.', '_') + "_"
+                + ToPascal(iface.Name) + ".g.cs";
             return new EmittedSource(fileName, sb.ToString());
         }
 
@@ -249,12 +261,31 @@ namespace Wacs.ComponentModel.CSharpEmit
         {
             if (iface.Functions.Count == 0)
                 return;
+            // Detect a name collision with a same-named resource
+            // (common in WITs like `interface network { resource
+            // network; ... }`). When colliding, suffix the
+            // free-function interface to avoid duplicate `INetwork`
+            // emissions in one namespace.
+            bool collidesWithResource = false;
+            foreach (var t in iface.Types)
+            {
+                if (t.Type is CtResourceType
+                    && string.Equals(t.Name, iface.Name,
+                        System.StringComparison.OrdinalIgnoreCase))
+                {
+                    collidesWithResource = true;
+                    break;
+                }
+            }
+            var suffix = collidesWithResource ? "Funcs" : "";
+
             EmitWitSourceAttr(sb, indent,
                 BuildInterfaceWitHeader(iface),
                 pkg: iface.Package?.ToString(),
                 @interface: iface.Name);
             sb.Append(indent).Append("public interface I")
-                .Append(ToPascal(iface.Name)).AppendLine();
+                .Append(ToPascal(iface.Name)).Append(suffix)
+                .AppendLine();
             sb.Append(indent).AppendLine("{");
             foreach (var f in iface.Functions)
                 EmitFreeFunction(sb, f, iface, indent + "    ");
@@ -747,6 +778,11 @@ namespace Wacs.ComponentModel.CSharpEmit
         // Wacs.ComponentModel without InternalsVisibleTo).
         private static string ToPascal(string s)
         {
+            // WIT identifiers may be `%`-prefixed when shadowing
+            // a WIT keyword (e.g. `%type`). The prefix exists only
+            // in the source text; the actual identifier is the
+            // tail. Strip it before casing.
+            if (s.Length > 0 && s[0] == '%') s = s.Substring(1);
             var sb = new StringBuilder();
             bool upper = true;
             foreach (var c in s)
@@ -768,6 +804,7 @@ namespace Wacs.ComponentModel.CSharpEmit
 
         private static string ToCamel(string s)
         {
+            if (s.Length > 0 && s[0] == '%') s = s.Substring(1);
             var p = ToPascal(s);
             if (p.Length == 0) return p;
             var c = char.ToLowerInvariant(p[0]) + p.Substring(1);

@@ -159,6 +159,12 @@ namespace Wacs.ComponentModel.Bindgen
             if (packages == null) throw new ArgumentNullException(nameof(packages));
             var opts = options ?? new EmitOptions { HostInterfaceMode = true };
             opts.HostInterfaceMode = true;
+            // Cross-package type-ref resolution. WitToTypes.Convert
+            // only resolves within a single document; for multi-doc
+            // sets (which is the normal case — every WASI WIT
+            // tree imports across packages), we need WitResolver
+            // to fill CtTypeRef.Target across the package set.
+            WitResolver.Resolve(packages);
             var result = new List<EmittedSource>();
             foreach (var pkg in packages)
                 result.AddRange(HostInterfaceEmit.EmitPackage(

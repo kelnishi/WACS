@@ -6,7 +6,9 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System.Collections.Generic;
+#if !WACS_SOURCEGEN
 using System.IO;
+#endif
 using System.Linq;
 using Wacs.ComponentModel.Types;
 
@@ -29,6 +31,12 @@ namespace Wacs.ComponentModel.WIT
     /// </summary>
     public static class WitLoader
     {
+#if !WACS_SOURCEGEN
+        // Disk-IO helpers — compiled out of the source-gen
+        // project (which lives under analyzer rules that ban
+        // System.IO.File / Directory). The pure in-memory entry
+        // point MergeDocuments stays available in both builds.
+
         /// <summary>
         /// Load every <c>.wit</c> file directly under
         /// <paramref name="directory"/> (non-recursive) and return
@@ -79,6 +87,7 @@ namespace Wacs.ComponentModel.WIT
             }
             return MergeDocuments(docs);
         }
+#endif
 
         /// <summary>
         /// Merge already-parsed <see cref="WitDocument"/>s into
