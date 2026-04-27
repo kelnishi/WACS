@@ -1222,6 +1222,95 @@ namespace Wacs.WASI.Preview2.Test
                 System.Text.Encoding.UTF8.GetString(auth[0]));
         }
 
+        private sealed class StagedTrailers : FutureTrailers
+        {
+            public bool Ready;
+            public Fields? Trailers;
+            public override (bool ready, Fields? trailers) Get()
+                => (Ready, Trailers);
+        }
+
+        [Fact]
+        public void FutureTrailers_get_writes_three_state_retArea()
+        {
+            // Tests the deeply nested option<result<option<own
+            // <trailers>>, error-code>> retArea encoder.
+            // Three states:
+            //   not-ready          → outer disc=0
+            //   ready-no-trailers  → outer=1, result=0, inner=0
+            //   ready-with-trailers→ outer=1, result=0, inner=1,
+            //                        handle at +20
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-future-trailers-get-component",
+                "futuretrailers.component.wasm"));
+
+            // Subtest 1: not ready
+            {
+                var resources = new ResourceContext();
+                var ft = new StagedTrailers { Ready = false };
+                int hFt = resources.TableFor(typeof(FutureTrailers))
+                    .Allocate(ft);
+                var ci = ComponentInstance.Instantiate(bytes, runtime =>
+                {
+                    runtime.BindWasiResource<FutureTrailers>(
+                        "wasi:http/types@0.2.3", resources);
+                    runtime.BindWasiResource<Fields>(
+                        "wasi:http/types@0.2.3", resources);
+                });
+                Assert.Equal(0u, (uint)ci.Invoke(
+                    "ask-outer-disc", (uint)hFt)!);
+            }
+
+            // Subtest 2: ready, no trailers
+            {
+                var resources = new ResourceContext();
+                var ft = new StagedTrailers { Ready = true,
+                    Trailers = null };
+                int hFt = resources.TableFor(typeof(FutureTrailers))
+                    .Allocate(ft);
+                var ci = ComponentInstance.Instantiate(bytes, runtime =>
+                {
+                    runtime.BindWasiResource<FutureTrailers>(
+                        "wasi:http/types@0.2.3", resources);
+                    runtime.BindWasiResource<Fields>(
+                        "wasi:http/types@0.2.3", resources);
+                });
+                Assert.Equal(1u, (uint)ci.Invoke(
+                    "ask-outer-disc", (uint)hFt)!);
+                Assert.Equal(0u, (uint)ci.Invoke(
+                    "ask-result-disc", (uint)hFt)!);
+                Assert.Equal(0u, (uint)ci.Invoke(
+                    "ask-inner-disc", (uint)hFt)!);
+            }
+
+            // Subtest 3: ready with trailers
+            {
+                var resources = new ResourceContext();
+                var trailers = new Fields();
+                var ft = new StagedTrailers { Ready = true,
+                    Trailers = trailers };
+                int hFt = resources.TableFor(typeof(FutureTrailers))
+                    .Allocate(ft);
+                var ci = ComponentInstance.Instantiate(bytes, runtime =>
+                {
+                    runtime.BindWasiResource<FutureTrailers>(
+                        "wasi:http/types@0.2.3", resources);
+                    runtime.BindWasiResource<Fields>(
+                        "wasi:http/types@0.2.3", resources);
+                });
+                Assert.Equal(1u, (uint)ci.Invoke(
+                    "ask-outer-disc", (uint)hFt)!);
+                Assert.Equal(1u, (uint)ci.Invoke(
+                    "ask-inner-disc", (uint)hFt)!);
+                uint hTrailers = (uint)ci.Invoke(
+                    "ask-trailers-handle", (uint)hFt)!;
+                Assert.NotEqual(0u, hTrailers);
+                Assert.Same(trailers,
+                    resources.TableFor(typeof(Fields))
+                        .Get((int)hTrailers));
+            }
+        }
+
         [Fact]
         public void Http_resource_markers_are_allocatable()
         {
