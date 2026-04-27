@@ -55,12 +55,8 @@ namespace Wacs.WASI.Preview2.Test
             });
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiInstance(
-                    "wasi:filesystem/preopens@0.2.3", stub, resources);
-                runtime.BindWasiResource<Descriptor>(
-                    "wasi:filesystem/types@0.2.3", resources);
-            });
+                new FilesystemBindings(resources, preopens: stub)
+                    .BindToRuntime(runtime));
 
             Assert.Equal(3u, (uint)ci.Invoke("count")!);
             // After all drops the table should be empty.
@@ -76,12 +72,8 @@ namespace Wacs.WASI.Preview2.Test
             var stub = new StubPreopens(System.Array.Empty<(Descriptor, string)>());
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiInstance(
-                    "wasi:filesystem/preopens@0.2.3", stub, resources);
-                runtime.BindWasiResource<Descriptor>(
-                    "wasi:filesystem/types@0.2.3", resources);
-            });
+                new FilesystemBindings(resources, preopens: stub)
+                    .BindToRuntime(runtime));
 
             Assert.Equal(0u, (uint)ci.Invoke("count")!);
         }

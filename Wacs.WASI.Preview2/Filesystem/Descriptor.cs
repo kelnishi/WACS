@@ -115,8 +115,6 @@ namespace Wacs.WASI.Preview2.Filesystem
     /// instances as filesystem errors.</summary>
     public sealed class FilesystemErrorCodeSource : IFilesystemErrorCode
     {
-        [WasiOptionalReturn]
-        [WasiMethodName("filesystem-error-code")]
         public FilesystemErrorCode? FilesystemErrorCode(
             Wacs.WASI.Preview2.Io.Error err) => null;
     }
@@ -323,8 +321,6 @@ namespace Wacs.WASI.Preview2.Filesystem
         /// <see cref="object.GetType"/> clash; the
         /// <see cref="WasiMethodNameAttribute"/> override
         /// restores the WIT name <c>get-type</c>.</para></summary>
-        [WasiErrorResult]
-        [WasiMethodName("get-type")]
         public virtual DescriptorType GetDescriptorType()
         {
             if (Directory.Exists(Path)) return DescriptorType.Directory;
@@ -338,7 +334,6 @@ namespace Wacs.WASI.Preview2.Filesystem
         /// host file. Default impl uses
         /// <see cref="System.IO.File.OpenRead"/>; subclasses
         /// override for virtual file systems.</summary>
-        [WasiErrorResult]
         public virtual InputStream ReadViaStream(ulong offset)
         {
             var stream = File.OpenRead(Path);
@@ -351,7 +346,6 @@ namespace Wacs.WASI.Preview2.Filesystem
         /// <paramref name="offset"/>. Returns an
         /// <see cref="OutputStream"/> wrapping the underlying
         /// host file.</summary>
-        [WasiErrorResult]
         public virtual OutputStream WriteViaStream(ulong offset)
         {
             var stream = File.OpenWrite(Path);
@@ -362,7 +356,6 @@ namespace Wacs.WASI.Preview2.Filesystem
 
         /// <summary>Open the file for appending. Returns an
         /// <see cref="OutputStream"/> positioned at EOF.</summary>
-        [WasiErrorResult]
         public virtual OutputStream AppendViaStream()
         {
             var stream = new FileStream(Path, FileMode.Append,
@@ -373,17 +366,14 @@ namespace Wacs.WASI.Preview2.Filesystem
         /// <summary>Force any buffered modifications to be
         /// flushed to durable storage. Default: no-op (host
         /// streams flush on close anyway).</summary>
-        [WasiErrorResult]
         public virtual void Sync() { }
 
         /// <summary>Like <see cref="Sync"/> but only flushes
         /// data, not metadata. Default: no-op.</summary>
-        [WasiErrorResult]
         public virtual void SyncData() { }
 
         /// <summary>Truncate or extend the file to
         /// <paramref name="size"/> bytes.</summary>
-        [WasiErrorResult]
         public virtual void SetSize(ulong size)
         {
             using var fs = new FileStream(Path, FileMode.Open,
@@ -399,7 +389,6 @@ namespace Wacs.WASI.Preview2.Filesystem
         /// requested bytes). The streams interface goes through
         /// <see cref="ReadViaStream"/>; this is the direct path
         /// for guests that don't want a stream's buffering.</summary>
-        [WasiErrorResult]
         public virtual (byte[], bool) Read(ulong length, ulong offset)
         {
             using var fs = File.OpenRead(Path);
@@ -418,7 +407,6 @@ namespace Wacs.WASI.Preview2.Filesystem
         /// <summary>Write <paramref name="buffer"/> at
         /// <paramref name="offset"/>. Returns count actually
         /// written.</summary>
-        [WasiErrorResult]
         public virtual ulong Write(byte[] buffer, ulong offset)
         {
             using var fs = new FileStream(Path, FileMode.OpenOrCreate,
@@ -432,8 +420,6 @@ namespace Wacs.WASI.Preview2.Filesystem
         /// <summary>Create a directory at <paramref name="path"/>
         /// relative to this descriptor (treated as a directory).
         /// </summary>
-        [WasiErrorResult]
-        [WasiMethodName("create-directory-at")]
         public virtual void CreateDirectoryAt(string path)
         {
             Directory.CreateDirectory(System.IO.Path.Combine(Path, path));
@@ -441,8 +427,6 @@ namespace Wacs.WASI.Preview2.Filesystem
 
         /// <summary>Remove the empty directory at
         /// <paramref name="path"/>.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("remove-directory-at")]
         public virtual void RemoveDirectoryAt(string path)
         {
             Directory.Delete(System.IO.Path.Combine(Path, path));
@@ -450,8 +434,6 @@ namespace Wacs.WASI.Preview2.Filesystem
 
         /// <summary>Unlink (delete) the file at
         /// <paramref name="path"/>.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("unlink-file-at")]
         public virtual void UnlinkFileAt(string path)
         {
             File.Delete(System.IO.Path.Combine(Path, path));
@@ -462,16 +444,12 @@ namespace Wacs.WASI.Preview2.Filesystem
         /// <paramref name="newDescriptor"/>. Default impl is a
         /// no-op since System.IO has no portable hard-link
         /// API; concrete subclasses override.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("link-at")]
         public virtual void LinkAt(PathFlags oldPathFlags, string oldPath,
             Descriptor newDescriptor, string newPath) { }
 
         /// <summary>Rename <paramref name="oldPath"/> under
         /// <c>this</c> to <paramref name="newPath"/> under
         /// <paramref name="newDescriptor"/>.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("rename-at")]
         public virtual void RenameAt(string oldPath,
             Descriptor newDescriptor, string newPath)
         {
@@ -489,8 +467,6 @@ namespace Wacs.WASI.Preview2.Filesystem
         /// since System.IO has no portable symlink API on
         /// netstandard2.1 — concrete subclasses override.
         /// </summary>
-        [WasiErrorResult]
-        [WasiMethodName("symlink-at")]
         public virtual void SymlinkAt(string oldPath, string newPath) { }
 
         /// <summary>Open or create a file/directory relative to
@@ -500,8 +476,6 @@ namespace Wacs.WASI.Preview2.Filesystem
         /// Default impl honors <see cref="OpenFlags.Create"/> by
         /// touching the target file; the resulting descriptor's
         /// behavior comes from the base class.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("open-at")]
         public virtual Descriptor OpenAt(PathFlags pathFlags, string path,
             OpenFlags openFlags, DescriptorFlags flags)
         {
@@ -520,8 +494,6 @@ namespace Wacs.WASI.Preview2.Filesystem
         /// the empty string — concrete subclasses override
         /// (System.IO has no portable readlink in
         /// netstandard2.1).</summary>
-        [WasiErrorResult]
-        [WasiMethodName("readlink-at")]
         public virtual string ReadlinkAt(string path) => "";
 
         /// <summary>Inspect file metadata. Returns a
@@ -529,7 +501,6 @@ namespace Wacs.WASI.Preview2.Filesystem
         /// / size + the three timestamps. Default impl reads
         /// from System.IO.File / Directory; concrete VFS
         /// shims override.</summary>
-        [WasiErrorResult]
         public virtual DescriptorStat Stat()
         {
             DescriptorType type = GetDescriptorType();
@@ -564,8 +535,6 @@ namespace Wacs.WASI.Preview2.Filesystem
         /// shape as <see cref="Stat"/> but takes a relative
         /// path; useful for guests walking trees without
         /// opening every entry.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("stat-at")]
         public virtual DescriptorStat StatAt(PathFlags pathFlags,
             string path)
         {
@@ -589,8 +558,6 @@ namespace Wacs.WASI.Preview2.Filesystem
         /// <summary>Open the directory for reading entries.
         /// Returns a <see cref="DirectoryEntryStream"/> the
         /// guest pulls entries from one at a time.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("read-directory")]
         public virtual DirectoryEntryStream ReadDirectory()
         {
             if (!Directory.Exists(Path))
@@ -611,8 +578,6 @@ namespace Wacs.WASI.Preview2.Filesystem
         /// same underlying file return equal values across
         /// <c>get-type</c> changes; default impl hashes
         /// <see cref="Path"/>.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("metadata-hash")]
         public virtual MetadataHashValue MetadataHash()
         {
             // Cheap deterministic hash from the path; concrete
@@ -627,23 +592,18 @@ namespace Wacs.WASI.Preview2.Filesystem
         /// flag set. Default returns Read | Write. Concrete
         /// hosts override based on how the descriptor was
         /// obtained.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("get-flags")]
         public virtual DescriptorFlags GetFlags()
             => DescriptorFlags.Read | DescriptorFlags.Write;
 
         /// <summary>Hint at access pattern for the descriptor's
         /// underlying file. Default impl is a no-op — concrete
         /// hosts wire to posix_fadvise on POSIX.</summary>
-        [WasiErrorResult]
         public virtual void Advise(ulong offset, ulong length,
             Advice advice) { }
 
         /// <summary>Test existence / accessibility at a path.
         /// Default impl is a no-op stub; concrete hosts
         /// override.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("access-at")]
         public virtual void AccessAt(PathFlags pathFlags, string path,
             AccessType type) { }
 
@@ -651,15 +611,11 @@ namespace Wacs.WASI.Preview2.Filesystem
         /// Each arg picks one of three cases (no-change, now,
         /// or a specific datetime) — the host applies the
         /// corresponding utime semantics.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("set-times")]
         public virtual void SetTimes(NewTimestamp dataAccessTimestamp,
             NewTimestamp dataModificationTimestamp) { }
 
         /// <summary>Update timestamps at a relative
         /// path.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("set-times-at")]
         public virtual void SetTimesAt(PathFlags pathFlags, string path,
             NewTimestamp dataAccessTimestamp,
             NewTimestamp dataModificationTimestamp) { }
@@ -667,8 +623,6 @@ namespace Wacs.WASI.Preview2.Filesystem
         /// <summary>Hash the file at a relative path. Pairs
         /// with <see cref="MetadataHash"/>; default impl
         /// hashes the full combined path string.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("metadata-hash-at")]
         public virtual MetadataHashValue MetadataHashAt(
             PathFlags pathFlags, string path)
         {
@@ -683,7 +637,6 @@ namespace Wacs.WASI.Preview2.Filesystem
         /// compares the host-side <see cref="Path"/>; subclasses
         /// override for VFS shims that don't keep textual
         /// paths.</summary>
-        [WasiMethodName("is-same-object")]
         public virtual bool IsSameObject(Descriptor other)
         {
             if (other == null) return false;
@@ -713,8 +666,6 @@ namespace Wacs.WASI.Preview2.Filesystem
 
         /// <summary>Pull the next directory entry, or null
         /// when exhausted.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("read-directory-entry")]
         public virtual DirectoryEntry? ReadDirectoryEntry()
             => _pos < _entries.Length ? _entries[_pos++] : null;
 

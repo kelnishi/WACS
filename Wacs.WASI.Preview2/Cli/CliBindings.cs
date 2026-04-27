@@ -75,6 +75,26 @@ namespace Wacs.WASI.Preview2.Cli
                 BindTerminalStdout(runtime, _resources, _terminalStdout);
             if (_terminalStderr != null)
                 BindTerminalStderr(runtime, _resources, _terminalStderr);
+            // The terminal-input / terminal-output resource-drop
+            // entries live in their own WIT interfaces. Always
+            // bind them when any terminal-* getter is wired so
+            // guests can release the handles those getters allocate.
+            if (_terminalStdin != null)
+            {
+                var t = _resources.Table<TerminalInput>();
+                runtime.BindHostFunction<Action<ExecContext, int>>(
+                    ("wasi:cli/terminal-input@0.2.3",
+                     "[resource-drop]terminal-input"),
+                    (_, h) => t.Drop(h));
+            }
+            if (_terminalStdout != null || _terminalStderr != null)
+            {
+                var t = _resources.Table<TerminalOutput>();
+                runtime.BindHostFunction<Action<ExecContext, int>>(
+                    ("wasi:cli/terminal-output@0.2.3",
+                     "[resource-drop]terminal-output"),
+                    (_, h) => t.Drop(h));
+            }
         }
 
         // wasi:cli/environment@0.2.3

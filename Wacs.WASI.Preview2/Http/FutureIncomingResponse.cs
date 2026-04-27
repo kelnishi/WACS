@@ -36,7 +36,6 @@ namespace Wacs.WASI.Preview2.Http
         /// only the always-Ok subset; inner Err (error-code)
         /// and outer Err (already-consumed) follow when the
         /// error-code variant payload encoder lands.</summary>
-        [WasiFutureIncomingResponseResult]
         public virtual (bool ready, IncomingResponse? response) Get()
             => (true, new IncomingResponse());
 

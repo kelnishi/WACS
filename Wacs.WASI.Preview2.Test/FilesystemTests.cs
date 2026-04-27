@@ -171,8 +171,6 @@ namespace Wacs.WASI.Preview2.Test
 
         private sealed class StubFsErrCode : IFilesystemErrorCode
         {
-            [WasiOptionalReturn]
-            [WasiMethodName("filesystem-error-code")]
             public FilesystemErrorCode? FilesystemErrorCode(
                 Wacs.WASI.Preview2.Io.Error err)
             {

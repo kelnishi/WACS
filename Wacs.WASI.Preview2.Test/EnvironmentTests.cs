@@ -108,7 +108,6 @@ namespace Wacs.WASI.Preview2.Test
 
             public (string, string)[] GetEnvironment() => _env;
             public string[] GetArguments() => _args;
-            [WasiOptionalReturn]
             public string? InitialCwd() => _cwd;
         }
     }

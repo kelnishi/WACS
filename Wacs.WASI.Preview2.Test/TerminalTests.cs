@@ -32,7 +32,6 @@ namespace Wacs.WASI.Preview2.Test
         {
             private readonly bool _isTerminal;
             public StubTerminalStdin(bool isTerminal) { _isTerminal = isTerminal; }
-            [WasiOptionalReturn]
             public TerminalInput? GetTerminalStdin() =>
                 _isTerminal ? new TerminalInput() : null;
         }
@@ -49,12 +48,8 @@ namespace Wacs.WASI.Preview2.Test
             var stub = new StubTerminalStdin(isTerminal: false);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
                 new CliBindings(resources, terminalStdin: stub)
-                    .BindToRuntime(runtime);
-                runtime.BindWasiResource<TerminalInput>(
-                    "wasi:cli/terminal-input@0.2.3", resources);
-            });
+                    .BindToRuntime(runtime));
 
             Assert.Equal(0u, (uint)ci.Invoke("check")!);
         }
@@ -70,12 +65,8 @@ namespace Wacs.WASI.Preview2.Test
             var stub = new StubTerminalStdin(isTerminal: true);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
                 new CliBindings(resources, terminalStdin: stub)
-                    .BindToRuntime(runtime);
-                runtime.BindWasiResource<TerminalInput>(
-                    "wasi:cli/terminal-input@0.2.3", resources);
-            });
+                    .BindToRuntime(runtime));
 
             Assert.Equal(1u, (uint)ci.Invoke("check")!);
             Assert.Equal(0, resources.TableFor(typeof(TerminalInput)).Count);

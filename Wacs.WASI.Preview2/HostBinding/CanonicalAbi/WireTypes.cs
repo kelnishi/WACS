@@ -14,7 +14,7 @@ namespace Wacs.WASI.Preview2.HostBinding.CanonicalAbi
     /// ABI. Pure functions, no state. Bindings use these to lay
     /// out retArea slots and decode primitive params.
     /// </summary>
-    internal static class WireTypes
+    public static class WireTypes
     {
         /// <summary>Byte size of a primitive — drives both
         /// alignment (start at <see cref="AlignUp"/>(offset, size))

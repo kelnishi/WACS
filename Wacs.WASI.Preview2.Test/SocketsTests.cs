@@ -565,8 +565,6 @@ namespace Wacs.WASI.Preview2.Test
         {
             public string LastName = "";
 
-            [WasiErrorResult]
-            [WasiMethodName("resolve-addresses")]
             public ResolveAddressStream ResolveAddresses(Network network,
                 string name)
             {

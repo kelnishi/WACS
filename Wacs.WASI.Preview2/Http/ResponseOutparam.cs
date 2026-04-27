@@ -24,9 +24,8 @@ namespace Wacs.WASI.Preview2.Http
         /// when disc!=0 the host receives null. Payload-bearing
         /// error-code variants will follow when the binder
         /// learns to decode them.</summary>
-        [WasiStaticMethod]
         public virtual void Set(
-            [WasiResultParam] OutgoingResponse? response) { }
+            OutgoingResponse? response) { }
 
         public virtual void Dispose() { }
     }

@@ -8,15 +8,17 @@
 using System;
 using System.IO;
 using Wacs.ComponentModel.Runtime;
+using Wacs.Core.Runtime;
 using Wacs.WASI.Preview2.HostBinding;
+using Wacs.WASI.Preview2.HostBinding.CanonicalAbi;
 using Xunit;
 
 namespace Wacs.WASI.Preview2.Test
 {
-    /// <summary>Tests for [WasiUnitResult] — bare WIT
+    /// <summary>Tests for unit-result wire shape — bare WIT
     /// <c>result&lt;_, _&gt;</c> on a resource method. The
-    /// wire shape is flat-return i32 (just the disc); the
-    /// host method returns void and the binder fills 0 (Ok)
+    /// flat-return form is just an i32 disc (always 0 = Ok);
+    /// the host method returns void and the binding emits 0
     /// unconditionally.</summary>
     public class UnitResultTests
     {
@@ -36,20 +38,47 @@ namespace Wacs.WASI.Preview2.Test
             public bool SetNameCalled;
             public string? CapturedName;
 
-            [WasiUnitResult]
-            [WasiMethodName("do-it")]
             public virtual void DoIt() { DoItCalled = true; }
-
-            [WasiUnitResult]
-            [WasiMethodName("set-name")]
-            public virtual void SetName(
-                [WasiOptionalParam] string? name)
+            public virtual void SetName(string? name)
             {
                 SetNameCalled = true;
                 CapturedName = name;
             }
-
             public virtual void Dispose() { }
+        }
+
+        private sealed class ThingBindings : IBindable
+        {
+            private const string Ns = "test:unit/iface@1.0.0";
+            private readonly ResourceContext _resources;
+            public ThingBindings(ResourceContext resources)
+                => _resources = resources;
+
+            public void BindToRuntime(WasmRuntime runtime)
+            {
+                var things = _resources.Table<Thing>();
+
+                runtime.BindHostFunction<Action<ExecContext, int>>(
+                    (Ns, "[resource-drop]thing"),
+                    (_, h) => things.Drop(h));
+
+                // do-it() -> result<_, _> — flat-return i32 disc.
+                runtime.BindHostFunction<Func<ExecContext, int, int>>(
+                    (Ns, "[method]thing.do-it"),
+                    (_, h) => { ((Thing)things.Get(h)).DoIt(); return 0; });
+
+                // set-name(option<string>) -> result<_, _>.
+                // Wire: handle + opt-disc + ptr + len → flat i32.
+                runtime.BindHostFunction<Func<ExecContext, int, int, int, int, int>>(
+                    (Ns, "[method]thing.set-name"),
+                    (ctx, h, optDisc, ptr, len) =>
+                    {
+                        string? name = optDisc == 0 ? null
+                            : ctx.ReadUtf8String(ptr, len);
+                        ((Thing)things.Get(h)).SetName(name);
+                        return 0;
+                    });
+            }
         }
 
         [Fact]
@@ -64,10 +93,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(thing);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<Thing>(
-                    "test:unit/iface@1.0.0", resources);
-            });
+                new ThingBindings(resources).BindToRuntime(runtime));
 
             // do-it returns bare result; the wat layer just
             // forwards the wire i32. 0 = Ok.
@@ -92,10 +118,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Allocate(thing);
 
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
-            {
-                runtime.BindWasiResource<Thing>(
-                    "test:unit/iface@1.0.0", resources);
-            });
+                new ThingBindings(resources).BindToRuntime(runtime));
 
             // None
             Assert.Equal(0u, (uint)ci.Invoke(

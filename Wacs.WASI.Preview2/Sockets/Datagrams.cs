@@ -49,7 +49,6 @@ namespace Wacs.WASI.Preview2.Sockets
         /// Returns an empty array when the queue is empty.
         /// Default returns empty; concrete impls override
         /// with real socket reads.</summary>
-        [WasiErrorResult]
         public virtual IncomingDatagram[] Receive(ulong maxResults)
             => System.Array.Empty<IncomingDatagram>();
 
@@ -99,8 +98,6 @@ namespace Wacs.WASI.Preview2.Sockets
         /// blocking. Default returns a generous fixed value;
         /// concrete impls override based on real socket
         /// buffer state.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("check-send")]
         public virtual ulong CheckSend() => 64;
 
         /// <summary>Send a batch of datagrams. Returns the
@@ -108,7 +105,6 @@ namespace Wacs.WASI.Preview2.Sockets
         /// allowed when the kernel buffer fills mid-batch.
         /// Default returns the input count (assume all sent).
         /// </summary>
-        [WasiErrorResult]
         public virtual ulong Send(OutgoingDatagram[] datagrams)
             => (ulong)datagrams.Length;
 

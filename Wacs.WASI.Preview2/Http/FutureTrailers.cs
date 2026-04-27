@@ -35,7 +35,6 @@ namespace Wacs.WASI.Preview2.Http
         /// stage actual trailers or to return a
         /// not-ready state. v0 always-Ok — the Err side of
         /// the result variant isn't surfaced.</summary>
-        [WasiFutureTrailersResult]
         public virtual (bool ready, Fields? trailers) Get()
             => (true, null);
 

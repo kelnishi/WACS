@@ -22,14 +22,11 @@ namespace Wacs.WASI.Preview2.Http
         /// <summary>WIT <c>constructor(headers: own&lt;headers&gt;)</c>.
         /// Guest passes a Fields handle; ownership transfers
         /// in on construction.</summary>
-        [WasiConstructor]
         public static OutgoingResponse New(Fields headers)
             => new OutgoingResponse { _headers = headers };
 
         public virtual ushort StatusCode() => _statusCode;
 
-        [WasiErrorResult]
-        [WasiMethodName("set-status-code")]
         public virtual void SetStatusCode(ushort statusCode)
             => _statusCode = statusCode;
 
@@ -37,7 +34,6 @@ namespace Wacs.WASI.Preview2.Http
 
         /// <summary>Take ownership of the response body for
         /// writing.</summary>
-        [WasiErrorResult]
         public virtual OutgoingBody Body()
             => _body ??= new OutgoingBody();
 

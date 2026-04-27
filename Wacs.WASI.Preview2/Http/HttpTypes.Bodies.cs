@@ -49,7 +49,7 @@ namespace Wacs.WASI.Preview2.Http
             //
             // The host method is declared as an instance method
             // (taking trailers); the canon-lower wire form prefixes
-            // the receiver handle. [WasiStaticMethod] on the host
+            // the receiver handle. on the host
             // class only affects the import-name prefix
             // ([static] vs [method]) — the wire shape is
             // unchanged.

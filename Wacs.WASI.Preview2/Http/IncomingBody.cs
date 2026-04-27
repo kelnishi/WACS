@@ -25,8 +25,6 @@ namespace Wacs.WASI.Preview2.Http
         ///   -&gt; result&lt;own&lt;input-stream&gt;,
         ///                _&gt;</c> (% escapes the keyword;
         /// the wire import-name is "stream").</summary>
-        [WasiErrorResult]
-        [WasiMethodName("stream")]
         public virtual InputStream Stream()
             => _stream ??= new InputStream();
 
@@ -34,10 +32,9 @@ namespace Wacs.WASI.Preview2.Http
         /// WIT <c>finish: static func(this: own&lt;incoming-body&gt;)
         ///   -&gt; own&lt;future-trailers&gt;</c>. Bare own
         /// return — no result wrapper, just an i32 handle.
-        /// [WasiStaticMethod] swaps the import-name prefix to
+        /// swaps the import-name prefix to
         /// [static]; the wire form is unchanged from a
         /// zero-arg instance factory.</summary>
-        [WasiStaticMethod]
         public virtual FutureTrailers Finish()
             => _trailers ??= new FutureTrailers();
 

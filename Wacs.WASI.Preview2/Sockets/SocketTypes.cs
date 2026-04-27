@@ -139,7 +139,6 @@ namespace Wacs.WASI.Preview2.Sockets
         /// <summary>Return the socket's address family. WIT's
         /// <c>address-family() -&gt; ip-address-family</c> —
         /// no result wrapping; bare enum return.</summary>
-        [WasiMethodName("address-family")]
         public virtual IpAddressFamily AddressFamily() => Family;
 
         /// <summary>Yield a pollable that fires when this
@@ -152,16 +151,12 @@ namespace Wacs.WASI.Preview2.Sockets
         /// Pairs with <see cref="FinishBind"/>. Default
         /// captures the address; concrete impls invoke real
         /// socket APIs.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("start-bind")]
         public virtual void StartBind(Network network,
             IpSocketAddress localAddress)
             => _pendingLocal = localAddress;
 
         /// <summary>Begin connecting to
         /// <paramref name="remoteAddress"/>.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("start-connect")]
         public virtual void StartConnect(Network network,
             IpSocketAddress remoteAddress)
             => _pendingRemote = remoteAddress;
@@ -174,19 +169,13 @@ namespace Wacs.WASI.Preview2.Sockets
         /// <summary>Complete a previously-issued <c>start-bind</c>
         /// call. Default impl is a no-op since v0 doesn't yet
         /// model the start/finish split.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("finish-bind")]
         public virtual void FinishBind() { }
 
         /// <summary>Begin transitioning to the listening state.
         /// Pairs with <see cref="FinishListen"/>.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("start-listen")]
         public virtual void StartListen() { }
 
         /// <summary>Complete the listen transition.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("finish-listen")]
         public virtual void FinishListen() { }
 
         /// <summary>Complete a previously-issued
@@ -195,8 +184,6 @@ namespace Wacs.WASI.Preview2.Sockets
         /// established connection — guests use these to read
         /// and write the TCP byte stream. Default returns a
         /// pair of stub streams.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("finish-connect")]
         public virtual (InputStream, OutputStream) FinishConnect()
             => (new InputStream(), new OutputStream());
 
@@ -204,7 +191,6 @@ namespace Wacs.WASI.Preview2.Sockets
         /// Returns the new <c>tcp-socket</c> + its
         /// (input-stream, output-stream) pair. Default returns
         /// stub instances.</summary>
-        [WasiErrorResult]
         public virtual (TcpSocket, InputStream, OutputStream) Accept()
             => (new TcpSocket(Family),
                 new InputStream(), new OutputStream());
@@ -212,105 +198,69 @@ namespace Wacs.WASI.Preview2.Sockets
         /// <summary>Initiate a connection-shutdown of the
         /// requested direction. The base impl is a no-op
         /// stub.</summary>
-        [WasiErrorResult]
         public virtual void Shutdown(ShutdownType how) { }
 
         /// <summary>Local address the socket is bound to.
         /// Default returns 0.0.0.0:0 — concrete subclasses
         /// override after a real bind.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("local-address")]
         public virtual IpSocketAddress LocalAddress()
             => new Ipv4SocketAddress(0, new byte[] { 0, 0, 0, 0 });
 
         /// <summary>Remote (peer) address the socket is
         /// connected to.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("remote-address")]
         public virtual IpSocketAddress RemoteAddress()
             => new Ipv4SocketAddress(0, new byte[] { 0, 0, 0, 0 });
 
         /// <summary>True iff this socket has transitioned into
         /// the listening state. Bare <c>bool</c> return — no
         /// result wrapping per WIT.</summary>
-        [WasiMethodName("is-listening")]
         public virtual bool IsListening() => _listening;
 
         /// <summary>Per-socket setter for the listen backlog.
         /// v0 just records the value.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("set-listen-backlog-size")]
         public virtual void SetListenBacklogSize(ulong value)
             => ListenBacklogSize = value;
 
         public ulong ListenBacklogSize { get; protected set; } = 128;
 
         /// <summary>SO_KEEPALIVE getter.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("keep-alive-enabled")]
         public virtual bool KeepAliveEnabled() => _keepAliveEnabled;
 
-        [WasiErrorResult]
-        [WasiMethodName("set-keep-alive-enabled")]
         public virtual void SetKeepAliveEnabled(bool value)
             => _keepAliveEnabled = value;
 
         /// <summary>SO_KEEPALIVE idle-time getter (nanoseconds
         /// before the first keep-alive probe).</summary>
-        [WasiErrorResult]
-        [WasiMethodName("keep-alive-idle-time")]
         public virtual ulong KeepAliveIdleTime() => _keepAliveIdleTime;
 
-        [WasiErrorResult]
-        [WasiMethodName("set-keep-alive-idle-time")]
         public virtual void SetKeepAliveIdleTime(ulong value)
             => _keepAliveIdleTime = value;
 
-        [WasiErrorResult]
-        [WasiMethodName("keep-alive-interval")]
         public virtual ulong KeepAliveInterval() => _keepAliveInterval;
 
-        [WasiErrorResult]
-        [WasiMethodName("set-keep-alive-interval")]
         public virtual void SetKeepAliveInterval(ulong value)
             => _keepAliveInterval = value;
 
-        [WasiErrorResult]
-        [WasiMethodName("keep-alive-count")]
         public virtual uint KeepAliveCount() => _keepAliveCount;
 
-        [WasiErrorResult]
-        [WasiMethodName("set-keep-alive-count")]
         public virtual void SetKeepAliveCount(uint value)
             => _keepAliveCount = value;
 
         /// <summary>IP_TTL / IPV6_UNICAST_HOPS getter.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("hop-limit")]
         public virtual byte HopLimit() => _hopLimit;
 
-        [WasiErrorResult]
-        [WasiMethodName("set-hop-limit")]
         public virtual void SetHopLimit(byte value)
             => _hopLimit = value;
 
         /// <summary>SO_RCVBUF getter.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("receive-buffer-size")]
         public virtual ulong ReceiveBufferSize() => _receiveBufferSize;
 
-        [WasiErrorResult]
-        [WasiMethodName("set-receive-buffer-size")]
         public virtual void SetReceiveBufferSize(ulong value)
             => _receiveBufferSize = value;
 
         /// <summary>SO_SNDBUF getter.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("send-buffer-size")]
         public virtual ulong SendBufferSize() => _sendBufferSize;
 
-        [WasiErrorResult]
-        [WasiMethodName("set-send-buffer-size")]
         public virtual void SetSendBufferSize(ulong value)
             => _sendBufferSize = value;
 
@@ -334,18 +284,13 @@ namespace Wacs.WASI.Preview2.Sockets
         public IpAddressFamily Family { get; }
         public UdpSocket(IpAddressFamily family) { Family = family; }
 
-        [WasiMethodName("address-family")]
         public virtual IpAddressFamily AddressFamily() => Family;
 
         public virtual Pollable Subscribe() => new Pollable();
 
-        [WasiErrorResult]
-        [WasiMethodName("finish-bind")]
         public virtual void FinishBind() { }
 
         /// <summary>Begin binding to a local address.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("start-bind")]
         public virtual void StartBind(Network network,
             IpSocketAddress localAddress)
             => _pendingLocal = localAddress;
@@ -355,40 +300,24 @@ namespace Wacs.WASI.Preview2.Sockets
 
         /// <summary>IP_TTL / IPV6_UNICAST_HOPS getter — UDP
         /// equivalent of TCP's <c>hop-limit</c>.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("unicast-hop-limit")]
         public virtual byte UnicastHopLimit() => _hopLimit;
 
-        [WasiErrorResult]
-        [WasiMethodName("set-unicast-hop-limit")]
         public virtual void SetUnicastHopLimit(byte value)
             => _hopLimit = value;
 
-        [WasiErrorResult]
-        [WasiMethodName("receive-buffer-size")]
         public virtual ulong ReceiveBufferSize() => _receiveBufferSize;
 
-        [WasiErrorResult]
-        [WasiMethodName("set-receive-buffer-size")]
         public virtual void SetReceiveBufferSize(ulong value)
             => _receiveBufferSize = value;
 
-        [WasiErrorResult]
-        [WasiMethodName("send-buffer-size")]
         public virtual ulong SendBufferSize() => _sendBufferSize;
 
-        [WasiErrorResult]
-        [WasiMethodName("set-send-buffer-size")]
         public virtual void SetSendBufferSize(ulong value)
             => _sendBufferSize = value;
 
-        [WasiErrorResult]
-        [WasiMethodName("local-address")]
         public virtual IpSocketAddress LocalAddress()
             => new Ipv4SocketAddress(0, new byte[] { 0, 0, 0, 0 });
 
-        [WasiErrorResult]
-        [WasiMethodName("remote-address")]
         public virtual IpSocketAddress RemoteAddress()
             => new Ipv4SocketAddress(0, new byte[] { 0, 0, 0, 0 });
 
@@ -399,10 +328,8 @@ namespace Wacs.WASI.Preview2.Sockets
         /// non-null); when null the socket is unconnected and
         /// any peer can send to it. Default returns stub
         /// streams.</summary>
-        [WasiErrorResult]
-        [WasiMethodName("stream")]
         public virtual (IncomingDatagramStream, OutgoingDatagramStream)
-            UdpStream([WasiOptionalParam] IpSocketAddress? remoteAddress)
+            UdpStream(IpSocketAddress? remoteAddress)
             => (new IncomingDatagramStream(),
                 new OutgoingDatagramStream());
 

@@ -23,7 +23,6 @@ namespace Wacs.WASI.Preview2.Http
         /// WIT <c>write: func()
         ///   -&gt; result&lt;own&lt;output-stream&gt;,
         ///                _&gt;</c>.</summary>
-        [WasiErrorResult]
         public virtual OutputStream Write()
             => _stream ??= new OutputStream();
 
@@ -35,13 +34,11 @@ namespace Wacs.WASI.Preview2.Http
         /// At the wire level, an instance method's first
         /// param IS the resource handle, so this can stay an
         /// instance method on the C# class — the
-        /// [WasiStaticMethod] attribute just changes the
+        /// attribute just changes the
         /// import-name prefix from [method] to [static].
         /// </summary>
-        [WasiErrorResult]
-        [WasiStaticMethod]
         public virtual void Finish(
-            [WasiOptionalParam] Fields? trailers) { }
+            Fields? trailers) { }
 
         public virtual void Dispose() { }
     }

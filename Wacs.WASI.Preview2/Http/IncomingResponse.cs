@@ -32,7 +32,6 @@ namespace Wacs.WASI.Preview2.Http
 
         /// <summary>Take ownership of the response body for
         /// reading.</summary>
-        [WasiErrorResult]
         public virtual IncomingBody Consume()
             => _body ??= new IncomingBody();
 

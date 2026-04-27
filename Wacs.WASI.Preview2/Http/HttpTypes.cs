@@ -71,7 +71,7 @@ namespace Wacs.WASI.Preview2.Http
         // the simplified-error retArea (just the outer Ok disc
         // — Err side never written in v0). Spec-layout
         // (40 bytes, align 8) is reserved for the
-        // outgoing-handler's [WasiSpecErrorCode] path which
+        // outgoing-handler's path which
         // ships in a follow-up commit.
 
         // result<_, error-code>: 1 byte (just Ok disc).
