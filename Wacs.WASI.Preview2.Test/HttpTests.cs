@@ -942,6 +942,45 @@ namespace Wacs.WASI.Preview2.Test
         }
 
         [Fact]
+        public void RequestOptions_set_connect_timeout_with_none_and_some()
+        {
+            // Fixture: option<u64> param shape — wire 2 slots
+            // (disc i32 + value i64). ask-set-none calls
+            // set-connect-timeout(opts, None) — disc=0,
+            // value=0 (ignored). ask-set-some calls with
+            // Some(42) — disc=1, value=42.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-reqopts-setters-component",
+                "httpreqoptsset.component.wasm"));
+            var resources = new ResourceContext();
+            var opts = new RequestOptions();
+            int hOpts = resources.TableFor(typeof(RequestOptions))
+                .Allocate(opts);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                runtime.BindWasiResource<RequestOptions>(
+                    "wasi:http/types@0.2.3", resources);
+            });
+
+            // None — clears the timeout (already null but
+            // sticks).
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-set-none", (uint)hOpts)!);
+            Assert.Null(opts.ConnectTimeout());
+
+            // Some(12345)
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-set-some", (uint)hOpts, 12345UL)!);
+            Assert.Equal(12345UL, opts.ConnectTimeout());
+
+            // None again — clears back.
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-set-none", (uint)hOpts)!);
+            Assert.Null(opts.ConnectTimeout());
+        }
+
+        [Fact]
         public void Http_resource_markers_are_allocatable()
         {
             // Smoke test: every wasi:http resource type can

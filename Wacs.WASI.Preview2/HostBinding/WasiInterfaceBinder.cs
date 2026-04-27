@@ -2485,6 +2485,17 @@ namespace Wacs.WASI.Preview2.HostBinding
                 => p.GetCustomAttribute<WasiOptionalParamAttribute>() != null
                    && p.ParameterType.GetCustomAttribute<
                        WasiResourceAttribute>() != null;
+            // option<primitive> param — Nullable<T> with
+            // [WasiOptionalParam]. Wire: 2 slots (option disc
+            // + value), where value's wire type matches the
+            // underlying primitive (i32 / i64 / f32 / f64).
+            bool IsOptPrimitive(ParameterInfo p)
+                => p.GetCustomAttribute<WasiOptionalParamAttribute>() != null
+                   && p.ParameterType.IsGenericType
+                   && p.ParameterType.GetGenericTypeDefinition()
+                       == typeof(Nullable<>)
+                   && IsPrimitive(p.ParameterType
+                       .GetGenericArguments()[0]);
             foreach (var p in paramInfos)
                 if (!IsPrimitive(p.ParameterType)
                     && !p.ParameterType.IsEnum
@@ -2494,6 +2505,7 @@ namespace Wacs.WASI.Preview2.HostBinding
                     && p.ParameterType.GetCustomAttribute<
                         WasiResourceAttribute>() == null
                     && !IsOptResource(p)
+                    && !IsOptPrimitive(p)
                     && p.ParameterType != typeof(
                         Wacs.WASI.Preview2.Sockets.IpSocketAddress)
                     && p.ParameterType != typeof(
@@ -2512,7 +2524,8 @@ namespace Wacs.WASI.Preview2.HostBinding
                 if (p.ParameterType == typeof(string)
                     || p.ParameterType == typeof(byte[])
                     || p.ParameterType == typeof(byte[][])
-                    || IsOptResource(p))
+                    || IsOptResource(p)
+                    || IsOptPrimitive(p))
                     paramSlotCount += 2;
                 else if (p.ParameterType == typeof(
                     Wacs.WASI.Preview2.Sockets.IpSocketAddress))
@@ -2543,6 +2556,14 @@ namespace Wacs.WASI.Preview2.HostBinding
                 {
                     wireParamTypes[wi++] = typeof(int);   // option disc
                     wireParamTypes[wi++] = typeof(int);   // handle
+                }
+                else if (IsOptPrimitive(p))
+                {
+                    // option<primitive>: disc (i32) + payload
+                    // (wire type of underlying primitive).
+                    wireParamTypes[wi++] = typeof(int);
+                    wireParamTypes[wi++] = ToWireType(
+                        p.ParameterType.GetGenericArguments()[0]);
                 }
                 else if (p.ParameterType.GetCustomAttribute<
                     WasiResourceAttribute>() != null)
@@ -2615,6 +2636,15 @@ namespace Wacs.WASI.Preview2.HostBinding
                         typeof(int), paramInfos[i].Name + "_optDisc");
                     lambdaParams[wi++] = Expression.Parameter(
                         typeof(int), paramInfos[i].Name + "_handle");
+                }
+                else if (IsOptPrimitive(paramInfos[i]))
+                {
+                    lambdaParams[wi++] = Expression.Parameter(
+                        typeof(int), paramInfos[i].Name + "_optDisc");
+                    lambdaParams[wi++] = Expression.Parameter(
+                        ToWireType(paramInfos[i].ParameterType
+                            .GetGenericArguments()[0]),
+                        paramInfos[i].Name + "_value");
                 }
                 else if (paramInfos[i].ParameterType == typeof(
                     Wacs.WASI.Preview2.Sockets.IpSocketAddress))
@@ -2754,6 +2784,41 @@ namespace Wacs.WASI.Preview2.HostBinding
                             Expression.Constant(null,
                                 paramInfos[i].ParameterType),
                             resolved),
+                        typeof(object));
+                }
+                else if (IsOptPrimitive(paramInfos[i]))
+                {
+                    // option<primitive>: 2 wire slots (disc i32
+                    // + value of primitive's wire type). Decode
+                    // to Nullable<T>: disc==0 → null, else
+                    // (T?)value.
+                    var optDiscParam = lambdaParams[wi++];
+                    var valueParam = lambdaParams[wi++];
+                    var underlying = paramInfos[i].ParameterType
+                        .GetGenericArguments()[0];
+                    Expression valueExpr = valueParam;
+                    if (valueExpr.Type != underlying)
+                    {
+                        if (underlying == typeof(bool))
+                            valueExpr = Expression.NotEqual(
+                                valueExpr,
+                                Expression.Constant(0,
+                                    valueExpr.Type));
+                        else
+                            valueExpr = Expression.Convert(
+                                valueExpr, underlying);
+                    }
+                    var someExpr = Expression.New(
+                        paramInfos[i].ParameterType
+                            .GetConstructor(new[] { underlying })!,
+                        valueExpr);
+                    argExprs[i] = Expression.Convert(
+                        Expression.Condition(
+                            Expression.Equal(optDiscParam,
+                                Expression.Constant(0)),
+                            Expression.Constant(null,
+                                paramInfos[i].ParameterType),
+                            someExpr),
                         typeof(object));
                 }
                 else if (paramInfos[i].ParameterType.GetCustomAttribute<

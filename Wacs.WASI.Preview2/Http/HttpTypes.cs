@@ -364,14 +364,38 @@ namespace Wacs.WASI.Preview2.Http
         [WasiMethodName("connect-timeout")]
         public virtual ulong? ConnectTimeout() => _connectTimeout;
 
+        /// <summary>WIT <c>set-connect-timeout: func(
+        ///   duration: option&lt;duration&gt;)
+        ///   -&gt; result&lt;_, error-code&gt;</c>. duration is
+        /// option<u64>; null clears the timeout.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("set-connect-timeout")]
+        public virtual void SetConnectTimeout(
+            [WasiOptionalParam] ulong? duration)
+            => _connectTimeout = duration;
+
         [WasiOptionalReturn]
         [WasiMethodName("first-byte-timeout")]
         public virtual ulong? FirstByteTimeout() => _firstByteTimeout;
+
+        /// <summary>WIT <c>set-first-byte-timeout</c>.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("set-first-byte-timeout")]
+        public virtual void SetFirstByteTimeout(
+            [WasiOptionalParam] ulong? duration)
+            => _firstByteTimeout = duration;
 
         [WasiOptionalReturn]
         [WasiMethodName("between-bytes-timeout")]
         public virtual ulong? BetweenBytesTimeout()
             => _betweenBytesTimeout;
+
+        /// <summary>WIT <c>set-between-bytes-timeout</c>.</summary>
+        [WasiErrorResult]
+        [WasiMethodName("set-between-bytes-timeout")]
+        public virtual void SetBetweenBytesTimeout(
+            [WasiOptionalParam] ulong? duration)
+            => _betweenBytesTimeout = duration;
 
         public virtual void Dispose() { }
     }
