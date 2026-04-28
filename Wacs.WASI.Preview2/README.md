@@ -1,0 +1,145 @@
+# WACS.WASI.Preview2
+
+WASI Preview 2 (component-model) host implementations for the WACS
+WebAssembly interpreter. Implements the canonical-ABI surface for
+`wasi:cli`, `wasi:clocks`, `wasi:filesystem`, `wasi:http`, `wasi:io`,
+`wasi:random`, and `wasi:sockets` — all of WASI 0.2.3.
+
+## Architecture
+
+Three layers:
+
+1. **Vendored WIT files** at `wit/` — the WASI 0.2.3 specs, sourced
+   from upstream `wasi-cli`. Drives both code generation and
+   contract validation.
+2. **Generated host interfaces** — a Roslyn source generator
+   (`Wacs.ComponentModel.Bindgen.SourceGen`) reads the vendored WIT
+   at compile time and emits one `public interface IXxx` per WIT
+   resource or free-function group, with `[WitSource]` attributes
+   carrying the source WIT text. See
+   [`../Wacs.ComponentModel.Bindgen.SourceGen/README.md`](../Wacs.ComponentModel.Bindgen.SourceGen/README.md).
+3. **`*Bindings.cs` orchestrators** — per-subsystem `IBindable`
+   classes that wire host implementations of those interfaces to a
+   `WasmRuntime` via `runtime.BindHostFunction<TDelegate>`. One
+   class per WIT package, partial-class-split per resource family.
+
+The bindings layer lifts/lowers between the canonical-ABI wire form
+and the generated interface contract. Host methods return
+`Result<T, ErrorCode>` (no throw-on-error idiom) — the bindings
+encode both Ok and Err sides faithfully into the canon-ABI retArea.
+
+## Installation
+
+```bash
+dotnet add package WACS.WASI.Preview2
+```
+
+## Usage
+
+Wire each WASI subsystem you want to expose. Constructor params are
+nullable; pass `null` (or omit) to skip an interface.
+
+```csharp
+using Wacs.Core.Runtime;
+using Wacs.WASI.Preview2.Cli;
+using Wacs.WASI.Preview2.Clocks;
+using Wacs.WASI.Preview2.HostBinding;
+using Wacs.WASI.Preview2.Io;
+using Wacs.WASI.Preview2.Random;
+using Wacs.WASI.Preview2.Sockets;
+using Wacs.WASI.Preview2.Http;
+using Wacs.ComponentModel.Runtime;
+
+var runtime = new WasmRuntime();
+var resources = new ResourceContext();
+
+// Stdio + environment + exit. Default Environment pulls from
+// System.Environment; override for sandboxed args/env/cwd.
+new CliBindings(resources,
+    environment: new Environment(),
+    exit: new ExitHandler(),
+    stdin: new Stdin(),
+    stdout: new Stdout(),
+    stderr: new Stderr())
+    .BindToRuntime(runtime);
+
+// Clocks
+new ClockBindings(resources,
+    monotonic: new MonotonicClock(),
+    wall: new WallClock(),
+    timezone: new Timezone())
+    .BindToRuntime(runtime);
+
+// I/O streams + poll + error
+new IoBindings(resources, poll: new PollSource()).BindToRuntime(runtime);
+new StreamBindings(resources).BindToRuntime(runtime);
+
+// Random
+new RandomBindings(
+    random: new Random.Random(),
+    insecureRandom: new InsecureRandom(),
+    insecureSeed: new InsecureSeed())
+    .BindToRuntime(runtime);
+
+// Filesystem (preopens optional)
+new FilesystemBindings(resources).BindToRuntime(runtime);
+
+// Sockets (network stub by default; subclass for real I/O)
+new SocketsBindings(resources,
+    instanceNetwork: new InstanceNetworkSource(),
+    tcpCreate: new TcpCreateSocket(),
+    udpCreate: new UdpCreateSocket(),
+    ipNameLookup: new IpNameLookup())
+    .BindToRuntime(runtime);
+
+// HTTP types (always wire when using outgoing-handler)
+new HttpTypes(resources).BindToRuntime(runtime);
+new OutgoingHandlerBindings(resources, new OutgoingHandlerSource())
+    .BindToRuntime(runtime);
+```
+
+## Validating bindings against the WIT contract
+
+Optional but recommended: catch contract drift at link time before
+the component runs. See the
+[validation docs](../Wacs.ComponentModel/Validation/README.md) for
+details.
+
+```csharp
+using Wacs.ComponentModel.Validation;
+
+var linker = new Linker(runtime, ValidationLevel.Strict);
+linker.Bind(new CliBindings(resources, /* … */));
+linker.Bind(new HttpTypes(resources));
+linker.Bind(new OutgoingHandlerBindings(resources, handler));
+
+var contract = WitContract.FromDirectory("wit");
+linker.Validate(contract);   // throws ValidationException on mismatch
+```
+
+## Implementation depth
+
+The contract surface is complete for WASI 0.2.3. Default host
+implementations vary:
+
+| Subsystem | Default impl | Real I/O |
+|---|---|---|
+| `wasi:cli` (env, exit, stdio) | Backed by `System.Environment` / `Console` | ✅ |
+| `wasi:clocks` | `Stopwatch` / `DateTimeOffset` / `TimeZoneInfo` | ✅ |
+| `wasi:filesystem` | `System.IO.File` / `Directory` via `HostFileInputStream` etc. | ✅ |
+| `wasi:random` | `RandomNumberGenerator` (CSPRNG) + `System.Random` (insecure) | ✅ |
+| `wasi:io/streams` | Through filesystem / cli wrappers | ✅ |
+| `wasi:io/poll` | Always-ready `Pollable` base class | ⚠️ stub |
+| `wasi:sockets/tcp` | In-memory state, no `System.Net.Sockets` | ⚠️ stub |
+| `wasi:sockets/udp` | Same — in-memory only | ⚠️ stub |
+| `wasi:sockets/ip-name-lookup` | Returns empty resolution | ⚠️ stub |
+| `wasi:http/outgoing-handler` | Returns stub future, no `HttpClient` | ⚠️ stub |
+
+Subsystems marked stub return `Ok(default)` — they don't trap, but
+they don't perform real I/O either. Subclass the host types and
+override the relevant methods to plug in real implementations
+(e.g. `class TcpUdpSocket : UdpSocket` with a `UdpClient` backing).
+
+## License
+
+Apache-2.0
