@@ -98,6 +98,42 @@ new OutgoingHandlerBindings(resources, new OutgoingHandlerSource())
     .BindToRuntime(runtime);
 ```
 
+## Dependency-injection integration
+
+For `Microsoft.Extensions.DependencyInjection` consumers (ASP.NET,
+generic-host worker services, etc.), the
+`WACS.WASI.Preview2.DependencyInjection` companion package
+registers every default impl + bindings + a pre-wired `Linker`
+in one call:
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using Wacs.WASI.Preview2.DependencyInjection;
+
+var services = new ServiceCollection();
+services.AddWasiPreview2();   // every subsystem default registered
+
+// Selective override — DI's normal mechanism. Defaults use TryAdd,
+// so any earlier registration wins:
+services.AddSingleton<IOutgoingHandler>(_ =>
+    new HttpClientOutgoingHandler(new HttpClient { Timeout = ... }));
+services.AddSingleton<IEnvironment>(_ => new SandboxedEnvironment(...));
+
+using var sp = services.BuildServiceProvider();
+using var scope = sp.CreateScope();
+
+// Resolve a fully pre-bound Linker — every WASI subsystem already
+// wired into the runtime, ready for component instantiation.
+var linker = scope.ServiceProvider.GetRequiredService<Linker>();
+var runtime = linker.Runtime;
+```
+
+`AddWasiPreview2(opts => opts.InstanceLifetime = ServiceLifetime.Scoped)`
+is the default — `WasmRuntime` / `ResourceContext` / bindings /
+`Linker` all resolve once per scope (fits ASP.NET request-scoped
+wasm execution). Pass `Transient` for per-call construction or
+`Singleton` for single-component apps.
+
 ## Validating bindings against the WIT contract
 
 Optional but recommended: catch contract drift at link time before
