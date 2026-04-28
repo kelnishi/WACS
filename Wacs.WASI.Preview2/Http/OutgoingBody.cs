@@ -7,6 +7,7 @@
 
 using System;
 using Wacs.ComponentModel.Runtime;
+using Wacs.WASI.Preview2.Filesystem;
 using Wacs.WASI.Preview2.HostBinding;
 using Wacs.WASI.Preview2.Io;
 
@@ -14,11 +15,27 @@ namespace Wacs.WASI.Preview2.Http
 {
     /// <summary>WIT <c>wasi:http/types.outgoing-body</c>.
     /// Write side of an HTTP body — guest pushes bytes via
-    /// the <see cref="Write"/> OutputStream.</summary>
+    /// the <see cref="Write"/> OutputStream.
+    ///
+    /// <para>Default impl captures every byte the guest writes
+    /// into an internal <see cref="System.IO.MemoryStream"/>;
+    /// subclasses can read the accumulated bytes via
+    /// <see cref="GetBytes"/>. The
+    /// <see cref="HttpClientOutgoingHandler"/> uses this to
+    /// assemble the request body before
+    /// <see cref="HttpClient.SendAsync(HttpRequestMessage,
+    /// HttpCompletionOption, System.Threading.CancellationToken)"/>.
+    /// </para>
+    /// </summary>
     [WasiResource("outgoing-body")]
     public class OutgoingBody : IOutgoingBody, IDisposable
     {
         protected OutputStream? _stream;
+        // Backing buffer for the default capturing stream.
+        // Subclasses that supply their own _stream simply leave
+        // this null and override GetBytes if they want to expose
+        // captured bytes through a different mechanism.
+        private System.IO.MemoryStream? _captureBuf;
 
         /// <summary>Take ownership of the write stream.
         /// WIT <c>write: func()
@@ -28,7 +45,22 @@ namespace Wacs.WASI.Preview2.Http
             => Result<IOutputStream, Unit>.FromOk(WriteConcrete());
 
         public virtual OutputStream WriteConcrete()
-            => _stream ??= new OutputStream();
+        {
+            if (_stream != null) return _stream;
+            _captureBuf = new System.IO.MemoryStream();
+            _stream = new HostFileOutputStream(_captureBuf);
+            return _stream;
+        }
+
+        /// <summary>The bytes accumulated through the
+        /// outgoing-body's write stream so far. Empty when
+        /// nothing was written or when a subclass replaced
+        /// the default capturing stream. Used by transports
+        /// like <see cref="HttpClientOutgoingHandler"/> to
+        /// assemble the request payload.</summary>
+        public virtual byte[] GetBytes()
+            => _captureBuf?.ToArray()
+                ?? System.Array.Empty<byte>();
 
         /// <summary>Mark the body as complete with optional
         /// trailers. WIT
