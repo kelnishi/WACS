@@ -683,5 +683,89 @@ namespace Wacs.WASI.Preview2.Test
             Assert.True(table.Drop(h));
             Assert.Equal(0, table.Count);
         }
+
+        // ---------- DNS-backed IpNameLookup ---------------------
+
+        [Fact]
+        public void DnsResolveAddressStream_walks_array_then_returns_None()
+        {
+            // Pre-resolved input → walks through, then exhausts.
+            var addrs = new[]
+            {
+                System.Net.IPAddress.Loopback,        // 127.0.0.1
+                System.Net.IPAddress.IPv6Loopback,    // ::1
+            };
+            var stream = new DnsResolveAddressStream(addrs);
+
+            var first = stream.ResolveNextAddress();
+            Assert.True(first.IsOk && first.Ok.HasValue);
+            Assert.IsType<IpAddress.IpAddressIpv4>(first.Ok.Value);
+            var v4 = ((IpAddress.IpAddressIpv4)first.Ok.Value).Value;
+            Assert.Equal((127, 0, 0, 1),
+                ((int)v4.Item1, (int)v4.Item2,
+                 (int)v4.Item3, (int)v4.Item4));
+
+            var second = stream.ResolveNextAddress();
+            Assert.True(second.IsOk && second.Ok.HasValue);
+            Assert.IsType<IpAddress.IpAddressIpv6>(second.Ok.Value);
+
+            // Exhausted → Ok(None).
+            var third = stream.ResolveNextAddress();
+            Assert.True(third.IsOk);
+            Assert.False(third.Ok.HasValue);
+        }
+
+        [Fact]
+        public void IpNameLookup_resolves_localhost_via_System_Net_Dns()
+        {
+            // localhost is guaranteed to resolve on every host
+            // — sanity-check the System.Net.Dns wiring without
+            // hitting the network.
+            var lookup = new IpNameLookup();
+            var network = new Network();
+            var r = lookup.ResolveAddresses(network, "localhost");
+            Assert.True(r.IsOk, "Dns.GetHostAddresses(localhost) "
+                + "should succeed on any host");
+            var stream = (ResolveAddressStream)r.Ok;
+
+            // Walk the stream — should yield at least one addr
+            // (typically 127.0.0.1 and/or ::1).
+            int count = 0;
+            while (true)
+            {
+                var next = stream.ResolveNextAddress();
+                Assert.True(next.IsOk);
+                if (!next.Ok.HasValue) break;
+                count++;
+                if (count > 10) break;   // safety
+            }
+            Assert.True(count > 0,
+                "expected at least one address for localhost");
+        }
+
+        [Fact]
+        public void IpNameLookup_returns_NameUnresolvable_for_invalid_host()
+        {
+            // RFC 6761 reserves .invalid for unresolvable names.
+            // System.Net.Dns surfaces SocketError.HostNotFound
+            // for these on every platform.
+            var lookup = new IpNameLookup();
+            var network = new Network();
+            var r = lookup.ResolveAddresses(network,
+                "wacs-test-nonexistent-domain.invalid");
+            Assert.True(r.IsErr,
+                "expected error for unresolvable host");
+            Assert.Equal(ErrorCode.NameUnresolvable, r.Err);
+        }
+
+        [Fact]
+        public void IpNameLookup_returns_InvalidArgument_for_empty_name()
+        {
+            var lookup = new IpNameLookup();
+            var network = new Network();
+            var r = lookup.ResolveAddresses(network, "");
+            Assert.True(r.IsErr);
+            Assert.Equal(ErrorCode.InvalidArgument, r.Err);
+        }
     }
 }
