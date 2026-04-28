@@ -183,5 +183,70 @@ namespace Wacs.WASI.Preview2.Test
             Assert.Contains(modules, m =>
                 m.StartsWith("wasi:http/"));
         }
+
+        // ---------- Assembly-embedded WIT resources --------------
+
+        [Fact]
+        public void Validation_FromAssembly_loads_WASI_contract_from_DLL()
+        {
+            // The WIT files are embedded as <EmbeddedResource>
+            // with logical names "wit/...". Verify the runtime
+            // can reconstitute the full contract from the
+            // shipped DLL alone — no source-tree access.
+            var asm = typeof(Wacs.WASI.Preview2.Cli.CliBindings)
+                .Assembly;
+            var contract = WitContract.FromAssembly(asm);
+            Assert.NotEmpty(contract.Imports);
+            // Same coverage assertion as the directory variant.
+            var modules = contract.Imports
+                .Select(i => i.Module).Distinct().ToList();
+            Assert.Contains(modules, m =>
+                m.StartsWith("wasi:cli/"));
+            Assert.Contains(modules, m =>
+                m.StartsWith("wasi:http/"));
+            Assert.Contains(modules, m =>
+                m.StartsWith("wasi:sockets/"));
+        }
+
+        [Fact]
+        public void ReadEmbeddedWit_enumerates_every_wit_resource()
+        {
+            var asm = typeof(Wacs.WASI.Preview2.Cli.CliBindings)
+                .Assembly;
+            var sources = WitContract.ReadEmbeddedWit(asm);
+            Assert.NotEmpty(sources);
+            // Every shipped WIT file is exposed by logical
+            // name + readable as text.
+            Assert.All(sources, s =>
+            {
+                Assert.StartsWith("wit/", s.Name);
+                Assert.EndsWith(".wit", s.Name);
+                Assert.False(string.IsNullOrEmpty(s.Text));
+            });
+            // Spot-check: random.wit is in the set.
+            Assert.Contains(sources, s =>
+                s.Name == "wit/deps/random/random.wit");
+        }
+
+        [Fact]
+        public void Validation_FromAssembly_catches_missing_random_binding()
+        {
+            // End-to-end: embed-driven contract + a linker that
+            // bound nothing yields the expected MissingBinding
+            // diagnostics. Confirms the embedded WIT survives
+            // round-trip without dropping interfaces.
+            var runtime = new WasmRuntime();
+            var linker = new Linker(runtime, ValidationLevel.Warnings);
+            var asm = typeof(Wacs.WASI.Preview2.Random.Random)
+                .Assembly;
+            var contract = WitContract.FromAssembly(asm);
+            var report = linker.Validate(contract);
+
+            Assert.False(report.IsClean);
+            Assert.Contains(report.Issues, i =>
+                i.Kind == ValidationIssueKind.MissingBinding
+                && i.Module == "wasi:random/random@0.2.3"
+                && i.Entity == "get-random-bytes");
+        }
     }
 }

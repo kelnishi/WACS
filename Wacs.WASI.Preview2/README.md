@@ -113,7 +113,10 @@ linker.Bind(new CliBindings(resources, /* … */));
 linker.Bind(new HttpTypes(resources));
 linker.Bind(new OutgoingHandlerBindings(resources, handler));
 
-var contract = WitContract.FromDirectory("wit");
+// The WIT files this package was built against are embedded in
+// the assembly itself — no need to ship them alongside.
+var contract = WitContract.FromAssembly(
+    typeof(CliBindings).Assembly);
 linker.Validate(contract);   // throws ValidationException on mismatch
 ```
 

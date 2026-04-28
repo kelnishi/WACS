@@ -85,4 +85,15 @@
         <WitHostNamespaceOverride>Wacs.WASI.Preview2</WitHostNamespaceOverride>
     </PropertyGroup>
 
+    <!-- Embed every vendored WIT file in the assembly so
+         downstream consumers (and Linker.Validate callers) can
+         build a WitContract from this DLL alone — no need to
+         ship wit/ source-tree alongside. Resource keys preserve
+         the relative path under wit/ so WitContract can replay
+         WitLoader's directory-tree merging from in-memory. -->
+    <ItemGroup>
+        <EmbeddedResource Include="wit\**\*.wit"
+                          LogicalName="wit/%(RecursiveDir)%(Filename)%(Extension)" />
+    </ItemGroup>
+
 </Project>
