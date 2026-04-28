@@ -62,7 +62,7 @@ emits issues for mismatches.
 ### `WitContract`
 
 Flat list of `ImportEntry` (module, entity, expected param/return
-arity). Build it from any of five sources:
+arity). Build it from any of six sources:
 
 ```csharp
 // 1. From WIT text (single document, ad-hoc)
@@ -90,7 +90,17 @@ var packages = WitLoader.LoadDirectoryTree("wit");
 WitResolver.Resolve(packages);
 var contract = WitContract.FromPackages(packages);
 
-// 5. From the bindings themselves — reflects [WitSource]
+// 5. From a specific WIT *world*'s imports (the right entry
+//    point when validating against a component-model world
+//    rather than every interface the WIT tree declares —
+//    skips guest-export interfaces, recursively expands
+//    `include other-world;`).
+var packages = WitContract.LoadAssemblyPackages(
+    typeof(CliBindings).Assembly);
+var contract = WitContract.FromWorld(packages,
+    "wasi:cli/imports@0.2.3");
+
+// 6. From the bindings themselves — reflects [WitSource]
 //    attributes off generated I* interface types
 var contract = WitContract.FromBindingTypes(
     typeof(IRandom), typeof(IExit), typeof(IFields));

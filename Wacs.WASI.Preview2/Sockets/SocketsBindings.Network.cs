@@ -14,8 +14,14 @@ namespace Wacs.WASI.Preview2.Sockets
 {
     public sealed partial class SocketsBindings
     {
-        // wasi:sockets/network@0.2.3 — the resource carries no
-        // methods; only the resource-drop is wired.
+        // wasi:sockets/network@0.2.3 — Network resource (no
+        // methods) plus a top-level function:
+        //   network-error-code: func(err: borrow<error>)
+        //     -> option<error-code>
+        // The default impl returns None — i.e. no Error
+        // resource is treated as a network-related error code.
+        // Hosts that want to classify subclass SocketsBindings
+        // and override this binding.
         private static void BindNetwork(WasmRuntime runtime,
             ResourceContext resources)
         {
@@ -23,6 +29,23 @@ namespace Wacs.WASI.Preview2.Sockets
             runtime.BindHostFunction<Action<ExecContext, int>>(
                 (NetworkNs, "[resource-drop]network"),
                 (_, h) => nets.Drop(h));
+
+            // network-error-code(err: borrow<error>)
+            //   -> option<error-code>
+            // Wire: handle (i32) + retArea (i32) -> void.
+            // retArea = 2 bytes: option disc (u8) + error-code
+            // (u8); align 1 since both are u8.
+            runtime.BindHostFunction<Action<ExecContext, int, int>>(
+                (NetworkNs, "network-error-code"),
+                (ctx, errHandle, retArea) =>
+                {
+                    // Default: no classification — return None.
+                    // The errHandle borrow is informational; we
+                    // don't dereference it in the default impl.
+                    var mem = ctx.Memory();
+                    mem[retArea] = 0;       // option None
+                    mem[retArea + 1] = 0;   // payload zeroed
+                });
         }
 
         // wasi:sockets/instance-network@0.2.3

@@ -7,8 +7,10 @@
 
 using System.IO;
 using System.Linq;
+using Microsoft.Extensions.DependencyInjection;
 using Wacs.ComponentModel.Validation;
 using Wacs.Core.Runtime;
+using Wacs.WASI.Preview2.DependencyInjection;
 using Wacs.WASI.Preview2.HostBinding;
 using Wacs.WASI.Preview2.Io;
 using Wacs.WASI.Preview2.Random;
@@ -247,6 +249,90 @@ namespace Wacs.WASI.Preview2.Test
                 i.Kind == ValidationIssueKind.MissingBinding
                 && i.Module == "wasi:random/random@0.2.3"
                 && i.Entity == "get-random-bytes");
+        }
+
+        // ---------- FromWorld scoping ---------------------------
+
+        [Fact]
+        public void FromWorld_scopes_imports_to_a_specific_world()
+        {
+            // wasi:cli/imports is a pure-imports world — every
+            // entry should be host-bindable. wasi:cli/command
+            // pulls those in via `include imports` and adds
+            // `export run` (guest-side, not in our contract).
+            var asm = typeof(Wacs.WASI.Preview2.Cli.CliBindings)
+                .Assembly;
+            var packages = WitContract.LoadAssemblyPackages(asm);
+
+            var importsContract = WitContract.FromWorld(packages,
+                "wasi:cli/imports@0.2.3");
+            var commandContract = WitContract.FromWorld(packages,
+                "wasi:cli/command@0.2.3");
+
+            // Both worlds should pull in CLI + clocks + io +
+            // random + sockets + filesystem imports.
+            foreach (var c in new[] { importsContract,
+                commandContract })
+            {
+                var modules = c.Imports.Select(i => i.Module)
+                    .Distinct().ToList();
+                Assert.Contains(modules, m =>
+                    m == "wasi:cli/environment@0.2.3");
+                Assert.Contains(modules, m =>
+                    m == "wasi:io/streams@0.2.3");
+                Assert.Contains(modules, m =>
+                    m == "wasi:filesystem/types@0.2.3");
+            }
+
+            // Neither contract should include guest-export
+            // interfaces — wasi:cli/run is an EXPORT of the
+            // command world, not an import.
+            foreach (var c in new[] { importsContract,
+                commandContract })
+            {
+                Assert.DoesNotContain(c.Imports, i =>
+                    i.Module == "wasi:cli/run@0.2.3");
+            }
+        }
+
+        [Fact]
+        public void FromWorld_throws_for_missing_world_name()
+        {
+            var asm = typeof(Wacs.WASI.Preview2.Cli.CliBindings)
+                .Assembly;
+            var packages = WitContract.LoadAssemblyPackages(asm);
+            Assert.Throws<System.InvalidOperationException>(
+                () => WitContract.FromWorld(packages,
+                    "wasi:nonexistent/world@9.9.9"));
+        }
+
+        [Fact]
+        public void FromWorld_validation_passes_imports_world_with_DI()
+        {
+            // The DI integration's pre-bound Linker should
+            // satisfy the wasi:cli/imports world contract
+            // exactly — every import that world declares is
+            // bound; no guest-export pollution.
+            var services = new Microsoft.Extensions.DependencyInjection
+                .ServiceCollection();
+            services.AddWasiPreview2(opts =>
+                opts.ValidationLevel = ValidationLevel.Warnings);
+            using var sp = services.BuildServiceProvider();
+            using var scope = sp.CreateScope();
+
+            var linker = scope.ServiceProvider
+                .GetRequiredService<Linker>();
+            var packages = WitContract.LoadAssemblyPackages(
+                typeof(Wacs.WASI.Preview2.Cli.CliBindings).Assembly);
+            var contract = WitContract.FromWorld(packages,
+                "wasi:cli/imports@0.2.3");
+
+            // Validate; cli/imports world's bindings should
+            // all be present even if some arity-mismatch noise
+            // remains from the validator's coarse estimation.
+            var report = linker.Validate(contract);
+            Assert.DoesNotContain(report.Issues, i =>
+                i.Kind == ValidationIssueKind.MissingBinding);
         }
     }
 }
