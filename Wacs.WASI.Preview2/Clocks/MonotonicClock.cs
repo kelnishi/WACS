@@ -48,12 +48,22 @@ namespace Wacs.WASI.Preview2.Clocks
             return (ulong)(1_000_000_000L / Stopwatch.Frequency);
         }
 
-        /// <summary>Default impl returns an always-ready
-        /// Pollable — sufficient for guests that only need
-        /// the wiring; concrete subclasses integrate with
-        /// async timers.</summary>
-        public IPollable SubscribeInstant(ulong when) => new Pollable();
+        /// <summary>Subscribe to a pollable that fires at the
+        /// specified absolute monotonic instant (nanoseconds
+        /// since this clock's epoch). Backed by
+        /// <see cref="System.Threading.Tasks.Task.Delay(System.TimeSpan)"/>;
+        /// instants in the past fire immediately.</summary>
+        public IPollable SubscribeInstant(ulong when)
+        {
+            var nowNs = Now();
+            ulong remaining = when > nowNs ? when - nowNs : 0UL;
+            return new TimerPollable(remaining);
+        }
 
-        public IPollable SubscribeDuration(ulong when) => new Pollable();
+        /// <summary>Subscribe to a pollable that fires after
+        /// <paramref name="when"/> nanoseconds elapse from the
+        /// call site.</summary>
+        public IPollable SubscribeDuration(ulong when)
+            => new TimerPollable(when);
     }
 }
