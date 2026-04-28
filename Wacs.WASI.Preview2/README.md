@@ -119,26 +119,33 @@ linker.Validate(contract);   // throws ValidationException on mismatch
 
 ## Implementation depth
 
-The contract surface is complete for WASI 0.2.3. Default host
-implementations vary:
+Every WASI 0.2.3 subsystem ships with a real .NET-backed default
+implementation. The base classes default to "stub" semantics
+(empty/no-op) so they don't trap if a host wires them naively;
+the production-named subclass per subsystem wires through to the
+real BCL primitive.
 
-| Subsystem | Default impl | Real I/O |
+| Subsystem | Real-impl class | Backing |
 |---|---|---|
-| `wasi:cli` (env, exit, stdio) | Backed by `System.Environment` / `Console` | ✅ |
-| `wasi:clocks` | `Stopwatch` / `DateTimeOffset` / `TimeZoneInfo` | ✅ |
-| `wasi:filesystem` | `System.IO.File` / `Directory` via `HostFileInputStream` etc. | ✅ |
-| `wasi:random` | `RandomNumberGenerator` (CSPRNG) + `System.Random` (insecure) | ✅ |
-| `wasi:io/streams` | Through filesystem / cli wrappers | ✅ |
-| `wasi:io/poll` | Always-ready `Pollable` base class | ⚠️ stub |
-| `wasi:sockets/tcp` | In-memory state, no `System.Net.Sockets` | ⚠️ stub |
-| `wasi:sockets/udp` | Same — in-memory only | ⚠️ stub |
-| `wasi:sockets/ip-name-lookup` | Returns empty resolution | ⚠️ stub |
-| `wasi:http/outgoing-handler` | Returns stub future, no `HttpClient` | ⚠️ stub |
+| `wasi:cli` (env, exit, stdio) | `Environment` / `ExitHandler` / `Stdin` / `Stdout` / `Stderr` | `System.Environment` / `Console` |
+| `wasi:clocks/monotonic` | `MonotonicClock` | `Stopwatch` (high-res) + `Task.Delay` for subscribe-* |
+| `wasi:clocks/wall-clock` | `WallClock` | `DateTimeOffset.UtcNow` |
+| `wasi:clocks/timezone` | `Timezone` | `TimeZoneInfo` |
+| `wasi:filesystem` | `Descriptor` + `HostFileInputStream` / `HostFileOutputStream` | `System.IO.File` / `Directory` |
+| `wasi:random` | `Random` / `InsecureRandom` / `InsecureSeed` | `RandomNumberGenerator` (CSPRNG) + `System.Random` |
+| `wasi:io/streams` | Through filesystem / cli wrappers | Result-encoded `System.IO.Stream` |
+| `wasi:io/poll` | `PollSource` + `ManualResetPollable` / `TimerPollable` | `ManualResetEventSlim` + `Task.WhenAny` |
+| `wasi:sockets/tcp` | `SystemTcpSocket` + `SystemTcpCreateSocket` | `System.Net.Sockets.Socket` (Stream) |
+| `wasi:sockets/udp` | `SystemUdpSocket` + datagram-stream wrappers | `System.Net.Sockets.Socket` (Dgram) |
+| `wasi:sockets/ip-name-lookup` | `IpNameLookup` + `DnsResolveAddressStream` | `System.Net.Dns.GetHostAddresses` |
+| `wasi:http/outgoing-handler` | `HttpClientOutgoingHandler` | `System.Net.Http.HttpClient` |
 
-Subsystems marked stub return `Ok(default)` — they don't trap, but
-they don't perform real I/O either. Subclass the host types and
-override the relevant methods to plug in real implementations
-(e.g. `class TcpUdpSocket : UdpSocket` with a `UdpClient` backing).
+Constructors take optional impl arguments — default to the real-
+backed class, pass `null` to skip wiring an interface entirely.
+
+Hosts that need different behavior (sandbox restrictions, custom
+DNS, fakes for testing) subclass the relevant base type and
+override the methods they want to replace.
 
 ## License
 
