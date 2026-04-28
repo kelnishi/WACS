@@ -591,6 +591,16 @@ namespace Wacs.WASI.Preview2.Sockets
         //   error mapping
         // -----------------------------------------------------
 
+        // Public passthroughs for sibling System*Socket types
+        // (e.g. SystemUdpSocket, SystemIncomingDatagramStream)
+        // that need the same IpSocketAddress <-> IPEndPoint
+        // conversion shape. The underlying methods stay
+        // protected on the TCP class to keep the surface tight.
+        public static IPEndPoint ToEndPointPublic(IpSocketAddress addr)
+            => ToEndPoint(addr);
+        public static IpSocketAddress FromEndPointPublic(IPEndPoint ep)
+            => FromEndPoint(ep);
+
         internal static ErrorCode MapSocketError(SocketException se)
             => se.SocketErrorCode switch
             {
@@ -619,21 +629,25 @@ namespace Wacs.WASI.Preview2.Sockets
     public sealed class SocketReadyPollable : Pollable
     {
         private readonly Socket _socket;
+        private readonly SelectMode _mode;
         public SocketReadyPollable(Socket socket)
+            : this(socket, SelectMode.SelectRead) { }
+        public SocketReadyPollable(Socket socket, SelectMode mode)
         {
             _socket = socket
                 ?? throw new ArgumentNullException(nameof(socket));
+            _mode = mode;
         }
 
         public override bool Ready()
         {
-            try { return _socket.Poll(0, SelectMode.SelectRead); }
+            try { return _socket.Poll(0, _mode); }
             catch { return true; }
         }
 
         public override void Block()
         {
-            try { _socket.Poll(-1, SelectMode.SelectRead); }
+            try { _socket.Poll(-1, _mode); }
             catch { /* completion via the next op surfaces error */ }
         }
     }
