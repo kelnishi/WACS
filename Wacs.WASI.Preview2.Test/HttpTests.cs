@@ -751,11 +751,16 @@ namespace Wacs.WASI.Preview2.Test
         {
             public bool SetCalled;
             public OutgoingResponse? CapturedResponse;
+            public ErrorCode? CapturedError;
 
-            public override void SetImpl(OutgoingResponse? response)
+            public override void Set(IResponseOutparam param,
+                Result<IOutgoingResponse, ErrorCode> response)
             {
                 SetCalled = true;
-                CapturedResponse = response;
+                if (response.IsOk)
+                    CapturedResponse = (OutgoingResponse)response.Ok;
+                else
+                    CapturedError = response.Err;
             }
         }
 
@@ -792,10 +797,10 @@ namespace Wacs.WASI.Preview2.Test
         [Fact]
         public void ResponseOutparam_set_with_err_passes_null()
         {
-            // Same fixture, ask-set-err(param) calls
-            // set(param, Err(internal-error)) — outer disc=1,
-            // payload slot ignored. Stub gets null since v0
-            // doesn't surface the error payload.
+            // ask-set-err calls set(param, Err(internal-error(None))).
+            // Disc 38, all payload zero — stub captures the
+            // ErrorCodeInternalError variant via the Set
+            // override.
             var bytes = File.ReadAllBytes(FindFixturePath(
                 "wasi-http-responseoutparam-component",
                 "httpresponseoutparam.component.wasm"));
@@ -813,6 +818,65 @@ namespace Wacs.WASI.Preview2.Test
                 "ask-set-err", (uint)hParam)!);
             Assert.True(outparam.SetCalled);
             Assert.Null(outparam.CapturedResponse);
+            var ie = Assert.IsType<ErrorCode.ErrorCodeInternalError>(
+                outparam.CapturedError);
+            Assert.False(ie.Value.HasValue);
+        }
+
+        [Fact]
+        public void ResponseOutparam_decodes_i64_payload_via_canonical_join()
+        {
+            // ask-set-err-bodysize: Err(HTTP-request-body-size(
+            // Some(12345))). Exercises the joined-flat i64 slot
+            // (rp2) — decoded as ulong directly, no narrowing.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-responseoutparam-component",
+                "httpresponseoutparam.component.wasm"));
+            var resources = new ResourceContext();
+            var outparam = new CapturingResponseOutparam();
+            int hParam = resources.TableFor(typeof(ResponseOutparam))
+                .Allocate(outparam);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                new HttpTypes(resources).BindToRuntime(runtime);
+            });
+
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-set-err-bodysize", (uint)hParam)!);
+            var bs = Assert.IsType<ErrorCode.ErrorCodeHTTPRequestBodySize>(
+                outparam.CapturedError);
+            Assert.True(bs.Value.HasValue);
+            Assert.Equal(12345UL, bs.Value.Value);
+        }
+
+        [Fact]
+        public void ResponseOutparam_decodes_string_payload_via_canonical_join()
+        {
+            // ask-set-err-internal-msg: Err(internal-error(
+            // Some("bad"))). Exercises the canonical string
+            // payload — ptr is read from the (i64-joined) rp2
+            // narrowed back to i32, len from rp3. The host
+            // resolves the UTF-8 from guest memory.
+            var bytes = File.ReadAllBytes(FindFixturePath(
+                "wasi-http-responseoutparam-component",
+                "httpresponseoutparam.component.wasm"));
+            var resources = new ResourceContext();
+            var outparam = new CapturingResponseOutparam();
+            int hParam = resources.TableFor(typeof(ResponseOutparam))
+                .Allocate(outparam);
+
+            var ci = ComponentInstance.Instantiate(bytes, runtime =>
+            {
+                new HttpTypes(resources).BindToRuntime(runtime);
+            });
+
+            Assert.Equal(0u, (uint)ci.Invoke(
+                "ask-set-err-internal-msg", (uint)hParam)!);
+            var ie = Assert.IsType<ErrorCode.ErrorCodeInternalError>(
+                outparam.CapturedError);
+            Assert.True(ie.Value.HasValue);
+            Assert.Equal("bad", ie.Value.Value);
         }
 
         [Fact]

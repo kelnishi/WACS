@@ -402,10 +402,23 @@ namespace Wacs.ComponentModel.Validation
             IReadOnlyList<CtPackage> packages)
         {
             var imports = new List<ImportEntry>();
+            // Pre-compute the set of interfaces that appear as
+            // imports in at least one world (transitively through
+            // `include other-world`). Anything that's only ever a
+            // guest export (e.g. `wasi:cli/run`,
+            // `wasi:http/incoming-handler`) is skipped — hosts
+            // don't bind exports. If the package tree declares no
+            // worlds, fall back to including every interface.
+            var importableIfaces = ComputeImportableInterfaces(
+                packages);
+            bool scopeToImports = importableIfaces != null;
             foreach (var pkg in packages)
             {
                 foreach (var iface in pkg.Interfaces)
                 {
+                    if (scopeToImports
+                        && !importableIfaces!.Contains(iface))
+                        continue;
                     // WASM imports use the WASI-canonical form
                     // <ns>:<pkg>/<iface>@<ver> (version at the
                     // end), not the WIT QualifiedName's
@@ -449,6 +462,92 @@ namespace Wacs.ComponentModel.Validation
             return new WitContract(imports);
         }
 
+        // Determine which interfaces should appear in a
+        // FromAssembly / FromDirectory contract. Three buckets:
+        //   - imported by some world → include (host binds it)
+        //   - referenced only as exports across all worlds →
+        //     exclude (guest implements it; host doesn't bind)
+        //   - not referenced by any world (orphan) → include
+        //     conservatively (no signal to exclude)
+        //
+        // Returns null if the package tree declares no worlds
+        // at all — caller falls back to "include everything"
+        // (preserves the pre-scoping FromText one-shot behavior).
+        private static HashSet<CtInterfaceType>?
+            ComputeImportableInterfaces(
+                IReadOnlyList<CtPackage> packages)
+        {
+            bool sawWorld = false;
+            foreach (var pkg in packages)
+            {
+                if (pkg.Worlds.Count > 0)
+                {
+                    sawWorld = true;
+                    break;
+                }
+            }
+            if (!sawWorld) return null;
+
+            var imported = new HashSet<CtInterfaceType>();
+            var referenced = new HashSet<CtInterfaceType>();
+            var visited = new HashSet<string>();
+            foreach (var pkg in packages)
+                foreach (var w in pkg.Worlds)
+                    CollectWorldRefs(w, packages,
+                        imported, referenced, visited);
+
+            var result = new HashSet<CtInterfaceType>(imported);
+            foreach (var pkg in packages)
+                foreach (var iface in pkg.Interfaces)
+                    if (!referenced.Contains(iface))
+                        result.Add(iface);  // orphan
+            return result;
+        }
+
+        private static void CollectWorldRefs(
+            CtWorldType world,
+            IReadOnlyList<CtPackage> packages,
+            HashSet<CtInterfaceType> imported,
+            HashSet<CtInterfaceType> referenced,
+            HashSet<string> visited)
+        {
+            if (!visited.Add(world.QualifiedName))
+                return;
+
+            foreach (var inc in world.Includes)
+            {
+                var includedName = inc.Package == null
+                    ? (world.Package?.ToString() ?? "") + "/" + inc.WorldName
+                    : inc.Package.ToString() + "/" + inc.WorldName;
+                var included = FindWorld(packages, includedName);
+                if (included != null)
+                    CollectWorldRefs(included, packages,
+                        imported, referenced, visited);
+            }
+
+            foreach (var imp in world.Imports)
+                AddIfaceRef(imp.Spec, imported, referenced);
+            foreach (var exp in world.Exports)
+                AddIfaceRef(exp.Spec, null, referenced);
+        }
+
+        private static void AddIfaceRef(CtExternType spec,
+            HashSet<CtInterfaceType>? imported,
+            HashSet<CtInterfaceType> referenced)
+        {
+            switch (spec)
+            {
+                case CtExternInterfaceRef iref when iref.Target != null:
+                    imported?.Add(iref.Target);
+                    referenced.Add(iref.Target);
+                    break;
+                case CtExternInlineInterface inline:
+                    imported?.Add(inline.Interface);
+                    referenced.Add(inline.Interface);
+                    break;
+            }
+        }
+
         private static string ResourceMethodEntity(string resName,
             CtResourceMethod m)
         {
@@ -475,82 +574,50 @@ namespace Wacs.ComponentModel.Validation
             return s![0] == '%' ? s.Substring(1) : s;
         }
 
-        // Wire-shape arity is the canon-lowered "flat" form.
-        // The validator checks param-count + return-count
-        // equality; exact per-slot ValType matching is a
-        // follow-up. <paramref name="resourceMethodKind"/>
-        // is null for free functions; instance methods take
-        // an implicit self handle, constructors return one.
+        // Canon-ABI flat-form lowering for host-imported funcs.
+        // Spec: MAX_FLAT_PARAMS = 16, MAX_FLAT_RESULTS = 1.
+        // - If lowered param-flat > 16 → all params packed into
+        //   a single i32 pointer (indirect params).
+        // - If lowered return-flat > 1 → result returned through
+        //   a trailing i32 retArea param, function returns void.
+        // <paramref name="resourceMethodKind"/> is null for free
+        // functions; instance methods take an implicit self
+        // handle, constructors return one.
+        private const int MaxFlatParams = 16;
+        private const int MaxFlatResults = 1;
+
         private static ImportEntry BuildEntry(string module,
             string name, CtFunctionType fn,
             CtResourceMethodKind? resourceMethodKind = null)
         {
             int paramSlots = 0;
-            // [method]X.foo — receiver passes its own handle
-            // as the first wire slot.
             if (resourceMethodKind == CtResourceMethodKind.Instance)
                 paramSlots += 1;
             foreach (var p in fn.Params)
                 paramSlots += FlatSlotCount(p.Type);
 
-            // Canon-ABI direction: host-imported functions cap
-            // at MAX_FLAT_RESULTS = 1. Anything wider lowers to
-            // a retArea pointer (1 trailing param) + void
-            // return. result<...>, list<X>, tuple<X,Y>,
-            // option<...> with multi-slot inner — all use
-            // retArea.
-            int rawReturnSlots;
-            bool resultReturn = false;
-            if (resourceMethodKind == CtResourceMethodKind.Constructor)
-            {
-                // [constructor]X — implicit own<X> return,
-                // 1 handle slot.
-                rawReturnSlots = 1;
-            }
-            else if (fn.HasNoResult)
-            {
-                rawReturnSlots = 0;
-            }
-            else
-            {
-                rawReturnSlots = FlatSlotCount(fn.Result!);
-                // WACS convention: any result<...> return uses
-                // the retArea pointer pattern, even for
-                // result<_, _> where the canon-ABI flat form
-                // would be a single i32 disc. Matches the
-                // bindings' uniform Write* helper signatures.
-                resultReturn = ResolveBody(fn.Result!)
-                    is CtResultType;
-            }
-
             int returnSlots;
-            if (!resultReturn && rawReturnSlots <= 1)
-            {
-                returnSlots = rawReturnSlots;
-            }
+            if (resourceMethodKind == CtResourceMethodKind.Constructor)
+                returnSlots = 1;
+            else if (fn.HasNoResult)
+                returnSlots = 0;
             else
+                returnSlots = FlatSlotCount(fn.Result!);
+
+            // Apply MAX_FLAT_PARAMS — note this happens BEFORE
+            // the retArea hoist, so a func with 16 flat param
+            // slots + retArea ends up as 1 ptr (indirect) + 1
+            // retArea = 2 params on the wire.
+            if (paramSlots > MaxFlatParams)
+                paramSlots = 1;
+
+            if (returnSlots > MaxFlatResults)
             {
-                // Hoist to retArea — host receives an extra i32
-                // trailing param, returns void.
                 paramSlots += 1;
                 returnSlots = 0;
             }
             return new ImportEntry(module, name,
                 paramSlots, returnSlots);
-        }
-
-        // Follow CtTypeRef chains to the underlying body —
-        // matches HostInterfaceEmit.ResolveTarget. Used for
-        // shape-classification predicates like "is this
-        // ultimately a result<...>?".
-        private static CtValType ResolveBody(CtValType t)
-        {
-            while (t is CtTypeRef r && r.Target?.Type != null
-                && !ReferenceEquals(r.Target.Type, t))
-            {
-                t = r.Target.Type;
-            }
-            return t;
         }
 
         private static int FlatSlotCount(CtValType t)
@@ -622,20 +689,17 @@ namespace Wacs.ComponentModel.Validation
                 // by counting method's parameter wire types.
                 int paramSlots = m.GetParameters()
                     .Sum(p => FlatSlotCountForClrType(p.ParameterType));
-                bool returnsResult =
-                    m.ReturnType.IsGenericType
-                    && m.ReturnType.GetGenericTypeDefinition()
-                        == typeof(Result<,>);
-                int returnSlots;
-                if (m.ReturnType == typeof(void))
-                    returnSlots = 0;
-                else if (returnsResult)
+                int returnSlots = m.ReturnType == typeof(void)
+                    ? 0
+                    : FlatSlotCountForClrType(m.ReturnType);
+
+                if (paramSlots > MaxFlatParams)
+                    paramSlots = 1;
+                if (returnSlots > MaxFlatResults)
                 {
-                    paramSlots += 1; // retArea
+                    paramSlots += 1;
                     returnSlots = 0;
                 }
-                else
-                    returnSlots = FlatSlotCountForClrType(m.ReturnType);
 
                 imports.Add(new ImportEntry(module, item,
                     paramSlots, returnSlots));

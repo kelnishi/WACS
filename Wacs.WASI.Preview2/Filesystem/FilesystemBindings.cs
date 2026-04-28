@@ -293,15 +293,6 @@ namespace Wacs.WASI.Preview2.Filesystem
         //                  variant param decoders
         // -----------------------------------------------------
 
-        // variant access-type { access(modes), exists } —
-        // 2 wire slots: disc + modes.
-        private static AccessType DecodeAccessType(int disc, int modes)
-        {
-            if (disc == 0)
-                return new AccessTypeAccess((AccessModes)modes);
-            return new AccessTypeExists();
-        }
-
         // variant new-timestamp { no-change, now,
         //   timestamp(datetime) } — 3 wire slots:
         //   disc + i64 seconds + i32 nanos.

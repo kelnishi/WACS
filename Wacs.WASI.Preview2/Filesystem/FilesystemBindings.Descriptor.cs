@@ -297,27 +297,6 @@ namespace Wacs.WASI.Preview2.Filesystem
                             (ulong)offset, (ulong)length,
                             (Advice)(byte)advice)));
 
-            // access-at: func(path-flags, path, type: access-type)
-            //   -> result<_, error-code>
-            // Wire form: (handle i32, pathFlags i32, ptr i32, len i32,
-            //             accessDisc i32, accessModes i32, retArea i32)
-            // NOT in the v0.2.3 WIT — host-only convenience method
-            // retained for backwards-compatibility with earlier tests.
-            // Default impl is a no-op, so the encoder always writes Ok.
-            runtime.BindHostFunction<Action<ExecContext, int, int, int, int,
-                int, int, int>>(
-                (Ns, "[method]descriptor.access-at"),
-                (ctx, handle, pathFlags, ptr, len, accDisc, accModes,
-                    retArea) =>
-                {
-                    ((Descriptor)descriptors.Get(handle)).AccessAt(
-                        (PathFlags)(uint)pathFlags,
-                        ctx.ReadUtf8String(ptr, len),
-                        DecodeAccessType(accDisc, accModes));
-                    WriteResultUnit(ctx.Memory(), retArea,
-                        Result<Unit, ErrorCode>.FromOk(Unit.Value));
-                });
-
             // set-times: func(data-access: new-timestamp,
             //                data-modification: new-timestamp)
             //   -> result<_, error-code>

@@ -43,16 +43,14 @@ namespace Wacs.WASI.Preview2.Http
                     ((OutgoingResponse)responses.Get(handle)).StatusCode());
 
             // [method]outgoing-response.set-status-code -> result<_, _>.
-            // The fixture's wit makes this return a flat i32 disc
-            // OR a 1-byte retArea — looking at the existing
-            // binding, it uses 1-byte retArea form.
-            runtime.BindHostFunction<Action<ExecContext, int, int, int>>(
+            // result<_, _> lowers to a single i32 disc, returned flat.
+            runtime.BindHostFunction<Func<ExecContext, int, int, int>>(
                 (Ns, "[method]outgoing-response.set-status-code"),
-                (ctx, handle, value, retArea) =>
+                (_, handle, value) =>
                 {
                     var r = ((OutgoingResponse)responses.Get(handle))
                         .SetStatusCode((ushort)value);
-                    WriteResultUnit(ctx.Memory(), retArea, r);
+                    return r.IsOk ? 0 : 1;
                 });
 
             runtime.BindHostFunction<Func<ExecContext, int, int>>(

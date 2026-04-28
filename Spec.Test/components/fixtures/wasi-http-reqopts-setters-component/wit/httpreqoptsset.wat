@@ -1,6 +1,6 @@
 (module
   (import "wasi:http/types@0.2.3" "[method]request-options.set-connect-timeout"
-    (func $set (param i32 i32 i64 i32)))
+    (func $set (param i32 i32 i64) (result i32)))
   (memory (export "memory") 1)
   (global $next (mut i32) (i32.const 1024))
   (func $realloc (param i32 i32 i32 i32) (result i32)
@@ -15,15 +15,8 @@
       (i32.add (global.get $next) (local.get 3)))
     (local.get $r))
   (export "cabi_realloc" (func $realloc))
+  ;; set-connect-timeout returns result<_, _> = flat i32 disc (0=Ok).
   (func (export "ask-set-none") (param i32) (result i32)
-    (local $r i32)
-    (local.set $r (call $realloc (i32.const 0) (i32.const 0) (i32.const 1) (i32.const 4)))
-    ;; set-connect-timeout(opts, None: disc=0, value=0)
-    (call $set (local.get 0) (i32.const 0) (i64.const 0) (local.get $r))
-    (i32.load8_u (local.get $r)))
+    (call $set (local.get 0) (i32.const 0) (i64.const 0)))
   (func (export "ask-set-some") (param i32 i64) (result i32)
-    (local $r i32)
-    (local.set $r (call $realloc (i32.const 0) (i32.const 0) (i32.const 1) (i32.const 4)))
-    ;; set-connect-timeout(opts, Some(value): disc=1, value)
-    (call $set (local.get 0) (i32.const 1) (local.get 1) (local.get $r))
-    (i32.load8_u (local.get $r))))
+    (call $set (local.get 0) (i32.const 1) (local.get 1))))

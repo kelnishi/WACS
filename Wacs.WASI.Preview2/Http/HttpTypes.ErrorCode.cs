@@ -25,9 +25,13 @@ namespace Wacs.WASI.Preview2.Http
         //   +1..+7: pad
         //   +8..+39: error-code variant slot (32 bytes,
         //              ErrorCodeEncoder.Size).
+        //
+        // <paramref name="impl"/> may be null — without a mapper
+        // the host returns Option.None, matching the spec's
+        // intent that error-code classification is best-effort.
         private static void BindHttpErrorCode(WasmRuntime runtime,
             ResourceContext resources, Realloc alloc,
-            IHttpErrorCodeMapper impl)
+            IHttpErrorCodeMapper? impl)
         {
             var errors = resources.Table<Error>();
 
@@ -35,9 +39,14 @@ namespace Wacs.WASI.Preview2.Http
                 (Ns, "http-error-code"),
                 (ctx, handle, retArea) =>
                 {
+                    var mem = ctx.Memory();
+                    if (impl == null)
+                    {
+                        mem[retArea] = 0;       // None
+                        return;
+                    }
                     var err = (Error)errors.Get(handle);
                     var code = impl.HttpErrorCode(err);
-                    var mem = ctx.Memory();
                     if (code == null)
                     {
                         mem[retArea] = 0;       // None

@@ -5,8 +5,9 @@
     (func $hd (param i32) (result i32)))
   (import "wasi:http/types@0.2.3" "[method]outgoing-response.status-code"
     (func $osc (param i32) (result i32)))
+  ;; set-status-code returns result<_, _> = flat i32 disc.
   (import "wasi:http/types@0.2.3" "[method]outgoing-response.set-status-code"
-    (func $sosc (param i32 i32 i32)))
+    (func $sosc (param i32 i32) (result i32)))
   (import "wasi:http/types@0.2.3" "[resource-drop]fields"
     (func $drop_fields (param i32)))
   (memory (export "memory") 1)
@@ -26,10 +27,7 @@
   (func (export "ask-status") (param i32) (result i32)
     (call $st (local.get 0)))
   (func (export "ask-set-status") (param i32) (result i32)
-    (local $r i32)
-    ;; result<_, header-error>: align 1, total 2 bytes
-    (local.set $r (call $realloc (i32.const 0) (i32.const 0) (i32.const 1) (i32.const 2)))
-    (call $sosc (local.get 0) (i32.const 404) (local.get $r))
+    (drop (call $sosc (local.get 0) (i32.const 404)))
     (call $osc (local.get 0)))
   (func (export "ask-headers") (param i32) (result i32)
     (local $h i32)
