@@ -104,13 +104,23 @@ namespace Wacs.WASI.Preview2.Clocks
 
         // wasi:clocks/timezone@0.2.3
         //   utc-offset: func(when: datetime) -> s32
+        //   display: func(when: datetime) -> timezone-display
         //
         // datetime param flat-lowers to two slots (u64 + u32).
-        // Wire: (param i64 i32) -> (result i32).
+        // utc-offset wire: (param i64 i32) -> (result i32).
+        // display returns a record (utc-offset:s32, name:string,
+        // in-daylight-saving-time:bool) which the canon ABI lifts
+        // through a retArea pointer.
+        //   retArea = 16 bytes:
+        //     +0: utc-offset (s32)
+        //     +4: name ptr (i32)
+        //     +8: name len (i32)
+        //     +12: in-daylight-saving-time (bool, +3 pad)
         private static void BindTimezone(WasmRuntime runtime,
             ITimezone impl)
         {
             const string ns = "wasi:clocks/timezone@0.2.3";
+            var alloc = new Realloc(runtime);
 
             runtime.BindHostFunction<Func<ExecContext, long, int, int>>(
                 (ns, "utc-offset"),
@@ -119,6 +129,30 @@ namespace Wacs.WASI.Preview2.Clocks
                     Seconds = (ulong)seconds,
                     Nanoseconds = (uint)nanoseconds,
                 }));
+
+            runtime.BindHostFunction<Action<ExecContext, long, int, int>>(
+                (ns, "display"),
+                (ctx, seconds, nanoseconds, retArea) =>
+                {
+                    var disp = impl.Display(new Datetime
+                    {
+                        Seconds = (ulong)seconds,
+                        Nanoseconds = (uint)nanoseconds,
+                    });
+                    var (namePtr, nameLen) = MemoryWriter
+                        .WriteUtf8StringAllocated(
+                            ctx.Memory, disp.Name ?? "", alloc);
+                    var mem = ctx.Memory();
+                    MemoryWriter.WriteI32LE(mem, retArea,
+                        disp.UtcOffset);
+                    MemoryWriter.WriteI32LE(mem, retArea + 4, namePtr);
+                    MemoryWriter.WriteI32LE(mem, retArea + 8, nameLen);
+                    mem[retArea + 12] = disp.InDaylightSavingTime
+                        ? (byte)1 : (byte)0;
+                    mem[retArea + 13] = 0;
+                    mem[retArea + 14] = 0;
+                    mem[retArea + 15] = 0;
+                });
         }
 
         private static void WriteDatetime(ExecContext ctx,

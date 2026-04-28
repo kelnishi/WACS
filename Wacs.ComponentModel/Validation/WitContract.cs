@@ -96,20 +96,28 @@ namespace Wacs.ComponentModel.Validation
         {
             if (assembly == null) throw new ArgumentNullException(
                 nameof(assembly));
+            return BuildFromPackages(
+                LoadAssemblyPackages(assembly, resourcePrefix));
+        }
+
+        /// <summary>
+        /// Load all <see cref="CtPackage"/>s from
+        /// <paramref name="assembly"/>'s embedded WIT resources,
+        /// resolved (cross-package <c>use</c> chains filled in).
+        /// Useful when the caller wants to walk the package
+        /// graph directly — e.g. to pick a specific world via
+        /// <see cref="FromWorld"/>.
+        /// </summary>
+        public static IReadOnlyList<CtPackage> LoadAssemblyPackages(
+            Assembly assembly, string resourcePrefix = "wit/")
+        {
             var sources = ReadEmbeddedWit(assembly, resourcePrefix);
             if (sources.Count == 0)
                 throw new InvalidOperationException(
                     "Assembly " + assembly.GetName().Name
                     + " has no embedded WIT resources under prefix '"
-                    + resourcePrefix + "'. Add "
-                    + "<EmbeddedResource Include=\"wit\\**\\*.wit\" "
-                    + "LogicalName=\"wit/%(RecursiveDir)%(Filename)%(Extension)\" /> "
-                    + "to the project, or pass a different prefix.");
+                    + resourcePrefix + "'.");
 
-            // Group by directory under the prefix — mirrors
-            // WitLoader.LoadDirectoryTree's behavior so
-            // headerless siblings attribute to the named package
-            // in their directory.
             var byDir = new Dictionary<string, List<string>>(
                 StringComparer.OrdinalIgnoreCase);
             foreach (var (key, text) in sources)
@@ -135,7 +143,7 @@ namespace Wacs.ComponentModel.Validation
             }
             var packages = MergeByQualifiedName(allPackages);
             WitResolver.Resolve(packages);
-            return BuildFromPackages(packages);
+            return packages;
         }
 
         /// <summary>Enumerate the embedded WIT resources from
@@ -203,6 +211,169 @@ namespace Wacs.ComponentModel.Validation
         }
 
         /// <summary>
+        /// Build a contract for a specific WIT <em>world</em>'s
+        /// imports. Walks the world's
+        /// <see cref="CtWorldType.Imports"/>, recursively
+        /// expanding <see cref="CtWorldType.Includes"/>. Exports
+        /// are skipped — they're what the guest provides, not
+        /// what the host has to bind.
+        ///
+        /// <para>This is the right entry point for validating
+        /// against a specific component-model world rather than
+        /// "every interface in every package the WIT tree
+        /// defines." For WASI 0.2.3 hosts targeting CLI guests,
+        /// validate against <c>wasi:cli/imports</c>;
+        /// HTTP-proxy hosts validate against
+        /// <c>wasi:http/proxy</c>.</para>
+        /// </summary>
+        /// <param name="packages">All packages whose
+        /// interfaces the world's imports may reference. Must
+        /// have been through <see cref="WitResolver.Resolve"/>.</param>
+        /// <param name="worldQualifiedName">The world's
+        /// canonical name (e.g.
+        /// <c>"wasi:cli/imports@0.2.3"</c>).</param>
+        public static WitContract FromWorld(
+            IReadOnlyList<CtPackage> packages,
+            string worldQualifiedName)
+        {
+            if (packages == null) throw new ArgumentNullException(
+                nameof(packages));
+            if (worldQualifiedName == null)
+                throw new ArgumentNullException(
+                    nameof(worldQualifiedName));
+
+            var world = FindWorld(packages, worldQualifiedName);
+            if (world == null)
+                throw new InvalidOperationException(
+                    "World '" + worldQualifiedName
+                    + "' not found in supplied packages.");
+
+            var imports = new List<ImportEntry>();
+            var visited = new HashSet<string>();
+            CollectWorldImports(world, packages, imports, visited);
+            return new WitContract(imports);
+        }
+
+        private static CtWorldType? FindWorld(
+            IReadOnlyList<CtPackage> packages,
+            string qualifiedName)
+        {
+            foreach (var pkg in packages)
+            {
+                foreach (var w in pkg.Worlds)
+                {
+                    // Accept both QualifiedName forms:
+                    //   <ns>:<pkg>@<ver>/<world>   (CtWorldType.QualifiedName)
+                    //   <ns>:<pkg>/<world>@<ver>   (wasm-wire canonical)
+                    if (w.QualifiedName == qualifiedName)
+                        return w;
+                    if (WorldWireForm(w) == qualifiedName)
+                        return w;
+                }
+            }
+            return null;
+        }
+
+        private static string WorldWireForm(CtWorldType w)
+        {
+            var pkg = w.Package;
+            if (pkg == null) return w.Name;
+            var path = string.Join(":", pkg.Path);
+            var ver = string.IsNullOrEmpty(pkg.Version)
+                ? "" : "@" + pkg.Version;
+            return pkg.Namespace + ":" + path + "/" + w.Name + ver;
+        }
+
+        private static void CollectWorldImports(CtWorldType world,
+            IReadOnlyList<CtPackage> packages,
+            List<ImportEntry> imports,
+            HashSet<string> visited)
+        {
+            if (!visited.Add(world.QualifiedName))
+                return;   // include cycle — bail.
+
+            // Recursively expand `include other-world;` —
+            // included worlds' imports/exports splice in.
+            foreach (var inc in world.Includes)
+            {
+                var includedName = inc.Package == null
+                    ? (world.Package?.ToString() ?? "") + "/" + inc.WorldName
+                    : inc.Package.ToString() + "/" + inc.WorldName;
+                var includedWorld = FindWorld(packages, includedName);
+                if (includedWorld != null)
+                    CollectWorldImports(includedWorld, packages,
+                        imports, visited);
+            }
+
+            foreach (var imp in world.Imports)
+                CollectExternImport(imp.Name, imp.Spec,
+                    world.Package, imports);
+        }
+
+        private static void CollectExternImport(string portName,
+            CtExternType spec, CtPackageName? worldPkg,
+            List<ImportEntry> imports)
+        {
+            switch (spec)
+            {
+                case CtExternInterfaceRef iref:
+                    var iface = iref.Target;
+                    if (iface == null) return;   // unresolved
+                    var module = ModuleNameFor(iface);
+                    foreach (var fn in iface.Functions)
+                        imports.Add(BuildEntry(module, fn.Name,
+                            fn.Type));
+                    foreach (var t in iface.Types)
+                    {
+                        if (t.Type is CtResourceType res)
+                        {
+                            foreach (var m in res.Methods)
+                            {
+                                var entity = ResourceMethodEntity(
+                                    res.Name, m);
+                                imports.Add(BuildEntry(module,
+                                    entity, m.Function, m.Kind));
+                            }
+                        }
+                    }
+                    break;
+
+                case CtExternFunc inlineFn:
+                    // Inline function imported at world level —
+                    // the module is the world's package, the
+                    // entity is the import's port name.
+                    var pkgPart = worldPkg == null ? ""
+                        : worldPkg.ToString();
+                    imports.Add(BuildEntry(pkgPart,
+                        StripKeywordShadow(portName)!,
+                        inlineFn.Function));
+                    break;
+
+                case CtExternInlineInterface inlineIface:
+                    var inlineModule = ModuleNameFor(
+                        inlineIface.Interface);
+                    foreach (var fn in inlineIface.Interface.Functions)
+                        imports.Add(BuildEntry(inlineModule,
+                            StripKeywordShadow(fn.Name)!,
+                            fn.Type));
+                    break;
+            }
+        }
+
+        // Match the canonical wasm import-string form used by
+        // BuildFromPackages: <ns>:<pkg-path>/<iface>@<ver>.
+        private static string ModuleNameFor(CtInterfaceType iface)
+        {
+            var pkg = iface.Package;
+            if (pkg == null) return iface.Name;
+            var path = string.Join(":", pkg.Path);
+            var ver = string.IsNullOrEmpty(pkg.Version)
+                ? "" : "@" + pkg.Version;
+            return pkg.Namespace + ":" + path + "/"
+                + iface.Name + ver;
+        }
+
+        /// <summary>
         /// Build a contract by reflecting over generated host
         /// interface types decorated with
         /// <see cref="WitSourceAttribute"/>. Each interface's
@@ -250,7 +421,8 @@ namespace Wacs.ComponentModel.Validation
                             : "@" + pkgName.Version);
                     foreach (var fn in iface.Functions)
                     {
-                        imports.Add(BuildEntry(module, fn.Name,
+                        imports.Add(BuildEntry(module,
+                            StripKeywordShadow(fn.Name)!,
                             fn.Type));
                     }
                     foreach (var t in iface.Types)
@@ -280,14 +452,27 @@ namespace Wacs.ComponentModel.Validation
         private static string ResourceMethodEntity(string resName,
             CtResourceMethod m)
         {
+            // The WIT source-level `%`-keyword-shadow prefix
+            // (e.g. `%stream` to use the keyword "stream" as
+            // an identifier) is not part of the canonical
+            // wasm-import-string entity name; the bindings
+            // register the bare name without it.
+            var name = StripKeywordShadow(m.Name);
+            var rn = StripKeywordShadow(resName);
             return m.Kind switch
             {
                 CtResourceMethodKind.Constructor =>
-                    "[constructor]" + resName,
+                    "[constructor]" + rn,
                 CtResourceMethodKind.Static =>
-                    "[static]" + resName + "." + m.Name,
-                _ => "[method]" + resName + "." + m.Name,
+                    "[static]" + rn + "." + name,
+                _ => "[method]" + rn + "." + name,
             };
+        }
+
+        private static string? StripKeywordShadow(string? s)
+        {
+            if (string.IsNullOrEmpty(s)) return s;
+            return s![0] == '%' ? s.Substring(1) : s;
         }
 
         // Wire-shape arity is the canon-lowered "flat" form.
