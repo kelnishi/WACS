@@ -41,6 +41,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.Preview2", "Wacs.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.Preview2.Test", "Wacs.WASI.Preview2.Test\Wacs.WASI.Preview2.Test.csproj", "{26C8C659-7CC5-4A0B-8283-04DFEB070A0F}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.Preview2.DependencyInjection", "Wacs.WASI.Preview2.DependencyInjection\Wacs.WASI.Preview2.DependencyInjection.csproj", "{57FEE854-BFFE-4F23-B9FA-6D3127C29A5B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -127,5 +129,9 @@ Global
 		{26C8C659-7CC5-4A0B-8283-04DFEB070A0F}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{26C8C659-7CC5-4A0B-8283-04DFEB070A0F}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{26C8C659-7CC5-4A0B-8283-04DFEB070A0F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{57FEE854-BFFE-4F23-B9FA-6D3127C29A5B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{57FEE854-BFFE-4F23-B9FA-6D3127C29A5B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{57FEE854-BFFE-4F23-B9FA-6D3127C29A5B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{57FEE854-BFFE-4F23-B9FA-6D3127C29A5B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

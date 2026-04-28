@@ -268,7 +268,7 @@ namespace Wacs.ComponentModel.Validation
                                 var entity = ResourceMethodEntity(
                                     res.Name, m);
                                 imports.Add(BuildEntry(module,
-                                    entity, m.Function));
+                                    entity, m.Function, m.Kind));
                             }
                         }
                     }
@@ -290,42 +290,82 @@ namespace Wacs.ComponentModel.Validation
             };
         }
 
-        // Wire-shape arity is the canon-lowered "flat" form. For
-        // v0 the linker checks param-count + return-count
-        // equality only — exact per-slot ValType matching is a
-        // follow-up. Per-method counts derive from the
-        // CtFunctionType using a coarse-grained estimate that
-        // matches what the WASIp2 bindings actually emit.
+        // Wire-shape arity is the canon-lowered "flat" form.
+        // The validator checks param-count + return-count
+        // equality; exact per-slot ValType matching is a
+        // follow-up. <paramref name="resourceMethodKind"/>
+        // is null for free functions; instance methods take
+        // an implicit self handle, constructors return one.
         private static ImportEntry BuildEntry(string module,
-            string name, CtFunctionType fn)
+            string name, CtFunctionType fn,
+            CtResourceMethodKind? resourceMethodKind = null)
         {
             int paramSlots = 0;
+            // [method]X.foo — receiver passes its own handle
+            // as the first wire slot.
+            if (resourceMethodKind == CtResourceMethodKind.Instance)
+                paramSlots += 1;
             foreach (var p in fn.Params)
                 paramSlots += FlatSlotCount(p.Type);
+
             // Canon-ABI direction: host-imported functions cap
             // at MAX_FLAT_RESULTS = 1. Anything wider lowers to
             // a retArea pointer (1 trailing param) + void
             // return. result<...>, list<X>, tuple<X,Y>,
             // option<...> with multi-slot inner — all use
             // retArea.
-            int returnSlots;
-            if (fn.HasNoResult)
-                returnSlots = 0;
+            int rawReturnSlots;
+            bool resultReturn = false;
+            if (resourceMethodKind == CtResourceMethodKind.Constructor)
+            {
+                // [constructor]X — implicit own<X> return,
+                // 1 handle slot.
+                rawReturnSlots = 1;
+            }
+            else if (fn.HasNoResult)
+            {
+                rawReturnSlots = 0;
+            }
             else
             {
-                int rawSlots = FlatSlotCount(fn.Result!);
-                if (rawSlots <= 1)
-                    returnSlots = rawSlots;
-                else
-                {
-                    // Hoist to retArea — host receives an extra
-                    // i32 trailing param, returns void.
-                    paramSlots += 1;
-                    returnSlots = 0;
-                }
+                rawReturnSlots = FlatSlotCount(fn.Result!);
+                // WACS convention: any result<...> return uses
+                // the retArea pointer pattern, even for
+                // result<_, _> where the canon-ABI flat form
+                // would be a single i32 disc. Matches the
+                // bindings' uniform Write* helper signatures.
+                resultReturn = ResolveBody(fn.Result!)
+                    is CtResultType;
+            }
+
+            int returnSlots;
+            if (!resultReturn && rawReturnSlots <= 1)
+            {
+                returnSlots = rawReturnSlots;
+            }
+            else
+            {
+                // Hoist to retArea — host receives an extra i32
+                // trailing param, returns void.
+                paramSlots += 1;
+                returnSlots = 0;
             }
             return new ImportEntry(module, name,
                 paramSlots, returnSlots);
+        }
+
+        // Follow CtTypeRef chains to the underlying body —
+        // matches HostInterfaceEmit.ResolveTarget. Used for
+        // shape-classification predicates like "is this
+        // ultimately a result<...>?".
+        private static CtValType ResolveBody(CtValType t)
+        {
+            while (t is CtTypeRef r && r.Target?.Type != null
+                && !ReferenceEquals(r.Target.Type, t))
+            {
+                t = r.Target.Type;
+            }
+            return t;
         }
 
         private static int FlatSlotCount(CtValType t)
@@ -337,7 +377,7 @@ namespace Wacs.ComponentModel.Validation
             //   list<T> → 2 (ptr, len)
             //   option<T> with align ≤ 4 → 1 + flat(T)
             //   tuple<a,b,...> → sum(flat(elem))
-            //   record → sum of flat fields  (fixed in resolver)
+            //   record → sum of flat fields
             //   variant → 1 (disc) + max-payload-flat
             //   own/borrow/resource ref → 1 (handle)
             //   primitive → 1
@@ -355,6 +395,15 @@ namespace Wacs.ComponentModel.Validation
                         r.Ok != null ? FlatSlotCount(r.Ok) : 0,
                         r.Err != null ? FlatSlotCount(r.Err) : 0),
                 CtTupleType tp => tp.Elements.Sum(FlatSlotCount),
+                CtRecordType rec => rec.Fields.Sum(
+                    f => FlatSlotCount(f.Type)),
+                CtVariantType v =>
+                    1 + (v.Cases.Count == 0 ? 0
+                        : v.Cases.Max(c =>
+                            c.Payload == null ? 0
+                                : FlatSlotCount(c.Payload))),
+                CtTypeRef r when r.Target?.Type != null =>
+                    FlatSlotCount(r.Target.Type),
                 _ => 1,
             };
         }
