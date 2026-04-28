@@ -62,7 +62,7 @@ emits issues for mismatches.
 ### `WitContract`
 
 Flat list of `ImportEntry` (module, entity, expected param/return
-arity). Build it from any of three sources:
+arity). Build it from any of five sources:
 
 ```csharp
 // 1. From WIT text (single document, ad-hoc)
@@ -73,20 +73,42 @@ var contract = WitContract.FromText(@"
     }
 ");
 
-// 2. From a vendored WIT directory (recurses, resolves cross-
-//    package `use` chains via WitResolver.Resolve)
+// 2. From a vendored WIT directory on disk (recurses, resolves
+//    cross-package `use` chains via WitResolver.Resolve)
 var contract = WitContract.FromDirectory("wit");
 
-// 3. From in-memory pre-parsed packages
+// 3. From a shipped DLL's <EmbeddedResource> WIT files —
+//    no source tree needed. The host `Wacs.WASI.Preview2`
+//    embeds its WIT under "wit/..." resource names; consumers
+//    can validate against the contract the package was built
+//    from without shipping the .wit source alongside.
+var contract = WitContract.FromAssembly(
+    typeof(CliBindings).Assembly);
+
+// 4. From in-memory pre-parsed packages
 var packages = WitLoader.LoadDirectoryTree("wit");
 WitResolver.Resolve(packages);
 var contract = WitContract.FromPackages(packages);
 
-// 4. From the bindings themselves — reflects [WitSource]
+// 5. From the bindings themselves — reflects [WitSource]
 //    attributes off generated I* interface types
 var contract = WitContract.FromBindingTypes(
     typeof(IRandom), typeof(IExit), typeof(IFields));
 ```
+
+To embed WIT in your own bindings package, add to the csproj:
+
+```xml
+<ItemGroup>
+  <EmbeddedResource Include="wit\**\*.wit"
+                    LogicalName="wit/%(RecursiveDir)%(Filename)%(Extension)" />
+</ItemGroup>
+```
+
+The `wit/` prefix is the convention `WitContract.FromAssembly`
+filters on by default; pass a different `resourcePrefix` if your
+project uses a different scheme. `WitContract.ReadEmbeddedWit`
+exposes the raw `(name, text)` pairs for inspection.
 
 ### `ValidationReport` / `ValidationIssue`
 

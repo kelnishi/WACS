@@ -68,6 +68,132 @@ namespace Wacs.ComponentModel.Validation
         }
 #endif
 
+        /// <summary>
+        /// Build a contract from WIT files embedded as
+        /// <c>EmbeddedResource</c> in <paramref name="assembly"/>.
+        /// Filters resources whose name starts with
+        /// <paramref name="resourcePrefix"/> (default
+        /// <c>"wit/"</c> — matches the convention WACS.WASI.Preview2
+        /// ships with).
+        ///
+        /// <para>Resources are grouped by directory (the path
+        /// under the prefix) so headerless WIT files attribute to
+        /// the package declared by their sibling, mirroring how
+        /// <see cref="WitLoader.LoadDirectoryTree"/> resolves a
+        /// disk tree.</para>
+        ///
+        /// <para>Lets a host validate against the WIT contract a
+        /// shipped binding package was built from, without needing
+        /// the original <c>.wit</c> files on disk:
+        /// <code>
+        /// var contract = WitContract.FromAssembly(
+        ///     typeof(CliBindings).Assembly);
+        /// linker.Validate(contract);
+        /// </code></para>
+        /// </summary>
+        public static WitContract FromAssembly(Assembly assembly,
+            string resourcePrefix = "wit/")
+        {
+            if (assembly == null) throw new ArgumentNullException(
+                nameof(assembly));
+            var sources = ReadEmbeddedWit(assembly, resourcePrefix);
+            if (sources.Count == 0)
+                throw new InvalidOperationException(
+                    "Assembly " + assembly.GetName().Name
+                    + " has no embedded WIT resources under prefix '"
+                    + resourcePrefix + "'. Add "
+                    + "<EmbeddedResource Include=\"wit\\**\\*.wit\" "
+                    + "LogicalName=\"wit/%(RecursiveDir)%(Filename)%(Extension)\" /> "
+                    + "to the project, or pass a different prefix.");
+
+            // Group by directory under the prefix — mirrors
+            // WitLoader.LoadDirectoryTree's behavior so
+            // headerless siblings attribute to the named package
+            // in their directory.
+            var byDir = new Dictionary<string, List<string>>(
+                StringComparer.OrdinalIgnoreCase);
+            foreach (var (key, text) in sources)
+            {
+                var rel = key.Substring(resourcePrefix.Length);
+                int slash = rel.LastIndexOf('/');
+                var dir = slash < 0 ? "" : rel.Substring(0, slash);
+                if (!byDir.TryGetValue(dir, out var list))
+                {
+                    list = new List<string>();
+                    byDir[dir] = list;
+                }
+                list.Add(text);
+            }
+
+            var allPackages = new List<CtPackage>();
+            foreach (var group in byDir.Values)
+            {
+                var docs = new List<WitDocument>(group.Count);
+                foreach (var text in group)
+                    docs.Add(WitParser.Parse(text));
+                allPackages.AddRange(WitLoader.MergeDocuments(docs));
+            }
+            var packages = MergeByQualifiedName(allPackages);
+            WitResolver.Resolve(packages);
+            return BuildFromPackages(packages);
+        }
+
+        /// <summary>Enumerate the embedded WIT resources from
+        /// <paramref name="assembly"/> as (logical-name, text)
+        /// pairs. Useful for inspection / re-emission;
+        /// <see cref="FromAssembly"/> is the path most
+        /// validation callers want.</summary>
+        public static IReadOnlyList<(string Name, string Text)>
+            ReadEmbeddedWit(Assembly assembly,
+                string resourcePrefix = "wit/")
+        {
+            if (assembly == null) throw new ArgumentNullException(
+                nameof(assembly));
+            var result = new List<(string, string)>();
+            foreach (var name in assembly.GetManifestResourceNames())
+            {
+                if (!name.StartsWith(resourcePrefix,
+                    StringComparison.Ordinal)) continue;
+                if (!name.EndsWith(".wit",
+                    StringComparison.OrdinalIgnoreCase)) continue;
+                using var stream = assembly.GetManifestResourceStream(name);
+                if (stream == null) continue;
+                using var reader = new System.IO.StreamReader(
+                    stream, System.Text.Encoding.UTF8);
+                result.Add((name, reader.ReadToEnd()));
+            }
+            return result;
+        }
+
+        // Pure-string MergeByQualifiedName — duplicates the
+        // logic in WitLoader so the source-gen side (which
+        // can't call WitLoader's IO methods) and this assembly-
+        // resource path both stay in lockstep.
+        private static List<CtPackage> MergeByQualifiedName(
+            IReadOnlyList<CtPackage> packages)
+        {
+            var byKey = new Dictionary<string, (CtPackageName Name,
+                List<CtInterfaceType> Ifaces, List<CtWorldType> Worlds)>();
+            foreach (var pkg in packages)
+            {
+                var key = pkg.Name.ToString();
+                if (!byKey.TryGetValue(key, out var acc))
+                {
+                    acc = (pkg.Name,
+                        new List<CtInterfaceType>(),
+                        new List<CtWorldType>());
+                    byKey[key] = acc;
+                }
+                acc.Ifaces.AddRange(pkg.Interfaces);
+                acc.Worlds.AddRange(pkg.Worlds);
+                byKey[key] = acc;
+            }
+            var result = new List<CtPackage>();
+            foreach (var v in byKey.Values)
+                result.Add(new CtPackage(v.Name, v.Ifaces, v.Worlds));
+            return result;
+        }
+
         public static WitContract FromPackages(
             IReadOnlyList<CtPackage> packages)
         {
