@@ -240,19 +240,29 @@ the canonical ABI flat-form rules:
 | `result<T, E>` | 1 (disc) + max(slots(T), slots(E)) |
 | `own<R>`, `borrow<R>`, resource ref | 1 (handle) |
 
-Imports whose flat-lowered return is wider than 1 slot get a
-trailing **retArea pointer** in the param list and a `void` return
-— this matches how the canon ABI lifts compound returns out of
-host-imported functions. Validation accounts for this so
-`get-random-bytes: func(len: u64) -> list<u8>` checks as `2 params
-(len, retArea)` + `0 returns`, matching the binding's
-`Action<ExecContext, long, int>` shape.
+Lowering follows the canonical-ABI thresholds **exactly**:
 
-The validation is intentionally coarse — it catches presence,
-arity, and shape-class mismatches but not exact per-slot ValType
-matching. Per-slot type checks are a follow-up; the current depth
-is enough to surface every common contract-drift scenario (missing
-import, signature change, off-by-one).
+- `MAX_FLAT_PARAMS = 16` — if the sum of param slots exceeds 16,
+  all params lower to a single `i32` pointer (indirect params).
+- `MAX_FLAT_RESULTS = 1` — if the result lowers to more than 1
+  slot, the host receives a trailing `i32` retArea pointer in
+  the param list and the function returns void.
+
+The thresholds are applied independently. `get-random-bytes:
+func(len: u64) -> list<u8>` checks as `2 params (len, retArea)` +
+`0 returns` (list<u8> = 2 slots, hoisted), matching the binding's
+`Action<ExecContext, long, int>` shape. `set-method: func(method:
+method) -> result<_, _>` checks as `3 params (handle, disc, ptr,
+len)` + `1 result` (result<_, _> = 1 disc slot, returned flat) —
+so a binding that uses retArea for a bare `result<_, _>` is real
+canonical-ABI drift the validator surfaces.
+
+The validation still does not check per-slot ValType (e.g. an
+`i32`-vs-`i64` swap on a primitive would only surface if the
+slot count differs). Exact ValType match is a follow-up; the
+current arity + shape-class depth is enough to surface every
+common contract-drift scenario (missing import, signature
+change, off-by-one, retArea-vs-flat mismatch).
 
 ## What validation does NOT catch
 
@@ -269,6 +279,27 @@ import, signature change, off-by-one).
   presence is filtered out as bookkeeping. If the host's drop
   doesn't actually call `IDisposable.Dispose`, validation can't
   see that.
+
+## Import-side scoping in `FromAssembly` / `FromDirectory`
+
+When the package tree declares at least one world,
+`BuildFromPackages` filters interfaces by role:
+
+- **Imported by some world** → included (host binds it).
+- **Only ever exported across all worlds** → excluded (guest
+  implements it). Examples: `wasi:cli/run`,
+  `wasi:http/incoming-handler`.
+- **Not referenced by any world** (orphan in the package) →
+  included conservatively, since there's no signal to
+  exclude it.
+
+Worlds are walked transitively through `include other-world;`
+directives. If the package tree has no worlds at all (e.g.
+`FromText` with a single inline-interface document),
+filtering is bypassed and every interface is included.
+
+For tighter scoping, use `WitContract.FromWorld(...)` to
+validate against a specific world's import surface only.
 
 ## License
 

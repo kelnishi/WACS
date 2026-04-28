@@ -1,10 +1,5 @@
 package wasi:http@0.2.3;
 interface types {
-    variant header-error {
-        invalid-syntax,
-        forbidden,
-        immutable,
-    }
     type status-code = u16;
     resource fields;
     resource incoming-response {
@@ -14,6 +9,6 @@ interface types {
     resource outgoing-response {
         status-code: func() -> status-code;
         set-status-code: func(status-code: status-code)
-            -> result<_, header-error>;
+            -> result;
     }
 }

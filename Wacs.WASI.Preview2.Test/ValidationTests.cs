@@ -306,6 +306,47 @@ namespace Wacs.WASI.Preview2.Test
                     "wasi:nonexistent/world@9.9.9"));
         }
 
+        // Strict canon-ABI lock: with import-side scoping in
+        // BuildFromPackages, FromAssembly's contract excludes
+        // export-only interfaces (e.g. wasi:cli/run) so the
+        // DI-bound linker matches the contract exactly — zero
+        // drift expected. Any future ArityMismatch /
+        // ReturnTypeMismatch / ExtraBinding / MissingBinding
+        // surfaces as a real regression.
+        [Fact]
+        public void FromAssembly_excludes_export_only_interfaces()
+        {
+            // wasi:cli/run is a guest export interface
+            // (defined in run.wit, exported by the wasi:cli/
+            // command world). Hosts don't bind it, so it must
+            // not appear in the FromAssembly contract.
+            var asm = typeof(Wacs.WASI.Preview2.Cli.CliBindings)
+                .Assembly;
+            var contract = WitContract.FromAssembly(asm);
+            Assert.DoesNotContain(contract.Imports, i =>
+                i.Module == "wasi:cli/run@0.2.3");
+        }
+
+        [Fact]
+        public void Strict_canon_abi_drift_is_bounded()
+        {
+            var services = new Microsoft.Extensions.DependencyInjection
+                .ServiceCollection();
+            services.AddWasiPreview2(opts =>
+                opts.ValidationLevel = ValidationLevel.Warnings);
+            using var sp = services.BuildServiceProvider();
+            using var scope = sp.CreateScope();
+            var linker = scope.ServiceProvider
+                .GetRequiredService<Linker>();
+            var asm = typeof(Wacs.WASI.Preview2.Cli.CliBindings).Assembly;
+            var report = linker.Validate(WitContract.FromAssembly(asm));
+
+            Assert.True(report.IsClean,
+                "Unexpected canon-ABI drift: "
+                + string.Join("; ", report.Issues.Select(i =>
+                    i.Kind + " " + i.Module + "/" + i.Entity)));
+        }
+
         [Fact]
         public void FromWorld_validation_passes_imports_world_with_DI()
         {

@@ -1,10 +1,9 @@
 package wasi:http@0.2.3;
 interface types {
-    variant error-code { internal-error }
     resource outgoing-request {
         set-path-with-query: func(path-with-query: option<string>)
-            -> result<_, error-code>;
+            -> result;
         set-authority: func(authority: option<string>)
-            -> result<_, error-code>;
+            -> result;
     }
 }

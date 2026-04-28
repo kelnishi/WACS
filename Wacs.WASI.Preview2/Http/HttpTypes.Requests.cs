@@ -106,16 +106,17 @@ namespace Wacs.WASI.Preview2.Http
 
             // [method]outgoing-request.set-authority(
             //   authority: option<string>) -> result<_, _>.
-            runtime.BindHostFunction<Action<ExecContext, int, int, int, int, int>>(
+            // result<_, _> lowers to a single i32 disc, returned flat.
+            runtime.BindHostFunction<Func<ExecContext, int, int, int, int, int>>(
                 (Ns, "[method]outgoing-request.set-authority"),
-                (ctx, handle, optDisc, ptr, len, retArea) =>
+                (ctx, handle, optDisc, ptr, len) =>
                 {
                     Option<string> value = optDisc == 0
                         ? Option<string>.None
                         : Option<string>.Some(ctx.ReadUtf8String(ptr, len));
                     var r = ((OutgoingRequest)requests.Get(handle))
                         .SetAuthority(value);
-                    WriteResultUnit(ctx.Memory(), retArea, r);
+                    return r.IsOk ? 0 : 1;
                 });
 
             // [method]outgoing-request.path-with-query()
@@ -131,16 +132,16 @@ namespace Wacs.WASI.Preview2.Http
 
             // [method]outgoing-request.set-path-with-query(
             //   path-with-query: option<string>) -> result<_, _>.
-            runtime.BindHostFunction<Action<ExecContext, int, int, int, int, int>>(
+            runtime.BindHostFunction<Func<ExecContext, int, int, int, int, int>>(
                 (Ns, "[method]outgoing-request.set-path-with-query"),
-                (ctx, handle, optDisc, ptr, len, retArea) =>
+                (ctx, handle, optDisc, ptr, len) =>
                 {
                     Option<string> value = optDisc == 0
                         ? Option<string>.None
                         : Option<string>.Some(ctx.ReadUtf8String(ptr, len));
                     var r = ((OutgoingRequest)requests.Get(handle))
                         .SetPathWithQuery(value);
-                    WriteResultUnit(ctx.Memory(), retArea, r);
+                    return r.IsOk ? 0 : 1;
                 });
 
             // [method]outgoing-request.headers() -> own<headers>.

@@ -64,9 +64,8 @@ namespace Wacs.WASI.Preview2.Http
             BindFutureTrailers(runtime, _resources, alloc);
             BindRequestOptions(runtime, _resources);
             BindResponseOutparam(runtime, _resources);
-            if (_errorCodeMapper != null)
-                BindHttpErrorCode(runtime, _resources, alloc,
-                    _errorCodeMapper);
+            BindHttpErrorCode(runtime, _resources, alloc,
+                _errorCodeMapper);
         }
 
         // -----------------------------------------------------

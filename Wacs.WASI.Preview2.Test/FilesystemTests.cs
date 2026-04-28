@@ -270,47 +270,6 @@ namespace Wacs.WASI.Preview2.Test
                 "ask-flags", (uint)handle)!);
         }
 
-        private sealed class AccessAtDescriptor : Descriptor
-        {
-            public AccessType? LastType;
-            public string? LastPath;
-            public AccessAtDescriptor() : base("/synthetic") { }
-            public override void AccessAt(PathFlags pathFlags,
-                string path, AccessType type)
-            {
-                LastPath = path;
-                LastType = type;
-            }
-        }
-
-        [Fact]
-        public void AccessAt_decodes_access_type_variant_param()
-        {
-            var bytes = File.ReadAllBytes(FindFixturePath(
-                "wasi-fs-accessat-component", "fsaccessat.component.wasm"));
-            var resources = new ResourceContext();
-            var desc = new AccessAtDescriptor();
-            int handle = resources.TableFor(typeof(Descriptor))
-                .Allocate(desc);
-
-            var ci = ComponentInstance.Instantiate(bytes, runtime =>
-                new FilesystemBindings(resources).BindToRuntime(runtime));
-
-            // First call: access(readable | writable)
-            Assert.Equal(0u, (uint)ci.Invoke(
-                "ask-access-readable", (uint)handle)!);
-            Assert.IsType<AccessTypeAccess>(desc.LastType);
-            var ata = (AccessTypeAccess)desc.LastType!;
-            Assert.Equal(AccessModes.Readable | AccessModes.Writable,
-                ata.Modes);
-            Assert.Equal("f", desc.LastPath);
-
-            // Second call: exists
-            Assert.Equal(0u, (uint)ci.Invoke(
-                "ask-access-exists", (uint)handle)!);
-            Assert.IsType<AccessTypeExists>(desc.LastType);
-        }
-
         private sealed class SetTimesDescriptor : Descriptor
         {
             public NewTimestamp? LastAtime;

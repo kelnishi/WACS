@@ -44,17 +44,18 @@ namespace Wacs.WASI.Preview2.Http
 
             // [method]request-options.set-connect-timeout(
             //   duration: option<duration>) -> result<_, _>.
-            // Wire: (handle, optDisc, value, retArea) → void.
-            runtime.BindHostFunction<Action<ExecContext, int, int, long, int>>(
+            // result<_, _> lowers to a single i32 disc, returned
+            // flat. Wire: (handle, optDisc, value) → i32.
+            runtime.BindHostFunction<Func<ExecContext, int, int, long, int>>(
                 (Ns, "[method]request-options.set-connect-timeout"),
-                (ctx, handle, optDisc, value, retArea) =>
+                (_, handle, optDisc, value) =>
                 {
                     Option<ulong> v = optDisc == 0
                         ? Option<ulong>.None
                         : Option<ulong>.Some((ulong)value);
                     var r = ((RequestOptions)opts.Get(handle))
                         .SetConnectTimeout(v);
-                    WriteResultUnit(ctx.Memory(), retArea, r);
+                    return r.IsOk ? 0 : 1;
                 });
 
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
@@ -66,16 +67,16 @@ namespace Wacs.WASI.Preview2.Http
                     WriteOptionU64(ctx.Memory(), retArea, v);
                 });
 
-            runtime.BindHostFunction<Action<ExecContext, int, int, long, int>>(
+            runtime.BindHostFunction<Func<ExecContext, int, int, long, int>>(
                 (Ns, "[method]request-options.set-first-byte-timeout"),
-                (ctx, handle, optDisc, value, retArea) =>
+                (_, handle, optDisc, value) =>
                 {
                     Option<ulong> v = optDisc == 0
                         ? Option<ulong>.None
                         : Option<ulong>.Some((ulong)value);
                     var r = ((RequestOptions)opts.Get(handle))
                         .SetFirstByteTimeout(v);
-                    WriteResultUnit(ctx.Memory(), retArea, r);
+                    return r.IsOk ? 0 : 1;
                 });
 
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
@@ -87,16 +88,16 @@ namespace Wacs.WASI.Preview2.Http
                     WriteOptionU64(ctx.Memory(), retArea, v);
                 });
 
-            runtime.BindHostFunction<Action<ExecContext, int, int, long, int>>(
+            runtime.BindHostFunction<Func<ExecContext, int, int, long, int>>(
                 (Ns, "[method]request-options.set-between-bytes-timeout"),
-                (ctx, handle, optDisc, value, retArea) =>
+                (_, handle, optDisc, value) =>
                 {
                     Option<ulong> v = optDisc == 0
                         ? Option<ulong>.None
                         : Option<ulong>.Some((ulong)value);
                     var r = ((RequestOptions)opts.Get(handle))
                         .SetBetweenBytesTimeout(v);
-                    WriteResultUnit(ctx.Memory(), retArea, r);
+                    return r.IsOk ? 0 : 1;
                 });
         }
     }

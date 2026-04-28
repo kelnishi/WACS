@@ -20,44 +20,7 @@ namespace Wacs.WASI.Preview2.Filesystem
     // NewTimestamp + nested cases, IDescriptor,
     // IDirectoryEntryStream, IPreopens, ITypes) are emitted by
     // the source generator from wit/deps/filesystem/*.wit and
-    // land in this namespace. Hand-written code below adds the
-    // host-side impls + a couple of types that don't appear in
-    // the WIT (AccessType, AccessTypeAccess, etc.).
-
-    /// <summary>WIT flags
-    /// <c>wasi:filesystem/types.modes</c> — accessibility
-    /// modes used by access-type's access(modes) case. Not
-    /// part of the v0.2.3 WIT itself; retained as a
-    /// host-only extension surface for the
-    /// <see cref="Descriptor.AccessAt"/> helper.</summary>
-    [System.Flags]
-    public enum AccessModes : uint
-    {
-        None = 0,
-        Readable = 1 << 0,
-        Writable = 1 << 1,
-        Executable = 1 << 2,
-    }
-
-    /// <summary>Host-only variant approximating WIT
-    /// <c>access-type</c>:
-    /// <code>variant access-type {
-    ///   access(modes),       // bit-mask of which modes to test
-    ///   exists,              // existence-only check
-    /// }</code>
-    /// Wire form: 2 flat slots (variant disc + modes-or-pad).
-    /// </summary>
-    public abstract class AccessType { }
-
-    /// <summary>access-type case "access(modes)".</summary>
-    public sealed class AccessTypeAccess : AccessType
-    {
-        public AccessModes Modes { get; }
-        public AccessTypeAccess(AccessModes modes) { Modes = modes; }
-    }
-
-    /// <summary>access-type case "exists" (no payload).</summary>
-    public sealed class AccessTypeExists : AccessType { }
+    // land in this namespace.
 
     /// <summary>
     /// Host representation of <c>wasi:filesystem/types@0.2.3</c>'s
@@ -445,14 +408,6 @@ namespace Wacs.WASI.Preview2.Filesystem
         public virtual Result<Unit, ErrorCode> Advise(ulong offset,
             ulong length, Advice advice)
             => Result<Unit, ErrorCode>.FromOk(Unit.Value);
-
-        /// <summary>Test existence / accessibility at a path.
-        /// Default impl is a no-op stub; concrete hosts
-        /// override. NOT part of the v0.2.3 WIT — this is a
-        /// host-only convenience method retained from earlier
-        /// drafts.</summary>
-        public virtual void AccessAt(PathFlags pathFlags, string path,
-            AccessType type) { }
 
         /// <summary>Update access + modification timestamps.
         /// Each arg picks one of three cases (no-change, now,

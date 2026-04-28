@@ -2,9 +2,9 @@ package local:httpreqoptsset;
 world demo {
     import wasi:http/types@0.2.3;
     /// Calls set-connect-timeout(handle, None); returns the
-    /// outer disc byte (0 = Ok).
+    /// flat result disc (0 = Ok).
     export ask-set-none: func(opts: u32) -> u32;
     /// Calls set-connect-timeout(handle, Some(value)); returns
-    /// the outer disc byte (0 = Ok).
+    /// the flat result disc (0 = Ok).
     export ask-set-some: func(opts: u32, value: u64) -> u32;
 }
