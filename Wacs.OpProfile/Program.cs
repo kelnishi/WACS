@@ -28,6 +28,8 @@
 // against real binaries (not benchmarks) so the findings reflect production
 // distribution, not a tight loop's idiosyncrasies.
 
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
