@@ -124,6 +124,60 @@ namespace Wacs.Transpiler.Test
         };
 
         // (module
+        //   (type $t1 (func (result i64)))
+        //   (import "my:test/env@1.0.0" "get-value" (func $imp1 (type $t1)))
+        //   (import "external" "stub" (func $imp2 (type $t1)))
+        //   (func (export "call_resolved") (result i64) call $imp1)
+        //   (func (export "call_fallback") (result i64) call $imp2))
+        //
+        // The "my:test/env@1.0.0"."get-value" import is matched by
+        // the resolver and lowers to direct-linked IL. The
+        // "external"."stub" import is NOT in the resolver's host
+        // package, so it falls back to the legacy
+        // ImportDelegates[] dispatch. This exercises the
+        // per-funcIdx binding map's "sparse subset" handling.
+        private static byte[] BuildMixedFallbackFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 1 type — () → i64
+            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7E,
+            // Import section: 2 imports
+            0x02, 0x2F, 0x02,
+            // Import 0: "my:test/env@1.0.0" "get-value"
+            0x11,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x65, 0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x09,
+            0x67, 0x65, 0x74, 0x2D, 0x76, 0x61, 0x6C, 0x75, 0x65,
+            0x00, 0x00,
+            // Import 1: "external" "stub"
+            0x08,
+            0x65, 0x78, 0x74, 0x65, 0x72, 0x6E, 0x61, 0x6C,
+            0x04,
+            0x73, 0x74, 0x75, 0x62,
+            0x00, 0x00,
+            // Function section: 2 local funcs, both type 0
+            0x03, 0x03, 0x02, 0x00, 0x00,
+            // Export section: 2 exports
+            0x07, 0x21, 0x02,
+            // "call_resolved" → func 2
+            0x0D,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x72, 0x65, 0x73,
+            0x6F, 0x6C, 0x76, 0x65, 0x64,
+            0x00, 0x02,
+            // "call_fallback" → func 3
+            0x0D,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x66, 0x61, 0x6C,
+            0x6C, 0x62, 0x61, 0x63, 0x6B,
+            0x00, 0x03,
+            // Code section: 2 bodies, each = call N; end
+            // size = count(1) + body0(5) + body1(5) = 11 = 0x0B
+            0x0A, 0x0B, 0x02,
+            0x04, 0x00, 0x10, 0x00, 0x0B,
+            0x04, 0x00, 0x10, 0x01, 0x0B,
+        };
+
+        // (module
         //   (type $t (func (param i32 i32) (result i32)))
         //   (import "my:test/env@1.0.0" "combine" (func $imp (type $t)))
         //   (func (export "call_combine") (param i32 i32) (result i32)
@@ -314,6 +368,99 @@ namespace Wacs.Transpiler.Test
 
             Assert.IsType<int>(raw);
             Assert.Equal(expected, (int)raw);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_MixedResolvedAndFallback_BothPathsWork()
+        {
+            // Two imports in one module. The first is in the
+            // resolver's host package and lowers to direct-linked
+            // IL; the second is NOT and falls back to the legacy
+            // ImportDelegates[] dispatch. The IImports stub for the
+            // resolved one throws if called (proves bypass); the
+            // stub for the unresolved one returns a known value
+            // (proves the legacy path still works alongside the new).
+            const ulong DirectLinkedValue = 0xAAAA_BBBB_CCCC_DDDDUL;
+            const long FallbackValue = unchecked((long)0x1111_2222_3333_4444UL);
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            // Resolved import: stub throws (must not be invoked).
+            runtime.BindHostFunction<Func<long>>(
+                ("my:test/env@1.0.0", "get-value"),
+                () => throw new InvalidOperationException(
+                    "direct-linked stub must not be invoked"));
+            // Unresolved import: real handler — the legacy
+            // delegate dispatch will route through it.
+            runtime.BindHostFunction<Func<long>>(
+                ("external", "stub"), () => FallbackValue);
+
+            using var ms = new MemoryStream(
+                BuildMixedFallbackFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm }, bundleType: typeof(TestBundle));
+            // Sanity: resolver matched ONLY the my:test entry, not
+            // the external one.
+            Assert.True(resolver.TryResolve(
+                "my:test/env@1.0.0", "get-value", out _));
+            Assert.False(resolver.TryResolve(
+                "external", "stub", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.MixedFallback", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+
+            // Per-funcIdx binding map should hold exactly one
+            // entry — the resolved import's slot.
+            Assert.Single(options.ResolverImportBindings!);
+
+            // IImports proxy: the resolved entry throws if invoked,
+            // the fallback entry returns FallbackValue. Both paths
+            // get exercised by separate exports.
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_env_1_0_0_get_value"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for direct-linked "
+                            + "import must not be invoked"),
+                    ["external_stub"] = _ => FallbackValue,
+                });
+
+            var bundle = new TestBundle(new FakeEnv(DirectLinkedValue));
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+
+            // Direct-linked path: should hit the bundle.
+            var callResolved = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_resolved"))!;
+            object? rDirect = callResolved.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<long>(rDirect);
+            Assert.Equal(DirectLinkedValue,
+                unchecked((ulong)(long)rDirect));
+
+            // Fallback path: should hit the IImports stub.
+            var callFallback = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_fallback"))!;
+            object? rFallback = callFallback.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<long>(rFallback);
+            Assert.Equal(FallbackValue, (long)rFallback);
         }
     }
 }
