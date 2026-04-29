@@ -64,6 +64,7 @@ namespace Wacs.Transpiler.AOT
         private readonly DataSegmentEmitter? _dataEmitter;
         private readonly int _dataSegmentBaseId;
         private readonly int _elemSegmentBaseId;
+        private readonly TranspilerOptions? _options;
         private int _initDataId = -1;
         public int InitDataId => _initDataId;
 
@@ -78,7 +79,8 @@ namespace Wacs.Transpiler.AOT
             DataSegmentEmitter? dataEmitter = null,
             int dataSegmentBaseId = 0,
             int elemSegmentBaseId = 0,
-            FunctionType[]? allFunctionTypes = null)
+            FunctionType[]? allFunctionTypes = null,
+            TranspilerOptions? options = null)
         {
             _moduleBuilder = moduleBuilder;
             _namespace = @namespace;
@@ -94,7 +96,16 @@ namespace Wacs.Transpiler.AOT
             _dataSegmentBaseId = dataSegmentBaseId;
             _elemSegmentBaseId = elemSegmentBaseId;
             _allFunctionTypes = allFunctionTypes ?? Array.Empty<FunctionType>();
+            _options = options;
         }
+
+        // True when the resolver matched at least one of this module's
+        // imports — the generated ctor needs a trailing `object hostBundle`
+        // param so the consumer can supply the typed-interface aggregate
+        // the direct-linked IL dispatches through.
+        private bool HasResolverBindings =>
+            _options?.ResolverImportBindings != null
+            && _options.ResolverImportBindings.Count > 0;
 
         /// <summary>
         /// Build ModuleInitData from the WASM module and register it.
@@ -618,17 +629,36 @@ namespace Wacs.Transpiler.AOT
 
         private void EmitConstructor(FieldBuilder ctxField)
         {
-            var ctorParams = _interfaces.ImportsInterface != null
-                ? new[] { _interfaces.ImportsInterface }
-                : Type.EmptyTypes;
+            // ctor signature, in order:
+            //   [0] (implicit) this
+            //   [1] IImports imports          — when ImportsInterface != null
+            //   [2 or 1] object hostBundle    — when HasResolverBindings
+            // The bundle param is appended LAST so the existing
+            // (IImports)-only ctor shape stays binary-compatible for
+            // consumers that don't use direct linking.
+            var ctorParamList = new List<Type>();
+            if (_interfaces.ImportsInterface != null)
+                ctorParamList.Add(_interfaces.ImportsInterface);
+            if (HasResolverBindings)
+                ctorParamList.Add(typeof(object));
+            var ctorParams = ctorParamList.ToArray();
 
             var ctor = ModuleType!.DefineConstructor(
                 MethodAttributes.Public,
                 CallingConventions.Standard,
                 ctorParams);
 
+            int paramOrdinal = 1;
             if (_interfaces.ImportsInterface != null)
-                ctor.DefineParameter(1, ParameterAttributes.None, "imports");
+                ctor.DefineParameter(paramOrdinal++,
+                    ParameterAttributes.None, "imports");
+            int bundleArgOrdinal = -1;
+            if (HasResolverBindings)
+            {
+                bundleArgOrdinal = paramOrdinal;
+                ctor.DefineParameter(paramOrdinal++,
+                    ParameterAttributes.None, "hostBundle");
+            }
 
             var il = ctor.GetILGenerator();
 
@@ -667,6 +697,19 @@ namespace Wacs.Transpiler.AOT
             if (_interfaces.ImportsInterface != null && _interfaces.ImportMethods.Count > 0)
             {
                 EmitImportDelegateWiring(il, ctxLocal);
+            }
+
+            // === Stash the host-package bundle onto ctx.HostBundle ===
+            // Direct-linked import IL reads this field and dispatches
+            // through it instead of ImportDelegates[]. Slots in
+            // ImportDelegates for resolver-handled imports stay wired
+            // to the IImports stubs but the IL never reads them.
+            if (bundleArgOrdinal >= 0)
+            {
+                il.Emit(OpCodes.Ldloc, ctxLocal);
+                il.Emit(OpCodes.Ldarg, bundleArgOrdinal);
+                il.Emit(OpCodes.Stfld, typeof(ThinContext).GetField(
+                    nameof(ThinContext.HostBundle))!);
             }
 
             // === Populate FuncTable ===
