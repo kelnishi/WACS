@@ -6,6 +6,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
+using System.Collections.Concurrent;
 using System.Reflection;
 using System.Reflection.Emit;
 using Wacs.ComponentModel.CanonicalABI;
@@ -279,9 +280,11 @@ namespace Wacs.Transpiler.AOT.Component
                     il.Emit(OpCodes.Ldloc, temps[wasmCursor + 1]); // len
                     il.Emit(OpCodes.Call, LiftUtf8Method);
                 }
-                else if (clrType == typeof(byte[]))
+                else if (clrType.IsArray
+                    && IsSupportedPrimitiveArrayElement(
+                        clrType.GetElementType()!))
                 {
-                    // ListMarshal.LiftPrim<byte>(memory, ptr, len)
+                    // ListMarshal.LiftPrim<T>(memory, ptr, len)
                     il.Emit(OpCodes.Ldarg_0);
                     il.Emit(OpCodes.Ldfld, MemoriesField);
                     il.Emit(OpCodes.Ldc_I4_0);
@@ -289,7 +292,8 @@ namespace Wacs.Transpiler.AOT.Component
                     il.Emit(OpCodes.Ldfld, MemoryDataField);
                     il.Emit(OpCodes.Ldloc, temps[wasmCursor]);     // ptr
                     il.Emit(OpCodes.Ldloc, temps[wasmCursor + 1]); // len
-                    il.Emit(OpCodes.Call, LiftPrimByteMethod);
+                    il.Emit(OpCodes.Call,
+                        ResolveLiftPrimMethod(clrType.GetElementType()!));
                 }
                 else
                 {
@@ -385,18 +389,35 @@ namespace Wacs.Transpiler.AOT.Component
                 types: new[] { typeof(byte[]), typeof(int), typeof(int) },
                 modifiers: null)!;
 
-        // ListMarshal.LiftPrim<T> is generic; capture the byte
-        // instantiation at type-init so the emitted IL doesn't pay
-        // a MakeGenericMethod call per emit. Other primitive
-        // element types follow the same pattern when a fixture
-        // demands them.
-        private static readonly MethodInfo LiftPrimByteMethod =
+        // ListMarshal.LiftPrim<T> is generic. Cache the per-T
+        // instantiation so each emit reuses the same MethodInfo
+        // and we never pay a MakeGenericMethod call after the
+        // first per element type.
+        private static readonly MethodInfo LiftPrimGenericMethod =
             typeof(ListMarshal).GetMethod(
                 nameof(ListMarshal.LiftPrim),
                 BindingFlags.Public | BindingFlags.Static,
                 binder: null,
                 types: new[] { typeof(byte[]), typeof(int), typeof(int) },
-                modifiers: null)!.MakeGenericMethod(typeof(byte));
+                modifiers: null)!;
+
+        private static readonly ConcurrentDictionary<Type, MethodInfo>
+            LiftPrimCache = new();
+
+        // Set of unmanaged primitive element types ListMarshal.LiftPrim
+        // accepts. Keep in lockstep with the actual `where T : unmanaged`
+        // surface — adding a new shape here is enough to enable it
+        // for direct-linked import emission.
+        private static bool IsSupportedPrimitiveArrayElement(Type t) =>
+            t == typeof(byte) || t == typeof(sbyte)
+            || t == typeof(short) || t == typeof(ushort)
+            || t == typeof(int) || t == typeof(uint)
+            || t == typeof(long) || t == typeof(ulong)
+            || t == typeof(float) || t == typeof(double);
+
+        private static MethodInfo ResolveLiftPrimMethod(Type elementType)
+            => LiftPrimCache.GetOrAdd(elementType,
+                t => LiftPrimGenericMethod.MakeGenericMethod(t));
 
         // Per-CLR-type wasm flat-slot count for canonical-ABI lower:
         //   primitive (compat with i32/i64/f32/f64) → 1
@@ -413,7 +434,9 @@ namespace Wacs.Transpiler.AOT.Component
                 wasmTypes = new[] { ValType.I32, ValType.I32 };
                 return 2;
             }
-            if (clrType == typeof(byte[]))
+            if (clrType.IsArray
+                && IsSupportedPrimitiveArrayElement(
+                    clrType.GetElementType()!))
             {
                 wasmTypes = new[] { ValType.I32, ValType.I32 };
                 return 2;

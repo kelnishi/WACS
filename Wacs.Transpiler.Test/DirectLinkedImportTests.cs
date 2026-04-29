@@ -242,6 +242,30 @@ namespace Wacs.Transpiler.Test
             public void PrintBytes(byte[] data) { Captured = data; }
         }
 
+        // ====== int[] (list<u32>) param test surface =============
+
+        [WitSource(@"interface int-env",
+            Package = "my:test@1.0.0", Interface = "int-env")]
+        public interface IIntPrinter
+        {
+            [WitSource(@"print-ints: func(data: list<u32>);",
+                Package = "my:test@1.0.0", Interface = "int-env",
+                Item = "print-ints")]
+            void PrintInts(int[] data);
+        }
+
+        public sealed class IntBundle
+        {
+            public IIntPrinter IntEnv { get; }
+            public IntBundle(IIntPrinter intEnv) { IntEnv = intEnv; }
+        }
+
+        private sealed class CapturingIntPrinter : IIntPrinter
+        {
+            public int[]? Captured { get; private set; }
+            public void PrintInts(int[] data) { Captured = data; }
+        }
+
         private sealed class FakeEnv : IEnv
         {
             private readonly ulong _v;
@@ -294,6 +318,65 @@ namespace Wacs.Transpiler.Test
             0x00, 0x01,
             // Code section: body = call 0; end
             0x0A, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0B,
+        };
+
+        // (module
+        //   (type $t0 (func (param i32 i32)))   ;; void PrintInts(int[])
+        //   (type $t1 (func))                    ;; void call_print_ints()
+        //   (import "my:test/int-env@1.0.0" "print-ints" (func $imp (type $t0)))
+        //   (memory 1)
+        //   (data (i32.const 0) "\0a\00\00\00\14\00\00\00\1e\00\00\00\28\00\00\00")
+        //   (func (export "call_print_ints")
+        //     i32.const 0    ;; ptr
+        //     i32.const 4    ;; element count (NOT byte length)
+        //     call $imp))
+        //
+        // Same wire shape as byte[] (ptr + len), but len is the
+        // ELEMENT count (4) and the bytes occupy 4*4=16 bytes in
+        // memory. Direct-linked emit uses ListMarshal.LiftPrim<int>
+        // (resolved via ResolveLiftPrimMethod cache) to materialize
+        // the int[].
+        private static byte[] BuildIntArrayParamFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section
+            0x01, 0x09, 0x02,
+            0x60, 0x02, 0x7F, 0x7F, 0x00,
+            0x60, 0x00, 0x00,
+            // Import section
+            // size = 1 + 1 + 21 + 1 + 10 + 2 = 36 = 0x24
+            0x02, 0x24, 0x01,
+            // module: "my:test/int-env@1.0.0" (21)
+            0x15,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x69, 0x6E, 0x74, 0x2D, 0x65, 0x6E, 0x76, 0x40,
+            0x31, 0x2E, 0x30, 0x2E, 0x30,
+            // entity: "print-ints" (10)
+            0x0A,
+            0x70, 0x72, 0x69, 0x6E, 0x74, 0x2D, 0x69, 0x6E,
+            0x74, 0x73,
+            0x00, 0x00,
+            // Function section: 1 func of type 1
+            0x03, 0x02, 0x01, 0x01,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export: "call_print_ints" (15) → func 1
+            0x07, 0x13, 0x01,
+            0x0F,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x70, 0x72, 0x69,
+            0x6E, 0x74, 0x5F, 0x69, 0x6E, 0x74, 0x73,
+            0x00, 0x01,
+            // Code: locals=0, i32.const 0, i32.const 4, call 0, end
+            0x0A, 0x0A, 0x01, 0x08,
+            0x00, 0x41, 0x00, 0x41, 0x04, 0x10, 0x00, 0x0B,
+            // Data: 1 active segment, mem 0, offset 0,
+            // 16 bytes = 4 little-endian i32: 10, 20, 30, 40
+            0x0B, 0x16, 0x01,
+            0x00, 0x41, 0x00, 0x0B, 0x10,
+            0x0A, 0x00, 0x00, 0x00,
+            0x14, 0x00, 0x00, 0x00,
+            0x1E, 0x00, 0x00, 0x00,
+            0x28, 0x00, 0x00, 0x00,
         };
 
         // (module
@@ -1321,6 +1404,73 @@ namespace Wacs.Transpiler.Test
             // Get-by-handle path round-trip cleanly.
             Assert.IsType<int>(raw);
             Assert.Equal(99, (int)raw);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_IntArrayParam_LiftsViaListMarshal()
+        {
+            // Generalization of the byte[] path to int[] (list<u32>).
+            // Wasm wire is still (i32 ptr, i32 len) but len is the
+            // ELEMENT count and the bytes occupy 4*len in memory.
+            // Direct-linked emit looks up
+            // ListMarshal.LiftPrim<int>(byte[], int, int) via the
+            // per-T cache and lifts a fresh int[] from memory.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int, int>>(
+                ("my:test/int-env@1.0.0", "print-ints"),
+                (_, _) => throw new InvalidOperationException(
+                    "stub for print-ints must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildIntArrayParamFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(IntBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/int-env@1.0.0", "print-ints", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.IntParam", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_int_env_1_0_0_print_ints"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for print-ints must "
+                            + "not be invoked"),
+                });
+
+            var capturing = new CapturingIntPrinter();
+            var bundle = new IntBundle(capturing);
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+
+            var callPrint = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_print_ints"))!;
+            callPrint.Invoke(instance, Array.Empty<object>());
+
+            Assert.NotNull(capturing.Captured);
+            Assert.Equal(new[] { 10, 20, 30, 40 },
+                capturing.Captured);
         }
     }
 }
