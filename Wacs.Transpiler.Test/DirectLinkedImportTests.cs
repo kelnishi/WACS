@@ -104,12 +104,13 @@ namespace Wacs.Transpiler.Test
         }
 
         // Convention-only resources class — exposes the
-        // `object GetResource(Type, int)` method the
-        // DirectLinkedImportEmit looks up at IL-emit time.
+        // `object GetResource(Type, int)` and `int AllocateResource(Type, object)`
+        // methods the DirectLinkedImportEmit looks up at IL-emit time.
         public sealed class TestResources
         {
             private readonly Dictionary<(Type, int), object>
                 _table = new();
+            private int _nextHandle = 1;
 
             public void Register(Type iface, int handle, object impl)
                 => _table[(iface, handle)] = impl;
@@ -123,6 +124,14 @@ namespace Wacs.Transpiler.Test
                     "no resource for "
                     + resourceInterface.Name + " handle " + handle);
             }
+
+            public int AllocateResource(Type resourceInterface,
+                object instance)
+            {
+                int h = _nextHandle++;
+                _table[(resourceInterface, h)] = instance;
+                return h;
+            }
         }
 
         private sealed class FakeResEnv : IResEnv
@@ -135,6 +144,53 @@ namespace Wacs.Transpiler.Test
             private uint _n;
             public FakeCounter(uint start) { _n = start; }
             public uint Tick() => ++_n;
+        }
+
+        // ====== Static + constructor resource method surface =====
+        // Static interface methods are C# 8 default static interface
+        // methods — supported on netstandard2.1 / LangVersion=9.
+
+        [WitSource(@"resource widget { ... }",
+            Package = "my:test@1.0.0", Interface = "res-env",
+            Item = "widget")]
+        public interface IWidget
+        {
+            [WitSource(@"read: func() -> u32;",
+                Package = "my:test@1.0.0", Interface = "res-env",
+                Item = "widget.read")]
+            uint Read();
+
+            // Static method on the resource (no `this`, no handle).
+            // Wire form: [static]widget.default-value.
+            [WitSource(@"default-value: static func() -> u32;",
+                Package = "my:test@1.0.0", Interface = "res-env",
+                Item = "[static]widget.default-value")]
+            static uint DefaultValue() => 7u;
+
+            // Zero-arg constructor — wasm returns the i32 handle
+            // for the newly-allocated instance. The factory body
+            // mints a FakeWidget; the IL allocates a handle for
+            // it via the resources class's AllocateResource.
+            [WitSource(@"constructor();",
+                Package = "my:test@1.0.0", Interface = "res-env",
+                Item = "[constructor]widget")]
+            static IWidget Create() => new FakeWidget(99u);
+        }
+
+        public sealed class FakeWidget : IWidget
+        {
+            private readonly uint _v;
+            public FakeWidget(uint v) { _v = v; }
+            public uint Read() => _v;
+        }
+
+        // Bundle holds IWidget for the instance-method path; static
+        // methods bypass the bundle entirely (called via direct
+        // static dispatch on the interface type).
+        public sealed class WidgetBundle
+        {
+            public IWidget Widget { get; }
+            public WidgetBundle(IWidget widget) { Widget = widget; }
         }
 
         // ====== String-param test surface ========================
@@ -238,6 +294,107 @@ namespace Wacs.Transpiler.Test
             0x00, 0x01,
             // Code section: body = call 0; end
             0x0A, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0B,
+        };
+
+        // (module
+        //   (type $t (func (result i32)))
+        //   (import "my:test/res-env@1.0.0" "[static]widget.default-value"
+        //     (func $imp (type $t)))
+        //   (func (export "call_def") (result i32) call $imp))
+        //
+        // Static resource method: no leading handle, no `this`. The
+        // emitted IL emits `call IWidget::DefaultValue` (static
+        // dispatch on the default static interface method).
+        private static byte[] BuildStaticResourceFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: () → i32
+            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F,
+            // Import section: 1 import
+            // size = count(1) + modlen(1) + mod(21) + entlen(1) + ent(28) + desc(2) = 54 = 0x36
+            0x02, 0x36, 0x01,
+            // module: "my:test/res-env@1.0.0" (21)
+            0x15,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x72, 0x65, 0x73, 0x2D, 0x65, 0x6E, 0x76, 0x40,
+            0x31, 0x2E, 0x30, 0x2E, 0x30,
+            // entity: "[static]widget.default-value" (28)
+            0x1C,
+            0x5B, 0x73, 0x74, 0x61, 0x74, 0x69, 0x63, 0x5D,
+            0x77, 0x69, 0x64, 0x67, 0x65, 0x74, 0x2E, 0x64,
+            0x65, 0x66, 0x61, 0x75, 0x6C, 0x74, 0x2D, 0x76,
+            0x61, 0x6C, 0x75, 0x65,
+            // desc: func, type 0
+            0x00, 0x00,
+            // Function section: 1 func of type 0
+            0x03, 0x02, 0x01, 0x00,
+            // Export section: "call_def" (8) → func 1
+            0x07, 0x0C, 0x01,
+            0x08,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x64, 0x65, 0x66,
+            0x00, 0x01,
+            // Code section: locals=0, call 0, end
+            0x0A, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0B,
+        };
+
+        // (module
+        //   (type $t0 (func (result i32)))           ;; constructor + export
+        //   (type $t1 (func (param i32) (result i32))) ;; read
+        //   (import "my:test/res-env@1.0.0" "[constructor]widget"
+        //     (func $imp_ctor (type $t0)))
+        //   (import "my:test/res-env@1.0.0" "[method]widget.read"
+        //     (func $imp_read (type $t1)))
+        //   (func (export "call_create_read") (result i32)
+        //     call $imp_ctor          ;; leaves handle on stack
+        //     call $imp_read))         ;; consumes handle, returns value
+        //
+        // Constructor: zero-arg, returns i32 handle. The IL invokes
+        // the static factory `IWidget::Create()`, allocates a handle
+        // via Resources.AllocateResource(typeof(IWidget), instance),
+        // returns the handle as the wasm i32 result. The instance
+        // method that immediately follows resolves the freshly-
+        // allocated handle and reads the underlying value.
+        private static byte[] BuildConstructorAndInstanceFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types
+            0x01, 0x0A, 0x02,
+            0x60, 0x00, 0x01, 0x7F,            // type 0: () → i32
+            0x60, 0x01, 0x7F, 0x01, 0x7F,      // type 1: (i32) → i32
+            // Import section: 2 imports
+            // size = count(1) + import0(44) + import1(44) = 89 = 0x59
+            0x02, 0x59, 0x02,
+            // Import 0: ".../res-env@1.0.0" "[constructor]widget" : type 0
+            0x15,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x72, 0x65, 0x73, 0x2D, 0x65, 0x6E, 0x76, 0x40,
+            0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x13,
+            0x5B, 0x63, 0x6F, 0x6E, 0x73, 0x74, 0x72, 0x75,
+            0x63, 0x74, 0x6F, 0x72, 0x5D, 0x77, 0x69, 0x64,
+            0x67, 0x65, 0x74,
+            0x00, 0x00,
+            // Import 1: ".../res-env@1.0.0" "[method]widget.read" : type 1
+            0x15,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x72, 0x65, 0x73, 0x2D, 0x65, 0x6E, 0x76, 0x40,
+            0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x13,
+            0x5B, 0x6D, 0x65, 0x74, 0x68, 0x6F, 0x64, 0x5D,
+            0x77, 0x69, 0x64, 0x67, 0x65, 0x74, 0x2E, 0x72,
+            0x65, 0x61, 0x64,
+            0x00, 0x01,
+            // Function section: 1 func of type 0 (() → i32)
+            0x03, 0x02, 0x01, 0x00,
+            // Export section: "call_create_read" (16) → func 2
+            0x07, 0x14, 0x01,
+            0x10,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x63, 0x72, 0x65,
+            0x61, 0x74, 0x65, 0x5F, 0x72, 0x65, 0x61, 0x64,
+            0x00, 0x02,
+            // Code section: locals=0, call 0, call 1, end
+            0x0A, 0x08, 0x01, 0x06,
+            0x00, 0x10, 0x00, 0x10, 0x01, 0x0B,
         };
 
         // (module
@@ -1005,6 +1162,165 @@ namespace Wacs.Transpiler.Test
             Assert.NotNull(capturing.Captured);
             Assert.Equal(new byte[] { 0x68, 0x65, 0x6C, 0x6C, 0x6F },
                 capturing.Captured);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_StaticResourceMethod_NoHandle()
+        {
+            // [static]widget.default-value: zero-arg static method
+            // on the IWidget interface. No leading handle, no `this`.
+            // Emit issues `call IWidget::DefaultValue` directly.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Func<int>>(
+                ("my:test/res-env@1.0.0", "[static]widget.default-value"),
+                () => throw new InvalidOperationException(
+                    "stub for static must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildStaticResourceFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(WidgetBundle),
+                resourcesType: typeof(TestResources));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/res-env@1.0.0", "[static]widget.default-value",
+                out var binding));
+            Assert.Equal(HostPackageResolver.ResourceMethodKind.Static,
+                binding.ResourceKind);
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.StaticRes", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/res-env@1.0.0_[static]widget.default-value")] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for static must not be invoked"),
+                });
+
+            // Constructor needs both the bundle and resources args
+            // (HasResolverBindings + HasResourceBindings); pass
+            // dummies even though static dispatch ignores them.
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy,
+                    new WidgetBundle(new FakeWidget(0)),
+                    new TestResources() })!;
+
+            var callDef = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_def"))!;
+            object? raw = callDef.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<int>(raw);
+            Assert.Equal(7, (int)raw);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_ConstructorThenInstance_AllocatesAndResolves()
+        {
+            // [constructor]widget allocates a fresh IWidget instance
+            // and returns its handle as the wasm i32 result.
+            // [method]widget.read then resolves that handle and
+            // calls the typed instance method on it. Together they
+            // exercise the AllocateResource + GetResource convention
+            // round-trip.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Func<int>>(
+                ("my:test/res-env@1.0.0", "[constructor]widget"),
+                () => throw new InvalidOperationException(
+                    "stub for constructor must not be invoked"));
+            runtime.BindHostFunction<Func<int, int>>(
+                ("my:test/res-env@1.0.0", "[method]widget.read"),
+                _ => throw new InvalidOperationException(
+                    "stub for read must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildConstructorAndInstanceFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(WidgetBundle),
+                resourcesType: typeof(TestResources));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/res-env@1.0.0", "[constructor]widget",
+                out var ctorBinding));
+            Assert.Equal(HostPackageResolver.ResourceMethodKind.Constructor,
+                ctorBinding.ResourceKind);
+            Assert.True(resolver.TryResolve(
+                "my:test/res-env@1.0.0", "[method]widget.read",
+                out var readBinding));
+            Assert.Equal(HostPackageResolver.ResourceMethodKind.Instance,
+                readBinding.ResourceKind);
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.CtorRes", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Equal(2, options.ResolverImportBindings!.Count);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/res-env@1.0.0_[constructor]widget")] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for ctor must not be invoked"),
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/res-env@1.0.0_[method]widget.read")] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for read must not be invoked"),
+                });
+
+            var resources = new TestResources();
+            var bundle = new WidgetBundle(new FakeWidget(0));
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            var callCreateRead = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_create_read"))!;
+            object? raw = callCreateRead.Invoke(instance,
+                Array.Empty<object>());
+
+            // FakeWidget(99u).Read() = 99 — proves both the
+            // constructor's Allocate path and the subsequent
+            // Get-by-handle path round-trip cleanly.
+            Assert.IsType<int>(raw);
+            Assert.Equal(99, (int)raw);
         }
     }
 }

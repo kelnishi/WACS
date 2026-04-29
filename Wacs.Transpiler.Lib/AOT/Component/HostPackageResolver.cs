@@ -153,8 +153,14 @@ namespace Wacs.Transpiler.AOT.Component
                                                         // interfaces
 
                     bool addedAny = false;
+                    // Walk both instance + static methods. Default
+                    // static interface methods (C# 8+) carry the
+                    // [WitSource] for `[static]X.foo` and
+                    // `[constructor]X` shapes; instance methods
+                    // carry `[method]X.foo` and free functions.
                     foreach (var method in type.GetMethods(
                         BindingFlags.Public | BindingFlags.Instance
+                        | BindingFlags.Static
                         | BindingFlags.DeclaredOnly))
                     {
                         var ws = method

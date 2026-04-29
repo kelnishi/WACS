@@ -68,18 +68,46 @@ namespace Wacs.Transpiler.AOT.Component
             var wasmParams = wasmType.ParameterTypes.Types;
             var wasmResults = wasmType.ResultType.Types;
 
-            // Resource-method shape: wasm has a leading i32 handle
-            // that the CLR side doesn't see (the typed instance
-            // method's `this` IS the resolved resource).
-            // Resource v0: only instance methods. Static + constructor
-            // need separate code paths.
-            if (binding.IsResourceMethod
-                && binding.ResourceKind != HostPackageResolver.ResourceMethodKind.Instance)
-                return false;
-            int wasmParamOffset = binding.IsResourceMethod ? 1 : 0;
-            if (binding.IsResourceMethod
-                && (wasmParams.Length < 1 || wasmParams[0] != ValType.I32))
-                return false;
+            // Resource-method shape:
+            //   [method]X.foo (Instance)    : wasm has a leading i32
+            //                                 handle (the resolved
+            //                                 instance becomes `this`).
+            //   [static]X.foo (Static)      : no leading handle,
+            //                                 wasm shape == clr shape.
+            //   [constructor]X (Constructor): no leading handle,
+            //                                 wasm result == 1×i32
+            //                                 (the handle for the
+            //                                 newly-allocated instance).
+            int wasmParamOffset = 0;
+            if (binding.IsResourceMethod)
+            {
+                switch (binding.ResourceKind)
+                {
+                    case HostPackageResolver.ResourceMethodKind.Instance:
+                        wasmParamOffset = 1;
+                        if (wasmParams.Length < 1
+                            || wasmParams[0] != ValType.I32) return false;
+                        if (!method.IsVirtual && !method.IsAbstract)
+                            return false;   // must be a callvirt target
+                        break;
+                    case HostPackageResolver.ResourceMethodKind.Static:
+                        if (!method.IsStatic) return false;
+                        break;
+                    case HostPackageResolver.ResourceMethodKind.Constructor:
+                        if (!method.IsStatic) return false;
+                        // Constructor: wasm returns exactly one i32
+                        // (the handle). The CLR factory returns the
+                        // instance; emit allocates the handle.
+                        if (wasmResults.Length != 1
+                            || wasmResults[0] != ValType.I32) return false;
+                        if (method.ReturnType == typeof(void)) return false;
+                        if (!binding.InterfaceType.IsAssignableFrom(
+                            method.ReturnType)) return false;
+                        break;
+                    default:
+                        return false;
+                }
+            }
 
             // Each CLR param contributes its canon-ABI flat-slot
             // count to the wasm-side. Sum and check against
@@ -104,19 +132,30 @@ namespace Wacs.Transpiler.AOT.Component
                 != wasmParams.Length) return false;
             if (wasmResults.Length > 1) return false;
 
-            if (wasmResults.Length == 1)
+            // Constructor return: already validated as i32 (handle)
+            // wire / interface CLR. Skip the primitive-compat check.
+            bool isConstructor = binding.IsResourceMethod
+                && binding.ResourceKind ==
+                    HostPackageResolver.ResourceMethodKind.Constructor;
+            if (!isConstructor)
             {
-                if (method.ReturnType == typeof(void)) return false;
-                if (!IsPrimitiveCompatible(method.ReturnType,
-                    wasmResults[0])) return false;
+                if (wasmResults.Length == 1)
+                {
+                    if (method.ReturnType == typeof(void)) return false;
+                    if (!IsPrimitiveCompatible(method.ReturnType,
+                        wasmResults[0])) return false;
+                }
+                else
+                {
+                    // Wasm void return — the C# method must also
+                    // return void OR Unit (Unit is a struct;
+                    // zero-size). v0 only accepts plain void.
+                    if (method.ReturnType != typeof(void)) return false;
+                }
             }
-            else
-            {
-                // Wasm void return — the C# method must also return
-                // void OR Unit (Unit is a struct; zero-size). v0 only
-                // accepts plain void.
-                if (method.ReturnType != typeof(void)) return false;
-            }
+            // v0 constructors are zero-arg. Multi-arg constructor
+            // shapes (e.g. own<fields> param) ride incrementally.
+            if (isConstructor && clrParams.Length != 0) return false;
             return true;
         }
 
@@ -162,12 +201,28 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Stloc, temps[i]);
             }
 
-            int wasmParamOffset = binding.IsResourceMethod ? 1 : 0;
+            // Resource-method classification (one of):
+            //   FreeFunction:        free function (not a resource)
+            //   ResourceInstance:    [method]X.foo — pop handle, look up
+            //   ResourceStatic:      [static]X.foo — no handle, call static
+            //   ResourceConstructor: [constructor]X — no handle, factory
+            //                        returns instance, IL allocates handle
+            bool isInstance = binding.IsResourceMethod
+                && binding.ResourceKind ==
+                    HostPackageResolver.ResourceMethodKind.Instance;
+            bool isStatic = binding.IsResourceMethod
+                && binding.ResourceKind ==
+                    HostPackageResolver.ResourceMethodKind.Static;
+            bool isConstructor = binding.IsResourceMethod
+                && binding.ResourceKind ==
+                    HostPackageResolver.ResourceMethodKind.Constructor;
 
-            // Push the `this` arg for the callvirt:
-            //   - free function   : bundle.<Iface>
-            //   - resource method : resources.GetResource(typeof(IRes), handle) cast to IRes
-            if (binding.IsResourceMethod)
+            int wasmParamOffset = isInstance ? 1 : 0;
+
+            // Push the `this` arg for the callvirt — only for
+            // free-function or instance-method calls. Static and
+            // constructor methods are static dispatch.
+            if (isInstance)
             {
                 il.Emit(OpCodes.Ldarg_0);
                 il.Emit(OpCodes.Ldfld, ResourcesField);
@@ -189,8 +244,9 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Callvirt, getResource);
                 il.Emit(OpCodes.Castclass, binding.InterfaceType);
             }
-            else
+            else if (!isStatic && !isConstructor)
             {
+                // Free function — `this` for the typed-interface callvirt.
                 il.Emit(OpCodes.Ldarg_0);
                 il.Emit(OpCodes.Ldfld, HostBundleField);
                 il.Emit(OpCodes.Castclass, bundleType);
@@ -199,6 +255,7 @@ namespace Wacs.Transpiler.AOT.Component
                     binding.InterfaceType);
                 il.Emit(OpCodes.Callvirt, bundleProperty.GetGetMethod()!);
             }
+            // Static / Constructor: no `this` push — static dispatch.
 
             // Re-push remaining params from temps. Each CLR param
             // peels CanonicalSlotCount(clr) wasm slots (1 for prim,
@@ -243,17 +300,55 @@ namespace Wacs.Transpiler.AOT.Component
                 wasmCursor += slots;
             }
 
-            il.Emit(OpCodes.Callvirt, method);
+            // Static and constructor methods use static dispatch.
+            // Instance and free-function methods use callvirt
+            // (free fns go through a typed-interface property).
+            if (isStatic || isConstructor)
+                il.Emit(OpCodes.Call, method);
+            else
+                il.Emit(OpCodes.Callvirt, method);
 
-            // Convert C# return type back to the wasm wire type if the
-            // CIL stack form differs. Most narrow-int returns are
-            // already i32 on the stack (CIL widens to i32); ulong
-            // returns are already i64. So this is usually a no-op.
-            // But e.g. C# bool returned from an interface method is
-            // a 1-byte stack slot in some scenarios — emit a conv.i4
-            // defensively.
-            if (wasmType.ResultType.Types.Length == 1)
+            if (isConstructor)
             {
+                // Constructor's CLR factory just left the new
+                // instance on the stack. Allocate a handle for it
+                // via the resources class's
+                // `int AllocateResource(Type, object)` convention,
+                // then leave the handle as the wasm i32 return.
+                //
+                //   stack: [instance]
+                // emit:  ldarg_0; ldfld Resources; castclass <Res>;
+                //        ldtoken <IFace>; call typeof; <swap>;
+                //        callvirt AllocateResource(Type, object) → int
+                var allocate = ResolveAllocateResourceMethod(
+                    resourcesType!);
+
+                // Stash the instance, then build the call args in
+                // order: resources, type, instance. Then callvirt.
+                var instLocal = il.DeclareLocal(binding.InterfaceType);
+                il.Emit(OpCodes.Stloc, instLocal);
+
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, ResourcesField);
+                il.Emit(OpCodes.Castclass, resourcesType!);
+
+                il.Emit(OpCodes.Ldtoken, binding.InterfaceType);
+                il.Emit(OpCodes.Call, GetTypeFromHandleMethod);
+
+                il.Emit(OpCodes.Ldloc, instLocal);
+                il.Emit(OpCodes.Callvirt, allocate);
+                // Stack now has the i32 handle, which IS the wasm
+                // i32 return. No further conversion.
+            }
+            else if (wasmType.ResultType.Types.Length == 1)
+            {
+                // Convert C# return type back to the wasm wire type
+                // if the CIL stack form differs. Most narrow-int
+                // returns are already i32 on the stack (CIL widens
+                // to i32); ulong returns are already i64. So this
+                // is usually a no-op. But e.g. C# bool returned
+                // from an interface method is a 1-byte stack slot
+                // in some scenarios — emit a conv.i4 defensively.
                 var wasmRet = wasmType.ResultType.Types[0];
                 EmitReturnConversionIfNeeded(il, method.ReturnType,
                     wasmRet);
@@ -367,6 +462,25 @@ namespace Wacs.Transpiler.AOT.Component
                     "Host-package resources type "
                     + resourcesType.FullName
                     + " must expose `object GetResource(System.Type, int)`.");
+            return m;
+        }
+
+        // For [constructor]X bindings: the resources class must
+        // expose `int AllocateResource(System.Type, object)` —
+        // mints a handle for a newly-constructed instance and
+        // returns it as the wasm i32 result.
+        private static MethodInfo ResolveAllocateResourceMethod(Type resourcesType)
+        {
+            var m = resourcesType.GetMethod("AllocateResource",
+                BindingFlags.Public | BindingFlags.Instance,
+                binder: null,
+                types: new[] { typeof(Type), typeof(object) },
+                modifiers: null);
+            if (m == null || m.ReturnType != typeof(int))
+                throw new InvalidOperationException(
+                    "Host-package resources type "
+                    + resourcesType.FullName
+                    + " must expose `int AllocateResource(System.Type, object)`.");
             return m;
         }
 
