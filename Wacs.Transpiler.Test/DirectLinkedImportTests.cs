@@ -161,6 +161,31 @@ namespace Wacs.Transpiler.Test
             public void Print(string msg) { Captured = msg; }
         }
 
+        // ====== byte[] (list<u8>) param test surface =============
+
+        [WitSource(@"interface byte-env",
+            Package = "my:test@1.0.0", Interface = "byte-env")]
+        public interface IBytePrinter
+        {
+            [WitSource(@"print-bytes: func(data: list<u8>);",
+                Package = "my:test@1.0.0", Interface = "byte-env",
+                Item = "print-bytes")]
+            void PrintBytes(byte[] data);
+        }
+
+        public sealed class ByteBundle
+        {
+            public IBytePrinter ByteEnv { get; }
+            public ByteBundle(IBytePrinter byteEnv)
+            { ByteEnv = byteEnv; }
+        }
+
+        private sealed class CapturingBytePrinter : IBytePrinter
+        {
+            public byte[]? Captured { get; private set; }
+            public void PrintBytes(byte[] data) { Captured = data; }
+        }
+
         private sealed class FakeEnv : IEnv
         {
             private readonly ulong _v;
@@ -213,6 +238,58 @@ namespace Wacs.Transpiler.Test
             0x00, 0x01,
             // Code section: body = call 0; end
             0x0A, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0B,
+        };
+
+        // (module
+        //   (type $tBytes (func (param i32 i32)))   ;; void PrintBytes(byte[])
+        //   (type $tEntry (func))                    ;; void call_print()
+        //   (import "my:test/byte-env@1.0.0" "print-bytes" (func $imp (type $tBytes)))
+        //   (memory 1)
+        //   (data (i32.const 0) "hello")
+        //   (func (export "call_print")
+        //     i32.const 0; i32.const 5; call $imp))
+        //
+        // Same wire shape as the string fixture (i32 ptr + i32 len)
+        // but the typed C# IBytePrinter.PrintBytes(byte[]) lifts
+        // via ListMarshal.LiftPrim<byte> instead of
+        // StringMarshal.LiftUtf8.
+        private static byte[] BuildByteArrayParamFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: (i32 i32) → void, () → void
+            0x01, 0x09, 0x02,
+            0x60, 0x02, 0x7F, 0x7F, 0x00,
+            0x60, 0x00, 0x00,
+            // Import section: 1 import
+            // size = count(1) + modlen(1) + mod(22) + entlen(1) + ent(11) + desc(2) = 38 = 0x26
+            0x02, 0x26, 0x01,
+            // module: "my:test/byte-env@1.0.0" (22)
+            0x16,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x62, 0x79, 0x74, 0x65, 0x2D, 0x65, 0x6E, 0x76,
+            0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            // entity: "print-bytes" (11)
+            0x0B,
+            0x70, 0x72, 0x69, 0x6E, 0x74, 0x2D, 0x62, 0x79,
+            0x74, 0x65, 0x73,
+            // desc: func, type 0
+            0x00, 0x00,
+            // Function section: 1 func of type 1
+            0x03, 0x02, 0x01, 0x01,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export: "call_print" → func 1
+            0x07, 0x0E, 0x01,
+            0x0A,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x70, 0x72, 0x69, 0x6E, 0x74,
+            0x00, 0x01,
+            // Code: locals=0, i32.const 0, i32.const 5, call 0, end
+            0x0A, 0x0A, 0x01, 0x08,
+            0x00, 0x41, 0x00, 0x41, 0x05, 0x10, 0x00, 0x0B,
+            // Data: 1 active segment, mem 0, offset 0, "hello"
+            0x0B, 0x0B, 0x01,
+            0x00, 0x41, 0x00, 0x0B, 0x05,
+            0x68, 0x65, 0x6C, 0x6C, 0x6F,
         };
 
         // (module
@@ -857,6 +934,77 @@ namespace Wacs.Transpiler.Test
             // through the typed I.Print(string) callvirt, and
             // captured by the test impl.
             Assert.Equal("hello", capturing.Captured);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_ByteArrayParam_LiftsViaListMarshal()
+        {
+            // Same wasm wire shape as the string test (i32 ptr +
+            // i32 len, "hello" data segment) but the typed C#
+            // method is IBytePrinter.PrintBytes(byte[]). Direct-
+            // linked emit lifts via ListMarshal.LiftPrim<byte>.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int, int>>(
+                ("my:test/byte-env@1.0.0", "print-bytes"),
+                (_, _) => throw new InvalidOperationException(
+                    "stub for print-bytes must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildByteArrayParamFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(ByteBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/byte-env@1.0.0", "print-bytes",
+                out var binding));
+            Assert.Equal(typeof(IBytePrinter), binding.InterfaceType);
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.ByteParam", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_byte_env_1_0_0_print_bytes"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for print-bytes must "
+                            + "not be invoked"),
+                });
+
+            var capturing = new CapturingBytePrinter();
+            var bundle = new ByteBundle(capturing);
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+
+            var callPrint = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_print"))!;
+            callPrint.Invoke(instance, Array.Empty<object>());
+
+            // The bytes "hello" lifted from wasm memory and passed
+            // as a fresh CLR byte[] through the typed
+            // I.PrintBytes(byte[]) callvirt.
+            Assert.NotNull(capturing.Captured);
+            Assert.Equal(new byte[] { 0x68, 0x65, 0x6C, 0x6C, 0x6F },
+                capturing.Captured);
         }
     }
 }

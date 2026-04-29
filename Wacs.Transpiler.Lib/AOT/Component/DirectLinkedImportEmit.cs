@@ -222,6 +222,18 @@ namespace Wacs.Transpiler.AOT.Component
                     il.Emit(OpCodes.Ldloc, temps[wasmCursor + 1]); // len
                     il.Emit(OpCodes.Call, LiftUtf8Method);
                 }
+                else if (clrType == typeof(byte[]))
+                {
+                    // ListMarshal.LiftPrim<byte>(memory, ptr, len)
+                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Ldfld, MemoriesField);
+                    il.Emit(OpCodes.Ldc_I4_0);
+                    il.Emit(OpCodes.Ldelem_Ref);
+                    il.Emit(OpCodes.Ldfld, MemoryDataField);
+                    il.Emit(OpCodes.Ldloc, temps[wasmCursor]);     // ptr
+                    il.Emit(OpCodes.Ldloc, temps[wasmCursor + 1]); // len
+                    il.Emit(OpCodes.Call, LiftPrimByteMethod);
+                }
                 else
                 {
                     il.Emit(OpCodes.Ldloc, temps[wasmCursor]);
@@ -278,17 +290,35 @@ namespace Wacs.Transpiler.AOT.Component
                 types: new[] { typeof(byte[]), typeof(int), typeof(int) },
                 modifiers: null)!;
 
+        // ListMarshal.LiftPrim<T> is generic; capture the byte
+        // instantiation at type-init so the emitted IL doesn't pay
+        // a MakeGenericMethod call per emit. Other primitive
+        // element types follow the same pattern when a fixture
+        // demands them.
+        private static readonly MethodInfo LiftPrimByteMethod =
+            typeof(ListMarshal).GetMethod(
+                nameof(ListMarshal.LiftPrim),
+                BindingFlags.Public | BindingFlags.Static,
+                binder: null,
+                types: new[] { typeof(byte[]), typeof(int), typeof(int) },
+                modifiers: null)!.MakeGenericMethod(typeof(byte));
+
         // Per-CLR-type wasm flat-slot count for canonical-ABI lower:
         //   primitive (compat with i32/i64/f32/f64) → 1
         //   string                                  → 2 (ptr, len)
+        //   byte[]  (list<u8>)                      → 2 (ptr, len)
         // Returns -1 when the CLR type isn't supported by the v0
         // direct-linked emit. Out-param `wasmTypes` is the
-        // per-slot wire type sequence the wasm side must provide
-        // (e.g. for string: [I32, I32]; for byte: [I32]).
+        // per-slot wire type sequence the wasm side must provide.
         private static int CanonicalSlotCount(Type clrType,
             out ValType[] wasmTypes)
         {
             if (clrType == typeof(string))
+            {
+                wasmTypes = new[] { ValType.I32, ValType.I32 };
+                return 2;
+            }
+            if (clrType == typeof(byte[]))
             {
                 wasmTypes = new[] { ValType.I32, ValType.I32 };
                 return 2;
