@@ -102,6 +102,15 @@ namespace Wacs.Transpiler.AOT
         // Used by call_indirect/call_ref for dynamic dispatch.
         public Delegate[] FuncTable;
 
+        // HostBundle: opaque reference to a host package's typed-interface
+        // aggregate (e.g. WasiPreview2Bundle). Used by the transpiler's
+        // direct-linked import path — for each guest call $import that
+        // matches a binding in TranspilerOptions.Resolver, the emitted
+        // IL loads this field, casts to the bundle type, and dispatches
+        // through a typed callvirt instead of the ImportDelegates table.
+        // Typed object? to keep ThinContext free of WASI/host-package deps.
+        public object? HostBundle;
+
         // === Interpreter interop (nullable — not needed for standalone) ===
         // When running inside the WACS framework, these enable mixed-mode
         // execution with interpreted modules. When standalone, they are null.

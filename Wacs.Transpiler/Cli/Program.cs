@@ -255,8 +255,47 @@ namespace Wacs.Transpiler.Cli
                 MaxFunctionSize = opts.MaxFunctionSize,
                 DataStorage = ParseDataStorage(opts.DataStorage),
                 GcTypeChecking = ParseGcChecking(opts.GcChecking),
+                HostPackages = ResolveHostPackages(opts),
             };
             return t;
+        }
+
+        // --wasip2 expands to "Wacs.WASI.Preview2"; --host-package
+        // accepts either a simple assembly name (Assembly.Load) or a
+        // file path (Assembly.LoadFrom). Failures abort the CLI with
+        // a usage error so the user gets a deterministic message
+        // before transpilation begins.
+        private static IReadOnlyList<System.Reflection.Assembly> ResolveHostPackages(CliOptions opts)
+        {
+            var names = new List<string>();
+            if (opts.Wasip2) names.Add("Wacs.WASI.Preview2");
+            foreach (var n in opts.HostPackage)
+            {
+                if (string.IsNullOrWhiteSpace(n)) continue;
+                names.Add(n.Trim());
+            }
+            if (names.Count == 0) return System.Array.Empty<System.Reflection.Assembly>();
+
+            var asms = new List<System.Reflection.Assembly>(names.Count);
+            var seen = new HashSet<string>(System.StringComparer.Ordinal);
+            foreach (var n in names)
+            {
+                if (!seen.Add(n)) continue;
+                System.Reflection.Assembly asm;
+                try
+                {
+                    asm = File.Exists(n)
+                        ? System.Reflection.Assembly.LoadFrom(Path.GetFullPath(n))
+                        : System.Reflection.Assembly.Load(n);
+                }
+                catch (Exception ex)
+                {
+                    throw new ArgumentException(
+                        $"--host-package: failed to load '{n}': {ex.Message}");
+                }
+                asms.Add(asm);
+            }
+            return asms;
         }
 
         private static SimdStrategy ParseSimd(string s) => s.ToLowerInvariant() switch

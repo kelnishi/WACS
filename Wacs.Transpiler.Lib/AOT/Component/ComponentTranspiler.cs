@@ -156,7 +156,9 @@ namespace Wacs.Transpiler.AOT.Component
             Stream componentStream,
             string assemblyNamespace = "Wacs.Transpiled.Component",
             string moduleName = "ComponentModule",
-            byte[]? componentTypeOverride = null)
+            byte[]? componentTypeOverride = null,
+            TranspilerOptions? options = null,
+            System.Action<Wacs.Core.Runtime.WasmRuntime>? configureImports = null)
         {
             var parsed = Parse(componentStream);
 
@@ -195,9 +197,35 @@ namespace Wacs.Transpiler.AOT.Component
                 catch (System.FormatException) { decodedWit = null; }
             }
 
+            // Build the host-package resolver from options.HostPackages
+            // (if not pre-set) so the call-site emitter can branch
+            // direct-linked imports to inline IL. When no host
+            // packages are configured the resolver is null and the
+            // legacy delegate-table path handles every import as
+            // before.
+            var effectiveOptions = options ?? new TranspilerOptions();
+            if (effectiveOptions.Resolver == null
+                && effectiveOptions.HostPackages.Count > 0)
+            {
+                effectiveOptions.Resolver =
+                    HostPackageResolver.FromAssemblies(
+                        effectiveOptions.HostPackages);
+            }
+
             var runtime = new WasmRuntime();
+            // The runtime's InstantiateModule throws on any unbound
+            // import, so the caller must register stubs (or real
+            // bindings) for every (module, entity) the core module
+            // references. For direct-linked imports the IL never
+            // dispatches through these — they exist purely to
+            // satisfy the runtime's own validation. Mirrors the
+            // ComponentInstance.Instantiate(component, configureImports)
+            // pattern in the interpreter path.
+            configureImports?.Invoke(runtime);
+
             var instance = runtime.InstantiateModule(parsed.CoreModules[0]);
-            var transpiler = new ModuleTranspiler(assemblyNamespace);
+            var transpiler = new ModuleTranspiler(assemblyNamespace,
+                effectiveOptions);
             var result = transpiler.Transpile(instance, runtime, moduleName);
 
             // Bake the component-type:* bytes so the reverse

@@ -113,6 +113,36 @@ namespace Wacs.WASI.Preview2.DependencyInjection
             services.TryAddSingleton<IOutgoingHandler,
                 HttpClientOutgoingHandler>();
 
+            // Bundle aggregates every stateless host interface above.
+            // The transpiler's direct-linked import path consumes
+            // WasiPreview2Bundle as a single ctor param on the
+            // generated component class, then loads typed I*
+            // references from its fields at each guest call $import.
+            services.TryAddSingleton<WasiPreview2Bundle>(sp =>
+                new WasiPreview2Bundle(
+                    sp.GetRequiredService<IEnvironment>(),
+                    sp.GetRequiredService<IExit>(),
+                    sp.GetRequiredService<IStdin>(),
+                    sp.GetRequiredService<IStdout>(),
+                    sp.GetRequiredService<IStderr>(),
+                    sp.GetRequiredService<ITerminalStdin>(),
+                    sp.GetRequiredService<ITerminalStdout>(),
+                    sp.GetRequiredService<ITerminalStderr>(),
+                    sp.GetRequiredService<IMonotonicClock>(),
+                    sp.GetRequiredService<IWallClock>(),
+                    sp.GetRequiredService<ITimezone>(),
+                    sp.GetRequiredService<IRandom>(),
+                    sp.GetRequiredService<IInsecure>(),
+                    sp.GetRequiredService<IInsecureSeed>(),
+                    sp.GetRequiredService<IPoll>(),
+                    sp.GetRequiredService<IPreopens>(),
+                    sp.GetRequiredService<IFilesystemErrorCode>(),
+                    sp.GetRequiredService<IInstanceNetwork>(),
+                    sp.GetRequiredService<ITcpCreateSocket>(),
+                    sp.GetRequiredService<IUdpCreateSocket>(),
+                    sp.GetRequiredService<IIpNameLookup>(),
+                    sp.GetRequiredService<IOutgoingHandler>()));
+
             // ---- Per-component-instance — InstanceLifetime ----
             // ResourceContext, WasmRuntime, all bindings classes,
             // and the Linker share the configured lifetime so

@@ -84,6 +84,16 @@ namespace Wacs.Transpiler.Cli
             HelpText = "Path(s) to assemblies containing IBindable host libraries. The transpiler reflects each assembly, activates every concrete IBindable type with a parameterless ctor, and wires them into the runtime before transpilation. Repeat or comma-separate for multiple assemblies. Works with any library following the IBindable pattern (WASI, custom game hosts, etc.).")]
         public IEnumerable<string> Bind { get; set; } = System.Array.Empty<string>();
 
+        // ---- Component-mode host-package linking ----
+
+        [Option("host-package", Separator = ',',
+            HelpText = "Path(s) or assembly name(s) of host packages whose [WitSource]-tagged interfaces resolve a component's WASI/host imports at transpile time. Each guest call $import lowers to inline IL (typed callvirt) instead of routing through a runtime delegate table. Repeat or comma-separate for multiple packages. Component-mode only.")]
+        public IEnumerable<string> HostPackage { get; set; } = System.Array.Empty<string>();
+
+        [Option("wasip2",
+            HelpText = "Shorthand for `--host-package Wacs.WASI.Preview2`. Resolves a component's WASI Preview 2 imports against the typed interfaces shipped by the WACS host package. Component-mode only.")]
+        public bool Wasip2 { get; set; }
+
         [Value(0, MetaName = "args",
             HelpText = "Positional arguments forwarded to Program.Main when --run is set.")]
         public System.Collections.Generic.IEnumerable<string> Args { get; set; } = System.Array.Empty<string>();

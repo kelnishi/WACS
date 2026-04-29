@@ -209,6 +209,34 @@ namespace Wacs.Transpiler.AOT
                 moduleInst.Repr, moduleInst, runtime, importCount);
             interfaceGen.Generate();
 
+            // === Pass 0a.1: Resolve direct-linked host imports ===
+            // For each import method, query the resolver (if any) for a
+            // matching (module, entity) binding. Resolved imports get
+            // direct-linked IL at call sites (bypassing the runtime
+            // delegate table); unresolved imports keep the legacy
+            // dispatch. Reset the transient map at the start of each
+            // transpile call so a stale binding from a previous run
+            // never leaks across.
+            _options.ResolverImportBindings = null;
+            if (_options.Resolver != null
+                && interfaceGen.ImportMethods.Count > 0)
+            {
+                var bindings = new Dictionary<int, Component.HostPackageResolver.Binding>();
+                foreach (var im in interfaceGen.ImportMethods)
+                {
+                    if (im.WasmImportModule == null
+                        || im.WasmImportEntity == null) continue;
+                    if (_options.Resolver.TryResolve(
+                        im.WasmImportModule, im.WasmImportEntity,
+                        out var b))
+                    {
+                        bindings[im.FuncIndex] = b;
+                    }
+                }
+                if (bindings.Count > 0)
+                    _options.ResolverImportBindings = bindings;
+            }
+
             // === Pass 0b: Emit CLR types for WASM struct/array definitions ===
             var gcTypeEmitter = new GcTypeEmitter(moduleBuilder, $"{_namespace}.{moduleName}", moduleInst.Types);
             gcTypeEmitter.EmitTypes();
@@ -282,7 +310,7 @@ namespace Wacs.Transpiler.AOT
                 moduleInst.Repr, interfaceGen, typeBuilder, methodBuilders, importCount,
                 dataEmitter, dataSegmentBaseId >= 0 ? dataSegmentBaseId : 0,
                 elemSegmentBaseId >= 0 ? elemSegmentBaseId : 0,
-                allFunctionTypes);
+                allFunctionTypes, _options);
             // Populate initData BEFORE Generate(): the generator's
             // EmitEmbeddedInitData takes a snapshot of InitRegistry.Get(id)
             // and writes it into the emitted byte[] resource. Anything we
