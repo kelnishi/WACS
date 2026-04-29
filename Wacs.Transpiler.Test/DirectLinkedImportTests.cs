@@ -266,6 +266,34 @@ namespace Wacs.Transpiler.Test
             public void PrintInts(int[] data) { Captured = data; }
         }
 
+        // ====== Option<T> param test surface =====================
+        // Source-gen convention uses Option<T> from
+        // Wacs.ComponentModel.Runtime (NOT C# Nullable<T>) — option
+        // is a 2-case variant in canonical ABI, distinct from the
+        // C# null-reference / Nullable<T> shape.
+
+        [WitSource(@"interface opt-env",
+            Package = "my:test@1.0.0", Interface = "opt-env")]
+        public interface IOptTaker
+        {
+            [WitSource(@"take-opt: func(o: option<u32>);",
+                Package = "my:test@1.0.0", Interface = "opt-env",
+                Item = "take-opt")]
+            void TakeOpt(Option<uint> opt);
+        }
+
+        public sealed class OptBundle
+        {
+            public IOptTaker OptEnv { get; }
+            public OptBundle(IOptTaker optEnv) { OptEnv = optEnv; }
+        }
+
+        private sealed class CapturingOptTaker : IOptTaker
+        {
+            public Option<uint> Last { get; private set; }
+            public void TakeOpt(Option<uint> opt) { Last = opt; }
+        }
+
         private sealed class FakeEnv : IEnv
         {
             private readonly ulong _v;
@@ -478,6 +506,62 @@ namespace Wacs.Transpiler.Test
             // Code section: locals=0, call 0, call 1, end
             0x0A, 0x08, 0x01, 0x06,
             0x00, 0x10, 0x00, 0x10, 0x01, 0x0B,
+        };
+
+        // (module
+        //   (type $tOpt (func (param i32 i32)))   ;; void TakeOpt(Option<u32>)
+        //   (type $tEntry (func))                  ;; void call_some/none()
+        //   (import "my:test/opt-env@1.0.0" "take-opt" (func $imp (type $tOpt)))
+        //   (func (export "call_some")
+        //     i32.const 1   ;; disc = Some
+        //     i32.const 42  ;; value
+        //     call $imp)
+        //   (func (export "call_none")
+        //     i32.const 0   ;; disc = None
+        //     i32.const 0   ;; value (ignored when disc=0)
+        //     call $imp))
+        //
+        // option<u32> wire form is (i32 disc, i32 value). Direct-
+        // linked emit branches on the disc local: if non-zero,
+        // calls Option<uint>::Some(value); if zero, fetches
+        // Option<uint>::None.
+        private static byte[] BuildOptionParamFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types
+            0x01, 0x09, 0x02,
+            0x60, 0x02, 0x7F, 0x7F, 0x00,
+            0x60, 0x00, 0x00,
+            // Import section: 1 import
+            // size = 1 + 1 + 21 + 1 + 8 + 2 = 34 = 0x22
+            0x02, 0x22, 0x01,
+            // module: "my:test/opt-env@1.0.0" (21)
+            0x15,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x6F, 0x70, 0x74, 0x2D, 0x65, 0x6E, 0x76, 0x40,
+            0x31, 0x2E, 0x30, 0x2E, 0x30,
+            // entity: "take-opt" (8)
+            0x08,
+            0x74, 0x61, 0x6B, 0x65, 0x2D, 0x6F, 0x70, 0x74,
+            0x00, 0x00,
+            // Function section: 2 funcs of type 1
+            0x03, 0x03, 0x02, 0x01, 0x01,
+            // Export section: 2 exports
+            // size = 1 + (1+9+1+1) + (1+9+1+1) = 25 = 0x19
+            0x07, 0x19, 0x02,
+            0x09,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x73, 0x6F, 0x6D, 0x65,
+            0x00, 0x01,
+            0x09,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x6E, 0x6F, 0x6E, 0x65,
+            0x00, 0x02,
+            // Code section: 2 bodies
+            // size = 1 + 9 + 9 = 19 = 0x13
+            0x0A, 0x13, 0x02,
+            // body 0 (call_some): locals=0, i32.const 1, i32.const 42, call 0, end (8 bytes)
+            0x08, 0x00, 0x41, 0x01, 0x41, 0x2A, 0x10, 0x00, 0x0B,
+            // body 1 (call_none): locals=0, i32.const 0, i32.const 0, call 0, end (8 bytes)
+            0x08, 0x00, 0x41, 0x00, 0x41, 0x00, 0x10, 0x00, 0x0B,
         };
 
         // (module
@@ -1471,6 +1555,80 @@ namespace Wacs.Transpiler.Test
             Assert.NotNull(capturing.Captured);
             Assert.Equal(new[] { 10, 20, 30, 40 },
                 capturing.Captured);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_OptionParam_BothBranches()
+        {
+            // option<u32> wire form: (i32 disc, i32 value).
+            // Two exports exercise both branches of the disc:
+            //   call_some: passes (disc=1, value=42); host should
+            //              receive Option<uint>.Some(42)
+            //   call_none: passes (disc=0, value=0); host should
+            //              receive Option<uint>.None
+            // Direct-linked emit branches on the disc local via
+            // brfalse + Option<T>::Some(value) / get_None.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int, int>>(
+                ("my:test/opt-env@1.0.0", "take-opt"),
+                (_, _) => throw new InvalidOperationException(
+                    "stub for take-opt must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildOptionParamFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(OptBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/opt-env@1.0.0", "take-opt", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.OptParam", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_opt_env_1_0_0_take_opt"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for take-opt must "
+                            + "not be invoked"),
+                });
+
+            var capturing = new CapturingOptTaker();
+            var bundle = new OptBundle(capturing);
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+
+            // call_some path: disc=1, value=42 → Option.Some(42).
+            var callSome = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_some"))!;
+            callSome.Invoke(instance, Array.Empty<object>());
+            Assert.True(capturing.Last.HasValue);
+            Assert.Equal(42u, capturing.Last.Value);
+
+            // call_none path: disc=0 → Option.None.
+            var callNone = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_none"))!;
+            callNone.Invoke(instance, Array.Empty<object>());
+            Assert.False(capturing.Last.HasValue);
         }
     }
 }

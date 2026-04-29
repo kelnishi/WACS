@@ -10,6 +10,7 @@ using System.Collections.Concurrent;
 using System.Reflection;
 using System.Reflection.Emit;
 using Wacs.ComponentModel.CanonicalABI;
+using Wacs.ComponentModel.Runtime;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
@@ -295,6 +296,34 @@ namespace Wacs.Transpiler.AOT.Component
                     il.Emit(OpCodes.Call,
                         ResolveLiftPrimMethod(clrType.GetElementType()!));
                 }
+                else if (clrType.IsGenericType
+                    && clrType.GetGenericTypeDefinition() == typeof(Option<>))
+                {
+                    // Conditional Option<T>::Some(value) / None.
+                    //   ldloc disc
+                    //   brfalse none
+                    //   ldloc value (with conv if needed)
+                    //   call Option<T>::Some(T)
+                    //   br end
+                    // none:
+                    //   call Option<T>::get_None
+                    // end:
+                    var inner = clrType.GetGenericArguments()[0];
+                    var noneLabel = il.DefineLabel();
+                    var endLabel = il.DefineLabel();
+                    il.Emit(OpCodes.Ldloc, temps[wasmCursor]);
+                    il.Emit(OpCodes.Brfalse, noneLabel);
+                    // Some path
+                    il.Emit(OpCodes.Ldloc, temps[wasmCursor + 1]);
+                    EmitConversionIfNeeded(il, wasmParams[wasmCursor + 1],
+                        inner);
+                    il.Emit(OpCodes.Call, ResolveOptionSomeMethod(inner));
+                    il.Emit(OpCodes.Br, endLabel);
+                    // None path
+                    il.MarkLabel(noneLabel);
+                    il.Emit(OpCodes.Call, ResolveOptionNoneGetter(inner));
+                    il.MarkLabel(endLabel);
+                }
                 else
                 {
                     il.Emit(OpCodes.Ldloc, temps[wasmCursor]);
@@ -419,6 +448,36 @@ namespace Wacs.Transpiler.AOT.Component
             => LiftPrimCache.GetOrAdd(elementType,
                 t => LiftPrimGenericMethod.MakeGenericMethod(t));
 
+        // Option<T>::Some(T) and Option<T>::get_None are the
+        // construction surface for direct-linked Option<T> param
+        // emit. Cache the per-T MethodInfos; first emit per T pays
+        // one MakeGenericType + GetMethod, subsequent emits reuse.
+        private static readonly ConcurrentDictionary<Type, MethodInfo>
+            OptionSomeCache = new();
+
+        private static readonly ConcurrentDictionary<Type, MethodInfo>
+            OptionNoneCache = new();
+
+        private static MethodInfo ResolveOptionSomeMethod(Type inner)
+            => OptionSomeCache.GetOrAdd(inner, t =>
+            {
+                var optionT = typeof(Option<>).MakeGenericType(t);
+                return optionT.GetMethod("Some",
+                    BindingFlags.Public | BindingFlags.Static,
+                    binder: null,
+                    types: new[] { t },
+                    modifiers: null)!;
+            });
+
+        private static MethodInfo ResolveOptionNoneGetter(Type inner)
+            => OptionNoneCache.GetOrAdd(inner, t =>
+            {
+                var optionT = typeof(Option<>).MakeGenericType(t);
+                return optionT.GetProperty("None",
+                    BindingFlags.Public | BindingFlags.Static)!
+                    .GetGetMethod()!;
+            });
+
         // Per-CLR-type wasm flat-slot count for canonical-ABI lower:
         //   primitive (compat with i32/i64/f32/f64) → 1
         //   string                                  → 2 (ptr, len)
@@ -440,6 +499,18 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 wasmTypes = new[] { ValType.I32, ValType.I32 };
                 return 2;
+            }
+            // Option<T> for primitive T: 1 disc i32 + 1 value slot
+            // matching T's wire type. Per canon-ABI flat lowering.
+            if (clrType.IsGenericType
+                && clrType.GetGenericTypeDefinition() == typeof(Option<>))
+            {
+                var inner = clrType.GetGenericArguments()[0];
+                if (CanonicalSlotCount(inner, out var innerWasm) == 1)
+                {
+                    wasmTypes = new[] { ValType.I32, innerWasm[0] };
+                    return 2;
+                }
             }
             if (clrType == typeof(int) || clrType == typeof(uint)
                 || clrType == typeof(bool)
