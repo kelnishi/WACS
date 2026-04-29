@@ -111,6 +111,15 @@ namespace Wacs.Transpiler.AOT
         // Typed object? to keep ThinContext free of WASI/host-package deps.
         public object? HostBundle;
 
+        // Resources: opaque reference to a resource-resolver object that
+        // exposes a public `object GetResource(Type, int handle)` method.
+        // Used by direct-linked resource-method import IL: for each
+        // [method]X.foo guest import, the emitted IL pops the leading i32
+        // handle off the stack, calls GetResource(typeof(IX), handle),
+        // casts to IX, then invokes the typed instance method. Typed
+        // object? for the same WASI/host-package independence reason.
+        public object? Resources;
+
         // === Interpreter interop (nullable — not needed for standalone) ===
         // When running inside the WACS framework, these enable mixed-mode
         // execution with interpreted modules. When standalone, they are null.
