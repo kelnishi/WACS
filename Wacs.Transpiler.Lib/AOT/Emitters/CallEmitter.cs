@@ -267,11 +267,17 @@ namespace Wacs.Transpiler.AOT.Emitters
                 && bindings.TryGetValue(site.FuncIdx, out var binding)
                 && options!.Resolver?.PreferredBundleType != null
                 && Component.DirectLinkedImportEmit.CanEmitDirect(
-                    binding, site.FuncType))
+                    binding, site.FuncType)
+                // Resource methods need a resolved resources type;
+                // without one the call still falls back to the
+                // legacy delegate dispatch.
+                && (!binding.IsResourceMethod
+                    || options.Resolver.PreferredResourcesType != null))
             {
                 Component.DirectLinkedImportEmit.Emit(il, binding,
                     site.FuncType,
-                    options.Resolver.PreferredBundleType);
+                    options.Resolver.PreferredBundleType,
+                    options.Resolver.PreferredResourcesType);
                 return;
             }
             EmitTypedDelegateCall(il, site, ImportDelegatesField, site.FuncIdx, moduleInst);

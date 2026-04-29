@@ -69,6 +69,74 @@ namespace Wacs.Transpiler.Test
             public TestBundle(IEnv env) { Env = env; }
         }
 
+        // ====== Resource-method test surface ======================
+        // [WitSource] Item="counter" anchors a resource interface;
+        // its methods carry Item="counter.<method>" — the resolver
+        // rewrites that to wire form `[method]counter.<method>`.
+
+        [WitSource(@"interface res-env",
+            Package = "my:test@1.0.0", Interface = "res-env")]
+        public interface IResEnv
+        {
+            // Free function in the same interface — proves the
+            // free + resource paths coexist in one module.
+            [WitSource(@"banner: func() -> u32;",
+                Package = "my:test@1.0.0", Interface = "res-env",
+                Item = "banner")]
+            uint Banner();
+        }
+
+        [WitSource(@"resource counter { tick: func() -> u32; }",
+            Package = "my:test@1.0.0", Interface = "res-env",
+            Item = "counter")]
+        public interface ICounter
+        {
+            [WitSource(@"tick: func() -> u32;",
+                Package = "my:test@1.0.0", Interface = "res-env",
+                Item = "counter.tick")]
+            uint Tick();
+        }
+
+        public sealed class ResBundle
+        {
+            public IResEnv ResEnv { get; }
+            public ResBundle(IResEnv resEnv) { ResEnv = resEnv; }
+        }
+
+        // Convention-only resources class — exposes the
+        // `object GetResource(Type, int)` method the
+        // DirectLinkedImportEmit looks up at IL-emit time.
+        public sealed class TestResources
+        {
+            private readonly Dictionary<(Type, int), object>
+                _table = new();
+
+            public void Register(Type iface, int handle, object impl)
+                => _table[(iface, handle)] = impl;
+
+            public object GetResource(Type resourceInterface,
+                int handle)
+            {
+                if (_table.TryGetValue((resourceInterface, handle),
+                    out var impl)) return impl;
+                throw new InvalidOperationException(
+                    "no resource for "
+                    + resourceInterface.Name + " handle " + handle);
+            }
+        }
+
+        private sealed class FakeResEnv : IResEnv
+        {
+            public uint Banner() => 0xCAFEu;
+        }
+
+        private sealed class FakeCounter : ICounter
+        {
+            private uint _n;
+            public FakeCounter(uint start) { _n = start; }
+            public uint Tick() => ++_n;
+        }
+
         private sealed class FakeEnv : IEnv
         {
             private readonly ulong _v;
@@ -121,6 +189,75 @@ namespace Wacs.Transpiler.Test
             0x00, 0x01,
             // Code section: body = call 0; end
             0x0A, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0B,
+        };
+
+        // (module
+        //   (type $tFree (func (result i32)))
+        //   (type $tMethod (func (param i32) (result i32)))
+        //   (import "my:test/res-env@1.0.0" "banner" (func $imp1 (type $tFree)))
+        //   (import "my:test/res-env@1.0.0" "[method]counter.tick"
+        //           (func $imp2 (type $tMethod)))
+        //   (func (export "call_banner") (result i32) call $imp1)
+        //   (func (export "call_tick") (result i32)
+        //     i32.const 1                       ;; resource handle
+        //     call $imp2))
+        //
+        // Resource-method import: $imp2 takes the i32 handle as
+        // its first wasm param, but the typed C# ICounter.Tick is
+        // an instance method with no explicit args (handle resolves
+        // to `this` via the resources lookup). Direct-linked emit
+        // pops the handle, looks up the instance via
+        // ctx.Resources.GetResource(typeof(ICounter), handle), and
+        // invokes Tick on the resolved instance.
+        private static byte[] BuildResourceMethodFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types
+            //   type 0: () → i32
+            //   type 1: (i32) → i32
+            0x01, 0x0A, 0x02,
+            0x60, 0x00, 0x01, 0x7F,
+            0x60, 0x01, 0x7F, 0x01, 0x7F,
+            // Import section: 2 imports
+            0x02, 0x4D, 0x02,
+            // Import 0: "my:test/res-env@1.0.0" "banner" : type 0
+            0x15,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x72, 0x65, 0x73, 0x2D, 0x65, 0x6E, 0x76, 0x40,
+            0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x06,
+            0x62, 0x61, 0x6E, 0x6E, 0x65, 0x72,
+            0x00, 0x00,
+            // Import 1: "my:test/res-env@1.0.0" "[method]counter.tick" : type 1
+            0x15,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x72, 0x65, 0x73, 0x2D, 0x65, 0x6E, 0x76, 0x40,
+            0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x14,
+            0x5B, 0x6D, 0x65, 0x74, 0x68, 0x6F, 0x64, 0x5D,
+            0x63, 0x6F, 0x75, 0x6E, 0x74, 0x65, 0x72, 0x2E,
+            0x74, 0x69, 0x63, 0x6B,
+            0x00, 0x01,
+            // Function section: 2 funcs, both type 0 (() → i32)
+            0x03, 0x03, 0x02, 0x00, 0x00,
+            // Export section: 2 exports
+            0x07, 0x1B, 0x02,
+            // "call_banner" → func 2
+            0x0B,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x62, 0x61, 0x6E,
+            0x6E, 0x65, 0x72,
+            0x00, 0x02,
+            // "call_tick" → func 3
+            0x09,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x74, 0x69, 0x63, 0x6B,
+            0x00, 0x03,
+            // Code section: 2 bodies
+            // size = count(1) + body0(5) + body1(7) = 13 = 0x0D
+            0x0A, 0x0D, 0x02,
+            // body 0: locals=0, call 0, end (4-byte body)
+            0x04, 0x00, 0x10, 0x00, 0x0B,
+            // body 1: locals=0, i32.const 1, call 1, end (6-byte body)
+            0x06, 0x00, 0x41, 0x01, 0x10, 0x01, 0x0B,
         };
 
         // (module
@@ -461,6 +598,114 @@ namespace Wacs.Transpiler.Test
                 Array.Empty<object>());
             Assert.IsType<long>(rFallback);
             Assert.Equal(FallbackValue, (long)rFallback);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_ResourceMethod_LookupAndDispatch()
+        {
+            // Two imports in one module:
+            //  - free function "banner" → IResEnv.Banner()
+            //  - resource method "[method]counter.tick" with handle 1
+            //    → ICounter.Tick() on the instance bound to handle 1.
+            // Both resolve directly; the IImports stubs throw if
+            // invoked. The resources lookup goes through
+            // ctx.Resources.GetResource(typeof(ICounter), 1).
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Func<int>>(
+                ("my:test/res-env@1.0.0", "banner"),
+                () => throw new InvalidOperationException(
+                    "stub for banner must not be invoked"));
+            runtime.BindHostFunction<Func<int, int>>(
+                ("my:test/res-env@1.0.0", "[method]counter.tick"),
+                _ => throw new InvalidOperationException(
+                    "stub for counter.tick must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildResourceMethodFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(ResBundle),
+                resourcesType: typeof(TestResources));
+
+            // Sanity-check both bindings landed.
+            Assert.True(resolver.TryResolve(
+                "my:test/res-env@1.0.0", "banner", out var banBinding));
+            Assert.False(banBinding.IsResourceMethod);
+            Assert.True(resolver.TryResolve(
+                "my:test/res-env@1.0.0", "[method]counter.tick",
+                out var tickBinding));
+            Assert.True(tickBinding.IsResourceMethod);
+            Assert.Equal(typeof(ICounter), tickBinding.InterfaceType);
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.ResMethod", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+
+            // Both imports should be in the per-funcIdx map.
+            Assert.Equal(2, options.ResolverImportBindings!.Count);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_res_env_1_0_0_banner"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for direct-linked banner "
+                            + "must not be invoked"),
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/res-env@1.0.0_[method]counter.tick")] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for direct-linked tick "
+                            + "must not be invoked"),
+                });
+
+            var fakeCounter = new FakeCounter(start: 41u);
+            var resources = new TestResources();
+            resources.Register(typeof(ICounter), 1, fakeCounter);
+            var bundle = new ResBundle(new FakeResEnv());
+
+            // Ctor signature now: (IImports, object hostBundle,
+            // object resources). HasResourceBindings adds the third.
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            // Free function: should hit FakeResEnv.Banner = 0xCAFE.
+            var callBanner = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_banner"))!;
+            object? rBanner = callBanner.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<int>(rBanner);
+            Assert.Equal(unchecked((int)0xCAFEu), (int)rBanner);
+
+            // Resource method: handle 1 → fakeCounter; first .Tick()
+            // returns 42 (start was 41).
+            var callTick = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_tick"))!;
+            object? rTick1 = callTick.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<int>(rTick1);
+            Assert.Equal(42, (int)rTick1);
+
+            // Second call increments again — proves we're hitting
+            // the same instance, not a fresh one each time.
+            object? rTick2 = callTick.Invoke(instance,
+                Array.Empty<object>());
+            Assert.Equal(43, (int)rTick2);
         }
     }
 }

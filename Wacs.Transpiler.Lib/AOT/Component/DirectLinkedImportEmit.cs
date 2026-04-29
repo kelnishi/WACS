@@ -49,27 +49,49 @@ namespace Wacs.Transpiler.AOT.Component
         /// to direct IL with the v0 primitive-only emitter. False
         /// means the call site should fall back to the legacy
         /// <c>ImportDelegates[]</c> dispatch.
+        ///
+        /// <para>Resource methods are accepted only when the binding
+        /// kind is <see cref="HostPackageResolver.ResourceMethodKind.Instance"/>
+        /// — the wasm side carries a leading i32 handle that's
+        /// translated via <see cref="ThinContext.Resources"/>'s
+        /// <c>GetResource(Type, int)</c> lookup, and the typed C#
+        /// instance method runs on the resolved instance. Static
+        /// resource methods and constructors stay deferred.</para>
         /// </summary>
         public static bool CanEmitDirect(HostPackageResolver.Binding binding,
             FunctionType wasmType)
         {
-            // Resource methods: deferred — they need
-            // ResourceTable.Get/Allocate IL emission and the wire-prefix
-            // shape inference. Free functions only in v0.
-            if (binding.IsResourceMethod) return false;
-
             var method = binding.Method;
             var clrParams = method.GetParameters();
             var wasmParams = wasmType.ParameterTypes.Types;
             var wasmResults = wasmType.ResultType.Types;
 
-            if (clrParams.Length != wasmParams.Length) return false;
+            // Resource-method shape: wasm has a leading i32 handle
+            // that the CLR side doesn't see (the typed instance
+            // method's `this` IS the resolved resource). So expect
+            // wasmParams.Length == clrParams.Length + 1, with the
+            // first wasm param being the i32 handle.
+            int expectedWasmCount = binding.IsResourceMethod
+                ? clrParams.Length + 1
+                : clrParams.Length;
+            if (wasmParams.Length != expectedWasmCount) return false;
             if (wasmResults.Length > 1) return false;
 
+            // Resource v0: only instance methods. Static + constructor
+            // need separate code paths.
+            if (binding.IsResourceMethod
+                && binding.ResourceKind != HostPackageResolver.ResourceMethodKind.Instance)
+                return false;
+
+            // For resource methods, skip the leading wasm handle param
+            // when checking primitive-compat against CLR params.
+            int wasmParamOffset = binding.IsResourceMethod ? 1 : 0;
+            if (binding.IsResourceMethod
+                && wasmParams[0] != ValType.I32) return false;
             for (int i = 0; i < clrParams.Length; i++)
             {
                 if (!IsPrimitiveCompatible(clrParams[i].ParameterType,
-                    wasmParams[i])) return false;
+                    wasmParams[wasmParamOffset + i])) return false;
             }
 
             if (wasmResults.Length == 1)
@@ -94,47 +116,87 @@ namespace Wacs.Transpiler.AOT.Component
         /// have already pushed <c>ThinContext ctx</c> as arg-0 of
         /// the enclosing static method (the standard transpiled
         /// function-method shape).
+        ///
+        /// <para>For resource-method bindings the
+        /// <paramref name="resourcesType"/> is required — it's the
+        /// CLR type that exposes <c>object GetResource(Type, int)</c>
+        /// for handle resolution. Free-function bindings ignore it.</para>
         /// </summary>
         public static void Emit(ILGenerator il,
             HostPackageResolver.Binding binding,
             FunctionType wasmType,
-            Type bundleType)
+            Type bundleType,
+            Type? resourcesType = null)
         {
             if (bundleType == null) throw new ArgumentNullException(
                 nameof(bundleType));
+            if (binding.IsResourceMethod && resourcesType == null)
+                throw new ArgumentNullException(
+                    nameof(resourcesType),
+                    "resourcesType is required for resource-method bindings");
 
             var method = binding.Method;
             var clrParams = method.GetParameters();
-            int paramCount = clrParams.Length;
+            int clrParamCount = clrParams.Length;
+            var wasmParams = wasmType.ParameterTypes.Types;
+            int wasmParamCount = wasmParams.Length;
 
             // Spill wasm params already on the CIL stack into locals.
             // Order on the stack is param0..paramN-1 (top of stack =
-            // last param), so we pop in reverse.
-            var temps = new LocalBuilder[paramCount];
-            var wasmParams = wasmType.ParameterTypes.Types;
-            for (int i = paramCount - 1; i >= 0; i--)
+            // last param), so we pop in reverse. For resource methods
+            // the FIRST spill local is the i32 handle.
+            var temps = new LocalBuilder[wasmParamCount];
+            for (int i = wasmParamCount - 1; i >= 0; i--)
             {
                 temps[i] = il.DeclareLocal(WasmStackType(wasmParams[i]));
                 il.Emit(OpCodes.Stloc, temps[i]);
             }
 
-            // Push the typed interface as the `this` arg for callvirt.
-            // ctx → HostBundle → cast → typed-interface property.
-            il.Emit(OpCodes.Ldarg_0);
-            il.Emit(OpCodes.Ldfld, HostBundleField);
-            il.Emit(OpCodes.Castclass, bundleType);
+            int wasmParamOffset = binding.IsResourceMethod ? 1 : 0;
 
-            var bundleProperty = ResolveBundleProperty(bundleType,
-                binding.InterfaceType);
-            il.Emit(OpCodes.Callvirt, bundleProperty.GetGetMethod()!);
-
-            // Re-push params from temps, applying any narrow CLR
-            // conversion the typed-interface signature requires
-            // (e.g. wasm i32 → C# byte: conv.u1).
-            for (int i = 0; i < paramCount; i++)
+            // Push the `this` arg for the callvirt:
+            //   - free function   : bundle.<Iface>
+            //   - resource method : resources.GetResource(typeof(IRes), handle) cast to IRes
+            if (binding.IsResourceMethod)
             {
-                il.Emit(OpCodes.Ldloc, temps[i]);
-                EmitConversionIfNeeded(il, wasmParams[i],
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, ResourcesField);
+                il.Emit(OpCodes.Castclass, resourcesType!);
+
+                // Type literal for the resource interface — pushed
+                // as RuntimeTypeHandle then converted via Type.GetTypeFromHandle.
+                il.Emit(OpCodes.Ldtoken, binding.InterfaceType);
+                il.Emit(OpCodes.Call, GetTypeFromHandleMethod);
+
+                // Push the handle (first wasm param).
+                il.Emit(OpCodes.Ldloc, temps[0]);
+
+                // Resolve via convention: public method
+                // `object GetResource(System.Type, int)` on the
+                // resources class. Lookup at IL-emit time so trim/
+                // AOT analysis sees the exact MethodInfo.
+                var getResource = ResolveGetResourceMethod(resourcesType!);
+                il.Emit(OpCodes.Callvirt, getResource);
+                il.Emit(OpCodes.Castclass, binding.InterfaceType);
+            }
+            else
+            {
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, HostBundleField);
+                il.Emit(OpCodes.Castclass, bundleType);
+
+                var bundleProperty = ResolveBundleProperty(bundleType,
+                    binding.InterfaceType);
+                il.Emit(OpCodes.Callvirt, bundleProperty.GetGetMethod()!);
+            }
+
+            // Re-push remaining params from temps, applying any
+            // narrow CLR conversion the typed-interface signature
+            // requires (e.g. wasm i32 → C# byte: conv.u1).
+            for (int i = 0; i < clrParamCount; i++)
+            {
+                il.Emit(OpCodes.Ldloc, temps[wasmParamOffset + i]);
+                EmitConversionIfNeeded(il, wasmParams[wasmParamOffset + i],
                     clrParams[i].ParameterType);
             }
 
@@ -160,6 +222,34 @@ namespace Wacs.Transpiler.AOT.Component
         private static readonly FieldInfo HostBundleField =
             typeof(ThinContext).GetField(
                 nameof(ThinContext.HostBundle))!;
+
+        private static readonly FieldInfo ResourcesField =
+            typeof(ThinContext).GetField(
+                nameof(ThinContext.Resources))!;
+
+        private static readonly MethodInfo GetTypeFromHandleMethod =
+            typeof(Type).GetMethod(nameof(Type.GetTypeFromHandle),
+                BindingFlags.Public | BindingFlags.Static)!;
+
+        // The host package's resources class must expose a public
+        // `object GetResource(System.Type resourceInterface, int handle)`
+        // method. Lookup throws at IL-emit time if the convention
+        // isn't met — better to fail fast in the transpiler than
+        // emit IL that crashes at first call.
+        private static MethodInfo ResolveGetResourceMethod(Type resourcesType)
+        {
+            var m = resourcesType.GetMethod("GetResource",
+                BindingFlags.Public | BindingFlags.Instance,
+                binder: null,
+                types: new[] { typeof(Type), typeof(int) },
+                modifiers: null);
+            if (m == null || m.ReturnType != typeof(object))
+                throw new InvalidOperationException(
+                    "Host-package resources type "
+                    + resourcesType.FullName
+                    + " must expose `object GetResource(System.Type, int)`.");
+            return m;
+        }
 
         private static PropertyInfo ResolveBundleProperty(Type bundleType,
             Type interfaceType)

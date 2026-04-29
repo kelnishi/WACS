@@ -107,6 +107,23 @@ namespace Wacs.Transpiler.AOT
             _options?.ResolverImportBindings != null
             && _options.ResolverImportBindings.Count > 0;
 
+        // True when at least one resolver-matched import is a resource
+        // method — those need both the bundle (for the typed
+        // interface property) AND the resources object (for the
+        // handle → instance lookup). Adds an additional `object
+        // resources` ctor param.
+        private bool HasResourceBindings
+        {
+            get
+            {
+                var b = _options?.ResolverImportBindings;
+                if (b == null) return false;
+                foreach (var kv in b)
+                    if (kv.Value.IsResourceMethod) return true;
+                return false;
+            }
+        }
+
         /// <summary>
         /// Build ModuleInitData from the WASM module and register it.
         /// Must be called before Generate() so the constructor can reference the init data ID.
@@ -633,13 +650,16 @@ namespace Wacs.Transpiler.AOT
             //   [0] (implicit) this
             //   [1] IImports imports          — when ImportsInterface != null
             //   [2 or 1] object hostBundle    — when HasResolverBindings
-            // The bundle param is appended LAST so the existing
+            //   [3 / 2 / 1] object resources  — when HasResourceBindings
+            // Bundle and resources are appended LAST so the existing
             // (IImports)-only ctor shape stays binary-compatible for
             // consumers that don't use direct linking.
             var ctorParamList = new List<Type>();
             if (_interfaces.ImportsInterface != null)
                 ctorParamList.Add(_interfaces.ImportsInterface);
             if (HasResolverBindings)
+                ctorParamList.Add(typeof(object));
+            if (HasResourceBindings)
                 ctorParamList.Add(typeof(object));
             var ctorParams = ctorParamList.ToArray();
 
@@ -658,6 +678,13 @@ namespace Wacs.Transpiler.AOT
                 bundleArgOrdinal = paramOrdinal;
                 ctor.DefineParameter(paramOrdinal++,
                     ParameterAttributes.None, "hostBundle");
+            }
+            int resourcesArgOrdinal = -1;
+            if (HasResourceBindings)
+            {
+                resourcesArgOrdinal = paramOrdinal;
+                ctor.DefineParameter(paramOrdinal++,
+                    ParameterAttributes.None, "resources");
             }
 
             var il = ctor.GetILGenerator();
@@ -710,6 +737,13 @@ namespace Wacs.Transpiler.AOT
                 il.Emit(OpCodes.Ldarg, bundleArgOrdinal);
                 il.Emit(OpCodes.Stfld, typeof(ThinContext).GetField(
                     nameof(ThinContext.HostBundle))!);
+            }
+            if (resourcesArgOrdinal >= 0)
+            {
+                il.Emit(OpCodes.Ldloc, ctxLocal);
+                il.Emit(OpCodes.Ldarg, resourcesArgOrdinal);
+                il.Emit(OpCodes.Stfld, typeof(ThinContext).GetField(
+                    nameof(ThinContext.Resources))!);
             }
 
             // === Populate FuncTable ===

@@ -66,6 +66,16 @@ namespace Wacs.Transpiler.AOT.Component
         /// interface's name minus the leading <c>I</c>).</summary>
         public Type? PreferredBundleType { get; }
 
+        /// <summary>The host package's resource-resolver type — a
+        /// class with a public method
+        /// <c>object GetResource(System.Type resourceInterface, int handle)</c>
+        /// that maps a wasm resource handle to the typed instance
+        /// the bound interface method is invoked on. Direct-linked
+        /// resource-method import IL emits a callvirt against this
+        /// method. Null when no resource bindings are present or
+        /// when the host package supplies no resolver convention.</summary>
+        public Type? PreferredResourcesType { get; }
+
         private readonly Dictionary<(string Module, string Entity), Binding>
             _bindings;
 
@@ -73,12 +83,14 @@ namespace Wacs.Transpiler.AOT.Component
             IReadOnlyList<Assembly> hostPackages,
             Dictionary<(string Module, string Entity), Binding> bindings,
             IReadOnlyList<Type> interfaceTypes,
-            Type? preferredBundleType)
+            Type? preferredBundleType,
+            Type? preferredResourcesType)
         {
             HostPackages = hostPackages;
             _bindings = bindings;
             InterfaceTypes = interfaceTypes;
             PreferredBundleType = preferredBundleType;
+            PreferredResourcesType = preferredResourcesType;
         }
 
         public bool TryResolve(string module, string entity,
@@ -94,10 +106,16 @@ namespace Wacs.Transpiler.AOT.Component
         /// (skip auto-discovery). Otherwise the resolver searches
         /// for <c>WasiPreview2Bundle</c> in the loaded assemblies,
         /// the AppDomain, and via fresh <c>Assembly.Load</c>.
+        ///
+        /// <para><paramref name="resourcesType"/> supplies the
+        /// resource-resolver type used by direct-linked resource-
+        /// method import IL. Pass null to skip — resource methods
+        /// then fall back to the legacy delegate dispatch.</para>
         /// </summary>
         public static HostPackageResolver FromAssemblies(
             IReadOnlyList<Assembly> assemblies,
-            Type? bundleType = null)
+            Type? bundleType = null,
+            Type? resourcesType = null)
         {
             if (assemblies == null) throw new ArgumentNullException(
                 nameof(assemblies));
@@ -173,7 +191,7 @@ namespace Wacs.Transpiler.AOT.Component
             Type? bundle = bundleType ?? FindWasiPreview2Bundle(assemblies);
 
             return new HostPackageResolver(assemblies, bindings,
-                interfaceTypes, bundle);
+                interfaceTypes, bundle, resourcesType);
         }
 
         // wasi:cli@0.2.3 + exit  →  wasi:cli/exit@0.2.3
