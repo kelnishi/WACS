@@ -8,7 +8,9 @@
 using System;
 using System.Reflection;
 using System.Reflection.Emit;
+using Wacs.ComponentModel.CanonicalABI;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
 
@@ -68,31 +70,39 @@ namespace Wacs.Transpiler.AOT.Component
 
             // Resource-method shape: wasm has a leading i32 handle
             // that the CLR side doesn't see (the typed instance
-            // method's `this` IS the resolved resource). So expect
-            // wasmParams.Length == clrParams.Length + 1, with the
-            // first wasm param being the i32 handle.
-            int expectedWasmCount = binding.IsResourceMethod
-                ? clrParams.Length + 1
-                : clrParams.Length;
-            if (wasmParams.Length != expectedWasmCount) return false;
-            if (wasmResults.Length > 1) return false;
-
+            // method's `this` IS the resolved resource).
             // Resource v0: only instance methods. Static + constructor
             // need separate code paths.
             if (binding.IsResourceMethod
                 && binding.ResourceKind != HostPackageResolver.ResourceMethodKind.Instance)
                 return false;
-
-            // For resource methods, skip the leading wasm handle param
-            // when checking primitive-compat against CLR params.
             int wasmParamOffset = binding.IsResourceMethod ? 1 : 0;
             if (binding.IsResourceMethod
-                && wasmParams[0] != ValType.I32) return false;
+                && (wasmParams.Length < 1 || wasmParams[0] != ValType.I32))
+                return false;
+
+            // Each CLR param contributes its canon-ABI flat-slot
+            // count to the wasm-side. Sum and check against
+            // wasmParams (after skipping the resource handle slot).
+            int expectedRemainingWasm = 0;
             for (int i = 0; i < clrParams.Length; i++)
             {
-                if (!IsPrimitiveCompatible(clrParams[i].ParameterType,
-                    wasmParams[wasmParamOffset + i])) return false;
+                int slots = CanonicalSlotCount(clrParams[i].ParameterType,
+                    out var perWasmType);
+                if (slots < 0) return false;
+                expectedRemainingWasm += slots;
+                // Each contributing wasm slot must match the CLR
+                // param's expected wire shape (i32 / i64 / etc.).
+                for (int s = 0; s < slots; s++)
+                {
+                    int wIdx = wasmParamOffset + (expectedRemainingWasm - slots) + s;
+                    if (wIdx >= wasmParams.Length) return false;
+                    if (wasmParams[wIdx] != perWasmType[s]) return false;
+                }
             }
+            if (wasmParamOffset + expectedRemainingWasm
+                != wasmParams.Length) return false;
+            if (wasmResults.Length > 1) return false;
 
             if (wasmResults.Length == 1)
             {
@@ -190,14 +200,35 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Callvirt, bundleProperty.GetGetMethod()!);
             }
 
-            // Re-push remaining params from temps, applying any
-            // narrow CLR conversion the typed-interface signature
-            // requires (e.g. wasm i32 → C# byte: conv.u1).
+            // Re-push remaining params from temps. Each CLR param
+            // peels CanonicalSlotCount(clr) wasm slots (1 for prim,
+            // 2 for string ptr+len) and lifts them to the typed
+            // representation. The wasm-side cursor advances by the
+            // peeled slot count.
+            int wasmCursor = wasmParamOffset;
             for (int i = 0; i < clrParamCount; i++)
             {
-                il.Emit(OpCodes.Ldloc, temps[wasmParamOffset + i]);
-                EmitConversionIfNeeded(il, wasmParams[wasmParamOffset + i],
-                    clrParams[i].ParameterType);
+                var clrType = clrParams[i].ParameterType;
+                int slots = CanonicalSlotCount(clrType, out _);
+                if (clrType == typeof(string))
+                {
+                    // ctx.Memories[0].Data → byte[]
+                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Ldfld, MemoriesField);
+                    il.Emit(OpCodes.Ldc_I4_0);
+                    il.Emit(OpCodes.Ldelem_Ref);
+                    il.Emit(OpCodes.Ldfld, MemoryDataField);
+                    il.Emit(OpCodes.Ldloc, temps[wasmCursor]);     // ptr
+                    il.Emit(OpCodes.Ldloc, temps[wasmCursor + 1]); // len
+                    il.Emit(OpCodes.Call, LiftUtf8Method);
+                }
+                else
+                {
+                    il.Emit(OpCodes.Ldloc, temps[wasmCursor]);
+                    EmitConversionIfNeeded(il, wasmParams[wasmCursor],
+                        clrType);
+                }
+                wasmCursor += slots;
             }
 
             il.Emit(OpCodes.Callvirt, method);
@@ -230,6 +261,64 @@ namespace Wacs.Transpiler.AOT.Component
         private static readonly MethodInfo GetTypeFromHandleMethod =
             typeof(Type).GetMethod(nameof(Type.GetTypeFromHandle),
                 BindingFlags.Public | BindingFlags.Static)!;
+
+        private static readonly FieldInfo MemoriesField =
+            typeof(ThinContext).GetField(
+                nameof(ThinContext.Memories))!;
+
+        private static readonly FieldInfo MemoryDataField =
+            typeof(MemoryInstance).GetField(
+                nameof(MemoryInstance.Data))!;
+
+        private static readonly MethodInfo LiftUtf8Method =
+            typeof(StringMarshal).GetMethod(
+                nameof(StringMarshal.LiftUtf8),
+                BindingFlags.Public | BindingFlags.Static,
+                binder: null,
+                types: new[] { typeof(byte[]), typeof(int), typeof(int) },
+                modifiers: null)!;
+
+        // Per-CLR-type wasm flat-slot count for canonical-ABI lower:
+        //   primitive (compat with i32/i64/f32/f64) → 1
+        //   string                                  → 2 (ptr, len)
+        // Returns -1 when the CLR type isn't supported by the v0
+        // direct-linked emit. Out-param `wasmTypes` is the
+        // per-slot wire type sequence the wasm side must provide
+        // (e.g. for string: [I32, I32]; for byte: [I32]).
+        private static int CanonicalSlotCount(Type clrType,
+            out ValType[] wasmTypes)
+        {
+            if (clrType == typeof(string))
+            {
+                wasmTypes = new[] { ValType.I32, ValType.I32 };
+                return 2;
+            }
+            if (clrType == typeof(int) || clrType == typeof(uint)
+                || clrType == typeof(bool)
+                || clrType == typeof(byte) || clrType == typeof(sbyte)
+                || clrType == typeof(short) || clrType == typeof(ushort))
+            {
+                wasmTypes = new[] { ValType.I32 };
+                return 1;
+            }
+            if (clrType == typeof(long) || clrType == typeof(ulong))
+            {
+                wasmTypes = new[] { ValType.I64 };
+                return 1;
+            }
+            if (clrType == typeof(float))
+            {
+                wasmTypes = new[] { ValType.F32 };
+                return 1;
+            }
+            if (clrType == typeof(double))
+            {
+                wasmTypes = new[] { ValType.F64 };
+                return 1;
+            }
+            wasmTypes = Array.Empty<ValType>();
+            return -1;
+        }
 
         // The host package's resources class must expose a public
         // `object GetResource(System.Type resourceInterface, int handle)`

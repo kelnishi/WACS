@@ -137,6 +137,30 @@ namespace Wacs.Transpiler.Test
             public uint Tick() => ++_n;
         }
 
+        // ====== String-param test surface ========================
+
+        [WitSource(@"interface str-env",
+            Package = "my:test@1.0.0", Interface = "str-env")]
+        public interface IPrinter
+        {
+            [WitSource(@"print: func(msg: string);",
+                Package = "my:test@1.0.0", Interface = "str-env",
+                Item = "print")]
+            void Print(string msg);
+        }
+
+        public sealed class StringBundle
+        {
+            public IPrinter StrEnv { get; }
+            public StringBundle(IPrinter strEnv) { StrEnv = strEnv; }
+        }
+
+        private sealed class CapturingPrinter : IPrinter
+        {
+            public string? Captured { get; private set; }
+            public void Print(string msg) { Captured = msg; }
+        }
+
         private sealed class FakeEnv : IEnv
         {
             private readonly ulong _v;
@@ -189,6 +213,63 @@ namespace Wacs.Transpiler.Test
             0x00, 0x01,
             // Code section: body = call 0; end
             0x0A, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0B,
+        };
+
+        // (module
+        //   (type $tString (func (param i32 i32)))   ;; void Print(string)
+        //   (type $tEntry (func))                     ;; void call_print()
+        //   (import "my:test/str-env@1.0.0" "print" (func $imp (type $tString)))
+        //   (memory 1)
+        //   (data (i32.const 0) "hello")
+        //   (func (export "call_print")
+        //     i32.const 0  ;; ptr
+        //     i32.const 5  ;; len
+        //     call $imp))
+        //
+        // The wasm "print" import has 2 wasm slots (ptr + len) but
+        // the typed C# IPrinter.Print(string) has a single string
+        // param. CanonicalSlotCount maps string→2, so CanEmitDirect
+        // accepts the binding; Emit reads ctx.Memories[0].Data
+        // and lifts via StringMarshal.LiftUtf8.
+        private static byte[] BuildStringParamFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types
+            //   type 0: (i32 i32) → void
+            //   type 1: () → void
+            0x01, 0x09, 0x02,
+            0x60, 0x02, 0x7F, 0x7F, 0x00,
+            0x60, 0x00, 0x00,
+            // Import section: 1 import
+            // size = count(1) + modlen(1) + mod(21) + entlen(1) + ent(5) + desc(2) = 31 = 0x1F
+            0x02, 0x1F, 0x01,
+            // module: "my:test/str-env@1.0.0" (21 bytes)
+            0x15,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x73, 0x74, 0x72, 0x2D, 0x65, 0x6E, 0x76, 0x40,
+            0x31, 0x2E, 0x30, 0x2E, 0x30,
+            // entity: "print" (5 bytes)
+            0x05,
+            0x70, 0x72, 0x69, 0x6E, 0x74,
+            // desc: func, type 0
+            0x00, 0x00,
+            // Function section: 1 func of type 1
+            0x03, 0x02, 0x01, 0x01,
+            // Memory section: 1 memory, no max, min 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export section: "call_print" → func 1
+            0x07, 0x0E, 0x01,
+            0x0A,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x70, 0x72, 0x69, 0x6E, 0x74,
+            0x00, 0x01,
+            // Code section: 1 body
+            // body = locals(0), i32.const 0, i32.const 5, call 0, end
+            0x0A, 0x0A, 0x01, 0x08,
+            0x00, 0x41, 0x00, 0x41, 0x05, 0x10, 0x00, 0x0B,
+            // Data section: 1 active segment, mem 0, offset 0, "hello"
+            0x0B, 0x0B, 0x01,
+            0x00, 0x41, 0x00, 0x0B, 0x05,
+            0x68, 0x65, 0x6C, 0x6C, 0x6F,
         };
 
         // (module
@@ -706,6 +787,76 @@ namespace Wacs.Transpiler.Test
             object? rTick2 = callTick.Invoke(instance,
                 Array.Empty<object>());
             Assert.Equal(43, (int)rTick2);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_StringParam_LiftsFromMemory()
+        {
+            // Wasm has memory + a "hello" data segment at offset 0.
+            // The exported call_print invokes the imported print
+            // with (ptr=0, len=5). Direct-linked emit reads the
+            // bytes from ctx.Memories[0].Data, lifts via
+            // StringMarshal.LiftUtf8, and passes the resulting
+            // C# string to IPrinter.Print.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int, int>>(
+                ("my:test/str-env@1.0.0", "print"),
+                (_, _) => throw new InvalidOperationException(
+                    "stub for print must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildStringParamFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(StringBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/str-env@1.0.0", "print", out var binding));
+            Assert.Equal(typeof(IPrinter), binding.InterfaceType);
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.StringParam", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_str_env_1_0_0_print"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for print must not "
+                            + "be invoked"),
+                });
+
+            var capturing = new CapturingPrinter();
+            var bundle = new StringBundle(capturing);
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+
+            var callPrint = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_print"))!;
+            callPrint.Invoke(instance, Array.Empty<object>());
+
+            // The bytes "hello" lifted from wasm memory, passed
+            // through the typed I.Print(string) callvirt, and
+            // captured by the test impl.
+            Assert.Equal("hello", capturing.Captured);
         }
     }
 }
