@@ -269,67 +269,8 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 var clrType = clrParams[i].ParameterType;
                 int slots = CanonicalSlotCount(clrType, out _);
-                if (clrType == typeof(string))
-                {
-                    // ctx.Memories[0].Data → byte[]
-                    il.Emit(OpCodes.Ldarg_0);
-                    il.Emit(OpCodes.Ldfld, MemoriesField);
-                    il.Emit(OpCodes.Ldc_I4_0);
-                    il.Emit(OpCodes.Ldelem_Ref);
-                    il.Emit(OpCodes.Ldfld, MemoryDataField);
-                    il.Emit(OpCodes.Ldloc, temps[wasmCursor]);     // ptr
-                    il.Emit(OpCodes.Ldloc, temps[wasmCursor + 1]); // len
-                    il.Emit(OpCodes.Call, LiftUtf8Method);
-                }
-                else if (clrType.IsArray
-                    && IsSupportedPrimitiveArrayElement(
-                        clrType.GetElementType()!))
-                {
-                    // ListMarshal.LiftPrim<T>(memory, ptr, len)
-                    il.Emit(OpCodes.Ldarg_0);
-                    il.Emit(OpCodes.Ldfld, MemoriesField);
-                    il.Emit(OpCodes.Ldc_I4_0);
-                    il.Emit(OpCodes.Ldelem_Ref);
-                    il.Emit(OpCodes.Ldfld, MemoryDataField);
-                    il.Emit(OpCodes.Ldloc, temps[wasmCursor]);     // ptr
-                    il.Emit(OpCodes.Ldloc, temps[wasmCursor + 1]); // len
-                    il.Emit(OpCodes.Call,
-                        ResolveLiftPrimMethod(clrType.GetElementType()!));
-                }
-                else if (clrType.IsGenericType
-                    && clrType.GetGenericTypeDefinition() == typeof(Option<>))
-                {
-                    // Conditional Option<T>::Some(value) / None.
-                    //   ldloc disc
-                    //   brfalse none
-                    //   ldloc value (with conv if needed)
-                    //   call Option<T>::Some(T)
-                    //   br end
-                    // none:
-                    //   call Option<T>::get_None
-                    // end:
-                    var inner = clrType.GetGenericArguments()[0];
-                    var noneLabel = il.DefineLabel();
-                    var endLabel = il.DefineLabel();
-                    il.Emit(OpCodes.Ldloc, temps[wasmCursor]);
-                    il.Emit(OpCodes.Brfalse, noneLabel);
-                    // Some path
-                    il.Emit(OpCodes.Ldloc, temps[wasmCursor + 1]);
-                    EmitConversionIfNeeded(il, wasmParams[wasmCursor + 1],
-                        inner);
-                    il.Emit(OpCodes.Call, ResolveOptionSomeMethod(inner));
-                    il.Emit(OpCodes.Br, endLabel);
-                    // None path
-                    il.MarkLabel(noneLabel);
-                    il.Emit(OpCodes.Call, ResolveOptionNoneGetter(inner));
-                    il.MarkLabel(endLabel);
-                }
-                else
-                {
-                    il.Emit(OpCodes.Ldloc, temps[wasmCursor]);
-                    EmitConversionIfNeeded(il, wasmParams[wasmCursor],
-                        clrType);
-                }
+                EmitLiftForType(il, clrType, wasmParams, temps,
+                    wasmCursor);
                 wasmCursor += slots;
             }
 
@@ -386,6 +327,75 @@ namespace Wacs.Transpiler.AOT.Component
                 EmitReturnConversionIfNeeded(il, method.ReturnType,
                     wasmRet);
             }
+        }
+
+        // ---- Lift dispatcher -----------------------------------------
+
+        // Emit IL that consumes the wasm slots starting at
+        // <paramref name="wasmCursor"/> and leaves the corresponding
+        // CLR value on the stack. Recursive: Option<T> calls itself
+        // for the inner T's value-slot lift.
+        private static void EmitLiftForType(ILGenerator il,
+            Type clrType, ValType[] wasmParams,
+            LocalBuilder[] temps, int wasmCursor)
+        {
+            if (clrType == typeof(string))
+            {
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, MemoriesField);
+                il.Emit(OpCodes.Ldc_I4_0);
+                il.Emit(OpCodes.Ldelem_Ref);
+                il.Emit(OpCodes.Ldfld, MemoryDataField);
+                il.Emit(OpCodes.Ldloc, temps[wasmCursor]);     // ptr
+                il.Emit(OpCodes.Ldloc, temps[wasmCursor + 1]); // len
+                il.Emit(OpCodes.Call, LiftUtf8Method);
+                return;
+            }
+            if (clrType.IsArray
+                && IsSupportedPrimitiveArrayElement(
+                    clrType.GetElementType()!))
+            {
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, MemoriesField);
+                il.Emit(OpCodes.Ldc_I4_0);
+                il.Emit(OpCodes.Ldelem_Ref);
+                il.Emit(OpCodes.Ldfld, MemoryDataField);
+                il.Emit(OpCodes.Ldloc, temps[wasmCursor]);     // ptr
+                il.Emit(OpCodes.Ldloc, temps[wasmCursor + 1]); // len
+                il.Emit(OpCodes.Call,
+                    ResolveLiftPrimMethod(clrType.GetElementType()!));
+                return;
+            }
+            if (clrType.IsGenericType
+                && clrType.GetGenericTypeDefinition() == typeof(Option<>))
+            {
+                // Conditional Option<T>::Some(value) / None.
+                //   ldloc disc
+                //   brfalse none
+                //   <emit lift for inner T at cursor+1>
+                //   call Option<T>::Some(T)
+                //   br end
+                // none:
+                //   call Option<T>::get_None
+                // end:
+                var inner = clrType.GetGenericArguments()[0];
+                var noneLabel = il.DefineLabel();
+                var endLabel = il.DefineLabel();
+                il.Emit(OpCodes.Ldloc, temps[wasmCursor]);
+                il.Emit(OpCodes.Brfalse, noneLabel);
+                EmitLiftForType(il, inner, wasmParams, temps,
+                    wasmCursor + 1);
+                il.Emit(OpCodes.Call, ResolveOptionSomeMethod(inner));
+                il.Emit(OpCodes.Br, endLabel);
+                il.MarkLabel(noneLabel);
+                il.Emit(OpCodes.Call, ResolveOptionNoneGetter(inner));
+                il.MarkLabel(endLabel);
+                return;
+            }
+            // Primitive — load the spilled local and apply any
+            // narrow CLR conversion.
+            il.Emit(OpCodes.Ldloc, temps[wasmCursor]);
+            EmitConversionIfNeeded(il, wasmParams[wasmCursor], clrType);
         }
 
         // ---- Internals ------------------------------------------------
@@ -500,16 +510,21 @@ namespace Wacs.Transpiler.AOT.Component
                 wasmTypes = new[] { ValType.I32, ValType.I32 };
                 return 2;
             }
-            // Option<T> for primitive T: 1 disc i32 + 1 value slot
-            // matching T's wire type. Per canon-ABI flat lowering.
+            // Option<T>: 1 disc i32 + N value slots (whatever T's
+            // canonical-ABI flat-form lowers to). Per spec.
             if (clrType.IsGenericType
                 && clrType.GetGenericTypeDefinition() == typeof(Option<>))
             {
                 var inner = clrType.GetGenericArguments()[0];
-                if (CanonicalSlotCount(inner, out var innerWasm) == 1)
+                int innerSlots = CanonicalSlotCount(inner,
+                    out var innerWasm);
+                if (innerSlots > 0)
                 {
-                    wasmTypes = new[] { ValType.I32, innerWasm[0] };
-                    return 2;
+                    var combined = new ValType[1 + innerSlots];
+                    combined[0] = ValType.I32;
+                    Array.Copy(innerWasm, 0, combined, 1, innerSlots);
+                    wasmTypes = combined;
+                    return 1 + innerSlots;
                 }
             }
             if (clrType == typeof(int) || clrType == typeof(uint)

@@ -294,6 +294,33 @@ namespace Wacs.Transpiler.Test
             public void TakeOpt(Option<uint> opt) { Last = opt; }
         }
 
+        // ====== Option<string> param test surface ================
+        // Aggregate inner type — disc + (ptr, len) for a 3-slot
+        // wire form. The Some path lifts via StringMarshal.LiftUtf8
+        // (recursing into EmitLiftForType for the inner string).
+
+        [WitSource(@"interface optstr-env",
+            Package = "my:test@1.0.0", Interface = "optstr-env")]
+        public interface IOptStrTaker
+        {
+            [WitSource(@"take-optstr: func(o: option<string>);",
+                Package = "my:test@1.0.0", Interface = "optstr-env",
+                Item = "take-optstr")]
+            void TakeOptStr(Option<string> opt);
+        }
+
+        public sealed class OptStrBundle
+        {
+            public IOptStrTaker OptStrEnv { get; }
+            public OptStrBundle(IOptStrTaker s) { OptStrEnv = s; }
+        }
+
+        private sealed class CapturingOptStrTaker : IOptStrTaker
+        {
+            public Option<string> Last { get; private set; }
+            public void TakeOptStr(Option<string> opt) { Last = opt; }
+        }
+
         private sealed class FakeEnv : IEnv
         {
             private readonly ulong _v;
@@ -506,6 +533,72 @@ namespace Wacs.Transpiler.Test
             // Code section: locals=0, call 0, call 1, end
             0x0A, 0x08, 0x01, 0x06,
             0x00, 0x10, 0x00, 0x10, 0x01, 0x0B,
+        };
+
+        // (module
+        //   (type $tOptStr (func (param i32 i32 i32)))  ;; void TakeOptStr(Option<string>)
+        //   (type $tEntry (func))
+        //   (import "my:test/optstr-env@1.0.0" "take-optstr"
+        //           (func $imp (type $tOptStr)))
+        //   (memory 1)
+        //   (data (i32.const 0) "hello")
+        //   (func (export "call_some_str")
+        //     i32.const 1; i32.const 0; i32.const 5; call $imp)
+        //   (func (export "call_none_str")
+        //     i32.const 0; i32.const 0; i32.const 0; call $imp))
+        //
+        // option<string> wire is (i32 disc, i32 ptr, i32 len) = 3
+        // slots. The Some path lifts via StringMarshal.LiftUtf8
+        // (recursing into EmitLiftForType for the inner string)
+        // then constructs Option<string>::Some(s).
+        private static byte[] BuildOptionStringParamFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types
+            // type 0: (i32 i32 i32) → void  (6 bytes)
+            // type 1: () → void  (3 bytes)
+            0x01, 0x0A, 0x02,
+            0x60, 0x03, 0x7F, 0x7F, 0x7F, 0x00,
+            0x60, 0x00, 0x00,
+            // Import section
+            // size = 1 + 1 + 24 + 1 + 11 + 2 = 40 = 0x28
+            0x02, 0x28, 0x01,
+            // module: "my:test/optstr-env@1.0.0" (24)
+            0x18,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x6F, 0x70, 0x74, 0x73, 0x74, 0x72, 0x2D, 0x65,
+            0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            // entity: "take-optstr" (11)
+            0x0B,
+            0x74, 0x61, 0x6B, 0x65, 0x2D, 0x6F, 0x70, 0x74,
+            0x73, 0x74, 0x72,
+            0x00, 0x00,
+            // Function section: 2 funcs of type 1
+            0x03, 0x03, 0x02, 0x01, 0x01,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export section: 2 exports
+            // size = 1 + (1+13+1+1) + (1+13+1+1) = 33 = 0x21
+            0x07, 0x21, 0x02,
+            0x0D,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x73, 0x6F, 0x6D,
+            0x65, 0x5F, 0x73, 0x74, 0x72,
+            0x00, 0x01,
+            0x0D,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x6E, 0x6F, 0x6E,
+            0x65, 0x5F, 0x73, 0x74, 0x72,
+            0x00, 0x02,
+            // Code section: 2 bodies
+            // size = 1 + 11 + 11 = 23 = 0x17
+            0x0A, 0x17, 0x02,
+            // body 0 (call_some_str): locals=0, i32.const 1, i32.const 0, i32.const 5, call 0, end (10 bytes)
+            0x0A, 0x00, 0x41, 0x01, 0x41, 0x00, 0x41, 0x05, 0x10, 0x00, 0x0B,
+            // body 1 (call_none_str): locals=0, i32.const 0, i32.const 0, i32.const 0, call 0, end (10 bytes)
+            0x0A, 0x00, 0x41, 0x00, 0x41, 0x00, 0x41, 0x00, 0x10, 0x00, 0x0B,
+            // Data: "hello" at offset 0
+            0x0B, 0x0B, 0x01,
+            0x00, 0x41, 0x00, 0x0B, 0x05,
+            0x68, 0x65, 0x6C, 0x6C, 0x6F,
         };
 
         // (module
@@ -1627,6 +1720,77 @@ namespace Wacs.Transpiler.Test
             // call_none path: disc=0 → Option.None.
             var callNone = result.ExportsInterface!.GetMethod(
                 InterfaceGenerator.SanitizeName("call_none"))!;
+            callNone.Invoke(instance, Array.Empty<object>());
+            Assert.False(capturing.Last.HasValue);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_OptionStringParam_BothBranches()
+        {
+            // option<string> wire form: (i32 disc, i32 ptr, i32 len)
+            // = 3 slots. Some branch lifts the inner string from
+            // memory via LiftUtf8 (recursing into EmitLiftForType),
+            // wraps in Option<string>::Some. None branch loads
+            // Option<string>::None directly.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int, int, int>>(
+                ("my:test/optstr-env@1.0.0", "take-optstr"),
+                (_, _, _) => throw new InvalidOperationException(
+                    "stub for take-optstr must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildOptionStringParamFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(OptStrBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/optstr-env@1.0.0", "take-optstr", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.OptStrParam", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_optstr_env_1_0_0_take_optstr"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for take-optstr must "
+                            + "not be invoked"),
+                });
+
+            var capturing = new CapturingOptStrTaker();
+            var bundle = new OptStrBundle(capturing);
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+
+            // call_some_str: disc=1, lifts "hello" → Some("hello").
+            var callSome = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_some_str"))!;
+            callSome.Invoke(instance, Array.Empty<object>());
+            Assert.True(capturing.Last.HasValue);
+            Assert.Equal("hello", capturing.Last.Value);
+
+            // call_none_str: disc=0 → None (ptr/len ignored).
+            var callNone = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_none_str"))!;
             callNone.Invoke(instance, Array.Empty<object>());
             Assert.False(capturing.Last.HasValue);
         }
