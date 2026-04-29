@@ -22,6 +22,22 @@
         </None>
     </ItemGroup>
 
+    <!--
+      Auto-generated wit-bindgen-csharp output in
+      components/fixtures/<fixture>/{reference,expected}/ uses C# 10
+      file-scoped namespaces and unsafe code. Those trees ride along
+      as on-disk references for fixture diffing — they are never
+      compiled into Spec.Test (`LangVersion=9`, no AllowUnsafeBlocks).
+      Exclude them from the default **/*.cs glob so they don't break
+      the build.
+    -->
+    <ItemGroup>
+      <Compile Remove="components/fixtures/**/reference/**/*.cs" />
+      <Compile Remove="components/fixtures/**/expected/**/*.cs" />
+      <None Remove="components/fixtures/**/reference/**/*.cs" />
+      <None Remove="components/fixtures/**/expected/**/*.cs" />
+    </ItemGroup>
+
     <ItemGroup>
       <ProjectReference Include="..\Wacs.Core\Wacs.Core.csproj" />
       <ProjectReference Include="..\Wacs.WASIp1\Wacs.WASIp1.csproj" />
