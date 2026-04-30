@@ -120,6 +120,14 @@ namespace Wacs.Transpiler.AOT
         // object? for the same WASI/host-package independence reason.
         public object? Resources;
 
+        // CabiRealloc: typed delegate for the component's
+        // `cabi_realloc(oldPtr, oldLen, align, newLen) -> i32`
+        // export. Cached at module-class instantiation when the
+        // component exports it; null otherwise. Used by direct-
+        // linked aggregate-RETURN emit (string / list returns)
+        // to allocate guest-side buffers.
+        public Func<int, int, int, int, int>? CabiRealloc;
+
         // === Interpreter interop (nullable — not needed for standalone) ===
         // When running inside the WACS framework, these enable mixed-mode
         // execution with interpreted modules. When standalone, they are null.

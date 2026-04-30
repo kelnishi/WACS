@@ -7,6 +7,7 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Text;
 
 namespace Wacs.ComponentModel.CanonicalABI
 {
@@ -56,5 +57,44 @@ namespace Wacs.ComponentModel.CanonicalABI
                 dest.AsSpan(offset, 8), BitConverter.DoubleToInt64Bits(v));
         public static void StoreBool(byte[] dest, int offset, bool v)
             => dest[offset] = v ? (byte)1 : (byte)0;
+
+        /// <summary>
+        /// Store a UTF-8 string into wasm linear memory and write
+        /// the (ptr, len) pair to the retArea slot. Allocates a
+        /// guest-side buffer via the component's <c>cabi_realloc</c>
+        /// export and copies the encoded bytes into it.
+        ///
+        /// <para><paramref name="dest"/> is the wasm linear memory
+        /// (typically <c>ctx.Memories[0].Data</c>).
+        /// <paramref name="retAreaOffset"/> is the absolute byte
+        /// offset in <paramref name="dest"/> where the (ptr, len)
+        /// pair should land — the IL has already done
+        /// <c>retArea + fieldOffset</c>.</para>
+        ///
+        /// <para>Used by direct-linked aggregate-RETURN emit when
+        /// the host returns a string. The CLR-side string is
+        /// encoded with the canon-ABI default UTF-8; UTF-16 /
+        /// Latin1+UTF-16 encoders ride incrementally.</para>
+        /// </summary>
+        public static void StoreString(byte[] dest, int retAreaOffset,
+            string value, Func<int, int, int, int, int> cabiRealloc)
+        {
+            if (cabiRealloc == null)
+                throw new InvalidOperationException(
+                    "String returns require the component to "
+                    + "export `cabi_realloc`.");
+            // The dest buffer can be re-bound by cabi_realloc if
+            // the underlying wasm memory grows; re-fetch by lookup
+            // through the same memory we got passed (in WACS today
+            // the byte[] reference is stable per memory instance,
+            // but defensive re-bind is cheap).
+            var bytes = Encoding.UTF8.GetBytes(value);
+            var ptr = cabiRealloc(0, 0, 1, bytes.Length);
+            Buffer.BlockCopy(bytes, 0, dest, ptr, bytes.Length);
+            BinaryPrimitives.WriteInt32LittleEndian(
+                dest.AsSpan(retAreaOffset, 4), ptr);
+            BinaryPrimitives.WriteInt32LittleEndian(
+                dest.AsSpan(retAreaOffset + 4, 4), bytes.Length);
+        }
     }
 }

@@ -757,6 +757,13 @@ namespace Wacs.Transpiler.AOT
             // === Populate FuncTable ===
             EmitFuncTablePopulation(il, ctxLocal);
 
+            // === Cache cabi_realloc delegate, if exported ===
+            // Aggregate-RETURN emit (string / list<T>) needs a
+            // typed Func<int,int,int,int,int> reference to the
+            // component's cabi_realloc export. Cache once at
+            // ctor time so each return site is just a field load.
+            EmitCabiReallocCacheIfPresent(il, ctxLocal);
+
             // === Bind delegates into table elements ===
             // After FuncTable is populated, walk tables and replace raw funcref
             // indices with delegate-carrying Values for cross-module call_indirect.
@@ -830,6 +837,40 @@ namespace Wacs.Transpiler.AOT
 
                 il.Emit(OpCodes.Stelem_Ref);
             }
+        }
+
+        /// <summary>
+        /// If the module exports `cabi_realloc`, cache its typed
+        /// delegate on <c>ctx.CabiRealloc</c>. The funcIdx is
+        /// known at transpile time; the IL just casts the
+        /// matching FuncTable entry to
+        /// <c>Func&lt;int,int,int,int,int&gt;</c>.
+        /// </summary>
+        private void EmitCabiReallocCacheIfPresent(ILGenerator il,
+            LocalBuilder ctxLocal)
+        {
+            int? cabiFuncIdx = null;
+            foreach (var ex in _interfaces.ExportMethods)
+            {
+                if (ex.WasmName == "cabi_realloc")
+                {
+                    cabiFuncIdx = ex.FuncIndex;
+                    break;
+                }
+            }
+            if (cabiFuncIdx == null) return;
+
+            // ctx.CabiRealloc = (Func<int,int,int,int,int>) ctx.FuncTable[cabiFuncIdx]
+            il.Emit(OpCodes.Ldloc, ctxLocal);
+            il.Emit(OpCodes.Ldloc, ctxLocal);
+            il.Emit(OpCodes.Ldfld, typeof(ThinContext).GetField(
+                nameof(ThinContext.FuncTable))!);
+            il.Emit(OpCodes.Ldc_I4, cabiFuncIdx.Value);
+            il.Emit(OpCodes.Ldelem_Ref);
+            il.Emit(OpCodes.Castclass,
+                typeof(Func<int, int, int, int, int>));
+            il.Emit(OpCodes.Stfld, typeof(ThinContext).GetField(
+                nameof(ThinContext.CabiRealloc))!);
         }
 
         /// <summary>
