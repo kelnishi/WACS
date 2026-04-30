@@ -823,6 +823,31 @@ namespace Wacs.Transpiler.Test
             public Option<XYPair> Xy() => _v;
         }
 
+        // ====== Result<tuple<u32,u32>, primitive> return =========
+
+        [WitSource(@"interface restup-env",
+            Package = "my:test@1.0.0", Interface = "restup-env")]
+        public interface IPairResult
+        {
+            [WitSource(@"go: func() -> result<tuple<u32, u32>, u32>;",
+                Package = "my:test@1.0.0", Interface = "restup-env",
+                Item = "go")]
+            Result<(uint, uint), uint> Go();
+        }
+
+        public sealed class PairResultBundle
+        {
+            public IPairResult RestupEnv { get; }
+            public PairResultBundle(IPairResult r) { RestupEnv = r; }
+        }
+
+        private sealed class FixedPairResult : IPairResult
+        {
+            private readonly Result<(uint, uint), uint> _v;
+            public FixedPairResult(Result<(uint, uint), uint> v) { _v = v; }
+            public Result<(uint, uint), uint> Go() => _v;
+        }
+
         // ====== Variant return: string-bearing payload =========
         // variant note { silent, label(string) }: empty + string
         // payload. canon-ABI joined-flat reserves max(align)=4 and
@@ -2381,6 +2406,66 @@ namespace Wacs.Transpiler.Test
             0x62,
             0x00, 0x03,
             // Code section: same as Option<tuple>
+            0x0A, 0x25, 0x03,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x2D, 0x00, 0x00,
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x04,
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x08,
+            0x0B,
+        };
+
+        // Result<tuple<u32,u32>, u32> retArea: u8 disc @0 +
+        // joined-flat (a@4, b@8) | u32@4 at retArea+4. Probes
+        // disc, a@4, b@8 — for Err the b@8 slot is uninitialized.
+        private static byte[] BuildResultTupleReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: (i32) → void, () → i32
+            0x01, 0x09, 0x02,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // module: "my:test/restup-env@1.0.0" (24)
+            // entity: "go" (2)
+            // size = 1 + 1 + 24 + 1 + 2 + 2 = 31 = 0x1F
+            0x02, 0x1F, 0x01,
+            0x18,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x72, 0x65, 0x73, 0x74, 0x75, 0x70, 0x2D, 0x65,
+            0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x02,
+            0x67, 0x6F,
+            0x00, 0x00,
+            // Function section: 3 local funcs of type 1
+            0x03, 0x04, 0x03, 0x01, 0x01, 0x01,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export section: 3 exports
+            //   call_go_disc (12): 15
+            //   call_go_a    (9):  12
+            //   call_go_b    (9):  12
+            // size = 1 + 15 + 12 + 12 = 40 = 0x28
+            0x07, 0x28, 0x03,
+            0x0C,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x67, 0x6F, 0x5F,
+            0x64, 0x69, 0x73, 0x63,
+            0x00, 0x01,
+            0x09,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x67, 0x6F, 0x5F,
+            0x61,
+            0x00, 0x02,
+            0x09,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x67, 0x6F, 0x5F,
+            0x62,
+            0x00, 0x03,
+            // Code section: 3 bodies
             0x0A, 0x25, 0x03,
             0x0B, 0x00,
             0x41, 0x10, 0x10, 0x00,
@@ -8368,6 +8453,106 @@ namespace Wacs.Transpiler.Test
                 var callDisc = result.ExportsInterface!.GetMethod(
                     InterfaceGenerator.SanitizeName("call_xy_disc"))!;
                 Assert.Equal(0, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+            }
+        }
+
+        [Fact]
+        public void DirectLinkedImport_ResultTupleReturn_BothBranches()
+        {
+            // Result<(uint, uint), uint> retArea: u8 disc + 8-byte
+            // tuple in Ok arm OR 4-byte u32 in Err arm. Joined-flat
+            // valueOffset = 4, max-payload-size = 8 (the tuple).
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/restup-env@1.0.0", "go"),
+                _ => throw new InvalidOperationException(
+                    "stub for go must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildResultTupleReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(PairResultBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/restup-env@1.0.0", "go", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.ResTupRet", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_restup_env_1_0_0_go"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for go must not be invoked"),
+                });
+
+            // Ok((9, 16)) → disc=0, a=9, b=16.
+            {
+                var bundle = new PairResultBundle(new FixedPairResult(
+                    Result<(uint, uint), uint>.FromOk((9u, 16u))));
+
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callDisc = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_go_disc"))!;
+                Assert.Equal(0, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+
+                var fresh = Activator.CreateInstance(result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callA = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_go_a"))!;
+                Assert.Equal(9, (int)callA.Invoke(fresh,
+                    Array.Empty<object>())!);
+
+                var fresh2 = Activator.CreateInstance(result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callB = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_go_b"))!;
+                Assert.Equal(16, (int)callB.Invoke(fresh2,
+                    Array.Empty<object>())!);
+            }
+
+            // Err(0x37) → disc=1, a=0x37 (Err value at retArea+4).
+            {
+                var bundle = new PairResultBundle(new FixedPairResult(
+                    Result<(uint, uint), uint>.FromErr(0x37u)));
+
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callDisc = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_go_disc"))!;
+                Assert.Equal(1, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+
+                var fresh = Activator.CreateInstance(result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callA = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_go_a"))!;
+                Assert.Equal(0x37, (int)callA.Invoke(fresh,
                     Array.Empty<object>())!);
             }
         }
