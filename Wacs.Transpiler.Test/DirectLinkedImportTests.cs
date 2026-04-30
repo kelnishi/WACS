@@ -412,6 +412,65 @@ namespace Wacs.Transpiler.Test
             public void TakeStrs(string[] items) { Captured = items; }
         }
 
+        // ====== Variant param test surface =======================
+        // Mirrors the source-generator-emitted shape for WIT
+        // variants (HttpMethod, IpAddress, etc.):
+        //   - abstract base class with [WitSource("variant ...")]
+        //   - nested sealed classes per case in declaration order
+        //   - empty cases: no body
+        //   - payload cases: public Value { get; } + ctor(payload)
+
+        [WitSource(@"variant signal { tick, beep(u32), name(string) }",
+            Package = "my:test@1.0.0", Interface = "var-env",
+            Item = "signal")]
+        public abstract class Signal
+        {
+            public sealed class SignalTick : Signal { }
+            public sealed class SignalBeep : Signal
+            {
+                public uint Value { get; }
+                public SignalBeep(uint value) { Value = value; }
+            }
+            public sealed class SignalName : Signal
+            {
+                public string Value { get; }
+                public SignalName(string value) { Value = value; }
+            }
+        }
+
+        [WitSource(@"interface var-env",
+            Package = "my:test@1.0.0", Interface = "var-env")]
+        public interface ISignalTaker
+        {
+            // Returns a probe value the test can assert against.
+            // Encodes both the case kind AND the payload contents
+            // back as i32:
+            //   Tick      → 0xA000_0000
+            //   Beep(v)   → 0xB000_0000 | (v & 0x0FFF_FFFF)
+            //   Name(s)   → 0xC000_0000 | (s.Length & 0x0FFF_FFFF)
+            [WitSource(@"take-signal: func(s: signal) -> u32;",
+                Package = "my:test@1.0.0", Interface = "var-env",
+                Item = "take-signal")]
+            uint TakeSignal(Signal s);
+        }
+
+        public sealed class SignalBundle
+        {
+            public ISignalTaker VarEnv { get; }
+            public SignalBundle(ISignalTaker s) { VarEnv = s; }
+        }
+
+        private sealed class SignalProbe : ISignalTaker
+        {
+            public uint TakeSignal(Signal s) => s switch
+            {
+                Signal.SignalTick _ => 0xA000_0000u,
+                Signal.SignalBeep b => 0xB000_0000u | (b.Value & 0x0FFF_FFFFu),
+                Signal.SignalName n => 0xC000_0000u | ((uint)n.Value.Length & 0x0FFF_FFFFu),
+                _ => 0xFFFF_FFFFu,
+            };
+        }
+
         // ====== Option<T> param test surface =====================
         // Source-gen convention uses Option<T> from
         // Wacs.ComponentModel.Runtime (NOT C# Nullable<T>) — option
@@ -740,6 +799,84 @@ namespace Wacs.Transpiler.Test
             0x00, 0x01,
             // Code section: body = call 0; end
             0x0A, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0B,
+        };
+
+        // (module
+        //   (type $tSig (func (param i32 i32 i32) (result i32))) ;; (disc, s1, s2) → u32
+        //   (type $tEntry (func (result i32)))
+        //   (import "my:test/var-env@1.0.0" "take-signal" (func $imp (type $tSig)))
+        //   (memory 1)
+        //   (data (i32.const 0) "hi")           ;; 2-byte string
+        //   (func (export "call_tick") (result i32)
+        //     i32.const 0   ;; disc = SignalTick (case 0)
+        //     i32.const 0   ;; slot1 (ignored)
+        //     i32.const 0   ;; slot2 (ignored)
+        //     call $imp)
+        //   (func (export "call_beep") (result i32)
+        //     i32.const 1   ;; disc = SignalBeep (case 1)
+        //     i32.const 7   ;; payload value
+        //     i32.const 0   ;; slot2 (ignored)
+        //     call $imp)
+        //   (func (export "call_name") (result i32)
+        //     i32.const 2   ;; disc = SignalName (case 2)
+        //     i32.const 0   ;; ptr (memory offset 0)
+        //     i32.const 2   ;; len ("hi")
+        //     call $imp))
+        //
+        // Wire = (disc, then joined-flat over max payload). Beep's
+        // u32 payload sits in slot1; Name's (ptr, len) sits in
+        // slot1+slot2; Tick has no payload so the joined-flat
+        // slots are inert padding for it.
+        private static byte[] BuildVariantParamFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types
+            //   0: (i32 i32 i32) → i32 (7 bytes)
+            //   1: () → i32 (4 bytes)
+            // size = 1 + 7 + 4 = 12 = 0x0C
+            0x01, 0x0C, 0x02,
+            0x60, 0x03, 0x7F, 0x7F, 0x7F, 0x01, 0x7F,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // size = 1 + 1 + 21 + 1 + 11 + 2 = 37 = 0x25
+            0x02, 0x25, 0x01,
+            // module: "my:test/var-env@1.0.0" (21)
+            0x15,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x76, 0x61, 0x72, 0x2D, 0x65, 0x6E, 0x76, 0x40,
+            0x31, 0x2E, 0x30, 0x2E, 0x30,
+            // entity: "take-signal" (11)
+            0x0B,
+            0x74, 0x61, 0x6B, 0x65, 0x2D, 0x73, 0x69, 0x67,
+            0x6E, 0x61, 0x6C,
+            0x00, 0x00,
+            // Function section: 3 funcs of type 1
+            0x03, 0x04, 0x03, 0x01, 0x01, 0x01,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export section: 3 exports
+            // Each: namelen(1) + name(N) + descByte(1) + funcIdx(1)
+            // call_tick (9): 1+9+1+1 = 12
+            // call_beep (9): 12
+            // call_name (9): 12
+            // size = count(1) + 12*3 = 37 = 0x25
+            0x07, 0x25, 0x03,
+            0x09, 0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x74, 0x69, 0x63, 0x6B, 0x00, 0x01,
+            0x09, 0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x62, 0x65, 0x65, 0x70, 0x00, 0x02,
+            0x09, 0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x6E, 0x61, 0x6D, 0x65, 0x00, 0x03,
+            // Code section: 3 bodies, each = locals(1) + 3*i32const(2) + call(2) + end(1) = 10
+            // size = 1 + 11*3 = 34 = 0x22
+            0x0A, 0x22, 0x03,
+            // call_tick: i32.const 0, i32.const 0, i32.const 0, call 0
+            0x0A, 0x00, 0x41, 0x00, 0x41, 0x00, 0x41, 0x00, 0x10, 0x00, 0x0B,
+            // call_beep: i32.const 1, i32.const 7, i32.const 0, call 0
+            0x0A, 0x00, 0x41, 0x01, 0x41, 0x07, 0x41, 0x00, 0x10, 0x00, 0x0B,
+            // call_name: i32.const 2, i32.const 0, i32.const 2, call 0
+            0x0A, 0x00, 0x41, 0x02, 0x41, 0x00, 0x41, 0x02, 0x10, 0x00, 0x0B,
+            // Data: "hi" at offset 0 (2 bytes)
+            0x0B, 0x08, 0x01,
+            0x00, 0x41, 0x00, 0x0B, 0x02,
+            0x68, 0x69,
         };
 
         // (module
@@ -3723,6 +3860,93 @@ namespace Wacs.Transpiler.Test
             Assert.NotNull(capturing.Captured);
             Assert.Equal(new[] { "hi", "hello" },
                 capturing.Captured);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_VariantParam_AllCasesConstruct()
+        {
+            // variant signal { tick, beep(u32), name(string) }
+            // Wire form: (i32 disc, joined-flat over max payload).
+            // Max payload is string (2 slots: ptr + len), so wire =
+            // 3 i32 slots. Direct-linked emit switches on disc and
+            // newobjs the matching SignalXxx case class — for empty
+            // cases via parameterless ctor; for payload cases by
+            // recursively lifting the payload type and passing it
+            // to the case ctor.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Func<int, int, int, int>>(
+                ("my:test/var-env@1.0.0", "take-signal"),
+                (_, _, _) => throw new InvalidOperationException(
+                    "stub for take-signal must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildVariantParamFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(SignalBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/var-env@1.0.0", "take-signal", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.VariantParam", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_var_env_1_0_0_take_signal"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for take-signal must "
+                            + "not be invoked"),
+                });
+
+            var bundle = new SignalBundle(new SignalProbe());
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+
+            // Tick (case 0, no payload): SignalProbe returns 0xA000_0000.
+            var callTick = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_tick"))!;
+            object? rTick = callTick.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<int>(rTick);
+            Assert.Equal(unchecked((int)0xA000_0000u), (int)rTick);
+
+            // Beep(7) (case 1, u32 payload): 0xB000_0000 | 7.
+            var callBeep = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_beep"))!;
+            object? rBeep = callBeep.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<int>(rBeep);
+            Assert.Equal(unchecked((int)(0xB000_0000u | 7u)),
+                (int)rBeep);
+
+            // Name("hi") (case 2, string payload): 0xC000_0000 | 2.
+            var callName = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_name"))!;
+            object? rName = callName.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<int>(rName);
+            Assert.Equal(unchecked((int)(0xC000_0000u | 2u)),
+                (int)rName);
         }
     }
 }
