@@ -212,6 +212,14 @@ namespace Wacs.Transpiler.AOT.Component
                         effectiveOptions.HostPackages);
             }
 
+            // Walk the component's canon-lower options and apply
+            // each (module, entity) import's string-encoding to its
+            // matching binding. Unmatched imports keep their default
+            // UTF-8 encoding. Idempotent — safe to run on a
+            // pre-populated resolver too.
+            effectiveOptions.Resolver?.ApplyImportCanonOptions(
+                parsed.Component);
+
             var runtime = new WasmRuntime();
             // The runtime's InstantiateModule throws on any unbound
             // import, so the caller must register stubs (or real
