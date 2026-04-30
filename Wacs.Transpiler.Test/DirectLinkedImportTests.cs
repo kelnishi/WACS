@@ -515,6 +515,33 @@ namespace Wacs.Transpiler.Test
                 => ((uint)(byte)c << 16) | (uint)p;
         }
 
+        // ====== enum-return test surface =========================
+        // Free function returning a Color enum. The CLR enum value
+        // shares stack form with its underlying type, so the same
+        // primitive-return path that handles `byte` returns works
+        // directly for `Color : byte`.
+
+        [WitSource(@"interface enumret-env",
+            Package = "my:test@1.0.0", Interface = "enumret-env")]
+        public interface IColorPicker
+        {
+            [WitSource(@"pick: func() -> color;",
+                Package = "my:test@1.0.0", Interface = "enumret-env",
+                Item = "pick")]
+            Color Pick();
+        }
+
+        public sealed class EnumRetBundle
+        {
+            public IColorPicker EnumretEnv { get; }
+            public EnumRetBundle(IColorPicker p) { EnumretEnv = p; }
+        }
+
+        private sealed class GreenPicker : IColorPicker
+        {
+            public Color Pick() => Color.Green;
+        }
+
         private sealed class FakeEnv : IEnv
         {
             private readonly ulong _v;
@@ -727,6 +754,44 @@ namespace Wacs.Transpiler.Test
             // Code section: locals=0, call 0, call 1, end
             0x0A, 0x08, 0x01, 0x06,
             0x00, 0x10, 0x00, 0x10, 0x01, 0x0B,
+        };
+
+        // (module
+        //   (type $t (func (result i32)))
+        //   (import "my:test/enumret-env@1.0.0" "pick"
+        //           (func $imp (type $t)))
+        //   (func (export "call_pick") (result i32) call $imp))
+        //
+        // Color : byte enum returned via the primitive-return path —
+        // the CLR enum value shares the i32 stack form with its
+        // underlying byte/u8, so the typed callvirt's return slot
+        // is the wasm i32 result directly.
+        private static byte[] BuildEnumReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: () → i32
+            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F,
+            // Import section: 1 import
+            // size = 1 + 1 + 25 + 1 + 4 + 2 = 34 = 0x22
+            0x02, 0x22, 0x01,
+            // module: "my:test/enumret-env@1.0.0" (25)
+            0x19,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x65, 0x6E, 0x75, 0x6D, 0x72, 0x65, 0x74, 0x2D,
+            0x65, 0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            // entity: "pick" (4)
+            0x04,
+            0x70, 0x69, 0x63, 0x6B,
+            0x00, 0x00,
+            // Function section: 1 func of type 0
+            0x03, 0x02, 0x01, 0x00,
+            // Export: "call_pick" (9) → func 1
+            0x07, 0x0D, 0x01,
+            0x09,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x70, 0x69, 0x63, 0x6B,
+            0x00, 0x01,
+            // Code: locals=0, call 0, end
+            0x0A, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0B,
         };
 
         // (module
@@ -2735,6 +2800,71 @@ namespace Wacs.Transpiler.Test
                 Array.Empty<object>());
             Assert.IsType<int>(raw);
             Assert.Equal(0x10005, (int)raw);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_EnumReturn_PassesThroughPrimitivePath()
+        {
+            // The typed I.Pick() returns Color : byte. The CLR enum
+            // value sits on the eval stack in its underlying byte/u8
+            // form (which CIL widens to i32), so the existing
+            // primitive-return path handles it without special-case
+            // emit logic. Test asserts the returned wasm i32 equals
+            // (int)Color.Green = 1.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Func<int>>(
+                ("my:test/enumret-env@1.0.0", "pick"),
+                () => throw new InvalidOperationException(
+                    "stub for pick must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildEnumReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(EnumRetBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/enumret-env@1.0.0", "pick", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.EnumRet", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_enumret_env_1_0_0_pick"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for pick must not be invoked"),
+                });
+
+            var bundle = new EnumRetBundle(new GreenPicker());
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+
+            var callPick = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_pick"))!;
+            object? raw = callPick.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<int>(raw);
+            Assert.Equal((int)Color.Green, (int)raw);
         }
     }
 }
