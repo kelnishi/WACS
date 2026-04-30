@@ -160,6 +160,43 @@ namespace Wacs.ComponentModel.CanonicalABI
         }
 
         /// <summary>
+        /// Store a <c>byte[][]</c> (canon-ABI <c>list&lt;list&lt;u8&gt;&gt;</c>)
+        /// into wasm linear memory and write the (ptr, count) pair
+        /// to the retArea slot.
+        ///
+        /// <para>Two-level allocation: cabi_realloc once for the
+        /// outer (sub_ptr, sub_len)-pair array, then per-element
+        /// for each raw byte buffer. Mirrors <see cref="StoreStringList"/>
+        /// minus the UTF-8 encode step. Used by direct-linked
+        /// aggregate-RETURN emit when the host returns byte[][].</para>
+        /// </summary>
+        public static void StoreByteArrayList(byte[] dest, int retAreaOffset,
+            byte[][] value, Func<int, int, int, int, int> cabiRealloc)
+        {
+            if (cabiRealloc == null)
+                throw new InvalidOperationException(
+                    "list<list<u8>> returns require the component "
+                    + "to export `cabi_realloc`.");
+            int count = value.Length;
+            int outerByteCount = count * 8;
+            int outerPtr = cabiRealloc(0, 0, 4, outerByteCount);
+            for (int i = 0; i < count; i++)
+            {
+                var sub = value[i];
+                var subPtr = cabiRealloc(0, 0, 1, sub.Length);
+                Buffer.BlockCopy(sub, 0, dest, subPtr, sub.Length);
+                BinaryPrimitives.WriteInt32LittleEndian(
+                    dest.AsSpan(outerPtr + i * 8, 4), subPtr);
+                BinaryPrimitives.WriteInt32LittleEndian(
+                    dest.AsSpan(outerPtr + i * 8 + 4, 4), sub.Length);
+            }
+            BinaryPrimitives.WriteInt32LittleEndian(
+                dest.AsSpan(retAreaOffset, 4), outerPtr);
+            BinaryPrimitives.WriteInt32LittleEndian(
+                dest.AsSpan(retAreaOffset + 4, 4), count);
+        }
+
+        /// <summary>
         /// Store a <c>string[]</c> (canon-ABI <c>list&lt;string&gt;</c>)
         /// into wasm linear memory and write the (ptr, count) pair to
         /// the retArea slot.

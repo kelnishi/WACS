@@ -362,8 +362,12 @@ namespace Wacs.Transpiler.AOT.Component
                 bool isStringArrayReturn = method.ReturnType.IsArray
                     && method.ReturnType.GetArrayRank() == 1
                     && method.ReturnType.GetElementType() == typeof(string);
+                bool isByteArrayListReturn = method.ReturnType.IsArray
+                    && method.ReturnType.GetArrayRank() == 1
+                    && method.ReturnType.GetElementType() == typeof(byte[]);
                 bool isPrimArrayReturn = !isByteArrayReturn
                     && !isStringArrayReturn
+                    && !isByteArrayListReturn
                     && method.ReturnType.IsArray
                     && method.ReturnType.GetArrayRank() == 1
                     && IsListPrimitiveElement(
@@ -384,7 +388,8 @@ namespace Wacs.Transpiler.AOT.Component
                 }
                 else
                 if (isStringReturn || isByteArrayReturn
-                    || isPrimArrayReturn || isStringArrayReturn)
+                    || isPrimArrayReturn || isStringArrayReturn
+                    || isByteArrayListReturn)
                 {
                     // String / list<T> retArea layout: i32 ptr @0,
                     // i32 len/count @4. Encode (UTF-8 for string;
@@ -408,6 +413,7 @@ namespace Wacs.Transpiler.AOT.Component
                     if (isStringReturn) storeMethod = StoreStringMethod;
                     else if (isByteArrayReturn) storeMethod = StoreByteArrayMethod;
                     else if (isStringArrayReturn) storeMethod = StoreStringListMethod;
+                    else if (isByteArrayListReturn) storeMethod = StoreByteArrayListMethod;
                     else storeMethod = ResolveStorePrimitiveArrayMethod(
                         method.ReturnType.GetElementType()!);
                     il.Emit(OpCodes.Call, storeMethod);
@@ -1270,6 +1276,11 @@ namespace Wacs.Transpiler.AOT.Component
                 nameof(PrimitiveStore.StoreStringList),
                 BindingFlags.Public | BindingFlags.Static)!;
 
+        private static readonly MethodInfo StoreByteArrayListMethod =
+            typeof(PrimitiveStore).GetMethod(
+                nameof(PrimitiveStore.StoreByteArrayList),
+                BindingFlags.Public | BindingFlags.Static)!;
+
         private static readonly ConcurrentDictionary<Type, MethodInfo>
             StorePrimArrayCache = new();
 
@@ -1537,6 +1548,9 @@ namespace Wacs.Transpiler.AOT.Component
                 var elem = t.GetElementType()!;
                 if (IsListPrimitiveElement(elem)) return true;
                 if (elem == typeof(string)) return true;
+                // list<list<u8>> (byte[][]) — two-level cabi_realloc
+                // (outer pair-array + per-sub raw bytes).
+                if (elem == typeof(byte[])) return true;
                 // list<tuple-of-primitives> / list<record-of-primitives>:
                 // outer (ptr, count) at retArea + contiguous packed
                 // elements at *(ptr). cabi_realloc once for the outer
