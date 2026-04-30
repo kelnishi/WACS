@@ -364,6 +364,39 @@ namespace Wacs.Transpiler.Test
                 => opt.HasValue ? opt.Value.Read() : 0u;
         }
 
+        // ====== Result<TOk, TErr> param test surface =============
+        // Wasm pattern: result<u32, u32> — both sides 1×i32. The
+        // emit dispatches on disc (0=Ok, 1=Err) and constructs
+        // via Result<TOk,TErr>::FromOk(T) / FromErr(T).
+
+        [WitSource(@"interface res-env",
+            Package = "my:test@1.0.0", Interface = "res-env")]
+        public interface IResultTaker
+        {
+            // Encode the side + payload back as wasm i32 so the
+            // test can probe via the export's return value:
+            //   Ok(v)  → 0xA000_0000 | (v & 0x0FFF_FFFF)
+            //   Err(v) → 0xE000_0000 | (v & 0x0FFF_FFFF)
+            [WitSource(@"take-result: func(r: result<u32, u32>) -> u32;",
+                Package = "my:test@1.0.0", Interface = "res-env",
+                Item = "take-result")]
+            uint TakeResult(Result<uint, uint> r);
+        }
+
+        public sealed class ResultBundle
+        {
+            public IResultTaker ResEnv { get; }
+            public ResultBundle(IResultTaker r) { ResEnv = r; }
+        }
+
+        private sealed class ResultProbe : IResultTaker
+        {
+            public uint TakeResult(Result<uint, uint> r)
+                => r.IsOk
+                    ? 0xA000_0000u | (r.Ok & 0x0FFF_FFFFu)
+                    : 0xE000_0000u | (r.Err & 0x0FFF_FFFFu);
+        }
+
         private sealed class FakeEnv : IEnv
         {
             private readonly ulong _v;
@@ -576,6 +609,68 @@ namespace Wacs.Transpiler.Test
             // Code section: locals=0, call 0, call 1, end
             0x0A, 0x08, 0x01, 0x06,
             0x00, 0x10, 0x00, 0x10, 0x01, 0x0B,
+        };
+
+        // (module
+        //   (type $tRes (func (param i32 i32) (result i32)))
+        //   (type $tEntry (func (result i32)))
+        //   (import "my:test/res-env@1.0.0" "take-result"
+        //           (func $imp (type $tRes)))
+        //   (func (export "call_ok") (result i32)
+        //     i32.const 0     ;; disc=Ok
+        //     i32.const 0x42  ;; payload
+        //     call $imp)
+        //   (func (export "call_err") (result i32)
+        //     i32.const 1     ;; disc=Err
+        //     i32.const 0x55  ;; payload
+        //     call $imp))
+        //
+        // result<u32, u32> wire form: (i32 disc, i32 payload).
+        // ResultProbe encodes the side+payload back as i32 so the
+        // test can assert both branches from the export's return.
+        private static byte[] BuildResultParamFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types
+            // type 0: (i32 i32) → i32 (6 bytes)
+            // type 1: () → i32 (4 bytes)
+            0x01, 0x0B, 0x02,
+            0x60, 0x02, 0x7F, 0x7F, 0x01, 0x7F,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section: 1 import
+            // size = 1 + 1 + 21 + 1 + 11 + 2 = 37 = 0x25
+            0x02, 0x25, 0x01,
+            // module: "my:test/res-env@1.0.0" (21)
+            0x15,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x72, 0x65, 0x73, 0x2D, 0x65, 0x6E, 0x76, 0x40,
+            0x31, 0x2E, 0x30, 0x2E, 0x30,
+            // entity: "take-result" (11)
+            0x0B,
+            0x74, 0x61, 0x6B, 0x65, 0x2D, 0x72, 0x65, 0x73,
+            0x75, 0x6C, 0x74,
+            0x00, 0x00,
+            // Function section: 2 funcs of type 1
+            0x03, 0x03, 0x02, 0x01, 0x01,
+            // Export section: 2 exports
+            // size = 1 + (1+7+1+1) + (1+8+1+1) = 22 = 0x16
+            0x07, 0x16, 0x02,
+            0x07,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x6F, 0x6B,
+            0x00, 0x01,
+            0x08,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x65, 0x72, 0x72,
+            0x00, 0x02,
+            // Code section: 2 bodies
+            // Payloads must fit single-byte signed LEB128 (i.e.
+            // value < 0x40 / bit 6 clear) to encode in one byte.
+            // Use 0x12 (Ok) and 0x34 (Err) which round-trip cleanly.
+            // size = 1 + 9 + 9 = 19 = 0x13
+            0x0A, 0x13, 0x02,
+            // call_ok:  locals=0, i32.const 0, i32.const 0x12, call 0, end
+            0x08, 0x00, 0x41, 0x00, 0x41, 0x12, 0x10, 0x00, 0x0B,
+            // call_err: locals=0, i32.const 1, i32.const 0x34, call 0, end
+            0x08, 0x00, 0x41, 0x01, 0x41, 0x34, 0x10, 0x00, 0x0B,
         };
 
         // (module
@@ -2101,6 +2196,85 @@ namespace Wacs.Transpiler.Test
                 Array.Empty<object>());
             Assert.IsType<int>(rNone);
             Assert.Equal(0, (int)rNone);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_ResultParam_BothSides()
+        {
+            // result<u32, u32> wire form: (i32 disc, i32 payload).
+            // disc=0 → Ok branch (calls Result::FromOk), disc=1 →
+            // Err branch (calls Result::FromErr). Same recursive
+            // EmitLiftForType machinery as Option, just with a
+            // 2-case discriminant routing to two construction
+            // helpers.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Func<int, int, int>>(
+                ("my:test/res-env@1.0.0", "take-result"),
+                (_, _) => throw new InvalidOperationException(
+                    "stub for take-result must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildResultParamFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(ResultBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/res-env@1.0.0", "take-result", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.ResultParam", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_res_env_1_0_0_take_result"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for take-result must "
+                            + "not be invoked"),
+                });
+
+            var bundle = new ResultBundle(new ResultProbe());
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+
+            // call_ok: disc=0, payload=0x12 → Ok(0x12).
+            // ResultProbe encodes as 0xA000_0000 | 0x12.
+            var callOk = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_ok"))!;
+            object? rOk = callOk.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<int>(rOk);
+            Assert.Equal(unchecked((int)(0xA000_0000u | 0x12u)),
+                (int)rOk);
+
+            // call_err: disc=1, payload=0x34 → Err(0x34).
+            // ResultProbe encodes as 0xE000_0000 | 0x34.
+            var callErr = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_err"))!;
+            object? rErr = callErr.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<int>(rErr);
+            Assert.Equal(unchecked((int)(0xE000_0000u | 0x34u)),
+                (int)rErr);
         }
     }
 }
