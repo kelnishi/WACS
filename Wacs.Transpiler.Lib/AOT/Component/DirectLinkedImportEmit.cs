@@ -413,11 +413,13 @@ namespace Wacs.Transpiler.AOT.Component
                     && resourcesType != null;
                 bool isOptionOrResultArrayReturn = method.ReturnType.IsArray
                     && method.ReturnType.GetArrayRank() == 1
-                    && method.ReturnType.GetElementType()!.IsGenericType
-                    && (method.ReturnType.GetElementType()!
-                            .GetGenericTypeDefinition() == typeof(Option<>)
-                        || method.ReturnType.GetElementType()!
-                            .GetGenericTypeDefinition() == typeof(Result<,>));
+                    && ((method.ReturnType.GetElementType()!.IsGenericType
+                            && (method.ReturnType.GetElementType()!
+                                    .GetGenericTypeDefinition() == typeof(Option<>)
+                                || method.ReturnType.GetElementType()!
+                                    .GetGenericTypeDefinition() == typeof(Result<,>)))
+                        || IsLikelyVariantBase(
+                            method.ReturnType.GetElementType()!));
 
                 int offsetSoFar = 0;
                 if (isOptionOrResultArrayReturn)
@@ -485,211 +487,9 @@ namespace Wacs.Transpiler.AOT.Component
                 }
                 else if (isVariant)
                 {
-                    // Variant return retArea layout: u8 disc @0 +
-                    // joined-flat payload at offset Align(1, max-
-                    // payload-align). For empty cases the payload
-                    // slot is left as default memory.
-                    //
-                    //   isinst chain → case label
-                    //   case_i_label:
-                    //     StoreU8(retArea+0, i)
-                    //     if has_payload:
-                    //       castclass <CaseType>
-                    //       callvirt get_Value → T
-                    //       StoreXxx(retArea+valueOffset, value)
-                    //         OR for resource T:
-                    //       Resources.AllocateResource(typeof(IRes), val)
-                    //       StoreI32(retArea+valueOffset, handle)
-                    //     br end
-                    var cases = GetVariantCases(method.ReturnType);
-                    int maxPayloadAlign = 1;
-                    foreach (var c in cases)
-                    {
-                        if (c.Payload == null) continue;
-                        int a = AlignOfResultArm(c.Payload);
-                        if (a > maxPayloadAlign) maxPayloadAlign = a;
-                    }
-                    int valueOffset = Align(1, maxPayloadAlign);
-
-                    var endLabel = il.DefineLabel();
-                    var caseStoreLabels =
-                        new System.Reflection.Emit.Label[cases.Length];
-                    for (int i = 0; i < cases.Length; i++)
-                        caseStoreLabels[i] = il.DefineLabel();
-
-                    // Chain: for each case, ldloc returnLocal;
-                    // isinst <CaseType>; brtrue case_i_label.
-                    // The last case falls through to its store
-                    // (no branch needed).
-                    for (int i = 0; i < cases.Length - 1; i++)
-                    {
-                        il.Emit(OpCodes.Ldloc, returnLocal);
-                        il.Emit(OpCodes.Isinst, cases[i].CaseType);
-                        il.Emit(OpCodes.Brtrue, caseStoreLabels[i]);
-                    }
-                    il.Emit(OpCodes.Br, caseStoreLabels[cases.Length - 1]);
-
-                    for (int i = 0; i < cases.Length; i++)
-                    {
-                        il.MarkLabel(caseStoreLabels[i]);
-                        // disc=i
-                        il.Emit(OpCodes.Ldarg_0);
-                        il.Emit(OpCodes.Ldfld, MemoriesField);
-                        il.Emit(OpCodes.Ldc_I4_0);
-                        il.Emit(OpCodes.Ldelem_Ref);
-                        il.Emit(OpCodes.Ldfld, MemoryDataField);
-                        il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
-                        il.Emit(OpCodes.Ldc_I4, i);
-                        il.Emit(OpCodes.Call,
-                            ResolveStoreMethod(typeof(byte)));
-
-                        // payload write (if any)
-                        var c = cases[i];
-                        if (c.Payload != null)
-                        {
-                            bool isResourcePayload = resolver != null
-                                && resolver.IsResourceInterface(c.Payload)
-                                && resourcesType != null;
-
-                            il.Emit(OpCodes.Ldarg_0);
-                            il.Emit(OpCodes.Ldfld, MemoriesField);
-                            il.Emit(OpCodes.Ldc_I4_0);
-                            il.Emit(OpCodes.Ldelem_Ref);
-                            il.Emit(OpCodes.Ldfld, MemoryDataField);
-                            il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
-                            if (valueOffset != 0)
-                            {
-                                il.Emit(OpCodes.Ldc_I4, valueOffset);
-                                il.Emit(OpCodes.Add);
-                            }
-
-                            // Read CaseType.Value via castclass +
-                            // get_Value (no per-case helper needed
-                            // since GetVariantCases already cached
-                            // the property type).
-                            var valueProp = c.CaseType.GetProperty("Value",
-                                BindingFlags.Public | BindingFlags.Instance)!;
-
-                            bool isStringPayload = c.Payload == typeof(string);
-                            bool isByteArrayPayload = c.Payload == typeof(byte[]);
-                            bool isPrimArrayPayload = !isByteArrayPayload
-                                && c.Payload.IsArray
-                                && c.Payload.GetArrayRank() == 1
-                                && IsListPrimitiveElement(
-                                    c.Payload.GetElementType()!);
-                            bool isStringArrayPayload =
-                                c.Payload.IsArray
-                                && c.Payload.GetArrayRank() == 1
-                                && c.Payload.GetElementType() == typeof(string);
-                            bool isAggregatePayload =
-                                IsTupleOfPrimitives(c.Payload)
-                                || IsRecordOfPrimitives(c.Payload);
-                            bool isOptionPayload =
-                                c.Payload.IsGenericType
-                                && c.Payload.GetGenericTypeDefinition()
-                                    == typeof(Option<>);
-                            bool isResultPayload =
-                                c.Payload.IsGenericType
-                                && c.Payload.GetGenericTypeDefinition()
-                                    == typeof(Result<,>);
-
-                            if (isOptionPayload || isResultPayload)
-                            {
-                                // Nested Option/Result payload —
-                                // dispatch to the recursive helper
-                                // at the case's value slot. Bypass
-                                // the common pre-push.
-                                il.Emit(OpCodes.Pop);
-                                il.Emit(OpCodes.Pop);
-                                var payloadLocal = il.DeclareLocal(c.Payload);
-                                il.Emit(OpCodes.Ldloc, returnLocal);
-                                il.Emit(OpCodes.Castclass, c.CaseType);
-                                il.Emit(OpCodes.Callvirt,
-                                    valueProp.GetGetMethod()!);
-                                il.Emit(OpCodes.Stloc, payloadLocal);
-                                if (isOptionPayload)
-                                    EmitOptionStoreAt(il, c.Payload,
-                                        payloadLocal, temps[retAreaSlot],
-                                        valueOffset, resolver,
-                                        resourcesType, stringEncoding);
-                                else
-                                    EmitResultStoreAt(il, c.Payload,
-                                        payloadLocal, temps[retAreaSlot],
-                                        valueOffset, resolver,
-                                        resourcesType, stringEncoding);
-                            }
-                            else if (isAggregatePayload)
-                            {
-                                // Aggregate payloads write field-by-
-                                // field — bypass the common pre-push
-                                // (memory_data + retArea+offset) we
-                                // emitted above. Pop the pre-push
-                                // first so EmitInlineRecordOrTupleStore
-                                // can do its own per-field pushes.
-                                il.Emit(OpCodes.Pop);
-                                il.Emit(OpCodes.Pop);
-                                var payloadLocal = il.DeclareLocal(c.Payload);
-                                il.Emit(OpCodes.Ldloc, returnLocal);
-                                il.Emit(OpCodes.Castclass, c.CaseType);
-                                il.Emit(OpCodes.Callvirt,
-                                    valueProp.GetGetMethod()!);
-                                il.Emit(OpCodes.Stloc, payloadLocal);
-                                EmitInlineRecordOrTupleStore(il, c.Payload,
-                                    temps[retAreaSlot], valueOffset,
-                                    payloadLocal, stringEncoding);
-                            }
-                            else if (isResourcePayload)
-                            {
-                                il.Emit(OpCodes.Ldarg_0);
-                                il.Emit(OpCodes.Ldfld, ResourcesField);
-                                il.Emit(OpCodes.Castclass, resourcesType!);
-                                il.Emit(OpCodes.Ldtoken, c.Payload);
-                                il.Emit(OpCodes.Call, GetTypeFromHandleMethod);
-                                il.Emit(OpCodes.Ldloc, returnLocal);
-                                il.Emit(OpCodes.Castclass, c.CaseType);
-                                il.Emit(OpCodes.Callvirt,
-                                    valueProp.GetGetMethod()!);
-                                il.Emit(OpCodes.Callvirt,
-                                    ResolveAllocateResourceMethod(resourcesType!));
-                                il.Emit(OpCodes.Call,
-                                    ResolveStoreMethod(typeof(int)));
-                            }
-                            else if (isStringPayload || isByteArrayPayload
-                                || isPrimArrayPayload || isStringArrayPayload)
-                            {
-                                // Stack: [memory_data, retArea+valueOffset]
-                                // Push value + cabi_realloc + call.
-                                il.Emit(OpCodes.Ldloc, returnLocal);
-                                il.Emit(OpCodes.Castclass, c.CaseType);
-                                il.Emit(OpCodes.Callvirt,
-                                    valueProp.GetGetMethod()!);
-                                il.Emit(OpCodes.Ldarg_0);
-                                il.Emit(OpCodes.Ldfld, CabiReallocField);
-                                MethodInfo storeMethod;
-                                if (isStringPayload)
-                                    storeMethod = ResolveStoreStringMethod(stringEncoding);
-                                else if (isByteArrayPayload)
-                                    storeMethod = StoreByteArrayMethod;
-                                else if (isStringArrayPayload)
-                                    storeMethod = StoreStringListMethod;
-                                else
-                                    storeMethod = ResolveStorePrimitiveArrayMethod(
-                                        c.Payload.GetElementType()!);
-                                il.Emit(OpCodes.Call, storeMethod);
-                            }
-                            else
-                            {
-                                il.Emit(OpCodes.Ldloc, returnLocal);
-                                il.Emit(OpCodes.Castclass, c.CaseType);
-                                il.Emit(OpCodes.Callvirt,
-                                    valueProp.GetGetMethod()!);
-                                il.Emit(OpCodes.Call,
-                                    ResolveStoreMethod(c.Payload));
-                            }
-                        }
-                        il.Emit(OpCodes.Br, endLabel);
-                    }
-                    il.MarkLabel(endLabel);
+                    EmitVariantStoreAt(il, method.ReturnType,
+                        returnLocal, temps[retAreaSlot], 0,
+                        resolver, resourcesType, stringEncoding);
                 }
                 else
                 if (isOption)
@@ -1514,6 +1314,11 @@ namespace Wacs.Transpiler.AOT.Component
                         && IsAggregateReturnSupported(elem, resolver))
                         return true;
                 }
+                // list<variant<...>>: per-element variant write
+                // via EmitVariantStoreAt at outerPtr+i*elemSize.
+                if (IsLikelyVariantBase(elem)
+                    && IsAggregateReturnSupported(elem, resolver))
+                    return true;
             }
             if (IsLikelyRecordType(t))
             {
@@ -2084,6 +1889,193 @@ namespace Wacs.Transpiler.AOT.Component
             il.MarkLabel(endLabel);
         }
 
+        // Emit IL that stores a variant<...> at retArea+baseOffset.
+        // Reads the variant value from variantLocal.
+        //
+        // Wire form: u8 disc @ retArea+baseOffset + joined-flat
+        // payload at retArea+baseOffset+valueOffset where
+        // valueOffset = Align(1, max-payload-align). Empty cases
+        // leave the payload slot uninitialized.
+        //
+        // Per-case payload dispatch handles all the same shapes
+        // EmitResultArmStore handles: primitive, resource (own<R>),
+        // string/byte[] + primitive[]/string[] (cabi_realloc),
+        // tuple/record-of-flat-fields, nested Option<X>/Result<X,Y>.
+        private static void EmitVariantStoreAt(
+            ILGenerator il, Type variantType, LocalBuilder variantLocal,
+            LocalBuilder retAreaLocal, int baseOffset,
+            HostPackageResolver? resolver, Type? resourcesType,
+            CanonOption.Kind stringEncoding =
+                CanonOption.Kind.StringUtf8)
+        {
+            var cases = GetVariantCases(variantType);
+            int maxPayloadAlign = 1;
+            foreach (var c in cases)
+            {
+                if (c.Payload == null) continue;
+                int a = AlignOfResultArm(c.Payload);
+                if (a > maxPayloadAlign) maxPayloadAlign = a;
+            }
+            int valueOffset = Align(1, maxPayloadAlign);
+
+            var endLabel = il.DefineLabel();
+            var caseStoreLabels =
+                new System.Reflection.Emit.Label[cases.Length];
+            for (int i = 0; i < cases.Length; i++)
+                caseStoreLabels[i] = il.DefineLabel();
+
+            // Chain: for each case, ldloc variantLocal;
+            // isinst <CaseType>; brtrue case_i_label.
+            // The last case falls through to its store
+            // (no branch needed).
+            for (int i = 0; i < cases.Length - 1; i++)
+            {
+                il.Emit(OpCodes.Ldloc, variantLocal);
+                il.Emit(OpCodes.Isinst, cases[i].CaseType);
+                il.Emit(OpCodes.Brtrue, caseStoreLabels[i]);
+            }
+            il.Emit(OpCodes.Br, caseStoreLabels[cases.Length - 1]);
+
+            for (int i = 0; i < cases.Length; i++)
+            {
+                il.MarkLabel(caseStoreLabels[i]);
+                // disc=i at retArea+baseOffset
+                EmitWriteByteAt(il, retAreaLocal, baseOffset, i);
+
+                var c = cases[i];
+                if (c.Payload != null)
+                {
+                    int payloadAddrOffset = baseOffset + valueOffset;
+                    bool isResourcePayload = resolver != null
+                        && resolver.IsResourceInterface(c.Payload)
+                        && resourcesType != null;
+
+                    var valueProp = c.CaseType.GetProperty("Value",
+                        BindingFlags.Public | BindingFlags.Instance)!;
+
+                    bool isStringPayload = c.Payload == typeof(string);
+                    bool isByteArrayPayload = c.Payload == typeof(byte[]);
+                    bool isPrimArrayPayload = !isByteArrayPayload
+                        && c.Payload.IsArray
+                        && c.Payload.GetArrayRank() == 1
+                        && IsListPrimitiveElement(
+                            c.Payload.GetElementType()!);
+                    bool isStringArrayPayload =
+                        c.Payload.IsArray
+                        && c.Payload.GetArrayRank() == 1
+                        && c.Payload.GetElementType() == typeof(string);
+                    bool isAggregatePayload =
+                        IsTupleOfPrimitives(c.Payload)
+                        || IsRecordOfPrimitives(c.Payload);
+                    bool isOptionPayload =
+                        c.Payload.IsGenericType
+                        && c.Payload.GetGenericTypeDefinition()
+                            == typeof(Option<>);
+                    bool isResultPayload =
+                        c.Payload.IsGenericType
+                        && c.Payload.GetGenericTypeDefinition()
+                            == typeof(Result<,>);
+
+                    if (isOptionPayload || isResultPayload)
+                    {
+                        var payloadLocal = il.DeclareLocal(c.Payload);
+                        il.Emit(OpCodes.Ldloc, variantLocal);
+                        il.Emit(OpCodes.Castclass, c.CaseType);
+                        il.Emit(OpCodes.Callvirt,
+                            valueProp.GetGetMethod()!);
+                        il.Emit(OpCodes.Stloc, payloadLocal);
+                        if (isOptionPayload)
+                            EmitOptionStoreAt(il, c.Payload,
+                                payloadLocal, retAreaLocal,
+                                payloadAddrOffset, resolver,
+                                resourcesType, stringEncoding);
+                        else
+                            EmitResultStoreAt(il, c.Payload,
+                                payloadLocal, retAreaLocal,
+                                payloadAddrOffset, resolver,
+                                resourcesType, stringEncoding);
+                    }
+                    else if (isAggregatePayload)
+                    {
+                        var payloadLocal = il.DeclareLocal(c.Payload);
+                        il.Emit(OpCodes.Ldloc, variantLocal);
+                        il.Emit(OpCodes.Castclass, c.CaseType);
+                        il.Emit(OpCodes.Callvirt,
+                            valueProp.GetGetMethod()!);
+                        il.Emit(OpCodes.Stloc, payloadLocal);
+                        EmitInlineRecordOrTupleStore(il, c.Payload,
+                            retAreaLocal, payloadAddrOffset,
+                            payloadLocal, stringEncoding);
+                    }
+                    else
+                    {
+                        // Push: dest_array, dest_offset =
+                        // retArea + payloadAddrOffset
+                        il.Emit(OpCodes.Ldarg_0);
+                        il.Emit(OpCodes.Ldfld, MemoriesField);
+                        il.Emit(OpCodes.Ldc_I4_0);
+                        il.Emit(OpCodes.Ldelem_Ref);
+                        il.Emit(OpCodes.Ldfld, MemoryDataField);
+                        il.Emit(OpCodes.Ldloc, retAreaLocal);
+                        if (payloadAddrOffset != 0)
+                        {
+                            il.Emit(OpCodes.Ldc_I4, payloadAddrOffset);
+                            il.Emit(OpCodes.Add);
+                        }
+
+                        if (isResourcePayload)
+                        {
+                            il.Emit(OpCodes.Ldarg_0);
+                            il.Emit(OpCodes.Ldfld, ResourcesField);
+                            il.Emit(OpCodes.Castclass, resourcesType!);
+                            il.Emit(OpCodes.Ldtoken, c.Payload);
+                            il.Emit(OpCodes.Call, GetTypeFromHandleMethod);
+                            il.Emit(OpCodes.Ldloc, variantLocal);
+                            il.Emit(OpCodes.Castclass, c.CaseType);
+                            il.Emit(OpCodes.Callvirt,
+                                valueProp.GetGetMethod()!);
+                            il.Emit(OpCodes.Callvirt,
+                                ResolveAllocateResourceMethod(resourcesType!));
+                            il.Emit(OpCodes.Call,
+                                ResolveStoreMethod(typeof(int)));
+                        }
+                        else if (isStringPayload || isByteArrayPayload
+                            || isPrimArrayPayload || isStringArrayPayload)
+                        {
+                            il.Emit(OpCodes.Ldloc, variantLocal);
+                            il.Emit(OpCodes.Castclass, c.CaseType);
+                            il.Emit(OpCodes.Callvirt,
+                                valueProp.GetGetMethod()!);
+                            il.Emit(OpCodes.Ldarg_0);
+                            il.Emit(OpCodes.Ldfld, CabiReallocField);
+                            MethodInfo storeMethod;
+                            if (isStringPayload)
+                                storeMethod = ResolveStoreStringMethod(stringEncoding);
+                            else if (isByteArrayPayload)
+                                storeMethod = StoreByteArrayMethod;
+                            else if (isStringArrayPayload)
+                                storeMethod = StoreStringListMethod;
+                            else
+                                storeMethod = ResolveStorePrimitiveArrayMethod(
+                                    c.Payload.GetElementType()!);
+                            il.Emit(OpCodes.Call, storeMethod);
+                        }
+                        else
+                        {
+                            il.Emit(OpCodes.Ldloc, variantLocal);
+                            il.Emit(OpCodes.Castclass, c.CaseType);
+                            il.Emit(OpCodes.Callvirt,
+                                valueProp.GetGetMethod()!);
+                            il.Emit(OpCodes.Call,
+                                ResolveStoreMethod(c.Payload));
+                        }
+                    }
+                }
+                il.Emit(OpCodes.Br, endLabel);
+            }
+            il.MarkLabel(endLabel);
+        }
+
         // Emit IL that stores a Result<TOk, TErr> at retArea+baseOffset.
         // Reads the Result value from resultLocal.
         //
@@ -2177,6 +2169,19 @@ namespace Wacs.Transpiler.AOT.Component
                     int a1 = MaxAlignOf(args[1], resolver);
                     return a0 > a1 ? a0 : a1;
                 }
+            }
+            // Variant: max alignment across payload-bearing cases.
+            // Empty cases contribute the disc's u8 alignment (1).
+            if (IsLikelyVariantBase(t))
+            {
+                int maxA = 1;
+                foreach (var c in GetVariantCases(t))
+                {
+                    if (c.Payload == null) continue;
+                    int a = AlignOfResultArm(c.Payload);
+                    if (a > maxA) maxA = a;
+                }
+                return maxA;
             }
             // string / byte[] / list<X> / resource interface — all
             // i32-aligned (ptr or handle).
@@ -2308,8 +2313,9 @@ namespace Wacs.Transpiler.AOT.Component
         {
             int elemSize = SizeOf(elemType, resolver);
             int elemAlign = MaxAlignOf(elemType, resolver);
-            bool isOption = elemType.GetGenericTypeDefinition()
-                == typeof(Option<>);
+            bool isVariant = IsLikelyVariantBase(elemType);
+            bool isOption = !isVariant
+                && elemType.GetGenericTypeDefinition() == typeof(Option<>);
 
             // count = arrayLocal.Length
             var countLocal = il.DeclareLocal(typeof(int));
@@ -2360,7 +2366,11 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Stloc, elemLocal);
 
             // Write: pass perElementBase as retArea, baseOffset=0.
-            if (isOption)
+            if (isVariant)
+                EmitVariantStoreAt(il, elemType, elemLocal,
+                    perElementBaseLocal, 0,
+                    resolver, resourcesType, stringEncoding);
+            else if (isOption)
                 EmitOptionStoreAt(il, elemType, elemLocal,
                     perElementBaseLocal, 0,
                     resolver, resourcesType, stringEncoding);
@@ -2479,9 +2489,24 @@ namespace Wacs.Transpiler.AOT.Component
                     return Align(valueOffset + armSize, armAlign);
                 }
             }
-            // Fallback for string / byte[] / list<T> / variants
-            // (rare here — list-of-list returns bottom out at the
-            // outer list emit, not this helper).
+            // Variant: u8 disc + max payload size at common
+            // valueOffset, padded to max payload alignment.
+            if (IsLikelyVariantBase(t))
+            {
+                int maxAlign = 1;
+                int maxSize = 0;
+                foreach (var c in GetVariantCases(t))
+                {
+                    if (c.Payload == null) continue;
+                    int a = AlignOfResultArm(c.Payload);
+                    if (a > maxAlign) maxAlign = a;
+                    int s = SizeOf(c.Payload, resolver);
+                    if (s > maxSize) maxSize = s;
+                }
+                int valueOffset = Align(1, maxAlign);
+                return Align(valueOffset + maxSize, maxAlign);
+            }
+            // Fallback for string / byte[] / list<T>.
             return 8;
         }
 
