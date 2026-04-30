@@ -630,69 +630,9 @@ namespace Wacs.Transpiler.AOT.Component
                 }
                 else if (isResult)
                 {
-                    // Result<TOk, TErr> retArea layout: u8 disc @0
-                    // (0=Ok, 1=Err) + joined-flat value at offset
-                    // Align(1, max(align(TOk), align(TErr))). Each
-                    // arm may be primitive OR a resource interface
-                    // (resource handles are i32 align 4).
-                    var args = method.ReturnType
-                        .GetGenericArguments();
-                    int okAlign = AlignOfResultArm(args[0]);
-                    int errAlign = AlignOfResultArm(args[1]);
-                    int valueAlign = okAlign > errAlign
-                        ? okAlign : errAlign;
-                    int valueOffset = Align(1, valueAlign);
-
-                    var errLabel = il.DefineLabel();
-                    var endLabel = il.DefineLabel();
-
-                    var resultT = method.ReturnType;
-                    var isOkGetter = resultT.GetProperty("IsOk",
-                        BindingFlags.Public | BindingFlags.Instance)!
-                        .GetGetMethod()!;
-                    var okGetter = resultT.GetProperty("Ok",
-                        BindingFlags.Public | BindingFlags.Instance)!
-                        .GetGetMethod()!;
-                    var errGetter = resultT.GetProperty("Err",
-                        BindingFlags.Public | BindingFlags.Instance)!
-                        .GetGetMethod()!;
-
-                    il.Emit(OpCodes.Ldloca, returnLocal);
-                    il.Emit(OpCodes.Call, isOkGetter);
-                    il.Emit(OpCodes.Brfalse, errLabel);
-
-                    // Ok: write disc=0
-                    il.Emit(OpCodes.Ldarg_0);
-                    il.Emit(OpCodes.Ldfld, MemoriesField);
-                    il.Emit(OpCodes.Ldc_I4_0);
-                    il.Emit(OpCodes.Ldelem_Ref);
-                    il.Emit(OpCodes.Ldfld, MemoryDataField);
-                    il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
-                    il.Emit(OpCodes.Ldc_I4_0);
-                    il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(byte)));
-
-                    // Ok: write Ok value at retArea+valueOffset.
-                    EmitResultArmStore(il, args[0], returnLocal,
-                        okGetter, temps[retAreaSlot], valueOffset,
+                    EmitResultStoreAt(il, method.ReturnType,
+                        returnLocal, temps[retAreaSlot], 0,
                         resolver, resourcesType);
-                    il.Emit(OpCodes.Br, endLabel);
-
-                    // Err: write disc=1
-                    il.MarkLabel(errLabel);
-                    il.Emit(OpCodes.Ldarg_0);
-                    il.Emit(OpCodes.Ldfld, MemoriesField);
-                    il.Emit(OpCodes.Ldc_I4_0);
-                    il.Emit(OpCodes.Ldelem_Ref);
-                    il.Emit(OpCodes.Ldfld, MemoryDataField);
-                    il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
-                    il.Emit(OpCodes.Ldc_I4_1);
-                    il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(byte)));
-
-                    // Err: write Err value at retArea+valueOffset.
-                    EmitResultArmStore(il, args[1], returnLocal,
-                        errGetter, temps[retAreaSlot], valueOffset,
-                        resolver, resourcesType);
-                    il.MarkLabel(endLabel);
                 }
                 else if (isTuple)
                 {
@@ -1513,12 +1453,17 @@ namespace Wacs.Transpiler.AOT.Component
                         if (IsListPrimitiveElement(elem)) return true;
                         if (elem == typeof(string)) return true;
                     }
-                    // Option<Option<X>>: recursive — inner Option
-                    // must itself be a supported aggregate.
-                    if (inner.IsGenericType
-                        && inner.GetGenericTypeDefinition() == typeof(Option<>)
-                        && IsAggregateReturnSupported(inner, resolver))
-                        return true;
+                    // Option<Option<X>> / Option<Result<X,Y>>:
+                    // recursive — inner must itself be a supported
+                    // aggregate.
+                    if (inner.IsGenericType)
+                    {
+                        var innerDef = inner.GetGenericTypeDefinition();
+                        if ((innerDef == typeof(Option<>)
+                                || innerDef == typeof(Result<,>))
+                            && IsAggregateReturnSupported(inner, resolver))
+                            return true;
+                    }
                     return false;
                 }
                 // Result<TOk, TErr>: each arm must be storable
@@ -1866,6 +1811,8 @@ namespace Wacs.Transpiler.AOT.Component
                 && inner.GetElementType() == typeof(string);
             bool innerIsOption = inner.IsGenericType
                 && inner.GetGenericTypeDefinition() == typeof(Option<>);
+            bool innerIsResult = inner.IsGenericType
+                && inner.GetGenericTypeDefinition() == typeof(Result<,>);
 
             int valueAlign = MaxAlignOf(inner, resolver);
             int valueOffset = Align(1, valueAlign);
@@ -1896,6 +1843,17 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Call, valueGetter);
                 il.Emit(OpCodes.Stloc, innerLocal);
                 EmitOptionStoreAt(il, inner, innerLocal, retAreaLocal,
+                    baseOffset + valueOffset, resolver, resourcesType);
+            }
+            else if (innerIsResult)
+            {
+                // Option<Result<X, Y>>: stash inner Result, dispatch
+                // to the Result helper at our value slot.
+                var innerLocal = il.DeclareLocal(inner);
+                il.Emit(OpCodes.Ldloca, optionLocal);
+                il.Emit(OpCodes.Call, valueGetter);
+                il.Emit(OpCodes.Stloc, innerLocal);
+                EmitResultStoreAt(il, inner, innerLocal, retAreaLocal,
                     baseOffset + valueOffset, resolver, resourcesType);
             }
             else if (innerIsTuple || innerIsRecord)
@@ -1968,6 +1926,57 @@ namespace Wacs.Transpiler.AOT.Component
             // None: write disc=0 at retArea+baseOffset
             il.MarkLabel(noneLabel);
             EmitWriteByteAt(il, retAreaLocal, baseOffset, 0);
+
+            il.MarkLabel(endLabel);
+        }
+
+        // Emit IL that stores a Result<TOk, TErr> at retArea+baseOffset.
+        // Reads the Result value from resultLocal.
+        //
+        // Wire form: u8 disc @ retArea+baseOffset (0=Ok, 1=Err) +
+        // joined-flat value at retArea+baseOffset+valueOffset where
+        // valueOffset = Align(1, max(MaxAlignOf(Ok), MaxAlignOf(Err))).
+        private static void EmitResultStoreAt(
+            ILGenerator il, Type resultType, LocalBuilder resultLocal,
+            LocalBuilder retAreaLocal, int baseOffset,
+            HostPackageResolver? resolver, Type? resourcesType)
+        {
+            var args = resultType.GetGenericArguments();
+            int okAlign = MaxAlignOf(args[0], resolver);
+            int errAlign = MaxAlignOf(args[1], resolver);
+            int valueAlign = okAlign > errAlign ? okAlign : errAlign;
+            int valueOffset = Align(1, valueAlign);
+
+            var isOkGetter = resultType.GetProperty("IsOk",
+                BindingFlags.Public | BindingFlags.Instance)!
+                .GetGetMethod()!;
+            var okGetter = resultType.GetProperty("Ok",
+                BindingFlags.Public | BindingFlags.Instance)!
+                .GetGetMethod()!;
+            var errGetter = resultType.GetProperty("Err",
+                BindingFlags.Public | BindingFlags.Instance)!
+                .GetGetMethod()!;
+
+            var errLabel = il.DefineLabel();
+            var endLabel = il.DefineLabel();
+
+            il.Emit(OpCodes.Ldloca, resultLocal);
+            il.Emit(OpCodes.Call, isOkGetter);
+            il.Emit(OpCodes.Brfalse, errLabel);
+
+            // Ok: write disc=0 + Ok value
+            EmitWriteByteAt(il, retAreaLocal, baseOffset, 0);
+            EmitResultArmStore(il, args[0], resultLocal,
+                okGetter, retAreaLocal, baseOffset + valueOffset,
+                resolver, resourcesType);
+            il.Emit(OpCodes.Br, endLabel);
+
+            // Err: write disc=1 + Err value
+            il.MarkLabel(errLabel);
+            EmitWriteByteAt(il, retAreaLocal, baseOffset, 1);
+            EmitResultArmStore(il, args[1], resultLocal,
+                errGetter, retAreaLocal, baseOffset + valueOffset,
+                resolver, resourcesType);
 
             il.MarkLabel(endLabel);
         }
@@ -2172,9 +2181,10 @@ namespace Wacs.Transpiler.AOT.Component
         // True when the Ok or Err arm of a Result return is
         // storable: primitive, resource interface (Resources class
         // mints a handle), string/byte[]/primitive[]/string[]
-        // (cabi_realloc) — when allowVariableLength=true — OR
-        // tuple/record-of-primitives (per-field write at common
-        // arm offset).
+        // (cabi_realloc), tuple/record-of-primitives (per-field
+        // write at common arm offset), OR — when allowVariableLength
+        // — nested Option<X>/Result<X,Y> (recurse to corresponding
+        // store helper).
         private static bool IsResultArmStorable(Type t,
             HostPackageResolver? resolver,
             bool allowVariableLength = false)
@@ -2197,6 +2207,14 @@ namespace Wacs.Transpiler.AOT.Component
                 var elem = t.GetElementType()!;
                 if (IsListPrimitiveElement(elem)) return true;
                 if (elem == typeof(string)) return true;
+            }
+            if (allowVariableLength && t.IsGenericType)
+            {
+                var def = t.GetGenericTypeDefinition();
+                if ((def == typeof(Option<>)
+                        || def == typeof(Result<,>))
+                    && IsAggregateReturnSupported(t, resolver))
+                    return true;
             }
             return false;
         }
@@ -2241,6 +2259,33 @@ namespace Wacs.Transpiler.AOT.Component
                 && armType.GetElementType() == typeof(string);
             bool isAggregate = IsTupleOfPrimitives(armType)
                 || IsRecordOfPrimitives(armType);
+            bool isNestedOption = armType.IsGenericType
+                && armType.GetGenericTypeDefinition() == typeof(Option<>);
+            bool isNestedResult = armType.IsGenericType
+                && armType.GetGenericTypeDefinition() == typeof(Result<,>);
+
+            // Nested Option/Result arms recurse to the corresponding
+            // store helper at the arm's offset within retArea.
+            if (isNestedOption)
+            {
+                var armLocal = il.DeclareLocal(armType);
+                il.Emit(OpCodes.Ldloca, returnLocal);
+                il.Emit(OpCodes.Call, armGetter);
+                il.Emit(OpCodes.Stloc, armLocal);
+                EmitOptionStoreAt(il, armType, armLocal, retAreaLocal,
+                    valueOffset, resolver, resourcesType);
+                return;
+            }
+            if (isNestedResult)
+            {
+                var armLocal = il.DeclareLocal(armType);
+                il.Emit(OpCodes.Ldloca, returnLocal);
+                il.Emit(OpCodes.Call, armGetter);
+                il.Emit(OpCodes.Stloc, armLocal);
+                EmitResultStoreAt(il, armType, armLocal, retAreaLocal,
+                    valueOffset, resolver, resourcesType);
+                return;
+            }
 
             // Aggregate arms write field-by-field with their own
             // memory pushes — bypass the common pre-push.
