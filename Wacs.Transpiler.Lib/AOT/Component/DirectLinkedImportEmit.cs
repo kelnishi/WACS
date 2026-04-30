@@ -356,8 +356,53 @@ namespace Wacs.Transpiler.AOT.Component
                 bool isResult = method.ReturnType.IsGenericType
                     && method.ReturnType.GetGenericTypeDefinition()
                         == typeof(Result<,>);
+                bool isVariant = IsLikelyVariantBase(method.ReturnType);
 
                 int offsetSoFar = 0;
+                if (isVariant)
+                {
+                    // Variant return (all cases empty in v0): emit
+                    // a chain of `isinst` checks against each case
+                    // type; the matching case's index becomes the
+                    // u8 disc written at retArea+0. Default fallback
+                    // writes 0 (first case) which is benign for
+                    // valid variants.
+                    var cases = GetVariantCases(method.ReturnType);
+                    var endLabel = il.DefineLabel();
+                    var caseStoreLabels =
+                        new System.Reflection.Emit.Label[cases.Length];
+                    for (int i = 0; i < cases.Length; i++)
+                        caseStoreLabels[i] = il.DefineLabel();
+
+                    // Chain: for each case, ldloc returnLocal;
+                    // isinst <CaseType>; brtrue case_i_label.
+                    // The last case falls through to its store
+                    // (no branch needed).
+                    for (int i = 0; i < cases.Length - 1; i++)
+                    {
+                        il.Emit(OpCodes.Ldloc, returnLocal);
+                        il.Emit(OpCodes.Isinst, cases[i].CaseType);
+                        il.Emit(OpCodes.Brtrue, caseStoreLabels[i]);
+                    }
+                    il.Emit(OpCodes.Br, caseStoreLabels[cases.Length - 1]);
+
+                    for (int i = 0; i < cases.Length; i++)
+                    {
+                        il.MarkLabel(caseStoreLabels[i]);
+                        il.Emit(OpCodes.Ldarg_0);
+                        il.Emit(OpCodes.Ldfld, MemoriesField);
+                        il.Emit(OpCodes.Ldc_I4_0);
+                        il.Emit(OpCodes.Ldelem_Ref);
+                        il.Emit(OpCodes.Ldfld, MemoryDataField);
+                        il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
+                        il.Emit(OpCodes.Ldc_I4, i);
+                        il.Emit(OpCodes.Call,
+                            ResolveStoreMethod(typeof(byte)));
+                        il.Emit(OpCodes.Br, endLabel);
+                    }
+                    il.MarkLabel(endLabel);
+                }
+                else
                 if (isOption)
                 {
                     // Option<T> retArea layout: u8 disc @0 + aligned
@@ -1232,6 +1277,16 @@ namespace Wacs.Transpiler.AOT.Component
                     return IsResultArmStorable(args[0], resolver)
                         && IsResultArmStorable(args[1], resolver);
                 }
+            }
+            // Variant base type with all empty cases. Wire form
+            // is just u8 disc; payload-bearing variants need the
+            // joined-flat store path which defers.
+            if (IsLikelyVariantBase(t))
+            {
+                var cases = GetVariantCases(t);
+                foreach (var c in cases)
+                    if (c.Payload != null) return false;
+                return cases.Length > 0;
             }
             return false;
         }
