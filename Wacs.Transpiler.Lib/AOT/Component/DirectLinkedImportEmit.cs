@@ -457,25 +457,13 @@ namespace Wacs.Transpiler.AOT.Component
                 {
                     // Result<TOk, TErr> retArea layout: u8 disc @0
                     // (0=Ok, 1=Err) + joined-flat value at offset
-                    // Align(1, max(align(TOk), align(TErr))).
-                    //
-                    //   ldloca returnLocal
-                    //   call Result<TOk,TErr>::get_IsOk → bool
-                    //   brfalse err_label
-                    //   ;; Ok path:
-                    //     StoreU8(memory, retArea+0, 0)
-                    //     ldloca returnLocal; call get_Ok → TOk
-                    //     StoreXxx(memory, retArea+valueOffset, ok)
-                    //   br end
-                    // err_label:
-                    //   StoreU8(memory, retArea+0, 1)
-                    //   ldloca returnLocal; call get_Err → TErr
-                    //   StoreXxx(memory, retArea+valueOffset, err)
-                    // end:
+                    // Align(1, max(align(TOk), align(TErr))). Each
+                    // arm may be primitive OR a resource interface
+                    // (resource handles are i32 align 4).
                     var args = method.ReturnType
                         .GetGenericArguments();
-                    int okAlign = AlignOfPrimitive(args[0]);
-                    int errAlign = AlignOfPrimitive(args[1]);
+                    int okAlign = AlignOfResultArm(args[0]);
+                    int errAlign = AlignOfResultArm(args[1]);
                     int valueAlign = okAlign > errAlign
                         ? okAlign : errAlign;
                     int valueOffset = Align(1, valueAlign);
@@ -508,21 +496,10 @@ namespace Wacs.Transpiler.AOT.Component
                     il.Emit(OpCodes.Ldc_I4_0);
                     il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(byte)));
 
-                    // Ok: write Ok value at retArea+valueOffset
-                    il.Emit(OpCodes.Ldarg_0);
-                    il.Emit(OpCodes.Ldfld, MemoriesField);
-                    il.Emit(OpCodes.Ldc_I4_0);
-                    il.Emit(OpCodes.Ldelem_Ref);
-                    il.Emit(OpCodes.Ldfld, MemoryDataField);
-                    il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
-                    if (valueOffset != 0)
-                    {
-                        il.Emit(OpCodes.Ldc_I4, valueOffset);
-                        il.Emit(OpCodes.Add);
-                    }
-                    il.Emit(OpCodes.Ldloca, returnLocal);
-                    il.Emit(OpCodes.Call, okGetter);
-                    il.Emit(OpCodes.Call, ResolveStoreMethod(args[0]));
+                    // Ok: write Ok value at retArea+valueOffset.
+                    EmitResultArmStore(il, args[0], returnLocal,
+                        okGetter, temps[retAreaSlot], valueOffset,
+                        resolver, resourcesType);
                     il.Emit(OpCodes.Br, endLabel);
 
                     // Err: write disc=1
@@ -536,21 +513,10 @@ namespace Wacs.Transpiler.AOT.Component
                     il.Emit(OpCodes.Ldc_I4_1);
                     il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(byte)));
 
-                    // Err: write Err value at retArea+valueOffset
-                    il.Emit(OpCodes.Ldarg_0);
-                    il.Emit(OpCodes.Ldfld, MemoriesField);
-                    il.Emit(OpCodes.Ldc_I4_0);
-                    il.Emit(OpCodes.Ldelem_Ref);
-                    il.Emit(OpCodes.Ldfld, MemoryDataField);
-                    il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
-                    if (valueOffset != 0)
-                    {
-                        il.Emit(OpCodes.Ldc_I4, valueOffset);
-                        il.Emit(OpCodes.Add);
-                    }
-                    il.Emit(OpCodes.Ldloca, returnLocal);
-                    il.Emit(OpCodes.Call, errGetter);
-                    il.Emit(OpCodes.Call, ResolveStoreMethod(args[1]));
+                    // Err: write Err value at retArea+valueOffset.
+                    EmitResultArmStore(il, args[1], returnLocal,
+                        errGetter, temps[retAreaSlot], valueOffset,
+                        resolver, resourcesType);
                     il.MarkLabel(endLabel);
                 }
                 else if (isTuple)
@@ -1255,14 +1221,16 @@ namespace Wacs.Transpiler.AOT.Component
                         return true;
                     return false;
                 }
-                // Result<TOk, TErr> when both arms are storable
-                // primitives. Wire form: u8 disc + value (joined-
-                // flat at max alignment of Ok/Err).
+                // Result<TOk, TErr>: each arm must be storable
+                // (primitive OR resource interface for own<R>).
+                // Wire form: u8 disc + value (joined-flat at max
+                // alignment of Ok/Err; resource handles are i32
+                // alignment 4).
                 if (def == typeof(Result<,>))
                 {
                     var args = t.GetGenericArguments();
-                    return IsStorablePrimitive(args[0])
-                        && IsStorablePrimitive(args[1]);
+                    return IsResultArmStorable(args[0], resolver)
+                        && IsResultArmStorable(args[1], resolver);
                 }
             }
             return false;
@@ -1282,6 +1250,78 @@ namespace Wacs.Transpiler.AOT.Component
                 || t == typeof(long) || t == typeof(ulong)
                 || t == typeof(float) || t == typeof(double)
                 || t == typeof(bool);
+        }
+
+        // True when the Ok or Err arm of a Result return is
+        // storable: either a primitive OR a resource interface
+        // (Resources class can mint a handle for it). Used by
+        // IsAggregateReturnSupported's Result<,> path.
+        private static bool IsResultArmStorable(Type t,
+            HostPackageResolver? resolver)
+        {
+            if (IsStorablePrimitive(t)) return true;
+            if (resolver != null
+                && resolver.IsResourceInterface(t)
+                && resolver.PreferredResourcesType != null)
+                return true;
+            return false;
+        }
+
+        // Alignment for a Result-arm type (primitive or resource
+        // handle). Resource handles are i32 → align 4.
+        private static int AlignOfResultArm(Type t)
+        {
+            if (IsStorablePrimitive(t)) return AlignOfPrimitive(t);
+            return 4;  // resource handle (i32)
+        }
+
+        // Emit IL that stores either a primitive arm value OR a
+        // freshly-allocated handle (for resource-typed arms) at
+        // retArea+valueOffset. Used by the Result-return Emit
+        // dispatch for both Ok and Err sides.
+        private static void EmitResultArmStore(ILGenerator il,
+            Type armType, LocalBuilder returnLocal,
+            MethodInfo armGetter, LocalBuilder retAreaLocal,
+            int valueOffset, HostPackageResolver? resolver,
+            Type? resourcesType)
+        {
+            bool isResource = resolver != null
+                && resolver.IsResourceInterface(armType)
+                && resourcesType != null;
+
+            // Push: dest_array, dest_offset
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, MemoriesField);
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Ldelem_Ref);
+            il.Emit(OpCodes.Ldfld, MemoryDataField);
+            il.Emit(OpCodes.Ldloc, retAreaLocal);
+            if (valueOffset != 0)
+            {
+                il.Emit(OpCodes.Ldc_I4, valueOffset);
+                il.Emit(OpCodes.Add);
+            }
+
+            if (isResource)
+            {
+                // Allocate handle for the arm's instance, store i32.
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, ResourcesField);
+                il.Emit(OpCodes.Castclass, resourcesType!);
+                il.Emit(OpCodes.Ldtoken, armType);
+                il.Emit(OpCodes.Call, GetTypeFromHandleMethod);
+                il.Emit(OpCodes.Ldloca, returnLocal);
+                il.Emit(OpCodes.Call, armGetter);
+                il.Emit(OpCodes.Callvirt,
+                    ResolveAllocateResourceMethod(resourcesType!));
+                il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(int)));
+            }
+            else
+            {
+                il.Emit(OpCodes.Ldloca, returnLocal);
+                il.Emit(OpCodes.Call, armGetter);
+                il.Emit(OpCodes.Call, ResolveStoreMethod(armType));
+            }
         }
 
         // canon-ABI alignment for a primitive type, in bytes.
