@@ -847,6 +847,35 @@ namespace Wacs.Transpiler.Test
                 => (t.Item1 << 8) | t.Item2;
         }
 
+        // ====== tuple<u32, string> param =========================
+        // Mixed-element tuples — Item1 is i32 (1 slot), Item2 is
+        // string (2 slots: ptr+len). Total wasm slots = 3.
+
+        [WitSource(@"interface mtup-env",
+            Package = "my:test@1.0.0", Interface = "mtup-env")]
+        public interface IMixedTupleTaker
+        {
+            [WitSource(@"take-mtup: func(t: tuple<u32, string>) -> u32;",
+                Package = "my:test@1.0.0", Interface = "mtup-env",
+                Item = "take-mtup")]
+            uint TakeMixed((uint, string) t);
+        }
+
+        public sealed class MixedTupleBundle
+        {
+            public IMixedTupleTaker MtupEnv { get; }
+            public MixedTupleBundle(IMixedTupleTaker m)
+            { MtupEnv = m; }
+        }
+
+        private sealed class MixedTupleProbe : IMixedTupleTaker
+        {
+            // (Item1 * 1000) + Item2.Length so the test can assert
+            // both elements made it through.
+            public uint TakeMixed((uint, string) t)
+                => (t.Item1 * 1000u) + (uint)t.Item2.Length;
+        }
+
         // ====== Record param test surface ========================
         // Matches the WitHostInterfaceGenerator emission shape:
         // sealed class with public auto-properties + parameterless
@@ -2052,6 +2081,65 @@ namespace Wacs.Transpiler.Test
             // Code: locals=0, i32.const 0x12, i32.const 0x34, call 0, end
             0x0A, 0x0A, 0x01, 0x08,
             0x00, 0x41, 0x12, 0x41, 0x34, 0x10, 0x00, 0x0B,
+        };
+
+        // (module
+        //   (type $tMtup (func (param i32 i32 i32) (result i32))) ;; (Item1, ptr, len) → u32
+        //   (type $tEntry (func (result i32)))
+        //   (import "my:test/mtup-env@1.0.0" "take-mtup"
+        //           (func $imp (type $tMtup)))
+        //   (memory 1)
+        //   (data (i32.const 0) "hi")
+        //   (func (export "call_mtup") (result i32)
+        //     i32.const 5      ;; Item1
+        //     i32.const 0      ;; ptr
+        //     i32.const 2      ;; len ("hi")
+        //     call $imp))      ;; → MixedTupleProbe yields 5*1000+2 = 5002
+        //
+        // tuple<u32, string> wire = i32 + i32 + i32 = 3 slots.
+        private static byte[] BuildMixedTupleParamFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types
+            // 0: (i32 i32 i32) → i32 (7 bytes)
+            // 1: () → i32 (4 bytes)
+            // size = 1 + 7 + 4 = 12 = 0x0C
+            0x01, 0x0C, 0x02,
+            0x60, 0x03, 0x7F, 0x7F, 0x7F, 0x01, 0x7F,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // size = 1 + 1 + 22 + 1 + 9 + 2 = 36 = 0x24
+            0x02, 0x24, 0x01,
+            // module: "my:test/mtup-env@1.0.0" (22)
+            0x16,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x6D, 0x74, 0x75, 0x70, 0x2D, 0x65, 0x6E, 0x76,
+            0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            // entity: "take-mtup" (9)
+            0x09,
+            0x74, 0x61, 0x6B, 0x65, 0x2D, 0x6D, 0x74, 0x75, 0x70,
+            0x00, 0x00,
+            // Function section: 1 func of type 1
+            0x03, 0x02, 0x01, 0x01,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export: "call_mtup" (9) → func 1
+            0x07, 0x0D, 0x01,
+            0x09,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x6D, 0x74, 0x75, 0x70,
+            0x00, 0x01,
+            // Code: locals=0, i32.const 5, i32.const 0, i32.const 2, call 0, end
+            0x0A, 0x0C, 0x01, 0x0A,
+            0x00,
+            0x41, 0x05,
+            0x41, 0x00,
+            0x41, 0x02,
+            0x10, 0x00,
+            0x0B,
+            // Data: "hi" at offset 0
+            0x0B, 0x08, 0x01,
+            0x00, 0x41, 0x00, 0x0B, 0x02,
+            0x68, 0x69,
         };
 
         // (module
@@ -5471,6 +5559,72 @@ namespace Wacs.Transpiler.Test
                 Array.Empty<object>());
             Assert.IsType<int>(raw);
             Assert.Equal(705, (int)raw);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_MixedTupleParam_RecurseElementLifts()
+        {
+            // tuple<u32, string> — Item1 is one i32 slot, Item2 is
+            // (ptr, len) two i32 slots; total wasm wire = 3 slots.
+            // The tuple lift loop walks elements per their flat-slot
+            // count; Item2's lift recurses into the existing string-
+            // lift emit.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Func<int, int, int, int>>(
+                ("my:test/mtup-env@1.0.0", "take-mtup"),
+                (_, _, _) => throw new InvalidOperationException(
+                    "stub for take-mtup must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildMixedTupleParamFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(MixedTupleBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/mtup-env@1.0.0", "take-mtup", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.MtupParam", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_mtup_env_1_0_0_take_mtup"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for take-mtup must not be invoked"),
+                });
+
+            var bundle = new MixedTupleBundle(new MixedTupleProbe());
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+
+            // Wasm passes (Item1=5, ptr=0, len=2) over "hi";
+            // MixedTupleProbe yields 5*1000 + 2 = 5002.
+            var callMtup = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_mtup"))!;
+            object? raw = callMtup.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<int>(raw);
+            Assert.Equal(5002, (int)raw);
         }
     }
 }
