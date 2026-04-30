@@ -388,9 +388,22 @@ namespace Wacs.Transpiler.AOT.Component
                             method.ReturnType.GetElementType()!)
                         || IsRecordOfPrimitives(
                             method.ReturnType.GetElementType()!));
+                bool isResourceArrayReturn = method.ReturnType.IsArray
+                    && method.ReturnType.GetArrayRank() == 1
+                    && resolver != null
+                    && resolver.IsResourceInterface(
+                        method.ReturnType.GetElementType()!)
+                    && resourcesType != null;
 
                 int offsetSoFar = 0;
-                if (isAggregateArrayReturn)
+                if (isResourceArrayReturn)
+                {
+                    EmitListOfResourceReturn(il,
+                        method.ReturnType.GetElementType()!,
+                        returnLocal, temps[retAreaSlot],
+                        resourcesType!);
+                }
+                else if (isAggregateArrayReturn)
                 {
                     EmitListOfRecordOrTupleReturn(il,
                         method.ReturnType.GetElementType()!,
@@ -1589,6 +1602,12 @@ namespace Wacs.Transpiler.AOT.Component
                 // buffer; per-element fields written inline.
                 if (IsTupleOfPrimitives(elem)) return true;
                 if (IsRecordOfPrimitives(elem)) return true;
+                // list<own<R>>: per-element AllocateResource + i32
+                // handle write into the outer buffer.
+                if (resolver != null
+                    && resolver.IsResourceInterface(elem)
+                    && resolver.PreferredResourcesType != null)
+                    return true;
             }
             if (IsLikelyRecordType(t))
             {
@@ -1931,6 +1950,109 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(int)));
 
             // count @4
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, MemoriesField);
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Ldelem_Ref);
+            il.Emit(OpCodes.Ldfld, MemoryDataField);
+            il.Emit(OpCodes.Ldloc, retAreaLocal);
+            il.Emit(OpCodes.Ldc_I4_4);
+            il.Emit(OpCodes.Add);
+            il.Emit(OpCodes.Ldloc, countLocal);
+            il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(int)));
+        }
+
+        // Emit IL for a list<own<R>> top-level return.
+        //   1. count = arrayLocal.Length
+        //   2. outerPtr = ctx.CabiRealloc(0, 0, 4, count*4)
+        //   3. for (int i = 0; i < count; i++):
+        //        handle = ctx.Resources.AllocateResource(typeof(IRes), array[i])
+        //        StoreI32(memory, outerPtr + i*4, handle)
+        //   4. Write (outerPtr, count) to retArea+0/+4.
+        private static void EmitListOfResourceReturn(
+            ILGenerator il, Type resInterface, LocalBuilder arrayLocal,
+            LocalBuilder retAreaLocal, Type resourcesType)
+        {
+            // count = arrayLocal.Length
+            var countLocal = il.DeclareLocal(typeof(int));
+            il.Emit(OpCodes.Ldloc, arrayLocal);
+            il.Emit(OpCodes.Ldlen);
+            il.Emit(OpCodes.Conv_I4);
+            il.Emit(OpCodes.Stloc, countLocal);
+
+            // outerPtr = ctx.CabiRealloc(0, 0, 4, count*4)
+            var outerPtrLocal = il.DeclareLocal(typeof(int));
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, CabiReallocField);
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Ldc_I4_4);
+            il.Emit(OpCodes.Ldloc, countLocal);
+            il.Emit(OpCodes.Ldc_I4_4);
+            il.Emit(OpCodes.Mul);
+            il.Emit(OpCodes.Callvirt,
+                typeof(Func<int, int, int, int, int>)
+                    .GetMethod("Invoke")!);
+            il.Emit(OpCodes.Stloc, outerPtrLocal);
+
+            // for i = 0; i < count; i++
+            var indexLocal = il.DeclareLocal(typeof(int));
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Stloc, indexLocal);
+
+            var loopStart = il.DefineLabel();
+            var loopCheck = il.DefineLabel();
+            il.Emit(OpCodes.Br, loopCheck);
+            il.MarkLabel(loopStart);
+
+            // Push: dest_array, dest_offset = outerPtr + i*4
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, MemoriesField);
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Ldelem_Ref);
+            il.Emit(OpCodes.Ldfld, MemoryDataField);
+            il.Emit(OpCodes.Ldloc, outerPtrLocal);
+            il.Emit(OpCodes.Ldloc, indexLocal);
+            il.Emit(OpCodes.Ldc_I4_4);
+            il.Emit(OpCodes.Mul);
+            il.Emit(OpCodes.Add);
+
+            // handle = ctx.Resources.AllocateResource(typeof(IRes), array[i])
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, ResourcesField);
+            il.Emit(OpCodes.Castclass, resourcesType);
+            il.Emit(OpCodes.Ldtoken, resInterface);
+            il.Emit(OpCodes.Call, GetTypeFromHandleMethod);
+            il.Emit(OpCodes.Ldloc, arrayLocal);
+            il.Emit(OpCodes.Ldloc, indexLocal);
+            il.Emit(OpCodes.Ldelem_Ref);
+            il.Emit(OpCodes.Callvirt,
+                ResolveAllocateResourceMethod(resourcesType));
+
+            // StoreI32(dest_array, dest_offset, handle)
+            il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(int)));
+
+            // i++
+            il.Emit(OpCodes.Ldloc, indexLocal);
+            il.Emit(OpCodes.Ldc_I4_1);
+            il.Emit(OpCodes.Add);
+            il.Emit(OpCodes.Stloc, indexLocal);
+
+            il.MarkLabel(loopCheck);
+            il.Emit(OpCodes.Ldloc, indexLocal);
+            il.Emit(OpCodes.Ldloc, countLocal);
+            il.Emit(OpCodes.Blt, loopStart);
+
+            // Write (outerPtr, count) to retArea + 0 / + 4.
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, MemoriesField);
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Ldelem_Ref);
+            il.Emit(OpCodes.Ldfld, MemoryDataField);
+            il.Emit(OpCodes.Ldloc, retAreaLocal);
+            il.Emit(OpCodes.Ldloc, outerPtrLocal);
+            il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(int)));
+
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldfld, MemoriesField);
             il.Emit(OpCodes.Ldc_I4_0);
