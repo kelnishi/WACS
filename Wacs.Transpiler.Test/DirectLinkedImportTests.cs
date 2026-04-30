@@ -337,6 +337,13 @@ namespace Wacs.Transpiler.Test
                 Package = "my:test@1.0.0", Interface = "own-env",
                 Item = "take-widget")]
             uint TakeWidget(IWidget widget);
+
+            // Option<own<R>> — recursive composition of Option<T> +
+            // resource-interface lift. Wasm wire is (i32 disc, i32 handle).
+            [WitSource(@"take-opt-widget: func(w: option<own<widget>>) -> u32;",
+                Package = "my:test@1.0.0", Interface = "own-env",
+                Item = "take-opt-widget")]
+            uint TakeOptWidget(Option<IWidget> widget);
         }
 
         public sealed class OwnBundle
@@ -348,6 +355,13 @@ namespace Wacs.Transpiler.Test
         private sealed class WidgetReader : IOwnTaker
         {
             public uint TakeWidget(IWidget widget) => widget.Read();
+
+            // Returns the widget's value when Some, or 0 when None.
+            // Lets the test assert via the wasm i32 result whether
+            // direct-linked emit threaded the inner-type lift
+            // correctly through the Option Some branch.
+            public uint TakeOptWidget(Option<IWidget> opt)
+                => opt.HasValue ? opt.Value.Read() : 0u;
         }
 
         private sealed class FakeEnv : IEnv
@@ -562,6 +576,66 @@ namespace Wacs.Transpiler.Test
             // Code section: locals=0, call 0, call 1, end
             0x0A, 0x08, 0x01, 0x06,
             0x00, 0x10, 0x00, 0x10, 0x01, 0x0B,
+        };
+
+        // (module
+        //   (type $tOptOwn (func (param i32 i32) (result i32)))
+        //   (type $tEntry (func (result i32)))
+        //   (import "my:test/own-env@1.0.0" "take-opt-widget"
+        //           (func $imp (type $tOptOwn)))
+        //   (func (export "call_take_some") (result i32)
+        //     i32.const 1   ;; disc = Some
+        //     i32.const 7   ;; handle
+        //     call $imp)
+        //   (func (export "call_take_none") (result i32)
+        //     i32.const 0   ;; disc = None
+        //     i32.const 0   ;; handle (ignored)
+        //     call $imp))
+        //
+        // option<own<widget>> wire form: (i32 disc, i32 handle).
+        // Direct-linked emit recurses into EmitLiftForType for the
+        // inner own<widget>, threading the resourcesType so the
+        // resource-handle lookup can fire inside the Some branch.
+        private static byte[] BuildOptionOwnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types
+            // type 0: (i32 i32) → i32 (6 bytes)
+            // type 1: () → i32 (4 bytes)
+            0x01, 0x0B, 0x02,
+            0x60, 0x02, 0x7F, 0x7F, 0x01, 0x7F,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section: 1 import
+            // size = 1 + 1 + 21 + 1 + 15 + 2 = 41 = 0x29
+            0x02, 0x29, 0x01,
+            // module: "my:test/own-env@1.0.0" (21)
+            0x15,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x6F, 0x77, 0x6E, 0x2D, 0x65, 0x6E, 0x76, 0x40,
+            0x31, 0x2E, 0x30, 0x2E, 0x30,
+            // entity: "take-opt-widget" (15)
+            0x0F,
+            0x74, 0x61, 0x6B, 0x65, 0x2D, 0x6F, 0x70, 0x74,
+            0x2D, 0x77, 0x69, 0x64, 0x67, 0x65, 0x74,
+            0x00, 0x00,
+            // Function section: 2 funcs of type 1
+            0x03, 0x03, 0x02, 0x01, 0x01,
+            // Export section: 2 exports
+            // size = 1 + (1+14+1+1) + (1+14+1+1) = 35 = 0x23
+            0x07, 0x23, 0x02,
+            0x0E,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x74, 0x61, 0x6B,
+            0x65, 0x5F, 0x73, 0x6F, 0x6D, 0x65,
+            0x00, 0x01,
+            0x0E,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x74, 0x61, 0x6B,
+            0x65, 0x5F, 0x6E, 0x6F, 0x6E, 0x65,
+            0x00, 0x02,
+            // Code section: 2 bodies
+            // size = 1 + 9 + 9 = 19 = 0x13
+            0x0A, 0x13, 0x02,
+            0x08, 0x00, 0x41, 0x01, 0x41, 0x07, 0x10, 0x00, 0x0B,
+            0x08, 0x00, 0x41, 0x00, 0x41, 0x00, 0x10, 0x00, 0x0B,
         };
 
         // (module
@@ -1951,6 +2025,82 @@ namespace Wacs.Transpiler.Test
             // w.Read() = 123. The result rides back through wasm i32.
             Assert.IsType<int>(raw);
             Assert.Equal(123, (int)raw);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_OptionOwnResource_RecursiveLift()
+        {
+            // option<own<R>> exercises the composition of Option<T>
+            // and own<R> in the recursive EmitLiftForType. Some
+            // branch must thread resourcesType through the inner-T
+            // lift so the resource handle resolves; None branch
+            // skips the handle entirely.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Func<int, int, int>>(
+                ("my:test/own-env@1.0.0", "take-opt-widget"),
+                (_, _) => throw new InvalidOperationException(
+                    "stub for take-opt-widget must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildOptionOwnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(OwnBundle),
+                resourcesType: typeof(TestResources));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.OptOwn", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_own_env_1_0_0_take_opt_widget"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for take-opt-widget must "
+                            + "not be invoked"),
+                });
+
+            var resources = new TestResources();
+            resources.Register(typeof(IWidget), 7,
+                new FakeWidget(456u));
+            var bundle = new OwnBundle(new WidgetReader());
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            // Some branch: handle 7 → FakeWidget(456) → 456.
+            var callSome = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_take_some"))!;
+            object? rSome = callSome.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<int>(rSome);
+            Assert.Equal(456, (int)rSome);
+
+            // None branch: WidgetReader.TakeOptWidget returns 0
+            // when opt.HasValue is false — proves the IL took the
+            // None side and never resolved a handle.
+            var callNone = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_take_none"))!;
+            object? rNone = callNone.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<int>(rNone);
+            Assert.Equal(0, (int)rNone);
         }
     }
 }
