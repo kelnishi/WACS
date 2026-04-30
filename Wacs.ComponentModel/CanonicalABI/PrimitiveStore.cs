@@ -345,7 +345,8 @@ namespace Wacs.ComponentModel.CanonicalABI
             private static int ComputeSize()
             {
                 if (typeof(T) == typeof(byte)
-                    || typeof(T) == typeof(sbyte)) return 1;
+                    || typeof(T) == typeof(sbyte)
+                    || typeof(T) == typeof(bool)) return 1;
                 if (typeof(T) == typeof(short)
                     || typeof(T) == typeof(ushort)) return 2;
                 if (typeof(T) == typeof(int)

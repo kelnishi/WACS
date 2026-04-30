@@ -1226,8 +1226,9 @@ namespace Wacs.Transpiler.AOT.Component
 
         // True when T is a canon-ABI list<> element type that maps
         // 1:1 to a CLR unmanaged primitive: s8/u8/s16/u16/s32/u32/
-        // s64/u64/f32/f64. bool is omitted (canon-ABI bools are u8
-        // wire and CLR bool isn't blittable for MemoryMarshal.AsBytes).
+        // s64/u64/f32/f64/bool. canon-ABI bools are u8 wire (0=false,
+        // 1=true); .NET represents bool as a 1-byte value with the
+        // same encoding, so MemoryMarshal.AsBytes round-trips.
         private static bool IsListPrimitiveElement(Type t)
         {
             if (t.IsEnum) t = Enum.GetUnderlyingType(t);
@@ -1235,7 +1236,8 @@ namespace Wacs.Transpiler.AOT.Component
                 || t == typeof(short) || t == typeof(ushort)
                 || t == typeof(int) || t == typeof(uint)
                 || t == typeof(long) || t == typeof(ulong)
-                || t == typeof(float) || t == typeof(double);
+                || t == typeof(float) || t == typeof(double)
+                || t == typeof(bool);
         }
 
         // Option<T>::Some(T) and Option<T>::get_None are the
