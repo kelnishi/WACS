@@ -770,6 +770,36 @@ namespace Wacs.Transpiler.Test
             public byte[] Give() => _v;
         }
 
+        // ====== string[] return shape (via cabi_realloc) =========
+        // Wire form: i32 ptr @0 + i32 count @4. *(ptr) is an array
+        // of (i32 ptr, i32 len) pairs (8 bytes per element); each
+        // string ptr points to a UTF-8 buffer. Two-level allocation
+        // — outer once + inner once per string.
+
+        [WitSource(@"interface strs-ret-env",
+            Package = "my:test@1.0.0", Interface = "strs-ret-env")]
+        public interface IStringSource
+        {
+            [WitSource(@"give: func() -> list<string>;",
+                Package = "my:test@1.0.0", Interface = "strs-ret-env",
+                Item = "give")]
+            string[] Give();
+        }
+
+        public sealed class StringSourceBundle
+        {
+            public IStringSource StrsRetEnv { get; }
+            public StringSourceBundle(IStringSource g)
+            { StrsRetEnv = g; }
+        }
+
+        private sealed class FixedStringSource : IStringSource
+        {
+            private readonly string[] _v;
+            public FixedStringSource(string[] v) { _v = v; }
+            public string[] Give() => _v;
+        }
+
         // ====== int[] return shape (via cabi_realloc) ============
         // Wire form: i32 ptr @0 + i32 count @4 (count = element
         // count, NOT byte count). cabi_realloc gets element-aligned
@@ -1745,6 +1775,93 @@ namespace Wacs.Transpiler.Test
             0x41, 0x10, 0x10, 0x00,
             0x41, 0x10, 0x28, 0x02, 0x00,    // ptr at retArea+0
             0x28, 0x02, 0x00,                  // i32.load → first int
+            0x0B,
+        };
+
+        // list<string> retArea: i32 ptr @0 + i32 count @4. *(ptr)
+        // is an array of (i32 sptr, i32 slen) pairs; *(sptr) is the
+        // UTF-8 buffer. Probes:
+        //   call_give_count           → outer count
+        //   call_give_first_byte      → first byte of first string
+        // The byte probe chases:
+        //   retArea → load i32 offset=0  → outer_ptr
+        //   outer_ptr → load i32 offset=0 → first sptr
+        //   first_sptr → load8_u offset=0 → first byte
+        private static byte[] BuildStringArrayReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 3 types
+            0x01, 0x11, 0x03,
+            0x60, 0x04, 0x7F, 0x7F, 0x7F, 0x7F, 0x01, 0x7F,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // module: "my:test/strs-ret-env@1.0.0" (26)
+            // entity: "give" (4)
+            // size = 1 + 1 + 26 + 1 + 4 + 2 = 35 = 0x23
+            0x02, 0x23, 0x01,
+            0x1A,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x73, 0x74, 0x72, 0x73, 0x2D, 0x72, 0x65, 0x74,
+            0x2D, 0x65, 0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30,
+            0x2E, 0x30,
+            0x04,
+            0x67, 0x69, 0x76, 0x65,
+            0x00, 0x01,
+            // Function section: 3 local funcs
+            0x03, 0x04, 0x03, 0x00, 0x02, 0x02,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Global: bump allocator at 32
+            0x06, 0x06, 0x01,
+            0x7F, 0x01, 0x41, 0x20, 0x0B,
+            // Export section: 3 exports
+            //   call_give_count       (15): 1+15+1+1 = 18
+            //   call_give_first_byte  (20): 1+20+1+1 = 23
+            //   cabi_realloc          (12): 15
+            // size = 1 + 18 + 23 + 15 = 57 = 0x39
+            0x07, 0x39, 0x03,
+            0x0F,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x67, 0x69, 0x76,
+            0x65, 0x5F, 0x63, 0x6F, 0x75, 0x6E, 0x74,
+            0x00, 0x02,
+            0x14,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x67, 0x69, 0x76,
+            0x65, 0x5F, 0x66, 0x69, 0x72, 0x73, 0x74, 0x5F,
+            0x62, 0x79, 0x74, 0x65,
+            0x00, 0x03,
+            0x0C,
+            0x63, 0x61, 0x62, 0x69, 0x5F, 0x72, 0x65, 0x61,
+            0x6C, 0x6C, 0x6F, 0x63,
+            0x00, 0x01,
+            // Code section: 3 bodies
+            //   body0 cabi_realloc          : 11 → 12
+            //   body1 call_give_count       : 11 → 12
+            //   body2 call_give_first_byte  : 17 → 18
+            //     locals(1)+i32.const(2)+call(2)+i32.const(2)+
+            //     i32.load(3)+i32.load(3)+i32.load8_u(3)+end(1)=17
+            // size = 1 + 12 + 12 + 18 = 43 = 0x2B
+            0x0A, 0x2B, 0x03,
+            // body0 cabi_realloc
+            0x0B, 0x00,
+            0x23, 0x00,
+            0x23, 0x00,
+            0x20, 0x03,
+            0x6A,
+            0x24, 0x00,
+            0x0B,
+            // body1 call_give_count
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x04,
+            0x0B,
+            // body2 call_give_first_byte (chase outer + inner ptrs)
+            0x11, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10,
+            0x28, 0x02, 0x00,                 // outer_ptr at retArea+0
+            0x28, 0x02, 0x00,                 // first sptr
+            0x2D, 0x00, 0x00,                 // first byte
             0x0B,
         };
 
@@ -7389,6 +7506,82 @@ namespace Wacs.Transpiler.Test
             var callFirst = result.ExportsInterface!.GetMethod(
                 InterfaceGenerator.SanitizeName("call_give_first_long_lo"))!;
             Assert.Equal(0x42, (int)callFirst.Invoke(fresh,
+                Array.Empty<object>())!);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_StringArrayReturn_ViaCabiRealloc()
+        {
+            // list<string> retArea: i32 ptr @0 + i32 count @4. The
+            // emit calls StoreStringList which mints the outer
+            // (sptr,slen) array via cabi_realloc, then per-string
+            // mints UTF-8 buffers and writes (sptr, slen) into the
+            // outer slots. Probes:
+            //   call_give_count           → outer count
+            //   call_give_first_byte      → first byte of first
+            //                                string (chases outer
+            //                                + inner ptrs)
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/strs-ret-env@1.0.0", "give"),
+                _ => throw new InvalidOperationException(
+                    "stub for give must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildStringArrayReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(StringSourceBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/strs-ret-env@1.0.0", "give", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.StrArrRet", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_strs_ret_env_1_0_0_give"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for give must not be invoked"),
+                });
+
+            // string[] { "Hi", "Wat" } — count=2, first="H"=0x48.
+            var bundle = new StringSourceBundle(new FixedStringSource(
+                new string[] { "Hi", "Wat" }));
+            var instance = Activator.CreateInstance(
+                result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+
+            var callCount = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_give_count"))!;
+            Assert.Equal(2, (int)callCount.Invoke(instance,
+                Array.Empty<object>())!);
+
+            var fresh = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+            var callByte = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_give_first_byte"))!;
+            Assert.Equal(0x48, (int)callByte.Invoke(fresh,
                 Array.Empty<object>())!);
         }
     }
