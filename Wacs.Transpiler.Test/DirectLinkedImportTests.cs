@@ -533,6 +533,35 @@ namespace Wacs.Transpiler.Test
             public Option<uint> Maybe() => _v;
         }
 
+        // ====== Result<TOk, TErr> return shape ===================
+        // Wire form: u8 disc @0 (0=Ok, 1=Err) + value at offset
+        // Align(1, max(align(Ok), align(Err))). For
+        // result<u32, u32>: 8 bytes (disc@0, value@4).
+
+        [WitSource(@"interface resret-env",
+            Package = "my:test@1.0.0", Interface = "resret-env")]
+        public interface IResultFactory
+        {
+            [WitSource(@"compute: func() -> result<u32, u32>;",
+                Package = "my:test@1.0.0", Interface = "resret-env",
+                Item = "compute")]
+            Result<uint, uint> Compute();
+        }
+
+        public sealed class ResultRetBundle
+        {
+            public IResultFactory ResretEnv { get; }
+            public ResultRetBundle(IResultFactory r)
+            { ResretEnv = r; }
+        }
+
+        private sealed class FixedResult : IResultFactory
+        {
+            private readonly Result<uint, uint> _v;
+            public FixedResult(Result<uint, uint> v) { _v = v; }
+            public Result<uint, uint> Compute() => _v;
+        }
+
         // ====== Variant param test surface =======================
         // Mirrors the source-generator-emitted shape for WIT
         // variants (HttpMethod, IpAddress, etc.):
@@ -920,6 +949,81 @@ namespace Wacs.Transpiler.Test
             0x00, 0x01,
             // Code section: body = call 0; end
             0x0A, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0B,
+        };
+
+        // (module
+        //   (type $tCompute (func (param i32)))   ;; compute(retArea) → ()
+        //   (type $tEntry (func (result i32)))    ;; call_compute_disc/value → u32
+        //   (import "my:test/resret-env@1.0.0" "compute"
+        //           (func $imp (type $tCompute)))
+        //   (memory 1)
+        //   (func (export "call_compute_disc") (result i32)
+        //     i32.const 16  ;; retArea
+        //     call $imp
+        //     i32.const 16
+        //     i32.load8_u)  ;; → disc
+        //   (func (export "call_compute_value") (result i32)
+        //     i32.const 16
+        //     call $imp
+        //     i32.const 16
+        //     i32.load offset=4))  ;; → value @ retArea+4
+        //
+        // Same retArea shape as Option<u32> (8 bytes), but disc=0
+        // means Ok(value), disc=1 means Err(value).
+        private static byte[] BuildResultReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: (i32) → void, () → i32
+            0x01, 0x09, 0x02,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // size = 1 + 1 + 24 + 1 + 7 + 2 = 36 = 0x24
+            0x02, 0x24, 0x01,
+            // module: "my:test/resret-env@1.0.0" (24)
+            0x18,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x72, 0x65, 0x73, 0x72, 0x65, 0x74, 0x2D, 0x65,
+            0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            // entity: "compute" (7)
+            0x07,
+            0x63, 0x6F, 0x6D, 0x70, 0x75, 0x74, 0x65,
+            0x00, 0x00,
+            // Function section: 2 funcs of type 1
+            0x03, 0x03, 0x02, 0x01, 0x01,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export: 2 exports
+            // call_compute_disc (17): 1+17+1+1 = 20
+            // call_compute_value (18): 1+18+1+1 = 21
+            // size = 1 + 20 + 21 = 42 = 0x2A
+            0x07, 0x2A, 0x02,
+            0x11,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x63, 0x6F, 0x6D,
+            0x70, 0x75, 0x74, 0x65, 0x5F, 0x64, 0x69, 0x73, 0x63,
+            0x00, 0x01,
+            0x12,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x63, 0x6F, 0x6D,
+            0x70, 0x75, 0x74, 0x65, 0x5F, 0x76, 0x61, 0x6C,
+            0x75, 0x65,
+            0x00, 0x02,
+            // Code section: 2 bodies
+            // body0 (read disc): locals(1) + i32.const(2) + call(2) + i32.const(2) + i32.load8_u(3) + end(1) = 11
+            // body1 (read value): locals(1) + i32.const(2) + call(2) + i32.const(2) + i32.load align=2 offset=4(3) + end(1) = 11
+            // size = 1 + 12 + 12 = 25 = 0x19
+            0x0A, 0x19, 0x02,
+            0x0B, 0x00,
+            0x41, 0x10,
+            0x10, 0x00,
+            0x41, 0x10,
+            0x2D, 0x00, 0x00,
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10,
+            0x10, 0x00,
+            0x41, 0x10,
+            0x28, 0x02, 0x04,
+            0x0B,
         };
 
         // (module
@@ -4659,6 +4763,98 @@ namespace Wacs.Transpiler.Test
                 var callDisc = result.ExportsInterface!.GetMethod(
                     InterfaceGenerator.SanitizeName("call_maybe_disc"))!;
                 Assert.Equal(0, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+            }
+        }
+
+        [Fact]
+        public void DirectLinkedImport_ResultPrimitiveReturn_BothBranches()
+        {
+            // Result<u32, u32> retArea: u8 disc @0 + u32 value @4
+            // (joined-flat at max alignment of Ok/Err = 4). Same
+            // wire shape as Option<u32> but with two value-bearing
+            // branches: disc=0 → Ok(value), disc=1 → Err(value).
+            // Two exports probe each retArea slot; run twice with
+            // Ok and Err results.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/resret-env@1.0.0", "compute"),
+                _ => throw new InvalidOperationException(
+                    "stub for compute must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildResultReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(ResultRetBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/resret-env@1.0.0", "compute", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.ResRetParam", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_resret_env_1_0_0_compute"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for compute must not be invoked"),
+                });
+
+            // Test #1: Ok(0x21) — disc=0, value=0x21.
+            {
+                var bundle = new ResultRetBundle(new FixedResult(
+                    Result<uint, uint>.FromOk(0x21u)));
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+
+                var callDisc = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_compute_disc"))!;
+                var callValue = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_compute_value"))!;
+
+                Assert.Equal(0, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+                Assert.Equal(0x21, (int)callValue.Invoke(instance,
+                    Array.Empty<object>())!);
+            }
+
+            // Test #2: Err(0x33) — disc=1, value=0x33.
+            {
+                var bundle = new ResultRetBundle(new FixedResult(
+                    Result<uint, uint>.FromErr(0x33u)));
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+
+                var callDisc = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_compute_disc"))!;
+                var callValue = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_compute_value"))!;
+
+                Assert.Equal(1, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+                Assert.Equal(0x33, (int)callValue.Invoke(instance,
                     Array.Empty<object>())!);
             }
         }

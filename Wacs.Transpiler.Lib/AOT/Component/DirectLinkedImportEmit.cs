@@ -353,6 +353,9 @@ namespace Wacs.Transpiler.AOT.Component
                 bool isOption = method.ReturnType.IsGenericType
                     && method.ReturnType.GetGenericTypeDefinition()
                         == typeof(Option<>);
+                bool isResult = method.ReturnType.IsGenericType
+                    && method.ReturnType.GetGenericTypeDefinition()
+                        == typeof(Result<,>);
 
                 int offsetSoFar = 0;
                 if (isOption)
@@ -428,6 +431,106 @@ namespace Wacs.Transpiler.AOT.Component
                     il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
                     il.Emit(OpCodes.Ldc_I4_0);
                     il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(byte)));
+                    il.MarkLabel(endLabel);
+                }
+                else if (isResult)
+                {
+                    // Result<TOk, TErr> retArea layout: u8 disc @0
+                    // (0=Ok, 1=Err) + joined-flat value at offset
+                    // Align(1, max(align(TOk), align(TErr))).
+                    //
+                    //   ldloca returnLocal
+                    //   call Result<TOk,TErr>::get_IsOk → bool
+                    //   brfalse err_label
+                    //   ;; Ok path:
+                    //     StoreU8(memory, retArea+0, 0)
+                    //     ldloca returnLocal; call get_Ok → TOk
+                    //     StoreXxx(memory, retArea+valueOffset, ok)
+                    //   br end
+                    // err_label:
+                    //   StoreU8(memory, retArea+0, 1)
+                    //   ldloca returnLocal; call get_Err → TErr
+                    //   StoreXxx(memory, retArea+valueOffset, err)
+                    // end:
+                    var args = method.ReturnType
+                        .GetGenericArguments();
+                    int okAlign = AlignOfPrimitive(args[0]);
+                    int errAlign = AlignOfPrimitive(args[1]);
+                    int valueAlign = okAlign > errAlign
+                        ? okAlign : errAlign;
+                    int valueOffset = Align(1, valueAlign);
+
+                    var errLabel = il.DefineLabel();
+                    var endLabel = il.DefineLabel();
+
+                    var resultT = method.ReturnType;
+                    var isOkGetter = resultT.GetProperty("IsOk",
+                        BindingFlags.Public | BindingFlags.Instance)!
+                        .GetGetMethod()!;
+                    var okGetter = resultT.GetProperty("Ok",
+                        BindingFlags.Public | BindingFlags.Instance)!
+                        .GetGetMethod()!;
+                    var errGetter = resultT.GetProperty("Err",
+                        BindingFlags.Public | BindingFlags.Instance)!
+                        .GetGetMethod()!;
+
+                    il.Emit(OpCodes.Ldloca, returnLocal);
+                    il.Emit(OpCodes.Call, isOkGetter);
+                    il.Emit(OpCodes.Brfalse, errLabel);
+
+                    // Ok: write disc=0
+                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Ldfld, MemoriesField);
+                    il.Emit(OpCodes.Ldc_I4_0);
+                    il.Emit(OpCodes.Ldelem_Ref);
+                    il.Emit(OpCodes.Ldfld, MemoryDataField);
+                    il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
+                    il.Emit(OpCodes.Ldc_I4_0);
+                    il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(byte)));
+
+                    // Ok: write Ok value at retArea+valueOffset
+                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Ldfld, MemoriesField);
+                    il.Emit(OpCodes.Ldc_I4_0);
+                    il.Emit(OpCodes.Ldelem_Ref);
+                    il.Emit(OpCodes.Ldfld, MemoryDataField);
+                    il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
+                    if (valueOffset != 0)
+                    {
+                        il.Emit(OpCodes.Ldc_I4, valueOffset);
+                        il.Emit(OpCodes.Add);
+                    }
+                    il.Emit(OpCodes.Ldloca, returnLocal);
+                    il.Emit(OpCodes.Call, okGetter);
+                    il.Emit(OpCodes.Call, ResolveStoreMethod(args[0]));
+                    il.Emit(OpCodes.Br, endLabel);
+
+                    // Err: write disc=1
+                    il.MarkLabel(errLabel);
+                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Ldfld, MemoriesField);
+                    il.Emit(OpCodes.Ldc_I4_0);
+                    il.Emit(OpCodes.Ldelem_Ref);
+                    il.Emit(OpCodes.Ldfld, MemoryDataField);
+                    il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
+                    il.Emit(OpCodes.Ldc_I4_1);
+                    il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(byte)));
+
+                    // Err: write Err value at retArea+valueOffset
+                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Ldfld, MemoriesField);
+                    il.Emit(OpCodes.Ldc_I4_0);
+                    il.Emit(OpCodes.Ldelem_Ref);
+                    il.Emit(OpCodes.Ldfld, MemoryDataField);
+                    il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
+                    if (valueOffset != 0)
+                    {
+                        il.Emit(OpCodes.Ldc_I4, valueOffset);
+                        il.Emit(OpCodes.Add);
+                    }
+                    il.Emit(OpCodes.Ldloca, returnLocal);
+                    il.Emit(OpCodes.Call, errGetter);
+                    il.Emit(OpCodes.Call, ResolveStoreMethod(args[1]));
                     il.MarkLabel(endLabel);
                 }
                 else if (isTuple)
@@ -1122,6 +1225,15 @@ namespace Wacs.Transpiler.AOT.Component
                 {
                     var inner = t.GetGenericArguments()[0];
                     return IsStorablePrimitive(inner);
+                }
+                // Result<TOk, TErr> when both arms are storable
+                // primitives. Wire form: u8 disc + value (joined-
+                // flat at max alignment of Ok/Err).
+                if (def == typeof(Result<,>))
+                {
+                    var args = t.GetGenericArguments();
+                    return IsStorablePrimitive(args[0])
+                        && IsStorablePrimitive(args[1]);
                 }
             }
             return false;
