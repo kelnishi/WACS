@@ -1000,6 +1000,36 @@ namespace Wacs.Transpiler.Test
             public int[][] All() => _v;
         }
 
+        // ====== list<list<string>> (string[][]) return =========
+        // Three-level cabi_realloc: outer (sub_ptr, sub_count) pair
+        // array, then per-outer-element (str_ptr, str_len) pair
+        // arrays, then per-string UTF-8 buffers. Mirrors HTTP-style
+        // list-of-header-lists shapes.
+
+        [WitSource(@"interface listsl-env",
+            Package = "my:test@1.0.0", Interface = "listsl-env")]
+        public interface IStringListListSource
+        {
+            [WitSource(@"all: func() -> list<list<string>>;",
+                Package = "my:test@1.0.0", Interface = "listsl-env",
+                Item = "all")]
+            string[][] All();
+        }
+
+        public sealed class StringListListBundle
+        {
+            public IStringListListSource ListslEnv { get; }
+            public StringListListBundle(IStringListListSource s)
+            { ListslEnv = s; }
+        }
+
+        private sealed class FixedStringListList : IStringListListSource
+        {
+            private readonly string[][] _v;
+            public FixedStringListList(string[][] v) { _v = v; }
+            public string[][] All() => _v;
+        }
+
         // ====== list<list<u8>> (byte[][]) return ===============
         // Wire form: outer (i32 ptr, i32 count) + inner array of
         // (sub_ptr, sub_len) pairs at *(ptr) + raw byte buffers at
@@ -3260,6 +3290,100 @@ namespace Wacs.Transpiler.Test
             0x28, 0x02, 0x00,                 // outer_ptr
             0x28, 0x02, 0x00,                 // first sub_ptr
             0x28, 0x02, 0x00,                 // first int (i32 at *sub_ptr+0)
+            0x0B,
+        };
+
+        // list<list<string>> retArea: i32 ptr @0 + i32 count @4.
+        // *(ptr) is array of (sub_ptr, sub_count) pairs;
+        // *(sub_ptr) is array of (str_ptr, str_len) pairs;
+        // *(str_ptr) is UTF-8 bytes. Three-level cabi_realloc.
+        // Probes:
+        //   call_all_count          → outer count
+        //   call_all_first_subcount → first inner list's count
+        //   call_all_first_byte     → first byte of first inner
+        //                              list's first string
+        private static byte[] BuildListOfStringListReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 3 types
+            0x01, 0x11, 0x03,
+            0x60, 0x04, 0x7F, 0x7F, 0x7F, 0x7F, 0x01, 0x7F,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // module: "my:test/listsl-env@1.0.0" (24)
+            // entity: "all" (3)
+            // size = 1 + 1 + 24 + 1 + 3 + 2 = 32 = 0x20
+            0x02, 0x20, 0x01,
+            0x18,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x6C, 0x69, 0x73, 0x74, 0x73, 0x6C, 0x2D, 0x65,
+            0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x03,
+            0x61, 0x6C, 0x6C,
+            0x00, 0x01,
+            // Function section: 4 local funcs
+            0x03, 0x05, 0x04, 0x00, 0x02, 0x02, 0x02,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Global: bump allocator at 32
+            0x06, 0x06, 0x01,
+            0x7F, 0x01, 0x41, 0x20, 0x0B,
+            // Export section: 4 exports
+            //   call_all_count          (14): 17
+            //   call_all_first_subcount (23): 26
+            //   call_all_first_byte     (19): 22
+            //   cabi_realloc            (12): 15
+            // size = 1 + 17 + 26 + 22 + 15 = 81 = 0x51
+            0x07, 0x51, 0x04,
+            0x0E,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x61, 0x6C, 0x6C,
+            0x5F, 0x63, 0x6F, 0x75, 0x6E, 0x74,
+            0x00, 0x02,
+            0x17,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x61, 0x6C, 0x6C,
+            0x5F, 0x66, 0x69, 0x72, 0x73, 0x74, 0x5F, 0x73,
+            0x75, 0x62, 0x63, 0x6F, 0x75, 0x6E, 0x74,
+            0x00, 0x03,
+            0x13,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x61, 0x6C, 0x6C,
+            0x5F, 0x66, 0x69, 0x72, 0x73, 0x74, 0x5F, 0x62,
+            0x79, 0x74, 0x65,
+            0x00, 0x04,
+            0x0C,
+            0x63, 0x61, 0x62, 0x69, 0x5F, 0x72, 0x65, 0x61,
+            0x6C, 0x6C, 0x6F, 0x63,
+            0x00, 0x01,
+            // Code section: 4 bodies
+            //   body0 cabi_realloc           : 11 → 12
+            //   body1 call_all_count         : 11 → 12
+            //   body2 call_all_first_subcount: 14 → 15
+            //   body3 call_all_first_byte    : 20 → 21
+            // size = 1 + 12 + 12 + 15 + 21 = 61 = 0x3D
+            0x0A, 0x3D, 0x04,
+            0x0B, 0x00,
+            0x23, 0x00,
+            0x23, 0x00,
+            0x20, 0x03,
+            0x6A,
+            0x24, 0x00,
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x04,
+            0x0B,
+            0x0E, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x00,    // outer_ptr
+            0x28, 0x02, 0x04,                 // first inner sub_count
+            0x0B,
+            0x14, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10,
+            0x28, 0x02, 0x00,                 // outer_ptr
+            0x28, 0x02, 0x00,                 // first inner sub_ptr
+            0x28, 0x02, 0x00,                 // first str_ptr
+            0x2D, 0x00, 0x00,                 // first byte
             0x0B,
         };
 
@@ -11327,6 +11451,93 @@ namespace Wacs.Transpiler.Test
             var callValue = result.ExportsInterface!.GetMethod(
                 InterfaceGenerator.SanitizeName("call_all_first_value"))!;
             Assert.Equal(0x42, (int)callValue.Invoke(fresh2,
+                Array.Empty<object>())!);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_ListOfStringListReturn_ThreeLevelRealloc()
+        {
+            // list<list<string>> exercises three-level cabi_realloc:
+            // outer (sub_ptr, sub_count) pair array + per-outer
+            // inner (str_ptr, str_len) pair array + per-string UTF-8
+            // buffer. Mirrors HTTP-style list-of-header-lists.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/listsl-env@1.0.0", "all"),
+                _ => throw new InvalidOperationException(
+                    "stub for all must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildListOfStringListReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(StringListListBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/listsl-env@1.0.0", "all", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.ListSlRet", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_listsl_env_1_0_0_all"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for all must not be invoked"),
+                });
+
+            // string[][] {
+            //   { "Hi", "Wat" },   // outer[0]: 2 strings, first 'H'=0x48
+            //   { "X" },            // outer[1]: 1 string
+            // }
+            // Probes: outer count=2, first inner count=2, first
+            // byte of first string = 0x48 ('H').
+            var bundle = new StringListListBundle(new FixedStringListList(
+                new[]
+                {
+                    new[] { "Hi", "Wat" },
+                    new[] { "X" },
+                }));
+            var instance = Activator.CreateInstance(
+                result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+
+            var callCount = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_all_count"))!;
+            Assert.Equal(2, (int)callCount.Invoke(instance,
+                Array.Empty<object>())!);
+
+            var fresh = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+            var callSubCount = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_all_first_subcount"))!;
+            Assert.Equal(2, (int)callSubCount.Invoke(fresh,
+                Array.Empty<object>())!);
+
+            var fresh2 = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+            var callByte = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_all_first_byte"))!;
+            Assert.Equal(0x48, (int)callByte.Invoke(fresh2,
                 Array.Empty<object>())!);
         }
     }

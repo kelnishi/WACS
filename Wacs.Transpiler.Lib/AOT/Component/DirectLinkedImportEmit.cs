@@ -377,6 +377,20 @@ namespace Wacs.Transpiler.AOT.Component
                     && IsListPrimitiveElement(
                         method.ReturnType.GetElementType()!
                             .GetElementType()!);
+                bool isStringJaggedArrayReturn = method.ReturnType.IsArray
+                    && method.ReturnType.GetArrayRank() == 1
+                    && method.ReturnType.GetElementType()!.IsArray
+                    && method.ReturnType.GetElementType()!
+                        .GetArrayRank() == 1
+                    && method.ReturnType.GetElementType()!
+                        .GetElementType() == typeof(string);
+                bool isByteArrayJaggedArrayReturn = method.ReturnType.IsArray
+                    && method.ReturnType.GetArrayRank() == 1
+                    && method.ReturnType.GetElementType()!.IsArray
+                    && method.ReturnType.GetElementType()!
+                        .GetArrayRank() == 1
+                    && method.ReturnType.GetElementType()!
+                        .GetElementType() == typeof(byte[]);
                 bool isPrimArrayReturn = !isByteArrayReturn
                     && !isStringArrayReturn
                     && !isByteArrayListReturn
@@ -430,7 +444,9 @@ namespace Wacs.Transpiler.AOT.Component
                 if (isStringReturn || isByteArrayReturn
                     || isPrimArrayReturn || isStringArrayReturn
                     || isByteArrayListReturn
-                    || isPrimJaggedArrayReturn)
+                    || isPrimJaggedArrayReturn
+                    || isStringJaggedArrayReturn
+                    || isByteArrayJaggedArrayReturn)
                 {
                     // String / list<T> retArea layout: i32 ptr @0,
                     // i32 len/count @4. Encode (UTF-8 for string;
@@ -456,6 +472,8 @@ namespace Wacs.Transpiler.AOT.Component
                     else if (isByteArrayReturn) storeMethod = StoreByteArrayMethod;
                     else if (isStringArrayReturn) storeMethod = StoreStringListMethod;
                     else if (isByteArrayListReturn) storeMethod = StoreByteArrayListMethod;
+                    else if (isStringJaggedArrayReturn) storeMethod = StoreListOfStringListMethod;
+                    else if (isByteArrayJaggedArrayReturn) storeMethod = StoreListOfByteArrayListMethod;
                     else if (isPrimJaggedArrayReturn) storeMethod =
                         ResolveStorePrimArrayListMethod(
                             method.ReturnType.GetElementType()!
@@ -1215,6 +1233,16 @@ namespace Wacs.Transpiler.AOT.Component
                 nameof(PrimitiveStore.StoreByteArrayList),
                 BindingFlags.Public | BindingFlags.Static)!;
 
+        private static readonly MethodInfo StoreListOfStringListMethod =
+            typeof(PrimitiveStore).GetMethod(
+                nameof(PrimitiveStore.StoreListOfStringList),
+                BindingFlags.Public | BindingFlags.Static)!;
+
+        private static readonly MethodInfo StoreListOfByteArrayListMethod =
+            typeof(PrimitiveStore).GetMethod(
+                nameof(PrimitiveStore.StoreListOfByteArrayList),
+                BindingFlags.Public | BindingFlags.Static)!;
+
         // Open generic StorePrimArrayList<T> for jagged primitive
         // returns (int[][], long[][], etc.).
         private static readonly MethodInfo StorePrimArrayListOpenMethod =
@@ -1503,6 +1531,16 @@ namespace Wacs.Transpiler.AOT.Component
                 // cabi_realloc (outer pair-array + per-sub raw bytes).
                 if (elem.IsArray && elem.GetArrayRank() == 1
                     && IsListPrimitiveElement(elem.GetElementType()!))
+                    return true;
+                // list<list<string>> (string[][]) — three-level
+                // cabi_realloc.
+                if (elem.IsArray && elem.GetArrayRank() == 1
+                    && elem.GetElementType() == typeof(string))
+                    return true;
+                // list<list<list<u8>>> (byte[][][]) — three-level
+                // cabi_realloc with raw byte buffers.
+                if (elem.IsArray && elem.GetArrayRank() == 1
+                    && elem.GetElementType() == typeof(byte[]))
                     return true;
                 // list<tuple-of-primitives> / list<record-of-primitives>:
                 // outer (ptr, count) at retArea + contiguous packed
