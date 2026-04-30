@@ -551,8 +551,41 @@ namespace Wacs.Transpiler.AOT.Component
                             bool isAggregatePayload =
                                 IsTupleOfPrimitives(c.Payload)
                                 || IsRecordOfPrimitives(c.Payload);
+                            bool isOptionPayload =
+                                c.Payload.IsGenericType
+                                && c.Payload.GetGenericTypeDefinition()
+                                    == typeof(Option<>);
+                            bool isResultPayload =
+                                c.Payload.IsGenericType
+                                && c.Payload.GetGenericTypeDefinition()
+                                    == typeof(Result<,>);
 
-                            if (isAggregatePayload)
+                            if (isOptionPayload || isResultPayload)
+                            {
+                                // Nested Option/Result payload —
+                                // dispatch to the recursive helper
+                                // at the case's value slot. Bypass
+                                // the common pre-push.
+                                il.Emit(OpCodes.Pop);
+                                il.Emit(OpCodes.Pop);
+                                var payloadLocal = il.DeclareLocal(c.Payload);
+                                il.Emit(OpCodes.Ldloc, returnLocal);
+                                il.Emit(OpCodes.Castclass, c.CaseType);
+                                il.Emit(OpCodes.Callvirt,
+                                    valueProp.GetGetMethod()!);
+                                il.Emit(OpCodes.Stloc, payloadLocal);
+                                if (isOptionPayload)
+                                    EmitOptionStoreAt(il, c.Payload,
+                                        payloadLocal, temps[retAreaSlot],
+                                        valueOffset, resolver,
+                                        resourcesType, stringEncoding);
+                                else
+                                    EmitResultStoreAt(il, c.Payload,
+                                        payloadLocal, temps[retAreaSlot],
+                                        valueOffset, resolver,
+                                        resourcesType, stringEncoding);
+                            }
+                            else if (isAggregatePayload)
                             {
                                 // Aggregate payloads write field-by-
                                 // field — bypass the common pre-push

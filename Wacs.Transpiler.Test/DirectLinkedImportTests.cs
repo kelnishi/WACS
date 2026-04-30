@@ -1030,6 +1030,47 @@ namespace Wacs.Transpiler.Test
             public (uint, uint)[] All() => _v;
         }
 
+        // ====== Variant with Option payload ====================
+        // variant ping { idle, retry(option<u32>) }: empty + nested
+        // Option payload. Variant emit dispatches the retry case
+        // through EmitOptionStoreAt at retArea+valueOffset.
+
+        [WitSource(@"variant ping { idle, retry(option<u32>) }",
+            Package = "my:test@1.0.0", Interface = "varopt-env",
+            Item = "ping")]
+        public abstract class Ping
+        {
+            public sealed class PingIdle : Ping { }
+            public sealed class PingRetry : Ping
+            {
+                public Option<uint> Value { get; }
+                public PingRetry(Option<uint> v) { Value = v; }
+            }
+        }
+
+        [WitSource(@"interface varopt-env",
+            Package = "my:test@1.0.0", Interface = "varopt-env")]
+        public interface IPingFactory
+        {
+            [WitSource(@"emit: func() -> ping;",
+                Package = "my:test@1.0.0", Interface = "varopt-env",
+                Item = "emit")]
+            Ping Emit();
+        }
+
+        public sealed class PingBundle
+        {
+            public IPingFactory VaroptEnv { get; }
+            public PingBundle(IPingFactory p) { VaroptEnv = p; }
+        }
+
+        private sealed class FixedPing : IPingFactory
+        {
+            private readonly Ping _v;
+            public FixedPing(Ping v) { _v = v; }
+            public Ping Emit() => _v;
+        }
+
         // ====== Variant with tuple payload =====================
         // variant pos { home, point(tuple<u32, u32>) } — tap +
         // tuple-bearing case. valueOffset=4, payload tuple at
@@ -3171,6 +3212,67 @@ namespace Wacs.Transpiler.Test
             0x41, 0x10,
             0x28, 0x02, 0x00,                 // outer_ptr
             0x28, 0x02, 0x04,                 // first.b (i32 at *ptr+4)
+            0x0B,
+        };
+
+        // Variant with Option<u32> payload (ping { idle,
+        // retry(option<u32>) }). retArea: u8 outer disc @0 +
+        // Option<u32> at +4 (inner disc @4 + u32 value @8).
+        private static byte[] BuildVariantOptionPayloadFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: (i32) → void, () → i32
+            0x01, 0x09, 0x02,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // module: "my:test/varopt-env@1.0.0" (24)
+            // entity: "emit" (4)
+            // size = 1 + 1 + 24 + 1 + 4 + 2 = 33 = 0x21
+            0x02, 0x21, 0x01,
+            0x18,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x76, 0x61, 0x72, 0x6F, 0x70, 0x74, 0x2D, 0x65,
+            0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x04,
+            0x65, 0x6D, 0x69, 0x74,
+            0x00, 0x00,
+            // Function section: 3 local funcs of type 1
+            0x03, 0x04, 0x03, 0x01, 0x01, 0x01,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export section: 3 exports
+            //   call_ping_disc       (14): 17
+            //   call_ping_inner_disc (20): 23
+            //   call_ping_value      (15): 18
+            // size = 1 + 17 + 23 + 18 = 59 = 0x3B
+            0x07, 0x3B, 0x03,
+            0x0E,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x70, 0x69, 0x6E,
+            0x67, 0x5F, 0x64, 0x69, 0x73, 0x63,
+            0x00, 0x01,
+            0x14,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x70, 0x69, 0x6E,
+            0x67, 0x5F, 0x69, 0x6E, 0x6E, 0x65, 0x72, 0x5F,
+            0x64, 0x69, 0x73, 0x63,
+            0x00, 0x02,
+            0x0F,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x70, 0x69, 0x6E,
+            0x67, 0x5F, 0x76, 0x61, 0x6C, 0x75, 0x65,
+            0x00, 0x03,
+            // Code section: 3 bodies (each 11 → 12)
+            0x0A, 0x25, 0x03,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x2D, 0x00, 0x00,
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x2D, 0x00, 0x04,    // load8_u offset=4 (inner disc)
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x08,    // i32.load offset=8 (value)
             0x0B,
         };
 
@@ -10266,6 +10368,122 @@ namespace Wacs.Transpiler.Test
                 InterfaceGenerator.SanitizeName("call_greet_first_byte"))!;
             Assert.Equal(0xC2, (int)callByte.Invoke(fresh,
                 Array.Empty<object>())!);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_VariantOptionPayloadReturn_AllBranches()
+        {
+            // variant ping { idle, retry(option<u32>) }: nested
+            // Option payload exercises the variant emit's
+            // dispatch-to-EmitOptionStoreAt path for case payloads.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/varopt-env@1.0.0", "emit"),
+                _ => throw new InvalidOperationException(
+                    "stub for emit must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildVariantOptionPayloadFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(PingBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/varopt-env@1.0.0", "emit", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.PingRet", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_varopt_env_1_0_0_emit"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for emit must not be invoked"),
+                });
+
+            // Idle (no payload) → outer_disc=0.
+            {
+                var bundle = new PingBundle(
+                    new FixedPing(new Ping.PingIdle()));
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+
+                var callDisc = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_ping_disc"))!;
+                Assert.Equal(0, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+            }
+
+            // Retry(None) → outer_disc=1, inner_disc=0.
+            {
+                var bundle = new PingBundle(
+                    new FixedPing(new Ping.PingRetry(
+                        Option<uint>.None)));
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+
+                var callDisc = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_ping_disc"))!;
+                Assert.Equal(1, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+
+                var fresh = Activator.CreateInstance(result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callInner = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_ping_inner_disc"))!;
+                Assert.Equal(0, (int)callInner.Invoke(fresh,
+                    Array.Empty<object>())!);
+            }
+
+            // Retry(Some(0x42)) → outer_disc=1, inner_disc=1, value=0x42.
+            {
+                var bundle = new PingBundle(
+                    new FixedPing(new Ping.PingRetry(
+                        Option<uint>.Some(0x42u))));
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+
+                var callDisc = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_ping_disc"))!;
+                Assert.Equal(1, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+
+                var fresh1 = Activator.CreateInstance(result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callInner = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_ping_inner_disc"))!;
+                Assert.Equal(1, (int)callInner.Invoke(fresh1,
+                    Array.Empty<object>())!);
+
+                var fresh2 = Activator.CreateInstance(result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callValue = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_ping_value"))!;
+                Assert.Equal(0x42, (int)callValue.Invoke(fresh2,
+                    Array.Empty<object>())!);
+            }
         }
     }
 }
