@@ -7,6 +7,7 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace Wacs.ComponentModel.CanonicalABI
@@ -118,6 +119,68 @@ namespace Wacs.ComponentModel.CanonicalABI
                 dest.AsSpan(retAreaOffset, 4), ptr);
             BinaryPrimitives.WriteInt32LittleEndian(
                 dest.AsSpan(retAreaOffset + 4, 4), value.Length);
+        }
+
+        /// <summary>
+        /// Store a <c>T[]</c> of unmanaged primitives (canon-ABI
+        /// <c>list&lt;T&gt;</c> for T in {s8/u8/s16/u16/s32/u32/
+        /// s64/u64/f32/f64}) into wasm linear memory and write the
+        /// (ptr, count) pair to the retArea slot. Allocates a guest
+        /// buffer via <c>cabi_realloc</c>, copies the raw bytes via
+        /// <see cref="MemoryMarshal.AsBytes{T}(System.ReadOnlySpan{T})"/>,
+        /// then writes <paramref name="value"/>.Length (NOT the byte
+        /// count) into the len slot.
+        ///
+        /// <para>Canon-ABI requires little-endian; this relies on
+        /// the .NET host running on a little-endian platform (.NET
+        /// supports x64 / arm64 / arm / wasm — all LE).</para>
+        ///
+        /// <para>Used by direct-linked aggregate-RETURN emit when the
+        /// host returns int[], long[], float[], etc.</para>
+        /// </summary>
+        public static void StorePrimitiveArray<T>(byte[] dest,
+            int retAreaOffset, T[] value,
+            Func<int, int, int, int, int> cabiRealloc)
+            where T : unmanaged
+        {
+            if (cabiRealloc == null)
+                throw new InvalidOperationException(
+                    "list<T> returns require the component to "
+                    + "export `cabi_realloc`.");
+            int elementSize = MarshalSizeOf<T>.Size;
+            int byteCount = value.Length * elementSize;
+            var ptr = cabiRealloc(0, 0, elementSize, byteCount);
+            var srcBytes = MemoryMarshal.AsBytes(
+                new ReadOnlySpan<T>(value));
+            srcBytes.CopyTo(dest.AsSpan(ptr, byteCount));
+            BinaryPrimitives.WriteInt32LittleEndian(
+                dest.AsSpan(retAreaOffset, 4), ptr);
+            BinaryPrimitives.WriteInt32LittleEndian(
+                dest.AsSpan(retAreaOffset + 4, 4), value.Length);
+        }
+
+        // sizeof(T) requires unsafe; cache the per-T size once via
+        // Marshal.SizeOf to avoid the unsafe block in the hot path.
+        // For canon-ABI primitives (i8/i16/i32/i64/f32/f64) this
+        // matches sizeof(T) exactly; bool is excluded by callers.
+        private static class MarshalSizeOf<T> where T : unmanaged
+        {
+            public static readonly int Size = ComputeSize();
+            private static int ComputeSize()
+            {
+                if (typeof(T) == typeof(byte)
+                    || typeof(T) == typeof(sbyte)) return 1;
+                if (typeof(T) == typeof(short)
+                    || typeof(T) == typeof(ushort)) return 2;
+                if (typeof(T) == typeof(int)
+                    || typeof(T) == typeof(uint)
+                    || typeof(T) == typeof(float)) return 4;
+                if (typeof(T) == typeof(long)
+                    || typeof(T) == typeof(ulong)
+                    || typeof(T) == typeof(double)) return 8;
+                throw new InvalidOperationException(
+                    "Unsupported list<T> element type: " + typeof(T));
+            }
         }
     }
 }

@@ -359,18 +359,24 @@ namespace Wacs.Transpiler.AOT.Component
                 bool isVariant = IsLikelyVariantBase(method.ReturnType);
                 bool isStringReturn = method.ReturnType == typeof(string);
                 bool isByteArrayReturn = method.ReturnType == typeof(byte[]);
+                bool isPrimArrayReturn = !isByteArrayReturn
+                    && method.ReturnType.IsArray
+                    && method.ReturnType.GetArrayRank() == 1
+                    && IsListPrimitiveElement(
+                        method.ReturnType.GetElementType()!);
 
                 int offsetSoFar = 0;
-                if (isStringReturn || isByteArrayReturn)
+                if (isStringReturn || isByteArrayReturn
+                    || isPrimArrayReturn)
                 {
-                    // String / byte[] retArea layout: i32 ptr @0,
-                    // i32 len @4. Encode (UTF-8 for string; raw
-                    // bytes for byte[]), call cabi_realloc to
-                    // allocate guest buffer, BlockCopy bytes,
-                    // write (ptr, len) pair.
+                    // String / list<T> retArea layout: i32 ptr @0,
+                    // i32 len/count @4. Encode (UTF-8 for string;
+                    // raw LE bytes for primitive arrays), call
+                    // cabi_realloc to allocate guest buffer,
+                    // copy bytes, write (ptr, len) pair.
                     //
-                    //   StoreString/StoreByteArray(memory, retArea,
-                    //                              value, ctx.CabiRealloc)
+                    //   StoreXxx(memory, retArea, value,
+                    //            ctx.CabiRealloc)
                     il.Emit(OpCodes.Ldarg_0);
                     il.Emit(OpCodes.Ldfld, MemoriesField);
                     il.Emit(OpCodes.Ldc_I4_0);
@@ -380,9 +386,12 @@ namespace Wacs.Transpiler.AOT.Component
                     il.Emit(OpCodes.Ldloc, returnLocal);
                     il.Emit(OpCodes.Ldarg_0);
                     il.Emit(OpCodes.Ldfld, CabiReallocField);
-                    il.Emit(OpCodes.Call, isStringReturn
-                        ? StoreStringMethod
-                        : StoreByteArrayMethod);
+                    MethodInfo storeMethod;
+                    if (isStringReturn) storeMethod = StoreStringMethod;
+                    else if (isByteArrayReturn) storeMethod = StoreByteArrayMethod;
+                    else storeMethod = ResolveStorePrimitiveArrayMethod(
+                        method.ReturnType.GetElementType()!);
+                    il.Emit(OpCodes.Call, storeMethod);
                 }
                 else if (isVariant)
                 {
@@ -1136,6 +1145,35 @@ namespace Wacs.Transpiler.AOT.Component
                 nameof(PrimitiveStore.StoreByteArray),
                 BindingFlags.Public | BindingFlags.Static)!;
 
+        // Open generic StorePrimitiveArray<T>; close per-T at emit
+        // time via the cache below.
+        private static readonly MethodInfo StorePrimitiveArrayOpenMethod =
+            typeof(PrimitiveStore).GetMethod(
+                nameof(PrimitiveStore.StorePrimitiveArray),
+                BindingFlags.Public | BindingFlags.Static)!;
+
+        private static readonly ConcurrentDictionary<Type, MethodInfo>
+            StorePrimArrayCache = new();
+
+        private static MethodInfo ResolveStorePrimitiveArrayMethod(
+            Type elementType)
+            => StorePrimArrayCache.GetOrAdd(elementType,
+                t => StorePrimitiveArrayOpenMethod.MakeGenericMethod(t));
+
+        // True when T is a canon-ABI list<> element type that maps
+        // 1:1 to a CLR unmanaged primitive: s8/u8/s16/u16/s32/u32/
+        // s64/u64/f32/f64. bool is omitted (canon-ABI bools are u8
+        // wire and CLR bool isn't blittable for MemoryMarshal.AsBytes).
+        private static bool IsListPrimitiveElement(Type t)
+        {
+            if (t.IsEnum) t = Enum.GetUnderlyingType(t);
+            return t == typeof(byte) || t == typeof(sbyte)
+                || t == typeof(short) || t == typeof(ushort)
+                || t == typeof(int) || t == typeof(uint)
+                || t == typeof(long) || t == typeof(ulong)
+                || t == typeof(float) || t == typeof(double);
+        }
+
         // Option<T>::Some(T) and Option<T>::get_None are the
         // construction surface for direct-linked Option<T> param
         // emit. Cache the per-T MethodInfos; first emit per T pays
@@ -1371,6 +1409,15 @@ namespace Wacs.Transpiler.AOT.Component
             // export cabi_realloc.
             if (t == typeof(string)) return true;
             if (t == typeof(byte[])) return true;
+            // list<T> for unmanaged primitive T (s8..f64) — same wire
+            // form as byte[] (8-byte retArea: ptr + count) but with
+            // per-T element width. Goes through cabi_realloc +
+            // StorePrimitiveArray<T>.
+            if (t.IsArray && t.GetArrayRank() == 1)
+            {
+                var elem = t.GetElementType()!;
+                if (IsListPrimitiveElement(elem)) return true;
+            }
             if (IsLikelyRecordType(t))
             {
                 foreach (var p in GetRecordProperties(t))
