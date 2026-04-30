@@ -321,6 +321,35 @@ namespace Wacs.Transpiler.Test
             public void TakeOptStr(Option<string> opt) { Last = opt; }
         }
 
+        // ====== own<R> as direct param test surface =============
+        // A free function that takes a resource-typed CLR param.
+        // Wasm wire is a single i32 handle; the IL looks up the
+        // typed instance via ctx.Resources (same machinery as
+        // resource-instance-method `this`).
+
+        [WitSource(@"interface own-env",
+            Package = "my:test@1.0.0", Interface = "own-env")]
+        public interface IOwnTaker
+        {
+            // The resource-typed param (IWidget — already declared
+            // in res-env) lowers to a single i32 handle on the wire.
+            [WitSource(@"take-widget: func(w: own<widget>) -> u32;",
+                Package = "my:test@1.0.0", Interface = "own-env",
+                Item = "take-widget")]
+            uint TakeWidget(IWidget widget);
+        }
+
+        public sealed class OwnBundle
+        {
+            public IOwnTaker OwnEnv { get; }
+            public OwnBundle(IOwnTaker o) { OwnEnv = o; }
+        }
+
+        private sealed class WidgetReader : IOwnTaker
+        {
+            public uint TakeWidget(IWidget widget) => widget.Read();
+        }
+
         private sealed class FakeEnv : IEnv
         {
             private readonly ulong _v;
@@ -533,6 +562,55 @@ namespace Wacs.Transpiler.Test
             // Code section: locals=0, call 0, call 1, end
             0x0A, 0x08, 0x01, 0x06,
             0x00, 0x10, 0x00, 0x10, 0x01, 0x0B,
+        };
+
+        // (module
+        //   (type $tOwn (func (param i32) (result i32)))  ;; uint TakeWidget(IWidget)
+        //   (type $tEntry (func (result i32)))             ;; uint call_take()
+        //   (import "my:test/own-env@1.0.0" "take-widget"
+        //           (func $imp (type $tOwn)))
+        //   (func (export "call_take") (result i32)
+        //     i32.const 7   ;; the resource handle the test pre-registers
+        //     call $imp))
+        //
+        // own<widget> wire is a single i32 (the handle). Direct-
+        // linked emit detects IWidget as a resource interface from
+        // the resolver and emits the same lookup machinery as the
+        // resource-instance-method `this`: load Resources, call
+        // GetResource(typeof(IWidget), handle), cast to IWidget,
+        // pass as the typed param.
+        private static byte[] BuildOwnParamFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types
+            // type 0: (i32) → i32 (5 bytes), type 1: () → i32 (4 bytes)
+            // size = count(1) + type0(5) + type1(4) = 10 = 0x0A
+            0x01, 0x0A, 0x02,
+            0x60, 0x01, 0x7F, 0x01, 0x7F,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section: 1 import
+            // size = 1 + 1 + 21 + 1 + 11 + 2 = 37 = 0x25
+            0x02, 0x25, 0x01,
+            // module: "my:test/own-env@1.0.0" (21)
+            0x15,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x6F, 0x77, 0x6E, 0x2D, 0x65, 0x6E, 0x76, 0x40,
+            0x31, 0x2E, 0x30, 0x2E, 0x30,
+            // entity: "take-widget" (11)
+            0x0B,
+            0x74, 0x61, 0x6B, 0x65, 0x2D, 0x77, 0x69, 0x64,
+            0x67, 0x65, 0x74,
+            0x00, 0x00,
+            // Function section: 1 func of type 1
+            0x03, 0x02, 0x01, 0x01,
+            // Export: "call_take" (9) → func 1
+            0x07, 0x0D, 0x01,
+            0x09,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x74, 0x61, 0x6B, 0x65,
+            0x00, 0x01,
+            // Code: locals=0, i32.const 7 (handle), call 0, end
+            0x0A, 0x08, 0x01, 0x06,
+            0x00, 0x41, 0x07, 0x10, 0x00, 0x0B,
         };
 
         // (module
@@ -1793,6 +1871,86 @@ namespace Wacs.Transpiler.Test
                 InterfaceGenerator.SanitizeName("call_none_str"))!;
             callNone.Invoke(instance, Array.Empty<object>());
             Assert.False(capturing.Last.HasValue);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_OwnResourceParam_HandleResolves()
+        {
+            // own<widget> param: wasm wire is one i32 handle, but
+            // the typed C# IOwnTaker.TakeWidget takes an IWidget
+            // (the resolved instance). Direct-linked emit detects
+            // IWidget as a resource interface from the resolver
+            // and lifts via Resources.GetResource(typeof(IWidget),
+            // handle) → cast.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Func<int, int>>(
+                ("my:test/own-env@1.0.0", "take-widget"),
+                _ => throw new InvalidOperationException(
+                    "stub for take-widget must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildOwnParamFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(OwnBundle),
+                resourcesType: typeof(TestResources));
+
+            // Sanity: the resolver picked IWidget up as a resource
+            // interface (it was declared with WitSource Item="widget").
+            Assert.True(resolver.IsResourceInterface(typeof(IWidget)));
+            Assert.True(resolver.TryResolve(
+                "my:test/own-env@1.0.0", "take-widget",
+                out var binding));
+            Assert.False(binding.IsResourceMethod);   // free fn
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.OwnParam", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_own_env_1_0_0_take_widget"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for take-widget must "
+                            + "not be invoked"),
+                });
+
+            // Pre-register a FakeWidget at handle 7 — the wasm
+            // body passes that exact handle to the import.
+            var resources = new TestResources();
+            resources.Register(typeof(IWidget), 7, new FakeWidget(123u));
+            var bundle = new OwnBundle(new WidgetReader());
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            var callTake = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_take"))!;
+            object? raw = callTake.Invoke(instance,
+                Array.Empty<object>());
+
+            // The wasm passes handle 7 → resolver resolves to
+            // FakeWidget(123u) → WidgetReader.TakeWidget(w) calls
+            // w.Read() = 123. The result rides back through wasm i32.
+            Assert.IsType<int>(raw);
+            Assert.Equal(123, (int)raw);
         }
     }
 }
