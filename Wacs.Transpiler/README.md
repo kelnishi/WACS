@@ -314,6 +314,399 @@ var addMethod = moduleType.GetMethod("add");
 var result = addMethod!.Invoke(module, new object[] { 2, 3 });
 ```
 
+## Component Model mode
+
+For WebAssembly **components** (the `.component.wasm` shape that wraps
+core modules with a WIT-described interface), the transpiler emits a
+fully-linked `.dll` whose guest→host imports lower to inline IL —
+direct `callvirt` into typed `I*` interfaces, no delegate boxing, no
+runtime dictionary hop. Missing or mismatched imports fail at
+**transpile time** with the same `Detail` text the runtime validator
+would produce.
+
+A transpiled component `.dll` carries:
+- `ComponentExports` — a static class (or set of classes per
+  interface) with one method per WIT export, signatures already
+  shaped to the component's WIT.
+- `[WitSource]`-tagged `I{Iface}` interfaces — one per export
+  interface plus a synthesized `I{World}World` for freestanding
+  world exports. These are the same shape `wit-bindgen-csharp`
+  emits, so a transpiled `.dll` is interchangeable with a
+  source-generated one as a host package.
+- `ComponentMetadata.EmbeddedWitBytes` — the original
+  `component-type:*` blob, so the WIT round-trips out of the
+  assembly without the source `.component.wasm`.
+
+### CLI
+
+Resolve a component's imports against the bundled WASI Preview 2
+host package:
+
+```bash
+wasm-transpile -i my-component.wasm -o my-component.dll --wasip2
+```
+
+Or against any host-package assembly that exposes
+`[WitSource]`-tagged interfaces (matches what
+`Wacs.ComponentModel.Bindgen.SourceGen` and
+`ExportInterfaceEmit` both produce):
+
+```bash
+wasm-transpile -i app.wasm -o app.dll \
+  --host-package Wacs.WASI.Preview2 \
+  --host-package ./MyHost.dll
+```
+
+`--host-package` is repeatable (or comma-separated). Each value is
+either an assembly **name** (`Assembly.Load`) or a **file path**
+(`Assembly.LoadFrom`). `--wasip2` is a shorthand for
+`--host-package Wacs.WASI.Preview2`.
+
+Verify direct linking actually replaced the delegate hop:
+
+```bash
+ildasm app.dll | grep -i BindHostFunction
+# (no output — every import dispatches inline)
+```
+
+### Programmatic transpile
+
+```csharp
+using System.IO;
+using System.Reflection;
+using Wacs.Transpiler.AOT;
+using Wacs.Transpiler.AOT.Component;
+
+var options = new TranspilerOptions
+{
+    HostPackages = new[]
+    {
+        Assembly.Load("Wacs.WASI.Preview2"),
+        // …additional host packages
+    },
+};
+
+using var fs = new FileStream("my-component.wasm", FileMode.Open);
+var result = ComponentTranspiler.TranspileSingleModule(
+    fs,
+    assemblyNamespace: "MyApp.Component",
+    moduleName: "MyComponent",
+    options: options);
+
+result.SaveAssembly("my-component.dll");
+```
+
+`TranspileSingleModule` builds a `HostPackageResolver` from
+`options.HostPackages` automatically (or accepts a pre-built one
+via `options.Resolver`). For every guest import it can resolve, the
+call site emits inline IL into the typed interface; everything else
+falls back to the legacy delegate-table dispatch — so partial host
+packages work without ceremony.
+
+When the runtime needs stub bindings to satisfy unresolved imports
+(for instance, a no-op `IImports` shim during transpile so
+`InstantiateModule` doesn't throw), pass a `configureImports`
+callback:
+
+```csharp
+ComponentTranspiler.TranspileSingleModule(
+    fs, options: options,
+    configureImports: runtime =>
+    {
+        // register throwing stubs for any unresolved imports
+    });
+```
+
+### Running a transpiled component
+
+The generated module class's constructor takes — in order — any
+imports the underlying core module declared (an `IImports`
+interface) followed by the host bundle (`object`) and, if any
+resource methods are direct-linked, a resources object. The
+`(IImports)`-only shape stays binary-compatible for non-direct-
+linked assemblies.
+
+For a `--wasip2`-transpiled assembly the bundle is
+`Wacs.WASI.Preview2.DependencyInjection.WasiPreview2Bundle`. The
+unresolved-import surface is satisfied by a throwing stub — every
+WASI import lowered to inline IL bypasses it:
+
+```csharp
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
+using Microsoft.Extensions.DependencyInjection;
+using Wacs.Transpiler.Cli;             // ImportDispatcher
+using Wacs.WASI.Preview2.DependencyInjection;
+
+var bundle = new ServiceCollection()
+    .AddWasiPreview2()           // registers WasiPreview2Bundle as singleton
+    .BuildServiceProvider()
+    .GetRequiredService<WasiPreview2Bundle>();
+
+var asm = Assembly.LoadFrom("my-component.dll");
+var moduleType = asm.GetType("MyApp.Component.MyComponent.Module")!;
+
+// First ctor param is the generated IImports interface (a stub
+// when every import is direct-linked — the inline IL bypasses it,
+// but the core runtime's instantiation validation still wants
+// the slot populated). Build a no-op via the bundled
+// ImportDispatcher with an empty handler set.
+var ctorParams = moduleType.GetConstructors()[0].GetParameters();
+var importsInterface = ctorParams[0].ParameterType;
+var importsStub = ImportDispatcher.Create(
+    importsInterface,
+    new Dictionary<string, System.Func<object?[], object?>>());
+
+var module = Activator.CreateInstance(
+    moduleType, importsStub, bundle)!;
+
+// Exports surface, two paths:
+//   1. The IExports interface — raw core-WASM signatures
+//      (i32/i64/etc.). Implemented directly by the Module class.
+//   2. The ComponentExports static class — wit-shaped signatures
+//      (string, T[], Option<T>, etc.). Only emitted when the
+//      core module's ctor takes no args (no imports). For
+//      direct-linked WASI components use path 1.
+
+var iExports = moduleType.GetInterfaces()
+    .First(i => i.Name.StartsWith("IExports"));
+var run = iExports.GetMethod("run")!;
+run.Invoke(module, System.Array.Empty<object>());
+```
+
+For components compiled without imports (uncommon for real-world
+WASI guests, common for self-contained fixtures and tests),
+`ComponentExports` is emitted with public static methods you can
+call directly:
+
+```csharp
+var exports = asm.GetType("MyApp.Component.ComponentExports")!;
+var greet = exports.GetMethod("Greet")!;       // greet: func(name: string) -> string
+var hello = (string)greet.Invoke(null, new object[] { "world" })!;
+```
+
+`WasiPreview2Bundle` packs all 22 WASI Preview 2 typed interfaces
+(`IRandom`, `IStdout`, `IMonotonicClock`, `IOutgoingHandler`, etc.)
+into a single object. `AddWasiPreview2()` registers it as a
+singleton along with each interface's default implementation; see
+`Wacs.WASI.Preview2.DependencyInjection.WasiPreview2ServiceCollectionExtensions`
+for the canonical wiring. Override individual services
+(`services.Replace(ServiceDescriptor.Singleton<IStdout, SilentStdout>())`)
+to swap behavior — e.g. a silent stdout for tests, or an in-memory
+filesystem for sandboxed runs — then resolve `WasiPreview2Bundle`
+and the override flows through.
+
+### Interrogating a transpiled assembly
+
+A transpiled component `.dll` is fully self-describing — load it
+and walk the surface with reflection, the same way you'd walk a
+source-generated host package.
+
+**Recover the WIT contract:**
+
+```csharp
+using System.Reflection;
+using Wacs.ComponentModel.Validation;
+
+var asm = Assembly.LoadFrom("my-component.dll");
+var contract = WitContract.FromAssembly(asm);
+
+foreach (var import in contract.Imports)
+    Console.WriteLine($"{import.Module}/{import.Entity} " +
+        $"(params={import.ExpectedParamCount}, " +
+        $"results={import.ExpectedReturnCount})");
+```
+
+`FromAssembly` tries the embedded-WIT path first
+(`source-gen`/`componentize-dotnet` style with `wit/*.wit` resources)
+and falls back to walking `[WitSource]`-tagged interfaces — so a
+WACS-transpiled `.dll` and a `wit-bindgen-csharp` host package both
+work identically.
+
+**Enumerate the [WitSource]-tagged interfaces:**
+
+```csharp
+using Wacs.ComponentModel.Runtime;
+
+foreach (var t in asm.GetExportedTypes())
+{
+    if (!t.IsInterface) continue;
+    var ws = t.GetCustomAttribute<WitSourceAttribute>();
+    if (ws == null) continue;
+
+    Console.WriteLine($"{t.FullName}");
+    Console.WriteLine($"  Package:   {ws.Package}");
+    Console.WriteLine($"  Interface: {ws.Interface}");
+
+    foreach (var m in t.GetMethods())
+    {
+        var mws = m.GetCustomAttribute<WitSourceAttribute>();
+        if (mws == null) continue;
+        var ps = string.Join(", ", m.GetParameters()
+            .Select(p => $"{p.ParameterType.Name} {p.Name}"));
+        Console.WriteLine($"  - {m.Name}({ps}) -> {m.ReturnType.Name}");
+        Console.WriteLine($"      Item: {mws.Item}");
+    }
+}
+```
+
+**Recover the original WIT text:**
+
+```csharp
+var packages = WitContract.LoadAssemblyPackages(asm);
+// each CtPackage carries Interfaces / Worlds / etc.
+
+// Or, if the assembly preserved the component-type blob:
+var metadataType = asm.GetType("MyApp.Component.ComponentMetadata");
+var witBytes = (byte[])metadataType!
+    .GetField("EmbeddedWitBytes",
+        BindingFlags.Public | BindingFlags.Static)!
+    .GetValue(null)!;
+```
+
+**Enumerate exports:**
+
+The `ComponentExports` class holds one static method per WIT export
+function, shaped to the canonical-ABI lift/lower of the signature
+(strings as `string`, lists as `T[]`, options as `Option<T>`,
+records as POCOs, etc.):
+
+```csharp
+var exports = asm.GetType("MyApp.Component.ComponentExports")!;
+foreach (var m in exports.GetMethods(BindingFlags.Public | BindingFlags.Static))
+    Console.WriteLine($"{m.ReturnType.Name} {m.Name}({string.Join(", ", m.GetParameters().Select(p => p.ParameterType.Name))})");
+```
+
+### Chain mode: transpiled `.dll` as host package
+
+Because every transpiled component carries `[WitSource]`-tagged
+exports, a transpiled `.dll` itself satisfies the host-package
+contract. The chain `B.wasm → B.dll → A.wasm uses --host-package
+B.dll` works end-to-end:
+
+```bash
+# 1. Transpile B (the producer) into a .dll, resolving its own
+#    imports against WASI:
+wasm-transpile -i B.wasm -o B.dll --wasip2
+
+# 2. Transpile A (the consumer), resolving its imports against B's
+#    transpiled exports — plus any system imports against WASI:
+wasm-transpile -i A.wasm -o A.dll \
+  --wasip2 \
+  --host-package ./B.dll
+```
+
+Programmatically:
+
+```csharp
+// Build B first.
+using (var bs = File.OpenRead("B.wasm"))
+    ComponentTranspiler.TranspileSingleModule(bs,
+        assemblyNamespace: "Composed.B",
+        moduleName: "B",
+        options: new TranspilerOptions
+        {
+            HostPackages = new[] { Assembly.Load("Wacs.WASI.Preview2") },
+        }).SaveAssembly("B.dll");
+
+// Then build A using B as a host package.
+var bAsm = Assembly.LoadFrom("./B.dll");
+using (var fs = File.OpenRead("A.wasm"))
+    ComponentTranspiler.TranspileSingleModule(fs,
+        assemblyNamespace: "Composed.A",
+        moduleName: "A",
+        options: new TranspilerOptions
+        {
+            HostPackages = new[]
+            {
+                Assembly.Load("Wacs.WASI.Preview2"),
+                bAsm,
+            },
+        }).SaveAssembly("A.dll");
+```
+
+At runtime, instantiate B and pass it as the host bundle for A:
+
+```csharp
+var aAsm = Assembly.LoadFrom("A.dll");
+var bAsm = Assembly.LoadFrom("B.dll");
+
+// B needs the WASI bundle.
+var wasi = new ServiceCollection().AddWasiPreview2()
+    .BuildServiceProvider().GetRequiredService<WasiPreview2Bundle>();
+var bModuleType = bAsm.GetType("Composed.B.B.Module")!;
+var bModule = Activator.CreateInstance(bModuleType, wasi)!;
+
+// A needs a bundle whose properties match B's exported [WitSource]
+// interfaces. Build a small adapter exposing each as a getter that
+// returns the relevant ComponentExports facade on bModule. (Or
+// generate this glue from the [WitSource] surface.)
+var aBundle = new BAdapterBundle(bModule);
+
+var aModuleType = aAsm.GetType("Composed.A.A.Module")!;
+var aModule = Activator.CreateInstance(aModuleType, aBundle)!;
+```
+
+The [WitSource] attributes on B's interfaces are the contract the
+adapter satisfies — `HostPackageResolver` indexes them by
+`(Package, Interface, Item)`, which is exactly what the wasm
+component's import strings encode.
+
+> **Status:** Phase B chain mode's transpile-time loop is shipped
+> — `WitContract.FromAssembly` round-trips the contract from
+> either an embedded-WIT host package or a transpiled `.dll`. The
+> runtime adapter (mapping B's `IExports` to A's expected
+> `[WitSource]`-interface bundle) is currently caller-built; the
+> auto-generated adapter is a v0.4 follow-up.
+
+### Building a custom host package
+
+Drop `[WitSource]` on a plain C# interface and the resolver picks
+it up — no source generator required:
+
+```csharp
+using Wacs.ComponentModel.Runtime;
+
+[WitSource("interface env",
+    Package = "local:demo@1.0.0", Interface = "env")]
+public interface IEnv
+{
+    [WitSource("get-config: func() -> string",
+        Package = "local:demo@1.0.0", Interface = "env",
+        Item = "get-config")]
+    string GetConfig();
+
+    [WitSource("log: func(msg: string)",
+        Package = "local:demo@1.0.0", Interface = "env",
+        Item = "log")]
+    void Log(string msg);
+}
+
+public sealed class MyHostBundle
+{
+    public IEnv Env { get; }
+    public MyHostBundle(IEnv env) { Env = env; }
+}
+```
+
+Pass the assembly via `--host-package ./MyHost.dll` (or by
+reference at the API level). The resolver discovers `MyHostBundle`
+automatically when a public read-only property's type matches the
+`[WitSource]`-tagged interface; otherwise, point at it explicitly:
+
+```csharp
+var resolver = HostPackageResolver.FromAssemblies(
+    assemblies: new[] { typeof(IEnv).Assembly },
+    bundleType: typeof(MyHostBundle));
+options.Resolver = resolver;
+```
+
+The generated module class's constructor takes
+`object hostBundle` — pass an instance whose property types
+satisfy the `[WitSource]` interface set, and the inline IL
+dispatches through it.
+
 ## Remaining limitations (tracked for v0.3)
 
 - **`--emit-main` rejects modules with imports.** A `--wasi-host` flag
