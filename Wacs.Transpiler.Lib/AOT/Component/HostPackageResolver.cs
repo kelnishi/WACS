@@ -11,6 +11,7 @@ using System.Linq;
 using System.Reflection;
 using Wacs.ComponentModel.Runtime;
 using Wacs.ComponentModel.Runtime.Parser;
+using ComponentSectionId = Wacs.ComponentModel.Runtime.Parser.ComponentSectionId;
 
 namespace Wacs.Transpiler.AOT.Component
 {
@@ -117,6 +118,116 @@ namespace Wacs.Transpiler.AOT.Component
             out Binding binding)
         {
             return _bindings.TryGetValue((module, entity), out binding!);
+        }
+
+        /// <summary>
+        /// Walk the component's canon-lower options and apply each
+        /// matching binding's <see cref="Binding.StringEncoding"/>.
+        /// For each (module, entity) core-module import that has a
+        /// matching <c>canon lower (string-encoding=...)</c>, the
+        /// binding's encoding is updated from the canon-lower's
+        /// option (defaults to UTF-8 if no option declared).
+        ///
+        /// <para>Walks the typical wit-component / componentize-dotnet
+        /// shape: one InstantiateCoreModule with args naming each
+        /// import-module, each arg pointing at an
+        /// InstantiateCoreInline whose exports name the canon-
+        /// lowered core-funcs. Multi-module composites and other
+        /// shapes are handled best-effort — unmatched imports keep
+        /// their default UTF-8 encoding.</para>
+        /// </summary>
+        public void ApplyImportCanonOptions(
+            Wacs.ComponentModel.Runtime.ComponentModule component)
+        {
+            if (component == null) return;
+
+            // 1. Walk Canon section to map core-func-idx →
+            //    CanonLower (only canon-lower entries care for
+            //    options; canon resource.* also bumps the index but
+            //    contributes no options).
+            var canonLowerByCoreFunc = new Dictionary<uint, CanonLower>();
+            uint coreFuncIdx = 0;
+            foreach (var s in component.RawSections)
+            {
+                switch (s.Id)
+                {
+                    case ComponentSectionId.Alias:
+                    {
+                        var entries = AliasSectionReader.Decode(s.Payload);
+                        foreach (var a in entries)
+                        {
+                            if (a.Sort == AliasSort.CoreSort
+                                && a.CoreKind == CoreAliasKind.Func)
+                                coreFuncIdx++;
+                        }
+                        break;
+                    }
+                    case ComponentSectionId.Canon:
+                    {
+                        var entries = CanonSectionReader.Decode(s.Payload);
+                        foreach (var e in entries)
+                        {
+                            if (e is CanonLower lower)
+                            {
+                                canonLowerByCoreFunc[coreFuncIdx] = lower;
+                                coreFuncIdx++;
+                            }
+                            else if (e is CanonResourceOp)
+                            {
+                                coreFuncIdx++;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+
+            // 2. Walk core-instances. The typical shape:
+            //    InstantiateCoreModule has args naming each import-
+            //    module; each arg.InstanceIdx → InstantiateCoreInline
+            //    whose exports name the entity → core-func mapping.
+            var coreInsts = component.CoreInstances;
+            foreach (var inst in coreInsts)
+            {
+                if (!(inst is InstantiateCoreModule icm)) continue;
+                foreach (var arg in icm.Args)
+                {
+                    var moduleName = arg.Name;
+                    if (arg.InstanceIdx >= coreInsts.Count) continue;
+                    var inner = coreInsts[(int)arg.InstanceIdx];
+                    if (!(inner is InstantiateCoreInline inline)) continue;
+                    foreach (var exp in inline.Exports)
+                    {
+                        if (exp.Sort != CoreSort.Func) continue;
+                        if (!canonLowerByCoreFunc.TryGetValue(
+                                exp.Index, out var lower)) continue;
+                        var encoding = ResolveStringEncoding(lower.Options);
+                        if (_bindings.TryGetValue(
+                                (moduleName, exp.Name),
+                                out var binding))
+                            binding.StringEncoding = encoding;
+                    }
+                }
+            }
+        }
+
+        // Pick the canon-lower's string encoding; defaults to UTF-8
+        // when no string-encoding option is declared (matches
+        // CanonicalABI.md's "if no option, utf8" rule).
+        private static CanonOption.Kind ResolveStringEncoding(
+            IReadOnlyList<CanonOption> options)
+        {
+            foreach (var opt in options)
+            {
+                switch (opt.OptionKind)
+                {
+                    case CanonOption.Kind.StringUtf8:
+                    case CanonOption.Kind.StringUtf16:
+                    case CanonOption.Kind.StringLatin1OrUtf16:
+                        return opt.OptionKind;
+                }
+            }
+            return CanonOption.Kind.StringUtf8;
         }
 
         /// <summary>

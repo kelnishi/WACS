@@ -11106,5 +11106,27 @@ namespace Wacs.Transpiler.Test
                     Array.Empty<object>())!);
             }
         }
+
+        [Fact]
+        public void HostPackageResolver_ApplyImportCanonOptions_NullSafe()
+        {
+            // Smoke test — passing null component is a no-op.
+            // (Real-world canon-opts auto-discovery exercised
+            // through ComponentTranspiler.TranspileSingleModule
+            // when the wasm component declares
+            // canon lower (string-encoding=utf16) on its imports.)
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { typeof(IEnv).Assembly },
+                bundleType: typeof(GreetBundle));
+            // No assertion crash → success.
+            resolver.ApplyImportCanonOptions(null!);
+
+            // Bindings should still default to UTF-8 when no
+            // canon-opts overrides apply.
+            Assert.True(resolver.TryResolve(
+                "my:test/str-ret-env@1.0.0", "greet", out var binding));
+            Assert.Equal(CanonOption.Kind.StringUtf8,
+                binding.StringEncoding);
+        }
     }
 }
