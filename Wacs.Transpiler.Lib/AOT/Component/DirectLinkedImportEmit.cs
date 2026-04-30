@@ -361,13 +361,32 @@ namespace Wacs.Transpiler.AOT.Component
                 int offsetSoFar = 0;
                 if (isVariant)
                 {
-                    // Variant return (all cases empty in v0): emit
-                    // a chain of `isinst` checks against each case
-                    // type; the matching case's index becomes the
-                    // u8 disc written at retArea+0. Default fallback
-                    // writes 0 (first case) which is benign for
-                    // valid variants.
+                    // Variant return retArea layout: u8 disc @0 +
+                    // joined-flat payload at offset Align(1, max-
+                    // payload-align). For empty cases the payload
+                    // slot is left as default memory.
+                    //
+                    //   isinst chain → case label
+                    //   case_i_label:
+                    //     StoreU8(retArea+0, i)
+                    //     if has_payload:
+                    //       castclass <CaseType>
+                    //       callvirt get_Value → T
+                    //       StoreXxx(retArea+valueOffset, value)
+                    //         OR for resource T:
+                    //       Resources.AllocateResource(typeof(IRes), val)
+                    //       StoreI32(retArea+valueOffset, handle)
+                    //     br end
                     var cases = GetVariantCases(method.ReturnType);
+                    int maxPayloadAlign = 1;
+                    foreach (var c in cases)
+                    {
+                        if (c.Payload == null) continue;
+                        int a = AlignOfResultArm(c.Payload);
+                        if (a > maxPayloadAlign) maxPayloadAlign = a;
+                    }
+                    int valueOffset = Align(1, maxPayloadAlign);
+
                     var endLabel = il.DefineLabel();
                     var caseStoreLabels =
                         new System.Reflection.Emit.Label[cases.Length];
@@ -389,6 +408,7 @@ namespace Wacs.Transpiler.AOT.Component
                     for (int i = 0; i < cases.Length; i++)
                     {
                         il.MarkLabel(caseStoreLabels[i]);
+                        // disc=i
                         il.Emit(OpCodes.Ldarg_0);
                         il.Emit(OpCodes.Ldfld, MemoriesField);
                         il.Emit(OpCodes.Ldc_I4_0);
@@ -398,6 +418,60 @@ namespace Wacs.Transpiler.AOT.Component
                         il.Emit(OpCodes.Ldc_I4, i);
                         il.Emit(OpCodes.Call,
                             ResolveStoreMethod(typeof(byte)));
+
+                        // payload write (if any)
+                        var c = cases[i];
+                        if (c.Payload != null)
+                        {
+                            bool isResourcePayload = resolver != null
+                                && resolver.IsResourceInterface(c.Payload)
+                                && resourcesType != null;
+
+                            il.Emit(OpCodes.Ldarg_0);
+                            il.Emit(OpCodes.Ldfld, MemoriesField);
+                            il.Emit(OpCodes.Ldc_I4_0);
+                            il.Emit(OpCodes.Ldelem_Ref);
+                            il.Emit(OpCodes.Ldfld, MemoryDataField);
+                            il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
+                            if (valueOffset != 0)
+                            {
+                                il.Emit(OpCodes.Ldc_I4, valueOffset);
+                                il.Emit(OpCodes.Add);
+                            }
+
+                            // Read CaseType.Value via castclass +
+                            // get_Value (no per-case helper needed
+                            // since GetVariantCases already cached
+                            // the property type).
+                            var valueProp = c.CaseType.GetProperty("Value",
+                                BindingFlags.Public | BindingFlags.Instance)!;
+
+                            if (isResourcePayload)
+                            {
+                                il.Emit(OpCodes.Ldarg_0);
+                                il.Emit(OpCodes.Ldfld, ResourcesField);
+                                il.Emit(OpCodes.Castclass, resourcesType!);
+                                il.Emit(OpCodes.Ldtoken, c.Payload);
+                                il.Emit(OpCodes.Call, GetTypeFromHandleMethod);
+                                il.Emit(OpCodes.Ldloc, returnLocal);
+                                il.Emit(OpCodes.Castclass, c.CaseType);
+                                il.Emit(OpCodes.Callvirt,
+                                    valueProp.GetGetMethod()!);
+                                il.Emit(OpCodes.Callvirt,
+                                    ResolveAllocateResourceMethod(resourcesType!));
+                                il.Emit(OpCodes.Call,
+                                    ResolveStoreMethod(typeof(int)));
+                            }
+                            else
+                            {
+                                il.Emit(OpCodes.Ldloc, returnLocal);
+                                il.Emit(OpCodes.Castclass, c.CaseType);
+                                il.Emit(OpCodes.Callvirt,
+                                    valueProp.GetGetMethod()!);
+                                il.Emit(OpCodes.Call,
+                                    ResolveStoreMethod(c.Payload));
+                            }
+                        }
                         il.Emit(OpCodes.Br, endLabel);
                     }
                     il.MarkLabel(endLabel);
@@ -1278,15 +1352,40 @@ namespace Wacs.Transpiler.AOT.Component
                         && IsResultArmStorable(args[1], resolver);
                 }
             }
-            // Variant base type with all empty cases. Wire form
-            // is just u8 disc; payload-bearing variants need the
-            // joined-flat store path which defers.
+            // Variant base type. Wire form: u8 disc + joined-flat
+            // value at Align(1, max-payload-align). v0 supports
+            // empty cases AND primitive-payload cases AND resource-
+            // handle-payload (own<R>) cases. All payload-bearing
+            // cases must share the same primitive wire shape so
+            // joined-flat is deterministic; resource handles are
+            // i32/align-4 and mix cleanly with i32 primitives.
             if (IsLikelyVariantBase(t))
             {
                 var cases = GetVariantCases(t);
+                if (cases.Length == 0) return false;
+                Type? payloadProbe = null;
                 foreach (var c in cases)
-                    if (c.Payload != null) return false;
-                return cases.Length > 0;
+                {
+                    if (c.Payload == null) continue;
+                    if (!IsResultArmStorable(c.Payload, resolver))
+                        return false;
+                    if (payloadProbe == null)
+                    {
+                        payloadProbe = c.Payload;
+                        continue;
+                    }
+                    // All payload cases must share the same wire
+                    // shape (size + alignment). Resource handles
+                    // are i32; primitives must match.
+                    if (AlignOfResultArm(c.Payload)
+                        != AlignOfResultArm(payloadProbe)) return false;
+                    int sizeNew = IsStorablePrimitive(c.Payload)
+                        ? SizeOfPrimitive(c.Payload) : 4;
+                    int sizeOld = IsStorablePrimitive(payloadProbe)
+                        ? SizeOfPrimitive(payloadProbe) : 4;
+                    if (sizeNew != sizeOld) return false;
+                }
+                return true;
             }
             return false;
         }
