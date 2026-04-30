@@ -197,6 +197,52 @@ namespace Wacs.ComponentModel.CanonicalABI
         }
 
         /// <summary>
+        /// Store a <c>T[][]</c> of unmanaged primitives (canon-ABI
+        /// <c>list&lt;list&lt;T&gt;&gt;</c>) into wasm linear memory and
+        /// write the (ptr, count) pair to the retArea slot.
+        ///
+        /// <para>Two-level allocation: cabi_realloc once for the
+        /// outer (sub_ptr, sub_len)-pair array (8 bytes per element),
+        /// then per-element for each raw primitive buffer. Generic
+        /// over T : unmanaged so the same helper closes over int[],
+        /// long[], float[], etc.</para>
+        ///
+        /// <para>Used by direct-linked aggregate-RETURN emit when
+        /// the host returns int[][], long[][], etc.</para>
+        /// </summary>
+        public static void StorePrimArrayList<T>(byte[] dest,
+            int retAreaOffset, T[][] value,
+            Func<int, int, int, int, int> cabiRealloc)
+            where T : unmanaged
+        {
+            if (cabiRealloc == null)
+                throw new InvalidOperationException(
+                    "list<list<T>> returns require the component "
+                    + "to export `cabi_realloc`.");
+            int count = value.Length;
+            int outerByteCount = count * 8;
+            int outerPtr = cabiRealloc(0, 0, 4, outerByteCount);
+            int elementSize = MarshalSizeOf<T>.Size;
+            for (int i = 0; i < count; i++)
+            {
+                var sub = value[i];
+                int subByteCount = sub.Length * elementSize;
+                var subPtr = cabiRealloc(0, 0, elementSize, subByteCount);
+                var srcBytes = MemoryMarshal.AsBytes(
+                    new ReadOnlySpan<T>(sub));
+                srcBytes.CopyTo(dest.AsSpan(subPtr, subByteCount));
+                BinaryPrimitives.WriteInt32LittleEndian(
+                    dest.AsSpan(outerPtr + i * 8, 4), subPtr);
+                BinaryPrimitives.WriteInt32LittleEndian(
+                    dest.AsSpan(outerPtr + i * 8 + 4, 4), sub.Length);
+            }
+            BinaryPrimitives.WriteInt32LittleEndian(
+                dest.AsSpan(retAreaOffset, 4), outerPtr);
+            BinaryPrimitives.WriteInt32LittleEndian(
+                dest.AsSpan(retAreaOffset + 4, 4), count);
+        }
+
+        /// <summary>
         /// Store a <c>string[]</c> (canon-ABI <c>list&lt;string&gt;</c>)
         /// into wasm linear memory and write the (ptr, count) pair to
         /// the retArea slot.

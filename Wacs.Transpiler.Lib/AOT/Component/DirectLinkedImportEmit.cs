@@ -365,9 +365,19 @@ namespace Wacs.Transpiler.AOT.Component
                 bool isByteArrayListReturn = method.ReturnType.IsArray
                     && method.ReturnType.GetArrayRank() == 1
                     && method.ReturnType.GetElementType() == typeof(byte[]);
+                bool isPrimJaggedArrayReturn = !isByteArrayListReturn
+                    && method.ReturnType.IsArray
+                    && method.ReturnType.GetArrayRank() == 1
+                    && method.ReturnType.GetElementType()!.IsArray
+                    && method.ReturnType.GetElementType()!
+                        .GetArrayRank() == 1
+                    && IsListPrimitiveElement(
+                        method.ReturnType.GetElementType()!
+                            .GetElementType()!);
                 bool isPrimArrayReturn = !isByteArrayReturn
                     && !isStringArrayReturn
                     && !isByteArrayListReturn
+                    && !isPrimJaggedArrayReturn
                     && method.ReturnType.IsArray
                     && method.ReturnType.GetArrayRank() == 1
                     && IsListPrimitiveElement(
@@ -389,7 +399,8 @@ namespace Wacs.Transpiler.AOT.Component
                 else
                 if (isStringReturn || isByteArrayReturn
                     || isPrimArrayReturn || isStringArrayReturn
-                    || isByteArrayListReturn)
+                    || isByteArrayListReturn
+                    || isPrimJaggedArrayReturn)
                 {
                     // String / list<T> retArea layout: i32 ptr @0,
                     // i32 len/count @4. Encode (UTF-8 for string;
@@ -414,6 +425,10 @@ namespace Wacs.Transpiler.AOT.Component
                     else if (isByteArrayReturn) storeMethod = StoreByteArrayMethod;
                     else if (isStringArrayReturn) storeMethod = StoreStringListMethod;
                     else if (isByteArrayListReturn) storeMethod = StoreByteArrayListMethod;
+                    else if (isPrimJaggedArrayReturn) storeMethod =
+                        ResolveStorePrimArrayListMethod(
+                            method.ReturnType.GetElementType()!
+                                .GetElementType()!);
                     else storeMethod = ResolveStorePrimitiveArrayMethod(
                         method.ReturnType.GetElementType()!);
                     il.Emit(OpCodes.Call, storeMethod);
@@ -1281,6 +1296,21 @@ namespace Wacs.Transpiler.AOT.Component
                 nameof(PrimitiveStore.StoreByteArrayList),
                 BindingFlags.Public | BindingFlags.Static)!;
 
+        // Open generic StorePrimArrayList<T> for jagged primitive
+        // returns (int[][], long[][], etc.).
+        private static readonly MethodInfo StorePrimArrayListOpenMethod =
+            typeof(PrimitiveStore).GetMethod(
+                nameof(PrimitiveStore.StorePrimArrayList),
+                BindingFlags.Public | BindingFlags.Static)!;
+
+        private static readonly ConcurrentDictionary<Type, MethodInfo>
+            StorePrimArrayListCache = new();
+
+        private static MethodInfo ResolveStorePrimArrayListMethod(
+            Type elementType)
+            => StorePrimArrayListCache.GetOrAdd(elementType,
+                t => StorePrimArrayListOpenMethod.MakeGenericMethod(t));
+
         private static readonly ConcurrentDictionary<Type, MethodInfo>
             StorePrimArrayCache = new();
 
@@ -1548,9 +1578,11 @@ namespace Wacs.Transpiler.AOT.Component
                 var elem = t.GetElementType()!;
                 if (IsListPrimitiveElement(elem)) return true;
                 if (elem == typeof(string)) return true;
-                // list<list<u8>> (byte[][]) — two-level cabi_realloc
-                // (outer pair-array + per-sub raw bytes).
-                if (elem == typeof(byte[])) return true;
+                // list<list<T>> (T[][]) for primitive T — two-level
+                // cabi_realloc (outer pair-array + per-sub raw bytes).
+                if (elem.IsArray && elem.GetArrayRank() == 1
+                    && IsListPrimitiveElement(elem.GetElementType()!))
+                    return true;
                 // list<tuple-of-primitives> / list<record-of-primitives>:
                 // outer (ptr, count) at retArea + contiguous packed
                 // elements at *(ptr). cabi_realloc once for the outer
