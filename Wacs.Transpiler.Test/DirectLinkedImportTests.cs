@@ -451,6 +451,31 @@ namespace Wacs.Transpiler.Test
             public Dt Now() => _dt;
         }
 
+        // ====== Aggregate-return: ValueTuple shape ===============
+
+        [WitSource(@"interface tup-ret-env",
+            Package = "my:test@1.0.0", Interface = "tup-ret-env")]
+        public interface IPairFactory
+        {
+            [WitSource(@"make-pair: func() -> tuple<u32, u32>;",
+                Package = "my:test@1.0.0", Interface = "tup-ret-env",
+                Item = "make-pair")]
+            (uint, uint) MakePair();
+        }
+
+        public sealed class PairBundle
+        {
+            public IPairFactory TupRetEnv { get; }
+            public PairBundle(IPairFactory p) { TupRetEnv = p; }
+        }
+
+        private sealed class FixedPair : IPairFactory
+        {
+            private readonly (uint, uint) _v;
+            public FixedPair((uint, uint) v) { _v = v; }
+            public (uint, uint) MakePair() => _v;
+        }
+
         // ====== Variant param test surface =======================
         // Mirrors the source-generator-emitted shape for WIT
         // variants (HttpMethod, IpAddress, etc.):
@@ -838,6 +863,72 @@ namespace Wacs.Transpiler.Test
             0x00, 0x01,
             // Code section: body = call 0; end
             0x0A, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0B,
+        };
+
+        // (module
+        //   (type $tMakePair (func (param i32)))  ;; make-pair(retArea) → ()
+        //   (type $tEntry (func (result i32)))    ;; call_pair_sum() → u32
+        //   (import "my:test/tup-ret-env@1.0.0" "make-pair"
+        //           (func $imp (type $tMakePair)))
+        //   (memory 1)
+        //   (func (export "call_pair_sum") (result i32)
+        //     i32.const 64    ;; retArea ptr
+        //     call $imp       ;; → host writes (Item1:u32@0, Item2:u32@4)
+        //     i32.const 64
+        //     i32.load        ;; → Item1
+        //     i32.const 64
+        //     i32.load offset=4
+        //     i32.add)        ;; → Item1 + Item2
+        //
+        // tuple<u32, u32> retArea write: 8 bytes (2 i32s, no
+        // padding). Export reads both back via i32.load and adds —
+        // assertion proves both fields landed at the right offset.
+        private static byte[] BuildTupleReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types
+            // 0: (i32) → void (4)
+            // 1: () → i32 (4)
+            0x01, 0x09, 0x02,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // size = 1 + 1 + 25 + 1 + 9 + 2 = 39 = 0x27
+            0x02, 0x27, 0x01,
+            // module: "my:test/tup-ret-env@1.0.0" (25)
+            0x19,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x74, 0x75, 0x70, 0x2D, 0x72, 0x65, 0x74, 0x2D,
+            0x65, 0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            // entity: "make-pair" (9)
+            0x09,
+            0x6D, 0x61, 0x6B, 0x65, 0x2D, 0x70, 0x61, 0x69, 0x72,
+            0x00, 0x00,
+            // Function section: 1 func of type 1
+            0x03, 0x02, 0x01, 0x01,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export: "call_pair_sum" (13) → func 1
+            0x07, 0x11, 0x01,
+            0x0D,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x70, 0x61, 0x69,
+            0x72, 0x5F, 0x73, 0x75, 0x6D,
+            0x00, 0x01,
+            // Code section: 1 body
+            // retArea = 16 (single-byte signed LEB128 — value < 0x40
+            // so bit 6 clear, no sign-extension surprises).
+            // body = locals(1) + i32.const(2) + call(2) + i32.const(2)
+            //      + i32.load(3) + i32.const(2) + i32.load(3) + i32.add(1) + end(1) = 17
+            0x0A, 0x13, 0x01, 0x11,
+            0x00,
+            0x41, 0x10,              // i32.const 16
+            0x10, 0x00,              // call 0
+            0x41, 0x10,              // i32.const 16
+            0x28, 0x02, 0x00,        // i32.load align=2 offset=0
+            0x41, 0x10,              // i32.const 16
+            0x28, 0x02, 0x04,        // i32.load align=2 offset=4
+            0x6A,                    // i32.add
+            0x0B,
         };
 
         // (module
@@ -4125,6 +4216,76 @@ namespace Wacs.Transpiler.Test
             // the aggregate-return retArea write fired correctly.
             Assert.IsType<long>(raw);
             Assert.Equal(SecondsVal, unchecked((ulong)(long)raw));
+        }
+
+        [Fact]
+        public void DirectLinkedImport_AggregateReturn_ValueTuple()
+        {
+            // tuple<u32, u32> retArea write. Same machinery as the
+            // record-return test but the CLR side is ValueTuple,
+            // so the IL reads Item1/Item2 fields (not properties)
+            // before the StoreXxx calls. Wasm reads both elements
+            // back via i32.load and adds them.
+
+            const uint A = 0x12, B = 0x21;  // single-byte LEB128 friendly
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/tup-ret-env@1.0.0", "make-pair"),
+                _ => throw new InvalidOperationException(
+                    "stub for make-pair must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildTupleReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(PairBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/tup-ret-env@1.0.0", "make-pair", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.TupReturn", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_tup_ret_env_1_0_0_make_pair"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for make-pair must not "
+                            + "be invoked"),
+                });
+
+            var bundle = new PairBundle(new FixedPair((A, B)));
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+
+            var callPairSum = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_pair_sum"))!;
+            object? raw = callPairSum.Invoke(instance,
+                Array.Empty<object>());
+
+            // Wasm reads both Item1 + Item2 from the retArea and
+            // adds them — A + B == sum.
+            Assert.IsType<int>(raw);
+            Assert.Equal(unchecked((int)(A + B)), (int)raw);
         }
     }
 }

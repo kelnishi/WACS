@@ -329,43 +329,83 @@ namespace Wacs.Transpiler.AOT.Component
 
             if (emitAggregateReturn)
             {
-                // Stash the returned record, then walk its public
-                // {get;set;} properties in MetadataToken order,
-                // computing canon-ABI-aligned offsets, and write
-                // each field into memory[retAreaPtr+offset] via
-                // the matching PrimitiveStore.StoreXxx helper.
+                // Stash the returned aggregate, then walk its
+                // fields in declaration order, computing canon-ABI
+                // -aligned offsets, and write each field into
+                // memory[retAreaPtr+offset] via the matching
+                // PrimitiveStore.StoreXxx helper. Records use
+                // property getters; ValueTuple<...> uses Item1/2/...
+                // fields directly.
                 var returnLocal = il.DeclareLocal(method.ReturnType);
                 il.Emit(OpCodes.Stloc, returnLocal);
 
-                var props = GetRecordProperties(method.ReturnType);
+                bool isTuple = method.ReturnType.IsGenericType
+                    && IsValueTupleType(method.ReturnType
+                        .GetGenericTypeDefinition());
+
                 int offsetSoFar = 0;
-                foreach (var p in props)
+                if (isTuple)
                 {
-                    int fieldAlign = AlignOfPrimitive(p.PropertyType);
-                    int fieldOffset = Align(offsetSoFar, fieldAlign);
-
-                    // PrimitiveStore.StoreXxx(byte[] dest, int off, T v)
-                    // Push: Memories[0].Data, retAreaPtr+fieldOffset, fieldValue
-                    il.Emit(OpCodes.Ldarg_0);
-                    il.Emit(OpCodes.Ldfld, MemoriesField);
-                    il.Emit(OpCodes.Ldc_I4_0);
-                    il.Emit(OpCodes.Ldelem_Ref);
-                    il.Emit(OpCodes.Ldfld, MemoryDataField);
-
-                    il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
-                    if (fieldOffset != 0)
+                    var elements = method.ReturnType.GetGenericArguments();
+                    for (int i = 0; i < elements.Length; i++)
                     {
-                        il.Emit(OpCodes.Ldc_I4, fieldOffset);
-                        il.Emit(OpCodes.Add);
+                        var et = elements[i];
+                        int fieldAlign = AlignOfPrimitive(et);
+                        int fieldOffset = Align(offsetSoFar, fieldAlign);
+
+                        il.Emit(OpCodes.Ldarg_0);
+                        il.Emit(OpCodes.Ldfld, MemoriesField);
+                        il.Emit(OpCodes.Ldc_I4_0);
+                        il.Emit(OpCodes.Ldelem_Ref);
+                        il.Emit(OpCodes.Ldfld, MemoryDataField);
+
+                        il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
+                        if (fieldOffset != 0)
+                        {
+                            il.Emit(OpCodes.Ldc_I4, fieldOffset);
+                            il.Emit(OpCodes.Add);
+                        }
+
+                        // Read tuple field — ValueTuple's Item1..ItemN
+                        // are public fields, not properties.
+                        il.Emit(OpCodes.Ldloca, returnLocal);
+                        var field = method.ReturnType.GetField(
+                            "Item" + (i + 1))!;
+                        il.Emit(OpCodes.Ldfld, field);
+                        il.Emit(OpCodes.Call, ResolveStoreMethod(et));
+
+                        offsetSoFar = fieldOffset + SizeOfPrimitive(et);
                     }
+                }
+                else
+                {
+                    var props = GetRecordProperties(method.ReturnType);
+                    foreach (var p in props)
+                    {
+                        int fieldAlign = AlignOfPrimitive(p.PropertyType);
+                        int fieldOffset = Align(offsetSoFar, fieldAlign);
 
-                    il.Emit(OpCodes.Ldloc, returnLocal);
-                    il.Emit(OpCodes.Callvirt, p.GetGetMethod()!);
-                    il.Emit(OpCodes.Call,
-                        ResolveStoreMethod(p.PropertyType));
+                        il.Emit(OpCodes.Ldarg_0);
+                        il.Emit(OpCodes.Ldfld, MemoriesField);
+                        il.Emit(OpCodes.Ldc_I4_0);
+                        il.Emit(OpCodes.Ldelem_Ref);
+                        il.Emit(OpCodes.Ldfld, MemoryDataField);
 
-                    offsetSoFar = fieldOffset
-                        + SizeOfPrimitive(p.PropertyType);
+                        il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
+                        if (fieldOffset != 0)
+                        {
+                            il.Emit(OpCodes.Ldc_I4, fieldOffset);
+                            il.Emit(OpCodes.Add);
+                        }
+
+                        il.Emit(OpCodes.Ldloc, returnLocal);
+                        il.Emit(OpCodes.Callvirt, p.GetGetMethod()!);
+                        il.Emit(OpCodes.Call,
+                            ResolveStoreMethod(p.PropertyType));
+
+                        offsetSoFar = fieldOffset
+                            + SizeOfPrimitive(p.PropertyType);
+                    }
                 }
                 // Wasm sig has 0 returns; nothing further on the stack.
             }
@@ -941,17 +981,26 @@ namespace Wacs.Transpiler.AOT.Component
 
         // True when this CLR return type can be serialized into
         // wasm linear memory at the retArea pointer. v0: records
-        // (sealed POCOs) whose every field is a primitive scalar.
-        // Other shapes (option, result, tuple, variant, string,
-        // list) defer until per-shape store emit lands.
+        // (sealed POCOs) AND ValueTuple<...> whose every field is
+        // a primitive scalar. Option / Result / variant / string
+        // / list defer until per-shape store emit lands (those
+        // need cabi_realloc for variable-length contents).
         private static bool IsAggregateReturnSupported(Type t)
         {
-            if (!IsLikelyRecordType(t)) return false;
-            foreach (var p in GetRecordProperties(t))
+            if (IsLikelyRecordType(t))
             {
-                if (!IsStorablePrimitive(p.PropertyType)) return false;
+                foreach (var p in GetRecordProperties(t))
+                    if (!IsStorablePrimitive(p.PropertyType)) return false;
+                return true;
             }
-            return true;
+            if (t.IsGenericType
+                && IsValueTupleType(t.GetGenericTypeDefinition()))
+            {
+                foreach (var ta in t.GetGenericArguments())
+                    if (!IsStorablePrimitive(ta)) return false;
+                return true;
+            }
+            return false;
         }
 
         // True when this CLR type maps directly to a single
