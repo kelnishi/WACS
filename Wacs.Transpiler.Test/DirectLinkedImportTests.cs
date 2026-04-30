@@ -425,6 +425,43 @@ namespace Wacs.Transpiler.Test
                 => (t.Item1 << 8) | t.Item2;
         }
 
+        // ====== Record param test surface ========================
+        // Matches the WitHostInterfaceGenerator emission shape:
+        // sealed class with public auto-properties + parameterless
+        // ctor. Wire form is the concatenation of each property's
+        // flat-slot count in declaration order.
+
+        [WitSource(@"record point { x: u32, y: u32 }",
+            Package = "my:test@1.0.0", Interface = "rec-env",
+            Item = "point")]
+        public sealed class Point
+        {
+            public uint X { get; set; } = default!;
+            public uint Y { get; set; } = default!;
+        }
+
+        [WitSource(@"interface rec-env",
+            Package = "my:test@1.0.0", Interface = "rec-env")]
+        public interface IPointTaker
+        {
+            [WitSource(@"take-point: func(p: point) -> u32;",
+                Package = "my:test@1.0.0", Interface = "rec-env",
+                Item = "take-point")]
+            uint TakePoint(Point p);
+        }
+
+        public sealed class PointBundle
+        {
+            public IPointTaker RecEnv { get; }
+            public PointBundle(IPointTaker p) { RecEnv = p; }
+        }
+
+        private sealed class PointHasher : IPointTaker
+        {
+            // (X<<8)|Y so the test can probe field order.
+            public uint TakePoint(Point p) => (p.X << 8) | p.Y;
+        }
+
         private sealed class FakeEnv : IEnv
         {
             private readonly ulong _v;
@@ -637,6 +674,53 @@ namespace Wacs.Transpiler.Test
             // Code section: locals=0, call 0, call 1, end
             0x0A, 0x08, 0x01, 0x06,
             0x00, 0x10, 0x00, 0x10, 0x01, 0x0B,
+        };
+
+        // (module
+        //   (type $tRec (func (param i32 i32) (result i32)))
+        //   (type $tEntry (func (result i32)))
+        //   (import "my:test/rec-env@1.0.0" "take-point"
+        //           (func $imp (type $tRec)))
+        //   (func (export "call_point") (result i32)
+        //     i32.const 0x12   ;; X
+        //     i32.const 0x34   ;; Y
+        //     call $imp))      ;; → PointHasher: (0x12<<8)|0x34 = 0x1234
+        //
+        // record point { x: u32, y: u32 } wire form: 2 i32 slots.
+        // Direct-linked emit constructs Point via parameterless
+        // ctor, then sets X = lift_at_cursor_0, Y = lift_at_cursor_1
+        // before pushing the instance for the typed callvirt.
+        private static byte[] BuildRecordParamFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types
+            0x01, 0x0B, 0x02,
+            0x60, 0x02, 0x7F, 0x7F, 0x01, 0x7F,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section: 1 import
+            // size = 1 + 1 + 21 + 1 + 10 + 2 = 36 = 0x24
+            0x02, 0x24, 0x01,
+            // module: "my:test/rec-env@1.0.0" (21)
+            0x15,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x72, 0x65, 0x63, 0x2D, 0x65, 0x6E, 0x76, 0x40,
+            0x31, 0x2E, 0x30, 0x2E, 0x30,
+            // entity: "take-point" (10)
+            0x0A,
+            0x74, 0x61, 0x6B, 0x65, 0x2D, 0x70, 0x6F, 0x69,
+            0x6E, 0x74,
+            0x00, 0x00,
+            // Function section: 1 func of type 1
+            0x03, 0x02, 0x01, 0x01,
+            // Export: "call_point" (10) → func 1
+            0x07, 0x0E, 0x01,
+            0x0A,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x70, 0x6F, 0x69,
+            0x6E, 0x74,
+            0x00, 0x01,
+            // Code: locals=0, i32.const 0x12, i32.const 0x34, call 0, end
+            0x0A, 0x0A, 0x01, 0x08,
+            0x00, 0x41, 0x12, 0x41, 0x34, 0x10, 0x00, 0x0B,
         };
 
         // (module
@@ -2416,6 +2500,74 @@ namespace Wacs.Transpiler.Test
                 Array.Empty<object>());
             Assert.IsType<int>(raw);
             Assert.Equal(0x507, (int)raw);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_RecordParam_LiftsViaSetters()
+        {
+            // record point { x: u32, y: u32 } → CLR Point class
+            // with X/Y auto-properties. Wasm wire is 2 i32 slots
+            // concatenated. Direct-linked emit creates the Point
+            // via parameterless ctor, then sets X (cursor 0) and
+            // Y (cursor 1) via property setters before pushing
+            // the instance for the typed callvirt.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Func<int, int, int>>(
+                ("my:test/rec-env@1.0.0", "take-point"),
+                (_, _) => throw new InvalidOperationException(
+                    "stub for take-point must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildRecordParamFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(PointBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/rec-env@1.0.0", "take-point", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.RecParam", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_rec_env_1_0_0_take_point"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for take-point must "
+                            + "not be invoked"),
+                });
+
+            var bundle = new PointBundle(new PointHasher());
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+
+            // Wasm passes (X=0x12, Y=0x34); PointHasher returns
+            // (0x12<<8)|0x34 = 0x1234.
+            var callPoint = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_point"))!;
+            object? raw = callPoint.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<int>(raw);
+            Assert.Equal(0x1234, (int)raw);
         }
     }
 }
