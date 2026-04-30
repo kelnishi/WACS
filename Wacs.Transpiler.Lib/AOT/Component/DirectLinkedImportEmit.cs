@@ -112,9 +112,37 @@ namespace Wacs.Transpiler.AOT.Component
                 }
             }
 
+            // Hoist isConstructor here so the aggregate-return
+            // detection can exclude constructors (which already
+            // have their own retArea-shaped wire — i32 handle).
+            bool isConstructorEarly = binding.IsResourceMethod
+                && binding.ResourceKind ==
+                    HostPackageResolver.ResourceMethodKind.Constructor;
+
+            // Aggregate-return detection: if the wasm sig has 0
+            // returns AND the CLR returns a non-void aggregate AND
+            // the last wasm param is i32, we're in retArea-return
+            // mode — the trailing i32 is the retArea ptr (NOT a
+            // CLR-side param). Reduce the effective wasm-param
+            // count by 1 for the per-CLR-param walk.
+            bool isAggregateReturn = false;
+            if (!isConstructorEarly
+                && wasmResults.Length == 0
+                && method.ReturnType != typeof(void)
+                && wasmParams.Length >= 1
+                && wasmParams[wasmParams.Length - 1] == ValType.I32
+                && IsAggregateReturnSupported(method.ReturnType))
+            {
+                isAggregateReturn = true;
+            }
+            int effectiveWasmCount = isAggregateReturn
+                ? wasmParams.Length - 1
+                : wasmParams.Length;
+
             // Each CLR param contributes its canon-ABI flat-slot
             // count to the wasm-side. Sum and check against
-            // wasmParams (after skipping the resource handle slot).
+            // wasmParams (after skipping the resource handle slot
+            // and any retArea slot).
             int expectedRemainingWasm = 0;
             for (int i = 0; i < clrParams.Length; i++)
             {
@@ -127,12 +155,12 @@ namespace Wacs.Transpiler.AOT.Component
                 for (int s = 0; s < slots; s++)
                 {
                     int wIdx = wasmParamOffset + (expectedRemainingWasm - slots) + s;
-                    if (wIdx >= wasmParams.Length) return false;
+                    if (wIdx >= effectiveWasmCount) return false;
                     if (wasmParams[wIdx] != perWasmType[s]) return false;
                 }
             }
             if (wasmParamOffset + expectedRemainingWasm
-                != wasmParams.Length) return false;
+                != effectiveWasmCount) return false;
             if (wasmResults.Length > 1) return false;
 
             // Constructor return: already validated as i32 (handle)
@@ -140,7 +168,7 @@ namespace Wacs.Transpiler.AOT.Component
             bool isConstructor = binding.IsResourceMethod
                 && binding.ResourceKind ==
                     HostPackageResolver.ResourceMethodKind.Constructor;
-            if (!isConstructor)
+            if (!isConstructor && !isAggregateReturn)
             {
                 if (wasmResults.Length == 1)
                 {
@@ -269,6 +297,18 @@ namespace Wacs.Transpiler.AOT.Component
             // 2 for string ptr+len) and lifts them to the typed
             // representation. The wasm-side cursor advances by the
             // peeled slot count.
+            // Aggregate-return mode mirrors the CanEmitDirect
+            // detection: trailing wasm i32 is the retArea ptr.
+            bool emitAggregateReturn = !isInstance && !isStatic
+                && !isConstructor
+                && wasmType.ResultType.Types.Length == 0
+                && method.ReturnType != typeof(void)
+                && wasmParams.Length >= 1
+                && wasmParams[wasmParams.Length - 1] == ValType.I32
+                && IsAggregateReturnSupported(method.ReturnType);
+            int retAreaSlot = emitAggregateReturn
+                ? wasmParams.Length - 1 : -1;
+
             int wasmCursor = wasmParamOffset;
             for (int i = 0; i < clrParamCount; i++)
             {
@@ -287,7 +327,49 @@ namespace Wacs.Transpiler.AOT.Component
             else
                 il.Emit(OpCodes.Callvirt, method);
 
-            if (isConstructor)
+            if (emitAggregateReturn)
+            {
+                // Stash the returned record, then walk its public
+                // {get;set;} properties in MetadataToken order,
+                // computing canon-ABI-aligned offsets, and write
+                // each field into memory[retAreaPtr+offset] via
+                // the matching PrimitiveStore.StoreXxx helper.
+                var returnLocal = il.DeclareLocal(method.ReturnType);
+                il.Emit(OpCodes.Stloc, returnLocal);
+
+                var props = GetRecordProperties(method.ReturnType);
+                int offsetSoFar = 0;
+                foreach (var p in props)
+                {
+                    int fieldAlign = AlignOfPrimitive(p.PropertyType);
+                    int fieldOffset = Align(offsetSoFar, fieldAlign);
+
+                    // PrimitiveStore.StoreXxx(byte[] dest, int off, T v)
+                    // Push: Memories[0].Data, retAreaPtr+fieldOffset, fieldValue
+                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Ldfld, MemoriesField);
+                    il.Emit(OpCodes.Ldc_I4_0);
+                    il.Emit(OpCodes.Ldelem_Ref);
+                    il.Emit(OpCodes.Ldfld, MemoryDataField);
+
+                    il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
+                    if (fieldOffset != 0)
+                    {
+                        il.Emit(OpCodes.Ldc_I4, fieldOffset);
+                        il.Emit(OpCodes.Add);
+                    }
+
+                    il.Emit(OpCodes.Ldloc, returnLocal);
+                    il.Emit(OpCodes.Callvirt, p.GetGetMethod()!);
+                    il.Emit(OpCodes.Call,
+                        ResolveStoreMethod(p.PropertyType));
+
+                    offsetSoFar = fieldOffset
+                        + SizeOfPrimitive(p.PropertyType);
+                }
+                // Wasm sig has 0 returns; nothing further on the stack.
+            }
+            else if (isConstructor)
             {
                 // Constructor's CLR factory just left the new
                 // instance on the stack. Allocate a handle for it
@@ -854,6 +936,97 @@ namespace Wacs.Transpiler.AOT.Component
             return VariantCaseCtorCache.GetOrAdd(key, _ =>
                 caseType.GetConstructor(argTypes)!);
         }
+
+        // ---- Aggregate-return support --------------------------
+
+        // True when this CLR return type can be serialized into
+        // wasm linear memory at the retArea pointer. v0: records
+        // (sealed POCOs) whose every field is a primitive scalar.
+        // Other shapes (option, result, tuple, variant, string,
+        // list) defer until per-shape store emit lands.
+        private static bool IsAggregateReturnSupported(Type t)
+        {
+            if (!IsLikelyRecordType(t)) return false;
+            foreach (var p in GetRecordProperties(t))
+            {
+                if (!IsStorablePrimitive(p.PropertyType)) return false;
+            }
+            return true;
+        }
+
+        // True when this CLR type maps directly to a single
+        // canon-ABI primitive store (a PrimitiveStore.StoreXxx
+        // helper exists for it). Subset of IsPrimitiveCompatible
+        // — excludes types whose wire shape needs alignment that
+        // isn't trivially derivable from the CLR type alone.
+        private static bool IsStorablePrimitive(Type t)
+        {
+            if (t.IsEnum) t = Enum.GetUnderlyingType(t);
+            return t == typeof(byte) || t == typeof(sbyte)
+                || t == typeof(short) || t == typeof(ushort)
+                || t == typeof(int) || t == typeof(uint)
+                || t == typeof(long) || t == typeof(ulong)
+                || t == typeof(float) || t == typeof(double)
+                || t == typeof(bool);
+        }
+
+        // canon-ABI alignment for a primitive type, in bytes.
+        private static int AlignOfPrimitive(Type t)
+        {
+            if (t.IsEnum) t = Enum.GetUnderlyingType(t);
+            if (t == typeof(byte) || t == typeof(sbyte)
+                || t == typeof(bool)) return 1;
+            if (t == typeof(short) || t == typeof(ushort)) return 2;
+            if (t == typeof(int) || t == typeof(uint)
+                || t == typeof(float)) return 4;
+            if (t == typeof(long) || t == typeof(ulong)
+                || t == typeof(double)) return 8;
+            return 1;
+        }
+
+        private static int SizeOfPrimitive(Type t)
+        {
+            if (t.IsEnum) t = Enum.GetUnderlyingType(t);
+            if (t == typeof(byte) || t == typeof(sbyte)
+                || t == typeof(bool)) return 1;
+            if (t == typeof(short) || t == typeof(ushort)) return 2;
+            if (t == typeof(int) || t == typeof(uint)
+                || t == typeof(float)) return 4;
+            if (t == typeof(long) || t == typeof(ulong)
+                || t == typeof(double)) return 8;
+            return 1;
+        }
+
+        private static int Align(int offset, int alignment)
+            => (offset + alignment - 1) & ~(alignment - 1);
+
+        // Cache the per-primitive-type StoreXxx MethodInfo so each
+        // emit reuses the lookup.
+        private static readonly ConcurrentDictionary<Type, MethodInfo>
+            StoreMethodCache = new();
+
+        private static MethodInfo ResolveStoreMethod(Type clrType)
+            => StoreMethodCache.GetOrAdd(clrType, t =>
+            {
+                var underlying = t.IsEnum
+                    ? Enum.GetUnderlyingType(t) : t;
+                string name;
+                if (underlying == typeof(byte)) name = "StoreU8";
+                else if (underlying == typeof(sbyte)) name = "StoreI8";
+                else if (underlying == typeof(short)) name = "StoreI16";
+                else if (underlying == typeof(ushort)) name = "StoreU16";
+                else if (underlying == typeof(int)) name = "StoreI32";
+                else if (underlying == typeof(uint)) name = "StoreU32";
+                else if (underlying == typeof(long)) name = "StoreI64";
+                else if (underlying == typeof(ulong)) name = "StoreU64";
+                else if (underlying == typeof(float)) name = "StoreF32";
+                else if (underlying == typeof(double)) name = "StoreF64";
+                else if (underlying == typeof(bool)) name = "StoreBool";
+                else throw new InvalidOperationException(
+                    "no StoreMethod for " + t);
+                return typeof(PrimitiveStore).GetMethod(name,
+                    BindingFlags.Public | BindingFlags.Static)!;
+            });
 
         // Per-CLR-type wasm flat-slot count for canonical-ABI lower:
         //   primitive (compat with i32/i64/f32/f64) → 1
