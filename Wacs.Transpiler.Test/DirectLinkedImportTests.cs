@@ -562,6 +562,36 @@ namespace Wacs.Transpiler.Test
             public Result<uint, uint> Compute() => _v;
         }
 
+        // ====== Option<own<R>> return shape ======================
+        // Same shape as wasi:cli/terminal-stdin.get-terminal-stdin
+        // -> option<own<terminal-input>>. The Some path allocates
+        // a handle for the inner instance via Resources; the None
+        // path writes disc=0.
+
+        [WitSource(@"interface optown-env",
+            Package = "my:test@1.0.0", Interface = "optown-env")]
+        public interface IMaybeWidget
+        {
+            [WitSource(@"maybe-widget: func() -> option<own<widget>>;",
+                Package = "my:test@1.0.0", Interface = "optown-env",
+                Item = "maybe-widget")]
+            Option<IWidget> MaybeWidget();
+        }
+
+        public sealed class MaybeWidgetBundle
+        {
+            public IMaybeWidget OptownEnv { get; }
+            public MaybeWidgetBundle(IMaybeWidget m)
+            { OptownEnv = m; }
+        }
+
+        private sealed class FixedMaybeWidget : IMaybeWidget
+        {
+            private readonly Option<IWidget> _v;
+            public FixedMaybeWidget(Option<IWidget> v) { _v = v; }
+            public Option<IWidget> MaybeWidget() => _v;
+        }
+
         // ====== Variant param test surface =======================
         // Mirrors the source-generator-emitted shape for WIT
         // variants (HttpMethod, IpAddress, etc.):
@@ -949,6 +979,105 @@ namespace Wacs.Transpiler.Test
             0x00, 0x01,
             // Code section: body = call 0; end
             0x0A, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0B,
+        };
+
+        // (module
+        //   (type $tMaybe (func (param i32)))     ;; maybe-widget(retArea) → ()
+        //   (type $tRead (func (param i32) (result i32))) ;; widget.read(h) → u32
+        //   (type $tEntry (func (result i32)))    ;; call_*() → u32
+        //   (import "my:test/optown-env@1.0.0" "maybe-widget"
+        //           (func $imp_maybe (type $tMaybe)))
+        //   (import "my:test/res-env@1.0.0" "[method]widget.read"
+        //           (func $imp_read (type $tRead)))
+        //   (memory 1)
+        //   (func (export "call_maybe_disc") (result i32)
+        //     i32.const 16; call $imp_maybe
+        //     i32.const 16; i32.load8_u)
+        //   (func (export "call_maybe_read_handle") (result i32)
+        //     i32.const 16; call $imp_maybe
+        //     i32.const 16; i32.load offset=4    ;; handle
+        //     call $imp_read)                    ;; → widget.read(handle)
+        //
+        // The Some path mints a handle via Resources.AllocateResource
+        // for the returned widget; the read call resolves the handle
+        // back to the same instance and reads its value. Round-trip
+        // success proves the disc + handle layout fired correctly.
+        private static byte[] BuildOptionOwnReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 3 types
+            // 0: (i32) → void (4)
+            // 1: (i32) → i32 (5)
+            // 2: () → i32 (4)
+            // size = 1 + 4 + 5 + 4 = 14 = 0x0E
+            0x01, 0x0E, 0x03,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x01, 0x7F, 0x01, 0x7F,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section: 2 imports
+            // imp0: my:test/optown-env@1.0.0 (24) . maybe-widget (12) : type 0
+            //   = 1+24+1+12+2 = 40
+            // imp1: my:test/res-env@1.0.0 (21) . [method]widget.read (19) : type 1
+            //   = 1+21+1+19+2 = 44
+            // size = 1 + 40 + 44 = 85 = 0x55
+            0x02, 0x55, 0x02,
+            // imp0
+            0x18,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x6F, 0x70, 0x74, 0x6F, 0x77, 0x6E, 0x2D, 0x65,
+            0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x0C,
+            0x6D, 0x61, 0x79, 0x62, 0x65, 0x2D, 0x77, 0x69,
+            0x64, 0x67, 0x65, 0x74,
+            0x00, 0x00,
+            // imp1
+            0x15,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x72, 0x65, 0x73, 0x2D, 0x65, 0x6E, 0x76, 0x40,
+            0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x13,
+            0x5B, 0x6D, 0x65, 0x74, 0x68, 0x6F, 0x64, 0x5D,
+            0x77, 0x69, 0x64, 0x67, 0x65, 0x74, 0x2E, 0x72,
+            0x65, 0x61, 0x64,
+            0x00, 0x01,
+            // Function section: 2 funcs of type 2
+            0x03, 0x03, 0x02, 0x02, 0x02,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export: 2 exports
+            // call_maybe_disc (15): 1+15+1+1 = 18
+            // call_maybe_read_handle (22): 1+22+1+1 = 25
+            // size = 1 + 18 + 25 = 44 = 0x2C
+            0x07, 0x2C, 0x02,
+            0x0F,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x6D, 0x61, 0x79,
+            0x62, 0x65, 0x5F, 0x64, 0x69, 0x73, 0x63,
+            0x00, 0x02,
+            0x16,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x6D, 0x61, 0x79,
+            0x62, 0x65, 0x5F, 0x72, 0x65, 0x61, 0x64, 0x5F,
+            0x68, 0x61, 0x6E, 0x64, 0x6C, 0x65,
+            0x00, 0x03,
+            // Code section: 2 bodies
+            // body0 (read disc): locals(1) + i32.const(2) + call(2) + i32.const(2) + i32.load8_u(3) + end(1) = 11
+            // body1 (read handle then call read): locals(1) + i32.const(2) + call(2) + i32.const(2) + i32.load(3) + call(2) + end(1) = 13
+            // size = 1 + 12 + 14 = 27 = 0x1B
+            0x0A, 0x1B, 0x02,
+            // body 0:
+            0x0B, 0x00,
+            0x41, 0x10,
+            0x10, 0x00,
+            0x41, 0x10,
+            0x2D, 0x00, 0x00,
+            0x0B,
+            // body 1:
+            0x0D, 0x00,
+            0x41, 0x10,
+            0x10, 0x00,
+            0x41, 0x10,
+            0x28, 0x02, 0x04,
+            0x10, 0x01,
+            0x0B,
         };
 
         // (module
@@ -4855,6 +4984,114 @@ namespace Wacs.Transpiler.Test
                 Assert.Equal(1, (int)callDisc.Invoke(instance,
                     Array.Empty<object>())!);
                 Assert.Equal(0x33, (int)callValue.Invoke(instance,
+                    Array.Empty<object>())!);
+            }
+        }
+
+        [Fact]
+        public void DirectLinkedImport_OptionOwnReturn_HandleAllocation()
+        {
+            // Option<own<R>> retArea: u8 disc + i32 handle. The
+            // Some path mints a handle for the inner instance via
+            // Resources.AllocateResource; the wasm body reads the
+            // handle back and calls [method]widget.read on it to
+            // probe round-trip success. The None path writes
+            // disc=0 and the handle slot stays as default memory.
+
+            const uint Seed = 0x33;
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/optown-env@1.0.0", "maybe-widget"),
+                _ => throw new InvalidOperationException(
+                    "stub for maybe-widget must not be invoked"));
+            runtime.BindHostFunction<Func<int, int>>(
+                ("my:test/res-env@1.0.0", "[method]widget.read"),
+                _ => throw new InvalidOperationException(
+                    "stub for read must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildOptionOwnReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(MaybeWidgetBundle),
+                resourcesType: typeof(TestResources));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/optown-env@1.0.0", "maybe-widget", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.OptOwnRet", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Equal(2, options.ResolverImportBindings!.Count);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/optown-env@1.0.0_maybe-widget")] = _ =>
+                        throw new InvalidOperationException("maybe IImports stub"),
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/res-env@1.0.0_[method]widget.read")] = _ =>
+                        throw new InvalidOperationException("read IImports stub"),
+                });
+
+            // Test #1: Some(FakeWidget(0x33)) — disc=1, handle
+            // refers to FakeWidget(0x33), Read() returns 0x33.
+            {
+                var resources = new TestResources();
+                var bundle = new MaybeWidgetBundle(
+                    new FixedMaybeWidget(
+                        Option<IWidget>.Some(new FakeWidget(Seed))));
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle, resources })!;
+
+                var callDisc = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_maybe_disc"))!;
+                Assert.Equal(1, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+
+                // Re-instantiate so the resources table starts
+                // fresh (each call to maybe_disc invoked the host
+                // factory once already, allocating handle 1).
+                var fresh = Activator.CreateInstance(result.ModuleClass!,
+                    new object[] { importsProxy, bundle, resources })!;
+                var callRead = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_maybe_read_handle"))!;
+                Assert.Equal((int)Seed,
+                    (int)callRead.Invoke(fresh,
+                        Array.Empty<object>())!);
+            }
+
+            // Test #2: None — disc=0; we don't probe the handle
+            // (would resolve to garbage at unset slot 0).
+            {
+                var resources = new TestResources();
+                var bundle = new MaybeWidgetBundle(
+                    new FixedMaybeWidget(Option<IWidget>.None));
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle, resources })!;
+
+                var callDisc = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_maybe_disc"))!;
+                Assert.Equal(0, (int)callDisc.Invoke(instance,
                     Array.Empty<object>())!);
             }
         }
