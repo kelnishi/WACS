@@ -980,6 +980,36 @@ namespace Wacs.Transpiler.Test
             public Light[] All() => _v;
         }
 
+        // ====== list<tuple<string, string>> (HTTP headers) =====
+        // Realistic WASI shape — wasi:http/types' list-of-header-
+        // pairs. Per-element: tuple<string, string> = 16 bytes
+        // (str0_ptr/len + str1_ptr/len). Outer + inner cabi_realloc
+        // per element + per string.
+
+        [WitSource(@"interface listpair-env",
+            Package = "my:test@1.0.0", Interface = "listpair-env")]
+        public interface IStringPairListSource
+        {
+            [WitSource(@"all: func() -> list<tuple<string, string>>;",
+                Package = "my:test@1.0.0", Interface = "listpair-env",
+                Item = "all")]
+            (string, string)[] All();
+        }
+
+        public sealed class StringPairListBundle
+        {
+            public IStringPairListSource ListpairEnv { get; }
+            public StringPairListBundle(IStringPairListSource s)
+            { ListpairEnv = s; }
+        }
+
+        private sealed class FixedStringPairList : IStringPairListSource
+        {
+            private readonly (string, string)[] _v;
+            public FixedStringPairList((string, string)[] v) { _v = v; }
+            public (string, string)[] All() => _v;
+        }
+
         // ====== list<own<R>> (IWidget[]) return =================
         // Per-element AllocateResource mints a handle for each
         // resource instance; the outer (ptr, count) lands at retArea
@@ -3132,6 +3162,100 @@ namespace Wacs.Transpiler.Test
             0x0B, 0x00,
             0x41, 0x10, 0x10, 0x00,
             0x41, 0x10, 0x28, 0x02, 0x08,    // i32.load offset=8 (inner value)
+            0x0B,
+        };
+
+        // list<tuple<string,string>> retArea: i32 ptr @0 +
+        // i32 count @4. *(ptr) is N elements of 16 bytes each:
+        // (str0_ptr@+0, str0_len@+4, str1_ptr@+8, str1_len@+12).
+        // Probes count + first elem's first/second str's first byte.
+        private static byte[] BuildListOfStringPairReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 3 types
+            0x01, 0x11, 0x03,
+            0x60, 0x04, 0x7F, 0x7F, 0x7F, 0x7F, 0x01, 0x7F,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // module: "my:test/listpair-env@1.0.0" (26)
+            // entity: "all" (3)
+            // size = 1 + 1 + 26 + 1 + 3 + 2 = 34 = 0x22
+            0x02, 0x22, 0x01,
+            0x1A,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x6C, 0x69, 0x73, 0x74, 0x70, 0x61, 0x69, 0x72,
+            0x2D, 0x65, 0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30,
+            0x2E, 0x30,
+            0x03,
+            0x61, 0x6C, 0x6C,
+            0x00, 0x01,
+            // Function section: 4 local funcs
+            0x03, 0x05, 0x04, 0x00, 0x02, 0x02, 0x02,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Global: bump allocator at 32
+            0x06, 0x06, 0x01,
+            0x7F, 0x01, 0x41, 0x20, 0x0B,
+            // Export section: 4 exports
+            //   call_all_count        (14): 17
+            //   call_all_first_a_byte (21): 1+21+1+1 = 24
+            //   call_all_first_b_byte (21): 24
+            //   cabi_realloc          (12): 15
+            // size = 1 + 17 + 24 + 24 + 15 = 81 = 0x51
+            0x07, 0x51, 0x04,
+            0x0E,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x61, 0x6C, 0x6C,
+            0x5F, 0x63, 0x6F, 0x75, 0x6E, 0x74,
+            0x00, 0x02,
+            0x15,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x61, 0x6C, 0x6C,
+            0x5F, 0x66, 0x69, 0x72, 0x73, 0x74, 0x5F, 0x61,
+            0x5F, 0x62, 0x79, 0x74, 0x65,
+            0x00, 0x03,
+            0x15,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x61, 0x6C, 0x6C,
+            0x5F, 0x66, 0x69, 0x72, 0x73, 0x74, 0x5F, 0x62,
+            0x5F, 0x62, 0x79, 0x74, 0x65,
+            0x00, 0x04,
+            0x0C,
+            0x63, 0x61, 0x62, 0x69, 0x5F, 0x72, 0x65, 0x61,
+            0x6C, 0x6C, 0x6F, 0x63,
+            0x00, 0x01,
+            // Code section: 4 bodies
+            //   body0 cabi_realloc            : 11 → 12
+            //   body1 call_all_count          : 11 → 12
+            //   body2 call_all_first_a_byte   : 17 → 18
+            //     locals(1)+i32.const(2)+call(2)+i32.const(2)+
+            //     i32.load(3)+i32.load(3)+load8_u(3)+end(1)=17
+            //   body3 call_all_first_b_byte   : 17 → 18
+            //     same shape but inner load offset=8
+            // size = 1 + 12 + 12 + 18 + 18 = 61 = 0x3D
+            0x0A, 0x3D, 0x04,
+            0x0B, 0x00,
+            0x23, 0x00,
+            0x23, 0x00,
+            0x20, 0x03,
+            0x6A,
+            0x24, 0x00,
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x04,
+            0x0B,
+            0x11, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10,
+            0x28, 0x02, 0x00,                 // outer ptr
+            0x28, 0x02, 0x00,                 // first elem's str0_ptr
+            0x2D, 0x00, 0x00,                 // first byte of first str
+            0x0B,
+            0x11, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10,
+            0x28, 0x02, 0x00,                 // outer ptr
+            0x28, 0x02, 0x08,                 // first elem's str1_ptr (offset+8)
+            0x2D, 0x00, 0x00,                 // first byte of second str
             0x0B,
         };
 
@@ -11937,6 +12061,92 @@ namespace Wacs.Transpiler.Test
             var callSecond = result.ExportsInterface!.GetMethod(
                 InterfaceGenerator.SanitizeName("call_all_second_disc"))!;
             Assert.Equal(1, (int)callSecond.Invoke(fresh2,
+                Array.Empty<object>())!);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_ListOfStringPairReturn_HttpHeadersShape()
+        {
+            // list<tuple<string, string>>: realistic WASI HTTP
+            // headers shape. Per element 16 bytes (str0_ptr/len +
+            // str1_ptr/len). Outer cabi_realloc + per-element
+            // EmitInlineRecordOrTupleStore + per-string cabi_realloc
+            // (StoreString).
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/listpair-env@1.0.0", "all"),
+                _ => throw new InvalidOperationException(
+                    "stub for all must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildListOfStringPairReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(StringPairListBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/listpair-env@1.0.0", "all", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.ListPairRet", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_listpair_env_1_0_0_all"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for all must not be invoked"),
+                });
+
+            // (string, string)[] {
+            //   ("Hi",  "Wat"),   // first 'H'=0x48, second 'W'=0x57
+            //   ("Foo", "Bar"),
+            // }
+            var bundle = new StringPairListBundle(
+                new FixedStringPairList(new (string, string)[]
+                {
+                    ("Hi",  "Wat"),
+                    ("Foo", "Bar"),
+                }));
+            var instance = Activator.CreateInstance(
+                result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+
+            var callCount = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_all_count"))!;
+            Assert.Equal(2, (int)callCount.Invoke(instance,
+                Array.Empty<object>())!);
+
+            var fresh = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+            var callA = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_all_first_a_byte"))!;
+            Assert.Equal(0x48, (int)callA.Invoke(fresh,
+                Array.Empty<object>())!);
+
+            var fresh2 = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+            var callB = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_all_first_b_byte"))!;
+            Assert.Equal(0x57, (int)callB.Invoke(fresh2,
                 Array.Empty<object>())!);
         }
     }
