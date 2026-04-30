@@ -1412,8 +1412,10 @@ namespace Wacs.Transpiler.AOT.Component
                 if (def == typeof(Result<,>))
                 {
                     var args = t.GetGenericArguments();
-                    return IsResultArmStorable(args[0], resolver)
-                        && IsResultArmStorable(args[1], resolver);
+                    return IsResultArmStorable(args[0], resolver,
+                            allowVariableLength: true)
+                        && IsResultArmStorable(args[1], resolver,
+                            allowVariableLength: true);
                 }
             }
             // Variant base type. Wire form: u8 disc + joined-flat
@@ -1471,32 +1473,40 @@ namespace Wacs.Transpiler.AOT.Component
         }
 
         // True when the Ok or Err arm of a Result return is
-        // storable: either a primitive OR a resource interface
-        // (Resources class can mint a handle for it). Used by
-        // IsAggregateReturnSupported's Result<,> path.
+        // storable: primitive, resource interface (Resources class
+        // mints a handle), or — when allowVariableLength is true —
+        // string / byte[] (cabi_realloc + StoreString/StoreByteArray).
+        // Variants set allowVariableLength=false because the variant
+        // emit path doesn't yet handle (ptr,len) payload widths.
         private static bool IsResultArmStorable(Type t,
-            HostPackageResolver? resolver)
+            HostPackageResolver? resolver,
+            bool allowVariableLength = false)
         {
             if (IsStorablePrimitive(t)) return true;
             if (resolver != null
                 && resolver.IsResourceInterface(t)
                 && resolver.PreferredResourcesType != null)
                 return true;
+            if (allowVariableLength
+                && (t == typeof(string) || t == typeof(byte[])))
+                return true;
             return false;
         }
 
-        // Alignment for a Result-arm type (primitive or resource
-        // handle). Resource handles are i32 → align 4.
+        // Alignment for a Result-arm type. Resource handles are i32,
+        // string/byte[] are (i32 ptr + i32 len) → both align 4.
         private static int AlignOfResultArm(Type t)
         {
             if (IsStorablePrimitive(t)) return AlignOfPrimitive(t);
-            return 4;  // resource handle (i32)
+            return 4;  // resource handle OR (ptr, len) pair
         }
 
-        // Emit IL that stores either a primitive arm value OR a
-        // freshly-allocated handle (for resource-typed arms) at
-        // retArea+valueOffset. Used by the Result-return Emit
-        // dispatch for both Ok and Err sides.
+        // Emit IL that stores a Result arm's value at
+        // retArea+valueOffset. Dispatches on arm shape:
+        //   - primitive          : direct PrimitiveStore.StoreXxx
+        //   - resource interface : Resources.AllocateResource → StoreI32
+        //   - string / byte[]    : cabi_realloc + StoreString/StoreByteArray
+        // Used by the Result-return Emit for both Ok and Err sides.
         private static void EmitResultArmStore(ILGenerator il,
             Type armType, LocalBuilder returnLocal,
             MethodInfo armGetter, LocalBuilder retAreaLocal,
@@ -1506,6 +1516,8 @@ namespace Wacs.Transpiler.AOT.Component
             bool isResource = resolver != null
                 && resolver.IsResourceInterface(armType)
                 && resourcesType != null;
+            bool isString = armType == typeof(string);
+            bool isByteArray = armType == typeof(byte[]);
 
             // Push: dest_array, dest_offset
             il.Emit(OpCodes.Ldarg_0);
@@ -1533,6 +1545,20 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Callvirt,
                     ResolveAllocateResourceMethod(resourcesType!));
                 il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(int)));
+            }
+            else if (isString || isByteArray)
+            {
+                // Stack: [memory_data, retArea+valueOffset]
+                // StoreString/StoreByteArray takes
+                //   (byte[] dest, int retAreaOffset, T value, Func realloc)
+                // — push value + cabi_realloc + call.
+                il.Emit(OpCodes.Ldloca, returnLocal);
+                il.Emit(OpCodes.Call, armGetter);
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, CabiReallocField);
+                il.Emit(OpCodes.Call, isString
+                    ? StoreStringMethod
+                    : StoreByteArrayMethod);
             }
             else
             {
