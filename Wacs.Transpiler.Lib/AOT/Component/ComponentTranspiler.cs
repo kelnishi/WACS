@@ -256,6 +256,16 @@ namespace Wacs.Transpiler.AOT.Component
                     result.ModuleClass, decodedWit);
             }
 
+            // Phase B chain mode: emit [WitSource]-tagged
+            // I{Iface} interface types so the transpiled .dll can
+            // serve as a host-package for downstream transpiles.
+            // Walks decodedWit.Interfaces; v0 maps primitive +
+            // string + byte[] + Option<P> + Result<P,E> +
+            // list<P> shapes — methods using records / variants
+            // skip silently (interface stub stays present).
+            ExportInterfaceEmit.EmitInterfaces(
+                result.ModuleBuilder, assemblyNamespace, decodedWit);
+
             return result;
         }
 
