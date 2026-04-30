@@ -770,6 +770,63 @@ namespace Wacs.Transpiler.Test
             public byte[] Give() => _v;
         }
 
+        // ====== int[] return shape (via cabi_realloc) ============
+        // Wire form: i32 ptr @0 + i32 count @4 (count = element
+        // count, NOT byte count). cabi_realloc gets element-aligned
+        // (align=4 for int) and byte_count = count * 4.
+
+        [WitSource(@"interface ints-ret-env",
+            Package = "my:test@1.0.0", Interface = "ints-ret-env")]
+        public interface IIntSource
+        {
+            [WitSource(@"give: func() -> list<s32>;",
+                Package = "my:test@1.0.0", Interface = "ints-ret-env",
+                Item = "give")]
+            int[] Give();
+        }
+
+        public sealed class IntSourceBundle
+        {
+            public IIntSource IntsRetEnv { get; }
+            public IntSourceBundle(IIntSource g)
+            { IntsRetEnv = g; }
+        }
+
+        private sealed class FixedIntSource : IIntSource
+        {
+            private readonly int[] _v;
+            public FixedIntSource(int[] v) { _v = v; }
+            public int[] Give() => _v;
+        }
+
+        // ====== long[] return shape (via cabi_realloc) ===========
+        // Wire form: i32 ptr @0 + i32 count @4 (count = element
+        // count). cabi_realloc gets align=8, byte_count = count * 8.
+
+        [WitSource(@"interface longs-ret-env",
+            Package = "my:test@1.0.0", Interface = "longs-ret-env")]
+        public interface ILongSource
+        {
+            [WitSource(@"give: func() -> list<s64>;",
+                Package = "my:test@1.0.0", Interface = "longs-ret-env",
+                Item = "give")]
+            long[] Give();
+        }
+
+        public sealed class LongSourceBundle
+        {
+            public ILongSource LongsRetEnv { get; }
+            public LongSourceBundle(ILongSource g)
+            { LongsRetEnv = g; }
+        }
+
+        private sealed class FixedLongSource : ILongSource
+        {
+            private readonly long[] _v;
+            public FixedLongSource(long[] v) { _v = v; }
+            public long[] Give() => _v;
+        }
+
         // ====== Option<string> return ============================
         // Wire form: u8 disc @0 + (i32 ptr, i32 len) at retArea+4.
         // Some path: cabi_realloc + memcpy + write disc=1 + (ptr, len).
@@ -1614,6 +1671,157 @@ namespace Wacs.Transpiler.Test
             0x41, 0x10, 0x10, 0x00,
             0x41, 0x10, 0x28, 0x02, 0x00,
             0x2D, 0x00, 0x00,
+            0x0B,
+        };
+
+        // Same shape as the byte[] fixture but for list<s32> — the
+        // second probe reads an i32 (4-byte LE) at *(ptr+0) instead
+        // of u8.
+        private static byte[] BuildIntArrayReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 3 types
+            0x01, 0x11, 0x03,
+            0x60, 0x04, 0x7F, 0x7F, 0x7F, 0x7F, 0x01, 0x7F,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // module: "my:test/ints-ret-env@1.0.0" (26)
+            // entity: "give" (4)
+            // size = 1 + 1 + 26 + 1 + 4 + 2 = 35 = 0x23
+            0x02, 0x23, 0x01,
+            0x1A,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x69, 0x6E, 0x74, 0x73, 0x2D, 0x72, 0x65, 0x74,
+            0x2D, 0x65, 0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30,
+            0x2E, 0x30,
+            0x04,
+            0x67, 0x69, 0x76, 0x65,
+            0x00, 0x01,
+            // Function section: 3 local funcs
+            0x03, 0x04, 0x03, 0x00, 0x02, 0x02,
+            // Memory section: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Global section: bump allocator at 32
+            0x06, 0x06, 0x01,
+            0x7F, 0x01, 0x41, 0x20, 0x0B,
+            // Export section: 3 exports
+            //   call_give_len       (13): 1+13+1+1 = 16
+            //   call_give_first_int (19): 1+19+1+1 = 22
+            //   cabi_realloc        (12): 1+12+1+1 = 15
+            // size = 1 + 16 + 22 + 15 = 54 = 0x36
+            0x07, 0x36, 0x03,
+            0x0D,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x67, 0x69, 0x76,
+            0x65, 0x5F, 0x6C, 0x65, 0x6E,
+            0x00, 0x02,
+            0x13,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x67, 0x69, 0x76,
+            0x65, 0x5F, 0x66, 0x69, 0x72, 0x73, 0x74, 0x5F,
+            0x69, 0x6E, 0x74,
+            0x00, 0x03,
+            0x0C,
+            0x63, 0x61, 0x62, 0x69, 0x5F, 0x72, 0x65, 0x61,
+            0x6C, 0x6C, 0x6F, 0x63,
+            0x00, 0x01,
+            // Code section: 3 bodies
+            //   body0 cabi_realloc       : 11 → 12
+            //   body1 call_give_len      : 11 → 12
+            //   body2 call_give_first_int: 14 → 15
+            // size = 1 + 12 + 12 + 15 = 40 = 0x28
+            0x0A, 0x28, 0x03,
+            0x0B, 0x00,
+            0x23, 0x00,
+            0x23, 0x00,
+            0x20, 0x03,
+            0x6A,
+            0x24, 0x00,
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x04,
+            0x0B,
+            0x0E, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x00,    // ptr at retArea+0
+            0x28, 0x02, 0x00,                  // i32.load → first int
+            0x0B,
+        };
+
+        // Same shape as int[] fixture but for list<s64>. The second
+        // probe reads i64 at *(ptr+0) and wraps to i32 to fit the
+        // probe's () → i32 result type.
+        private static byte[] BuildLongArrayReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 3 types
+            0x01, 0x11, 0x03,
+            0x60, 0x04, 0x7F, 0x7F, 0x7F, 0x7F, 0x01, 0x7F,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // module: "my:test/longs-ret-env@1.0.0" (27)
+            // entity: "give" (4)
+            // size = 1 + 1 + 27 + 1 + 4 + 2 = 36 = 0x24
+            0x02, 0x24, 0x01,
+            0x1B,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x6C, 0x6F, 0x6E, 0x67, 0x73, 0x2D, 0x72, 0x65,
+            0x74, 0x2D, 0x65, 0x6E, 0x76, 0x40, 0x31, 0x2E,
+            0x30, 0x2E, 0x30,
+            0x04,
+            0x67, 0x69, 0x76, 0x65,
+            0x00, 0x01,
+            // Function section: 3 local funcs
+            0x03, 0x04, 0x03, 0x00, 0x02, 0x02,
+            // Memory section: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Global section: bump allocator at 32
+            0x06, 0x06, 0x01,
+            0x7F, 0x01, 0x41, 0x20, 0x0B,
+            // Export section: 3 exports
+            //   call_give_len           (13): 16
+            //   call_give_first_long_lo (23): 1+23+1+1 = 26
+            //   cabi_realloc            (12): 15
+            // size = 1 + 16 + 26 + 15 = 58 = 0x3A
+            0x07, 0x3A, 0x03,
+            0x0D,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x67, 0x69, 0x76,
+            0x65, 0x5F, 0x6C, 0x65, 0x6E,
+            0x00, 0x02,
+            0x17,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x67, 0x69, 0x76,
+            0x65, 0x5F, 0x66, 0x69, 0x72, 0x73, 0x74, 0x5F,
+            0x6C, 0x6F, 0x6E, 0x67, 0x5F, 0x6C, 0x6F,
+            0x00, 0x03,
+            0x0C,
+            0x63, 0x61, 0x62, 0x69, 0x5F, 0x72, 0x65, 0x61,
+            0x6C, 0x6C, 0x6F, 0x63,
+            0x00, 0x01,
+            // Code section: 3 bodies
+            //   body0 cabi_realloc          : 11 → 12
+            //   body1 call_give_len         : 11 → 12
+            //   body2 call_give_first_long_lo: 14 → 15
+            //     (reads low 32 bits of first long via i32.load —
+            //      same body bytes as the int fixture; for an LE
+            //      long like 0x42 the low i32 is 0x42 too)
+            // size = 1 + 12 + 12 + 15 = 40 = 0x28
+            0x0A, 0x28, 0x03,
+            0x0B, 0x00,
+            0x23, 0x00,
+            0x23, 0x00,
+            0x20, 0x03,
+            0x6A,
+            0x24, 0x00,
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x04,
+            0x0B,
+            0x0E, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x00,
+            0x28, 0x02, 0x00,
             0x0B,
         };
 
@@ -7037,6 +7245,151 @@ namespace Wacs.Transpiler.Test
                 Assert.Equal(0x37, (int)callByte.Invoke(fresh,
                     Array.Empty<object>())!);
             }
+        }
+
+        [Fact]
+        public void DirectLinkedImport_IntArrayReturn_ViaCabiRealloc()
+        {
+            // list<s32> retArea: i32 ptr @0 + i32 count @4. Host
+            // returns int[]; emit calls cabi_realloc with align=4
+            // and byte_count = count*4, copies the LE bytes via
+            // MemoryMarshal.AsBytes, writes (ptr, count). Probes:
+            //   call_give_len   → count
+            //   call_give_first_int → first i32 at *(ptr+0)
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/ints-ret-env@1.0.0", "give"),
+                _ => throw new InvalidOperationException(
+                    "stub for give must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildIntArrayReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(IntSourceBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/ints-ret-env@1.0.0", "give", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.IntArrRet", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_ints_ret_env_1_0_0_give"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for give must not be invoked"),
+                });
+
+            // int[] { 0x21, 0x33, 0x12 } — len=3, first int=0x21.
+            var bundle = new IntSourceBundle(new FixedIntSource(
+                new int[] { 0x21, 0x33, 0x12 }));
+            var instance = Activator.CreateInstance(
+                result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+
+            var callLen = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_give_len"))!;
+            Assert.Equal(3, (int)callLen.Invoke(instance,
+                Array.Empty<object>())!);
+
+            var fresh = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+            var callFirst = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_give_first_int"))!;
+            Assert.Equal(0x21, (int)callFirst.Invoke(fresh,
+                Array.Empty<object>())!);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_LongArrayReturn_ViaCabiRealloc()
+        {
+            // list<s64> retArea: i32 ptr @0 + i32 count @4. Host
+            // returns long[]; emit calls cabi_realloc with align=8
+            // and byte_count = count*8, copies LE bytes. Probes
+            // first 32 bits of first long (== full long for small
+            // values on LE).
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/longs-ret-env@1.0.0", "give"),
+                _ => throw new InvalidOperationException(
+                    "stub for give must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildLongArrayReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(LongSourceBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/longs-ret-env@1.0.0", "give", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.LongArrRet", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_longs_ret_env_1_0_0_give"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for give must not be invoked"),
+                });
+
+            // long[] { 0x42, 0x37 } — len=2, first long low32=0x42.
+            var bundle = new LongSourceBundle(new FixedLongSource(
+                new long[] { 0x42, 0x37 }));
+            var instance = Activator.CreateInstance(
+                result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+
+            var callLen = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_give_len"))!;
+            Assert.Equal(2, (int)callLen.Invoke(instance,
+                Array.Empty<object>())!);
+
+            var fresh = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+            var callFirst = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_give_first_long_lo"))!;
+            Assert.Equal(0x42, (int)callFirst.Invoke(fresh,
+                Array.Empty<object>())!);
         }
     }
 }
