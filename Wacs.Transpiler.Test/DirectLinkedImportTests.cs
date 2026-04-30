@@ -799,6 +799,64 @@ namespace Wacs.Transpiler.Test
             public Option<string> Name() => _v;
         }
 
+        // ====== Result<string, primitive> return =================
+        // Wire form: u8 disc @0 + joined-flat (i32 ptr, i32 len)
+        // at retArea+4. Ok path: cabi_realloc + memcpy + write
+        // disc=0 + (ptr, len). Err path: write disc=1 + u32 at
+        // retArea+4. Mirrors realistic WASI shapes like
+        // wasi:filesystem/types.read-link → result<string, error-code>.
+
+        [WitSource(@"interface resstr-env",
+            Package = "my:test@1.0.0", Interface = "resstr-env")]
+        public interface IResStr
+        {
+            [WitSource(@"compute: func() -> result<string, u32>;",
+                Package = "my:test@1.0.0", Interface = "resstr-env",
+                Item = "compute")]
+            Result<string, uint> Compute();
+        }
+
+        public sealed class ResStrBundle
+        {
+            public IResStr ResstrEnv { get; }
+            public ResStrBundle(IResStr r) { ResstrEnv = r; }
+        }
+
+        private sealed class FixedResStr : IResStr
+        {
+            private readonly Result<string, uint> _v;
+            public FixedResStr(Result<string, uint> v) { _v = v; }
+            public Result<string, uint> Compute() => _v;
+        }
+
+        // ====== Result<primitive, byte[]> return =================
+        // Symmetric to ResStr but exercises the byte[] arm on the
+        // Err side. Wire form: u8 disc @0 + joined-flat
+        // (i32 ptr, i32 len) | u32 at retArea+4.
+
+        [WitSource(@"interface resbyt-env",
+            Package = "my:test@1.0.0", Interface = "resbyt-env")]
+        public interface IResByt
+        {
+            [WitSource(@"compute: func() -> result<u32, list<u8>>;",
+                Package = "my:test@1.0.0", Interface = "resbyt-env",
+                Item = "compute")]
+            Result<uint, byte[]> Compute();
+        }
+
+        public sealed class ResBytBundle
+        {
+            public IResByt ResbytEnv { get; }
+            public ResBytBundle(IResByt r) { ResbytEnv = r; }
+        }
+
+        private sealed class FixedResByt : IResByt
+        {
+            private readonly Result<uint, byte[]> _v;
+            public FixedResByt(Result<uint, byte[]> v) { _v = v; }
+            public Result<uint, byte[]> Compute() => _v;
+        }
+
         // ====== Variant param test surface =======================
         // Mirrors the source-generator-emitted shape for WIT
         // variants (HttpMethod, IpAddress, etc.):
@@ -1294,6 +1352,195 @@ namespace Wacs.Transpiler.Test
             0x41, 0x10, 0x10, 0x00,
             0x41, 0x10, 0x28, 0x02, 0x04,    // i32.load align=2 offset=4 → ptr at retArea+4
             0x2D, 0x00, 0x00,                 // i32.load8_u → byte at *(ptr)
+            0x0B,
+        };
+
+        // Result<string, u32> retArea (joined-flat at offset 4):
+        //   disc @0 (u8)
+        //   Ok  : i32 ptr @4 + i32 len @8
+        //   Err : u32        @4
+        // Three probes: disc, first byte at *(ptr@retArea+4) (Ok),
+        // i32 @retArea+4 (Err arm value or Ok ptr).
+        // (module
+        //   (type $tCabi (func (param i32 i32 i32 i32) (result i32)))
+        //   (type $tCompute (func (param i32)))   ;; compute(retArea) → ()
+        //   (type $tEntry (func (result i32)))    ;; call_*  → u32
+        //   (import "my:test/resstr-env@1.0.0" "compute"
+        //           (func $imp (type $tCompute)))
+        //   (memory 1)
+        //   (global $next (mut i32) (i32.const 32))
+        //   (func $cabi_realloc (type $tCabi)
+        //     global.get $next; global.get $next; local.get 3;
+        //     i32.add; global.set $next)
+        //   (func (export "call_compute_disc") (result i32)
+        //     i32.const 16; call $imp;
+        //     i32.const 16; i32.load8_u)
+        //   (func (export "call_compute_first_byte") (result i32)
+        //     i32.const 16; call $imp;
+        //     i32.const 16; i32.load offset=4; i32.load8_u)
+        //   (func (export "call_compute_int4") (result i32)
+        //     i32.const 16; call $imp;
+        //     i32.const 16; i32.load offset=4)
+        //   (export "cabi_realloc" (func $cabi_realloc)))
+        private static byte[] BuildResultStringReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 3 types (same shape as optstr-ret-env)
+            0x01, 0x11, 0x03,
+            0x60, 0x04, 0x7F, 0x7F, 0x7F, 0x7F, 0x01, 0x7F,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section: 1 import (compute : type 1)
+            // module: "my:test/resstr-env@1.0.0" (24)
+            // entity: "compute" (7)
+            // size = 1 + 1 + 24 + 1 + 7 + 2 = 36 = 0x24
+            0x02, 0x24, 0x01,
+            0x18,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x72, 0x65, 0x73, 0x73, 0x74, 0x72, 0x2D, 0x65,
+            0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x07,
+            0x63, 0x6F, 0x6D, 0x70, 0x75, 0x74, 0x65,
+            0x00, 0x01,
+            // Function section: 4 local funcs
+            //   funcs[0] = type 0 (cabi_realloc)
+            //   funcs[1..3] = type 2
+            0x03, 0x05, 0x04, 0x00, 0x02, 0x02, 0x02,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Global: bump allocator at 32
+            0x06, 0x06, 0x01,
+            0x7F, 0x01, 0x41, 0x20, 0x0B,
+            // Export section: 4 exports
+            //   call_compute_disc       (17): 1+17+1+1 = 20
+            //   call_compute_first_byte (23): 1+23+1+1 = 26
+            //   call_compute_int4       (17): 1+17+1+1 = 20
+            //   cabi_realloc            (12): 1+12+1+1 = 15
+            // size = 1 + 20 + 26 + 20 + 15 = 82 = 0x52
+            0x07, 0x52, 0x04,
+            0x11,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x63, 0x6F, 0x6D,
+            0x70, 0x75, 0x74, 0x65, 0x5F, 0x64, 0x69, 0x73, 0x63,
+            0x00, 0x02,
+            0x17,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x63, 0x6F, 0x6D,
+            0x70, 0x75, 0x74, 0x65, 0x5F, 0x66, 0x69, 0x72,
+            0x73, 0x74, 0x5F, 0x62, 0x79, 0x74, 0x65,
+            0x00, 0x03,
+            0x11,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x63, 0x6F, 0x6D,
+            0x70, 0x75, 0x74, 0x65, 0x5F, 0x69, 0x6E, 0x74, 0x34,
+            0x00, 0x04,
+            0x0C,
+            0x63, 0x61, 0x62, 0x69, 0x5F, 0x72, 0x65, 0x61,
+            0x6C, 0x6C, 0x6F, 0x63,
+            0x00, 0x01,
+            // Code section: 4 bodies
+            //   body0 cabi_realloc        : size 11 → 12
+            //   body1 call_compute_disc   : size 11 → 12
+            //   body2 call_compute_first_byte: size 14 → 15
+            //   body3 call_compute_int4   : size 11 → 12
+            // size = 1 + 12 + 12 + 15 + 12 = 52 = 0x34
+            0x0A, 0x34, 0x04,
+            // body0 cabi_realloc
+            0x0B, 0x00,
+            0x23, 0x00,
+            0x23, 0x00,
+            0x20, 0x03,
+            0x6A,
+            0x24, 0x00,
+            0x0B,
+            // body1 call_compute_disc
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x2D, 0x00, 0x00,
+            0x0B,
+            // body2 call_compute_first_byte
+            0x0E, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x04,    // i32.load align=2 offset=4 → ptr
+            0x2D, 0x00, 0x00,                 // i32.load8_u → byte at *(ptr)
+            0x0B,
+            // body3 call_compute_int4
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x04,    // i32.load align=2 offset=4 → i32 at retArea+4
+            0x0B,
+        };
+
+        // Result<u32, list<u8>> — symmetric to ResultString but the
+        // byte[] arm rides the Err side. Wire form identical: u8
+        // disc + joined-flat (i32 ptr | u32) at offset 4. Same wasm
+        // shape, only the import module/entity strings change.
+        private static byte[] BuildResultByteArrayReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 3 types
+            0x01, 0x11, 0x03,
+            0x60, 0x04, 0x7F, 0x7F, 0x7F, 0x7F, 0x01, 0x7F,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // module: "my:test/resbyt-env@1.0.0" (24)
+            // entity: "compute" (7)
+            // size = 1 + 1 + 24 + 1 + 7 + 2 = 36 = 0x24
+            0x02, 0x24, 0x01,
+            0x18,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x72, 0x65, 0x73, 0x62, 0x79, 0x74, 0x2D, 0x65,
+            0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x07,
+            0x63, 0x6F, 0x6D, 0x70, 0x75, 0x74, 0x65,
+            0x00, 0x01,
+            // Function section: 4 local funcs
+            0x03, 0x05, 0x04, 0x00, 0x02, 0x02, 0x02,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Global: bump allocator at 32
+            0x06, 0x06, 0x01,
+            0x7F, 0x01, 0x41, 0x20, 0x0B,
+            // Export section: 4 exports (same names as ResultString
+            // fixture — byte at *(ptr) is the Err byte[] first byte
+            // when in Err branch; int4 is the Ok u32 value)
+            0x07, 0x52, 0x04,
+            0x11,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x63, 0x6F, 0x6D,
+            0x70, 0x75, 0x74, 0x65, 0x5F, 0x64, 0x69, 0x73, 0x63,
+            0x00, 0x02,
+            0x17,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x63, 0x6F, 0x6D,
+            0x70, 0x75, 0x74, 0x65, 0x5F, 0x66, 0x69, 0x72,
+            0x73, 0x74, 0x5F, 0x62, 0x79, 0x74, 0x65,
+            0x00, 0x03,
+            0x11,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x63, 0x6F, 0x6D,
+            0x70, 0x75, 0x74, 0x65, 0x5F, 0x69, 0x6E, 0x74, 0x34,
+            0x00, 0x04,
+            0x0C,
+            0x63, 0x61, 0x62, 0x69, 0x5F, 0x72, 0x65, 0x61,
+            0x6C, 0x6C, 0x6F, 0x63,
+            0x00, 0x01,
+            // Code section: 4 bodies (identical to ResultString)
+            0x0A, 0x34, 0x04,
+            0x0B, 0x00,
+            0x23, 0x00,
+            0x23, 0x00,
+            0x20, 0x03,
+            0x6A,
+            0x24, 0x00,
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x2D, 0x00, 0x00,
+            0x0B,
+            0x0E, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x04,
+            0x2D, 0x00, 0x00,
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x04,
             0x0B,
         };
 
@@ -6595,6 +6842,199 @@ namespace Wacs.Transpiler.Test
                 var callDisc = result.ExportsInterface!.GetMethod(
                     InterfaceGenerator.SanitizeName("call_name_disc"))!;
                 Assert.Equal(0, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+            }
+        }
+
+        [Fact]
+        public void DirectLinkedImport_ResultStringReturn_ViaCabiRealloc()
+        {
+            // Result<string, u32> retArea: u8 disc @0 + joined-flat
+            // (i32 ptr | u32) at offset 4. Ok branch: cabi_realloc
+            // mints a buffer, StoreString writes (ptr, len) and
+            // disc=0; Err branch: StoreI32 writes the err value and
+            // disc=1. Probes both branches end-to-end.
+            //
+            // Mirrors realistic WASI shapes like
+            // wasi:filesystem/types.read-link → result<string, error-code>.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/resstr-env@1.0.0", "compute"),
+                _ => throw new InvalidOperationException(
+                    "stub for compute must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildResultStringReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(ResStrBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/resstr-env@1.0.0", "compute", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.ResStrRet", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_resstr_env_1_0_0_compute"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for compute must not be invoked"),
+                });
+
+            // Test #1: Ok("Hi") — disc=0; first byte at *(ptr) = 'H' (0x48).
+            {
+                var bundle = new ResStrBundle(new FixedResStr(
+                    Result<string, uint>.FromOk("Hi")));
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+
+                var callDisc = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_compute_disc"))!;
+                Assert.Equal(0, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+
+                var fresh = Activator.CreateInstance(result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callByte = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_compute_first_byte"))!;
+                Assert.Equal(0x48, (int)callByte.Invoke(fresh,
+                    Array.Empty<object>())!);
+            }
+
+            // Test #2: Err(0x33) — disc=1; i32 @retArea+4 = 0x33.
+            {
+                var bundle = new ResStrBundle(new FixedResStr(
+                    Result<string, uint>.FromErr(0x33u)));
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+
+                var callDisc = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_compute_disc"))!;
+                Assert.Equal(1, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+
+                var fresh = Activator.CreateInstance(result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callInt4 = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_compute_int4"))!;
+                Assert.Equal(0x33, (int)callInt4.Invoke(fresh,
+                    Array.Empty<object>())!);
+            }
+        }
+
+        [Fact]
+        public void DirectLinkedImport_ResultByteArrayReturn_ViaCabiRealloc()
+        {
+            // Result<u32, list<u8>> — symmetric to ResultString but
+            // the byte[] arm rides the Err side. Ok branch writes
+            // u32 + disc=0; Err branch cabi_realloc-allocates the
+            // byte[] and writes (ptr, count) + disc=1.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/resbyt-env@1.0.0", "compute"),
+                _ => throw new InvalidOperationException(
+                    "stub for compute must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildResultByteArrayReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(ResBytBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/resbyt-env@1.0.0", "compute", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.ResBytRet", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_resbyt_env_1_0_0_compute"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for compute must not be invoked"),
+                });
+
+            // Test #1: Ok(0x21) — disc=0; i32 @retArea+4 = 0x21.
+            {
+                var bundle = new ResBytBundle(new FixedResByt(
+                    Result<uint, byte[]>.FromOk(0x21u)));
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+
+                var callDisc = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_compute_disc"))!;
+                Assert.Equal(0, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+
+                var fresh = Activator.CreateInstance(result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callInt4 = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_compute_int4"))!;
+                Assert.Equal(0x21, (int)callInt4.Invoke(fresh,
+                    Array.Empty<object>())!);
+            }
+
+            // Test #2: Err([0x37, 0x12]) — disc=1; first byte at
+            // *(ptr) = 0x37.
+            {
+                var bundle = new ResBytBundle(new FixedResByt(
+                    Result<uint, byte[]>.FromErr(new byte[] { 0x37, 0x12 })));
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+
+                var callDisc = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_compute_disc"))!;
+                Assert.Equal(1, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+
+                var fresh = Activator.CreateInstance(result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callByte = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_compute_first_byte"))!;
+                Assert.Equal(0x37, (int)callByte.Invoke(fresh,
                     Array.Empty<object>())!);
             }
         }
