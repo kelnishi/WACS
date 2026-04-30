@@ -486,6 +486,9 @@ namespace Wacs.Transpiler.AOT.Component
                             var valueProp = c.CaseType.GetProperty("Value",
                                 BindingFlags.Public | BindingFlags.Instance)!;
 
+                            bool isStringPayload = c.Payload == typeof(string);
+                            bool isByteArrayPayload = c.Payload == typeof(byte[]);
+
                             if (isResourcePayload)
                             {
                                 il.Emit(OpCodes.Ldarg_0);
@@ -501,6 +504,20 @@ namespace Wacs.Transpiler.AOT.Component
                                     ResolveAllocateResourceMethod(resourcesType!));
                                 il.Emit(OpCodes.Call,
                                     ResolveStoreMethod(typeof(int)));
+                            }
+                            else if (isStringPayload || isByteArrayPayload)
+                            {
+                                // Stack: [memory_data, retArea+valueOffset]
+                                // Push value + cabi_realloc + call.
+                                il.Emit(OpCodes.Ldloc, returnLocal);
+                                il.Emit(OpCodes.Castclass, c.CaseType);
+                                il.Emit(OpCodes.Callvirt,
+                                    valueProp.GetGetMethod()!);
+                                il.Emit(OpCodes.Ldarg_0);
+                                il.Emit(OpCodes.Ldfld, CabiReallocField);
+                                il.Emit(OpCodes.Call, isStringPayload
+                                    ? StoreStringMethod
+                                    : StoreByteArrayMethod);
                             }
                             else
                             {
@@ -1480,12 +1497,11 @@ namespace Wacs.Transpiler.AOT.Component
             }
             // Variant base type. Wire form: u8 disc + joined-flat
             // value at Align(1, max-payload-align). v0 supports
-            // empty cases AND primitive-payload cases AND resource-
-            // handle-payload (own<R>) cases. Mixed payload widths
-            // are fine — canon-ABI joined-flat reserves max-width
-            // and each case writes its own width at the common
-            // valueOffset; the higher bytes of narrower cases stay
-            // uninitialized per spec.
+            // empty cases, primitive-payload cases, resource-handle-
+            // payload (own<R>) cases, AND string/byte[] payloads
+            // via cabi_realloc. Mixed payload widths are fine — the
+            // joined-flat slot reserves max-width and each case
+            // writes its own width at the common valueOffset.
             if (IsLikelyVariantBase(t))
             {
                 var cases = GetVariantCases(t);
@@ -1493,7 +1509,8 @@ namespace Wacs.Transpiler.AOT.Component
                 foreach (var c in cases)
                 {
                     if (c.Payload == null) continue;
-                    if (!IsResultArmStorable(c.Payload, resolver))
+                    if (!IsResultArmStorable(c.Payload, resolver,
+                            allowVariableLength: true))
                         return false;
                 }
                 return true;
