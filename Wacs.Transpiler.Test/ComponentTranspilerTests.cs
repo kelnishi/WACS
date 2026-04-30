@@ -1653,5 +1653,115 @@ namespace Wacs.Transpiler.Test
             // legitimately be null here.
             Assert.NotNull(result.Component);
         }
+
+        [Fact]
+        public void ExportInterfaceEmit_synthesizes_WitSource_tagged_world_interface()
+        {
+            // Phase B chain mode entry point — verify
+            // ExportInterfaceEmit synthesizes a [WitSource]-tagged
+            // I{World}World interface for each world's freestanding
+            // exports, plus an I{Iface} interface for each named
+            // interface declared in the package. Construct a
+            // CtPackage by hand (so we don't depend on a
+            // particular fixture's component-type section
+            // preservation) and verify the emitted types.
+
+            var pkgName = new Wacs.ComponentModel.Types.CtPackageName(
+                "local",
+                new[] { "demo" },
+                "1.0.0");
+
+            // interface ops { add: func(x: u32, y: u32) -> u32; }
+            var addFn = new Wacs.ComponentModel.Types.CtInterfaceFunction(
+                "add",
+                new Wacs.ComponentModel.Types.CtFunctionType(
+                    new[]
+                    {
+                        new Wacs.ComponentModel.Types.CtFuncParam(
+                            "x", Wacs.ComponentModel.Types.CtPrimType.U32),
+                        new Wacs.ComponentModel.Types.CtFuncParam(
+                            "y", Wacs.ComponentModel.Types.CtPrimType.U32),
+                    },
+                    Wacs.ComponentModel.Types.CtPrimType.U32,
+                    null));
+            var iface = new Wacs.ComponentModel.Types.CtInterfaceType(
+                pkgName, "ops",
+                System.Array.Empty<Wacs.ComponentModel.Types.CtNamedType>(),
+                new[] { addFn },
+                System.Array.Empty<Wacs.ComponentModel.Types.CtUse>(),
+                System.Array.Empty<Wacs.ComponentModel.Types.CtNamedType>());
+
+            // world demo {
+            //   export greet: func(name: string) -> string;
+            // }
+            var greetFn = new Wacs.ComponentModel.Types.CtFunctionType(
+                new[]
+                {
+                    new Wacs.ComponentModel.Types.CtFuncParam(
+                        "name", Wacs.ComponentModel.Types.CtPrimType.String),
+                },
+                Wacs.ComponentModel.Types.CtPrimType.String,
+                null);
+            var world = new Wacs.ComponentModel.Types.CtWorldType(
+                pkgName, "demo",
+                System.Array.Empty<Wacs.ComponentModel.Types.CtNamedType>(),
+                System.Array.Empty<Wacs.ComponentModel.Types.CtUse>(),
+                System.Array.Empty<Wacs.ComponentModel.Types.CtWorldImport>(),
+                new[] { new Wacs.ComponentModel.Types.CtWorldExport(
+                    "greet",
+                    new Wacs.ComponentModel.Types.CtExternFunc(greetFn)) },
+                System.Array.Empty<Wacs.ComponentModel.Types.CtWorldInclude>());
+
+            var pkg = new Wacs.ComponentModel.Types.CtPackage(
+                pkgName,
+                new[] { iface },
+                new[] { world });
+
+            // Build a fresh dynamic assembly + module to host the
+            // emitted interfaces.
+            var an = new AssemblyName("Wacs.Test.PhaseB");
+            var ab = AssemblyBuilder.DefineDynamicAssembly(
+                an, AssemblyBuilderAccess.RunAndCollect);
+            var mb = ab.DefineDynamicModule(an.Name!);
+
+            var emitted = ExportInterfaceEmit.EmitInterfaces(
+                mb, "Wacs.Test.PhaseB", pkg);
+
+            Assert.Equal(2, emitted.Count);
+
+            // I{Iface} for declared interface "ops".
+            var iOps = ab.GetType("Wacs.Test.PhaseB.IOps");
+            Assert.NotNull(iOps);
+            Assert.True(iOps!.IsInterface);
+            var iOpsAttr = iOps.GetCustomAttribute<
+                Wacs.ComponentModel.Runtime.WitSourceAttribute>();
+            Assert.NotNull(iOpsAttr);
+            Assert.Equal("ops", iOpsAttr!.Interface);
+            Assert.Equal("local:demo@1.0.0", iOpsAttr.Package);
+            // add(x: u32, y: u32) → uint Add(uint, uint)
+            var addMethod = iOps.GetMethod("Add");
+            Assert.NotNull(addMethod);
+            Assert.Equal(typeof(uint), addMethod!.ReturnType);
+            Assert.Equal(2, addMethod.GetParameters().Length);
+            var addAttr = addMethod.GetCustomAttribute<
+                Wacs.ComponentModel.Runtime.WitSourceAttribute>();
+            Assert.NotNull(addAttr);
+            Assert.Equal("add", addAttr!.Item);
+
+            // I{World}World synthesized for world "demo".
+            var iDemo = ab.GetType("Wacs.Test.PhaseB.IDemoWorld");
+            Assert.NotNull(iDemo);
+            Assert.True(iDemo!.IsInterface);
+            var iDemoAttr = iDemo.GetCustomAttribute<
+                Wacs.ComponentModel.Runtime.WitSourceAttribute>();
+            Assert.NotNull(iDemoAttr);
+            Assert.Equal("demo-world", iDemoAttr!.Interface);
+            // greet(name: string) → string Greet(string)
+            var greetMethod = iDemo.GetMethod("Greet");
+            Assert.NotNull(greetMethod);
+            Assert.Equal(typeof(string), greetMethod!.ReturnType);
+            Assert.Equal(typeof(string),
+                greetMethod.GetParameters()[0].ParameterType);
+        }
     }
 }
