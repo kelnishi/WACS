@@ -271,6 +271,39 @@ namespace Wacs.Transpiler.Test
             public uint Inspect() => _seed.Read();
         }
 
+        // ====== HTTP-handle-style composition surface ============
+        // Same shape as wasi:http/outgoing-handler.handle —
+        // own<R> + option<own<R>> in one call. The combination
+        // covers (a) resource-interface own<R> direct param,
+        // (b) Option recursion into own<R>'s 1-slot wire form,
+        // (c) total wasm wire of 1 + 2 = 3 slots.
+
+        [WitSource(@"interface http-env",
+            Package = "my:test@1.0.0", Interface = "http-env")]
+        public interface IHandler
+        {
+            // Encode (request handle's value, options-present) back
+            // as i32 so the test can probe both. Returns:
+            //   (req.Read() << 1) | (opts.HasValue ? 1u : 0u)
+            // — proves request resolved AND option branch fired.
+            [WitSource(@"handle: func(req: own<widget>, opts: option<own<widget>>) -> u32;",
+                Package = "my:test@1.0.0", Interface = "http-env",
+                Item = "handle")]
+            uint Handle(IWidget req, Option<IWidget> opts);
+        }
+
+        public sealed class HttpBundle
+        {
+            public IHandler HttpEnv { get; }
+            public HttpBundle(IHandler h) { HttpEnv = h; }
+        }
+
+        private sealed class HttpProbe : IHandler
+        {
+            public uint Handle(IWidget req, Option<IWidget> opts)
+                => (req.Read() << 1) | (opts.HasValue ? 1u : 0u);
+        }
+
         // Bundle holds IWidget for the instance-method path; static
         // methods bypass the bundle entirely (called via direct
         // static dispatch on the interface type).
@@ -1422,6 +1455,73 @@ namespace Wacs.Transpiler.Test
             0x0B, 0x0B, 0x01,
             0x00, 0x41, 0x00, 0x0B, 0x05,
             0x68, 0x65, 0x6C, 0x6C, 0x6F,
+        };
+
+        // (module
+        //   (type $tHandle (func (param i32 i32 i32) (result i32)))
+        //   (type $tEntry (func (result i32)))
+        //   (import "my:test/http-env@1.0.0" "handle"
+        //     (func $imp (type $tHandle)))
+        //   (func (export "call_with_opts") (result i32)
+        //     i32.const 30    ;; request handle (FakeWidget(50))
+        //     i32.const 1     ;; option disc = Some
+        //     i32.const 31    ;; opts handle (any non-null)
+        //     call $imp)      ;; → (50<<1)|1 = 101
+        //   (func (export "call_no_opts") (result i32)
+        //     i32.const 30    ;; request handle
+        //     i32.const 0     ;; option disc = None
+        //     i32.const 0     ;; opts handle (ignored)
+        //     call $imp))     ;; → (50<<1)|0 = 100
+        //
+        // Handles must fit single-byte signed LEB128 (value < 0x40)
+        // to avoid sign-extension. 30 and 31 round-trip cleanly.
+        //
+        // 3-slot wire (request + option-disc + option-handle).
+        // Direct-linked emit lifts request via Resources, then
+        // recursively lifts option<own<widget>>: brfalse on disc,
+        // Some path resolves opts handle via Resources too.
+        private static byte[] BuildHttpHandleFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types
+            // type 0: (i32 i32 i32) → i32 (7 bytes)
+            // type 1: () → i32 (4 bytes)
+            // size = count(1) + 7 + 4 = 12 = 0x0C
+            0x01, 0x0C, 0x02,
+            0x60, 0x03, 0x7F, 0x7F, 0x7F, 0x01, 0x7F,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section: 1 import
+            // size = 1 + 1 + 22 + 1 + 6 + 2 = 33 = 0x21
+            0x02, 0x21, 0x01,
+            // module: "my:test/http-env@1.0.0" (22)
+            0x16,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x68, 0x74, 0x74, 0x70, 0x2D, 0x65, 0x6E, 0x76,
+            0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            // entity: "handle" (6)
+            0x06,
+            0x68, 0x61, 0x6E, 0x64, 0x6C, 0x65,
+            0x00, 0x00,
+            // Function section: 2 funcs of type 1
+            0x03, 0x03, 0x02, 0x01, 0x01,
+            // Export section: 2 exports
+            // size = count(1) + (1+14+1+1) + (1+12+1+1) = 33 = 0x21
+            0x07, 0x21, 0x02,
+            0x0E,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x77, 0x69, 0x74,
+            0x68, 0x5F, 0x6F, 0x70, 0x74, 0x73,
+            0x00, 0x01,
+            0x0C,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x6E, 0x6F, 0x5F,
+            0x6F, 0x70, 0x74, 0x73,
+            0x00, 0x02,
+            // Code section: 2 bodies
+            // body0 = locals(1) + 3*i32.const(2) + call(2) + end(1) = 10
+            // body1 = same = 10
+            // size = 1 + 11 + 11 = 23 = 0x17
+            0x0A, 0x17, 0x02,
+            0x0A, 0x00, 0x41, 0x1E, 0x41, 0x01, 0x41, 0x1F, 0x10, 0x00, 0x0B,
+            0x0A, 0x00, 0x41, 0x1E, 0x41, 0x00, 0x41, 0x00, 0x10, 0x00, 0x0B,
         };
 
         // (module
@@ -3385,6 +3485,85 @@ namespace Wacs.Transpiler.Test
             // and the inspect method resolved that handle back.
             Assert.IsType<int>(raw);
             Assert.Equal(2024, (int)raw);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_HttpHandleStyle_OwnPlusOptionOwn()
+        {
+            // Same shape as wasi:http/outgoing-handler.handle —
+            // own<R> + option<own<R>> in one call. Tests both
+            // resolution paths (request always-Some, opts in Some
+            // and None branches) and the canonical 1+2-slot wire
+            // layout that real WASI HTTP guests will hit.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Func<int, int, int, int>>(
+                ("my:test/http-env@1.0.0", "handle"),
+                (_, _, _) => throw new InvalidOperationException(
+                    "stub for handle must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildHttpHandleFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(HttpBundle),
+                resourcesType: typeof(TestResources));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/http-env@1.0.0", "handle", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.HttpHandle", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_http_env_1_0_0_handle"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for handle must not be invoked"),
+                });
+
+            // Pre-register widgets at the handles the wasm passes:
+            //   handle 30 → request widget (FakeWidget(50))
+            //   handle 31 → opts widget   (any non-null impl)
+            var resources = new TestResources();
+            resources.Register(typeof(IWidget), 30, new FakeWidget(50u));
+            resources.Register(typeof(IWidget), 31, new FakeWidget(99u));
+            var bundle = new HttpBundle(new HttpProbe());
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            // Some branch: returns (50<<1)|1 = 101.
+            var callWith = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_with_opts"))!;
+            object? rWith = callWith.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<int>(rWith);
+            Assert.Equal(101, (int)rWith);
+
+            // None branch: returns (50<<1)|0 = 100.
+            var callNo = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_no_opts"))!;
+            object? rNo = callNo.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<int>(rNo);
+            Assert.Equal(100, (int)rNo);
         }
     }
 }
