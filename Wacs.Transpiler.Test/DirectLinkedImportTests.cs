@@ -823,6 +823,36 @@ namespace Wacs.Transpiler.Test
             public Option<XYPair> Xy() => _v;
         }
 
+        // ====== list<tuple<u32, u32>> return =====================
+        // Wire form: outer (i32 ptr, i32 count) at retArea + a
+        // contiguous packed array of tuple<u32, u32> elements
+        // (each 8 bytes) at *(ptr). Mirrors realistic shapes like
+        // wasi:http/types.list-of-tuples.
+
+        [WitSource(@"interface listtup-env",
+            Package = "my:test@1.0.0", Interface = "listtup-env")]
+        public interface IPairListSource
+        {
+            [WitSource(@"all: func() -> list<tuple<u32, u32>>;",
+                Package = "my:test@1.0.0", Interface = "listtup-env",
+                Item = "all")]
+            (uint, uint)[] All();
+        }
+
+        public sealed class PairListBundle
+        {
+            public IPairListSource ListtupEnv { get; }
+            public PairListBundle(IPairListSource s)
+            { ListtupEnv = s; }
+        }
+
+        private sealed class FixedPairList : IPairListSource
+        {
+            private readonly (uint, uint)[] _v;
+            public FixedPairList((uint, uint)[] v) { _v = v; }
+            public (uint, uint)[] All() => _v;
+        }
+
         // ====== Variant with tuple payload =====================
         // variant pos { home, point(tuple<u32, u32>) } — tap +
         // tuple-bearing case. valueOffset=4, payload tuple at
@@ -2459,6 +2489,100 @@ namespace Wacs.Transpiler.Test
             0x0B, 0x00,
             0x41, 0x10, 0x10, 0x00,
             0x41, 0x10, 0x28, 0x02, 0x08,
+            0x0B,
+        };
+
+        // list<tuple<u32,u32>> retArea: i32 ptr @0 + i32 count @4.
+        // *(ptr) is a packed array of (u32, u32) — 8 bytes per
+        // element. cabi_realloc allocates the outer buffer; the
+        // emit loops per-element to write a@elemBase, b@elemBase+4.
+        // Probes: count, first.a (ptr→load i32@0→load i32@0),
+        // first.b (ptr→load i32@0→load i32@4).
+        private static byte[] BuildListOfTupleReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 3 types
+            0x01, 0x11, 0x03,
+            0x60, 0x04, 0x7F, 0x7F, 0x7F, 0x7F, 0x01, 0x7F,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // module: "my:test/listtup-env@1.0.0" (25)
+            // entity: "all" (3)
+            // size = 1 + 1 + 25 + 1 + 3 + 2 = 33 = 0x21
+            0x02, 0x21, 0x01,
+            0x19,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x6C, 0x69, 0x73, 0x74, 0x74, 0x75, 0x70, 0x2D,
+            0x65, 0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x03,
+            0x61, 0x6C, 0x6C,
+            0x00, 0x01,
+            // Function section: 4 local funcs
+            //   funcs[0] = type 0 (cabi_realloc)
+            //   funcs[1..3] = type 2
+            0x03, 0x05, 0x04, 0x00, 0x02, 0x02, 0x02,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Global: bump allocator at 32
+            0x06, 0x06, 0x01,
+            0x7F, 0x01, 0x41, 0x20, 0x0B,
+            // Export section: 4 exports
+            //   call_all_count   (14): 17
+            //   call_all_first_a (16): 19
+            //   call_all_first_b (16): 19
+            //   cabi_realloc     (12): 15
+            // size = 1 + 17 + 19 + 19 + 15 = 71 = 0x47
+            0x07, 0x47, 0x04,
+            0x0E,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x61, 0x6C, 0x6C,
+            0x5F, 0x63, 0x6F, 0x75, 0x6E, 0x74,
+            0x00, 0x02,
+            0x10,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x61, 0x6C, 0x6C,
+            0x5F, 0x66, 0x69, 0x72, 0x73, 0x74, 0x5F, 0x61,
+            0x00, 0x03,
+            0x10,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x61, 0x6C, 0x6C,
+            0x5F, 0x66, 0x69, 0x72, 0x73, 0x74, 0x5F, 0x62,
+            0x00, 0x04,
+            0x0C,
+            0x63, 0x61, 0x62, 0x69, 0x5F, 0x72, 0x65, 0x61,
+            0x6C, 0x6C, 0x6F, 0x63,
+            0x00, 0x01,
+            // Code section: 4 bodies
+            //   body0 cabi_realloc      : 11 → 12
+            //   body1 call_all_count    : 11 → 12
+            //   body2 call_all_first_a  : 14 → 15
+            //   body3 call_all_first_b  : 14 → 15
+            // size = 1 + 12 + 12 + 15 + 15 = 55 = 0x37
+            0x0A, 0x37, 0x04,
+            // body0 cabi_realloc
+            0x0B, 0x00,
+            0x23, 0x00,
+            0x23, 0x00,
+            0x20, 0x03,
+            0x6A,
+            0x24, 0x00,
+            0x0B,
+            // body1 call_all_count
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x04,
+            0x0B,
+            // body2 call_all_first_a (chase outer ptr → first.a)
+            0x0E, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10,
+            0x28, 0x02, 0x00,                 // outer_ptr
+            0x28, 0x02, 0x00,                 // first.a (i32 at *ptr+0)
+            0x0B,
+            // body3 call_all_first_b (chase outer ptr → first.b)
+            0x0E, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10,
+            0x28, 0x02, 0x00,                 // outer_ptr
+            0x28, 0x02, 0x04,                 // first.b (i32 at *ptr+4)
             0x0B,
         };
 
@@ -8751,6 +8875,85 @@ namespace Wacs.Transpiler.Test
                 Assert.Equal(16, (int)callB.Invoke(fresh2,
                     Array.Empty<object>())!);
             }
+        }
+
+        [Fact]
+        public void DirectLinkedImport_ListOfTupleReturn_ViaCabiRealloc()
+        {
+            // list<tuple<u32, u32>> wire form: outer (ptr, count)
+            // at retArea + a packed array of (a, b) tuples at *ptr.
+            // The emit allocates the outer buffer once via
+            // cabi_realloc, loops to write each element's fields,
+            // then writes (ptr, count) to retArea. Probes: count,
+            // first element's a/b via outer-ptr chase.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/listtup-env@1.0.0", "all"),
+                _ => throw new InvalidOperationException(
+                    "stub for all must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildListOfTupleReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(PairListBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/listtup-env@1.0.0", "all", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.ListTupRet", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_listtup_env_1_0_0_all"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for all must not be invoked"),
+                });
+
+            var bundle = new PairListBundle(new FixedPairList(
+                new (uint, uint)[] { (9u, 16u), (3u, 4u) }));
+
+            var instance = Activator.CreateInstance(
+                result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+            var callCount = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_all_count"))!;
+            Assert.Equal(2, (int)callCount.Invoke(instance,
+                Array.Empty<object>())!);
+
+            var fresh = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+            var callA = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_all_first_a"))!;
+            Assert.Equal(9, (int)callA.Invoke(fresh,
+                Array.Empty<object>())!);
+
+            var fresh2 = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+            var callB = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_all_first_b"))!;
+            Assert.Equal(16, (int)callB.Invoke(fresh2,
+                Array.Empty<object>())!);
         }
     }
 }
