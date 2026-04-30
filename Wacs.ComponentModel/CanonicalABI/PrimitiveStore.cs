@@ -159,6 +159,46 @@ namespace Wacs.ComponentModel.CanonicalABI
                 dest.AsSpan(retAreaOffset + 4, 4), value.Length);
         }
 
+        /// <summary>
+        /// Store a <c>string[]</c> (canon-ABI <c>list&lt;string&gt;</c>)
+        /// into wasm linear memory and write the (ptr, count) pair to
+        /// the retArea slot.
+        ///
+        /// <para>Two-level allocation: cabi_realloc once for the
+        /// outer array of (ptr, len) pairs (8 bytes per element),
+        /// then once per element for the UTF-8 byte buffer. Each
+        /// (sptr, slen) pair is written into its outer slot.</para>
+        ///
+        /// <para>Used by direct-linked aggregate-RETURN emit when the
+        /// host returns string[].</para>
+        /// </summary>
+        public static void StoreStringList(byte[] dest, int retAreaOffset,
+            string[] value, Func<int, int, int, int, int> cabiRealloc)
+        {
+            if (cabiRealloc == null)
+                throw new InvalidOperationException(
+                    "list<string> returns require the component to "
+                    + "export `cabi_realloc`.");
+            int count = value.Length;
+            int outerByteCount = count * 8;
+            int outerPtr = cabiRealloc(0, 0, 4, outerByteCount);
+            for (int i = 0; i < count; i++)
+            {
+                var bytes = Encoding.UTF8.GetBytes(value[i]);
+                var sPtr = cabiRealloc(0, 0, 1, bytes.Length);
+                Buffer.BlockCopy(bytes, 0, dest, sPtr, bytes.Length);
+                BinaryPrimitives.WriteInt32LittleEndian(
+                    dest.AsSpan(outerPtr + i * 8, 4), sPtr);
+                BinaryPrimitives.WriteInt32LittleEndian(
+                    dest.AsSpan(outerPtr + i * 8 + 4, 4),
+                    bytes.Length);
+            }
+            BinaryPrimitives.WriteInt32LittleEndian(
+                dest.AsSpan(retAreaOffset, 4), outerPtr);
+            BinaryPrimitives.WriteInt32LittleEndian(
+                dest.AsSpan(retAreaOffset + 4, 4), count);
+        }
+
         // sizeof(T) requires unsafe; cache the per-T size once via
         // Marshal.SizeOf to avoid the unsafe block in the hot path.
         // For canon-ABI primitives (i8/i16/i32/i64/f32/f64) this

@@ -359,7 +359,11 @@ namespace Wacs.Transpiler.AOT.Component
                 bool isVariant = IsLikelyVariantBase(method.ReturnType);
                 bool isStringReturn = method.ReturnType == typeof(string);
                 bool isByteArrayReturn = method.ReturnType == typeof(byte[]);
+                bool isStringArrayReturn = method.ReturnType.IsArray
+                    && method.ReturnType.GetArrayRank() == 1
+                    && method.ReturnType.GetElementType() == typeof(string);
                 bool isPrimArrayReturn = !isByteArrayReturn
+                    && !isStringArrayReturn
                     && method.ReturnType.IsArray
                     && method.ReturnType.GetArrayRank() == 1
                     && IsListPrimitiveElement(
@@ -367,12 +371,13 @@ namespace Wacs.Transpiler.AOT.Component
 
                 int offsetSoFar = 0;
                 if (isStringReturn || isByteArrayReturn
-                    || isPrimArrayReturn)
+                    || isPrimArrayReturn || isStringArrayReturn)
                 {
                     // String / list<T> retArea layout: i32 ptr @0,
                     // i32 len/count @4. Encode (UTF-8 for string;
-                    // raw LE bytes for primitive arrays), call
-                    // cabi_realloc to allocate guest buffer,
+                    // raw LE bytes for primitive arrays; outer
+                    // (ptr,len) pairs for string[]), call
+                    // cabi_realloc to allocate guest buffer(s),
                     // copy bytes, write (ptr, len) pair.
                     //
                     //   StoreXxx(memory, retArea, value,
@@ -389,6 +394,7 @@ namespace Wacs.Transpiler.AOT.Component
                     MethodInfo storeMethod;
                     if (isStringReturn) storeMethod = StoreStringMethod;
                     else if (isByteArrayReturn) storeMethod = StoreByteArrayMethod;
+                    else if (isStringArrayReturn) storeMethod = StoreStringListMethod;
                     else storeMethod = ResolveStorePrimitiveArrayMethod(
                         method.ReturnType.GetElementType()!);
                     il.Emit(OpCodes.Call, storeMethod);
@@ -1152,6 +1158,11 @@ namespace Wacs.Transpiler.AOT.Component
                 nameof(PrimitiveStore.StorePrimitiveArray),
                 BindingFlags.Public | BindingFlags.Static)!;
 
+        private static readonly MethodInfo StoreStringListMethod =
+            typeof(PrimitiveStore).GetMethod(
+                nameof(PrimitiveStore.StoreStringList),
+                BindingFlags.Public | BindingFlags.Static)!;
+
         private static readonly ConcurrentDictionary<Type, MethodInfo>
             StorePrimArrayCache = new();
 
@@ -1411,12 +1422,14 @@ namespace Wacs.Transpiler.AOT.Component
             if (t == typeof(byte[])) return true;
             // list<T> for unmanaged primitive T (s8..f64) — same wire
             // form as byte[] (8-byte retArea: ptr + count) but with
-            // per-T element width. Goes through cabi_realloc +
-            // StorePrimitiveArray<T>.
+            // per-T element width. list<string> rides via two-level
+            // cabi_realloc (outer array of (ptr,len) + per-element
+            // UTF-8 buffers).
             if (t.IsArray && t.GetArrayRank() == 1)
             {
                 var elem = t.GetElementType()!;
                 if (IsListPrimitiveElement(elem)) return true;
+                if (elem == typeof(string)) return true;
             }
             if (IsLikelyRecordType(t))
             {
