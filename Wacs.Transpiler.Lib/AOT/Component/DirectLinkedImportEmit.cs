@@ -501,6 +501,15 @@ namespace Wacs.Transpiler.AOT.Component
 
                             bool isStringPayload = c.Payload == typeof(string);
                             bool isByteArrayPayload = c.Payload == typeof(byte[]);
+                            bool isPrimArrayPayload = !isByteArrayPayload
+                                && c.Payload.IsArray
+                                && c.Payload.GetArrayRank() == 1
+                                && IsListPrimitiveElement(
+                                    c.Payload.GetElementType()!);
+                            bool isStringArrayPayload =
+                                c.Payload.IsArray
+                                && c.Payload.GetArrayRank() == 1
+                                && c.Payload.GetElementType() == typeof(string);
                             bool isAggregatePayload =
                                 IsTupleOfPrimitives(c.Payload)
                                 || IsRecordOfPrimitives(c.Payload);
@@ -541,7 +550,8 @@ namespace Wacs.Transpiler.AOT.Component
                                 il.Emit(OpCodes.Call,
                                     ResolveStoreMethod(typeof(int)));
                             }
-                            else if (isStringPayload || isByteArrayPayload)
+                            else if (isStringPayload || isByteArrayPayload
+                                || isPrimArrayPayload || isStringArrayPayload)
                             {
                                 // Stack: [memory_data, retArea+valueOffset]
                                 // Push value + cabi_realloc + call.
@@ -551,9 +561,17 @@ namespace Wacs.Transpiler.AOT.Component
                                     valueProp.GetGetMethod()!);
                                 il.Emit(OpCodes.Ldarg_0);
                                 il.Emit(OpCodes.Ldfld, CabiReallocField);
-                                il.Emit(OpCodes.Call, isStringPayload
-                                    ? StoreStringMethod
-                                    : StoreByteArrayMethod);
+                                MethodInfo storeMethod;
+                                if (isStringPayload)
+                                    storeMethod = StoreStringMethod;
+                                else if (isByteArrayPayload)
+                                    storeMethod = StoreByteArrayMethod;
+                                else if (isStringArrayPayload)
+                                    storeMethod = StoreStringListMethod;
+                                else
+                                    storeMethod = ResolveStorePrimitiveArrayMethod(
+                                        c.Payload.GetElementType()!);
+                                il.Emit(OpCodes.Call, storeMethod);
                             }
                             else
                             {
@@ -591,10 +609,19 @@ namespace Wacs.Transpiler.AOT.Component
                     bool innerIsByteArray = inner == typeof(byte[]);
                     bool innerIsTuple = IsTupleOfPrimitives(inner);
                     bool innerIsRecord = IsRecordOfPrimitives(inner);
+                    bool innerIsPrimArray = !innerIsByteArray
+                        && inner.IsArray
+                        && inner.GetArrayRank() == 1
+                        && IsListPrimitiveElement(
+                            inner.GetElementType()!);
+                    bool innerIsStringArray = inner.IsArray
+                        && inner.GetArrayRank() == 1
+                        && inner.GetElementType() == typeof(string);
                     int valueAlign;
                     if (innerIsResource || innerIsString
-                        || innerIsByteArray)
-                        valueAlign = 4;  // (ptr, len) pair starts on i32 boundary
+                        || innerIsByteArray || innerIsPrimArray
+                        || innerIsStringArray)
+                        valueAlign = 4;  // (ptr, len/count) pair starts on i32 boundary
                     else if (innerIsTuple || innerIsRecord)
                         valueAlign = MaxFieldAlign(inner);
                     else
@@ -666,7 +693,8 @@ namespace Wacs.Transpiler.AOT.Component
                             il.Emit(OpCodes.Call,
                                 ResolveStoreMethod(typeof(int)));
                         }
-                        else if (innerIsString || innerIsByteArray)
+                        else if (innerIsString || innerIsByteArray
+                            || innerIsPrimArray || innerIsStringArray)
                         {
                             // Stack: [memory_data, retArea+valueOffset]
                             // Push value + cabi_realloc + call.
@@ -674,9 +702,17 @@ namespace Wacs.Transpiler.AOT.Component
                             il.Emit(OpCodes.Call, valueGetter);
                             il.Emit(OpCodes.Ldarg_0);
                             il.Emit(OpCodes.Ldfld, CabiReallocField);
-                            il.Emit(OpCodes.Call, innerIsString
-                                ? StoreStringMethod
-                                : StoreByteArrayMethod);
+                            MethodInfo storeMethod;
+                            if (innerIsString)
+                                storeMethod = StoreStringMethod;
+                            else if (innerIsByteArray)
+                                storeMethod = StoreByteArrayMethod;
+                            else if (innerIsStringArray)
+                                storeMethod = StoreStringListMethod;
+                            else
+                                storeMethod = ResolveStorePrimitiveArrayMethod(
+                                    inner.GetElementType()!);
+                            il.Emit(OpCodes.Call, storeMethod);
                         }
                         else
                         {
@@ -1545,6 +1581,14 @@ namespace Wacs.Transpiler.AOT.Component
                     // slot. valueOffset = Align(1, max-field-align).
                     if (IsTupleOfPrimitives(inner)) return true;
                     if (IsRecordOfPrimitives(inner)) return true;
+                    // Option<list<T>> (primitive T) / Option<string[]>:
+                    // outer (ptr, count) at retArea+valueOffset.
+                    if (inner.IsArray && inner.GetArrayRank() == 1)
+                    {
+                        var elem = inner.GetElementType()!;
+                        if (IsListPrimitiveElement(elem)) return true;
+                        if (elem == typeof(string)) return true;
+                    }
                     return false;
                 }
                 // Result<TOk, TErr>: each arm must be storable
@@ -1903,11 +1947,10 @@ namespace Wacs.Transpiler.AOT.Component
 
         // True when the Ok or Err arm of a Result return is
         // storable: primitive, resource interface (Resources class
-        // mints a handle), string/byte[] (cabi_realloc) — when
-        // allowVariableLength=true — OR tuple/record-of-primitives
-        // (per-field write at common arm offset).
-        // Variants set allowVariableLength=false because the variant
-        // emit path doesn't yet handle (ptr,len) payload widths.
+        // mints a handle), string/byte[]/primitive[]/string[]
+        // (cabi_realloc) — when allowVariableLength=true — OR
+        // tuple/record-of-primitives (per-field write at common
+        // arm offset).
         private static bool IsResultArmStorable(Type t,
             HostPackageResolver? resolver,
             bool allowVariableLength = false)
@@ -1924,18 +1967,26 @@ namespace Wacs.Transpiler.AOT.Component
                 && (IsTupleOfPrimitives(t)
                     || IsRecordOfPrimitives(t)))
                 return true;
+            if (allowVariableLength
+                && t.IsArray && t.GetArrayRank() == 1)
+            {
+                var elem = t.GetElementType()!;
+                if (IsListPrimitiveElement(elem)) return true;
+                if (elem == typeof(string)) return true;
+            }
             return false;
         }
 
         // Alignment for a Result-arm type. Resource handles are i32,
-        // string/byte[] are (i32 ptr + i32 len) → both align 4.
-        // Tuple/record arms use the max field alignment.
+        // string/byte[]/list<T>/string[] are (i32 ptr + i32 len/count)
+        // → all align 4. Tuple/record arms use the max field
+        // alignment.
         private static int AlignOfResultArm(Type t)
         {
             if (IsStorablePrimitive(t)) return AlignOfPrimitive(t);
             if (IsTupleOfPrimitives(t) || IsRecordOfPrimitives(t))
                 return MaxFieldAlign(t);
-            return 4;  // resource handle OR (ptr, len) pair
+            return 4;  // resource handle / list-style (ptr, len/count)
         }
 
         // Emit IL that stores a Result arm's value at
@@ -1957,6 +2008,13 @@ namespace Wacs.Transpiler.AOT.Component
                 && resourcesType != null;
             bool isString = armType == typeof(string);
             bool isByteArray = armType == typeof(byte[]);
+            bool isPrimArray = !isByteArray
+                && armType.IsArray
+                && armType.GetArrayRank() == 1
+                && IsListPrimitiveElement(armType.GetElementType()!);
+            bool isStringArray = armType.IsArray
+                && armType.GetArrayRank() == 1
+                && armType.GetElementType() == typeof(string);
             bool isAggregate = IsTupleOfPrimitives(armType)
                 || IsRecordOfPrimitives(armType);
 
@@ -2000,19 +2058,24 @@ namespace Wacs.Transpiler.AOT.Component
                     ResolveAllocateResourceMethod(resourcesType!));
                 il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(int)));
             }
-            else if (isString || isByteArray)
+            else if (isString || isByteArray
+                || isPrimArray || isStringArray)
             {
                 // Stack: [memory_data, retArea+valueOffset]
-                // StoreString/StoreByteArray takes
-                //   (byte[] dest, int retAreaOffset, T value, Func realloc)
-                // — push value + cabi_realloc + call.
+                // StoreXxx takes (byte[] dest, int retAreaOffset,
+                //   T value, Func realloc) — push value +
+                // cabi_realloc + call.
                 il.Emit(OpCodes.Ldloca, returnLocal);
                 il.Emit(OpCodes.Call, armGetter);
                 il.Emit(OpCodes.Ldarg_0);
                 il.Emit(OpCodes.Ldfld, CabiReallocField);
-                il.Emit(OpCodes.Call, isString
-                    ? StoreStringMethod
-                    : StoreByteArrayMethod);
+                MethodInfo storeMethod;
+                if (isString) storeMethod = StoreStringMethod;
+                else if (isByteArray) storeMethod = StoreByteArrayMethod;
+                else if (isStringArray) storeMethod = StoreStringListMethod;
+                else storeMethod = ResolveStorePrimitiveArrayMethod(
+                    armType.GetElementType()!);
+                il.Emit(OpCodes.Call, storeMethod);
             }
             else
             {
