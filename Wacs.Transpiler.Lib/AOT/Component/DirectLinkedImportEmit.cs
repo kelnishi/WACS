@@ -419,6 +419,30 @@ namespace Wacs.Transpiler.AOT.Component
                     ResolveValueTupleCtor(clrType));
                 return;
             }
+            // User-class record: newobj parameterless ctor, then for
+            // each public property in declaration order:
+            //   dup
+            //   <emit lift for property type at current cursor>
+            //   callvirt set_<Property>
+            //   advance cursor by property's flat-slot count
+            if (IsLikelyRecordType(clrType))
+            {
+                var ctor = ResolveRecordCtor(clrType);
+                il.Emit(OpCodes.Newobj, ctor);
+                int recCursor = wasmCursor;
+                foreach (var p in GetRecordProperties(clrType))
+                {
+                    int ps = CanonicalSlotCount(p.PropertyType,
+                        out _, resolver);
+                    il.Emit(OpCodes.Dup);
+                    EmitLiftForType(il, p.PropertyType, wasmParams,
+                        temps, recCursor, resolver, resourcesType);
+                    il.Emit(OpCodes.Callvirt,
+                        p.GetSetMethod()!);
+                    recCursor += ps;
+                }
+                return;
+            }
             // Result<TOk, TErr>: same recursive shape as Option but
             // with a 2-case (Ok=0 / Err=1) discriminant routing to
             // the correct construction helper. v0 requires Ok and
@@ -620,6 +644,63 @@ namespace Wacs.Transpiler.AOT.Component
             => ValueTupleCtorCache.GetOrAdd(tupleType, t =>
                 t.GetConstructor(t.GetGenericArguments())!);
 
+        // Heuristic: is this CLR type a "record" (a sealed class
+        // with public parameterless ctor + ≥1 public {get;set;}
+        // properties) suitable for direct-linked field-by-field
+        // construction? Matches what WitHostInterfaceGenerator
+        // emits for WIT record types AND user-defined records that
+        // follow the same convention.
+        //
+        // Conservative — exclude built-in framework types,
+        // generics (already handled by Option/Result/Tuple cases),
+        // and anything not a class. Keeps the false-positive
+        // risk low: record-like POCOs in user code are accepted;
+        // System.Tuple and similar are not.
+        private static bool IsLikelyRecordType(Type t)
+        {
+            if (t.IsValueType || t.IsArray || t.IsInterface) return false;
+            if (t == typeof(string) || t == typeof(object)) return false;
+            if (t.IsGenericType) return false;       // Option/Result/Tuple paths
+            if (t.IsAbstract) return false;
+            if (t.GetConstructor(Type.EmptyTypes) == null) return false;
+            // Must have at least one public read/write property — the
+            // shape WitHostInterfaceGenerator emits.
+            var props = t.GetProperties(BindingFlags.Public
+                | BindingFlags.Instance);
+            foreach (var p in props)
+                if (p.CanRead && p.CanWrite) return true;
+            return false;
+        }
+
+        private static readonly ConcurrentDictionary<Type, PropertyInfo[]>
+            RecordPropertiesCache = new();
+
+        // Public read/write instance properties in MetadataToken
+        // order — this is the canonical field-declaration order
+        // for properties emitted by Roslyn. The wire layout is
+        // declaration order so this needs to match exactly.
+        private static PropertyInfo[] GetRecordProperties(Type t)
+            => RecordPropertiesCache.GetOrAdd(t, type =>
+            {
+                var list = new System.Collections.Generic.List<PropertyInfo>();
+                foreach (var p in type.GetProperties(BindingFlags.Public
+                    | BindingFlags.Instance))
+                {
+                    if (p.CanRead && p.CanWrite)
+                        list.Add(p);
+                }
+                list.Sort((a, b) => a.MetadataToken.CompareTo(
+                    b.MetadataToken));
+                return list.ToArray();
+            });
+
+        private static readonly ConcurrentDictionary<Type, ConstructorInfo>
+            RecordCtorCache = new();
+
+        private static ConstructorInfo ResolveRecordCtor(Type t)
+            => RecordCtorCache.GetOrAdd(t, type =>
+                type.GetConstructor(Type.EmptyTypes)!);
+
         // Per-CLR-type wasm flat-slot count for canonical-ABI lower:
         //   primitive (compat with i32/i64/f32/f64) → 1
         //   string                                  → 2 (ptr, len)
@@ -689,6 +770,33 @@ namespace Wacs.Transpiler.AOT.Component
                     combined.AddRange(ew);
                 }
                 if (ok)
+                {
+                    wasmTypes = combined.ToArray();
+                    return total;
+                }
+            }
+            // User-class record: declaration-order concatenation of
+            // each public auto-property's flat-slot count. Detected
+            // by the IsLikelyRecordType heuristic (sealed class with
+            // a public parameterless ctor + ≥1 public {get;set;} —
+            // matches what WitHostInterfaceGenerator emits for WIT
+            // record types, plus user-defined records following the
+            // same convention).
+            if (IsLikelyRecordType(clrType))
+            {
+                var props = GetRecordProperties(clrType);
+                var combined = new System.Collections.Generic.List<ValType>();
+                int total = 0;
+                bool ok = true;
+                foreach (var p in props)
+                {
+                    int ps = CanonicalSlotCount(p.PropertyType,
+                        out var pw, resolver);
+                    if (ps <= 0) { ok = false; break; }
+                    total += ps;
+                    combined.AddRange(pw);
+                }
+                if (ok && total > 0)
                 {
                     wasmTypes = combined.ToArray();
                     return total;
