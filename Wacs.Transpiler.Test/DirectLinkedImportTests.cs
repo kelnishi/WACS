@@ -941,6 +941,45 @@ namespace Wacs.Transpiler.Test
             public Option<uint>[] All() => _v;
         }
 
+        // ====== list<variant<...>> return ========================
+        // variant light { red, green, blue }: 3 empty cases, each
+        // element packs into 1 byte (just the disc). List<Light>
+        // is N contiguous u8 disc bytes at *(outer_ptr).
+
+        [WitSource(@"variant light { red, green, blue }",
+            Package = "my:test@1.0.0", Interface = "listvar-env",
+            Item = "light")]
+        public abstract class Light
+        {
+            public sealed class LightRed : Light { }
+            public sealed class LightGreen : Light { }
+            public sealed class LightBlue : Light { }
+        }
+
+        [WitSource(@"interface listvar-env",
+            Package = "my:test@1.0.0", Interface = "listvar-env")]
+        public interface ILightListSource
+        {
+            [WitSource(@"all: func() -> list<light>;",
+                Package = "my:test@1.0.0", Interface = "listvar-env",
+                Item = "all")]
+            Light[] All();
+        }
+
+        public sealed class LightListBundle
+        {
+            public ILightListSource ListvarEnv { get; }
+            public LightListBundle(ILightListSource s)
+            { ListvarEnv = s; }
+        }
+
+        private sealed class FixedLightList : ILightListSource
+        {
+            private readonly Light[] _v;
+            public FixedLightList(Light[] v) { _v = v; }
+            public Light[] All() => _v;
+        }
+
         // ====== list<own<R>> (IWidget[]) return =================
         // Per-element AllocateResource mints a handle for each
         // resource instance; the outer (ptr, count) lands at retArea
@@ -3093,6 +3132,92 @@ namespace Wacs.Transpiler.Test
             0x0B, 0x00,
             0x41, 0x10, 0x10, 0x00,
             0x41, 0x10, 0x28, 0x02, 0x08,    // i32.load offset=8 (inner value)
+            0x0B,
+        };
+
+        // list<light> retArea: i32 ptr @0 + i32 count @4.
+        // *(ptr) is N contiguous u8 disc bytes (each variant
+        // element is just its u8 disc — light has 3 empty cases,
+        // no payload). Probes count + first/second elem disc.
+        private static byte[] BuildListOfVariantReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 3 types
+            0x01, 0x11, 0x03,
+            0x60, 0x04, 0x7F, 0x7F, 0x7F, 0x7F, 0x01, 0x7F,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // module: "my:test/listvar-env@1.0.0" (25)
+            // entity: "all" (3)
+            // size = 1 + 1 + 25 + 1 + 3 + 2 = 33 = 0x21
+            0x02, 0x21, 0x01,
+            0x19,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x6C, 0x69, 0x73, 0x74, 0x76, 0x61, 0x72, 0x2D,
+            0x65, 0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x03,
+            0x61, 0x6C, 0x6C,
+            0x00, 0x01,
+            // Function section: 4 local funcs
+            0x03, 0x05, 0x04, 0x00, 0x02, 0x02, 0x02,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Global: bump allocator at 32
+            0x06, 0x06, 0x01,
+            0x7F, 0x01, 0x41, 0x20, 0x0B,
+            // Export section: 4 exports
+            //   call_all_count       (14): 17
+            //   call_all_first_disc  (19): 22
+            //   call_all_second_disc (20): 23
+            //   cabi_realloc         (12): 15
+            // size = 1 + 17 + 22 + 23 + 15 = 78 = 0x4E
+            0x07, 0x4E, 0x04,
+            0x0E,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x61, 0x6C, 0x6C,
+            0x5F, 0x63, 0x6F, 0x75, 0x6E, 0x74,
+            0x00, 0x02,
+            0x13,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x61, 0x6C, 0x6C,
+            0x5F, 0x66, 0x69, 0x72, 0x73, 0x74, 0x5F, 0x64,
+            0x69, 0x73, 0x63,
+            0x00, 0x03,
+            0x14,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x61, 0x6C, 0x6C,
+            0x5F, 0x73, 0x65, 0x63, 0x6F, 0x6E, 0x64, 0x5F,
+            0x64, 0x69, 0x73, 0x63,
+            0x00, 0x04,
+            0x0C,
+            0x63, 0x61, 0x62, 0x69, 0x5F, 0x72, 0x65, 0x61,
+            0x6C, 0x6C, 0x6F, 0x63,
+            0x00, 0x01,
+            // Code section: 4 bodies
+            //   body0 cabi_realloc        : 11 → 12
+            //   body1 call_all_count      : 11 → 12
+            //   body2 call_all_first_disc : 14 → 15
+            //   body3 call_all_second_disc: 14 → 15
+            // size = 1 + 12 + 12 + 15 + 15 = 55 = 0x37
+            0x0A, 0x37, 0x04,
+            0x0B, 0x00,
+            0x23, 0x00,
+            0x23, 0x00,
+            0x20, 0x03,
+            0x6A,
+            0x24, 0x00,
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x04,
+            0x0B,
+            0x0E, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x00,    // outer ptr
+            0x2D, 0x00, 0x00,                 // first elem disc (load8_u offset=0)
+            0x0B,
+            0x0E, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x00,    // outer ptr
+            0x2D, 0x00, 0x01,                 // second elem disc (load8_u offset=1)
             0x0B,
         };
 
@@ -11728,6 +11853,90 @@ namespace Wacs.Transpiler.Test
             var callByte = result.ExportsInterface!.GetMethod(
                 InterfaceGenerator.SanitizeName("call_go_first_byte"))!;
             Assert.Equal(0x48, (int)callByte.Invoke(fresh2,
+                Array.Empty<object>())!);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_ListOfVariantReturn_PerElement()
+        {
+            // list<light> with all-empty cases packs as N u8 disc
+            // bytes. Per-element write goes through
+            // EmitVariantStoreAt at outerPtr+i*1. Verifies the
+            // list-of-variant dispatch in EmitListOfOptionOrResultReturn.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/listvar-env@1.0.0", "all"),
+                _ => throw new InvalidOperationException(
+                    "stub for all must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildListOfVariantReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(LightListBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/listvar-env@1.0.0", "all", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.ListVarRet", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_listvar_env_1_0_0_all"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for all must not be invoked"),
+                });
+
+            // Light[] { Red, Green, Blue } → count=3,
+            // first elem disc = 0 (Red), second = 1 (Green).
+            var bundle = new LightListBundle(new FixedLightList(
+                new Light[]
+                {
+                    new Light.LightRed(),
+                    new Light.LightGreen(),
+                    new Light.LightBlue(),
+                }));
+            var instance = Activator.CreateInstance(
+                result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+
+            var callCount = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_all_count"))!;
+            Assert.Equal(3, (int)callCount.Invoke(instance,
+                Array.Empty<object>())!);
+
+            var fresh = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+            var callFirst = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_all_first_disc"))!;
+            Assert.Equal(0, (int)callFirst.Invoke(fresh,
+                Array.Empty<object>())!);
+
+            var fresh2 = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+            var callSecond = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_all_second_disc"))!;
+            Assert.Equal(1, (int)callSecond.Invoke(fresh2,
                 Array.Empty<object>())!);
         }
     }
