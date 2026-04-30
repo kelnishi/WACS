@@ -11,6 +11,7 @@ using System.Reflection;
 using System.Reflection.Emit;
 using Wacs.ComponentModel.CanonicalABI;
 using Wacs.ComponentModel.Runtime;
+using Wacs.ComponentModel.Runtime.Parser;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
@@ -317,13 +318,15 @@ namespace Wacs.Transpiler.AOT.Component
             int retAreaSlot = emitAggregateReturn
                 ? wasmParams.Length - 1 : -1;
 
+            var stringEncoding = binding.StringEncoding;
             int wasmCursor = wasmParamOffset;
             for (int i = 0; i < clrParamCount; i++)
             {
                 var clrType = clrParams[i].ParameterType;
                 int slots = CanonicalSlotCount(clrType, out _, resolver);
                 EmitLiftForType(il, clrType, wasmParams, temps,
-                    wasmCursor, resolver, resourcesType);
+                    wasmCursor, resolver, resourcesType,
+                    stringEncoding);
                 wasmCursor += slots;
             }
 
@@ -434,7 +437,8 @@ namespace Wacs.Transpiler.AOT.Component
                     il.Emit(OpCodes.Ldarg_0);
                     il.Emit(OpCodes.Ldfld, CabiReallocField);
                     MethodInfo storeMethod;
-                    if (isStringReturn) storeMethod = StoreStringMethod;
+                    if (isStringReturn) storeMethod =
+                        ResolveStoreStringMethod(stringEncoding);
                     else if (isByteArrayReturn) storeMethod = StoreByteArrayMethod;
                     else if (isStringArrayReturn) storeMethod = StoreStringListMethod;
                     else if (isByteArrayListReturn) storeMethod = StoreByteArrayListMethod;
@@ -597,7 +601,7 @@ namespace Wacs.Transpiler.AOT.Component
                                 il.Emit(OpCodes.Ldfld, CabiReallocField);
                                 MethodInfo storeMethod;
                                 if (isStringPayload)
-                                    storeMethod = StoreStringMethod;
+                                    storeMethod = ResolveStoreStringMethod(stringEncoding);
                                 else if (isByteArrayPayload)
                                     storeMethod = StoreByteArrayMethod;
                                 else if (isStringArrayPayload)
@@ -626,13 +630,13 @@ namespace Wacs.Transpiler.AOT.Component
                 {
                     EmitOptionStoreAt(il, method.ReturnType,
                         returnLocal, temps[retAreaSlot], 0,
-                        resolver, resourcesType);
+                        resolver, resourcesType, stringEncoding);
                 }
                 else if (isResult)
                 {
                     EmitResultStoreAt(il, method.ReturnType,
                         returnLocal, temps[retAreaSlot], 0,
-                        resolver, resourcesType);
+                        resolver, resourcesType, stringEncoding);
                 }
                 else if (isTuple)
                 {
@@ -783,7 +787,9 @@ namespace Wacs.Transpiler.AOT.Component
             Type clrType, ValType[] wasmParams,
             LocalBuilder[] temps, int wasmCursor,
             HostPackageResolver? resolver,
-            Type? resourcesType)
+            Type? resourcesType,
+            CanonOption.Kind stringEncoding =
+                CanonOption.Kind.StringUtf8)
         {
             if (clrType == typeof(string))
             {
@@ -794,7 +800,8 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Ldfld, MemoryDataField);
                 il.Emit(OpCodes.Ldloc, temps[wasmCursor]);     // ptr
                 il.Emit(OpCodes.Ldloc, temps[wasmCursor + 1]); // len
-                il.Emit(OpCodes.Call, LiftUtf8Method);
+                il.Emit(OpCodes.Call, ResolveLiftStringMethod(
+                    stringEncoding));
                 return;
             }
             if (clrType.IsArray
@@ -845,7 +852,8 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Ldloc, temps[wasmCursor]);
                 il.Emit(OpCodes.Brfalse, noneLabel);
                 EmitLiftForType(il, inner, wasmParams, temps,
-                    wasmCursor + 1, resolver, resourcesType);
+                    wasmCursor + 1, resolver, resourcesType,
+                    stringEncoding);
                 il.Emit(OpCodes.Call, ResolveOptionSomeMethod(inner));
                 il.Emit(OpCodes.Br, endLabel);
                 il.MarkLabel(noneLabel);
@@ -869,7 +877,8 @@ namespace Wacs.Transpiler.AOT.Component
                 {
                     int es = CanonicalSlotCount(e, out _, resolver);
                     EmitLiftForType(il, e, wasmParams, temps,
-                        eltCursor, resolver, resourcesType);
+                        eltCursor, resolver, resourcesType,
+                        stringEncoding);
                     eltCursor += es;
                 }
                 il.Emit(OpCodes.Newobj,
@@ -915,7 +924,7 @@ namespace Wacs.Transpiler.AOT.Component
                         // Payload case — lift, then ctor(payload).
                         EmitLiftForType(il, c.Payload, wasmParams,
                             temps, wasmCursor + 1, resolver,
-                            resourcesType);
+                            resourcesType, stringEncoding);
                         il.Emit(OpCodes.Newobj,
                             ResolveCaseCtor(c.CaseType,
                                 new[] { c.Payload }));
@@ -942,7 +951,8 @@ namespace Wacs.Transpiler.AOT.Component
                         out _, resolver);
                     il.Emit(OpCodes.Dup);
                     EmitLiftForType(il, p.PropertyType, wasmParams,
-                        temps, recCursor, resolver, resourcesType);
+                        temps, recCursor, resolver, resourcesType,
+                        stringEncoding);
                     il.Emit(OpCodes.Callvirt,
                         p.GetSetMethod()!);
                     recCursor += ps;
@@ -972,12 +982,14 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Ldloc, temps[wasmCursor]);
                 il.Emit(OpCodes.Brfalse, okLabel);
                 EmitLiftForType(il, args[1], wasmParams, temps,
-                    wasmCursor + 1, resolver, resourcesType);
+                    wasmCursor + 1, resolver, resourcesType,
+                    stringEncoding);
                 il.Emit(OpCodes.Call, ResolveResultFromErrMethod(args[0], args[1]));
                 il.Emit(OpCodes.Br, endLabel);
                 il.MarkLabel(okLabel);
                 EmitLiftForType(il, args[0], wasmParams, temps,
-                    wasmCursor + 1, resolver, resourcesType);
+                    wasmCursor + 1, resolver, resourcesType,
+                    stringEncoding);
                 il.Emit(OpCodes.Call, ResolveResultFromOkMethod(args[0], args[1]));
                 il.MarkLabel(endLabel);
                 return;
@@ -1036,6 +1048,33 @@ namespace Wacs.Transpiler.AOT.Component
                 types: new[] { typeof(byte[]), typeof(int), typeof(int) },
                 modifiers: null)!;
 
+        private static readonly MethodInfo LiftUtf16Method =
+            typeof(StringMarshal).GetMethod(
+                nameof(StringMarshal.LiftUtf16),
+                BindingFlags.Public | BindingFlags.Static,
+                binder: null,
+                types: new[] { typeof(byte[]), typeof(int), typeof(int) },
+                modifiers: null)!;
+
+        private static readonly MethodInfo LiftLatin1OrUtf16Method =
+            typeof(StringMarshal).GetMethod(
+                nameof(StringMarshal.LiftLatin1OrUtf16),
+                BindingFlags.Public | BindingFlags.Static,
+                binder: null,
+                types: new[] { typeof(byte[]), typeof(int), typeof(int) },
+                modifiers: null)!;
+
+        // Resolve the LiftXxx for a string read at the binding's
+        // declared canon-ABI string encoding. Default = UTF-8.
+        private static MethodInfo ResolveLiftStringMethod(
+            CanonOption.Kind encoding) => encoding switch
+            {
+                CanonOption.Kind.StringUtf16 => LiftUtf16Method,
+                CanonOption.Kind.StringLatin1OrUtf16
+                    => LiftLatin1OrUtf16Method,
+                _ => LiftUtf8Method,
+            };
+
         // ListMarshal.LiftPrim<T> is generic. Cache the per-T
         // instantiation so each emit reuses the same MethodInfo
         // and we never pay a MakeGenericMethod call after the
@@ -1085,6 +1124,27 @@ namespace Wacs.Transpiler.AOT.Component
             typeof(PrimitiveStore).GetMethod(
                 nameof(PrimitiveStore.StoreString),
                 BindingFlags.Public | BindingFlags.Static)!;
+
+        private static readonly MethodInfo StoreStringUtf16Method =
+            typeof(PrimitiveStore).GetMethod(
+                nameof(PrimitiveStore.StoreStringUtf16),
+                BindingFlags.Public | BindingFlags.Static)!;
+
+        private static readonly MethodInfo StoreStringLatin1OrUtf16Method =
+            typeof(PrimitiveStore).GetMethod(
+                nameof(PrimitiveStore.StoreStringLatin1OrUtf16),
+                BindingFlags.Public | BindingFlags.Static)!;
+
+        // Resolve the StoreXxx for a string write at the binding's
+        // declared canon-ABI string encoding.
+        private static MethodInfo ResolveStoreStringMethod(
+            CanonOption.Kind encoding) => encoding switch
+            {
+                CanonOption.Kind.StringUtf16 => StoreStringUtf16Method,
+                CanonOption.Kind.StringLatin1OrUtf16
+                    => StoreStringLatin1OrUtf16Method,
+                _ => StoreStringMethod,  // utf8 default
+            };
 
         private static readonly MethodInfo StoreByteArrayMethod =
             typeof(PrimitiveStore).GetMethod(
@@ -1791,7 +1851,9 @@ namespace Wacs.Transpiler.AOT.Component
         private static void EmitOptionStoreAt(
             ILGenerator il, Type optionType, LocalBuilder optionLocal,
             LocalBuilder retAreaLocal, int baseOffset,
-            HostPackageResolver? resolver, Type? resourcesType)
+            HostPackageResolver? resolver, Type? resourcesType,
+            CanonOption.Kind stringEncoding =
+                CanonOption.Kind.StringUtf8)
         {
             var inner = optionType.GetGenericArguments()[0];
             bool innerIsResource = resolver != null
@@ -1843,7 +1905,8 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Call, valueGetter);
                 il.Emit(OpCodes.Stloc, innerLocal);
                 EmitOptionStoreAt(il, inner, innerLocal, retAreaLocal,
-                    baseOffset + valueOffset, resolver, resourcesType);
+                    baseOffset + valueOffset, resolver, resourcesType,
+                    stringEncoding);
             }
             else if (innerIsResult)
             {
@@ -1854,7 +1917,8 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Call, valueGetter);
                 il.Emit(OpCodes.Stloc, innerLocal);
                 EmitResultStoreAt(il, inner, innerLocal, retAreaLocal,
-                    baseOffset + valueOffset, resolver, resourcesType);
+                    baseOffset + valueOffset, resolver, resourcesType,
+                    stringEncoding);
             }
             else if (innerIsTuple || innerIsRecord)
             {
@@ -1903,7 +1967,7 @@ namespace Wacs.Transpiler.AOT.Component
                     il.Emit(OpCodes.Ldfld, CabiReallocField);
                     MethodInfo storeMethod;
                     if (innerIsString)
-                        storeMethod = StoreStringMethod;
+                        storeMethod = ResolveStoreStringMethod(stringEncoding);
                     else if (innerIsByteArray)
                         storeMethod = StoreByteArrayMethod;
                     else if (innerIsStringArray)
@@ -1939,7 +2003,9 @@ namespace Wacs.Transpiler.AOT.Component
         private static void EmitResultStoreAt(
             ILGenerator il, Type resultType, LocalBuilder resultLocal,
             LocalBuilder retAreaLocal, int baseOffset,
-            HostPackageResolver? resolver, Type? resourcesType)
+            HostPackageResolver? resolver, Type? resourcesType,
+            CanonOption.Kind stringEncoding =
+                CanonOption.Kind.StringUtf8)
         {
             var args = resultType.GetGenericArguments();
             int okAlign = MaxAlignOf(args[0], resolver);
@@ -1968,7 +2034,7 @@ namespace Wacs.Transpiler.AOT.Component
             EmitWriteByteAt(il, retAreaLocal, baseOffset, 0);
             EmitResultArmStore(il, args[0], resultLocal,
                 okGetter, retAreaLocal, baseOffset + valueOffset,
-                resolver, resourcesType);
+                resolver, resourcesType, stringEncoding);
             il.Emit(OpCodes.Br, endLabel);
 
             // Err: write disc=1 + Err value
@@ -1976,7 +2042,7 @@ namespace Wacs.Transpiler.AOT.Component
             EmitWriteByteAt(il, retAreaLocal, baseOffset, 1);
             EmitResultArmStore(il, args[1], resultLocal,
                 errGetter, retAreaLocal, baseOffset + valueOffset,
-                resolver, resourcesType);
+                resolver, resourcesType, stringEncoding);
 
             il.MarkLabel(endLabel);
         }
@@ -2243,7 +2309,9 @@ namespace Wacs.Transpiler.AOT.Component
             Type armType, LocalBuilder returnLocal,
             MethodInfo armGetter, LocalBuilder retAreaLocal,
             int valueOffset, HostPackageResolver? resolver,
-            Type? resourcesType)
+            Type? resourcesType,
+            CanonOption.Kind stringEncoding =
+                CanonOption.Kind.StringUtf8)
         {
             bool isResource = resolver != null
                 && resolver.IsResourceInterface(armType)
@@ -2273,7 +2341,8 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Call, armGetter);
                 il.Emit(OpCodes.Stloc, armLocal);
                 EmitOptionStoreAt(il, armType, armLocal, retAreaLocal,
-                    valueOffset, resolver, resourcesType);
+                    valueOffset, resolver, resourcesType,
+                    stringEncoding);
                 return;
             }
             if (isNestedResult)
@@ -2283,7 +2352,8 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Call, armGetter);
                 il.Emit(OpCodes.Stloc, armLocal);
                 EmitResultStoreAt(il, armType, armLocal, retAreaLocal,
-                    valueOffset, resolver, resourcesType);
+                    valueOffset, resolver, resourcesType,
+                    stringEncoding);
                 return;
             }
 
@@ -2339,7 +2409,7 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Ldarg_0);
                 il.Emit(OpCodes.Ldfld, CabiReallocField);
                 MethodInfo storeMethod;
-                if (isString) storeMethod = StoreStringMethod;
+                if (isString) storeMethod = ResolveStoreStringMethod(stringEncoding);
                 else if (isByteArray) storeMethod = StoreByteArrayMethod;
                 else if (isStringArray) storeMethod = StoreStringListMethod;
                 else storeMethod = ResolveStorePrimitiveArrayMethod(

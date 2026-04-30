@@ -99,6 +99,59 @@ namespace Wacs.ComponentModel.CanonicalABI
         }
 
         /// <summary>
+        /// Store a <see cref="string"/> as canon-ABI
+        /// <c>string-encoding=utf16</c>. Encoding is UTF-16LE
+        /// bytes (2 bytes per code unit); cabi_realloc gets
+        /// align=2 and byte_count = bytes.Length. The retArea
+        /// receives (ptr, codeUnitCount) — note <b>length is in
+        /// u16 code units, not bytes</b> per CanonicalABI.md.
+        /// </summary>
+        public static void StoreStringUtf16(byte[] dest, int retAreaOffset,
+            string value, Func<int, int, int, int, int> cabiRealloc)
+        {
+            if (cabiRealloc == null)
+                throw new InvalidOperationException(
+                    "String returns require the component to "
+                    + "export `cabi_realloc`.");
+            var bytes = Encoding.Unicode.GetBytes(value);
+            var ptr = cabiRealloc(0, 0, 2, bytes.Length);
+            Buffer.BlockCopy(bytes, 0, dest, ptr, bytes.Length);
+            BinaryPrimitives.WriteInt32LittleEndian(
+                dest.AsSpan(retAreaOffset, 4), ptr);
+            BinaryPrimitives.WriteInt32LittleEndian(
+                dest.AsSpan(retAreaOffset + 4, 4), bytes.Length / 2);
+        }
+
+        /// <summary>
+        /// Store a <see cref="string"/> as canon-ABI
+        /// <c>string-encoding=latin1+utf16</c>. We always pick the
+        /// UTF-16 branch (high-bit set) — the Latin-1 fast path
+        /// would need a per-string scan and isn't free; UTF-16 is
+        /// always correct. The retArea receives
+        /// (ptr, taggedCodeUnits) where the tagged value =
+        /// codeUnits | <see cref="StringMarshal.Latin1OrUtf16Tag"/>.
+        /// </summary>
+        public static void StoreStringLatin1OrUtf16(byte[] dest,
+            int retAreaOffset, string value,
+            Func<int, int, int, int, int> cabiRealloc)
+        {
+            if (cabiRealloc == null)
+                throw new InvalidOperationException(
+                    "String returns require the component to "
+                    + "export `cabi_realloc`.");
+            var bytes = Encoding.Unicode.GetBytes(value);
+            var ptr = cabiRealloc(0, 0, 2, bytes.Length);
+            Buffer.BlockCopy(bytes, 0, dest, ptr, bytes.Length);
+            int codeUnits = bytes.Length / 2;
+            uint tagged = (uint)codeUnits
+                | StringMarshal.Latin1OrUtf16Tag;
+            BinaryPrimitives.WriteInt32LittleEndian(
+                dest.AsSpan(retAreaOffset, 4), ptr);
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                dest.AsSpan(retAreaOffset + 4, 4), tagged);
+        }
+
+        /// <summary>
         /// Store a <c>byte[]</c> (canon-ABI <c>list&lt;u8&gt;</c>)
         /// into wasm linear memory and write the (ptr, count) pair
         /// to the retArea slot. Same machinery as

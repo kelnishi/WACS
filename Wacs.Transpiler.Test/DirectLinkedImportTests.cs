@@ -11,6 +11,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using Wacs.ComponentModel.Runtime;
+using Wacs.ComponentModel.Runtime.Parser;
 using Wacs.Core;
 using Wacs.Core.Runtime;
 using Wacs.Transpiler.AOT;
@@ -10110,6 +10111,161 @@ namespace Wacs.Transpiler.Test
                 Assert.Equal(0x37, (int)callInner.Invoke(fresh,
                     Array.Empty<object>())!);
             }
+        }
+
+        [Fact]
+        public void DirectLinkedImport_StringReturn_Utf16Encoding()
+        {
+            // Reuses the greet/string-return wasm fixture, but
+            // mutates the binding's StringEncoding to Utf16 before
+            // transpile so the IL emit dispatches to
+            // PrimitiveStore.StoreStringUtf16. Returns "Â" (U+00C2):
+            //   UTF-8 encoding: bytes [0xC3, 0x82], len=2 bytes
+            //   UTF-16 encoding: bytes [0xC2, 0x00], len=1 code unit
+            // The differentiator is len AND first byte — both differ.
+
+            const string Greeting = "Â";
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/str-ret-env@1.0.0", "greet"),
+                _ => throw new InvalidOperationException(
+                    "stub for greet must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildStringReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(GreetBundle));
+
+            // Mutate the binding's encoding BEFORE transpile so the
+            // emitted IL dispatches to StoreStringUtf16.
+            Assert.True(resolver.TryResolve(
+                "my:test/str-ret-env@1.0.0", "greet", out var binding));
+            binding.StringEncoding = CanonOption.Kind.StringUtf16;
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.StrRetUtf16", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_str_ret_env_1_0_0_greet"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for greet must not be invoked"),
+                });
+
+            var bundle = new GreetBundle(new FixedGreeter(Greeting));
+
+            // call_greet_len → 1 (UTF-16 code units, NOT 2 bytes)
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+            var callLen = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_greet_len"))!;
+            Assert.Equal(1, (int)callLen.Invoke(instance,
+                Array.Empty<object>())!);
+
+            // call_greet_first_byte → 0xC2 (low byte of U+00C2 LE),
+            // NOT 0xC3 (UTF-8 first byte of 2-byte encoding).
+            var fresh = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+            var callByte = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_greet_first_byte"))!;
+            Assert.Equal(0xC2, (int)callByte.Invoke(fresh,
+                Array.Empty<object>())!);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_StringReturn_Latin1OrUtf16Encoding()
+        {
+            // Same fixture, but encoding = Latin1OrUtf16. WACS
+            // always picks the UTF-16 branch (high-bit set tag).
+            // Returns "Â": UTF-16 bytes [0xC2, 0x00], code units=1,
+            // tagged_count = 1 | (1 << 31) = 0x80000001 = -2147483647
+            // when read as i32. The probe reads i32 at retArea+4.
+
+            const string Greeting = "Â";
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/str-ret-env@1.0.0", "greet"),
+                _ => throw new InvalidOperationException(
+                    "stub for greet must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildStringReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(GreetBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/str-ret-env@1.0.0", "greet", out var binding));
+            binding.StringEncoding = CanonOption.Kind.StringLatin1OrUtf16;
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.StrRetLatin1OrUtf16", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_str_ret_env_1_0_0_greet"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for greet must not be invoked"),
+                });
+
+            var bundle = new GreetBundle(new FixedGreeter(Greeting));
+
+            // call_greet_len → high-bit-tagged: low 31 bits = 1
+            // (UTF-16 code unit count), high bit set. Reads as i32:
+            // 0x80000001 = -2147483647.
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+            var callLen = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_greet_len"))!;
+            int taggedLen = (int)callLen.Invoke(instance,
+                Array.Empty<object>())!;
+            Assert.Equal(unchecked((int)0x80000001u), taggedLen);
+
+            // call_greet_first_byte → 0xC2 (low byte of U+00C2 LE)
+            var fresh = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+            var callByte = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_greet_first_byte"))!;
+            Assert.Equal(0xC2, (int)callByte.Invoke(fresh,
+                Array.Empty<object>())!);
         }
     }
 }

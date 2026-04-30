@@ -10,6 +10,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using Wacs.ComponentModel.Runtime;
+using Wacs.ComponentModel.Runtime.Parser;
 
 namespace Wacs.Transpiler.AOT.Component
 {
@@ -404,13 +405,24 @@ namespace Wacs.Transpiler.AOT.Component
             public ResourceMethodKind? ResourceKind { get; }
             public string? ResourceName { get; }
 
+            /// <summary>
+            /// Canon-ABI string encoding for any string parameter
+            /// or return on this import. Defaults to UTF-8 — the
+            /// canonical default. Set explicitly when the wasm
+            /// component declares <c>canon lower (string-encoding=
+            /// utf16)</c> or <c>latin1+utf16</c>.
+            /// </summary>
+            public CanonOption.Kind StringEncoding { get; set; }
+
             public bool IsFreeFunction => ResourceKind == null;
             public bool IsResourceMethod => ResourceKind.HasValue;
 
             public Binding(string module, string entity,
                 Type interfaceType, MethodInfo method,
                 ResourceMethodKind? resourceKind,
-                string? resourceName)
+                string? resourceName,
+                CanonOption.Kind stringEncoding =
+                    CanonOption.Kind.StringUtf8)
             {
                 Module = module;
                 Entity = entity;
@@ -418,6 +430,7 @@ namespace Wacs.Transpiler.AOT.Component
                 Method = method;
                 ResourceKind = resourceKind;
                 ResourceName = resourceName;
+                StringEncoding = stringEncoding;
             }
 
             public override string ToString() =>
