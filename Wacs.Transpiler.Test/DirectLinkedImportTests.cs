@@ -744,6 +744,32 @@ namespace Wacs.Transpiler.Test
             public string Greet() => _v;
         }
 
+        // ====== byte[] return shape (via cabi_realloc) ===========
+
+        [WitSource(@"interface bytes-ret-env",
+            Package = "my:test@1.0.0", Interface = "bytes-ret-env")]
+        public interface IByteSource
+        {
+            [WitSource(@"give: func() -> list<u8>;",
+                Package = "my:test@1.0.0", Interface = "bytes-ret-env",
+                Item = "give")]
+            byte[] Give();
+        }
+
+        public sealed class ByteSourceBundle
+        {
+            public IByteSource BytesRetEnv { get; }
+            public ByteSourceBundle(IByteSource g)
+            { BytesRetEnv = g; }
+        }
+
+        private sealed class FixedByteSource : IByteSource
+        {
+            private readonly byte[] _v;
+            public FixedByteSource(byte[] v) { _v = v; }
+            public byte[] Give() => _v;
+        }
+
         // ====== Variant param test surface =======================
         // Mirrors the source-generator-emitted shape for WIT
         // variants (HttpMethod, IpAddress, etc.):
@@ -1160,6 +1186,79 @@ namespace Wacs.Transpiler.Test
             0x00, 0x01,
             // Code section: body = call 0; end
             0x0A, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0B,
+        };
+
+        // Same wasm shape as the string-return fixture, just with
+        // a different module + entity name. The cabi_realloc
+        // export and bump-allocator pattern are identical.
+        private static byte[] BuildByteArrayReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 3 types (same as string-return)
+            0x01, 0x11, 0x03,
+            0x60, 0x04, 0x7F, 0x7F, 0x7F, 0x7F, 0x01, 0x7F,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section: 1 import (give : type 1)
+            // size = 1 + 1 + 27 + 1 + 4 + 2 = 36 = 0x24
+            0x02, 0x24, 0x01,
+            // module: "my:test/bytes-ret-env@1.0.0" (27)
+            0x1B,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x62, 0x79, 0x74, 0x65, 0x73, 0x2D, 0x72, 0x65,
+            0x74, 0x2D, 0x65, 0x6E, 0x76, 0x40, 0x31, 0x2E,
+            0x30, 0x2E, 0x30,
+            // entity: "give" (4)
+            0x04,
+            0x67, 0x69, 0x76, 0x65,
+            0x00, 0x01,
+            // Function section: 3 local funcs
+            // funcs[0] = type 0 (cabi_realloc)
+            // funcs[1] = type 2 (call_give_len)
+            // funcs[2] = type 2 (call_give_first_byte)
+            0x03, 0x04, 0x03, 0x00, 0x02, 0x02,
+            // Memory section: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Global section: bump allocator at 32
+            0x06, 0x06, 0x01,
+            0x7F, 0x01, 0x41, 0x20, 0x0B,
+            // Export section: 3 exports
+            // call_give_len (13): 1+13+1+1 = 16
+            // call_give_first_byte (20): 1+20+1+1 = 23
+            // cabi_realloc (12): 1+12+1+1 = 15
+            // size = 1 + 16 + 23 + 15 = 55 = 0x37
+            0x07, 0x37, 0x03,
+            0x0D,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x67, 0x69, 0x76,
+            0x65, 0x5F, 0x6C, 0x65, 0x6E,
+            0x00, 0x02,
+            0x14,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x67, 0x69, 0x76,
+            0x65, 0x5F, 0x66, 0x69, 0x72, 0x73, 0x74, 0x5F,
+            0x62, 0x79, 0x74, 0x65,
+            0x00, 0x03,
+            0x0C,
+            0x63, 0x61, 0x62, 0x69, 0x5F, 0x72, 0x65, 0x61,
+            0x6C, 0x6C, 0x6F, 0x63,
+            0x00, 0x01,
+            // Code section: 3 bodies (same as string-return)
+            0x0A, 0x28, 0x03,
+            0x0B, 0x00,
+            0x23, 0x00,
+            0x23, 0x00,
+            0x20, 0x03,
+            0x6A,
+            0x24, 0x00,
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x04,
+            0x0B,
+            0x0E, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x00,
+            0x2D, 0x00, 0x00,
+            0x0B,
         };
 
         // (module
@@ -6227,6 +6326,80 @@ namespace Wacs.Transpiler.Test
             var callByte = result.ExportsInterface!.GetMethod(
                 InterfaceGenerator.SanitizeName("call_greet_first_byte"))!;
             Assert.Equal(0x68, (int)callByte.Invoke(freshInstance,
+                Array.Empty<object>())!);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_ByteArrayReturn_ViaCabiRealloc()
+        {
+            // Same retArea machinery as string return, but no
+            // encode step — raw bytes flow through. Two exports
+            // probe len and first byte of the returned buffer.
+
+            byte[] expected = { 0x10, 0x20, 0x30 };
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/bytes-ret-env@1.0.0", "give"),
+                _ => throw new InvalidOperationException(
+                    "stub for give must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildByteArrayReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(ByteSourceBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/bytes-ret-env@1.0.0", "give", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.BytesRet", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_bytes_ret_env_1_0_0_give"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for give must not be invoked"),
+                });
+
+            var bundle = new ByteSourceBundle(
+                new FixedByteSource(expected));
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+
+            // call_give_len reads count at retArea+4 → 3.
+            var callLen = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_give_len"))!;
+            Assert.Equal(3, (int)callLen.Invoke(instance,
+                Array.Empty<object>())!);
+
+            // call_give_first_byte reads ptr@retArea, then byte
+            // at that ptr → 0x10. Fresh module instance so the
+            // bump allocator starts back at 32.
+            var freshInstance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+            var callByte = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_give_first_byte"))!;
+            Assert.Equal(0x10, (int)callByte.Invoke(freshInstance,
                 Array.Empty<object>())!);
         }
     }

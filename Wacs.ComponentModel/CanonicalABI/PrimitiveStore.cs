@@ -96,5 +96,28 @@ namespace Wacs.ComponentModel.CanonicalABI
             BinaryPrimitives.WriteInt32LittleEndian(
                 dest.AsSpan(retAreaOffset + 4, 4), bytes.Length);
         }
+
+        /// <summary>
+        /// Store a <c>byte[]</c> (canon-ABI <c>list&lt;u8&gt;</c>)
+        /// into wasm linear memory and write the (ptr, count) pair
+        /// to the retArea slot. Same machinery as
+        /// <see cref="StoreString"/> minus the encode step.
+        /// Used by direct-linked aggregate-RETURN emit when the
+        /// host returns a byte[].
+        /// </summary>
+        public static void StoreByteArray(byte[] dest, int retAreaOffset,
+            byte[] value, Func<int, int, int, int, int> cabiRealloc)
+        {
+            if (cabiRealloc == null)
+                throw new InvalidOperationException(
+                    "byte[] returns require the component to "
+                    + "export `cabi_realloc`.");
+            var ptr = cabiRealloc(0, 0, 1, value.Length);
+            Buffer.BlockCopy(value, 0, dest, ptr, value.Length);
+            BinaryPrimitives.WriteInt32LittleEndian(
+                dest.AsSpan(retAreaOffset, 4), ptr);
+            BinaryPrimitives.WriteInt32LittleEndian(
+                dest.AsSpan(retAreaOffset + 4, 4), value.Length);
+        }
     }
 }
