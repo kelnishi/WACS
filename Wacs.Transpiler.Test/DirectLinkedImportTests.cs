@@ -146,6 +146,31 @@ namespace Wacs.Transpiler.Test
             public uint Tick() => ++_n;
         }
 
+        // ====== Resource method with own<R> arg ===================
+        // [method]X.foo whose typed CLR signature carries another
+        // resource interface as a non-self arg. Exercises the
+        // composition of the resource-method `this` lookup AND the
+        // own<R> param lookup in one IL emit.
+
+        [WitSource(@"resource sink { absorb: func(w: own<widget>) -> u32; }",
+            Package = "my:test@1.0.0", Interface = "res-env",
+            Item = "sink")]
+        public interface ISink
+        {
+            [WitSource(@"absorb: func(w: own<widget>) -> u32;",
+                Package = "my:test@1.0.0", Interface = "res-env",
+                Item = "sink.absorb")]
+            uint Absorb(IWidget widget);
+        }
+
+        public sealed class FakeSink : ISink
+        {
+            // Returns the widget's value so the test can assert
+            // both `this` (FakeSink) and the own<R> (FakeWidget)
+            // resolved correctly.
+            public uint Absorb(IWidget widget) => widget.Read();
+        }
+
         // ====== Static + constructor resource method surface =====
         // Static interface methods are C# 8 default static interface
         // methods — supported on netstandard2.1 / LangVersion=9.
@@ -1335,6 +1360,59 @@ namespace Wacs.Transpiler.Test
             0x0B, 0x0B, 0x01,
             0x00, 0x41, 0x00, 0x0B, 0x05,
             0x68, 0x65, 0x6C, 0x6C, 0x6F,
+        };
+
+        // (module
+        //   (type $t (func (param i32 i32) (result i32)))
+        //   (type $tEntry (func (result i32)))
+        //   (import "my:test/res-env@1.0.0" "[method]sink.absorb"
+        //     (func $imp (type $t)))
+        //   (func (export "call_absorb") (result i32)
+        //     i32.const 11   ;; sink handle (`this`)
+        //     i32.const 22   ;; widget handle (the own<R> param)
+        //     call $imp))
+        //
+        // [method]sink.absorb takes 2 wasm i32 slots: the leading
+        // sink handle (the implicit `this`) and the widget handle
+        // (the own<R> arg). Direct-linked emit pops both as i32,
+        // looks up sink via Resources.GetResource(typeof(ISink)),
+        // pushes that as `this`, looks up widget via
+        // Resources.GetResource(typeof(IWidget)), pushes that as
+        // the typed IWidget arg, then callvirts ISink.Absorb.
+        private static byte[] BuildResourceMethodWithOwnArgFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types
+            // type 0: (i32 i32) → i32 (6 bytes)
+            // type 1: () → i32 (4 bytes)
+            0x01, 0x0B, 0x02,
+            0x60, 0x02, 0x7F, 0x7F, 0x01, 0x7F,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section: 1 import
+            // size = 1 + 1 + 21 + 1 + 19 + 2 = 45 = 0x2D
+            0x02, 0x2D, 0x01,
+            // module: "my:test/res-env@1.0.0" (21)
+            0x15,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x72, 0x65, 0x73, 0x2D, 0x65, 0x6E, 0x76, 0x40,
+            0x31, 0x2E, 0x30, 0x2E, 0x30,
+            // entity: "[method]sink.absorb" (19)
+            0x13,
+            0x5B, 0x6D, 0x65, 0x74, 0x68, 0x6F, 0x64, 0x5D,
+            0x73, 0x69, 0x6E, 0x6B, 0x2E, 0x61, 0x62, 0x73,
+            0x6F, 0x72, 0x62,
+            0x00, 0x00,
+            // Function section: 1 func of type 1
+            0x03, 0x02, 0x01, 0x01,
+            // Export: "call_absorb" (11) → func 1
+            0x07, 0x0F, 0x01,
+            0x0B,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x61, 0x62, 0x73,
+            0x6F, 0x72, 0x62,
+            0x00, 0x01,
+            // Code: locals=0, i32.const 11, i32.const 22, call 0, end
+            0x0A, 0x0A, 0x01, 0x08,
+            0x00, 0x41, 0x0B, 0x41, 0x16, 0x10, 0x00, 0x0B,
         };
 
         // (module
@@ -2865,6 +2943,90 @@ namespace Wacs.Transpiler.Test
                 Array.Empty<object>());
             Assert.IsType<int>(raw);
             Assert.Equal((int)Color.Green, (int)raw);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_ResourceMethodWithOwnArg_BothLookups()
+        {
+            // [method]sink.absorb takes the implicit sink handle
+            // (`this`) AND a widget handle (own<R> arg). Both
+            // resolve through Resources.GetResource. Test plants
+            // FakeSink at handle 11 and FakeWidget(789) at handle
+            // 22; wasm passes both. Asserts the export's i32 result
+            // == 789 — proves both resolutions hit the right
+            // instances and the typed callvirt fired correctly.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Func<int, int, int>>(
+                ("my:test/res-env@1.0.0", "[method]sink.absorb"),
+                (_, _) => throw new InvalidOperationException(
+                    "stub for absorb must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildResourceMethodWithOwnArgFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(WidgetBundle),
+                resourcesType: typeof(TestResources));
+
+            // Sanity: both ISink and IWidget recognized as
+            // resource interfaces.
+            Assert.True(resolver.IsResourceInterface(typeof(ISink)));
+            Assert.True(resolver.IsResourceInterface(typeof(IWidget)));
+            Assert.True(resolver.TryResolve(
+                "my:test/res-env@1.0.0", "[method]sink.absorb",
+                out var binding));
+            Assert.True(binding.IsResourceMethod);
+            Assert.Equal(typeof(ISink), binding.InterfaceType);
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.SinkAbsorb", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/res-env@1.0.0_[method]sink.absorb")] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for absorb must not "
+                            + "be invoked"),
+                });
+
+            // Pre-register both instances at their wasm-passed
+            // handles. The IL pops `sinkHandle, widgetHandle` and
+            // routes them to GetResource(typeof(ISink), 11) +
+            // GetResource(typeof(IWidget), 22) respectively.
+            var resources = new TestResources();
+            resources.Register(typeof(ISink), 11, new FakeSink());
+            resources.Register(typeof(IWidget), 22, new FakeWidget(789u));
+            // WidgetBundle is unused here (no free fns), but the
+            // ctor still requires a non-null bundle arg.
+            var bundle = new WidgetBundle(new FakeWidget(0u));
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            var callAbsorb = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_absorb"))!;
+            object? raw = callAbsorb.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<int>(raw);
+            Assert.Equal(789, (int)raw);
         }
     }
 }
