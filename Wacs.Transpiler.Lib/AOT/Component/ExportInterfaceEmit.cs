@@ -107,7 +107,7 @@ namespace Wacs.Transpiler.AOT.Component
 
             foreach (var fn in iface.Functions)
             {
-                EmitMethod(typeBuilder, fn,
+                EmitMethod(typeBuilder, module, @namespace, fn,
                     PackageString(iface.Package), iface.Name);
             }
 
@@ -115,12 +115,13 @@ namespace Wacs.Transpiler.AOT.Component
         }
 
         private static void EmitMethod(
-            TypeBuilder tb, CtInterfaceFunction fn,
+            TypeBuilder tb, ModuleBuilder module, string @namespace,
+            CtInterfaceFunction fn,
             string packageStr, string ifaceName)
         {
-            var paramTypes = MapParams(fn.Type.Params);
+            var paramTypes = MapParams(fn.Type.Params, module, @namespace);
             if (paramTypes == null) return;
-            var returnType = MapReturn(fn.Type.Result);
+            var returnType = MapReturn(fn.Type.Result, module, @namespace);
             if (returnType == null) return;
 
             var method = tb.DefineMethod(
@@ -142,34 +143,104 @@ namespace Wacs.Transpiler.AOT.Component
 
         // CtFuncParam list → Type[] for DefineMethod. Returns null
         // when any param uses an unsupported type (skip the method).
-        private static Type[]? MapParams(IReadOnlyList<CtFuncParam> ps)
+        private static Type[]? MapParams(IReadOnlyList<CtFuncParam> ps,
+            ModuleBuilder module, string @namespace)
         {
             var types = new Type[ps.Count];
             for (int i = 0; i < ps.Count; i++)
             {
-                var t = MapType(ps[i].Type);
+                var t = MapType(ps[i].Type, module, @namespace);
                 if (t == null) return null;
                 types[i] = t;
             }
             return types;
         }
 
-        private static Type? MapReturn(CtValType? r)
+        private static Type? MapReturn(CtValType? r,
+            ModuleBuilder module, string @namespace)
         {
             if (r == null) return typeof(void);
-            return MapType(r);
+            return MapType(r, module, @namespace);
         }
 
-        // CtValType → CLR Type. Returns null for unsupported
-        // shapes (records / variants / resource handles in v0 —
-        // need pre-emitted CLR types from ComponentExportsEmit).
-        private static Type? MapType(CtValType t)
+        // CtValType → CLR Type. Resolves named types
+        // (records / variants / enums / flags / resource handles)
+        // through the @namespace + PascalCase lookup against types
+        // ComponentExportsEmit pre-emitted into the module.
+        private static Type? MapType(CtValType t,
+            ModuleBuilder module, string @namespace)
         {
             if (t is CtPrimType p) return MapPrimitive(p.Kind);
-            if (t is CtListType list) return MapListType(list);
-            if (t is CtOptionType opt) return MapOptionType(opt);
-            if (t is CtResultType res) return MapResultType(res);
+            if (t is CtListType list) return MapListType(list, module, @namespace);
+            if (t is CtOptionType opt) return MapOptionType(opt, module, @namespace);
+            if (t is CtResultType res) return MapResultType(res, module, @namespace);
+            // Named-type references: CtTypeRef points at a record /
+            // variant / enum / flags by WIT name. ComponentExportsEmit
+            // emits each as `@namespace.PascalCase(name)`. Look it
+            // up through the module — it's already baked by the
+            // time ExportInterfaceEmit runs.
+            if (t is CtTypeRef tr)
+                return LookupNamedType(module, @namespace, tr.Name);
+            // Directly-embedded named types — resolve by their own
+            // declared name (same naming convention as TypeRef).
+            if (t is CtRecordType rec) return LookupNamedType(module, @namespace, rec.Name);
+            if (t is CtVariantType var) return LookupNamedType(module, @namespace, var.Name);
+            if (t is CtEnumType en) return LookupNamedType(module, @namespace, en.Name);
+            if (t is CtFlagsType fl) return LookupNamedType(module, @namespace, fl.Name);
+            if (t is CtResourceType rt) return LookupNamedType(module, @namespace, rt.Name);
+            // own<R> / borrow<R>: resource handle → the CLR class
+            // ComponentExportsEmit emitted for the resource. v1
+            // surfaces it as the consumer-side handle class
+            // (matches what wit-bindgen-csharp non-host mode does);
+            // host-mode interface emission is a follow-up.
+            if (t is CtOwnType own)
+            {
+                if (own.Resource is CtTypeRef ownRef)
+                    return LookupNamedType(module, @namespace, ownRef.Name);
+                if (own.Resource is CtResourceType ownRes)
+                    return LookupNamedType(module, @namespace, ownRes.Name);
+            }
+            if (t is CtBorrowType bo)
+            {
+                if (bo.Resource is CtTypeRef boRef)
+                    return LookupNamedType(module, @namespace, boRef.Name);
+                if (bo.Resource is CtResourceType boRes)
+                    return LookupNamedType(module, @namespace, boRes.Name);
+            }
+            // Tuple → ValueTuple<...>
+            if (t is CtTupleType tup) return MapTupleType(tup, module, @namespace);
             return null;
+        }
+
+        private static Type? LookupNamedType(ModuleBuilder module,
+            string @namespace, string witName)
+        {
+            return module.GetType(@namespace + "." + ToPascal(witName));
+        }
+
+        private static Type? MapTupleType(CtTupleType tup,
+            ModuleBuilder module, string @namespace)
+        {
+            var elements = new Type[tup.Elements.Count];
+            for (int i = 0; i < tup.Elements.Count; i++)
+            {
+                var et = MapType(tup.Elements[i], module, @namespace);
+                if (et == null) return null;
+                elements[i] = et;
+            }
+            // ValueTuple<...> per arity. 1..7 are direct; nested
+            // TRest at 8+ defers (uncommon for WIT).
+            return elements.Length switch
+            {
+                1 => typeof(ValueTuple<>).MakeGenericType(elements),
+                2 => typeof(ValueTuple<,>).MakeGenericType(elements),
+                3 => typeof(ValueTuple<,,>).MakeGenericType(elements),
+                4 => typeof(ValueTuple<,,,>).MakeGenericType(elements),
+                5 => typeof(ValueTuple<,,,,>).MakeGenericType(elements),
+                6 => typeof(ValueTuple<,,,,,>).MakeGenericType(elements),
+                7 => typeof(ValueTuple<,,,,,,>).MakeGenericType(elements),
+                _ => null,
+            };
         }
 
         private static Type? MapPrimitive(CtPrim kind) => kind switch
@@ -190,7 +261,8 @@ namespace Wacs.Transpiler.AOT.Component
             _ => null,
         };
 
-        private static Type? MapListType(CtListType list)
+        private static Type? MapListType(CtListType list,
+            ModuleBuilder module, string @namespace)
         {
             // list<u8> → byte[]; list<T> → T[] when T maps to a
             // CLR type. Defer resource arrays / nested aggregates
@@ -200,27 +272,29 @@ namespace Wacs.Transpiler.AOT.Component
             if (list.Element is CtPrimType prim
                 && prim.Kind == CtPrim.U8)
                 return typeof(byte[]);
-            var elem = MapType(list.Element);
+            var elem = MapType(list.Element, module, @namespace);
             if (elem == null) return null;
             return elem.MakeArrayType();
         }
 
-        private static Type? MapOptionType(CtOptionType opt)
+        private static Type? MapOptionType(CtOptionType opt,
+            ModuleBuilder module, string @namespace)
         {
-            var inner = MapType(opt.Inner);
+            var inner = MapType(opt.Inner, module, @namespace);
             if (inner == null) return null;
             return typeof(Option<>).MakeGenericType(inner);
         }
 
-        private static Type? MapResultType(CtResultType res)
+        private static Type? MapResultType(CtResultType res,
+            ModuleBuilder module, string @namespace)
         {
             // result<T, E> with both arms — needs both sides.
             // Elided arms (result, result<T>, result<_,E>) need
             // unit/void on the missing side. Defer those for v1;
             // emit only the both-sides case here.
             if (res.Ok == null || res.Err == null) return null;
-            var ok = MapType(res.Ok);
-            var err = MapType(res.Err);
+            var ok = MapType(res.Ok, module, @namespace);
+            var err = MapType(res.Err, module, @namespace);
             if (ok == null || err == null) return null;
             return typeof(Result<,>).MakeGenericType(ok, err);
         }

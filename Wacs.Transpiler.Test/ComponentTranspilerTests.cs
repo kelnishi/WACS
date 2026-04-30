@@ -1777,5 +1777,153 @@ namespace Wacs.Transpiler.Test
             // call must not throw.
             Assert.NotNull(contract);
         }
+
+        [Fact]
+        public void ExportInterfaceEmit_resolves_record_param_via_named_type_lookup()
+        {
+            // v1 surface — verify a method whose param/return uses
+            // a record CtTypeRef gets emitted (not silently skipped)
+            // by looking up the corresponding pre-emitted CLR type
+            // via @namespace + PascalCase. Mirrors the contract
+            // ComponentExportsEmit + ExportInterfaceEmit jointly
+            // satisfy: ComponentExportsEmit pre-bakes named types,
+            // ExportInterfaceEmit references them.
+            const string ns = "Wacs.Test.PhaseB.V1";
+            var an = new AssemblyName("Wacs.Test.PhaseB.V1");
+            var ab = AssemblyBuilder.DefineDynamicAssembly(
+                an, AssemblyBuilderAccess.RunAndCollect);
+            var mb = ab.DefineDynamicModule(an.Name!);
+
+            // Pre-emit a "Point" record type into the module —
+            // stand-in for what ComponentExportsEmit.EmitNamedTypes
+            // would do for `record point { x: u32, y: u32 }`.
+            var pointTb = mb.DefineType(ns + ".Point",
+                TypeAttributes.Public | TypeAttributes.Class
+                    | TypeAttributes.Sealed);
+            pointTb.DefineField("X", typeof(uint),
+                FieldAttributes.Public);
+            pointTb.DefineField("Y", typeof(uint),
+                FieldAttributes.Public);
+            pointTb.CreateType();
+
+            // interface geom { translate: func(p: point, dx: u32, dy: u32) -> point; }
+            var pointRef = new Wacs.ComponentModel.Types.CtTypeRef("point");
+            var translateFn = new Wacs.ComponentModel.Types.CtInterfaceFunction(
+                "translate",
+                new Wacs.ComponentModel.Types.CtFunctionType(
+                    new[]
+                    {
+                        new Wacs.ComponentModel.Types.CtFuncParam("p", pointRef),
+                        new Wacs.ComponentModel.Types.CtFuncParam(
+                            "dx", Wacs.ComponentModel.Types.CtPrimType.U32),
+                        new Wacs.ComponentModel.Types.CtFuncParam(
+                            "dy", Wacs.ComponentModel.Types.CtPrimType.U32),
+                    },
+                    pointRef,
+                    null));
+
+            var pkgName = new Wacs.ComponentModel.Types.CtPackageName(
+                "local", new[] { "v1" }, "1.0.0");
+            var iface = new Wacs.ComponentModel.Types.CtInterfaceType(
+                pkgName, "geom",
+                System.Array.Empty<Wacs.ComponentModel.Types.CtNamedType>(),
+                new[] { translateFn },
+                System.Array.Empty<Wacs.ComponentModel.Types.CtUse>(),
+                System.Array.Empty<Wacs.ComponentModel.Types.CtNamedType>());
+            var pkg = new Wacs.ComponentModel.Types.CtPackage(
+                pkgName,
+                new[] { iface },
+                System.Array.Empty<Wacs.ComponentModel.Types.CtWorldType>());
+
+            var emitted = ExportInterfaceEmit.EmitInterfaces(mb, ns, pkg);
+
+            Assert.Single(emitted);
+            var iGeom = ab.GetType(ns + ".IGeom");
+            Assert.NotNull(iGeom);
+            // The translate method must NOT have been skipped — the
+            // record lookup found Point in the same module.
+            var translate = iGeom!.GetMethod("Translate");
+            Assert.NotNull(translate);
+            var pointType = ab.GetType(ns + ".Point");
+            Assert.Equal(pointType, translate!.ReturnType);
+            var ps = translate.GetParameters();
+            Assert.Equal(3, ps.Length);
+            Assert.Equal(pointType, ps[0].ParameterType);
+            Assert.Equal(typeof(uint), ps[1].ParameterType);
+            Assert.Equal(typeof(uint), ps[2].ParameterType);
+        }
+
+        [Fact]
+        public void ExportInterfaceEmit_resolves_enum_and_tuple_via_named_type_lookup()
+        {
+            // v1 surface — enum CtTypeRef + tuple<u32, u32>
+            // composition. ValueTuple is a CLR built-in (not
+            // pre-emitted), enum lookups go through @namespace +
+            // PascalCase.
+            const string ns = "Wacs.Test.PhaseB.V1.EnumTuple";
+            var an = new AssemblyName("Wacs.Test.PhaseB.V1.EnumTuple");
+            var ab = AssemblyBuilder.DefineDynamicAssembly(
+                an, AssemblyBuilderAccess.RunAndCollect);
+            var mb = ab.DefineDynamicModule(an.Name!);
+
+            // Pre-emit "Color" enum (4-byte underlying).
+            var colorEb = mb.DefineEnum(ns + ".Color",
+                TypeAttributes.Public, typeof(int));
+            colorEb.DefineLiteral("Red", 0);
+            colorEb.DefineLiteral("Green", 1);
+            colorEb.DefineLiteral("Blue", 2);
+            colorEb.CreateType();
+
+            // interface palette {
+            //   pick: func(c: color) -> tuple<u32, u32>;
+            // }
+            var colorRef = new Wacs.ComponentModel.Types.CtTypeRef("color");
+            var tupleType = new Wacs.ComponentModel.Types.CtTupleType(
+                new[]
+                {
+                    (Wacs.ComponentModel.Types.CtValType)
+                        Wacs.ComponentModel.Types.CtPrimType.U32,
+                    (Wacs.ComponentModel.Types.CtValType)
+                        Wacs.ComponentModel.Types.CtPrimType.U32,
+                });
+            var pickFn = new Wacs.ComponentModel.Types.CtInterfaceFunction(
+                "pick",
+                new Wacs.ComponentModel.Types.CtFunctionType(
+                    new[]
+                    {
+                        new Wacs.ComponentModel.Types.CtFuncParam("c", colorRef),
+                    },
+                    tupleType,
+                    null));
+
+            var pkgName = new Wacs.ComponentModel.Types.CtPackageName(
+                "local", new[] { "v1" }, "1.0.0");
+            var iface = new Wacs.ComponentModel.Types.CtInterfaceType(
+                pkgName, "palette",
+                System.Array.Empty<Wacs.ComponentModel.Types.CtNamedType>(),
+                new[] { pickFn },
+                System.Array.Empty<Wacs.ComponentModel.Types.CtUse>(),
+                System.Array.Empty<Wacs.ComponentModel.Types.CtNamedType>());
+            var pkg = new Wacs.ComponentModel.Types.CtPackage(
+                pkgName,
+                new[] { iface },
+                System.Array.Empty<Wacs.ComponentModel.Types.CtWorldType>());
+
+            var emitted = ExportInterfaceEmit.EmitInterfaces(mb, ns, pkg);
+            Assert.Single(emitted);
+
+            var iPalette = ab.GetType(ns + ".IPalette");
+            Assert.NotNull(iPalette);
+            var pick = iPalette!.GetMethod("Pick");
+            Assert.NotNull(pick);
+
+            var colorType = ab.GetType(ns + ".Color");
+            Assert.Equal(colorType,
+                pick!.GetParameters()[0].ParameterType);
+            // tuple<u32, u32> → ValueTuple<uint, uint>
+            Assert.Equal(
+                typeof(System.ValueTuple<uint, uint>),
+                pick.ReturnType);
+        }
     }
 }
