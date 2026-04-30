@@ -476,6 +476,35 @@ namespace Wacs.Transpiler.Test
             public (uint, uint) MakePair() => _v;
         }
 
+        // ====== own<R> return shape ==============================
+        // Free function returning a resource interface — same shape
+        // as wasi:cli/stdout.get-stdout() -> own<output-stream>.
+        // Wasm wire is 1 i32 (the handle); IL allocates a fresh
+        // handle for the returned instance.
+
+        [WitSource(@"interface own-ret-env",
+            Package = "my:test@1.0.0", Interface = "own-ret-env")]
+        public interface IWidgetFactory
+        {
+            [WitSource(@"make-widget: func() -> own<widget>;",
+                Package = "my:test@1.0.0", Interface = "own-ret-env",
+                Item = "make-widget")]
+            IWidget MakeWidget();
+        }
+
+        public sealed class FactoryBundle
+        {
+            public IWidgetFactory OwnRetEnv { get; }
+            public FactoryBundle(IWidgetFactory f) { OwnRetEnv = f; }
+        }
+
+        private sealed class WidgetMaker : IWidgetFactory
+        {
+            private readonly uint _seed;
+            public WidgetMaker(uint seed) { _seed = seed; }
+            public IWidget MakeWidget() => new FakeWidget(_seed);
+        }
+
         // ====== Variant param test surface =======================
         // Mirrors the source-generator-emitted shape for WIT
         // variants (HttpMethod, IpAddress, etc.):
@@ -863,6 +892,73 @@ namespace Wacs.Transpiler.Test
             0x00, 0x01,
             // Code section: body = call 0; end
             0x0A, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0B,
+        };
+
+        // (module
+        //   (type $tMake (func (result i32)))         ;; make-widget() → handle
+        //   (type $tRead (func (param i32) (result i32))) ;; widget.read(h) → u32
+        //   (import "my:test/own-ret-env@1.0.0" "make-widget"
+        //           (func $imp_make (type $tMake)))
+        //   (import "my:test/res-env@1.0.0" "[method]widget.read"
+        //           (func $imp_read (type $tRead)))
+        //   (func (export "call_make_read") (result i32)
+        //     call $imp_make    ;; → handle
+        //     call $imp_read))  ;; → u32 from that handle
+        //
+        // make-widget allocates a fresh widget instance via the
+        // host factory; the IL allocates a handle (Resources.
+        // AllocateResource) and returns it. The subsequent
+        // resource-method call resolves that handle and reads the
+        // seed value back. Round-trip success proves the own<R>
+        // return path mints handles correctly.
+        private static byte[] BuildOwnReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types
+            // 0: () → i32 (4)
+            // 1: (i32) → i32 (5)
+            // size = 1 + 4 + 5 = 10 = 0x0A
+            0x01, 0x0A, 0x02,
+            0x60, 0x00, 0x01, 0x7F,
+            0x60, 0x01, 0x7F, 0x01, 0x7F,
+            // Import section: 2 imports
+            // imp0: my:test/own-ret-env@1.0.0 (25) . make-widget (11) : type 0
+            //   = 1+25+1+11+2 = 40
+            // imp1: my:test/res-env@1.0.0 (21) . [method]widget.read (19) : type 1
+            //   = 1+21+1+19+2 = 44
+            // size = 1 + 40 + 44 = 85 = 0x55
+            0x02, 0x55, 0x02,
+            // imp0
+            0x19,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x6F, 0x77, 0x6E, 0x2D, 0x72, 0x65, 0x74, 0x2D,
+            0x65, 0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x0B,
+            0x6D, 0x61, 0x6B, 0x65, 0x2D, 0x77, 0x69, 0x64,
+            0x67, 0x65, 0x74,
+            0x00, 0x00,
+            // imp1
+            0x15,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x72, 0x65, 0x73, 0x2D, 0x65, 0x6E, 0x76, 0x40,
+            0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x13,
+            0x5B, 0x6D, 0x65, 0x74, 0x68, 0x6F, 0x64, 0x5D,
+            0x77, 0x69, 0x64, 0x67, 0x65, 0x74, 0x2E, 0x72,
+            0x65, 0x61, 0x64,
+            0x00, 0x01,
+            // Function section: 1 func of type 0
+            0x03, 0x02, 0x01, 0x00,
+            // Export: "call_make_read" (14) → func 2 (after 2 imports)
+            0x07, 0x12, 0x01,
+            0x0E,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x6D, 0x61, 0x6B,
+            0x65, 0x5F, 0x72, 0x65, 0x61, 0x64,
+            0x00, 0x02,
+            // Code: locals=0, call 0, call 1, end
+            // body = locals(1) + call(2)*2 + end(1) = 6
+            0x0A, 0x08, 0x01, 0x06,
+            0x00, 0x10, 0x00, 0x10, 0x01, 0x0B,
         };
 
         // (module
@@ -4286,6 +4382,91 @@ namespace Wacs.Transpiler.Test
             // adds them — A + B == sum.
             Assert.IsType<int>(raw);
             Assert.Equal(unchecked((int)(A + B)), (int)raw);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_OwnReturn_FactoryMintsHandle()
+        {
+            // make-widget() → own<widget>: free function returning
+            // a resource interface. Wasm wire is 1 i32 (the
+            // handle). Direct-linked emit calls the typed factory,
+            // allocates a handle for the returned instance via
+            // Resources.AllocateResource, and returns the handle.
+            // The wasm body chains a [method]widget.read on that
+            // handle to prove the handle is wired correctly into
+            // the resources table.
+
+            const uint Seed = 0x35;
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Func<int>>(
+                ("my:test/own-ret-env@1.0.0", "make-widget"),
+                () => throw new InvalidOperationException(
+                    "stub for make-widget must not be invoked"));
+            runtime.BindHostFunction<Func<int, int>>(
+                ("my:test/res-env@1.0.0", "[method]widget.read"),
+                _ => throw new InvalidOperationException(
+                    "stub for read must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildOwnReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(FactoryBundle),
+                resourcesType: typeof(TestResources));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/own-ret-env@1.0.0", "make-widget", out _));
+            Assert.True(resolver.TryResolve(
+                "my:test/res-env@1.0.0", "[method]widget.read", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.OwnReturn", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Equal(2, options.ResolverImportBindings!.Count);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/own-ret-env@1.0.0_make-widget")] = _ =>
+                        throw new InvalidOperationException("make IImports stub"),
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/res-env@1.0.0_[method]widget.read")] = _ =>
+                        throw new InvalidOperationException("read IImports stub"),
+                });
+
+            var resources = new TestResources();
+            var bundle = new FactoryBundle(new WidgetMaker(Seed));
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            var callMakeRead = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_make_read"))!;
+            object? raw = callMakeRead.Invoke(instance,
+                Array.Empty<object>());
+
+            // WidgetMaker.MakeWidget() returns FakeWidget(0x35).
+            // The IL allocates a handle for it; the next call's
+            // resource lookup resolves the handle back; FakeWidget
+            // .Read() returns 0x35.
+            Assert.IsType<int>(raw);
+            Assert.Equal((int)Seed, (int)raw);
         }
     }
 }
