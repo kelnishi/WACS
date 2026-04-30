@@ -396,6 +396,29 @@ namespace Wacs.Transpiler.AOT.Component
                 il.MarkLabel(endLabel);
                 return;
             }
+            // ValueTuple<T1, ..., TN>: lift each element in
+            // declaration order via recursive EmitLiftForType,
+            // then construct via the matching ValueTuple ctor.
+            // Wasm slots are concatenated per element in the same
+            // order. Supports up to 7-element ValueTuple; nested
+            // TRest defers (System.ValueTuple<...,TRest> takes a
+            // ValueTuple as its 8th arg).
+            if (clrType.IsGenericType
+                && IsValueTupleType(clrType.GetGenericTypeDefinition()))
+            {
+                var elements = clrType.GetGenericArguments();
+                int eltCursor = wasmCursor;
+                foreach (var e in elements)
+                {
+                    int es = CanonicalSlotCount(e, out _, resolver);
+                    EmitLiftForType(il, e, wasmParams, temps,
+                        eltCursor, resolver, resourcesType);
+                    eltCursor += es;
+                }
+                il.Emit(OpCodes.Newobj,
+                    ResolveValueTupleCtor(clrType));
+                return;
+            }
             // Result<TOk, TErr>: same recursive shape as Option but
             // with a 2-case (Ok=0 / Err=1) discriminant routing to
             // the correct construction helper. v0 requires Ok and
@@ -576,6 +599,27 @@ namespace Wacs.Transpiler.AOT.Component
                     modifiers: null)!;
             });
 
+        // Recognized ValueTuple<...> open generic defs. System
+        // provides 1-arity through 8-arity (8 uses TRest for
+        // nesting); v0 supports 1..7. ValueTuple<> (zero-arity)
+        // is a struct with no fields and never appears as a WIT
+        // tuple shape — exclude.
+        private static bool IsValueTupleType(Type def) =>
+            def == typeof(ValueTuple<>)
+            || def == typeof(ValueTuple<,>)
+            || def == typeof(ValueTuple<,,>)
+            || def == typeof(ValueTuple<,,,>)
+            || def == typeof(ValueTuple<,,,,>)
+            || def == typeof(ValueTuple<,,,,,>)
+            || def == typeof(ValueTuple<,,,,,,>);
+
+        private static readonly ConcurrentDictionary<Type, ConstructorInfo>
+            ValueTupleCtorCache = new();
+
+        private static ConstructorInfo ResolveValueTupleCtor(Type tupleType)
+            => ValueTupleCtorCache.GetOrAdd(tupleType, t =>
+                t.GetConstructor(t.GetGenericArguments())!);
+
         // Per-CLR-type wasm flat-slot count for canonical-ABI lower:
         //   primitive (compat with i32/i64/f32/f64) → 1
         //   string                                  → 2 (ptr, len)
@@ -624,6 +668,30 @@ namespace Wacs.Transpiler.AOT.Component
                     Array.Copy(innerWasm, 0, combined, 1, innerSlots);
                     wasmTypes = combined;
                     return 1 + innerSlots;
+                }
+            }
+            // ValueTuple<T1, T2, ...>: concatenated flat-slot
+            // sequences of each element. Per canon-ABI tuple lower.
+            // Supports the open-generic ValueTuple<,>...<,,,,,,,>
+            // surface (System provides up to 7-element + TRest).
+            if (clrType.IsGenericType
+                && IsValueTupleType(clrType.GetGenericTypeDefinition()))
+            {
+                var elements = clrType.GetGenericArguments();
+                var combined = new System.Collections.Generic.List<ValType>();
+                int total = 0;
+                bool ok = true;
+                foreach (var e in elements)
+                {
+                    int es = CanonicalSlotCount(e, out var ew, resolver);
+                    if (es <= 0) { ok = false; break; }
+                    total += es;
+                    combined.AddRange(ew);
+                }
+                if (ok)
+                {
+                    wasmTypes = combined.ToArray();
+                    return total;
                 }
             }
             // Result<TOk, TErr>: 1 disc i32 + max(flat(Ok), flat(Err))

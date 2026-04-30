@@ -397,6 +397,34 @@ namespace Wacs.Transpiler.Test
                     : 0xE000_0000u | (r.Err & 0x0FFF_FFFFu);
         }
 
+        // ====== Tuple<u32, u32> param test surface ===============
+
+        [WitSource(@"interface tup-env",
+            Package = "my:test@1.0.0", Interface = "tup-env")]
+        public interface ITupleTaker
+        {
+            // tuple<u32, u32> wire form is 2 i32 slots; the typed
+            // CLR side is ValueTuple<uint, uint> (i.e. (uint, uint)).
+            [WitSource(@"take-tup: func(t: tuple<u32, u32>) -> u32;",
+                Package = "my:test@1.0.0", Interface = "tup-env",
+                Item = "take-tup")]
+            uint TakeTup((uint, uint) t);
+        }
+
+        public sealed class TupleBundle
+        {
+            public ITupleTaker TupEnv { get; }
+            public TupleBundle(ITupleTaker t) { TupEnv = t; }
+        }
+
+        private sealed class TupleAdder : ITupleTaker
+        {
+            // Returns Item1 * 256 + Item2 so the test can probe
+            // both elements made it through with the right order.
+            public uint TakeTup((uint, uint) t)
+                => (t.Item1 << 8) | t.Item2;
+        }
+
         private sealed class FakeEnv : IEnv
         {
             private readonly ulong _v;
@@ -609,6 +637,53 @@ namespace Wacs.Transpiler.Test
             // Code section: locals=0, call 0, call 1, end
             0x0A, 0x08, 0x01, 0x06,
             0x00, 0x10, 0x00, 0x10, 0x01, 0x0B,
+        };
+
+        // (module
+        //   (type $tTup (func (param i32 i32) (result i32)))
+        //   (type $tEntry (func (result i32)))
+        //   (import "my:test/tup-env@1.0.0" "take-tup"
+        //           (func $imp (type $tTup)))
+        //   (func (export "call_tup") (result i32)
+        //     i32.const 0x05   ;; t.Item1
+        //     i32.const 0x07   ;; t.Item2
+        //     call $imp))      ;; → TupleAdder yields (5<<8)|7 = 0x507
+        //
+        // tuple<u32, u32> wire = 2 i32 slots concatenated. Direct-
+        // linked emit lifts each element via recursive
+        // EmitLiftForType (primitives in this case), then calls
+        // ValueTuple<uint, uint>'s 2-arg ctor.
+        private static byte[] BuildTupleParamFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types
+            // type 0: (i32 i32) → i32 (6 bytes)
+            // type 1: () → i32 (4 bytes)
+            0x01, 0x0B, 0x02,
+            0x60, 0x02, 0x7F, 0x7F, 0x01, 0x7F,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section: 1 import
+            // size = 1 + 1 + 21 + 1 + 8 + 2 = 34 = 0x22
+            0x02, 0x22, 0x01,
+            // module: "my:test/tup-env@1.0.0" (21)
+            0x15,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x74, 0x75, 0x70, 0x2D, 0x65, 0x6E, 0x76, 0x40,
+            0x31, 0x2E, 0x30, 0x2E, 0x30,
+            // entity: "take-tup" (8)
+            0x08,
+            0x74, 0x61, 0x6B, 0x65, 0x2D, 0x74, 0x75, 0x70,
+            0x00, 0x00,
+            // Function section: 1 func of type 1
+            0x03, 0x02, 0x01, 0x01,
+            // Export: "call_tup" (8) → func 1
+            0x07, 0x0C, 0x01,
+            0x08,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x74, 0x75, 0x70,
+            0x00, 0x01,
+            // Code: locals=0, i32.const 5, i32.const 7, call 0, end
+            0x0A, 0x0A, 0x01, 0x08,
+            0x00, 0x41, 0x05, 0x41, 0x07, 0x10, 0x00, 0x0B,
         };
 
         // (module
@@ -2275,6 +2350,72 @@ namespace Wacs.Transpiler.Test
             Assert.IsType<int>(rErr);
             Assert.Equal(unchecked((int)(0xE000_0000u | 0x34u)),
                 (int)rErr);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_TupleParam_LiftsAndConstructs()
+        {
+            // tuple<u32, u32> wire form: 2 i32 slots concatenated.
+            // Direct-linked emit lifts each element via recursive
+            // EmitLiftForType then calls ValueTuple<uint, uint>'s
+            // 2-arg ctor. TupleAdder yields (Item1<<8)|Item2 so the
+            // test asserts both elements made it through in order.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Func<int, int, int>>(
+                ("my:test/tup-env@1.0.0", "take-tup"),
+                (_, _) => throw new InvalidOperationException(
+                    "stub for take-tup must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildTupleParamFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(TupleBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/tup-env@1.0.0", "take-tup", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.TupParam", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_tup_env_1_0_0_take_tup"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for take-tup must not "
+                            + "be invoked"),
+                });
+
+            var bundle = new TupleBundle(new TupleAdder());
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+
+            // Wasm passes (5, 7); TupleAdder returns (5<<8)|7 = 0x507.
+            var callTup = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_tup"))!;
+            object? raw = callTup.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<int>(raw);
+            Assert.Equal(0x507, (int)raw);
         }
     }
 }
