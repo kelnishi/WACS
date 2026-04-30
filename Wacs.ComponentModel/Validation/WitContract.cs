@@ -96,8 +96,25 @@ namespace Wacs.ComponentModel.Validation
         {
             if (assembly == null) throw new ArgumentNullException(
                 nameof(assembly));
-            return BuildFromPackages(
-                LoadAssemblyPackages(assembly, resourcePrefix));
+            // Two paths:
+            // 1. Source-gen / componentize-dotnet style: WIT files
+            //    are baked as embedded resources under
+            //    "wit/<rel>.wit" — parse them and build the
+            //    contract from the WIT text.
+            // 2. WACS-transpiled .dll style: no embedded WIT
+            //    resources, but [WitSource]-tagged interfaces are
+            //    present courtesy of ExportInterfaceEmit. Walk
+            //    those via FromBindingTypes.
+            //
+            // Try the embedded-WIT path first; if it surfaces
+            // nothing, fall back to FromBindingTypes — this is
+            // the Phase B chain mode entry point that lets a
+            // transpiled .dll serve as a host-package.
+            var resources = ReadEmbeddedWit(assembly, resourcePrefix);
+            if (resources.Count > 0)
+                return BuildFromPackages(
+                    LoadAssemblyPackages(assembly, resourcePrefix));
+            return FromBindingTypes(assembly.GetExportedTypes());
         }
 
         /// <summary>
