@@ -214,6 +214,14 @@ namespace Wacs.Transpiler.Test
                 Item = "[static]widget.default-value")]
             static uint DefaultValue() => 7u;
 
+            // Multi-arg static method — covers the [static]X.foo
+            // shape with > 0 primitive args. Wire: 2 i32 slots
+            // (no `this`), returns a single i32 result.
+            [WitSource(@"combine-static: static func(a: u32, b: u32) -> u32;",
+                Package = "my:test@1.0.0", Interface = "res-env",
+                Item = "[static]widget.combine-static")]
+            static uint CombineStatic(uint a, uint b) => a + b * 100u;
+
             // Zero-arg constructor — wasm returns the i32 handle
             // for the newly-allocated instance. The factory body
             // mints a FakeWidget; the IL allocates a handle for
@@ -1762,6 +1770,55 @@ namespace Wacs.Transpiler.Test
             0x14, 0x00, 0x00, 0x00,
             0x1E, 0x00, 0x00, 0x00,
             0x28, 0x00, 0x00, 0x00,
+        };
+
+        // (module
+        //   (type $t (func (param i32 i32) (result i32)))
+        //   (type $tEntry (func (result i32)))
+        //   (import "my:test/res-env@1.0.0" "[static]widget.combine-static"
+        //     (func $imp (type $t)))
+        //   (func (export "call_combine") (result i32)
+        //     i32.const 5
+        //     i32.const 7
+        //     call $imp))   ;; → CombineStatic(5, 7) = 5 + 7*100 = 705
+        //
+        // Multi-arg static: 2 i32 slots in, 1 i32 out, no `this`.
+        private static byte[] BuildStaticMultiArgFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types
+            // 0: (i32 i32) → i32 (6)
+            // 1: () → i32 (4)
+            // size = 1 + 6 + 4 = 11 = 0x0B
+            0x01, 0x0B, 0x02,
+            0x60, 0x02, 0x7F, 0x7F, 0x01, 0x7F,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // size = 1 + 1 + 21 + 1 + 29 + 2 = 55 = 0x37
+            0x02, 0x37, 0x01,
+            // module: "my:test/res-env@1.0.0" (21)
+            0x15,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x72, 0x65, 0x73, 0x2D, 0x65, 0x6E, 0x76, 0x40,
+            0x31, 0x2E, 0x30, 0x2E, 0x30,
+            // entity: "[static]widget.combine-static" (29)
+            0x1D,
+            0x5B, 0x73, 0x74, 0x61, 0x74, 0x69, 0x63, 0x5D,
+            0x77, 0x69, 0x64, 0x67, 0x65, 0x74, 0x2E, 0x63,
+            0x6F, 0x6D, 0x62, 0x69, 0x6E, 0x65, 0x2D, 0x73,
+            0x74, 0x61, 0x74, 0x69, 0x63,
+            0x00, 0x00,
+            // Function section: 1 func of type 1
+            0x03, 0x02, 0x01, 0x01,
+            // Export: "call_combine" (12) → func 1
+            0x07, 0x10, 0x01,
+            0x0C,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x63, 0x6F, 0x6D,
+            0x62, 0x69, 0x6E, 0x65,
+            0x00, 0x01,
+            // Code: locals=0, i32.const 5, i32.const 7, call 0, end
+            0x0A, 0x0A, 0x01, 0x08,
+            0x00, 0x41, 0x05, 0x41, 0x07, 0x10, 0x00, 0x0B,
         };
 
         // (module
@@ -5346,6 +5403,74 @@ namespace Wacs.Transpiler.Test
                     (int)callValue.Invoke(freshForValue,
                         Array.Empty<object>())!);
             }
+        }
+
+        [Fact]
+        public void DirectLinkedImport_StaticMultiArg_PassesAllArgs()
+        {
+            // [static]widget.combine-static takes 2 i32 args, no
+            // `this`. Direct-linked emit: pop 2 i32s into temps,
+            // re-push in order, `call` the static method (no
+            // virtual dispatch, no resource lookup).
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Func<int, int, int>>(
+                ("my:test/res-env@1.0.0", "[static]widget.combine-static"),
+                (_, _) => throw new InvalidOperationException(
+                    "stub for combine-static must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildStaticMultiArgFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(WidgetBundle),
+                resourcesType: typeof(TestResources));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/res-env@1.0.0",
+                "[static]widget.combine-static", out var binding));
+            Assert.Equal(HostPackageResolver.ResourceMethodKind.Static,
+                binding.ResourceKind);
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.StaticMulti", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/res-env@1.0.0_[static]widget.combine-static")] = _ =>
+                        throw new InvalidOperationException("stub"),
+                });
+
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy,
+                    new WidgetBundle(new FakeWidget(0)),
+                    new TestResources() })!;
+
+            // CombineStatic(5, 7) = 5 + 7*100 = 705
+            var callCombine = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_combine"))!;
+            object? raw = callCombine.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<int>(raw);
+            Assert.Equal(705, (int)raw);
         }
     }
 }
