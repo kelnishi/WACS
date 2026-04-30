@@ -437,6 +437,55 @@ namespace Wacs.Transpiler.AOT.Component
                     ResolveValueTupleCtor(clrType));
                 return;
             }
+            // Variant: switch on disc; each case constructs the
+            // matching nested sealed class. Empty cases use the
+            // parameterless ctor; payload cases lift the payload
+            // (recursive EmitLiftForType) and pass it to the
+            // case ctor. Joined-flat lift uses the max-payload's
+            // wire layout — empty cases simply ignore the trailing
+            // payload slots since they newobj a parameterless ctor.
+            if (IsLikelyVariantBase(clrType))
+            {
+                var cases = GetVariantCases(clrType);
+                var caseLabels = new System.Reflection.Emit.Label[cases.Length];
+                for (int i = 0; i < cases.Length; i++)
+                    caseLabels[i] = il.DefineLabel();
+                var endLabel = il.DefineLabel();
+
+                // Switch on disc.
+                il.Emit(OpCodes.Ldloc, temps[wasmCursor]);
+                il.Emit(OpCodes.Switch, caseLabels);
+                // Default fallthrough: invalid disc. For valid wasm
+                // this is unreachable; jump to the first case as a
+                // benign fallback rather than introducing a trap.
+                il.Emit(OpCodes.Br, caseLabels[0]);
+
+                for (int i = 0; i < cases.Length; i++)
+                {
+                    il.MarkLabel(caseLabels[i]);
+                    var c = cases[i];
+                    if (c.Payload == null)
+                    {
+                        // Empty case — parameterless ctor.
+                        il.Emit(OpCodes.Newobj,
+                            ResolveCaseCtor(c.CaseType,
+                                Type.EmptyTypes));
+                    }
+                    else
+                    {
+                        // Payload case — lift, then ctor(payload).
+                        EmitLiftForType(il, c.Payload, wasmParams,
+                            temps, wasmCursor + 1, resolver,
+                            resourcesType);
+                        il.Emit(OpCodes.Newobj,
+                            ResolveCaseCtor(c.CaseType,
+                                new[] { c.Payload }));
+                    }
+                    il.Emit(OpCodes.Br, endLabel);
+                }
+                il.MarkLabel(endLabel);
+                return;
+            }
             // User-class record: newobj parameterless ctor, then for
             // each public property in declaration order:
             //   dup
@@ -730,6 +779,82 @@ namespace Wacs.Transpiler.AOT.Component
             => RecordCtorCache.GetOrAdd(t, type =>
                 type.GetConstructor(Type.EmptyTypes)!);
 
+        // ---- Variant detection + case enumeration --------------
+
+        // Heuristic: variant types are abstract classes carrying ≥1
+        // public sealed nested class that derives from them. The
+        // source generator emits this exact shape for WIT variants.
+        private static bool IsLikelyVariantBase(Type t)
+        {
+            if (!t.IsAbstract || t.IsInterface || t.IsValueType)
+                return false;
+            if (t.IsGenericType) return false;
+            if (t == typeof(object)) return false;
+            // Must have at least one public sealed nested type
+            // that inherits from this abstract.
+            foreach (var n in t.GetNestedTypes(BindingFlags.Public))
+            {
+                if (n.IsSealed && n.BaseType == t) return true;
+            }
+            return false;
+        }
+
+        public sealed class VariantCase
+        {
+            public Type CaseType { get; }
+            public Type? Payload { get; }
+            public VariantCase(Type caseType, Type? payload)
+            {
+                CaseType = caseType;
+                Payload = payload;
+            }
+        }
+
+        private static readonly ConcurrentDictionary<Type, VariantCase[]>
+            VariantCasesCache = new();
+
+        private static VariantCase[] GetVariantCases(Type variantBase)
+            => VariantCasesCache.GetOrAdd(variantBase, t =>
+            {
+                var list = new System.Collections.Generic.List<VariantCase>();
+                foreach (var n in t.GetNestedTypes(BindingFlags.Public))
+                {
+                    if (!n.IsSealed) continue;
+                    if (n.BaseType != t) continue;
+                    // Payload detected via single-arg ctor whose
+                    // arg matches a public Value property. Empty
+                    // cases have only the implicit parameterless
+                    // ctor (no Value property).
+                    var valueProp = n.GetProperty("Value",
+                        BindingFlags.Public | BindingFlags.Instance);
+                    if (valueProp != null && valueProp.CanRead)
+                        list.Add(new VariantCase(n, valueProp.PropertyType));
+                    else
+                        list.Add(new VariantCase(n, null));
+                }
+                // Declaration order = MetadataToken order — matches
+                // the WIT case index.
+                list.Sort((a, b) =>
+                    a.CaseType.MetadataToken.CompareTo(
+                        b.CaseType.MetadataToken));
+                return list.ToArray();
+            });
+
+        private static readonly ConcurrentDictionary<(Type, int), ConstructorInfo>
+            VariantCaseCtorCache = new();
+
+        private static ConstructorInfo ResolveCaseCtor(Type caseType,
+            Type[] argTypes)
+        {
+            // Cache key: (caseType, argTypes.Length) — different
+            // arities don't collide because the source generator
+            // emits exactly one (parameterless OR single-arg) ctor
+            // per case class.
+            var key = (caseType, argTypes.Length);
+            return VariantCaseCtorCache.GetOrAdd(key, _ =>
+                caseType.GetConstructor(argTypes)!);
+        }
+
         // Per-CLR-type wasm flat-slot count for canonical-ABI lower:
         //   primitive (compat with i32/i64/f32/f64) → 1
         //   string                                  → 2 (ptr, len)
@@ -820,6 +945,55 @@ namespace Wacs.Transpiler.AOT.Component
                 {
                     wasmTypes = combined.ToArray();
                     return total;
+                }
+            }
+            // Variant: 1 disc i32 + max(case-payload-flat) joined-
+            // flat slots. v0 handles variants whose payload cases
+            // all share the same flat-slot shape (e.g. HttpMethod
+            // / HttpScheme: 9 empty + 1 string-payload). Wire =
+            // (i32 disc, then the max-payload's wire slots).
+            if (IsLikelyVariantBase(clrType))
+            {
+                var cases = GetVariantCases(clrType);
+                int maxPayloadSlots = 0;
+                ValType[]? maxPayloadWire = null;
+                foreach (var c in cases)
+                {
+                    if (c.Payload == null) continue;
+                    int ps = CanonicalSlotCount(c.Payload,
+                        out var pw, resolver);
+                    if (ps < 0) { maxPayloadSlots = -1; break; }
+                    if (ps > maxPayloadSlots)
+                    {
+                        maxPayloadSlots = ps;
+                        maxPayloadWire = pw;
+                    }
+                    else if (ps == maxPayloadSlots
+                        && maxPayloadWire != null)
+                    {
+                        // All max-sized payloads must share the
+                        // same wire-type sequence — joined-flat
+                        // widening across mismatched primitive
+                        // shapes (i32 ↔ f32) is non-trivial; defer.
+                        for (int i = 0; i < ps; i++)
+                            if (pw[i] != maxPayloadWire[i])
+                            { maxPayloadSlots = -1; break; }
+                        if (maxPayloadSlots == -1) break;
+                    }
+                }
+                if (maxPayloadSlots >= 0)
+                {
+                    if (maxPayloadSlots == 0)
+                    {
+                        wasmTypes = new[] { ValType.I32 };
+                        return 1;
+                    }
+                    var combined = new ValType[1 + maxPayloadSlots];
+                    combined[0] = ValType.I32;
+                    Array.Copy(maxPayloadWire!, 0, combined, 1,
+                        maxPayloadSlots);
+                    wasmTypes = combined;
+                    return 1 + maxPayloadSlots;
                 }
             }
             // User-class record: declaration-order concatenation of
