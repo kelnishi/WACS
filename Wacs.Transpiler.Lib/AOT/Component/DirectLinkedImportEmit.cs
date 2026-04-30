@@ -173,8 +173,16 @@ namespace Wacs.Transpiler.AOT.Component
                 if (wasmResults.Length == 1)
                 {
                     if (method.ReturnType == typeof(void)) return false;
-                    if (!IsPrimitiveCompatible(method.ReturnType,
-                        wasmResults[0])) return false;
+                    // own<R> return: wasm i32 (handle) + CLR
+                    // resource interface. The IL allocates a handle
+                    // from the returned instance via Resources.
+                    bool isOwnReturn = wasmResults[0] == ValType.I32
+                        && resolver != null
+                        && resolver.IsResourceInterface(method.ReturnType)
+                        && resolver.PreferredResourcesType != null;
+                    if (!isOwnReturn
+                        && !IsPrimitiveCompatible(method.ReturnType,
+                            wasmResults[0])) return false;
                 }
                 else
                 {
@@ -443,16 +451,43 @@ namespace Wacs.Transpiler.AOT.Component
             }
             else if (wasmType.ResultType.Types.Length == 1)
             {
-                // Convert C# return type back to the wasm wire type
-                // if the CIL stack form differs. Most narrow-int
-                // returns are already i32 on the stack (CIL widens
-                // to i32); ulong returns are already i64. So this
-                // is usually a no-op. But e.g. C# bool returned
-                // from an interface method is a 1-byte stack slot
-                // in some scenarios — emit a conv.i4 defensively.
                 var wasmRet = wasmType.ResultType.Types[0];
-                EmitReturnConversionIfNeeded(il, method.ReturnType,
-                    wasmRet);
+                // own<R> return: the CLR returned a typed resource
+                // instance; allocate a handle via Resources and
+                // leave the i32 handle on the stack as the wasm
+                // result.
+                if (wasmRet == ValType.I32
+                    && resolver != null
+                    && resolver.IsResourceInterface(method.ReturnType)
+                    && resourcesType != null)
+                {
+                    var instLocal = il.DeclareLocal(method.ReturnType);
+                    il.Emit(OpCodes.Stloc, instLocal);
+
+                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Ldfld, ResourcesField);
+                    il.Emit(OpCodes.Castclass, resourcesType);
+
+                    il.Emit(OpCodes.Ldtoken, method.ReturnType);
+                    il.Emit(OpCodes.Call, GetTypeFromHandleMethod);
+
+                    il.Emit(OpCodes.Ldloc, instLocal);
+                    il.Emit(OpCodes.Callvirt,
+                        ResolveAllocateResourceMethod(resourcesType));
+                }
+                else
+                {
+                    // Convert C# return type back to the wasm wire
+                    // type if the CIL stack form differs. Most
+                    // narrow-int returns are already i32 on the
+                    // stack (CIL widens to i32); ulong returns are
+                    // already i64. So this is usually a no-op. But
+                    // e.g. C# bool returned from an interface
+                    // method is a 1-byte stack slot in some
+                    // scenarios — emit a conv.i4 defensively.
+                    EmitReturnConversionIfNeeded(il, method.ReturnType,
+                        wasmRet);
+                }
             }
         }
 
