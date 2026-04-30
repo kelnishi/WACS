@@ -368,8 +368,21 @@ namespace Wacs.Transpiler.AOT.Component
                     && method.ReturnType.GetArrayRank() == 1
                     && IsListPrimitiveElement(
                         method.ReturnType.GetElementType()!);
+                bool isAggregateArrayReturn = method.ReturnType.IsArray
+                    && method.ReturnType.GetArrayRank() == 1
+                    && (IsTupleOfPrimitives(
+                            method.ReturnType.GetElementType()!)
+                        || IsRecordOfPrimitives(
+                            method.ReturnType.GetElementType()!));
 
                 int offsetSoFar = 0;
+                if (isAggregateArrayReturn)
+                {
+                    EmitListOfRecordOrTupleReturn(il,
+                        method.ReturnType.GetElementType()!,
+                        returnLocal, temps[retAreaSlot]);
+                }
+                else
                 if (isStringReturn || isByteArrayReturn
                     || isPrimArrayReturn || isStringArrayReturn)
                 {
@@ -1488,6 +1501,12 @@ namespace Wacs.Transpiler.AOT.Component
                 var elem = t.GetElementType()!;
                 if (IsListPrimitiveElement(elem)) return true;
                 if (elem == typeof(string)) return true;
+                // list<tuple-of-primitives> / list<record-of-primitives>:
+                // outer (ptr, count) at retArea + contiguous packed
+                // elements at *(ptr). cabi_realloc once for the outer
+                // buffer; per-element fields written inline.
+                if (IsTupleOfPrimitives(elem)) return true;
+                if (IsRecordOfPrimitives(elem)) return true;
             }
             if (IsLikelyRecordType(t))
             {
@@ -1611,16 +1630,32 @@ namespace Wacs.Transpiler.AOT.Component
             return maxA;
         }
 
-        // Emit IL that stores a record/tuple of primitives at
-        // retArea+baseOffset, returning the post-write end offset.
-        // Reads each field/property via the appropriate access
-        // pattern (ValueTuple uses ldloca+ldfld; record uses
-        // ldloc+callvirt(getter)).
+        // Emit IL that stores a record/tuple of primitives whose
+        // base address (i32) is pushed onto the stack via
+        // pushBaseAddress. Each field write computes
+        // dest[base + fieldOffset] inline. Returns the post-write
+        // end offset (relative to base). Reads each field/property
+        // via the appropriate access pattern (ValueTuple uses
+        // ldloca+ldfld; record uses ldloc+callvirt(getter)).
+        //
+        // For top-level records/tuples at retArea+baseOffset:
+        //   pushBaseAddress = il2 => {
+        //     il2.Emit(Ldloc, retAreaLocal);
+        //     if (baseOffset != 0) { Ldc + Add; }
+        //   }
+        // For list-of-record per-element at outerPtr + i*elemSize:
+        //   pushBaseAddress = il2 => {
+        //     il2.Emit(Ldloc, outerPtrLocal);
+        //     il2.Emit(Ldloc, indexLocal);
+        //     il2.Emit(Ldc, elemSize); Mul;
+        //     Add;
+        //   }
         private static int EmitInlineRecordOrTupleStore(
-            ILGenerator il, Type type, LocalBuilder retAreaLocal,
-            int baseOffset, LocalBuilder valueLocal)
+            ILGenerator il, Type type,
+            Action<ILGenerator> pushBaseAddress,
+            LocalBuilder valueLocal)
         {
-            int offsetSoFar = baseOffset;
+            int offsetSoFar = 0;
             bool isTuple = type.IsGenericType
                 && IsValueTupleType(type.GetGenericTypeDefinition());
 
@@ -1638,7 +1673,7 @@ namespace Wacs.Transpiler.AOT.Component
                     il.Emit(OpCodes.Ldc_I4_0);
                     il.Emit(OpCodes.Ldelem_Ref);
                     il.Emit(OpCodes.Ldfld, MemoryDataField);
-                    il.Emit(OpCodes.Ldloc, retAreaLocal);
+                    pushBaseAddress(il);
                     if (fieldOffset != 0)
                     {
                         il.Emit(OpCodes.Ldc_I4, fieldOffset);
@@ -1665,7 +1700,7 @@ namespace Wacs.Transpiler.AOT.Component
                     il.Emit(OpCodes.Ldc_I4_0);
                     il.Emit(OpCodes.Ldelem_Ref);
                     il.Emit(OpCodes.Ldfld, MemoryDataField);
-                    il.Emit(OpCodes.Ldloc, retAreaLocal);
+                    pushBaseAddress(il);
                     if (fieldOffset != 0)
                     {
                         il.Emit(OpCodes.Ldc_I4, fieldOffset);
@@ -1682,6 +1717,172 @@ namespace Wacs.Transpiler.AOT.Component
                 }
             }
             return offsetSoFar;
+        }
+
+        // Convenience overload: matches the previous (retArea +
+        // baseOffset) signature so existing call sites don't change.
+        private static int EmitInlineRecordOrTupleStore(
+            ILGenerator il, Type type, LocalBuilder retAreaLocal,
+            int baseOffset, LocalBuilder valueLocal)
+        {
+            return EmitInlineRecordOrTupleStore(il, type,
+                il2 =>
+                {
+                    il2.Emit(OpCodes.Ldloc, retAreaLocal);
+                    if (baseOffset != 0)
+                    {
+                        il2.Emit(OpCodes.Ldc_I4, baseOffset);
+                        il2.Emit(OpCodes.Add);
+                    }
+                },
+                valueLocal);
+        }
+
+        // Emit IL for a list<tuple|record> top-level return.
+        //   1. Compute count = arrayLocal.Length
+        //   2. Compute byteCount = count * elemSize
+        //   3. Call cabi_realloc(0, 0, elemAlign, byteCount) → outerPtr
+        //   4. Loop i from 0 to count-1, write each element at
+        //      outerPtr + i*elemSize using the per-field write
+        //      machinery (with a dynamic base address).
+        //   5. Write (outerPtr, count) to retArea+0/+4.
+        private static void EmitListOfRecordOrTupleReturn(
+            ILGenerator il, Type elemType, LocalBuilder arrayLocal,
+            LocalBuilder retAreaLocal)
+        {
+            int elemSize = SizeOfRecordOrTuple(elemType);
+            int elemAlign = MaxFieldAlign(elemType);
+
+            // count = arrayLocal.Length
+            var countLocal = il.DeclareLocal(typeof(int));
+            il.Emit(OpCodes.Ldloc, arrayLocal);
+            il.Emit(OpCodes.Ldlen);
+            il.Emit(OpCodes.Conv_I4);
+            il.Emit(OpCodes.Stloc, countLocal);
+
+            // outerPtr = ctx.CabiRealloc(0, 0, elemAlign, count*elemSize)
+            var outerPtrLocal = il.DeclareLocal(typeof(int));
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, CabiReallocField);
+            // Null-check at runtime via dup+brfalse then throw isn't
+            // strictly necessary — calling a null Func throws NRE
+            // which the test sees. Skip the explicit guard.
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Ldc_I4, elemAlign);
+            il.Emit(OpCodes.Ldloc, countLocal);
+            il.Emit(OpCodes.Ldc_I4, elemSize);
+            il.Emit(OpCodes.Mul);
+            il.Emit(OpCodes.Callvirt,
+                typeof(Func<int, int, int, int, int>)
+                    .GetMethod("Invoke")!);
+            il.Emit(OpCodes.Stloc, outerPtrLocal);
+
+            // for (int i = 0; i < count; i++)
+            var indexLocal = il.DeclareLocal(typeof(int));
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Stloc, indexLocal);
+
+            var loopStart = il.DefineLabel();
+            var loopCheck = il.DefineLabel();
+
+            il.Emit(OpCodes.Br, loopCheck);
+            il.MarkLabel(loopStart);
+
+            // Stash element[i] in elemLocal.
+            var elemLocal = il.DeclareLocal(elemType);
+            il.Emit(OpCodes.Ldloc, arrayLocal);
+            il.Emit(OpCodes.Ldloc, indexLocal);
+            if (elemType.IsValueType)
+            {
+                // ValueTuple is a struct — Ldelem for value types
+                // takes the element via Ldelema + Ldobj, or use Ldelem
+                // with the type token.
+                il.Emit(OpCodes.Ldelem, elemType);
+            }
+            else
+            {
+                il.Emit(OpCodes.Ldelem_Ref);
+            }
+            il.Emit(OpCodes.Stloc, elemLocal);
+
+            // Write fields at outerPtr + i*elemSize + fieldOffset.
+            EmitInlineRecordOrTupleStore(il, elemType,
+                il2 =>
+                {
+                    il2.Emit(OpCodes.Ldloc, outerPtrLocal);
+                    il2.Emit(OpCodes.Ldloc, indexLocal);
+                    il2.Emit(OpCodes.Ldc_I4, elemSize);
+                    il2.Emit(OpCodes.Mul);
+                    il2.Emit(OpCodes.Add);
+                },
+                elemLocal);
+
+            // i++
+            il.Emit(OpCodes.Ldloc, indexLocal);
+            il.Emit(OpCodes.Ldc_I4_1);
+            il.Emit(OpCodes.Add);
+            il.Emit(OpCodes.Stloc, indexLocal);
+
+            il.MarkLabel(loopCheck);
+            il.Emit(OpCodes.Ldloc, indexLocal);
+            il.Emit(OpCodes.Ldloc, countLocal);
+            il.Emit(OpCodes.Blt, loopStart);
+
+            // Write (outerPtr, count) to retArea + 0 and + 4.
+            // ptr @0
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, MemoriesField);
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Ldelem_Ref);
+            il.Emit(OpCodes.Ldfld, MemoryDataField);
+            il.Emit(OpCodes.Ldloc, retAreaLocal);
+            il.Emit(OpCodes.Ldloc, outerPtrLocal);
+            il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(int)));
+
+            // count @4
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, MemoriesField);
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Ldelem_Ref);
+            il.Emit(OpCodes.Ldfld, MemoryDataField);
+            il.Emit(OpCodes.Ldloc, retAreaLocal);
+            il.Emit(OpCodes.Ldc_I4_4);
+            il.Emit(OpCodes.Add);
+            il.Emit(OpCodes.Ldloc, countLocal);
+            il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(int)));
+        }
+
+        // Total wire size of a tuple/record-of-primitives, accounting
+        // for per-field alignment padding. Used to compute the
+        // per-element stride in list<record>/list<tuple>.
+        private static int SizeOfRecordOrTuple(Type type)
+        {
+            int offsetSoFar = 0;
+            bool isTuple = type.IsGenericType
+                && IsValueTupleType(type.GetGenericTypeDefinition());
+            if (isTuple)
+            {
+                foreach (var et in type.GetGenericArguments())
+                {
+                    int fa = AlignOfPrimitive(et);
+                    offsetSoFar = Align(offsetSoFar, fa)
+                        + SizeOfPrimitive(et);
+                }
+            }
+            else
+            {
+                foreach (var p in GetRecordProperties(type))
+                {
+                    int fa = AlignOfPrimitive(p.PropertyType);
+                    offsetSoFar = Align(offsetSoFar, fa)
+                        + SizeOfPrimitive(p.PropertyType);
+                }
+            }
+            // canon-ABI: pad the total to the type's alignment so
+            // arrays of this type pack contiguously.
+            int maxA = MaxFieldAlign(type);
+            return Align(offsetSoFar, maxA);
         }
 
         // True when this CLR type maps directly to a single
