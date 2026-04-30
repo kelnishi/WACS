@@ -851,6 +851,36 @@ namespace Wacs.Transpiler.Test
             public Option<int[]> List() => _v;
         }
 
+        // ====== list<list<s32>> (int[][]) return ===============
+        // Wire form: outer (i32 ptr, i32 count) + inner array of
+        // (sub_ptr, sub_len) pairs, each sub_ptr pointing to a
+        // packed i32 buffer. Same shape as byte[][] but per-element
+        // size = 4 (i32) instead of 1 (u8).
+
+        [WitSource(@"interface listil-env",
+            Package = "my:test@1.0.0", Interface = "listil-env")]
+        public interface IIntListListSource
+        {
+            [WitSource(@"all: func() -> list<list<s32>>;",
+                Package = "my:test@1.0.0", Interface = "listil-env",
+                Item = "all")]
+            int[][] All();
+        }
+
+        public sealed class IntListListBundle
+        {
+            public IIntListListSource ListilEnv { get; }
+            public IntListListBundle(IIntListListSource s)
+            { ListilEnv = s; }
+        }
+
+        private sealed class FixedIntListList : IIntListListSource
+        {
+            private readonly int[][] _v;
+            public FixedIntListList(int[][] v) { _v = v; }
+            public int[][] All() => _v;
+        }
+
         // ====== list<list<u8>> (byte[][]) return ===============
         // Wire form: outer (i32 ptr, i32 count) + inner array of
         // (sub_ptr, sub_len) pairs at *(ptr) + raw byte buffers at
@@ -2547,6 +2577,77 @@ namespace Wacs.Transpiler.Test
             0x0B, 0x00,
             0x41, 0x10, 0x10, 0x00,
             0x41, 0x10, 0x28, 0x02, 0x08,
+            0x0B,
+        };
+
+        // list<list<s32>> retArea: i32 ptr @0 + i32 count @4.
+        // *(ptr) is array of (sub_ptr, sub_len) pairs; each
+        // *(sub_ptr) is a packed i32 buffer.
+        private static byte[] BuildListOfIntListReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 3 types
+            0x01, 0x11, 0x03,
+            0x60, 0x04, 0x7F, 0x7F, 0x7F, 0x7F, 0x01, 0x7F,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // module: "my:test/listil-env@1.0.0" (24)
+            // entity: "all" (3)
+            // size = 1 + 1 + 24 + 1 + 3 + 2 = 32 = 0x20
+            0x02, 0x20, 0x01,
+            0x18,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x6C, 0x69, 0x73, 0x74, 0x69, 0x6C, 0x2D, 0x65,
+            0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x03,
+            0x61, 0x6C, 0x6C,
+            0x00, 0x01,
+            // Function section: 3 local funcs
+            0x03, 0x04, 0x03, 0x00, 0x02, 0x02,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Global: bump allocator at 32
+            0x06, 0x06, 0x01,
+            0x7F, 0x01, 0x41, 0x20, 0x0B,
+            // Export section: 3 exports
+            //   call_all_count      (14): 17
+            //   call_all_first_int  (18): 21
+            //   cabi_realloc        (12): 15
+            // size = 1 + 17 + 21 + 15 = 54 = 0x36
+            0x07, 0x36, 0x03,
+            0x0E,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x61, 0x6C, 0x6C,
+            0x5F, 0x63, 0x6F, 0x75, 0x6E, 0x74,
+            0x00, 0x02,
+            0x12,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x61, 0x6C, 0x6C,
+            0x5F, 0x66, 0x69, 0x72, 0x73, 0x74, 0x5F, 0x69,
+            0x6E, 0x74,
+            0x00, 0x03,
+            0x0C,
+            0x63, 0x61, 0x62, 0x69, 0x5F, 0x72, 0x65, 0x61,
+            0x6C, 0x6C, 0x6F, 0x63,
+            0x00, 0x01,
+            // Code section: 3 bodies (12/12/18)
+            0x0A, 0x2B, 0x03,
+            0x0B, 0x00,
+            0x23, 0x00,
+            0x23, 0x00,
+            0x20, 0x03,
+            0x6A,
+            0x24, 0x00,
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x04,
+            0x0B,
+            0x11, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10,
+            0x28, 0x02, 0x00,                 // outer_ptr
+            0x28, 0x02, 0x00,                 // first sub_ptr
+            0x28, 0x02, 0x00,                 // first int (i32 at *sub_ptr+0)
             0x0B,
         };
 
@@ -9316,6 +9417,82 @@ namespace Wacs.Transpiler.Test
             var callByte = result.ExportsInterface!.GetMethod(
                 InterfaceGenerator.SanitizeName("call_all_first_byte"))!;
             Assert.Equal(0x37, (int)callByte.Invoke(fresh,
+                Array.Empty<object>())!);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_ListOfIntListReturn_ViaCabiRealloc()
+        {
+            // list<list<s32>> = int[][]: same two-level cabi_realloc
+            // shape as byte[][] but per-sub buffer is i32-aligned
+            // (align=4) and elementSize=4. Generic StorePrimArrayList<T>
+            // closes over int (or any T : unmanaged).
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/listil-env@1.0.0", "all"),
+                _ => throw new InvalidOperationException(
+                    "stub for all must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildListOfIntListReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(IntListListBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/listil-env@1.0.0", "all", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.ListIntListRet", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_listil_env_1_0_0_all"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for all must not be invoked"),
+                });
+
+            // int[][] { {9, 16}, {21, 33, 7} } — count=2, first
+            // sub's first int = 9.
+            var bundle = new IntListListBundle(new FixedIntListList(
+                new int[][]
+                {
+                    new int[] { 9, 16 },
+                    new int[] { 21, 33, 7 },
+                }));
+            var instance = Activator.CreateInstance(
+                result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+
+            var callCount = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_all_count"))!;
+            Assert.Equal(2, (int)callCount.Invoke(instance,
+                Array.Empty<object>())!);
+
+            var fresh = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+            var callInt = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_all_first_int"))!;
+            Assert.Equal(9, (int)callInt.Invoke(fresh,
                 Array.Empty<object>())!);
         }
     }
