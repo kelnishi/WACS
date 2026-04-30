@@ -504,18 +504,26 @@ namespace Wacs.Transpiler.AOT.Component
                 else
                 if (isOption)
                 {
-                    // Option<T> retArea layout: u8 disc @0 + aligned
-                    // value at offset Align(1, AlignOf(T)).
+                    // Option<T> retArea layout: u8 disc @0 + value
+                    // at offset Align(1, AlignOf(T)).
                     //   - primitive T: store via PrimitiveStore.StoreXxx
                     //   - resource T (own<R>): allocate handle via
-                    //     Resources.AllocateResource and StoreI32 it.
+                    //     Resources.AllocateResource and StoreI32 it
+                    //   - string / byte[]: cabi_realloc + memcpy +
+                    //     StoreString / StoreByteArray
                     var inner = method.ReturnType
                         .GetGenericArguments()[0];
                     bool innerIsResource = resolver != null
                         && resolver.IsResourceInterface(inner)
                         && resourcesType != null;
-                    int valueAlign = innerIsResource
-                        ? 4 : AlignOfPrimitive(inner);
+                    bool innerIsString = inner == typeof(string);
+                    bool innerIsByteArray = inner == typeof(byte[]);
+                    int valueAlign;
+                    if (innerIsResource || innerIsString
+                        || innerIsByteArray)
+                        valueAlign = 4;  // (ptr, len) pair starts on i32 boundary
+                    else
+                        valueAlign = AlignOfPrimitive(inner);
                     int valueOffset = Align(1, valueAlign);
 
                     var noneLabel = il.DefineLabel();
@@ -558,13 +566,7 @@ namespace Wacs.Transpiler.AOT.Component
                     if (innerIsResource)
                     {
                         // Allocate a handle from the inner instance,
-                        // then StoreI32 it. Stack progression:
-                        //   [..., dest_array, dest_offset]
-                        //   ; push handle (i32):
-                        //   ldarg_0; ldfld Resources; castclass <Res>;
-                        //   ldtoken IRes; call typeof;
-                        //   ldloca returnLocal; call Option::get_Value;
-                        //   callvirt AllocateResource → int
+                        // then StoreI32 it.
                         il.Emit(OpCodes.Ldarg_0);
                         il.Emit(OpCodes.Ldfld, ResourcesField);
                         il.Emit(OpCodes.Castclass, resourcesType!);
@@ -576,6 +578,20 @@ namespace Wacs.Transpiler.AOT.Component
                             ResolveAllocateResourceMethod(resourcesType!));
                         il.Emit(OpCodes.Call,
                             ResolveStoreMethod(typeof(int)));
+                    }
+                    else if (innerIsString || innerIsByteArray)
+                    {
+                        // Stack at this point: [memory_data, retArea+valueOffset]
+                        // StoreString/StoreByteArray takes
+                        // (byte[] dest, int retAreaOffset, T value, Func realloc)
+                        // — push value + cabi_realloc + call.
+                        il.Emit(OpCodes.Ldloca, returnLocal);
+                        il.Emit(OpCodes.Call, valueGetter);
+                        il.Emit(OpCodes.Ldarg_0);
+                        il.Emit(OpCodes.Ldfld, CabiReallocField);
+                        il.Emit(OpCodes.Call, innerIsString
+                            ? StoreStringMethod
+                            : StoreByteArrayMethod);
                     }
                     else
                     {
@@ -1370,15 +1386,18 @@ namespace Wacs.Transpiler.AOT.Component
                         if (!IsStorablePrimitive(ta)) return false;
                     return true;
                 }
-                // Option<primitive> OR Option<own<R>> — wire form:
-                // u8 disc + (primitive value | i32 handle). Resource
-                // case requires the resolver to recognize the inner
-                // type AND a resources class to allocate handles
-                // through.
+                // Option<primitive> OR Option<own<R>> OR
+                // Option<string> OR Option<byte[]> — wire form:
+                // u8 disc + (primitive value | i32 handle | (ptr, len)).
+                // Resource case requires the resolver to recognize
+                // the inner type AND a resources class. String and
+                // byte[] cases require cabi_realloc at runtime.
                 if (def == typeof(Option<>))
                 {
                     var inner = t.GetGenericArguments()[0];
                     if (IsStorablePrimitive(inner)) return true;
+                    if (inner == typeof(string)) return true;
+                    if (inner == typeof(byte[])) return true;
                     if (resolver != null
                         && resolver.IsResourceInterface(inner)
                         && resolver.PreferredResourcesType != null)

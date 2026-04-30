@@ -770,6 +770,35 @@ namespace Wacs.Transpiler.Test
             public byte[] Give() => _v;
         }
 
+        // ====== Option<string> return ============================
+        // Wire form: u8 disc @0 + (i32 ptr, i32 len) at retArea+4.
+        // Some path: cabi_realloc + memcpy + write disc=1 + (ptr, len).
+        // None path: write disc=0; ptr/len slots stay default.
+
+        [WitSource(@"interface optstr-ret-env",
+            Package = "my:test@1.0.0", Interface = "optstr-ret-env")]
+        public interface IMaybeName
+        {
+            [WitSource(@"name: func() -> option<string>;",
+                Package = "my:test@1.0.0", Interface = "optstr-ret-env",
+                Item = "name")]
+            Option<string> Name();
+        }
+
+        public sealed class MaybeNameBundle
+        {
+            public IMaybeName OptstrRetEnv { get; }
+            public MaybeNameBundle(IMaybeName m)
+            { OptstrRetEnv = m; }
+        }
+
+        private sealed class FixedMaybeName : IMaybeName
+        {
+            private readonly Option<string> _v;
+            public FixedMaybeName(Option<string> v) { _v = v; }
+            public Option<string> Name() => _v;
+        }
+
         // ====== Variant param test surface =======================
         // Mirrors the source-generator-emitted shape for WIT
         // variants (HttpMethod, IpAddress, etc.):
@@ -1186,6 +1215,86 @@ namespace Wacs.Transpiler.Test
             0x00, 0x01,
             // Code section: body = call 0; end
             0x0A, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0B,
+        };
+
+        // Same wasm shape as the string-return fixture but for
+        // Option<string>. retArea is 12 bytes (u8 disc + 3 padding
+        // + i32 ptr + i32 len). The export reads disc OR (when
+        // disc=1) reads the first byte at the ptr.
+        private static byte[] BuildOptionStringReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 3 types (same shape as string-return)
+            0x01, 0x11, 0x03,
+            0x60, 0x04, 0x7F, 0x7F, 0x7F, 0x7F, 0x01, 0x7F,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section: 1 import (name : type 1)
+            // module: "my:test/optstr-ret-env@1.0.0" (28)
+            // size = 1 + 1 + 28 + 1 + 4 + 2 = 37 = 0x25
+            0x02, 0x25, 0x01,
+            0x1C,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x6F, 0x70, 0x74, 0x73, 0x74, 0x72, 0x2D, 0x72,
+            0x65, 0x74, 0x2D, 0x65, 0x6E, 0x76, 0x40, 0x31,
+            0x2E, 0x30, 0x2E, 0x30,
+            0x04,
+            0x6E, 0x61, 0x6D, 0x65,
+            0x00, 0x01,
+            // Function section: 3 local funcs
+            // funcs[0] = type 0 (cabi_realloc)
+            // funcs[1] = type 2 (call_name_disc)
+            // funcs[2] = type 2 (call_name_first_byte)
+            0x03, 0x04, 0x03, 0x00, 0x02, 0x02,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Global: bump allocator at 32
+            0x06, 0x06, 0x01,
+            0x7F, 0x01, 0x41, 0x20, 0x0B,
+            // Export section: 3 exports
+            // call_name_disc (14): 1+14+1+1 = 17
+            // call_name_first_byte (20): 1+20+1+1 = 23
+            // cabi_realloc (12): 1+12+1+1 = 15
+            // size = 1 + 17 + 23 + 15 = 56 = 0x38
+            0x07, 0x38, 0x03,
+            0x0E,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x6E, 0x61, 0x6D,
+            0x65, 0x5F, 0x64, 0x69, 0x73, 0x63,
+            0x00, 0x02,
+            0x14,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x6E, 0x61, 0x6D,
+            0x65, 0x5F, 0x66, 0x69, 0x72, 0x73, 0x74, 0x5F,
+            0x62, 0x79, 0x74, 0x65,
+            0x00, 0x03,
+            0x0C,
+            0x63, 0x61, 0x62, 0x69, 0x5F, 0x72, 0x65, 0x61,
+            0x6C, 0x6C, 0x6F, 0x63,
+            0x00, 0x01,
+            // Code section: 3 bodies
+            // body0 cabi_realloc:
+            //   locals(1) + global.get(2) + global.get(2) + local.get(2) + i32.add(1) + global.set(2) + end(1) = 11
+            // body1 call_name_disc: locals + i32.const + call + i32.const + i32.load8_u@0 + end = 11
+            // body2 call_name_first_byte:
+            //   locals(1) + i32.const(2) + call(2) + i32.const(2) + i32.load align=2 offset=4(3) + i32.load8_u align=0 offset=0(3) + end(1) = 14
+            // sizes: 12, 12, 15
+            // section size = 1 + 12 + 12 + 15 = 40 = 0x28
+            0x0A, 0x28, 0x03,
+            0x0B, 0x00,
+            0x23, 0x00,
+            0x23, 0x00,
+            0x20, 0x03,
+            0x6A,
+            0x24, 0x00,
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x2D, 0x00, 0x00,
+            0x0B,
+            0x0E, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x04,    // i32.load align=2 offset=4 → ptr at retArea+4
+            0x2D, 0x00, 0x00,                 // i32.load8_u → byte at *(ptr)
+            0x0B,
         };
 
         // Same wasm shape as the string-return fixture, just with
@@ -6401,6 +6510,93 @@ namespace Wacs.Transpiler.Test
                 InterfaceGenerator.SanitizeName("call_give_first_byte"))!;
             Assert.Equal(0x10, (int)callByte.Invoke(freshInstance,
                 Array.Empty<object>())!);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_OptionStringReturn_ViaCabiRealloc()
+        {
+            // Option<string> retArea: u8 disc @0 + (i32 ptr @4,
+            // i32 len @8). Some path: cabi_realloc + memcpy + write
+            // disc=1 + (ptr, len). None path: write disc=0.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/optstr-ret-env@1.0.0", "name"),
+                _ => throw new InvalidOperationException(
+                    "stub for name must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildOptionStringReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(MaybeNameBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/optstr-ret-env@1.0.0", "name", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.OptStrRet", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_optstr_ret_env_1_0_0_name"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for name must not be invoked"),
+                });
+
+            // Test #1: Some("Wat") — disc=1; first byte at ptr = 'W' (0x57).
+            {
+                var bundle = new MaybeNameBundle(
+                    new FixedMaybeName(Option<string>.Some("Wat")));
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+
+                var callDisc = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_name_disc"))!;
+                Assert.Equal(1, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+
+                var fresh = Activator.CreateInstance(result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callByte = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_name_first_byte"))!;
+                Assert.Equal(0x57, (int)callByte.Invoke(fresh,
+                    Array.Empty<object>())!);
+            }
+
+            // Test #2: None — disc=0; the ptr/len slots stay
+            // default and we don't probe them.
+            {
+                var bundle = new MaybeNameBundle(
+                    new FixedMaybeName(Option<string>.None));
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+
+                var callDisc = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_name_disc"))!;
+                Assert.Equal(0, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+            }
         }
     }
 }
