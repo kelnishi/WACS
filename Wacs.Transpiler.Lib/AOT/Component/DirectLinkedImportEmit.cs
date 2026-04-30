@@ -396,6 +396,39 @@ namespace Wacs.Transpiler.AOT.Component
                 il.MarkLabel(endLabel);
                 return;
             }
+            // Result<TOk, TErr>: same recursive shape as Option but
+            // with a 2-case (Ok=0 / Err=1) discriminant routing to
+            // the correct construction helper. v0 requires Ok and
+            // Err to share the joined-flat shape — guarded by
+            // CanonicalSlotCount before we get here.
+            if (clrType.IsGenericType
+                && clrType.GetGenericTypeDefinition() == typeof(Result<,>))
+            {
+                //   ldloc disc
+                //   brfalse ok            ;; disc==0 → Ok branch
+                //   <emit lift for TErr at cursor+1>
+                //   call Result<TOk, TErr>::FromErr(TErr)
+                //   br end
+                // ok:
+                //   <emit lift for TOk at cursor+1>
+                //   call Result<TOk, TErr>::FromOk(TOk)
+                // end:
+                var args = clrType.GetGenericArguments();
+                var okLabel = il.DefineLabel();
+                var endLabel = il.DefineLabel();
+                il.Emit(OpCodes.Ldloc, temps[wasmCursor]);
+                il.Emit(OpCodes.Brfalse, okLabel);
+                EmitLiftForType(il, args[1], wasmParams, temps,
+                    wasmCursor + 1, resolver, resourcesType);
+                il.Emit(OpCodes.Call, ResolveResultFromErrMethod(args[0], args[1]));
+                il.Emit(OpCodes.Br, endLabel);
+                il.MarkLabel(okLabel);
+                EmitLiftForType(il, args[0], wasmParams, temps,
+                    wasmCursor + 1, resolver, resourcesType);
+                il.Emit(OpCodes.Call, ResolveResultFromOkMethod(args[0], args[1]));
+                il.MarkLabel(endLabel);
+                return;
+            }
             // own<R> / borrow<R>: a typed resource interface as a
             // CLR param maps to a single i32 wasm handle. Lift via
             // ctx.Resources.GetResource(typeof(IR), handle) → cast.
@@ -510,6 +543,39 @@ namespace Wacs.Transpiler.AOT.Component
                     .GetGetMethod()!;
             });
 
+        // Result<TOk, TErr>::FromOk(TOk) and FromErr(TErr) cached
+        // per (TOk, TErr) pair so each direct-linked Result<,>
+        // emit reuses the same MethodInfos.
+        private static readonly ConcurrentDictionary<(Type, Type), MethodInfo>
+            ResultFromOkCache = new();
+
+        private static readonly ConcurrentDictionary<(Type, Type), MethodInfo>
+            ResultFromErrCache = new();
+
+        private static MethodInfo ResolveResultFromOkMethod(Type ok, Type err)
+            => ResultFromOkCache.GetOrAdd((ok, err), key =>
+            {
+                var resultT = typeof(Result<,>).MakeGenericType(
+                    key.Item1, key.Item2);
+                return resultT.GetMethod("FromOk",
+                    BindingFlags.Public | BindingFlags.Static,
+                    binder: null,
+                    types: new[] { key.Item1 },
+                    modifiers: null)!;
+            });
+
+        private static MethodInfo ResolveResultFromErrMethod(Type ok, Type err)
+            => ResultFromErrCache.GetOrAdd((ok, err), key =>
+            {
+                var resultT = typeof(Result<,>).MakeGenericType(
+                    key.Item1, key.Item2);
+                return resultT.GetMethod("FromErr",
+                    BindingFlags.Public | BindingFlags.Static,
+                    binder: null,
+                    types: new[] { key.Item2 },
+                    modifiers: null)!;
+            });
+
         // Per-CLR-type wasm flat-slot count for canonical-ABI lower:
         //   primitive (compat with i32/i64/f32/f64) → 1
         //   string                                  → 2 (ptr, len)
@@ -558,6 +624,37 @@ namespace Wacs.Transpiler.AOT.Component
                     Array.Copy(innerWasm, 0, combined, 1, innerSlots);
                     wasmTypes = combined;
                     return 1 + innerSlots;
+                }
+            }
+            // Result<TOk, TErr>: 1 disc i32 + max(flat(Ok), flat(Err))
+            // joined-flat value slots. v0 only handles the case where
+            // Ok and Err have the same flat-slot count AND the same
+            // wire-type sequence — matches the WASI common pattern of
+            // result<T, error-code> where both sides are 1×i32.
+            // Mismatched widths require canon-ABI joined-flat with
+            // per-slot widening which is non-trivial to emit; defer.
+            if (clrType.IsGenericType
+                && clrType.GetGenericTypeDefinition() == typeof(Result<,>))
+            {
+                var args = clrType.GetGenericArguments();
+                int okSlots = CanonicalSlotCount(args[0],
+                    out var okWasm, resolver);
+                int errSlots = CanonicalSlotCount(args[1],
+                    out var errWasm, resolver);
+                if (okSlots > 0 && errSlots > 0
+                    && okSlots == errSlots)
+                {
+                    bool sameShape = true;
+                    for (int s = 0; s < okSlots; s++)
+                        if (okWasm[s] != errWasm[s]) { sameShape = false; break; }
+                    if (sameShape)
+                    {
+                        var combined = new ValType[1 + okSlots];
+                        combined[0] = ValType.I32;
+                        Array.Copy(okWasm, 0, combined, 1, okSlots);
+                        wasmTypes = combined;
+                        return 1 + okSlots;
+                    }
                 }
             }
             if (clrType == typeof(int) || clrType == typeof(uint)
