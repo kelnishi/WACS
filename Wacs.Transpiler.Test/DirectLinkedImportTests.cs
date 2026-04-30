@@ -823,6 +823,34 @@ namespace Wacs.Transpiler.Test
             public Option<XYPair> Xy() => _v;
         }
 
+        // ====== Option<list<u32>> (Option<int[]>) return =========
+        // Wire form: u8 disc @0 + (i32 ptr @4, i32 count @8). Some
+        // path: cabi_realloc + memcpy + write disc=1 + (ptr, count).
+
+        [WitSource(@"interface optintl-env",
+            Package = "my:test@1.0.0", Interface = "optintl-env")]
+        public interface IMaybeInts
+        {
+            [WitSource(@"list: func() -> option<list<s32>>;",
+                Package = "my:test@1.0.0", Interface = "optintl-env",
+                Item = "list")]
+            Option<int[]> List();
+        }
+
+        public sealed class MaybeIntsBundle
+        {
+            public IMaybeInts OptintlEnv { get; }
+            public MaybeIntsBundle(IMaybeInts m)
+            { OptintlEnv = m; }
+        }
+
+        private sealed class FixedMaybeInts : IMaybeInts
+        {
+            private readonly Option<int[]> _v;
+            public FixedMaybeInts(Option<int[]> v) { _v = v; }
+            public Option<int[]> List() => _v;
+        }
+
         // ====== list<tuple<u32, u32>> return =====================
         // Wire form: outer (i32 ptr, i32 count) at retArea + a
         // contiguous packed array of tuple<u32, u32> elements
@@ -2489,6 +2517,77 @@ namespace Wacs.Transpiler.Test
             0x0B, 0x00,
             0x41, 0x10, 0x10, 0x00,
             0x41, 0x10, 0x28, 0x02, 0x08,
+            0x0B,
+        };
+
+        // Option<list<s32>> retArea: u8 disc @0 + (i32 ptr @4, i32
+        // count @8). Some path: cabi_realloc + memcpy + write
+        // disc=1 + (ptr, count). None: write disc=0. Probes:
+        //   call_list_disc          → disc byte
+        //   call_list_first_int     → first int (chases ptr)
+        private static byte[] BuildOptionIntListReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 3 types
+            0x01, 0x11, 0x03,
+            0x60, 0x04, 0x7F, 0x7F, 0x7F, 0x7F, 0x01, 0x7F,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // module: "my:test/optintl-env@1.0.0" (25)
+            // entity: "list" (4)
+            // size = 1 + 1 + 25 + 1 + 4 + 2 = 34 = 0x22
+            0x02, 0x22, 0x01,
+            0x19,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x6F, 0x70, 0x74, 0x69, 0x6E, 0x74, 0x6C, 0x2D,
+            0x65, 0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x04,
+            0x6C, 0x69, 0x73, 0x74,
+            0x00, 0x01,
+            // Function section: 3 local funcs
+            0x03, 0x04, 0x03, 0x00, 0x02, 0x02,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Global: bump allocator at 32
+            0x06, 0x06, 0x01,
+            0x7F, 0x01, 0x41, 0x20, 0x0B,
+            // Export section: 3 exports
+            //   call_list_disc      (14): 17
+            //   call_list_first_int (19): 22
+            //   cabi_realloc        (12): 15
+            // size = 1 + 17 + 22 + 15 = 55 = 0x37
+            0x07, 0x37, 0x03,
+            0x0E,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x6C, 0x69, 0x73,
+            0x74, 0x5F, 0x64, 0x69, 0x73, 0x63,
+            0x00, 0x02,
+            0x13,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x6C, 0x69, 0x73,
+            0x74, 0x5F, 0x66, 0x69, 0x72, 0x73, 0x74, 0x5F,
+            0x69, 0x6E, 0x74,
+            0x00, 0x03,
+            0x0C,
+            0x63, 0x61, 0x62, 0x69, 0x5F, 0x72, 0x65, 0x61,
+            0x6C, 0x6C, 0x6F, 0x63,
+            0x00, 0x01,
+            // Code section: 3 bodies (12/12/15)
+            0x0A, 0x28, 0x03,
+            0x0B, 0x00,
+            0x23, 0x00,
+            0x23, 0x00,
+            0x20, 0x03,
+            0x6A,
+            0x24, 0x00,
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x2D, 0x00, 0x00,
+            0x0B,
+            0x0E, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x04,    // ptr at retArea+4
+            0x28, 0x02, 0x00,                 // first int (i32 at *ptr+0)
             0x0B,
         };
 
@@ -8954,6 +9053,92 @@ namespace Wacs.Transpiler.Test
                 InterfaceGenerator.SanitizeName("call_all_first_b"))!;
             Assert.Equal(16, (int)callB.Invoke(fresh2,
                 Array.Empty<object>())!);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_OptionIntListReturn_BothBranches()
+        {
+            // Option<int[]>: u8 disc + (i32 ptr, i32 count) at +4.
+            // Some path goes through cabi_realloc + StorePrimitiveArray<int>.
+            // None path writes disc=0 only.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/optintl-env@1.0.0", "list"),
+                _ => throw new InvalidOperationException(
+                    "stub for list must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildOptionIntListReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(MaybeIntsBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/optintl-env@1.0.0", "list", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.OptIntListRet", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_optintl_env_1_0_0_list"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for list must not be invoked"),
+                });
+
+            // Some(int[] { 9, 16 }) → disc=1, first int=9.
+            {
+                var bundle = new MaybeIntsBundle(new FixedMaybeInts(
+                    Option<int[]>.Some(new int[] { 9, 16 })));
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+
+                var callDisc = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_list_disc"))!;
+                Assert.Equal(1, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+
+                var fresh = Activator.CreateInstance(result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callFirst = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_list_first_int"))!;
+                Assert.Equal(9, (int)callFirst.Invoke(fresh,
+                    Array.Empty<object>())!);
+            }
+
+            // None → disc=0; ptr/count slots stay default.
+            {
+                var bundle = new MaybeIntsBundle(new FixedMaybeInts(
+                    Option<int[]>.None));
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+
+                var callDisc = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_list_disc"))!;
+                Assert.Equal(0, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+            }
         }
     }
 }
