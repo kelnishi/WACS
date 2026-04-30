@@ -488,8 +488,31 @@ namespace Wacs.Transpiler.AOT.Component
 
                             bool isStringPayload = c.Payload == typeof(string);
                             bool isByteArrayPayload = c.Payload == typeof(byte[]);
+                            bool isAggregatePayload =
+                                IsTupleOfPrimitives(c.Payload)
+                                || IsRecordOfPrimitives(c.Payload);
 
-                            if (isResourcePayload)
+                            if (isAggregatePayload)
+                            {
+                                // Aggregate payloads write field-by-
+                                // field — bypass the common pre-push
+                                // (memory_data + retArea+offset) we
+                                // emitted above. Pop the pre-push
+                                // first so EmitInlineRecordOrTupleStore
+                                // can do its own per-field pushes.
+                                il.Emit(OpCodes.Pop);
+                                il.Emit(OpCodes.Pop);
+                                var payloadLocal = il.DeclareLocal(c.Payload);
+                                il.Emit(OpCodes.Ldloc, returnLocal);
+                                il.Emit(OpCodes.Castclass, c.CaseType);
+                                il.Emit(OpCodes.Callvirt,
+                                    valueProp.GetGetMethod()!);
+                                il.Emit(OpCodes.Stloc, payloadLocal);
+                                EmitInlineRecordOrTupleStore(il, c.Payload,
+                                    temps[retAreaSlot], valueOffset,
+                                    payloadLocal);
+                            }
+                            else if (isResourcePayload)
                             {
                                 il.Emit(OpCodes.Ldarg_0);
                                 il.Emit(OpCodes.Ldfld, ResourcesField);

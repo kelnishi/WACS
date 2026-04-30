@@ -823,6 +823,47 @@ namespace Wacs.Transpiler.Test
             public Option<XYPair> Xy() => _v;
         }
 
+        // ====== Variant with tuple payload =====================
+        // variant pos { home, point(tuple<u32, u32>) } — tap +
+        // tuple-bearing case. valueOffset=4, payload tuple at
+        // retArea+4..retArea+11.
+
+        [WitSource(@"variant pos { home, point(tuple<u32, u32>) }",
+            Package = "my:test@1.0.0", Interface = "varpos-env",
+            Item = "pos")]
+        public abstract class Pos
+        {
+            public sealed class PosHome : Pos { }
+            public sealed class PosPoint : Pos
+            {
+                public (uint, uint) Value { get; }
+                public PosPoint((uint, uint) v) { Value = v; }
+            }
+        }
+
+        [WitSource(@"interface varpos-env",
+            Package = "my:test@1.0.0", Interface = "varpos-env")]
+        public interface IPosFactory
+        {
+            [WitSource(@"emit: func() -> pos;",
+                Package = "my:test@1.0.0", Interface = "varpos-env",
+                Item = "emit")]
+            Pos Emit();
+        }
+
+        public sealed class PosBundle
+        {
+            public IPosFactory VarposEnv { get; }
+            public PosBundle(IPosFactory p) { VarposEnv = p; }
+        }
+
+        private sealed class FixedPos : IPosFactory
+        {
+            private readonly Pos _v;
+            public FixedPos(Pos v) { _v = v; }
+            public Pos Emit() => _v;
+        }
+
         // ====== Result<tuple<u32,u32>, primitive> return =========
 
         [WitSource(@"interface restup-env",
@@ -2406,6 +2447,66 @@ namespace Wacs.Transpiler.Test
             0x62,
             0x00, 0x03,
             // Code section: same as Option<tuple>
+            0x0A, 0x25, 0x03,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x2D, 0x00, 0x00,
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x04,
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x08,
+            0x0B,
+        };
+
+        // Variant with tuple<u32,u32> payload (pos { home,
+        // point(tuple<u32,u32>) }). retArea: u8 disc + tuple
+        // a@4, b@8. Probes disc, a@4, b@8.
+        private static byte[] BuildVariantTuplePayloadFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: (i32) → void, () → i32
+            0x01, 0x09, 0x02,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // module: "my:test/varpos-env@1.0.0" (24)
+            // entity: "emit" (4)
+            // size = 1 + 1 + 24 + 1 + 4 + 2 = 33 = 0x21
+            0x02, 0x21, 0x01,
+            0x18,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x76, 0x61, 0x72, 0x70, 0x6F, 0x73, 0x2D, 0x65,
+            0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x04,
+            0x65, 0x6D, 0x69, 0x74,
+            0x00, 0x00,
+            // Function section: 3 local funcs of type 1
+            0x03, 0x04, 0x03, 0x01, 0x01, 0x01,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export section: 3 exports
+            //   call_pos_disc (13): 1+13+1+1 = 16
+            //   call_pos_a    (10): 1+10+1+1 = 13
+            //   call_pos_b    (10): 1+10+1+1 = 13
+            // size = 1 + 16 + 13 + 13 = 43 = 0x2B
+            0x07, 0x2B, 0x03,
+            0x0D,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x70, 0x6F, 0x73,
+            0x5F, 0x64, 0x69, 0x73, 0x63,
+            0x00, 0x01,
+            0x0A,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x70, 0x6F, 0x73,
+            0x5F, 0x61,
+            0x00, 0x02,
+            0x0A,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x70, 0x6F, 0x73,
+            0x5F, 0x62,
+            0x00, 0x03,
+            // Code section: 3 bodies (each 11 → 12)
             0x0A, 0x25, 0x03,
             0x0B, 0x00,
             0x41, 0x10, 0x10, 0x00,
@@ -8553,6 +8654,101 @@ namespace Wacs.Transpiler.Test
                 var callA = result.ExportsInterface!.GetMethod(
                     InterfaceGenerator.SanitizeName("call_go_a"))!;
                 Assert.Equal(0x37, (int)callA.Invoke(fresh,
+                    Array.Empty<object>())!);
+            }
+        }
+
+        [Fact]
+        public void DirectLinkedImport_VariantTuplePayloadReturn_BothCases()
+        {
+            // pos { home, point(tuple<u32,u32>) }: empty + tuple
+            // payload. canon-ABI joined-flat reserves max(align)=4
+            // and max(size)=8 for the slot. The point arm goes
+            // through EmitInlineRecordOrTupleStore — same machinery
+            // as Option<tuple>/Result<tuple,X>.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/varpos-env@1.0.0", "emit"),
+                _ => throw new InvalidOperationException(
+                    "stub for emit must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildVariantTuplePayloadFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(PosBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/varpos-env@1.0.0", "emit", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.PosRet", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_varpos_env_1_0_0_emit"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for emit must not be invoked"),
+                });
+
+            // Home (no payload) → disc=0.
+            {
+                var bundle = new PosBundle(
+                    new FixedPos(new Pos.PosHome()));
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+
+                var callDisc = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_pos_disc"))!;
+                Assert.Equal(0, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+            }
+
+            // Point((9, 16)) → disc=1, a=9, b=16.
+            {
+                var bundle = new PosBundle(
+                    new FixedPos(new Pos.PosPoint((9u, 16u))));
+
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callDisc = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_pos_disc"))!;
+                Assert.Equal(1, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+
+                var fresh = Activator.CreateInstance(result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callA = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_pos_a"))!;
+                Assert.Equal(9, (int)callA.Invoke(fresh,
+                    Array.Empty<object>())!);
+
+                var fresh2 = Activator.CreateInstance(result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callB = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_pos_b"))!;
+                Assert.Equal(16, (int)callB.Invoke(fresh2,
                     Array.Empty<object>())!);
             }
         }
