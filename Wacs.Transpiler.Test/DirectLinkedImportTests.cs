@@ -462,6 +462,59 @@ namespace Wacs.Transpiler.Test
             public uint TakePoint(Point p) => (p.X << 8) | p.Y;
         }
 
+        // ====== enum + flags param test surface ==================
+        // WIT enums lower as their underlying integral wire form
+        // (typically u8 → i32). Flags use uint backing to match
+        // the source generator's emission.
+
+        [WitSource(@"enum color { red, green, blue }",
+            Package = "my:test@1.0.0", Interface = "enum-env",
+            Item = "color")]
+        public enum Color : byte
+        {
+            Red = 0,
+            Green = 1,
+            Blue = 2,
+        }
+
+        [WitSource(@"flags perms { read, write, exec }",
+            Package = "my:test@1.0.0", Interface = "enum-env",
+            Item = "perms")]
+        [Flags]
+        public enum Perms : uint
+        {
+            None = 0,
+            Read = 1u << 0,
+            Write = 1u << 1,
+            Exec = 1u << 2,
+        }
+
+        [WitSource(@"interface enum-env",
+            Package = "my:test@1.0.0", Interface = "enum-env")]
+        public interface IEnumTaker
+        {
+            // Encode (color, perms) back as i32 so the test can
+            // probe both made it through with the right typing.
+            [WitSource(@"take-ef: func(c: color, p: perms) -> u32;",
+                Package = "my:test@1.0.0", Interface = "enum-env",
+                Item = "take-ef")]
+            uint TakeEnumFlags(Color c, Perms p);
+        }
+
+        public sealed class EnumBundle
+        {
+            public IEnumTaker EnumEnv { get; }
+            public EnumBundle(IEnumTaker e) { EnumEnv = e; }
+        }
+
+        private sealed class EnumProbe : IEnumTaker
+        {
+            // ((byte)c << 16) | (uint)p — caller asserts both
+            // came through with their typed values intact.
+            public uint TakeEnumFlags(Color c, Perms p)
+                => ((uint)(byte)c << 16) | (uint)p;
+        }
+
         private sealed class FakeEnv : IEnv
         {
             private readonly ulong _v;
@@ -674,6 +727,53 @@ namespace Wacs.Transpiler.Test
             // Code section: locals=0, call 0, call 1, end
             0x0A, 0x08, 0x01, 0x06,
             0x00, 0x10, 0x00, 0x10, 0x01, 0x0B,
+        };
+
+        // (module
+        //   (type $tEf (func (param i32 i32) (result i32)))
+        //   (type $tEntry (func (result i32)))
+        //   (import "my:test/enum-env@1.0.0" "take-ef"
+        //           (func $imp (type $tEf)))
+        //   (func (export "call_ef") (result i32)
+        //     i32.const 1   ;; Color.Green (=1)
+        //     i32.const 5   ;; Perms.Read | Perms.Exec (=5)
+        //     call $imp))   ;; → EnumProbe: (1<<16)|5 = 0x10005
+        //
+        // Both wasm slots are i32. The CLR side has Color (byte
+        // underlying) and Perms (uint underlying) — direct-linked
+        // emit treats both as their underlying type for slot count
+        // and conversion: Color gets conv.u1 narrowing (matches
+        // the byte underlying); Perms shares i32 stack form with
+        // uint so no conv needed.
+        private static byte[] BuildEnumFlagsParamFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types
+            0x01, 0x0B, 0x02,
+            0x60, 0x02, 0x7F, 0x7F, 0x01, 0x7F,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section: 1 import
+            // size = 1 + 1 + 22 + 1 + 7 + 2 = 34 = 0x22
+            0x02, 0x22, 0x01,
+            // module: "my:test/enum-env@1.0.0" (22)
+            0x16,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x65, 0x6E, 0x75, 0x6D, 0x2D, 0x65, 0x6E, 0x76,
+            0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            // entity: "take-ef" (7)
+            0x07,
+            0x74, 0x61, 0x6B, 0x65, 0x2D, 0x65, 0x66,
+            0x00, 0x00,
+            // Function section: 1 func of type 1
+            0x03, 0x02, 0x01, 0x01,
+            // Export: "call_ef" (7) → func 1
+            0x07, 0x0B, 0x01,
+            0x07,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x65, 0x66,
+            0x00, 0x01,
+            // Code: locals=0, i32.const 1, i32.const 5, call 0, end
+            0x0A, 0x0A, 0x01, 0x08,
+            0x00, 0x41, 0x01, 0x41, 0x05, 0x10, 0x00, 0x0B,
         };
 
         // (module
@@ -2568,6 +2668,73 @@ namespace Wacs.Transpiler.Test
                 Array.Empty<object>());
             Assert.IsType<int>(raw);
             Assert.Equal(0x1234, (int)raw);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_EnumAndFlagsParam_PassThroughTypedSlots()
+        {
+            // enum + flags as separate i32 wire params. Direct-linked
+            // emit treats both as their underlying integer for slot
+            // count and conversion: Color (byte) gets conv.u1; Perms
+            // (uint) shares i32 stack form so no conv. Both reach
+            // the typed callvirt as the typed enum values.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Func<int, int, int>>(
+                ("my:test/enum-env@1.0.0", "take-ef"),
+                (_, _) => throw new InvalidOperationException(
+                    "stub for take-ef must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildEnumFlagsParamFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(EnumBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/enum-env@1.0.0", "take-ef", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.EnumParam", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_enum_env_1_0_0_take_ef"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for take-ef must not "
+                            + "be invoked"),
+                });
+
+            var bundle = new EnumBundle(new EnumProbe());
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+
+            // Wasm passes (Color.Green=1, Perms.Read|Exec=5);
+            // EnumProbe returns ((byte)1 << 16) | (uint)5 = 0x10005.
+            var callEf = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_ef"))!;
+            object? raw = callEf.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<int>(raw);
+            Assert.Equal(0x10005, (int)raw);
         }
     }
 }

@@ -722,6 +722,16 @@ namespace Wacs.Transpiler.AOT.Component
                 wasmTypes = new[] { ValType.I32 };
                 return 1;
             }
+            // Enum (incl. [Flags]) lowers as its underlying integral
+            // type — same wire as a plain int. The CLR enum value
+            // shares the i32 stack form with the primitive, so the
+            // existing primitive path handles it once we recurse.
+            if (clrType.IsEnum)
+            {
+                return CanonicalSlotCount(
+                    Enum.GetUnderlyingType(clrType),
+                    out wasmTypes, resolver);
+            }
             if (clrType == typeof(string))
             {
                 wasmTypes = new[] { ValType.I32, ValType.I32 };
@@ -946,6 +956,8 @@ namespace Wacs.Transpiler.AOT.Component
         private static bool IsPrimitiveCompatible(Type clrType,
             ValType wasmType)
         {
+            if (clrType.IsEnum)
+                clrType = Enum.GetUnderlyingType(clrType);
             switch (wasmType)
             {
                 case ValType.I32:
@@ -986,9 +998,15 @@ namespace Wacs.Transpiler.AOT.Component
         // typed interface that uses a different CLR primitive. The
         // CIL stack uses i32 for everything narrower-than-i32, so a
         // wasm i32 reaching a C# byte param needs `conv.u1`.
+        // Enum CLR types are treated as their underlying type (CLR
+        // enums share stack representation with their underlying
+        // primitive — the typed callvirt accepts the integer
+        // directly without needing a Box / cast).
         private static void EmitConversionIfNeeded(ILGenerator il,
             ValType wasmType, Type clrType)
         {
+            if (clrType.IsEnum)
+                clrType = Enum.GetUnderlyingType(clrType);
             if (wasmType == ValType.I32)
             {
                 if (clrType == typeof(byte)) il.Emit(OpCodes.Conv_U1);
