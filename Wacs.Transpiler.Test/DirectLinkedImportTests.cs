@@ -1071,6 +1071,36 @@ namespace Wacs.Transpiler.Test
             public Outcome Emit() => _v;
         }
 
+        // ====== Option<Result<u32, u32>> nested return ===========
+        // Wire form: u8 outer_disc @0 + Result<u32,u32> at +4
+        // (inner disc @4 + u32 value @8). Exercises EmitOptionStoreAt's
+        // dispatch-to-EmitResultStoreAt for nested Result inside Some.
+
+        [WitSource(@"interface optres-env",
+            Package = "my:test@1.0.0", Interface = "optres-env")]
+        public interface IMaybeResult
+        {
+            [WitSource(@"thing: func() -> option<result<u32, u32>>;",
+                Package = "my:test@1.0.0", Interface = "optres-env",
+                Item = "thing")]
+            Option<Result<uint, uint>> Thing();
+        }
+
+        public sealed class MaybeResultBundle
+        {
+            public IMaybeResult OptresEnv { get; }
+            public MaybeResultBundle(IMaybeResult m)
+            { OptresEnv = m; }
+        }
+
+        private sealed class FixedMaybeResult : IMaybeResult
+        {
+            private readonly Option<Result<uint, uint>> _v;
+            public FixedMaybeResult(Option<Result<uint, uint>> v)
+            { _v = v; }
+            public Option<Result<uint, uint>> Thing() => _v;
+        }
+
         // ====== Variant with Option payload ====================
         // variant ping { idle, retry(option<u32>) }: empty + nested
         // Option payload. Variant emit dispatches the retry case
@@ -3351,6 +3381,69 @@ namespace Wacs.Transpiler.Test
             0x41, 0x10,
             0x28, 0x02, 0x00,                 // outer_ptr
             0x28, 0x02, 0x04,                 // first.b (i32 at *ptr+4)
+            0x0B,
+        };
+
+        // Option<Result<u32, u32>> retArea:
+        //   @0: outer Option disc (u8)
+        //   @4: inner Result disc (u8) — only set when outer is Some
+        //   @8: inner Result value (u32) — only set per inner branch
+        private static byte[] BuildOptionResultReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: (i32) → void, () → i32
+            0x01, 0x09, 0x02,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // module: "my:test/optres-env@1.0.0" (24)
+            // entity: "thing" (5)
+            // size = 1 + 1 + 24 + 1 + 5 + 2 = 34 = 0x22
+            0x02, 0x22, 0x01,
+            0x18,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x6F, 0x70, 0x74, 0x72, 0x65, 0x73, 0x2D, 0x65,
+            0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x05,
+            0x74, 0x68, 0x69, 0x6E, 0x67,
+            0x00, 0x00,
+            // Function section: 3 local funcs of type 1
+            0x03, 0x04, 0x03, 0x01, 0x01, 0x01,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export section: 3 exports
+            //   call_thing_outer_disc (21): 24
+            //   call_thing_inner_disc (21): 24
+            //   call_thing_value      (16): 19
+            // size = 1 + 24 + 24 + 19 = 68 = 0x44
+            0x07, 0x44, 0x03,
+            0x15,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x74, 0x68, 0x69,
+            0x6E, 0x67, 0x5F, 0x6F, 0x75, 0x74, 0x65, 0x72,
+            0x5F, 0x64, 0x69, 0x73, 0x63,
+            0x00, 0x01,
+            0x15,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x74, 0x68, 0x69,
+            0x6E, 0x67, 0x5F, 0x69, 0x6E, 0x6E, 0x65, 0x72,
+            0x5F, 0x64, 0x69, 0x73, 0x63,
+            0x00, 0x02,
+            0x10,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x74, 0x68, 0x69,
+            0x6E, 0x67, 0x5F, 0x76, 0x61, 0x6C, 0x75, 0x65,
+            0x00, 0x03,
+            // Code section: 3 bodies (each 11 → 12)
+            0x0A, 0x25, 0x03,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x2D, 0x00, 0x00,
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x2D, 0x00, 0x04,
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x08,
             0x0B,
         };
 
@@ -10878,6 +10971,137 @@ namespace Wacs.Transpiler.Test
                     new object[] { importsProxy, bundle })!;
                 var callValue = result.ExportsInterface!.GetMethod(
                     InterfaceGenerator.SanitizeName("call_outcome_value"))!;
+                Assert.Equal(0x37, (int)callValue.Invoke(fresh2,
+                    Array.Empty<object>())!);
+            }
+        }
+
+        [Fact]
+        public void DirectLinkedImport_OptionResultReturn_AllBranches()
+        {
+            // Option<Result<u32, u32>>: nested Result inside Option.
+            // Exercises EmitOptionStoreAt's dispatch-to-EmitResultStoreAt
+            // when the Some-arm value is itself a Result.
+            //
+            // Branches:
+            //   None             → outer_disc=0
+            //   Some(Ok(0x42))   → outer=1, inner_disc=0, value=0x42
+            //   Some(Err(0x37))  → outer=1, inner_disc=1, value=0x37
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/optres-env@1.0.0", "thing"),
+                _ => throw new InvalidOperationException(
+                    "stub for thing must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildOptionResultReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(MaybeResultBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/optres-env@1.0.0", "thing", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.OptResRet", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_optres_env_1_0_0_thing"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for thing must not be invoked"),
+                });
+
+            // None → outer_disc=0.
+            {
+                var bundle = new MaybeResultBundle(
+                    new FixedMaybeResult(
+                        Option<Result<uint, uint>>.None));
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+
+                var callOuter = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_thing_outer_disc"))!;
+                Assert.Equal(0, (int)callOuter.Invoke(instance,
+                    Array.Empty<object>())!);
+            }
+
+            // Some(Ok(0x42)) → outer=1, inner_disc=0, value=0x42.
+            {
+                var bundle = new MaybeResultBundle(
+                    new FixedMaybeResult(
+                        Option<Result<uint, uint>>.Some(
+                            Result<uint, uint>.FromOk(0x42u))));
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+
+                var callOuter = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_thing_outer_disc"))!;
+                Assert.Equal(1, (int)callOuter.Invoke(instance,
+                    Array.Empty<object>())!);
+
+                var fresh1 = Activator.CreateInstance(result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callInner = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_thing_inner_disc"))!;
+                Assert.Equal(0, (int)callInner.Invoke(fresh1,
+                    Array.Empty<object>())!);
+
+                var fresh2 = Activator.CreateInstance(result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callValue = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_thing_value"))!;
+                Assert.Equal(0x42, (int)callValue.Invoke(fresh2,
+                    Array.Empty<object>())!);
+            }
+
+            // Some(Err(0x37)) → outer=1, inner_disc=1, value=0x37.
+            {
+                var bundle = new MaybeResultBundle(
+                    new FixedMaybeResult(
+                        Option<Result<uint, uint>>.Some(
+                            Result<uint, uint>.FromErr(0x37u))));
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+
+                var callOuter = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_thing_outer_disc"))!;
+                Assert.Equal(1, (int)callOuter.Invoke(instance,
+                    Array.Empty<object>())!);
+
+                var fresh1 = Activator.CreateInstance(result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callInner = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_thing_inner_disc"))!;
+                Assert.Equal(1, (int)callInner.Invoke(fresh1,
+                    Array.Empty<object>())!);
+
+                var fresh2 = Activator.CreateInstance(result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callValue = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_thing_value"))!;
                 Assert.Equal(0x37, (int)callValue.Invoke(fresh2,
                     Array.Empty<object>())!);
             }
