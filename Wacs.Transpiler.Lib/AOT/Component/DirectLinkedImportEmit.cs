@@ -350,9 +350,87 @@ namespace Wacs.Transpiler.AOT.Component
                 bool isTuple = method.ReturnType.IsGenericType
                     && IsValueTupleType(method.ReturnType
                         .GetGenericTypeDefinition());
+                bool isOption = method.ReturnType.IsGenericType
+                    && method.ReturnType.GetGenericTypeDefinition()
+                        == typeof(Option<>);
 
                 int offsetSoFar = 0;
-                if (isTuple)
+                if (isOption)
+                {
+                    // Option<T> retArea layout: u8 disc @0 + aligned
+                    // T value at offset Align(1, AlignOf(T)).
+                    //
+                    //   ldloca returnLocal
+                    //   call Option<T>::get_HasValue → bool
+                    //   brfalse none_label
+                    //   ;; Some path:
+                    //     StoreU8(memory, retArea+0, 1)
+                    //     ldloca returnLocal; call get_Value → T
+                    //     StoreXxx(memory, retArea+valueOffset, value)
+                    //   br end
+                    // none_label:
+                    //   StoreU8(memory, retArea+0, 0)
+                    // end:
+                    var inner = method.ReturnType
+                        .GetGenericArguments()[0];
+                    int valueAlign = AlignOfPrimitive(inner);
+                    int valueOffset = Align(1, valueAlign);
+
+                    var noneLabel = il.DefineLabel();
+                    var endLabel = il.DefineLabel();
+
+                    var optionT = method.ReturnType;
+                    var hasValueGetter = optionT.GetProperty("HasValue",
+                        BindingFlags.Public | BindingFlags.Instance)!
+                        .GetGetMethod()!;
+                    var valueGetter = optionT.GetProperty("Value",
+                        BindingFlags.Public | BindingFlags.Instance)!
+                        .GetGetMethod()!;
+
+                    il.Emit(OpCodes.Ldloca, returnLocal);
+                    il.Emit(OpCodes.Call, hasValueGetter);
+                    il.Emit(OpCodes.Brfalse, noneLabel);
+
+                    // Some: write disc=1
+                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Ldfld, MemoriesField);
+                    il.Emit(OpCodes.Ldc_I4_0);
+                    il.Emit(OpCodes.Ldelem_Ref);
+                    il.Emit(OpCodes.Ldfld, MemoryDataField);
+                    il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
+                    il.Emit(OpCodes.Ldc_I4_1);
+                    il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(byte)));
+
+                    // Some: write value at retArea+valueOffset
+                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Ldfld, MemoriesField);
+                    il.Emit(OpCodes.Ldc_I4_0);
+                    il.Emit(OpCodes.Ldelem_Ref);
+                    il.Emit(OpCodes.Ldfld, MemoryDataField);
+                    il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
+                    if (valueOffset != 0)
+                    {
+                        il.Emit(OpCodes.Ldc_I4, valueOffset);
+                        il.Emit(OpCodes.Add);
+                    }
+                    il.Emit(OpCodes.Ldloca, returnLocal);
+                    il.Emit(OpCodes.Call, valueGetter);
+                    il.Emit(OpCodes.Call, ResolveStoreMethod(inner));
+                    il.Emit(OpCodes.Br, endLabel);
+
+                    // None: write disc=0
+                    il.MarkLabel(noneLabel);
+                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Ldfld, MemoriesField);
+                    il.Emit(OpCodes.Ldc_I4_0);
+                    il.Emit(OpCodes.Ldelem_Ref);
+                    il.Emit(OpCodes.Ldfld, MemoryDataField);
+                    il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
+                    il.Emit(OpCodes.Ldc_I4_0);
+                    il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(byte)));
+                    il.MarkLabel(endLabel);
+                }
+                else if (isTuple)
                 {
                     var elements = method.ReturnType.GetGenericArguments();
                     for (int i = 0; i < elements.Length; i++)
@@ -1016,10 +1094,10 @@ namespace Wacs.Transpiler.AOT.Component
 
         // True when this CLR return type can be serialized into
         // wasm linear memory at the retArea pointer. v0: records
-        // (sealed POCOs) AND ValueTuple<...> whose every field is
-        // a primitive scalar. Option / Result / variant / string
-        // / list defer until per-shape store emit lands (those
-        // need cabi_realloc for variable-length contents).
+        // (sealed POCOs), ValueTuple<...>, AND Option<primitive>.
+        // Result / variant / string / list defer until per-shape
+        // store emit lands (those need cabi_realloc for
+        // variable-length contents).
         private static bool IsAggregateReturnSupported(Type t)
         {
             if (IsLikelyRecordType(t))
@@ -1028,12 +1106,23 @@ namespace Wacs.Transpiler.AOT.Component
                     if (!IsStorablePrimitive(p.PropertyType)) return false;
                 return true;
             }
-            if (t.IsGenericType
-                && IsValueTupleType(t.GetGenericTypeDefinition()))
+            if (t.IsGenericType)
             {
-                foreach (var ta in t.GetGenericArguments())
-                    if (!IsStorablePrimitive(ta)) return false;
-                return true;
+                var def = t.GetGenericTypeDefinition();
+                if (IsValueTupleType(def))
+                {
+                    foreach (var ta in t.GetGenericArguments())
+                        if (!IsStorablePrimitive(ta)) return false;
+                    return true;
+                }
+                // Option<primitive> — wire form: u8 disc + aligned
+                // primitive value, both reachable through Option<T>'s
+                // HasValue/Value accessors.
+                if (def == typeof(Option<>))
+                {
+                    var inner = t.GetGenericArguments()[0];
+                    return IsStorablePrimitive(inner);
+                }
             }
             return false;
         }

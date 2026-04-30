@@ -505,6 +505,34 @@ namespace Wacs.Transpiler.Test
             public IWidget MakeWidget() => new FakeWidget(_seed);
         }
 
+        // ====== Option<primitive> return shape ===================
+        // wasi:cli/terminal-stdin.get-terminal-stdin() -> option<X>
+        // is the canonical shape; we test against the simpler
+        // option<u32> form to focus on the disc + value layout.
+
+        [WitSource(@"interface optret-env",
+            Package = "my:test@1.0.0", Interface = "optret-env")]
+        public interface IMaybeFactory
+        {
+            [WitSource(@"maybe: func() -> option<u32>;",
+                Package = "my:test@1.0.0", Interface = "optret-env",
+                Item = "maybe")]
+            Option<uint> Maybe();
+        }
+
+        public sealed class MaybeBundle
+        {
+            public IMaybeFactory OptretEnv { get; }
+            public MaybeBundle(IMaybeFactory m) { OptretEnv = m; }
+        }
+
+        private sealed class FixedMaybe : IMaybeFactory
+        {
+            private readonly Option<uint> _v;
+            public FixedMaybe(Option<uint> v) { _v = v; }
+            public Option<uint> Maybe() => _v;
+        }
+
         // ====== Variant param test surface =======================
         // Mirrors the source-generator-emitted shape for WIT
         // variants (HttpMethod, IpAddress, etc.):
@@ -892,6 +920,86 @@ namespace Wacs.Transpiler.Test
             0x00, 0x01,
             // Code section: body = call 0; end
             0x0A, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0B,
+        };
+
+        // (module
+        //   (type $tMaybe (func (param i32)))     ;; maybe(retArea) → ()
+        //   (type $tEntry (func (result i32)))    ;; call_maybe_disc/value → u32
+        //   (import "my:test/optret-env@1.0.0" "maybe"
+        //           (func $imp (type $tMaybe)))
+        //   (memory 1)
+        //   (func (export "call_maybe_disc") (result i32)
+        //     i32.const 16  ;; retArea
+        //     call $imp
+        //     i32.const 16
+        //     i32.load8_u)  ;; → disc
+        //   (func (export "call_maybe_value") (result i32)
+        //     i32.const 16
+        //     call $imp
+        //     i32.const 16
+        //     i32.load offset=4)) ;; → value (at retArea+4)
+        //
+        // Option<u32> retArea: u8 disc @0 + u32 value @4 (aligned).
+        // Two exports probe each field independently.
+        private static byte[] BuildOptionReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types
+            // 0: (i32) → void (4)
+            // 1: () → i32 (4)
+            // size = 1 + 4 + 4 = 9 = 0x09
+            0x01, 0x09, 0x02,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // size = 1 + 1 + 24 + 1 + 5 + 2 = 34 = 0x22
+            0x02, 0x22, 0x01,
+            // module: "my:test/optret-env@1.0.0" (24)
+            0x18,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x6F, 0x70, 0x74, 0x72, 0x65, 0x74, 0x2D, 0x65,
+            0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            // entity: "maybe" (5)
+            0x05,
+            0x6D, 0x61, 0x79, 0x62, 0x65,
+            0x00, 0x00,
+            // Function section: 2 funcs of type 1
+            0x03, 0x03, 0x02, 0x01, 0x01,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export: 2 exports
+            // call_maybe_disc (15): 1+15+1+1 = 18
+            // call_maybe_value (16): 1+16+1+1 = 19
+            // size = 1 + 18 + 19 = 38 = 0x26
+            0x07, 0x26, 0x02,
+            0x0F,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x6D, 0x61, 0x79,
+            0x62, 0x65, 0x5F, 0x64, 0x69, 0x73, 0x63,
+            0x00, 0x01,
+            0x10,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x6D, 0x61, 0x79,
+            0x62, 0x65, 0x5F, 0x76, 0x61, 0x6C, 0x75, 0x65,
+            0x00, 0x02,
+            // Code section: 2 bodies
+            // body0 = locals(1) + i32.const(2) + call(2) + i32.const(2) + i32.load8_u(3) + end(1) = 11
+            //   wait — i32.load8_u align=0 offset=0 = 3 bytes (0x2D, 0x00, 0x00)
+            // body1 = locals(1) + i32.const(2) + call(2) + i32.const(2) + i32.load align=2 offset=4(3) + end(1) = 11
+            // size = 1 + 12 + 12 = 25 = 0x19
+            0x0A, 0x19, 0x02,
+            // body 0:
+            0x0B, 0x00,
+            0x41, 0x10,             // i32.const 16
+            0x10, 0x00,             // call 0
+            0x41, 0x10,             // i32.const 16
+            0x2D, 0x00, 0x00,       // i32.load8_u align=0 offset=0
+            0x0B,
+            // body 1:
+            0x0B, 0x00,
+            0x41, 0x10,             // i32.const 16
+            0x10, 0x00,             // call 0
+            0x41, 0x10,             // i32.const 16
+            0x28, 0x02, 0x04,       // i32.load align=2 offset=4
+            0x0B,
         };
 
         // (module
@@ -4467,6 +4575,92 @@ namespace Wacs.Transpiler.Test
             // .Read() returns 0x35.
             Assert.IsType<int>(raw);
             Assert.Equal((int)Seed, (int)raw);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_OptionPrimitiveReturn_BothBranches()
+        {
+            // Option<u32> retArea: u8 disc @0 + u32 value @4. Two
+            // exports probe each layout slot independently:
+            //   call_maybe_disc:  reads byte 0 → expected disc
+            //   call_maybe_value: reads i32 @ offset 4 → expected value
+            // Both run twice — once with Some(0x12), once with None.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/optret-env@1.0.0", "maybe"),
+                _ => throw new InvalidOperationException(
+                    "stub for maybe must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildOptionReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(MaybeBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/optret-env@1.0.0", "maybe", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.OptRetParam", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_optret_env_1_0_0_maybe"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for maybe must not be invoked"),
+                });
+
+            // Test #1: Option.Some(0x12) — disc=1, value=0x12.
+            {
+                var bundle = new MaybeBundle(new FixedMaybe(
+                    Option<uint>.Some(0x12u)));
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+
+                var callDisc = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_maybe_disc"))!;
+                var callValue = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_maybe_value"))!;
+
+                Assert.Equal(1, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+                Assert.Equal(0x12, (int)callValue.Invoke(instance,
+                    Array.Empty<object>())!);
+            }
+
+            // Test #2: Option.None — disc=0, value=0.
+            {
+                var bundle = new MaybeBundle(new FixedMaybe(
+                    Option<uint>.None));
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+
+                var callDisc = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_maybe_disc"))!;
+                Assert.Equal(0, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+            }
         }
     }
 }
