@@ -851,6 +851,35 @@ namespace Wacs.Transpiler.Test
             public Option<int[]> List() => _v;
         }
 
+        // ====== Option<Option<u32>> nested return ================
+        // Wire form: u8 outer_disc @0 + (u8 inner_disc @4 + u32
+        // inner_value @8). The recursive helper handles both
+        // levels.
+
+        [WitSource(@"interface optopt-env",
+            Package = "my:test@1.0.0", Interface = "optopt-env")]
+        public interface IMaybeMaybeNum
+        {
+            [WitSource(@"num: func() -> option<option<u32>>;",
+                Package = "my:test@1.0.0", Interface = "optopt-env",
+                Item = "num")]
+            Option<Option<uint>> Num();
+        }
+
+        public sealed class MaybeMaybeNumBundle
+        {
+            public IMaybeMaybeNum OptoptEnv { get; }
+            public MaybeMaybeNumBundle(IMaybeMaybeNum m)
+            { OptoptEnv = m; }
+        }
+
+        private sealed class FixedMaybeMaybeNum : IMaybeMaybeNum
+        {
+            private readonly Option<Option<uint>> _v;
+            public FixedMaybeMaybeNum(Option<Option<uint>> v) { _v = v; }
+            public Option<Option<uint>> Num() => _v;
+        }
+
         // ====== list<own<R>> (IWidget[]) return =================
         // Per-element AllocateResource mints a handle for each
         // resource instance; the outer (ptr, count) lands at retArea
@@ -2606,6 +2635,68 @@ namespace Wacs.Transpiler.Test
             0x0B, 0x00,
             0x41, 0x10, 0x10, 0x00,
             0x41, 0x10, 0x28, 0x02, 0x08,
+            0x0B,
+        };
+
+        // Option<Option<u32>> retArea: u8 outer_disc @0 +
+        // (u8 inner_disc @4 + u32 inner_value @8). Probes per slot.
+        // No cabi_realloc needed.
+        private static byte[] BuildOptionOptionReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: (i32) → void, () → i32
+            0x01, 0x09, 0x02,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // module: "my:test/optopt-env@1.0.0" (24)
+            // entity: "num" (3)
+            // size = 1 + 1 + 24 + 1 + 3 + 2 = 32 = 0x20
+            0x02, 0x20, 0x01,
+            0x18,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x6F, 0x70, 0x74, 0x6F, 0x70, 0x74, 0x2D, 0x65,
+            0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x03,
+            0x6E, 0x75, 0x6D,
+            0x00, 0x00,
+            // Function section: 3 local funcs of type 1
+            0x03, 0x04, 0x03, 0x01, 0x01, 0x01,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export section: 3 exports
+            //   call_num_outer_disc (19): 1+19+1+1 = 22
+            //   call_num_inner_disc (19): 1+19+1+1 = 22
+            //   call_num_value      (14): 1+14+1+1 = 17
+            // size = 1 + 22 + 22 + 17 = 62 = 0x3E
+            0x07, 0x3E, 0x03,
+            0x13,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x6E, 0x75, 0x6D,
+            0x5F, 0x6F, 0x75, 0x74, 0x65, 0x72, 0x5F, 0x64,
+            0x69, 0x73, 0x63,
+            0x00, 0x01,
+            0x13,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x6E, 0x75, 0x6D,
+            0x5F, 0x69, 0x6E, 0x6E, 0x65, 0x72, 0x5F, 0x64,
+            0x69, 0x73, 0x63,
+            0x00, 0x02,
+            0x0E,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x6E, 0x75, 0x6D,
+            0x5F, 0x76, 0x61, 0x6C, 0x75, 0x65,
+            0x00, 0x03,
+            // Code section: 3 bodies (each 11 → 12)
+            0x0A, 0x25, 0x03,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x2D, 0x00, 0x00,
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x2D, 0x00, 0x04,    // load8_u offset=4 (inner disc)
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x08,    // i32.load offset=8 (inner value)
             0x0B,
         };
 
@@ -9672,6 +9763,128 @@ namespace Wacs.Transpiler.Test
                 InterfaceGenerator.SanitizeName("call_all_first_handle"))!;
             Assert.Equal(1, (int)callHandle.Invoke(fresh,
                 Array.Empty<object>())!);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_OptionOptionReturn_AllBranches()
+        {
+            // Option<Option<u32>> wire form:
+            //   @0: outer disc (u8)
+            //   @4: inner disc (u8)
+            //   @8: inner value (u32)
+            // Three branches:
+            //   None              → outer_disc=0
+            //   Some(None)        → outer_disc=1, inner_disc=0
+            //   Some(Some(0x42))  → outer_disc=1, inner_disc=1, value=0x42
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/optopt-env@1.0.0", "num"),
+                _ => throw new InvalidOperationException(
+                    "stub for num must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildOptionOptionReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(MaybeMaybeNumBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/optopt-env@1.0.0", "num", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.OptOptRet", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_optopt_env_1_0_0_num"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for num must not be invoked"),
+                });
+
+            // None → outer_disc=0.
+            {
+                var bundle = new MaybeMaybeNumBundle(
+                    new FixedMaybeMaybeNum(Option<Option<uint>>.None));
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+
+                var callOuter = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_num_outer_disc"))!;
+                Assert.Equal(0, (int)callOuter.Invoke(instance,
+                    Array.Empty<object>())!);
+            }
+
+            // Some(None) → outer_disc=1, inner_disc=0.
+            {
+                var bundle = new MaybeMaybeNumBundle(
+                    new FixedMaybeMaybeNum(
+                        Option<Option<uint>>.Some(Option<uint>.None)));
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+
+                var callOuter = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_num_outer_disc"))!;
+                Assert.Equal(1, (int)callOuter.Invoke(instance,
+                    Array.Empty<object>())!);
+
+                var fresh = Activator.CreateInstance(result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callInner = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_num_inner_disc"))!;
+                Assert.Equal(0, (int)callInner.Invoke(fresh,
+                    Array.Empty<object>())!);
+            }
+
+            // Some(Some(0x42)) → outer_disc=1, inner_disc=1, value=0x42.
+            {
+                var bundle = new MaybeMaybeNumBundle(
+                    new FixedMaybeMaybeNum(
+                        Option<Option<uint>>.Some(
+                            Option<uint>.Some(0x42u))));
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+
+                var callOuter = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_num_outer_disc"))!;
+                Assert.Equal(1, (int)callOuter.Invoke(instance,
+                    Array.Empty<object>())!);
+
+                var fresh1 = Activator.CreateInstance(result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callInner = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_num_inner_disc"))!;
+                Assert.Equal(1, (int)callInner.Invoke(fresh1,
+                    Array.Empty<object>())!);
+
+                var fresh2 = Activator.CreateInstance(result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callValue = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_num_value"))!;
+                Assert.Equal(0x42, (int)callValue.Invoke(fresh2,
+                    Array.Empty<object>())!);
+            }
         }
     }
 }
