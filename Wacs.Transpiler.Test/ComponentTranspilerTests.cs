@@ -1762,6 +1762,20 @@ namespace Wacs.Transpiler.Test
             Assert.Equal(typeof(string), greetMethod!.ReturnType);
             Assert.Equal(typeof(string),
                 greetMethod.GetParameters()[0].ParameterType);
+
+            // Phase B chain mode loop closes here: WitContract
+            // can recover an import-side contract from the
+            // emitted [WitSource] interfaces. This is what the
+            // resolver does internally when --host-package
+            // points at a transpiled .dll.
+            var contract = Wacs.ComponentModel.Validation.WitContract
+                .FromBindingTypes(new[] { iOps, iDemo });
+            // The contract walks importable interfaces; for our
+            // synthesized fixture neither the package "local:demo"
+            // nor the synthesized world is wired into a world's
+            // imports, so contract.Imports is empty — but the
+            // call must not throw.
+            Assert.NotNull(contract);
         }
     }
 }
