@@ -29,6 +29,97 @@ namespace Wacs.Transpiler.Test
     public class DirectLinkedWasiE2ETests
     {
         // (module
+        //   (type $tRand (func (result i64)))                ;; get-random-u64
+        //   (type $tExit (func (param i32)))                 ;; exit-with-code
+        //   (type $tClock (func (result i64)))               ;; monotonic-clock.now
+        //   (type $tEntry (func (param i32) (result i64)))   ;; call_all(exitCode) → randVal+now
+        //   (import "wasi:random/random@0.2.3" "get-random-u64"
+        //           (func $rand (type $tRand)))
+        //   (import "wasi:cli/exit@0.2.3" "exit-with-code"
+        //           (func $exit (type $tExit)))
+        //   (import "wasi:clocks/monotonic-clock@0.2.3" "now"
+        //           (func $now (type $tClock)))
+        //   (func (export "call_all") (param i32) (result i64)
+        //     local.get 0
+        //     call $exit             ;; ExitWithCode(arg0)
+        //     call $rand             ;; → i64
+        //     call $now              ;; → i64
+        //     i64.add)
+        //
+        // Three direct-linked imports across three distinct WASI
+        // interfaces (IRandom, IExit, IMonotonicClock). The single
+        // export proves all three resolve cleanly through the
+        // bundle, dispatching to different bundle properties.
+        private static byte[] BuildMultiImportFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 4 types
+            // 0: () → i64               (4 bytes)
+            // 1: (i32) → ()             (4 bytes)
+            // 2: () → i64               (4 bytes)  (same as 0 but kept for clarity)
+            // 3: (i32) → i64            (5 bytes)
+            // size = 1 + 4*3 + 5 = 18 = 0x12
+            0x01, 0x12, 0x04,
+            0x60, 0x00, 0x01, 0x7E,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7E,
+            0x60, 0x01, 0x7F, 0x01, 0x7E,
+            // Import section: 3 imports
+            // imp0: wasi:random/random@0.2.3 (24) . get-random-u64 (14) : type 0
+            //       = 1+24+1+14+2 = 42
+            // imp1: wasi:cli/exit@0.2.3 (19) . exit-with-code (14) : type 1
+            //       = 1+19+1+14+2 = 37
+            // imp2: wasi:clocks/monotonic-clock@0.2.3 (33) . now (3) : type 2
+            //       = 1+33+1+3+2 = 40
+            // size = 1 + 42 + 37 + 40 = 120 = 0x78
+            0x02, 0x78, 0x03,
+            // imp0 — module 24 bytes
+            0x18,
+            0x77, 0x61, 0x73, 0x69, 0x3A, 0x72, 0x61, 0x6E,
+            0x64, 0x6F, 0x6D, 0x2F, 0x72, 0x61, 0x6E, 0x64,
+            0x6F, 0x6D, 0x40, 0x30, 0x2E, 0x32, 0x2E, 0x33,
+            0x0E,
+            0x67, 0x65, 0x74, 0x2D, 0x72, 0x61, 0x6E, 0x64,
+            0x6F, 0x6D, 0x2D, 0x75, 0x36, 0x34,
+            0x00, 0x00,
+            // imp1 — module 19 bytes
+            0x13,
+            0x77, 0x61, 0x73, 0x69, 0x3A, 0x63, 0x6C, 0x69,
+            0x2F, 0x65, 0x78, 0x69, 0x74, 0x40, 0x30, 0x2E,
+            0x32, 0x2E, 0x33,
+            0x0E,
+            0x65, 0x78, 0x69, 0x74, 0x2D, 0x77, 0x69, 0x74,
+            0x68, 0x2D, 0x63, 0x6F, 0x64, 0x65,
+            0x00, 0x01,
+            // imp2 — module 33 bytes
+            0x21,
+            0x77, 0x61, 0x73, 0x69, 0x3A, 0x63, 0x6C, 0x6F,
+            0x63, 0x6B, 0x73, 0x2F, 0x6D, 0x6F, 0x6E, 0x6F,
+            0x74, 0x6F, 0x6E, 0x69, 0x63, 0x2D, 0x63, 0x6C,
+            0x6F, 0x63, 0x6B, 0x40, 0x30, 0x2E, 0x32, 0x2E, 0x33,
+            0x03,
+            0x6E, 0x6F, 0x77,
+            0x00, 0x02,
+            // Function section: 1 local func of type 3
+            0x03, 0x02, 0x01, 0x03,
+            // Export: "call_all" (8) → func 3 (after 3 imports)
+            0x07, 0x0C, 0x01,
+            0x08,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x61, 0x6C, 0x6C,
+            0x00, 0x03,
+            // Code: locals=0, local.get 0, call 1 (exit), call 0 (rand), call 2 (now), i64.add, end
+            // body = locals(1) + local.get(2) + call(2)*3 + i64.add(1) + end(1) = 11
+            0x0A, 0x0D, 0x01, 0x0B,
+            0x00,
+            0x20, 0x00,        // local.get 0
+            0x10, 0x01,        // call 1 (exit)
+            0x10, 0x00,        // call 0 (rand)
+            0x10, 0x02,        // call 2 (now)
+            0x7C,              // i64.add
+            0x0B,
+        };
+
+        // (module
         //   (type $t (func (result i64)))
         //   (import "wasi:random/random@0.2.3" "get-random-u64"
         //           (func $imp (type $t)))
@@ -74,6 +165,26 @@ namespace Wacs.Transpiler.Test
             public ulong GetRandomU64() => _v;
             public byte[] GetRandomBytes(ulong len)
                 => new byte[(int)len];
+        }
+
+        // Test impls for the multi-interface E2E test.
+        private sealed class FixedClock : Wacs.WASI.Preview2.Clocks.IMonotonicClock
+        {
+            private readonly ulong _now;
+            public FixedClock(ulong now) { _now = now; }
+            public ulong Now() => _now;
+            public ulong Resolution() => 1;
+            public Wacs.WASI.Preview2.Io.IPollable SubscribeInstant(ulong w) => throw new NotImplementedException();
+            public Wacs.WASI.Preview2.Io.IPollable SubscribeDuration(ulong w) => throw new NotImplementedException();
+        }
+
+        // Captures the exit code for assertion (real impl throws
+        // ExitException; we record the code instead).
+        private sealed class CapturingExit : Wacs.WASI.Preview2.Cli.IExit
+        {
+            public byte? Code { get; private set; }
+            public void Exit(Wacs.ComponentModel.Runtime.Result<Wacs.ComponentModel.Runtime.Unit, Wacs.ComponentModel.Runtime.Unit> _) => throw new NotImplementedException();
+            public void ExitWithCode(byte statusCode) { Code = statusCode; }
         }
 
         [Fact]
@@ -174,6 +285,115 @@ namespace Wacs.Transpiler.Test
             // dispatched our typed callvirt, and returned cleanly.
             Assert.IsType<long>(raw);
             Assert.Equal(Sentinel, unchecked((ulong)(long)raw));
+        }
+
+        [Fact]
+        public void E2E_MultiInterfaceImports_AllResolveThroughBundle()
+        {
+            // Three direct-linked imports across three distinct
+            // WASI interfaces in one module. Tests:
+            //   - per-funcIdx binding map handling 3 entries
+            //   - bundle property dispatch to 3 different I*
+            //     types in one transpile
+            //   - varied wire shapes (no-arg/i64-return,
+            //     i32-arg/no-return, no-arg/i64-return)
+            //   - method-with-an-arg + multi-import composition
+
+            const ulong RandVal = 0x1111_2222_3333_4444UL;
+            const ulong NowVal  = 0x5555_6666_7777_8888UL;
+            const byte ExitArg  = 42;
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            // Stubs throw if invoked — direct-linked path bypasses.
+            runtime.BindHostFunction<Func<long>>(
+                ("wasi:random/random@0.2.3", "get-random-u64"),
+                () => throw new InvalidOperationException("rand stub"));
+            runtime.BindHostFunction<Action<int>>(
+                ("wasi:cli/exit@0.2.3", "exit-with-code"),
+                _ => throw new InvalidOperationException("exit stub"));
+            runtime.BindHostFunction<Func<long>>(
+                ("wasi:clocks/monotonic-clock@0.2.3", "now"),
+                () => throw new InvalidOperationException("clock stub"));
+
+            using var ms = new MemoryStream(BuildMultiImportFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IRandom).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm });
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.MultiImportE2E", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+
+            // All 3 imports resolved.
+            Assert.Equal(3, options.ResolverImportBindings!.Count);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    [InterfaceGenerator.SanitizeName(
+                        "wasi:random/random@0.2.3_get-random-u64")] = _ =>
+                        throw new InvalidOperationException("rand IImports stub"),
+                    [InterfaceGenerator.SanitizeName(
+                        "wasi:cli/exit@0.2.3_exit-with-code")] = _ =>
+                        throw new InvalidOperationException("exit IImports stub"),
+                    [InterfaceGenerator.SanitizeName(
+                        "wasi:clocks/monotonic-clock@0.2.3_now")] = _ =>
+                        throw new InvalidOperationException("clock IImports stub"),
+                });
+
+            var capturingExit = new CapturingExit();
+            var bundle = new WasiPreview2Bundle(
+                environment: new StubEnv(),
+                exit: capturingExit,
+                stdin: new StubStdin(), stdout: new StubStdout(),
+                stderr: new StubStderr(),
+                terminalStdin: new StubTermStdin(),
+                terminalStdout: new StubTermStdout(),
+                terminalStderr: new StubTermStderr(),
+                monotonicClock: new FixedClock(NowVal),
+                wallClock: new StubWall(),
+                timezone: new StubTimezone(),
+                random: new FixedRandom(RandVal),
+                insecure: new StubInsecure(),
+                insecureSeed: new StubInsecureSeed(),
+                poll: new StubPoll(),
+                preopens: new StubPreopens(),
+                filesystemErrorCode: new StubFsErr(),
+                instanceNetwork: new StubInstNet(),
+                tcpCreateSocket: new StubTcp(),
+                udpCreateSocket: new StubUdp(),
+                ipNameLookup: new StubDns(),
+                outgoingHandler: new StubHttpHandler());
+
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+
+            var callAll = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_all"))!;
+            object? raw = callAll.Invoke(instance,
+                new object?[] { (int)ExitArg });
+
+            // ExitWithCode received the arg.
+            Assert.Equal(ExitArg, capturingExit.Code);
+
+            // i64.add(RandVal, NowVal) — wraps via unchecked.
+            Assert.IsType<long>(raw);
+            Assert.Equal(unchecked(RandVal + NowVal),
+                unchecked((ulong)(long)raw));
         }
 
         // ---- Stub impls for the rest of the bundle interfaces ----
