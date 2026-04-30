@@ -131,7 +131,7 @@ namespace Wacs.Transpiler.AOT.Component
                 && method.ReturnType != typeof(void)
                 && wasmParams.Length >= 1
                 && wasmParams[wasmParams.Length - 1] == ValType.I32
-                && IsAggregateReturnSupported(method.ReturnType))
+                && IsAggregateReturnSupported(method.ReturnType, resolver))
             {
                 isAggregateReturn = true;
             }
@@ -313,7 +313,7 @@ namespace Wacs.Transpiler.AOT.Component
                 && method.ReturnType != typeof(void)
                 && wasmParams.Length >= 1
                 && wasmParams[wasmParams.Length - 1] == ValType.I32
-                && IsAggregateReturnSupported(method.ReturnType);
+                && IsAggregateReturnSupported(method.ReturnType, resolver);
             int retAreaSlot = emitAggregateReturn
                 ? wasmParams.Length - 1 : -1;
 
@@ -361,22 +361,17 @@ namespace Wacs.Transpiler.AOT.Component
                 if (isOption)
                 {
                     // Option<T> retArea layout: u8 disc @0 + aligned
-                    // T value at offset Align(1, AlignOf(T)).
-                    //
-                    //   ldloca returnLocal
-                    //   call Option<T>::get_HasValue → bool
-                    //   brfalse none_label
-                    //   ;; Some path:
-                    //     StoreU8(memory, retArea+0, 1)
-                    //     ldloca returnLocal; call get_Value → T
-                    //     StoreXxx(memory, retArea+valueOffset, value)
-                    //   br end
-                    // none_label:
-                    //   StoreU8(memory, retArea+0, 0)
-                    // end:
+                    // value at offset Align(1, AlignOf(T)).
+                    //   - primitive T: store via PrimitiveStore.StoreXxx
+                    //   - resource T (own<R>): allocate handle via
+                    //     Resources.AllocateResource and StoreI32 it.
                     var inner = method.ReturnType
                         .GetGenericArguments()[0];
-                    int valueAlign = AlignOfPrimitive(inner);
+                    bool innerIsResource = resolver != null
+                        && resolver.IsResourceInterface(inner)
+                        && resourcesType != null;
+                    int valueAlign = innerIsResource
+                        ? 4 : AlignOfPrimitive(inner);
                     int valueOffset = Align(1, valueAlign);
 
                     var noneLabel = il.DefineLabel();
@@ -416,9 +411,34 @@ namespace Wacs.Transpiler.AOT.Component
                         il.Emit(OpCodes.Ldc_I4, valueOffset);
                         il.Emit(OpCodes.Add);
                     }
-                    il.Emit(OpCodes.Ldloca, returnLocal);
-                    il.Emit(OpCodes.Call, valueGetter);
-                    il.Emit(OpCodes.Call, ResolveStoreMethod(inner));
+                    if (innerIsResource)
+                    {
+                        // Allocate a handle from the inner instance,
+                        // then StoreI32 it. Stack progression:
+                        //   [..., dest_array, dest_offset]
+                        //   ; push handle (i32):
+                        //   ldarg_0; ldfld Resources; castclass <Res>;
+                        //   ldtoken IRes; call typeof;
+                        //   ldloca returnLocal; call Option::get_Value;
+                        //   callvirt AllocateResource → int
+                        il.Emit(OpCodes.Ldarg_0);
+                        il.Emit(OpCodes.Ldfld, ResourcesField);
+                        il.Emit(OpCodes.Castclass, resourcesType!);
+                        il.Emit(OpCodes.Ldtoken, inner);
+                        il.Emit(OpCodes.Call, GetTypeFromHandleMethod);
+                        il.Emit(OpCodes.Ldloca, returnLocal);
+                        il.Emit(OpCodes.Call, valueGetter);
+                        il.Emit(OpCodes.Callvirt,
+                            ResolveAllocateResourceMethod(resourcesType!));
+                        il.Emit(OpCodes.Call,
+                            ResolveStoreMethod(typeof(int)));
+                    }
+                    else
+                    {
+                        il.Emit(OpCodes.Ldloca, returnLocal);
+                        il.Emit(OpCodes.Call, valueGetter);
+                        il.Emit(OpCodes.Call, ResolveStoreMethod(inner));
+                    }
                     il.Emit(OpCodes.Br, endLabel);
 
                     // None: write disc=0
@@ -1197,11 +1217,13 @@ namespace Wacs.Transpiler.AOT.Component
 
         // True when this CLR return type can be serialized into
         // wasm linear memory at the retArea pointer. v0: records
-        // (sealed POCOs), ValueTuple<...>, AND Option<primitive>.
-        // Result / variant / string / list defer until per-shape
-        // store emit lands (those need cabi_realloc for
-        // variable-length contents).
-        private static bool IsAggregateReturnSupported(Type t)
+        // (sealed POCOs), ValueTuple<...>, Option<primitive>,
+        // Option<own<R>>, and Result<primitive, primitive>.
+        // String / list / variant returns defer until per-shape
+        // store emit lands (the variable-length ones need
+        // cabi_realloc).
+        private static bool IsAggregateReturnSupported(Type t,
+            HostPackageResolver? resolver = null)
         {
             if (IsLikelyRecordType(t))
             {
@@ -1218,13 +1240,20 @@ namespace Wacs.Transpiler.AOT.Component
                         if (!IsStorablePrimitive(ta)) return false;
                     return true;
                 }
-                // Option<primitive> — wire form: u8 disc + aligned
-                // primitive value, both reachable through Option<T>'s
-                // HasValue/Value accessors.
+                // Option<primitive> OR Option<own<R>> — wire form:
+                // u8 disc + (primitive value | i32 handle). Resource
+                // case requires the resolver to recognize the inner
+                // type AND a resources class to allocate handles
+                // through.
                 if (def == typeof(Option<>))
                 {
                     var inner = t.GetGenericArguments()[0];
-                    return IsStorablePrimitive(inner);
+                    if (IsStorablePrimitive(inner)) return true;
+                    if (resolver != null
+                        && resolver.IsResourceInterface(inner)
+                        && resolver.PreferredResourcesType != null)
+                        return true;
+                    return false;
                 }
                 // Result<TOk, TErr> when both arms are storable
                 // primitives. Wire form: u8 disc + value (joined-
