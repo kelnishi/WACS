@@ -373,6 +373,21 @@ namespace Wacs.Transpiler.AOT.Component
                     ResolveLiftPrimMethod(clrType.GetElementType()!));
                 return;
             }
+            if (clrType == typeof(string[]))
+            {
+                // ListMarshal.LiftStringList(memory, listPtr, count)
+                // walks `count` (ptr, len) pairs starting at listPtr
+                // and lifts each via UTF-8.
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, MemoriesField);
+                il.Emit(OpCodes.Ldc_I4_0);
+                il.Emit(OpCodes.Ldelem_Ref);
+                il.Emit(OpCodes.Ldfld, MemoryDataField);
+                il.Emit(OpCodes.Ldloc, temps[wasmCursor]);     // listPtr
+                il.Emit(OpCodes.Ldloc, temps[wasmCursor + 1]); // count
+                il.Emit(OpCodes.Call, LiftStringListMethod);
+                return;
+            }
             if (clrType.IsGenericType
                 && clrType.GetGenericTypeDefinition() == typeof(Option<>))
             {
@@ -563,6 +578,17 @@ namespace Wacs.Transpiler.AOT.Component
             => LiftPrimCache.GetOrAdd(elementType,
                 t => LiftPrimGenericMethod.MakeGenericMethod(t));
 
+        // ListMarshal.LiftStringList — single non-generic helper
+        // for the WASI list<string> shape (per-element ptr+len
+        // pairs in memory). Captured at type-init.
+        private static readonly MethodInfo LiftStringListMethod =
+            typeof(ListMarshal).GetMethod(
+                nameof(ListMarshal.LiftStringList),
+                BindingFlags.Public | BindingFlags.Static,
+                binder: null,
+                types: new[] { typeof(byte[]), typeof(int), typeof(int) },
+                modifiers: null)!;
+
         // Option<T>::Some(T) and Option<T>::get_None are the
         // construction surface for direct-linked Option<T> param
         // emit. Cache the per-T MethodInfos; first emit per T pays
@@ -743,6 +769,14 @@ namespace Wacs.Transpiler.AOT.Component
             if (clrType.IsArray
                 && IsSupportedPrimitiveArrayElement(
                     clrType.GetElementType()!))
+            {
+                wasmTypes = new[] { ValType.I32, ValType.I32 };
+                return 2;
+            }
+            // string[] — same wire shape (ptr, count) but the
+            // per-element memory layout is (ptr, len) pairs that
+            // StringMarshal/ListMarshal.LiftStringList handles.
+            if (clrType == typeof(string[]))
             {
                 wasmTypes = new[] { ValType.I32, ValType.I32 };
                 return 2;

@@ -386,6 +386,32 @@ namespace Wacs.Transpiler.Test
             public void PrintInts(int[] data) { Captured = data; }
         }
 
+        // ====== list<string> (string[]) param test surface ======
+        // wasi:cli/environment.get-arguments style — list of UTF-8
+        // strings via ListMarshal.LiftStringList.
+
+        [WitSource(@"interface strs-env",
+            Package = "my:test@1.0.0", Interface = "strs-env")]
+        public interface IStringsTaker
+        {
+            [WitSource(@"take-strs: func(items: list<string>);",
+                Package = "my:test@1.0.0", Interface = "strs-env",
+                Item = "take-strs")]
+            void TakeStrs(string[] items);
+        }
+
+        public sealed class StringsBundle
+        {
+            public IStringsTaker StrsEnv { get; }
+            public StringsBundle(IStringsTaker s) { StrsEnv = s; }
+        }
+
+        private sealed class CapturingStrings : IStringsTaker
+        {
+            public string[]? Captured { get; private set; }
+            public void TakeStrs(string[] items) { Captured = items; }
+        }
+
         // ====== Option<T> param test surface =====================
         // Source-gen convention uses Option<T> from
         // Wacs.ComponentModel.Runtime (NOT C# Nullable<T>) — option
@@ -714,6 +740,68 @@ namespace Wacs.Transpiler.Test
             0x00, 0x01,
             // Code section: body = call 0; end
             0x0A, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0B,
+        };
+
+        // (module
+        //   (type $t0 (func (param i32 i32)))   ;; void TakeStrs(string[])
+        //   (type $t1 (func))                    ;; void call_print_strs()
+        //   (import "my:test/strs-env@1.0.0" "take-strs" (func $imp (type $t0)))
+        //   (memory 1)
+        //   ;; data at offset 0: 2 (ptr,len) pairs + "hi" + "hello"
+        //   ;;   offset 0:  ptr=16 (i32 LE), len=2 (i32 LE)
+        //   ;;   offset 8:  ptr=18 (i32 LE), len=5 (i32 LE)
+        //   ;;   offset 16: "hi"
+        //   ;;   offset 18: "hello"
+        //   (data (i32.const 0) "\10\00\00\00\02\00\00\00\12\00\00\00\05\00\00\00hihello")
+        //   (func (export "call_print_strs")
+        //     i32.const 0    ;; listPtr
+        //     i32.const 2    ;; count
+        //     call $imp))
+        //
+        // ListMarshal.LiftStringList(memory, listPtr=0, count=2)
+        // walks 2 (ptr, len) pairs starting at offset 0 and lifts
+        // "hi" and "hello" via UTF-8.
+        private static byte[] BuildStringListParamFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: (i32 i32) → void, () → void
+            0x01, 0x09, 0x02,
+            0x60, 0x02, 0x7F, 0x7F, 0x00,
+            0x60, 0x00, 0x00,
+            // Import section
+            // size = 1 + 1 + 22 + 1 + 9 + 2 = 36 = 0x24
+            0x02, 0x24, 0x01,
+            // module: "my:test/strs-env@1.0.0" (22)
+            0x16,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x73, 0x74, 0x72, 0x73, 0x2D, 0x65, 0x6E, 0x76,
+            0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            // entity: "take-strs" (9)
+            0x09,
+            0x74, 0x61, 0x6B, 0x65, 0x2D, 0x73, 0x74, 0x72, 0x73,
+            0x00, 0x00,
+            // Function section: 1 func of type 1
+            0x03, 0x02, 0x01, 0x01,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export: "call_print_strs" (15) → func 1
+            0x07, 0x13, 0x01,
+            0x0F,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x70, 0x72, 0x69,
+            0x6E, 0x74, 0x5F, 0x73, 0x74, 0x72, 0x73,
+            0x00, 0x01,
+            // Code: locals=0, i32.const 0, i32.const 2, call 0, end
+            0x0A, 0x0A, 0x01, 0x08,
+            0x00, 0x41, 0x00, 0x41, 0x02, 0x10, 0x00, 0x0B,
+            // Data: active mem 0, offset 0, 23 bytes (2 pairs * 8B + "hi"(2) + "hello"(5))
+            0x0B, 0x1D, 0x01,
+            0x00, 0x41, 0x00, 0x0B, 0x17,
+            0x10, 0x00, 0x00, 0x00,  // ptr=16
+            0x02, 0x00, 0x00, 0x00,  // len=2
+            0x12, 0x00, 0x00, 0x00,  // ptr=18
+            0x05, 0x00, 0x00, 0x00,  // len=5
+            0x68, 0x69,              // "hi"
+            0x68, 0x65, 0x6C, 0x6C, 0x6F,  // "hello"
         };
 
         // (module
@@ -3564,6 +3652,77 @@ namespace Wacs.Transpiler.Test
                 Array.Empty<object>());
             Assert.IsType<int>(rNo);
             Assert.Equal(100, (int)rNo);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_StringListParam_LiftsViaListMarshal()
+        {
+            // list<string> wire form: (i32 listPtr, i32 count). The
+            // memory layout at listPtr is `count` (ptr, len) i32
+            // pairs; each pair points at the bytes of one element.
+            // Direct-linked emit invokes
+            // ListMarshal.LiftStringList(memory, listPtr, count) to
+            // walk the structure and lift each element via UTF-8.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int, int>>(
+                ("my:test/strs-env@1.0.0", "take-strs"),
+                (_, _) => throw new InvalidOperationException(
+                    "stub for take-strs must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildStringListParamFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(StringsBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/strs-env@1.0.0", "take-strs", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.StrsParam", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_strs_env_1_0_0_take_strs"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for take-strs must "
+                            + "not be invoked"),
+                });
+
+            var capturing = new CapturingStrings();
+            var bundle = new StringsBundle(capturing);
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+
+            var callPrint = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_print_strs"))!;
+            callPrint.Invoke(instance, Array.Empty<object>());
+
+            // Memory laid out so listPtr=0 references 2 (ptr, len)
+            // pairs pointing at "hi" and "hello"; the lifted array
+            // matches in the same order.
+            Assert.NotNull(capturing.Captured);
+            Assert.Equal(new[] { "hi", "hello" },
+                capturing.Captured);
         }
     }
 }
