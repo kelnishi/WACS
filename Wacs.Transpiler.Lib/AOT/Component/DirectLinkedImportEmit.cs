@@ -438,7 +438,8 @@ namespace Wacs.Transpiler.AOT.Component
                 {
                     EmitListOfRecordOrTupleReturn(il,
                         method.ReturnType.GetElementType()!,
-                        returnLocal, temps[retAreaSlot]);
+                        returnLocal, temps[retAreaSlot],
+                        stringEncoding);
                 }
                 else
                 if (isStringReturn || isByteArrayReturn
@@ -635,7 +636,7 @@ namespace Wacs.Transpiler.AOT.Component
                                 il.Emit(OpCodes.Stloc, payloadLocal);
                                 EmitInlineRecordOrTupleStore(il, c.Payload,
                                     temps[retAreaSlot], valueOffset,
-                                    payloadLocal);
+                                    payloadLocal, stringEncoding);
                             }
                             else if (isResourcePayload)
                             {
@@ -705,66 +706,15 @@ namespace Wacs.Transpiler.AOT.Component
                 }
                 else if (isTuple)
                 {
-                    var elements = method.ReturnType.GetGenericArguments();
-                    for (int i = 0; i < elements.Length; i++)
-                    {
-                        var et = elements[i];
-                        int fieldAlign = AlignOfPrimitive(et);
-                        int fieldOffset = Align(offsetSoFar, fieldAlign);
-
-                        il.Emit(OpCodes.Ldarg_0);
-                        il.Emit(OpCodes.Ldfld, MemoriesField);
-                        il.Emit(OpCodes.Ldc_I4_0);
-                        il.Emit(OpCodes.Ldelem_Ref);
-                        il.Emit(OpCodes.Ldfld, MemoryDataField);
-
-                        il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
-                        if (fieldOffset != 0)
-                        {
-                            il.Emit(OpCodes.Ldc_I4, fieldOffset);
-                            il.Emit(OpCodes.Add);
-                        }
-
-                        // Read tuple field — ValueTuple's Item1..ItemN
-                        // are public fields, not properties.
-                        il.Emit(OpCodes.Ldloca, returnLocal);
-                        var field = method.ReturnType.GetField(
-                            "Item" + (i + 1))!;
-                        il.Emit(OpCodes.Ldfld, field);
-                        il.Emit(OpCodes.Call, ResolveStoreMethod(et));
-
-                        offsetSoFar = fieldOffset + SizeOfPrimitive(et);
-                    }
+                    EmitInlineRecordOrTupleStore(il, method.ReturnType,
+                        temps[retAreaSlot], 0, returnLocal,
+                        stringEncoding);
                 }
                 else
                 {
-                    var props = GetRecordProperties(method.ReturnType);
-                    foreach (var p in props)
-                    {
-                        int fieldAlign = AlignOfPrimitive(p.PropertyType);
-                        int fieldOffset = Align(offsetSoFar, fieldAlign);
-
-                        il.Emit(OpCodes.Ldarg_0);
-                        il.Emit(OpCodes.Ldfld, MemoriesField);
-                        il.Emit(OpCodes.Ldc_I4_0);
-                        il.Emit(OpCodes.Ldelem_Ref);
-                        il.Emit(OpCodes.Ldfld, MemoryDataField);
-
-                        il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
-                        if (fieldOffset != 0)
-                        {
-                            il.Emit(OpCodes.Ldc_I4, fieldOffset);
-                            il.Emit(OpCodes.Add);
-                        }
-
-                        il.Emit(OpCodes.Ldloc, returnLocal);
-                        il.Emit(OpCodes.Callvirt, p.GetGetMethod()!);
-                        il.Emit(OpCodes.Call,
-                            ResolveStoreMethod(p.PropertyType));
-
-                        offsetSoFar = fieldOffset
-                            + SizeOfPrimitive(p.PropertyType);
-                    }
+                    EmitInlineRecordOrTupleStore(il, method.ReturnType,
+                        temps[retAreaSlot], 0, returnLocal,
+                        stringEncoding);
                 }
                 // Wasm sig has 0 returns; nothing further on the stack.
             }
@@ -1568,7 +1518,7 @@ namespace Wacs.Transpiler.AOT.Component
             if (IsLikelyRecordType(t))
             {
                 foreach (var p in GetRecordProperties(t))
-                    if (!IsStorablePrimitive(p.PropertyType)) return false;
+                    if (!IsFlatField(p.PropertyType)) return false;
                 return true;
             }
             if (t.IsGenericType)
@@ -1577,7 +1527,7 @@ namespace Wacs.Transpiler.AOT.Component
                 if (IsValueTupleType(def))
                 {
                     foreach (var ta in t.GetGenericArguments())
-                        if (!IsStorablePrimitive(ta)) return false;
+                        if (!IsFlatField(ta)) return false;
                     return true;
                 }
                 // Option<primitive> OR Option<own<R>> OR
@@ -1663,26 +1613,31 @@ namespace Wacs.Transpiler.AOT.Component
         // True when t is ValueTuple<...> with all elements being
         // canon-ABI primitives. Used for Option<tuple>/Result-arm
         // tuple support without recursion into nested aggregates.
+        // True when t is ValueTuple<...> with all elements being
+        // flat fields (primitives, strings, byte[]). The store
+        // emit dispatches per-field on the actual type.
         private static bool IsTupleOfPrimitives(Type t)
         {
             if (!t.IsGenericType) return false;
             if (!IsValueTupleType(t.GetGenericTypeDefinition())) return false;
             foreach (var ta in t.GetGenericArguments())
-                if (!IsStorablePrimitive(ta)) return false;
+                if (!IsFlatField(ta)) return false;
             return true;
         }
 
         // True when t is a sealed POCO with all property types
-        // being canon-ABI primitives.
+        // being flat fields (primitives, strings, byte[]).
         private static bool IsRecordOfPrimitives(Type t)
         {
             if (!IsLikelyRecordType(t)) return false;
             foreach (var p in GetRecordProperties(t))
-                if (!IsStorablePrimitive(p.PropertyType)) return false;
+                if (!IsFlatField(p.PropertyType)) return false;
             return true;
         }
 
-        // Max field alignment across a tuple/record-of-primitives.
+        // Max field alignment across a tuple/record. string/byte[]
+        // contribute align 4 (i32 ptr); primitives use their own
+        // alignment.
         private static int MaxFieldAlign(Type t)
         {
             int maxA = 1;
@@ -1691,7 +1646,7 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 foreach (var ta in t.GetGenericArguments())
                 {
-                    int a = AlignOfPrimitive(ta);
+                    int a = AlignOfFlatField(ta);
                     if (a > maxA) maxA = a;
                 }
             }
@@ -1699,7 +1654,7 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 foreach (var p in GetRecordProperties(t))
                 {
-                    int a = AlignOfPrimitive(p.PropertyType);
+                    int a = AlignOfFlatField(p.PropertyType);
                     if (a > maxA) maxA = a;
                 }
             }
@@ -1729,7 +1684,9 @@ namespace Wacs.Transpiler.AOT.Component
         private static int EmitInlineRecordOrTupleStore(
             ILGenerator il, Type type,
             Action<ILGenerator> pushBaseAddress,
-            LocalBuilder valueLocal)
+            LocalBuilder valueLocal,
+            CanonOption.Kind stringEncoding =
+                CanonOption.Kind.StringUtf8)
         {
             int offsetSoFar = 0;
             bool isTuple = type.IsGenericType
@@ -1741,65 +1698,98 @@ namespace Wacs.Transpiler.AOT.Component
                 for (int i = 0; i < elements.Length; i++)
                 {
                     var et = elements[i];
-                    int fieldAlign = AlignOfPrimitive(et);
+                    int fieldAlign = AlignOfFlatField(et);
                     int fieldOffset = Align(offsetSoFar, fieldAlign);
 
-                    il.Emit(OpCodes.Ldarg_0);
-                    il.Emit(OpCodes.Ldfld, MemoriesField);
-                    il.Emit(OpCodes.Ldc_I4_0);
-                    il.Emit(OpCodes.Ldelem_Ref);
-                    il.Emit(OpCodes.Ldfld, MemoryDataField);
-                    pushBaseAddress(il);
-                    if (fieldOffset != 0)
-                    {
-                        il.Emit(OpCodes.Ldc_I4, fieldOffset);
-                        il.Emit(OpCodes.Add);
-                    }
+                    EmitTupleOrRecordFieldStore(il, et, fieldOffset,
+                        pushBaseAddress,
+                        push => {
+                            push.Emit(OpCodes.Ldloca, valueLocal);
+                            push.Emit(OpCodes.Ldfld,
+                                type.GetField("Item" + (i + 1))!);
+                        },
+                        stringEncoding);
 
-                    il.Emit(OpCodes.Ldloca, valueLocal);
-                    il.Emit(OpCodes.Ldfld,
-                        type.GetField("Item" + (i + 1))!);
-                    il.Emit(OpCodes.Call, ResolveStoreMethod(et));
-
-                    offsetSoFar = fieldOffset + SizeOfPrimitive(et);
+                    offsetSoFar = fieldOffset + SizeOfFlatField(et);
                 }
             }
             else
             {
                 foreach (var p in GetRecordProperties(type))
                 {
-                    int fieldAlign = AlignOfPrimitive(p.PropertyType);
+                    int fieldAlign = AlignOfFlatField(p.PropertyType);
                     int fieldOffset = Align(offsetSoFar, fieldAlign);
 
-                    il.Emit(OpCodes.Ldarg_0);
-                    il.Emit(OpCodes.Ldfld, MemoriesField);
-                    il.Emit(OpCodes.Ldc_I4_0);
-                    il.Emit(OpCodes.Ldelem_Ref);
-                    il.Emit(OpCodes.Ldfld, MemoryDataField);
-                    pushBaseAddress(il);
-                    if (fieldOffset != 0)
-                    {
-                        il.Emit(OpCodes.Ldc_I4, fieldOffset);
-                        il.Emit(OpCodes.Add);
-                    }
-
-                    il.Emit(OpCodes.Ldloc, valueLocal);
-                    il.Emit(OpCodes.Callvirt, p.GetGetMethod()!);
-                    il.Emit(OpCodes.Call,
-                        ResolveStoreMethod(p.PropertyType));
+                    EmitTupleOrRecordFieldStore(il, p.PropertyType,
+                        fieldOffset, pushBaseAddress,
+                        push => {
+                            push.Emit(OpCodes.Ldloc, valueLocal);
+                            push.Emit(OpCodes.Callvirt,
+                                p.GetGetMethod()!);
+                        },
+                        stringEncoding);
 
                     offsetSoFar = fieldOffset
-                        + SizeOfPrimitive(p.PropertyType);
+                        + SizeOfFlatField(p.PropertyType);
                 }
             }
             return offsetSoFar;
+        }
+
+        // Per-field store helper: dispatches on the field type to
+        // either a plain primitive store (StoreXxx) or the
+        // cabi_realloc-backed variable-length store (StoreString /
+        // StoreByteArray) based on whether the field is primitive
+        // or a (ptr, len) pair-style flat field.
+        private static void EmitTupleOrRecordFieldStore(
+            ILGenerator il, Type fieldType, int fieldOffset,
+            Action<ILGenerator> pushBaseAddress,
+            Action<ILGenerator> pushFieldValue,
+            CanonOption.Kind stringEncoding)
+        {
+            bool isString = fieldType == typeof(string);
+            bool isByteArray = fieldType == typeof(byte[]);
+
+            // dest_array
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, MemoriesField);
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Ldelem_Ref);
+            il.Emit(OpCodes.Ldfld, MemoryDataField);
+            // dest_offset = base + fieldOffset
+            pushBaseAddress(il);
+            if (fieldOffset != 0)
+            {
+                il.Emit(OpCodes.Ldc_I4, fieldOffset);
+                il.Emit(OpCodes.Add);
+            }
+
+            if (isString || isByteArray)
+            {
+                // Push value + cabiRealloc + StoreXxx (variable-length
+                // dispatch — cabi_realloc allocates a guest buffer
+                // and the helper writes (ptr, len) at retArea slot).
+                pushFieldValue(il);
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, CabiReallocField);
+                il.Emit(OpCodes.Call, isString
+                    ? ResolveStoreStringMethod(stringEncoding)
+                    : StoreByteArrayMethod);
+            }
+            else
+            {
+                pushFieldValue(il);
+                il.Emit(OpCodes.Call, ResolveStoreMethod(fieldType));
+            }
         }
 
         // Convenience overload: matches the previous (retArea +
         // baseOffset) signature so existing call sites don't change.
         private static int EmitInlineRecordOrTupleStore(
             ILGenerator il, Type type, LocalBuilder retAreaLocal,
-            int baseOffset, LocalBuilder valueLocal)
+            int baseOffset, LocalBuilder valueLocal,
+            CanonOption.Kind stringEncoding =
+                CanonOption.Kind.StringUtf8)
         {
             return EmitInlineRecordOrTupleStore(il, type,
                 il2 =>
@@ -1811,7 +1801,7 @@ namespace Wacs.Transpiler.AOT.Component
                         il2.Emit(OpCodes.Add);
                     }
                 },
-                valueLocal);
+                valueLocal, stringEncoding);
         }
 
         // Emit IL for a list<tuple|record> top-level return.
@@ -1824,7 +1814,9 @@ namespace Wacs.Transpiler.AOT.Component
         //   5. Write (outerPtr, count) to retArea+0/+4.
         private static void EmitListOfRecordOrTupleReturn(
             ILGenerator il, Type elemType, LocalBuilder arrayLocal,
-            LocalBuilder retAreaLocal)
+            LocalBuilder retAreaLocal,
+            CanonOption.Kind stringEncoding =
+                CanonOption.Kind.StringUtf8)
         {
             int elemSize = SizeOfRecordOrTuple(elemType);
             int elemAlign = MaxFieldAlign(elemType);
@@ -1892,7 +1884,7 @@ namespace Wacs.Transpiler.AOT.Component
                     il2.Emit(OpCodes.Mul);
                     il2.Emit(OpCodes.Add);
                 },
-                elemLocal);
+                elemLocal, stringEncoding);
 
             // i++
             il.Emit(OpCodes.Ldloc, indexLocal);
@@ -2024,7 +2016,8 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Call, valueGetter);
                 il.Emit(OpCodes.Stloc, innerLocal);
                 EmitInlineRecordOrTupleStore(il, inner, retAreaLocal,
-                    baseOffset + valueOffset, innerLocal);
+                    baseOffset + valueOffset, innerLocal,
+                    stringEncoding);
             }
             else
             {
@@ -2421,18 +2414,18 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 foreach (var et in type.GetGenericArguments())
                 {
-                    int fa = AlignOfPrimitive(et);
+                    int fa = AlignOfFlatField(et);
                     offsetSoFar = Align(offsetSoFar, fa)
-                        + SizeOfPrimitive(et);
+                        + SizeOfFlatField(et);
                 }
             }
             else
             {
                 foreach (var p in GetRecordProperties(type))
                 {
-                    int fa = AlignOfPrimitive(p.PropertyType);
+                    int fa = AlignOfFlatField(p.PropertyType);
                     offsetSoFar = Align(offsetSoFar, fa)
-                        + SizeOfPrimitive(p.PropertyType);
+                        + SizeOfFlatField(p.PropertyType);
                 }
             }
             // canon-ABI: pad the total to the type's alignment so
@@ -2630,7 +2623,7 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Call, armGetter);
                 il.Emit(OpCodes.Stloc, armLocal);
                 EmitInlineRecordOrTupleStore(il, armType, retAreaLocal,
-                    valueOffset, armLocal);
+                    valueOffset, armLocal, stringEncoding);
                 return;
             }
 
@@ -2717,6 +2710,32 @@ namespace Wacs.Transpiler.AOT.Component
 
         private static int Align(int offset, int alignment)
             => (offset + alignment - 1) & ~(alignment - 1);
+
+        // True when t is a "flat" tuple/record field — primitive,
+        // string, or byte[] — that EmitInlineRecordOrTupleStore
+        // can write at a per-field offset within the parent's
+        // record layout.
+        private static bool IsFlatField(Type t)
+        {
+            if (IsStorablePrimitive(t)) return true;
+            if (t == typeof(string)) return true;
+            if (t == typeof(byte[])) return true;
+            return false;
+        }
+
+        // Alignment for a flat field. string/byte[] = 4 (i32 ptr).
+        private static int AlignOfFlatField(Type t)
+        {
+            if (IsStorablePrimitive(t)) return AlignOfPrimitive(t);
+            return 4;  // string / byte[] (ptr aligned)
+        }
+
+        // Size for a flat field. string/byte[] = 8 (ptr + len).
+        private static int SizeOfFlatField(Type t)
+        {
+            if (IsStorablePrimitive(t)) return SizeOfPrimitive(t);
+            return 8;  // string / byte[] (ptr + len pair)
+        }
 
         // Cache the per-primitive-type StoreXxx MethodInfo so each
         // emit reuses the lookup.

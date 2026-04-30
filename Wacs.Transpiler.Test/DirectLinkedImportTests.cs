@@ -1243,6 +1243,36 @@ namespace Wacs.Transpiler.Test
             public Pos Emit() => _v;
         }
 
+        // ====== tuple<u32, string> return ========================
+        // Wire form: u32 a @0 + (i32 ptr @4, i32 len @8) for the
+        // string field. Total 12 bytes, padded to align(4) = 12.
+        // Exercises the EmitInlineRecordOrTupleStore mixed-field
+        // path (primitive + string with cabi_realloc).
+
+        [WitSource(@"interface tupstr-env",
+            Package = "my:test@1.0.0", Interface = "tupstr-env")]
+        public interface IPairWithString
+        {
+            [WitSource(@"go: func() -> tuple<u32, string>;",
+                Package = "my:test@1.0.0", Interface = "tupstr-env",
+                Item = "go")]
+            (uint, string) Go();
+        }
+
+        public sealed class PairWithStringBundle
+        {
+            public IPairWithString TupstrEnv { get; }
+            public PairWithStringBundle(IPairWithString p)
+            { TupstrEnv = p; }
+        }
+
+        private sealed class FixedPairWithString : IPairWithString
+        {
+            private readonly (uint, string) _v;
+            public FixedPairWithString((uint, string) v) { _v = v; }
+            public (uint, string) Go() => _v;
+        }
+
         // ====== Result<tuple<u32,u32>, primitive> return =========
 
         [WitSource(@"interface restup-env",
@@ -3870,6 +3900,88 @@ namespace Wacs.Transpiler.Test
             0x0B, 0x00,
             0x41, 0x10, 0x10, 0x00,
             0x41, 0x10, 0x28, 0x02, 0x08,
+            0x0B,
+        };
+
+        // tuple<u32, string> retArea: u32 a @0 + (str_ptr @4,
+        // str_len @8). Probes a, len, first byte of string.
+        private static byte[] BuildTupleWithStringReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 3 types
+            0x01, 0x11, 0x03,
+            0x60, 0x04, 0x7F, 0x7F, 0x7F, 0x7F, 0x01, 0x7F,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // module: "my:test/tupstr-env@1.0.0" (24)
+            // entity: "go" (2)
+            // size = 1 + 1 + 24 + 1 + 2 + 2 = 31 = 0x1F
+            0x02, 0x1F, 0x01,
+            0x18,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x74, 0x75, 0x70, 0x73, 0x74, 0x72, 0x2D, 0x65,
+            0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x02,
+            0x67, 0x6F,
+            0x00, 0x01,
+            // Function section: 4 local funcs
+            0x03, 0x05, 0x04, 0x00, 0x02, 0x02, 0x02,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Global: bump allocator at 32
+            0x06, 0x06, 0x01,
+            0x7F, 0x01, 0x41, 0x20, 0x0B,
+            // Export section: 4 exports
+            //   call_go_a          (9):  12
+            //   call_go_len        (11): 14
+            //   call_go_first_byte (18): 21
+            //   cabi_realloc       (12): 15
+            // size = 1 + 12 + 14 + 21 + 15 = 63 = 0x3F
+            0x07, 0x3F, 0x04,
+            0x09,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x67, 0x6F, 0x5F,
+            0x61,
+            0x00, 0x02,
+            0x0B,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x67, 0x6F, 0x5F,
+            0x6C, 0x65, 0x6E,
+            0x00, 0x03,
+            0x12,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x67, 0x6F, 0x5F,
+            0x66, 0x69, 0x72, 0x73, 0x74, 0x5F, 0x62, 0x79,
+            0x74, 0x65,
+            0x00, 0x04,
+            0x0C,
+            0x63, 0x61, 0x62, 0x69, 0x5F, 0x72, 0x65, 0x61,
+            0x6C, 0x6C, 0x6F, 0x63,
+            0x00, 0x01,
+            // Code section: 4 bodies
+            //   body0 cabi_realloc       : 11 → 12
+            //   body1 call_go_a          : 11 → 12  (load offset=0)
+            //   body2 call_go_len        : 11 → 12  (load offset=8)
+            //   body3 call_go_first_byte : 14 → 15  (load offset=4, load8_u)
+            // size = 1 + 12 + 12 + 12 + 15 = 52 = 0x34
+            0x0A, 0x34, 0x04,
+            0x0B, 0x00,
+            0x23, 0x00,
+            0x23, 0x00,
+            0x20, 0x03,
+            0x6A,
+            0x24, 0x00,
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x00,    // a @ retArea+0
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x08,    // len @ retArea+8
+            0x0B,
+            0x0E, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x04,    // ptr @ retArea+4
+            0x2D, 0x00, 0x00,                 // first byte
             0x0B,
         };
 
@@ -11537,6 +11649,84 @@ namespace Wacs.Transpiler.Test
                 new object[] { importsProxy, bundle })!;
             var callByte = result.ExportsInterface!.GetMethod(
                 InterfaceGenerator.SanitizeName("call_all_first_byte"))!;
+            Assert.Equal(0x48, (int)callByte.Invoke(fresh2,
+                Array.Empty<object>())!);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_TupleWithStringReturn_MixedFields()
+        {
+            // tuple<u32, string>: mixed primitive + string fields
+            // exercise EmitInlineRecordOrTupleStore's per-field
+            // dispatch (primitive store → variable-length store via
+            // cabi_realloc).
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/tupstr-env@1.0.0", "go"),
+                _ => throw new InvalidOperationException(
+                    "stub for go must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildTupleWithStringReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(PairWithStringBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/tupstr-env@1.0.0", "go", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.TupStrRet", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_tupstr_env_1_0_0_go"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for go must not be invoked"),
+                });
+
+            // (uint, string) (0x42u, "Hi") → a=0x42, len=2, first byte='H'=0x48.
+            var bundle = new PairWithStringBundle(
+                new FixedPairWithString((0x42u, "Hi")));
+
+            var instance = Activator.CreateInstance(
+                result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+            var callA = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_go_a"))!;
+            Assert.Equal(0x42, (int)callA.Invoke(instance,
+                Array.Empty<object>())!);
+
+            var fresh = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+            var callLen = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_go_len"))!;
+            Assert.Equal(2, (int)callLen.Invoke(fresh,
+                Array.Empty<object>())!);
+
+            var fresh2 = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+            var callByte = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_go_first_byte"))!;
             Assert.Equal(0x48, (int)callByte.Invoke(fresh2,
                 Array.Empty<object>())!);
         }
