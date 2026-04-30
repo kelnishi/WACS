@@ -412,6 +412,45 @@ namespace Wacs.Transpiler.Test
             public void TakeStrs(string[] items) { Captured = items; }
         }
 
+        // ====== Aggregate-return surface =========================
+        // Wasi:clocks/wall-clock.now() → datetime is the canonical
+        // shape: a record { u64 seconds, u32 nanoseconds }. The
+        // wasm sig adds a trailing i32 retArea ptr param and has
+        // 0 returns; the host writes the record fields into memory
+        // at retAreaPtr (12 bytes total).
+
+        [WitSource(@"record dt { seconds: u64, nanoseconds: u32 }",
+            Package = "my:test@1.0.0", Interface = "agg-env",
+            Item = "dt")]
+        public sealed class Dt
+        {
+            public ulong Seconds { get; set; } = default!;
+            public uint Nanoseconds { get; set; } = default!;
+        }
+
+        [WitSource(@"interface agg-env",
+            Package = "my:test@1.0.0", Interface = "agg-env")]
+        public interface IClock
+        {
+            [WitSource(@"now: func() -> dt;",
+                Package = "my:test@1.0.0", Interface = "agg-env",
+                Item = "now")]
+            Dt Now();
+        }
+
+        public sealed class ClockBundle
+        {
+            public IClock AggEnv { get; }
+            public ClockBundle(IClock c) { AggEnv = c; }
+        }
+
+        private sealed class FixedClock2 : IClock
+        {
+            private readonly Dt _dt;
+            public FixedClock2(Dt dt) { _dt = dt; }
+            public Dt Now() => _dt;
+        }
+
         // ====== Variant param test surface =======================
         // Mirrors the source-generator-emitted shape for WIT
         // variants (HttpMethod, IpAddress, etc.):
@@ -799,6 +838,64 @@ namespace Wacs.Transpiler.Test
             0x00, 0x01,
             // Code section: body = call 0; end
             0x0A, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0B,
+        };
+
+        // (module
+        //   (type $tNow (func (param i32)))    ;; now(retArea) → ()
+        //   (type $tEntry (func (result i64))) ;; call_now() → seconds (u64)
+        //   (import "my:test/agg-env@1.0.0" "now" (func $imp (type $tNow)))
+        //   (memory 1)
+        //   (func (export "call_now_seconds") (result i64)
+        //     i32.const 32   ;; retArea ptr (away from any active data)
+        //     call $imp      ;; → host writes (seconds:u64@0, nanoseconds:u32@8)
+        //     i32.const 32
+        //     i64.load))     ;; → seconds
+        //
+        // 12-byte aggregate write at offset 32. Export reads
+        // seconds back via i64.load — proves the host serialized
+        // it correctly via PrimitiveStore.StoreU64 at retArea+0.
+        private static byte[] BuildAggregateReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types
+            // 0: (i32) → void (4 bytes)
+            // 1: () → i64 (4 bytes)
+            // size = 1 + 4 + 4 = 9 = 0x09
+            0x01, 0x09, 0x02,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7E,
+            // Import section
+            // size = 1 + 1 + 21 + 1 + 3 + 2 = 29 = 0x1D
+            0x02, 0x1D, 0x01,
+            // module: "my:test/agg-env@1.0.0" (21)
+            0x15,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x61, 0x67, 0x67, 0x2D, 0x65, 0x6E, 0x76, 0x40,
+            0x31, 0x2E, 0x30, 0x2E, 0x30,
+            // entity: "now" (3)
+            0x03,
+            0x6E, 0x6F, 0x77,
+            0x00, 0x00,
+            // Function section: 1 local func of type 1
+            0x03, 0x02, 0x01, 0x01,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export: "call_now_seconds" (16) → func 1 (after 1 import)
+            0x07, 0x14, 0x01,
+            0x10,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x6E, 0x6F, 0x77,
+            0x5F, 0x73, 0x65, 0x63, 0x6F, 0x6E, 0x64, 0x73,
+            0x00, 0x01,
+            // Code section: 1 body
+            // body = locals(1) + i32.const 32(2) + call(2) + i32.const 32(2) + i64.load align=3 offset=0(3) + end(1) = 11
+            // 0x29 = i64.load — opcode requires alignment & offset varuint
+            0x0A, 0x0D, 0x01, 0x0B,
+            0x00,
+            0x41, 0x20,         // i32.const 32
+            0x10, 0x00,         // call 0
+            0x41, 0x20,         // i32.const 32
+            0x29, 0x03, 0x00,   // i64.load align=3 offset=0
+            0x0B,
         };
 
         // (module
@@ -3947,6 +4044,87 @@ namespace Wacs.Transpiler.Test
             Assert.IsType<int>(rName);
             Assert.Equal(unchecked((int)(0xC000_0000u | 2u)),
                 (int)rName);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_AggregateReturn_RecordOfPrimitives()
+        {
+            // wasi:clocks/wall-clock.now()-style aggregate return.
+            // Wasm sig: (i32 retArea) → (). Host writes
+            // record { u64 seconds, u32 nanoseconds } at retArea
+            // (12 bytes). The export's i64.load at retArea+0 reads
+            // the seconds field back, providing a probe value the
+            // test can assert against.
+
+            const ulong SecondsVal = 0x1122334455667788UL;
+            const uint NanosVal    = 0x09999999u;
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/agg-env@1.0.0", "now"),
+                _ => throw new InvalidOperationException(
+                    "stub for now must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildAggregateReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(ClockBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/agg-env@1.0.0", "now", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.AggReturn", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+
+            // Aggregate-return shape was recognized and
+            // direct-linked.
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_agg_env_1_0_0_now"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for now must not be invoked"),
+                });
+
+            var dt = new Dt
+            {
+                Seconds = SecondsVal,
+                Nanoseconds = NanosVal,
+            };
+            var bundle = new ClockBundle(new FixedClock2(dt));
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+
+            var callNowSeconds = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_now_seconds"))!;
+            object? raw = callNowSeconds.Invoke(instance,
+                Array.Empty<object>());
+
+            // The wasm i64 result IS the u64 seconds field that
+            // the host wrote into memory at retArea+0 via
+            // PrimitiveStore.StoreU64. Round-trip success proves
+            // the aggregate-return retArea write fired correctly.
+            Assert.IsType<long>(raw);
+            Assert.Equal(SecondsVal, unchecked((ulong)(long)raw));
         }
     }
 }
