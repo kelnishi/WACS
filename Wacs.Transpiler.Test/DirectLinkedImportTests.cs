@@ -851,6 +851,35 @@ namespace Wacs.Transpiler.Test
             public Option<int[]> List() => _v;
         }
 
+        // ====== list<own<R>> (IWidget[]) return =================
+        // Per-element AllocateResource mints a handle for each
+        // resource instance; the outer (ptr, count) lands at retArea
+        // and the packed handle buffer at *(ptr).
+
+        [WitSource(@"interface listown-env",
+            Package = "my:test@1.0.0", Interface = "listown-env")]
+        public interface IWidgetListSource
+        {
+            [WitSource(@"all: func() -> list<own<widget>>;",
+                Package = "my:test@1.0.0", Interface = "listown-env",
+                Item = "all")]
+            IWidget[] All();
+        }
+
+        public sealed class WidgetListBundle
+        {
+            public IWidgetListSource ListownEnv { get; }
+            public WidgetListBundle(IWidgetListSource s)
+            { ListownEnv = s; }
+        }
+
+        private sealed class FixedWidgetList : IWidgetListSource
+        {
+            private readonly IWidget[] _v;
+            public FixedWidgetList(IWidget[] v) { _v = v; }
+            public IWidget[] All() => _v;
+        }
+
         // ====== list<list<s32>> (int[][]) return ===============
         // Wire form: outer (i32 ptr, i32 count) + inner array of
         // (sub_ptr, sub_len) pairs, each sub_ptr pointing to a
@@ -2577,6 +2606,76 @@ namespace Wacs.Transpiler.Test
             0x0B, 0x00,
             0x41, 0x10, 0x10, 0x00,
             0x41, 0x10, 0x28, 0x02, 0x08,
+            0x0B,
+        };
+
+        // list<own<widget>> retArea: i32 ptr @0 + i32 count @4.
+        // *(ptr) is a packed i32 handle buffer (4 bytes per handle).
+        // Probes count + first handle.
+        private static byte[] BuildListOfOwnReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 3 types
+            0x01, 0x11, 0x03,
+            0x60, 0x04, 0x7F, 0x7F, 0x7F, 0x7F, 0x01, 0x7F,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // module: "my:test/listown-env@1.0.0" (25)
+            // entity: "all" (3)
+            // size = 1 + 1 + 25 + 1 + 3 + 2 = 33 = 0x21
+            0x02, 0x21, 0x01,
+            0x19,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x6C, 0x69, 0x73, 0x74, 0x6F, 0x77, 0x6E, 0x2D,
+            0x65, 0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x03,
+            0x61, 0x6C, 0x6C,
+            0x00, 0x01,
+            // Function section: 3 local funcs
+            0x03, 0x04, 0x03, 0x00, 0x02, 0x02,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Global: bump allocator at 32
+            0x06, 0x06, 0x01,
+            0x7F, 0x01, 0x41, 0x20, 0x0B,
+            // Export section: 3 exports
+            //   call_all_count        (14): 17
+            //   call_all_first_handle (21): 24
+            //   cabi_realloc          (12): 15
+            // size = 1 + 17 + 24 + 15 = 57 = 0x39
+            0x07, 0x39, 0x03,
+            0x0E,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x61, 0x6C, 0x6C,
+            0x5F, 0x63, 0x6F, 0x75, 0x6E, 0x74,
+            0x00, 0x02,
+            0x15,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x61, 0x6C, 0x6C,
+            0x5F, 0x66, 0x69, 0x72, 0x73, 0x74, 0x5F, 0x68,
+            0x61, 0x6E, 0x64, 0x6C, 0x65,
+            0x00, 0x03,
+            0x0C,
+            0x63, 0x61, 0x62, 0x69, 0x5F, 0x72, 0x65, 0x61,
+            0x6C, 0x6C, 0x6F, 0x63,
+            0x00, 0x01,
+            // Code section: 3 bodies (12/12/15)
+            0x0A, 0x28, 0x03,
+            0x0B, 0x00,
+            0x23, 0x00,
+            0x23, 0x00,
+            0x20, 0x03,
+            0x6A,
+            0x24, 0x00,
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x04,
+            0x0B,
+            0x0E, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10,
+            0x28, 0x02, 0x00,                 // outer_ptr
+            0x28, 0x02, 0x00,                 // first handle (i32 at *ptr+0)
             0x0B,
         };
 
@@ -9493,6 +9592,85 @@ namespace Wacs.Transpiler.Test
             var callInt = result.ExportsInterface!.GetMethod(
                 InterfaceGenerator.SanitizeName("call_all_first_int"))!;
             Assert.Equal(9, (int)callInt.Invoke(fresh,
+                Array.Empty<object>())!);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_ListOfOwnReturn_AllocatesHandles()
+        {
+            // list<own<widget>>: per-element AllocateResource mints
+            // a handle for each instance; outer (ptr, count) +
+            // packed handle buffer at *(ptr). Probes count + first
+            // handle (which TestResources allocates starting at 1).
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/listown-env@1.0.0", "all"),
+                _ => throw new InvalidOperationException(
+                    "stub for all must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildListOfOwnReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(WidgetListBundle),
+                resourcesType: typeof(TestResources));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/listown-env@1.0.0", "all", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.ListOwnRet", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_listown_env_1_0_0_all"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for all must not be invoked"),
+                });
+
+            // Two FakeWidgets — count=2, first handle = 1 (first
+            // allocation in a fresh TestResources).
+            var resources = new TestResources();
+            var bundle = new WidgetListBundle(new FixedWidgetList(
+                new IWidget[]
+                {
+                    new FakeWidget(0x9),
+                    new FakeWidget(0x16),
+                }));
+            var instance = Activator.CreateInstance(
+                result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            var callCount = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_all_count"))!;
+            Assert.Equal(2, (int)callCount.Invoke(instance,
+                Array.Empty<object>())!);
+
+            var freshResources = new TestResources();
+            var fresh = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, freshResources })!;
+            var callHandle = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_all_first_handle"))!;
+            Assert.Equal(1, (int)callHandle.Invoke(fresh,
                 Array.Empty<object>())!);
         }
     }
