@@ -335,6 +335,68 @@ namespace Wacs.ComponentModel.CanonicalABI
                 dest.AsSpan(retAreaOffset + 4, 4), count);
         }
 
+        /// <summary>
+        /// Store a <c>string[][]</c> (canon-ABI
+        /// <c>list&lt;list&lt;string&gt;&gt;</c>) into wasm linear memory
+        /// and write the (ptr, count) pair to the retArea slot.
+        ///
+        /// <para>Three-level allocation: cabi_realloc for the outer
+        /// (sub_ptr, sub_count)-pair array, then per-outer-element
+        /// <see cref="StoreStringList"/> (which itself allocates the
+        /// inner string-pair array + per-string UTF-8 buffers).
+        /// Mirrors realistic shapes like HTTP's list-of-header-lists.</para>
+        /// </summary>
+        public static void StoreListOfStringList(byte[] dest,
+            int retAreaOffset, string[][] value,
+            Func<int, int, int, int, int> cabiRealloc)
+        {
+            if (cabiRealloc == null)
+                throw new InvalidOperationException(
+                    "list<list<string>> returns require the component "
+                    + "to export `cabi_realloc`.");
+            int count = value.Length;
+            int outerByteCount = count * 8;
+            int outerPtr = cabiRealloc(0, 0, 4, outerByteCount);
+            for (int i = 0; i < count; i++)
+            {
+                StoreStringList(dest, outerPtr + i * 8, value[i],
+                    cabiRealloc);
+            }
+            BinaryPrimitives.WriteInt32LittleEndian(
+                dest.AsSpan(retAreaOffset, 4), outerPtr);
+            BinaryPrimitives.WriteInt32LittleEndian(
+                dest.AsSpan(retAreaOffset + 4, 4), count);
+        }
+
+        /// <summary>
+        /// Store a <c>byte[][][]</c> (canon-ABI
+        /// <c>list&lt;list&lt;list&lt;u8&gt;&gt;&gt;</c>) into wasm linear
+        /// memory. Three-level allocation parallel to
+        /// <see cref="StoreListOfStringList"/> but with raw bytes
+        /// instead of UTF-8 strings.
+        /// </summary>
+        public static void StoreListOfByteArrayList(byte[] dest,
+            int retAreaOffset, byte[][][] value,
+            Func<int, int, int, int, int> cabiRealloc)
+        {
+            if (cabiRealloc == null)
+                throw new InvalidOperationException(
+                    "list<list<list<u8>>> returns require the component "
+                    + "to export `cabi_realloc`.");
+            int count = value.Length;
+            int outerByteCount = count * 8;
+            int outerPtr = cabiRealloc(0, 0, 4, outerByteCount);
+            for (int i = 0; i < count; i++)
+            {
+                StoreByteArrayList(dest, outerPtr + i * 8, value[i],
+                    cabiRealloc);
+            }
+            BinaryPrimitives.WriteInt32LittleEndian(
+                dest.AsSpan(retAreaOffset, 4), outerPtr);
+            BinaryPrimitives.WriteInt32LittleEndian(
+                dest.AsSpan(retAreaOffset + 4, 4), count);
+        }
+
         // sizeof(T) requires unsafe; cache the per-T size once via
         // Marshal.SizeOf to avoid the unsafe block in the hot path.
         // For canon-ABI primitives (i8/i16/i32/i64/f32/f64) this
