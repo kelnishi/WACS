@@ -397,9 +397,23 @@ namespace Wacs.Transpiler.AOT.Component
                     && resolver.IsResourceInterface(
                         method.ReturnType.GetElementType()!)
                     && resourcesType != null;
+                bool isOptionOrResultArrayReturn = method.ReturnType.IsArray
+                    && method.ReturnType.GetArrayRank() == 1
+                    && method.ReturnType.GetElementType()!.IsGenericType
+                    && (method.ReturnType.GetElementType()!
+                            .GetGenericTypeDefinition() == typeof(Option<>)
+                        || method.ReturnType.GetElementType()!
+                            .GetGenericTypeDefinition() == typeof(Result<,>));
 
                 int offsetSoFar = 0;
-                if (isResourceArrayReturn)
+                if (isOptionOrResultArrayReturn)
+                {
+                    EmitListOfOptionOrResultReturn(il,
+                        method.ReturnType.GetElementType()!,
+                        returnLocal, temps[retAreaSlot],
+                        resolver, resourcesType, stringEncoding);
+                }
+                else if (isResourceArrayReturn)
                 {
                     EmitListOfResourceReturn(il,
                         method.ReturnType.GetElementType()!,
@@ -1502,6 +1516,16 @@ namespace Wacs.Transpiler.AOT.Component
                     && resolver.IsResourceInterface(elem)
                     && resolver.PreferredResourcesType != null)
                     return true;
+                // list<Option<X>> / list<Result<X,Y>>: per-element
+                // recursive Option/Result write at outerPtr+i*elemSize.
+                if (elem.IsGenericType)
+                {
+                    var elemDef = elem.GetGenericTypeDefinition();
+                    if ((elemDef == typeof(Option<>)
+                            || elemDef == typeof(Result<,>))
+                        && IsAggregateReturnSupported(elem, resolver))
+                        return true;
+                }
             }
             if (IsLikelyRecordType(t))
             {
@@ -2231,6 +2255,122 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(int)));
         }
 
+        // Emit IL for a list<Option<X>> or list<Result<X,Y>> top-
+        // level return.
+        //   1. count = arrayLocal.Length
+        //   2. outerPtr = ctx.CabiRealloc(0, 0, elemAlign,
+        //                                  count*elemSize)
+        //   3. for (int i = 0; i < count; i++):
+        //        perElementBase = outerPtr + i*elemSize  (in local)
+        //        elem = array[i] (Option/Result, in local)
+        //        EmitOptionStoreAt(elem, perElementBase, baseOffset=0)
+        //          OR EmitResultStoreAt(elem, perElementBase, 0)
+        //   4. Write (outerPtr, count) to retArea+0/+4.
+        // The reuse trick: pass perElementBaseLocal as
+        // retAreaLocal + baseOffset=0 to the existing helpers — they
+        // compute disc/value offsets relative to retAreaLocal already.
+        private static void EmitListOfOptionOrResultReturn(
+            ILGenerator il, Type elemType, LocalBuilder arrayLocal,
+            LocalBuilder retAreaLocal,
+            HostPackageResolver? resolver, Type? resourcesType,
+            CanonOption.Kind stringEncoding)
+        {
+            int elemSize = SizeOf(elemType, resolver);
+            int elemAlign = MaxAlignOf(elemType, resolver);
+            bool isOption = elemType.GetGenericTypeDefinition()
+                == typeof(Option<>);
+
+            // count = arrayLocal.Length
+            var countLocal = il.DeclareLocal(typeof(int));
+            il.Emit(OpCodes.Ldloc, arrayLocal);
+            il.Emit(OpCodes.Ldlen);
+            il.Emit(OpCodes.Conv_I4);
+            il.Emit(OpCodes.Stloc, countLocal);
+
+            // outerPtr = ctx.CabiRealloc(0, 0, elemAlign, count*elemSize)
+            var outerPtrLocal = il.DeclareLocal(typeof(int));
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, CabiReallocField);
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Ldc_I4, elemAlign);
+            il.Emit(OpCodes.Ldloc, countLocal);
+            il.Emit(OpCodes.Ldc_I4, elemSize);
+            il.Emit(OpCodes.Mul);
+            il.Emit(OpCodes.Callvirt,
+                typeof(Func<int, int, int, int, int>)
+                    .GetMethod("Invoke")!);
+            il.Emit(OpCodes.Stloc, outerPtrLocal);
+
+            // for i = 0; i < count; i++
+            var indexLocal = il.DeclareLocal(typeof(int));
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Stloc, indexLocal);
+
+            var loopStart = il.DefineLabel();
+            var loopCheck = il.DefineLabel();
+            il.Emit(OpCodes.Br, loopCheck);
+            il.MarkLabel(loopStart);
+
+            // perElementBase = outerPtr + i * elemSize
+            var perElementBaseLocal = il.DeclareLocal(typeof(int));
+            il.Emit(OpCodes.Ldloc, outerPtrLocal);
+            il.Emit(OpCodes.Ldloc, indexLocal);
+            il.Emit(OpCodes.Ldc_I4, elemSize);
+            il.Emit(OpCodes.Mul);
+            il.Emit(OpCodes.Add);
+            il.Emit(OpCodes.Stloc, perElementBaseLocal);
+
+            // elem = array[i]
+            var elemLocal = il.DeclareLocal(elemType);
+            il.Emit(OpCodes.Ldloc, arrayLocal);
+            il.Emit(OpCodes.Ldloc, indexLocal);
+            il.Emit(OpCodes.Ldelem, elemType);
+            il.Emit(OpCodes.Stloc, elemLocal);
+
+            // Write: pass perElementBase as retArea, baseOffset=0.
+            if (isOption)
+                EmitOptionStoreAt(il, elemType, elemLocal,
+                    perElementBaseLocal, 0,
+                    resolver, resourcesType, stringEncoding);
+            else
+                EmitResultStoreAt(il, elemType, elemLocal,
+                    perElementBaseLocal, 0,
+                    resolver, resourcesType, stringEncoding);
+
+            // i++
+            il.Emit(OpCodes.Ldloc, indexLocal);
+            il.Emit(OpCodes.Ldc_I4_1);
+            il.Emit(OpCodes.Add);
+            il.Emit(OpCodes.Stloc, indexLocal);
+
+            il.MarkLabel(loopCheck);
+            il.Emit(OpCodes.Ldloc, indexLocal);
+            il.Emit(OpCodes.Ldloc, countLocal);
+            il.Emit(OpCodes.Blt, loopStart);
+
+            // Write (outerPtr, count) to retArea+0/+4.
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, MemoriesField);
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Ldelem_Ref);
+            il.Emit(OpCodes.Ldfld, MemoryDataField);
+            il.Emit(OpCodes.Ldloc, retAreaLocal);
+            il.Emit(OpCodes.Ldloc, outerPtrLocal);
+            il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(int)));
+
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, MemoriesField);
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Ldelem_Ref);
+            il.Emit(OpCodes.Ldfld, MemoryDataField);
+            il.Emit(OpCodes.Ldloc, retAreaLocal);
+            il.Emit(OpCodes.Ldc_I4_4);
+            il.Emit(OpCodes.Add);
+            il.Emit(OpCodes.Ldloc, countLocal);
+            il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(int)));
+        }
+
         // Total wire size of a tuple/record-of-primitives, accounting
         // for per-field alignment padding. Used to compute the
         // per-element stride in list<record>/list<tuple>.
@@ -2261,6 +2401,57 @@ namespace Wacs.Transpiler.AOT.Component
             // arrays of this type pack contiguously.
             int maxA = MaxFieldAlign(type);
             return Align(offsetSoFar, maxA);
+        }
+
+        // Recursive total size of a supported aggregate type,
+        // padded to the type's max alignment so arrays of this
+        // type pack contiguously.
+        //   Option<T> : Align(1, MaxAlignOf(T)) + SizeOf(T)
+        //              padded to MaxAlignOf(T).
+        //   Result<X,Y>: Align(1, max(MaxAlignOf(X), MaxAlignOf(Y)))
+        //               + max(SizeOf(X), SizeOf(Y))
+        //              padded to max(MaxAlignOf(X), MaxAlignOf(Y)).
+        //   tuple/record: SizeOfRecordOrTuple
+        //   primitive: SizeOfPrimitive
+        //   resource handle: 4
+        //   string/byte[]/list-style: 8 (i32 ptr + i32 len/count)
+        private static int SizeOf(Type t,
+            HostPackageResolver? resolver)
+        {
+            if (IsStorablePrimitive(t)) return SizeOfPrimitive(t);
+            if (IsTupleOfPrimitives(t) || IsRecordOfPrimitives(t))
+                return SizeOfRecordOrTuple(t);
+            if (resolver != null
+                && resolver.IsResourceInterface(t))
+                return 4;
+            if (t.IsGenericType)
+            {
+                var def = t.GetGenericTypeDefinition();
+                if (def == typeof(Option<>))
+                {
+                    var inner = t.GetGenericArguments()[0];
+                    int innerAlign = MaxAlignOf(inner, resolver);
+                    int valueOffset = Align(1, innerAlign);
+                    int total = valueOffset + SizeOf(inner, resolver);
+                    return Align(total, innerAlign);
+                }
+                if (def == typeof(Result<,>))
+                {
+                    var args = t.GetGenericArguments();
+                    int a0 = MaxAlignOf(args[0], resolver);
+                    int a1 = MaxAlignOf(args[1], resolver);
+                    int armAlign = a0 > a1 ? a0 : a1;
+                    int s0 = SizeOf(args[0], resolver);
+                    int s1 = SizeOf(args[1], resolver);
+                    int armSize = s0 > s1 ? s0 : s1;
+                    int valueOffset = Align(1, armAlign);
+                    return Align(valueOffset + armSize, armAlign);
+                }
+            }
+            // Fallback for string / byte[] / list<T> / variants
+            // (rare here — list-of-list returns bottom out at the
+            // outer list emit, not this helper).
+            return 8;
         }
 
         // True when this CLR type maps directly to a single

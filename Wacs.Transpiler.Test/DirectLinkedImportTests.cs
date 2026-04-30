@@ -911,6 +911,36 @@ namespace Wacs.Transpiler.Test
             public Option<Option<uint>> Num() => _v;
         }
 
+        // ====== list<option<u32>> (Option<uint>[]) return ========
+        // Per-element wire form: u8 disc + (3 padding) + u32 value
+        // = 8 bytes per element, aligned at 4. Outer (ptr, count)
+        // at retArea. Each element written via EmitOptionStoreAt
+        // with perElementBase = outerPtr + i*8.
+
+        [WitSource(@"interface listopt-env",
+            Package = "my:test@1.0.0", Interface = "listopt-env")]
+        public interface IMaybeIntsList
+        {
+            [WitSource(@"all: func() -> list<option<u32>>;",
+                Package = "my:test@1.0.0", Interface = "listopt-env",
+                Item = "all")]
+            Option<uint>[] All();
+        }
+
+        public sealed class MaybeIntsListBundle
+        {
+            public IMaybeIntsList ListoptEnv { get; }
+            public MaybeIntsListBundle(IMaybeIntsList m)
+            { ListoptEnv = m; }
+        }
+
+        private sealed class FixedMaybeIntsList : IMaybeIntsList
+        {
+            private readonly Option<uint>[] _v;
+            public FixedMaybeIntsList(Option<uint>[] v) { _v = v; }
+            public Option<uint>[] All() => _v;
+        }
+
         // ====== list<own<R>> (IWidget[]) return =================
         // Per-element AllocateResource mints a handle for each
         // resource instance; the outer (ptr, count) lands at retArea
@@ -3003,6 +3033,92 @@ namespace Wacs.Transpiler.Test
             0x0B, 0x00,
             0x41, 0x10, 0x10, 0x00,
             0x41, 0x10, 0x28, 0x02, 0x08,    // i32.load offset=8 (inner value)
+            0x0B,
+        };
+
+        // list<option<u32>> retArea: i32 ptr @0 + i32 count @4.
+        // *(ptr) is array of Option<u32> elements (8 bytes each:
+        // u8 disc + 3 pad + u32 value). Probes count + first
+        // element's disc + first element's value.
+        private static byte[] BuildListOfOptionReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 3 types
+            0x01, 0x11, 0x03,
+            0x60, 0x04, 0x7F, 0x7F, 0x7F, 0x7F, 0x01, 0x7F,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // module: "my:test/listopt-env@1.0.0" (25)
+            // entity: "all" (3)
+            // size = 1 + 1 + 25 + 1 + 3 + 2 = 33 = 0x21
+            0x02, 0x21, 0x01,
+            0x19,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x6C, 0x69, 0x73, 0x74, 0x6F, 0x70, 0x74, 0x2D,
+            0x65, 0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x03,
+            0x61, 0x6C, 0x6C,
+            0x00, 0x01,
+            // Function section: 4 local funcs
+            0x03, 0x05, 0x04, 0x00, 0x02, 0x02, 0x02,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Global: bump allocator at 32
+            0x06, 0x06, 0x01,
+            0x7F, 0x01, 0x41, 0x20, 0x0B,
+            // Export section: 4 exports
+            //   call_all_count       (14): 17
+            //   call_all_first_disc  (19): 22
+            //   call_all_first_value (20): 23
+            //   cabi_realloc         (12): 15
+            // size = 1 + 17 + 22 + 23 + 15 = 78 = 0x4E
+            0x07, 0x4E, 0x04,
+            0x0E,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x61, 0x6C, 0x6C,
+            0x5F, 0x63, 0x6F, 0x75, 0x6E, 0x74,
+            0x00, 0x02,
+            0x13,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x61, 0x6C, 0x6C,
+            0x5F, 0x66, 0x69, 0x72, 0x73, 0x74, 0x5F, 0x64,
+            0x69, 0x73, 0x63,
+            0x00, 0x03,
+            0x14,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x61, 0x6C, 0x6C,
+            0x5F, 0x66, 0x69, 0x72, 0x73, 0x74, 0x5F, 0x76,
+            0x61, 0x6C, 0x75, 0x65,
+            0x00, 0x04,
+            0x0C,
+            0x63, 0x61, 0x62, 0x69, 0x5F, 0x72, 0x65, 0x61,
+            0x6C, 0x6C, 0x6F, 0x63,
+            0x00, 0x01,
+            // Code section: 4 bodies
+            //   body0 cabi_realloc        : 11 → 12
+            //   body1 call_all_count      : 11 → 12
+            //   body2 call_all_first_disc : 14 → 15
+            //   body3 call_all_first_value: 14 → 15
+            // size = 1 + 12 + 12 + 15 + 15 = 55 = 0x37
+            0x0A, 0x37, 0x04,
+            0x0B, 0x00,
+            0x23, 0x00,
+            0x23, 0x00,
+            0x20, 0x03,
+            0x6A,
+            0x24, 0x00,
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x04,
+            0x0B,
+            0x0E, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x00,    // outer_ptr
+            0x2D, 0x00, 0x00,                 // first elem's disc
+            0x0B,
+            0x0E, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x00,    // outer_ptr
+            0x28, 0x02, 0x04,                 // first elem's u32 value @4
             0x0B,
         };
 
@@ -11127,6 +11243,91 @@ namespace Wacs.Transpiler.Test
                 "my:test/str-ret-env@1.0.0", "greet", out var binding));
             Assert.Equal(CanonOption.Kind.StringUtf8,
                 binding.StringEncoding);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_ListOfOptionReturn_PerElement()
+        {
+            // list<option<u32>>: per-element write at outerPtr+i*8.
+            // Each element is u8 disc + 3 pad + u32 value.
+            // Verifies the EmitListOfOptionOrResultReturn dispatch
+            // and the perElementBase trick (passing the per-element
+            // base local as retAreaLocal to EmitOptionStoreAt).
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/listopt-env@1.0.0", "all"),
+                _ => throw new InvalidOperationException(
+                    "stub for all must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildListOfOptionReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(MaybeIntsListBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/listopt-env@1.0.0", "all", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.ListOptRet", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_listopt_env_1_0_0_all"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for all must not be invoked"),
+                });
+
+            // Option<uint>[] { Some(0x42), None, Some(0x21) }
+            // count=3, first elem disc=1, first elem value=0x42.
+            var bundle = new MaybeIntsListBundle(new FixedMaybeIntsList(
+                new[]
+                {
+                    Option<uint>.Some(0x42u),
+                    Option<uint>.None,
+                    Option<uint>.Some(0x21u),
+                }));
+            var instance = Activator.CreateInstance(
+                result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+
+            var callCount = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_all_count"))!;
+            Assert.Equal(3, (int)callCount.Invoke(instance,
+                Array.Empty<object>())!);
+
+            var fresh = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+            var callDisc = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_all_first_disc"))!;
+            Assert.Equal(1, (int)callDisc.Invoke(fresh,
+                Array.Empty<object>())!);
+
+            var fresh2 = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+            var callValue = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_all_first_value"))!;
+            Assert.Equal(0x42, (int)callValue.Invoke(fresh2,
+                Array.Empty<object>())!);
         }
     }
 }
