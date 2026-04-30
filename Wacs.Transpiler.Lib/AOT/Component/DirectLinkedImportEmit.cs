@@ -1679,8 +1679,9 @@ namespace Wacs.Transpiler.AOT.Component
 
         // True when the Ok or Err arm of a Result return is
         // storable: primitive, resource interface (Resources class
-        // mints a handle), or — when allowVariableLength is true —
-        // string / byte[] (cabi_realloc + StoreString/StoreByteArray).
+        // mints a handle), string/byte[] (cabi_realloc) — when
+        // allowVariableLength=true — OR tuple/record-of-primitives
+        // (per-field write at common arm offset).
         // Variants set allowVariableLength=false because the variant
         // emit path doesn't yet handle (ptr,len) payload widths.
         private static bool IsResultArmStorable(Type t,
@@ -1695,14 +1696,21 @@ namespace Wacs.Transpiler.AOT.Component
             if (allowVariableLength
                 && (t == typeof(string) || t == typeof(byte[])))
                 return true;
+            if (allowVariableLength
+                && (IsTupleOfPrimitives(t)
+                    || IsRecordOfPrimitives(t)))
+                return true;
             return false;
         }
 
         // Alignment for a Result-arm type. Resource handles are i32,
         // string/byte[] are (i32 ptr + i32 len) → both align 4.
+        // Tuple/record arms use the max field alignment.
         private static int AlignOfResultArm(Type t)
         {
             if (IsStorablePrimitive(t)) return AlignOfPrimitive(t);
+            if (IsTupleOfPrimitives(t) || IsRecordOfPrimitives(t))
+                return MaxFieldAlign(t);
             return 4;  // resource handle OR (ptr, len) pair
         }
 
@@ -1711,6 +1719,8 @@ namespace Wacs.Transpiler.AOT.Component
         //   - primitive          : direct PrimitiveStore.StoreXxx
         //   - resource interface : Resources.AllocateResource → StoreI32
         //   - string / byte[]    : cabi_realloc + StoreString/StoreByteArray
+        //   - tuple / record-of-primitives: per-field write via
+        //                          EmitInlineRecordOrTupleStore
         // Used by the Result-return Emit for both Ok and Err sides.
         private static void EmitResultArmStore(ILGenerator il,
             Type armType, LocalBuilder returnLocal,
@@ -1723,6 +1733,21 @@ namespace Wacs.Transpiler.AOT.Component
                 && resourcesType != null;
             bool isString = armType == typeof(string);
             bool isByteArray = armType == typeof(byte[]);
+            bool isAggregate = IsTupleOfPrimitives(armType)
+                || IsRecordOfPrimitives(armType);
+
+            // Aggregate arms write field-by-field with their own
+            // memory pushes — bypass the common pre-push.
+            if (isAggregate)
+            {
+                var armLocal = il.DeclareLocal(armType);
+                il.Emit(OpCodes.Ldloca, returnLocal);
+                il.Emit(OpCodes.Call, armGetter);
+                il.Emit(OpCodes.Stloc, armLocal);
+                EmitInlineRecordOrTupleStore(il, armType, retAreaLocal,
+                    valueOffset, armLocal);
+                return;
+            }
 
             // Push: dest_array, dest_offset
             il.Emit(OpCodes.Ldarg_0);
