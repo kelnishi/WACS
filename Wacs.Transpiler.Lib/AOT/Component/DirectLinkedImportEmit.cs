@@ -357,9 +357,29 @@ namespace Wacs.Transpiler.AOT.Component
                     && method.ReturnType.GetGenericTypeDefinition()
                         == typeof(Result<,>);
                 bool isVariant = IsLikelyVariantBase(method.ReturnType);
+                bool isStringReturn = method.ReturnType == typeof(string);
 
                 int offsetSoFar = 0;
-                if (isVariant)
+                if (isStringReturn)
+                {
+                    // String retArea layout: i32 ptr @0, i32 len @4.
+                    // Encode UTF-8, allocate guest buffer via the
+                    // cached CabiRealloc delegate, copy bytes,
+                    // write the (ptr, len) pair.
+                    //
+                    //   PrimitiveStore.StoreString(memory, retArea, value, ctx.CabiRealloc)
+                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Ldfld, MemoriesField);
+                    il.Emit(OpCodes.Ldc_I4_0);
+                    il.Emit(OpCodes.Ldelem_Ref);
+                    il.Emit(OpCodes.Ldfld, MemoryDataField);
+                    il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
+                    il.Emit(OpCodes.Ldloc, returnLocal);
+                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Ldfld, CabiReallocField);
+                    il.Emit(OpCodes.Call, StoreStringMethod);
+                }
+                else if (isVariant)
                 {
                     // Variant return retArea layout: u8 disc @0 +
                     // joined-flat payload at offset Align(1, max-
@@ -1081,6 +1101,15 @@ namespace Wacs.Transpiler.AOT.Component
                 types: new[] { typeof(byte[]), typeof(int), typeof(int) },
                 modifiers: null)!;
 
+        private static readonly FieldInfo CabiReallocField =
+            typeof(ThinContext).GetField(
+                nameof(ThinContext.CabiRealloc))!;
+
+        private static readonly MethodInfo StoreStringMethod =
+            typeof(PrimitiveStore).GetMethod(
+                nameof(PrimitiveStore.StoreString),
+                BindingFlags.Public | BindingFlags.Static)!;
+
         // Option<T>::Some(T) and Option<T>::get_None are the
         // construction surface for direct-linked Option<T> param
         // emit. Cache the per-T MethodInfos; first emit per T pays
@@ -1310,6 +1339,15 @@ namespace Wacs.Transpiler.AOT.Component
         private static bool IsAggregateReturnSupported(Type t,
             HostPackageResolver? resolver = null)
         {
+            // string return: 8-byte retArea (i32 ptr + i32 len).
+            // Requires the module to export cabi_realloc; the IL
+            // calls it through ctx.CabiRealloc which is null at
+            // call time iff cabi_realloc isn't exported. We can't
+            // tell at IsAggregateReturnSupported time whether the
+            // module has cabi_realloc, so accept here and fall
+            // back to delegate dispatch at instantiation if the
+            // null-check fires.
+            if (t == typeof(string)) return true;
             if (IsLikelyRecordType(t))
             {
                 foreach (var p in GetRecordProperties(t))
