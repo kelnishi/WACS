@@ -188,7 +188,8 @@ namespace Wacs.Transpiler.AOT.Component
                         if (ws == null) continue;
 
                         var (entity, kind) = WireEntityFor(ws.Item,
-                            method.Name, resourceName);
+                            method.Name, resourceName,
+                            method.IsStatic);
                         if (entity == null) continue;
 
                         var b = new Binding(module, entity, type,
@@ -253,17 +254,27 @@ namespace Wacs.Transpiler.AOT.Component
         // [WitSource] attribute on the interface (Item field on
         // resource interfaces).
         //
-        // [static]<res>.<m> and [constructor]<res> cases are
-        // recognized when Item already starts with the marker;
-        // shape-inference for arbitrary host packages is a
-        // follow-up — v0 free-function surface covers IRandom /
-        // IExit / IMonotonicClock / IWallClock / IInsecure /
-        // IInsecureSeed / IPreopens / IFilesystemErrorCode etc.,
-        // which are the simplest WASI imports a guest can hold.
+        // Map [WitSource(Item=...)] → wasm wire entity name +
+        // resource-method kind. Three Item shapes appear in the
+        // wild:
+        //
+        //   1. Wire form already ("[method]X.foo", "[static]X.foo",
+        //      "[constructor]X") — pass through.
+        //   2. WitHostInterfaceGenerator's "X.foo" form — needs
+        //      kind disambiguation:
+        //         - "X.constructor" + IsStatic   → [constructor]X
+        //         - "X.foo"          + IsStatic   → [static]X.foo
+        //         - "X.foo"          + !IsStatic → [method]X.foo
+        //   3. Free-function "name" — pass through as the entity.
+        //
+        // The IsStatic signal is required to disambiguate (2) since
+        // the source generator emits both static and instance
+        // methods on the same interface with the same dotted Item
+        // shape.
         private static (string? Entity,
                 ResourceMethodKind? Kind) WireEntityFor(
             string? item, string clrMethodName,
-            string? resourceName)
+            string? resourceName, bool isStatic = false)
         {
             if (string.IsNullOrEmpty(item))
             {
@@ -292,7 +303,26 @@ namespace Wacs.Transpiler.AOT.Component
             int dot = i.IndexOf('.');
             if (dot > 0)
             {
-                // Resource instance method shape: "<res>.<name>".
+                var resPart = i.Substring(0, dot);
+                var namePart = i.Substring(dot + 1);
+
+                // "X.constructor" → [constructor]X. The source
+                // generator emits constructors as regular interface
+                // methods (instance shape) because C# default
+                // static interface methods aren't always practical;
+                // distinguish by the `.constructor` Item suffix
+                // alone, not IsStatic.
+                if (namePart == "constructor")
+                    return ("[constructor]" + resPart,
+                        ResourceMethodKind.Constructor);
+
+                // Static method on a resource: "X.name" + IsStatic
+                // → [static]X.name (no `this` on the wire).
+                if (isStatic)
+                    return ("[static]" + i, ResourceMethodKind.Static);
+
+                // Resource instance method: "X.name" + !IsStatic
+                // → [method]X.name (leading i32 handle on the wire).
                 return ("[method]" + i, ResourceMethodKind.Instance);
             }
 
