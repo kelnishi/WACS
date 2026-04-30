@@ -231,6 +231,46 @@ namespace Wacs.Transpiler.Test
             public uint Read() => _v;
         }
 
+        // ====== Resource constructor with own<R> arg surface =====
+        // [constructor]bag(seed: own<widget>) → bag — same shape as
+        // wasi:http/types.outgoing-request(headers: own<fields>).
+        // The factory takes a typed IWidget arg and returns a fresh
+        // IBag instance; direct-linked emit lifts the widget handle,
+        // calls the factory, then allocates a handle for the new
+        // IBag instance.
+
+        [WitSource(@"resource bag {
+    constructor(seed: own<widget>);
+    inspect: func() -> u32;
+}",
+            Package = "my:test@1.0.0", Interface = "res-env",
+            Item = "bag")]
+        public interface IBag
+        {
+            // Returns the seed widget's value so the test can probe
+            // the constructor flow end-to-end.
+            [WitSource(@"inspect: func() -> u32;",
+                Package = "my:test@1.0.0", Interface = "res-env",
+                Item = "bag.inspect")]
+            uint Inspect();
+
+            // Static factory: the typed CLR side takes IWidget;
+            // the wasm wire takes its i32 handle. Direct-linked
+            // emit lifts the handle via Resources.GetResource and
+            // pushes the resolved IWidget for the factory call.
+            [WitSource(@"constructor(seed: own<widget>);",
+                Package = "my:test@1.0.0", Interface = "res-env",
+                Item = "[constructor]bag")]
+            static IBag Create(IWidget seed) => new FakeBag(seed);
+        }
+
+        public sealed class FakeBag : IBag
+        {
+            private readonly IWidget _seed;
+            public FakeBag(IWidget seed) { _seed = seed; }
+            public uint Inspect() => _seed.Read();
+        }
+
         // Bundle holds IWidget for the instance-method path; static
         // methods bypass the bundle entirely (called via direct
         // static dispatch on the interface type).
@@ -1382,6 +1422,75 @@ namespace Wacs.Transpiler.Test
             0x0B, 0x0B, 0x01,
             0x00, 0x41, 0x00, 0x0B, 0x05,
             0x68, 0x65, 0x6C, 0x6C, 0x6F,
+        };
+
+        // (module
+        //   (type $tCtor (func (param i32) (result i32)))   ;; [constructor]bag(seedHandle) → bagHandle
+        //   (type $tInspect (func (param i32) (result i32))) ;; [method]bag.inspect(bagHandle) → u32
+        //   (type $tEntry (func (result i32)))
+        //   (import "my:test/res-env@1.0.0" "[constructor]bag"
+        //     (func $imp_ctor (type $tCtor)))
+        //   (import "my:test/res-env@1.0.0" "[method]bag.inspect"
+        //     (func $imp_inspect (type $tInspect)))
+        //   (func (export "call_ctor_inspect") (result i32)
+        //     i32.const 50          ;; seed widget handle
+        //     call $imp_ctor        ;; → bagHandle
+        //     call $imp_inspect))   ;; → u32 (the seed's value)
+        //
+        // Constructor takes the seed handle as wasm i32 (single
+        // slot), returns the new bag's handle. The instance method
+        // immediately consumes that handle to read the seed's
+        // value back through the chain.
+        private static byte[] BuildConstructorWithOwnArgFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types (both share (i32) → i32 shape)
+            // We can deduplicate but keep separate for clarity:
+            // type 0: (i32) → i32 (5 bytes)
+            // type 1: () → i32 (4 bytes)
+            // size = 1 + 5 + 4 = 10 = 0x0A
+            0x01, 0x0A, 0x02,
+            0x60, 0x01, 0x7F, 0x01, 0x7F,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section: 2 imports
+            // Import 0: "my:test/res-env@1.0.0" "[constructor]bag" : type 0
+            //   = 1 + 21 + 1 + 16 + 2 = 41 bytes
+            // Import 1: "my:test/res-env@1.0.0" "[method]bag.inspect" : type 0
+            //   = 1 + 21 + 1 + 19 + 2 = 44 bytes
+            // size = count(1) + 41 + 44 = 86 = 0x56
+            0x02, 0x56, 0x02,
+            // Import 0:
+            0x15,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x72, 0x65, 0x73, 0x2D, 0x65, 0x6E, 0x76, 0x40,
+            0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x10,
+            0x5B, 0x63, 0x6F, 0x6E, 0x73, 0x74, 0x72, 0x75,
+            0x63, 0x74, 0x6F, 0x72, 0x5D, 0x62, 0x61, 0x67,
+            0x00, 0x00,
+            // Import 1:
+            0x15,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x72, 0x65, 0x73, 0x2D, 0x65, 0x6E, 0x76, 0x40,
+            0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x13,
+            0x5B, 0x6D, 0x65, 0x74, 0x68, 0x6F, 0x64, 0x5D,
+            0x62, 0x61, 0x67, 0x2E, 0x69, 0x6E, 0x73, 0x70,
+            0x65, 0x63, 0x74,
+            0x00, 0x00,
+            // Function section: 1 func of type 1
+            0x03, 0x02, 0x01, 0x01,
+            // Export: "call_ctor_inspect" (17) → func 2
+            0x07, 0x15, 0x01,
+            0x11,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x63, 0x74, 0x6F,
+            0x72, 0x5F, 0x69, 0x6E, 0x73, 0x70, 0x65, 0x63,
+            0x74,
+            0x00, 0x02,
+            // Code: locals=0, i32.const 50, call 0, call 1, end
+            // body = locals(1) + i32const(2) + call(2) + call(2) + end(1) = 8 bytes
+            0x0A, 0x0A, 0x01, 0x08,
+            0x00, 0x41, 0x32, 0x10, 0x00, 0x10, 0x01, 0x0B,
         };
 
         // (module
@@ -3186,6 +3295,96 @@ namespace Wacs.Transpiler.Test
             // the typed callvirt — proves the resource-method +
             // aggregate-param composition works.
             Assert.Equal("world", capturing.Captured);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_ConstructorWithOwnArg_Composes()
+        {
+            // [constructor]bag(seed: own<widget>) — same shape as
+            // wasi:http/types.outgoing-request(headers: own<fields>).
+            // Wasm calls the constructor with a widget handle; the
+            // factory mints a Bag wrapping the resolved widget.
+            // Direct-linked emit: lift seed handle via Resources,
+            // call IBag::Create(IWidget) static factory, allocate
+            // a handle for the new bag instance, return as i32.
+            // Then [method]bag.inspect resolves the bag handle and
+            // calls Inspect() which returns the seed's value.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Func<int, int>>(
+                ("my:test/res-env@1.0.0", "[constructor]bag"),
+                _ => throw new InvalidOperationException(
+                    "stub for [constructor]bag must not be invoked"));
+            runtime.BindHostFunction<Func<int, int>>(
+                ("my:test/res-env@1.0.0", "[method]bag.inspect"),
+                _ => throw new InvalidOperationException(
+                    "stub for [method]bag.inspect must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildConstructorWithOwnArgFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(WidgetBundle),
+                resourcesType: typeof(TestResources));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/res-env@1.0.0", "[constructor]bag",
+                out var ctorBinding));
+            Assert.Equal(HostPackageResolver.ResourceMethodKind.Constructor,
+                ctorBinding.ResourceKind);
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.BagCtor", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Equal(2, options.ResolverImportBindings!.Count);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/res-env@1.0.0_[constructor]bag")] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for ctor must not be invoked"),
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/res-env@1.0.0_[method]bag.inspect")] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for inspect must not be invoked"),
+                });
+
+            // Pre-register the seed widget at handle 50 — wasm
+            // passes that exact handle into the constructor.
+            var resources = new TestResources();
+            resources.Register(typeof(IWidget), 50, new FakeWidget(2024u));
+            var bundle = new WidgetBundle(new FakeWidget(0u));
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            var callCtorInspect = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_ctor_inspect"))!;
+            object? raw = callCtorInspect.Invoke(instance,
+                Array.Empty<object>());
+
+            // FakeBag(FakeWidget(2024)).Inspect() = 2024 — proves
+            // the constructor lifted the widget arg, the factory
+            // produced a real instance, the IL allocated a handle,
+            // and the inspect method resolved that handle back.
+            Assert.IsType<int>(raw);
+            Assert.Equal(2024, (int)raw);
         }
     }
 }

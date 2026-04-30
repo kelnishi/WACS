@@ -156,9 +156,12 @@ namespace Wacs.Transpiler.AOT.Component
                     if (method.ReturnType != typeof(void)) return false;
                 }
             }
-            // v0 constructors are zero-arg. Multi-arg constructor
-            // shapes (e.g. own<fields> param) ride incrementally.
-            if (isConstructor && clrParams.Length != 0) return false;
+            // Constructor args ride through the same per-CLR-param
+            // dispatcher as resource-method args (own<R>, primitive,
+            // aggregate, etc.) — IL emit pushes them in order before
+            // calling the static factory. No additional gating
+            // beyond the per-param IsPrimitiveCompatible /
+            // CanonicalSlotCount checks above.
             return true;
         }
 
