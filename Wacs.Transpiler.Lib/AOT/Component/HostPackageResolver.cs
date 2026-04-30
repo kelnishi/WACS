@@ -56,6 +56,21 @@ namespace Wacs.Transpiler.AOT.Component
         /// individual ctor params).</summary>
         public IReadOnlyList<Type> InterfaceTypes { get; }
 
+        /// <summary>Subset of <see cref="InterfaceTypes"/> that
+        /// represents WIT resource interfaces (i.e. those whose
+        /// <see cref="Wacs.ComponentModel.Runtime.WitSourceAttribute.Item"/>
+        /// names a resource, not <c>null</c> or a free-function entity).
+        /// Direct-linked emit checks this set when a typed interface
+        /// appears as a CLR param to recognize own&lt;R&gt;/borrow&lt;R&gt;
+        /// shapes — the wasm wire is a single i32 handle that the
+        /// IL resolves via <see cref="ThinContext.Resources"/>.</summary>
+        public IReadOnlyCollection<Type> ResourceInterfaceTypes { get; }
+
+        /// <summary>True when <paramref name="t"/> is a typed resource
+        /// interface from the loaded host packages.</summary>
+        public bool IsResourceInterface(Type t)
+            => _resourceInterfaceTypes.Contains(t);
+
         /// <summary>The aggregate "bundle" type the host package
         /// ships, if one exists — a class whose public read-only
         /// properties expose each typed interface. v0 recognizes
@@ -78,17 +93,21 @@ namespace Wacs.Transpiler.AOT.Component
 
         private readonly Dictionary<(string Module, string Entity), Binding>
             _bindings;
+        private readonly HashSet<Type> _resourceInterfaceTypes;
 
         private HostPackageResolver(
             IReadOnlyList<Assembly> hostPackages,
             Dictionary<(string Module, string Entity), Binding> bindings,
             IReadOnlyList<Type> interfaceTypes,
+            HashSet<Type> resourceInterfaceTypes,
             Type? preferredBundleType,
             Type? preferredResourcesType)
         {
             HostPackages = hostPackages;
             _bindings = bindings;
             InterfaceTypes = interfaceTypes;
+            _resourceInterfaceTypes = resourceInterfaceTypes;
+            ResourceInterfaceTypes = resourceInterfaceTypes;
             PreferredBundleType = preferredBundleType;
             PreferredResourcesType = preferredResourcesType;
         }
@@ -123,6 +142,7 @@ namespace Wacs.Transpiler.AOT.Component
             var bindings = new Dictionary<(string, string), Binding>();
             var interfaceTypes = new List<Type>();
             var seenIface = new HashSet<Type>();
+            var resourceInterfaceTypes = new HashSet<Type>();
 
             foreach (var asm in assemblies)
             {
@@ -184,6 +204,14 @@ namespace Wacs.Transpiler.AOT.Component
 
                     if (addedAny && seenIface.Add(type))
                         interfaceTypes.Add(type);
+
+                    // An interface tagged with [WitSource(Item="<resource-name>")]
+                    // (i.e. resourceName non-null and not already a method-prefixed
+                    // wire-form name) IS a resource interface — own<R>/borrow<R>
+                    // params with this CLR type lower to a single i32 handle.
+                    if (resourceName != null
+                        && !resourceName.StartsWith("[", StringComparison.Ordinal))
+                        resourceInterfaceTypes.Add(type);
                 }
             }
 
@@ -197,7 +225,8 @@ namespace Wacs.Transpiler.AOT.Component
             Type? bundle = bundleType ?? FindWasiPreview2Bundle(assemblies);
 
             return new HostPackageResolver(assemblies, bindings,
-                interfaceTypes, bundle, resourcesType);
+                interfaceTypes, resourceInterfaceTypes,
+                bundle, resourcesType);
         }
 
         // wasi:cli@0.2.3 + exit  →  wasi:cli/exit@0.2.3

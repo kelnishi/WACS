@@ -107,17 +107,25 @@ namespace Wacs.Transpiler.AOT
             _options?.ResolverImportBindings != null
             && _options.ResolverImportBindings.Count > 0;
 
-        // True when at least one resolver-matched import is a resource
-        // method — those need both the bundle (for the typed
-        // interface property) AND the resources object (for the
-        // handle → instance lookup). Adds an additional `object
-        // resources` ctor param.
+        // True when the generated IL might dispatch into the
+        // resources lookup machinery — either because some binding
+        // is a [method]/[constructor] resource shape, or because
+        // the resolver knows about typed resource interfaces that
+        // could appear as own<R>/borrow<R> params on free functions.
+        // Adds an additional `object resources` ctor param.
         private bool HasResourceBindings
         {
             get
             {
                 var b = _options?.ResolverImportBindings;
                 if (b == null) return false;
+                var resolver = _options?.Resolver;
+                // Resolver knows about resource interfaces and has a
+                // resources type to dispatch through — even free-fn
+                // bindings might need it for own<R> params.
+                if (resolver?.PreferredResourcesType != null
+                    && resolver.ResourceInterfaceTypes.Count > 0)
+                    return true;
                 foreach (var kv in b)
                     if (kv.Value.IsResourceMethod) return true;
                 return false;

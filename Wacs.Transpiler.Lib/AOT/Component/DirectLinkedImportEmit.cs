@@ -63,7 +63,8 @@ namespace Wacs.Transpiler.AOT.Component
         /// resource methods and constructors stay deferred.</para>
         /// </summary>
         public static bool CanEmitDirect(HostPackageResolver.Binding binding,
-            FunctionType wasmType)
+            FunctionType wasmType,
+            HostPackageResolver? resolver = null)
         {
             var method = binding.Method;
             var clrParams = method.GetParameters();
@@ -118,7 +119,7 @@ namespace Wacs.Transpiler.AOT.Component
             for (int i = 0; i < clrParams.Length; i++)
             {
                 int slots = CanonicalSlotCount(clrParams[i].ParameterType,
-                    out var perWasmType);
+                    out var perWasmType, resolver);
                 if (slots < 0) return false;
                 expectedRemainingWasm += slots;
                 // Each contributing wasm slot must match the CLR
@@ -177,7 +178,8 @@ namespace Wacs.Transpiler.AOT.Component
             HostPackageResolver.Binding binding,
             FunctionType wasmType,
             Type bundleType,
-            Type? resourcesType = null)
+            Type? resourcesType = null,
+            HostPackageResolver? resolver = null)
         {
             if (bundleType == null) throw new ArgumentNullException(
                 nameof(bundleType));
@@ -268,9 +270,9 @@ namespace Wacs.Transpiler.AOT.Component
             for (int i = 0; i < clrParamCount; i++)
             {
                 var clrType = clrParams[i].ParameterType;
-                int slots = CanonicalSlotCount(clrType, out _);
+                int slots = CanonicalSlotCount(clrType, out _, resolver);
                 EmitLiftForType(il, clrType, wasmParams, temps,
-                    wasmCursor);
+                    wasmCursor, resolver, resourcesType);
                 wasmCursor += slots;
             }
 
@@ -337,7 +339,9 @@ namespace Wacs.Transpiler.AOT.Component
         // for the inner T's value-slot lift.
         private static void EmitLiftForType(ILGenerator il,
             Type clrType, ValType[] wasmParams,
-            LocalBuilder[] temps, int wasmCursor)
+            LocalBuilder[] temps, int wasmCursor,
+            HostPackageResolver? resolver,
+            Type? resourcesType)
         {
             if (clrType == typeof(string))
             {
@@ -384,12 +388,30 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Ldloc, temps[wasmCursor]);
                 il.Emit(OpCodes.Brfalse, noneLabel);
                 EmitLiftForType(il, inner, wasmParams, temps,
-                    wasmCursor + 1);
+                    wasmCursor + 1, resolver, resourcesType);
                 il.Emit(OpCodes.Call, ResolveOptionSomeMethod(inner));
                 il.Emit(OpCodes.Br, endLabel);
                 il.MarkLabel(noneLabel);
                 il.Emit(OpCodes.Call, ResolveOptionNoneGetter(inner));
                 il.MarkLabel(endLabel);
+                return;
+            }
+            // own<R> / borrow<R>: a typed resource interface as a
+            // CLR param maps to a single i32 wasm handle. Lift via
+            // ctx.Resources.GetResource(typeof(IR), handle) → cast.
+            if (resolver != null
+                && resolver.IsResourceInterface(clrType)
+                && resourcesType != null)
+            {
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, ResourcesField);
+                il.Emit(OpCodes.Castclass, resourcesType);
+                il.Emit(OpCodes.Ldtoken, clrType);
+                il.Emit(OpCodes.Call, GetTypeFromHandleMethod);
+                il.Emit(OpCodes.Ldloc, temps[wasmCursor]);   // handle
+                il.Emit(OpCodes.Callvirt,
+                    ResolveGetResourceMethod(resourcesType));
+                il.Emit(OpCodes.Castclass, clrType);
                 return;
             }
             // Primitive — load the spilled local and apply any
@@ -492,12 +514,23 @@ namespace Wacs.Transpiler.AOT.Component
         //   primitive (compat with i32/i64/f32/f64) → 1
         //   string                                  → 2 (ptr, len)
         //   byte[]  (list<u8>)                      → 2 (ptr, len)
+        //   own<R>/borrow<R> (resource interface)   → 1 (i32 handle)
         // Returns -1 when the CLR type isn't supported by the v0
         // direct-linked emit. Out-param `wasmTypes` is the
         // per-slot wire type sequence the wasm side must provide.
         private static int CanonicalSlotCount(Type clrType,
-            out ValType[] wasmTypes)
+            out ValType[] wasmTypes,
+            HostPackageResolver? resolver = null)
         {
+            // Resource interface as CLR param → 1 i32 (handle).
+            // Checked first so it doesn't fall through to the
+            // primitive-or-unsupported tail.
+            if (resolver != null
+                && resolver.IsResourceInterface(clrType))
+            {
+                wasmTypes = new[] { ValType.I32 };
+                return 1;
+            }
             if (clrType == typeof(string))
             {
                 wasmTypes = new[] { ValType.I32, ValType.I32 };
@@ -517,7 +550,7 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 var inner = clrType.GetGenericArguments()[0];
                 int innerSlots = CanonicalSlotCount(inner,
-                    out var innerWasm);
+                    out var innerWasm, resolver);
                 if (innerSlots > 0)
                 {
                     var combined = new ValType[1 + innerSlots];
