@@ -171,6 +171,28 @@ namespace Wacs.Transpiler.Test
             public uint Absorb(IWidget widget) => widget.Read();
         }
 
+        // ====== Resource method with string arg ==================
+        // [method]X.foo whose typed CLR sig carries a string. Same
+        // shape as wasi:io/streams.write — one of the most common
+        // WASI patterns. Wire: (i32 thisHandle, i32 ptr, i32 len).
+
+        [WitSource(@"resource logger { write: func(msg: string); }",
+            Package = "my:test@1.0.0", Interface = "res-env",
+            Item = "logger")]
+        public interface ILogger
+        {
+            [WitSource(@"write: func(msg: string);",
+                Package = "my:test@1.0.0", Interface = "res-env",
+                Item = "logger.write")]
+            void Write(string msg);
+        }
+
+        public sealed class CapturingLogger : ILogger
+        {
+            public string? Captured { get; private set; }
+            public void Write(string msg) { Captured = msg; }
+        }
+
         // ====== Static + constructor resource method surface =====
         // Static interface methods are C# 8 default static interface
         // methods — supported on netstandard2.1 / LangVersion=9.
@@ -1360,6 +1382,67 @@ namespace Wacs.Transpiler.Test
             0x0B, 0x0B, 0x01,
             0x00, 0x41, 0x00, 0x0B, 0x05,
             0x68, 0x65, 0x6C, 0x6C, 0x6F,
+        };
+
+        // (module
+        //   (type $t (func (param i32 i32 i32)))   ;; [method]logger.write(this, ptr, len)
+        //   (type $tEntry (func))
+        //   (import "my:test/res-env@1.0.0" "[method]logger.write"
+        //     (func $imp (type $t)))
+        //   (memory 1)
+        //   (data (i32.const 0) "world")
+        //   (func (export "call_log")
+        //     i32.const 33   ;; logger handle
+        //     i32.const 0    ;; ptr
+        //     i32.const 5    ;; len
+        //     call $imp))
+        //
+        // Direct-linked emit pops 3 i32s, looks up logger via
+        // Resources.GetResource(typeof(ILogger), 33), pushes the
+        // resolved ILogger as `this`, lifts the inner string from
+        // memory via StringMarshal.LiftUtf8, then callvirts
+        // ILogger.Write.
+        private static byte[] BuildResourceMethodWithStringArgFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types
+            // type 0: (i32 i32 i32) → void (6 bytes)
+            // type 1: () → void (3 bytes)
+            // size = count(1) + type0(6) + type1(3) = 10 = 0x0A
+            0x01, 0x0A, 0x02,
+            0x60, 0x03, 0x7F, 0x7F, 0x7F, 0x00,
+            0x60, 0x00, 0x00,
+            // Import section
+            // size = 1 + 1 + 21 + 1 + 20 + 2 = 46 = 0x2E
+            0x02, 0x2E, 0x01,
+            // module: "my:test/res-env@1.0.0" (21)
+            0x15,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x72, 0x65, 0x73, 0x2D, 0x65, 0x6E, 0x76, 0x40,
+            0x31, 0x2E, 0x30, 0x2E, 0x30,
+            // entity: "[method]logger.write" (20)
+            0x14,
+            0x5B, 0x6D, 0x65, 0x74, 0x68, 0x6F, 0x64, 0x5D,
+            0x6C, 0x6F, 0x67, 0x67, 0x65, 0x72, 0x2E, 0x77,
+            0x72, 0x69, 0x74, 0x65,
+            0x00, 0x00,
+            // Function section: 1 func of type 1
+            0x03, 0x02, 0x01, 0x01,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export: "call_log" (8) → func 1
+            0x07, 0x0C, 0x01,
+            0x08,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x6C, 0x6F, 0x67,
+            0x00, 0x01,
+            // Code: locals=0, i32.const 33, i32.const 0, i32.const 5, call 0, end
+            // body size = locals(1)+i32const(2)*3+call(2)+end(1) = 10
+            0x0A, 0x0C, 0x01, 0x0A,
+            0x00, 0x41, 0x21, 0x41, 0x00, 0x41, 0x05, 0x10, 0x00, 0x0B,
+            // Data: "world" at offset 0
+            0x0B, 0x0B, 0x01,
+            0x00, 0x41, 0x00, 0x0B, 0x05,
+            0x77, 0x6F, 0x72, 0x6C, 0x64,
         };
 
         // (module
@@ -3027,6 +3110,82 @@ namespace Wacs.Transpiler.Test
                 Array.Empty<object>());
             Assert.IsType<int>(raw);
             Assert.Equal(789, (int)raw);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_ResourceMethodWithStringArg_LiftsBoth()
+        {
+            // [method]logger.write(string msg) — wire form is
+            // (i32 thisHandle, i32 ptr, i32 len). Direct-linked
+            // emit pops all 3, looks up logger via Resources for
+            // `this`, lifts the string from memory via LiftUtf8,
+            // then callvirts ILogger.Write. Same shape as
+            // wasi:io/streams.write — the canonical WASI write
+            // pattern works end-to-end.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int, int, int>>(
+                ("my:test/res-env@1.0.0", "[method]logger.write"),
+                (_, _, _) => throw new InvalidOperationException(
+                    "stub for logger.write must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildResourceMethodWithStringArgFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(WidgetBundle),
+                resourcesType: typeof(TestResources));
+
+            Assert.True(resolver.IsResourceInterface(typeof(ILogger)));
+            Assert.True(resolver.TryResolve(
+                "my:test/res-env@1.0.0", "[method]logger.write",
+                out var binding));
+            Assert.Equal(typeof(ILogger), binding.InterfaceType);
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.LoggerWrite", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/res-env@1.0.0_[method]logger.write")] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for logger.write must "
+                            + "not be invoked"),
+                });
+
+            var capturing = new CapturingLogger();
+            var resources = new TestResources();
+            resources.Register(typeof(ILogger), 33, capturing);
+            var bundle = new WidgetBundle(new FakeWidget(0u));
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            var callLog = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_log"))!;
+            callLog.Invoke(instance, Array.Empty<object>());
+
+            // Logger received "world" from wasm memory through
+            // the typed callvirt — proves the resource-method +
+            // aggregate-param composition works.
+            Assert.Equal("world", capturing.Captured);
         }
     }
 }
