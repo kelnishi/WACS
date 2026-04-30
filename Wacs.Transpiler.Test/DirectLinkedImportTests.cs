@@ -713,6 +713,54 @@ namespace Wacs.Transpiler.Test
             public Code Emit() => _v;
         }
 
+        // ====== Variant return: mixed primitive payload widths ===
+        // variant event { tap, beep(u8), tone(u32) }: payloads have
+        // different widths (1 byte vs 4 bytes). canon-ABI joined-
+        // flat reserves max(align(payload)) for the slot offset and
+        // max(size(payload)) for the slot size; each case writes
+        // its own width starting at retArea+4.
+
+        [WitSource(@"variant event { tap, beep(u8), tone(u32) }",
+            Package = "my:test@1.0.0", Interface = "evtret-env",
+            Item = "event")]
+        public abstract class Evt
+        {
+            public sealed class EvtTap : Evt { }
+            public sealed class EvtBeep : Evt
+            {
+                public byte Value { get; }
+                public EvtBeep(byte v) { Value = v; }
+            }
+            public sealed class EvtTone : Evt
+            {
+                public uint Value { get; }
+                public EvtTone(uint v) { Value = v; }
+            }
+        }
+
+        [WitSource(@"interface evtret-env",
+            Package = "my:test@1.0.0", Interface = "evtret-env")]
+        public interface IEvtFactory
+        {
+            [WitSource(@"fire: func() -> event;",
+                Package = "my:test@1.0.0", Interface = "evtret-env",
+                Item = "fire")]
+            Evt Fire();
+        }
+
+        public sealed class EvtBundle
+        {
+            public IEvtFactory EvtretEnv { get; }
+            public EvtBundle(IEvtFactory e) { EvtretEnv = e; }
+        }
+
+        private sealed class FixedEvt : IEvtFactory
+        {
+            private readonly Evt _v;
+            public FixedEvt(Evt v) { _v = v; }
+            public Evt Fire() => _v;
+        }
+
         // ====== String return shape (via cabi_realloc) ===========
         // Common WASI shape — the host returns a string, the
         // direct-linked emit calls the guest's cabi_realloc to
@@ -2112,6 +2160,59 @@ namespace Wacs.Transpiler.Test
             // Code section: 2 bodies
             // body0: locals(1) + i32.const(2) + call(2) + i32.const(2) + i32.load8_u(3) + end(1) = 11
             // body1: locals(1) + i32.const(2) + call(2) + i32.const(2) + i32.load(3) + end(1) = 11
+            0x0A, 0x19, 0x02,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x2D, 0x00, 0x00,
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x04,
+            0x0B,
+        };
+
+        // Same shape as VariantPayloadReturn fixture but for the
+        // mixed-width "event" variant — payloads u8 vs u32. The
+        // probe loads the same i32 at retArea+4; for u8 payloads
+        // only the low byte is meaningful (higher bytes start as
+        // zero in fresh wasm memory). Module/entity differ only.
+        private static byte[] BuildVariantMixedPayloadFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: (i32) → void, () → i32
+            0x01, 0x09, 0x02,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // module: "my:test/evtret-env@1.0.0" (24)
+            // entity: "fire" (4)
+            // size = 1 + 1 + 24 + 1 + 4 + 2 = 33 = 0x21
+            0x02, 0x21, 0x01,
+            0x18,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x65, 0x76, 0x74, 0x72, 0x65, 0x74, 0x2D, 0x65,
+            0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x04,
+            0x66, 0x69, 0x72, 0x65,
+            0x00, 0x00,
+            // Function section: 2 funcs of type 1
+            0x03, 0x03, 0x02, 0x01, 0x01,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export: 2 exports
+            //   call_evt_disc  (13): 1+13+1+1 = 16
+            //   call_evt_value (14): 1+14+1+1 = 17
+            // size = 1 + 16 + 17 = 34 = 0x22
+            0x07, 0x22, 0x02,
+            0x0D,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x65, 0x76, 0x74,
+            0x5F, 0x64, 0x69, 0x73, 0x63,
+            0x00, 0x01,
+            0x0E,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x65, 0x76, 0x74,
+            0x5F, 0x76, 0x61, 0x6C, 0x75, 0x65,
+            0x00, 0x02,
+            // Code section: 2 bodies (same as code variant)
             0x0A, 0x19, 0x02,
             0x0B, 0x00,
             0x41, 0x10, 0x10, 0x00,
@@ -7583,6 +7684,117 @@ namespace Wacs.Transpiler.Test
                 InterfaceGenerator.SanitizeName("call_give_first_byte"))!;
             Assert.Equal(0x48, (int)callByte.Invoke(fresh,
                 Array.Empty<object>())!);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_VariantMixedPayloadReturn_AllCases()
+        {
+            // event { tap, beep(u8), tone(u32) } — joined-flat
+            // payload slot reserves max(align)=4, max(size)=4. Each
+            // case writes its own width starting at retArea+4.
+            // The probe loads i32 at retArea+4: for u32 payloads
+            // it returns the full value; for u8 payloads only the
+            // low byte is meaningful (higher bytes are zero on
+            // a fresh wasm memory).
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/evtret-env@1.0.0", "fire"),
+                _ => throw new InvalidOperationException(
+                    "stub for fire must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildVariantMixedPayloadFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(EvtBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/evtret-env@1.0.0", "fire", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.EvtRet", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_evtret_env_1_0_0_fire"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for fire must not be invoked"),
+                });
+
+            // Tap (no payload) → disc=0.
+            {
+                var bundle = new EvtBundle(
+                    new FixedEvt(new Evt.EvtTap()));
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+
+                var callDisc = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_evt_disc"))!;
+                Assert.Equal(0, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+            }
+
+            // Beep(0x37) → disc=1, low byte of value=0x37.
+            {
+                var bundle = new EvtBundle(
+                    new FixedEvt(new Evt.EvtBeep(0x37)));
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+
+                var callDisc = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_evt_disc"))!;
+                Assert.Equal(1, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+
+                var fresh = Activator.CreateInstance(result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callValue = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_evt_value"))!;
+                Assert.Equal(0x37, (int)callValue.Invoke(fresh,
+                    Array.Empty<object>())!);
+            }
+
+            // Tone(0x12345678) → disc=2, value=0x12345678.
+            {
+                var bundle = new EvtBundle(
+                    new FixedEvt(new Evt.EvtTone(0x12345678u)));
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+
+                var callDisc = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_evt_disc"))!;
+                Assert.Equal(2, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+
+                var fresh = Activator.CreateInstance(result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callValue = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_evt_value"))!;
+                Assert.Equal(0x12345678, (int)callValue.Invoke(fresh,
+                    Array.Empty<object>())!);
+            }
         }
     }
 }

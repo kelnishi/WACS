@@ -1481,35 +1481,20 @@ namespace Wacs.Transpiler.AOT.Component
             // Variant base type. Wire form: u8 disc + joined-flat
             // value at Align(1, max-payload-align). v0 supports
             // empty cases AND primitive-payload cases AND resource-
-            // handle-payload (own<R>) cases. All payload-bearing
-            // cases must share the same primitive wire shape so
-            // joined-flat is deterministic; resource handles are
-            // i32/align-4 and mix cleanly with i32 primitives.
+            // handle-payload (own<R>) cases. Mixed payload widths
+            // are fine — canon-ABI joined-flat reserves max-width
+            // and each case writes its own width at the common
+            // valueOffset; the higher bytes of narrower cases stay
+            // uninitialized per spec.
             if (IsLikelyVariantBase(t))
             {
                 var cases = GetVariantCases(t);
                 if (cases.Length == 0) return false;
-                Type? payloadProbe = null;
                 foreach (var c in cases)
                 {
                     if (c.Payload == null) continue;
                     if (!IsResultArmStorable(c.Payload, resolver))
                         return false;
-                    if (payloadProbe == null)
-                    {
-                        payloadProbe = c.Payload;
-                        continue;
-                    }
-                    // All payload cases must share the same wire
-                    // shape (size + alignment). Resource handles
-                    // are i32; primitives must match.
-                    if (AlignOfResultArm(c.Payload)
-                        != AlignOfResultArm(payloadProbe)) return false;
-                    int sizeNew = IsStorablePrimitive(c.Payload)
-                        ? SizeOfPrimitive(c.Payload) : 4;
-                    int sizeOld = IsStorablePrimitive(payloadProbe)
-                        ? SizeOfPrimitive(payloadProbe) : 4;
-                    if (sizeNew != sizeOld) return false;
                 }
                 return true;
             }
