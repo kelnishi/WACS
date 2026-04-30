@@ -624,150 +624,9 @@ namespace Wacs.Transpiler.AOT.Component
                 else
                 if (isOption)
                 {
-                    // Option<T> retArea layout: u8 disc @0 + value
-                    // at offset Align(1, AlignOf(T)).
-                    //   - primitive T: store via PrimitiveStore.StoreXxx
-                    //   - resource T (own<R>): allocate handle via
-                    //     Resources.AllocateResource and StoreI32 it
-                    //   - string / byte[]: cabi_realloc + memcpy +
-                    //     StoreString / StoreByteArray
-                    //   - tuple / record of primitives: per-field
-                    //     write at the option value slot's nested
-                    //     offsets
-                    var inner = method.ReturnType
-                        .GetGenericArguments()[0];
-                    bool innerIsResource = resolver != null
-                        && resolver.IsResourceInterface(inner)
-                        && resourcesType != null;
-                    bool innerIsString = inner == typeof(string);
-                    bool innerIsByteArray = inner == typeof(byte[]);
-                    bool innerIsTuple = IsTupleOfPrimitives(inner);
-                    bool innerIsRecord = IsRecordOfPrimitives(inner);
-                    bool innerIsPrimArray = !innerIsByteArray
-                        && inner.IsArray
-                        && inner.GetArrayRank() == 1
-                        && IsListPrimitiveElement(
-                            inner.GetElementType()!);
-                    bool innerIsStringArray = inner.IsArray
-                        && inner.GetArrayRank() == 1
-                        && inner.GetElementType() == typeof(string);
-                    int valueAlign;
-                    if (innerIsResource || innerIsString
-                        || innerIsByteArray || innerIsPrimArray
-                        || innerIsStringArray)
-                        valueAlign = 4;  // (ptr, len/count) pair starts on i32 boundary
-                    else if (innerIsTuple || innerIsRecord)
-                        valueAlign = MaxFieldAlign(inner);
-                    else
-                        valueAlign = AlignOfPrimitive(inner);
-                    int valueOffset = Align(1, valueAlign);
-
-                    var noneLabel = il.DefineLabel();
-                    var endLabel = il.DefineLabel();
-
-                    var optionT = method.ReturnType;
-                    var hasValueGetter = optionT.GetProperty("HasValue",
-                        BindingFlags.Public | BindingFlags.Instance)!
-                        .GetGetMethod()!;
-                    var valueGetter = optionT.GetProperty("Value",
-                        BindingFlags.Public | BindingFlags.Instance)!
-                        .GetGetMethod()!;
-
-                    il.Emit(OpCodes.Ldloca, returnLocal);
-                    il.Emit(OpCodes.Call, hasValueGetter);
-                    il.Emit(OpCodes.Brfalse, noneLabel);
-
-                    // Some: write disc=1
-                    il.Emit(OpCodes.Ldarg_0);
-                    il.Emit(OpCodes.Ldfld, MemoriesField);
-                    il.Emit(OpCodes.Ldc_I4_0);
-                    il.Emit(OpCodes.Ldelem_Ref);
-                    il.Emit(OpCodes.Ldfld, MemoryDataField);
-                    il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
-                    il.Emit(OpCodes.Ldc_I4_1);
-                    il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(byte)));
-
-                    if (innerIsTuple || innerIsRecord)
-                    {
-                        // Stash inner aggregate, then per-field writes.
-                        var innerLocal = il.DeclareLocal(inner);
-                        il.Emit(OpCodes.Ldloca, returnLocal);
-                        il.Emit(OpCodes.Call, valueGetter);
-                        il.Emit(OpCodes.Stloc, innerLocal);
-                        EmitInlineRecordOrTupleStore(il, inner,
-                            temps[retAreaSlot], valueOffset, innerLocal);
-                    }
-                    else
-                    {
-                        // Some: write value at retArea+valueOffset
-                        il.Emit(OpCodes.Ldarg_0);
-                        il.Emit(OpCodes.Ldfld, MemoriesField);
-                        il.Emit(OpCodes.Ldc_I4_0);
-                        il.Emit(OpCodes.Ldelem_Ref);
-                        il.Emit(OpCodes.Ldfld, MemoryDataField);
-                        il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
-                        if (valueOffset != 0)
-                        {
-                            il.Emit(OpCodes.Ldc_I4, valueOffset);
-                            il.Emit(OpCodes.Add);
-                        }
-                        if (innerIsResource)
-                        {
-                            // Allocate a handle from the inner instance,
-                            // then StoreI32 it.
-                            il.Emit(OpCodes.Ldarg_0);
-                            il.Emit(OpCodes.Ldfld, ResourcesField);
-                            il.Emit(OpCodes.Castclass, resourcesType!);
-                            il.Emit(OpCodes.Ldtoken, inner);
-                            il.Emit(OpCodes.Call, GetTypeFromHandleMethod);
-                            il.Emit(OpCodes.Ldloca, returnLocal);
-                            il.Emit(OpCodes.Call, valueGetter);
-                            il.Emit(OpCodes.Callvirt,
-                                ResolveAllocateResourceMethod(resourcesType!));
-                            il.Emit(OpCodes.Call,
-                                ResolveStoreMethod(typeof(int)));
-                        }
-                        else if (innerIsString || innerIsByteArray
-                            || innerIsPrimArray || innerIsStringArray)
-                        {
-                            // Stack: [memory_data, retArea+valueOffset]
-                            // Push value + cabi_realloc + call.
-                            il.Emit(OpCodes.Ldloca, returnLocal);
-                            il.Emit(OpCodes.Call, valueGetter);
-                            il.Emit(OpCodes.Ldarg_0);
-                            il.Emit(OpCodes.Ldfld, CabiReallocField);
-                            MethodInfo storeMethod;
-                            if (innerIsString)
-                                storeMethod = StoreStringMethod;
-                            else if (innerIsByteArray)
-                                storeMethod = StoreByteArrayMethod;
-                            else if (innerIsStringArray)
-                                storeMethod = StoreStringListMethod;
-                            else
-                                storeMethod = ResolveStorePrimitiveArrayMethod(
-                                    inner.GetElementType()!);
-                            il.Emit(OpCodes.Call, storeMethod);
-                        }
-                        else
-                        {
-                            il.Emit(OpCodes.Ldloca, returnLocal);
-                            il.Emit(OpCodes.Call, valueGetter);
-                            il.Emit(OpCodes.Call, ResolveStoreMethod(inner));
-                        }
-                    }
-                    il.Emit(OpCodes.Br, endLabel);
-
-                    // None: write disc=0
-                    il.MarkLabel(noneLabel);
-                    il.Emit(OpCodes.Ldarg_0);
-                    il.Emit(OpCodes.Ldfld, MemoriesField);
-                    il.Emit(OpCodes.Ldc_I4_0);
-                    il.Emit(OpCodes.Ldelem_Ref);
-                    il.Emit(OpCodes.Ldfld, MemoryDataField);
-                    il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
-                    il.Emit(OpCodes.Ldc_I4_0);
-                    il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(byte)));
-                    il.MarkLabel(endLabel);
+                    EmitOptionStoreAt(il, method.ReturnType,
+                        returnLocal, temps[retAreaSlot], 0,
+                        resolver, resourcesType);
                 }
                 else if (isResult)
                 {
@@ -1654,6 +1513,12 @@ namespace Wacs.Transpiler.AOT.Component
                         if (IsListPrimitiveElement(elem)) return true;
                         if (elem == typeof(string)) return true;
                     }
+                    // Option<Option<X>>: recursive — inner Option
+                    // must itself be a supported aggregate.
+                    if (inner.IsGenericType
+                        && inner.GetGenericTypeDefinition() == typeof(Option<>)
+                        && IsAggregateReturnSupported(inner, resolver))
+                        return true;
                     return false;
                 }
                 // Result<TOk, TErr>: each arm must be storable
@@ -1960,6 +1825,197 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Add);
             il.Emit(OpCodes.Ldloc, countLocal);
             il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(int)));
+        }
+
+        // Emit IL that stores an Option<inner> at retArea+baseOffset.
+        // Reads the Option value from optionLocal (top-level: the
+        // function's return; nested Option<Option<X>>: a stashed
+        // local holding the inner Option<X>).
+        //
+        // Wire form: u8 disc @ retArea+baseOffset + value at
+        // retArea+baseOffset+valueOffset where valueOffset =
+        // Align(1, MaxAlignOf(inner)).
+        //
+        // Inner shapes handled:
+        //   - primitive: PrimitiveStore.StoreXxx
+        //   - resource (own<R>): Resources.AllocateResource + StoreI32
+        //   - string / byte[]: cabi_realloc + StoreString/StoreByteArray
+        //   - primitive[] / string[]: cabi_realloc + StoreXxxList
+        //   - tuple / record of primitives: per-field write
+        //   - Option<X>: recursive call (Option<Option<...>>)
+        private static void EmitOptionStoreAt(
+            ILGenerator il, Type optionType, LocalBuilder optionLocal,
+            LocalBuilder retAreaLocal, int baseOffset,
+            HostPackageResolver? resolver, Type? resourcesType)
+        {
+            var inner = optionType.GetGenericArguments()[0];
+            bool innerIsResource = resolver != null
+                && resolver.IsResourceInterface(inner)
+                && resourcesType != null;
+            bool innerIsString = inner == typeof(string);
+            bool innerIsByteArray = inner == typeof(byte[]);
+            bool innerIsTuple = IsTupleOfPrimitives(inner);
+            bool innerIsRecord = IsRecordOfPrimitives(inner);
+            bool innerIsPrimArray = !innerIsByteArray
+                && inner.IsArray
+                && inner.GetArrayRank() == 1
+                && IsListPrimitiveElement(
+                    inner.GetElementType()!);
+            bool innerIsStringArray = inner.IsArray
+                && inner.GetArrayRank() == 1
+                && inner.GetElementType() == typeof(string);
+            bool innerIsOption = inner.IsGenericType
+                && inner.GetGenericTypeDefinition() == typeof(Option<>);
+
+            int valueAlign = MaxAlignOf(inner, resolver);
+            int valueOffset = Align(1, valueAlign);
+
+            var hasValueGetter = optionType.GetProperty("HasValue",
+                BindingFlags.Public | BindingFlags.Instance)!
+                .GetGetMethod()!;
+            var valueGetter = optionType.GetProperty("Value",
+                BindingFlags.Public | BindingFlags.Instance)!
+                .GetGetMethod()!;
+
+            var noneLabel = il.DefineLabel();
+            var endLabel = il.DefineLabel();
+
+            il.Emit(OpCodes.Ldloca, optionLocal);
+            il.Emit(OpCodes.Call, hasValueGetter);
+            il.Emit(OpCodes.Brfalse, noneLabel);
+
+            // Some: write disc=1 at retArea+baseOffset
+            EmitWriteByteAt(il, retAreaLocal, baseOffset, 1);
+
+            if (innerIsOption)
+            {
+                // Recurse: stash inner Option, recursively call self
+                // with baseOffset += valueOffset.
+                var innerLocal = il.DeclareLocal(inner);
+                il.Emit(OpCodes.Ldloca, optionLocal);
+                il.Emit(OpCodes.Call, valueGetter);
+                il.Emit(OpCodes.Stloc, innerLocal);
+                EmitOptionStoreAt(il, inner, innerLocal, retAreaLocal,
+                    baseOffset + valueOffset, resolver, resourcesType);
+            }
+            else if (innerIsTuple || innerIsRecord)
+            {
+                var innerLocal = il.DeclareLocal(inner);
+                il.Emit(OpCodes.Ldloca, optionLocal);
+                il.Emit(OpCodes.Call, valueGetter);
+                il.Emit(OpCodes.Stloc, innerLocal);
+                EmitInlineRecordOrTupleStore(il, inner, retAreaLocal,
+                    baseOffset + valueOffset, innerLocal);
+            }
+            else
+            {
+                int totalOffset = baseOffset + valueOffset;
+                // Some: write value at retArea+totalOffset
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, MemoriesField);
+                il.Emit(OpCodes.Ldc_I4_0);
+                il.Emit(OpCodes.Ldelem_Ref);
+                il.Emit(OpCodes.Ldfld, MemoryDataField);
+                il.Emit(OpCodes.Ldloc, retAreaLocal);
+                if (totalOffset != 0)
+                {
+                    il.Emit(OpCodes.Ldc_I4, totalOffset);
+                    il.Emit(OpCodes.Add);
+                }
+                if (innerIsResource)
+                {
+                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Ldfld, ResourcesField);
+                    il.Emit(OpCodes.Castclass, resourcesType!);
+                    il.Emit(OpCodes.Ldtoken, inner);
+                    il.Emit(OpCodes.Call, GetTypeFromHandleMethod);
+                    il.Emit(OpCodes.Ldloca, optionLocal);
+                    il.Emit(OpCodes.Call, valueGetter);
+                    il.Emit(OpCodes.Callvirt,
+                        ResolveAllocateResourceMethod(resourcesType!));
+                    il.Emit(OpCodes.Call,
+                        ResolveStoreMethod(typeof(int)));
+                }
+                else if (innerIsString || innerIsByteArray
+                    || innerIsPrimArray || innerIsStringArray)
+                {
+                    il.Emit(OpCodes.Ldloca, optionLocal);
+                    il.Emit(OpCodes.Call, valueGetter);
+                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Ldfld, CabiReallocField);
+                    MethodInfo storeMethod;
+                    if (innerIsString)
+                        storeMethod = StoreStringMethod;
+                    else if (innerIsByteArray)
+                        storeMethod = StoreByteArrayMethod;
+                    else if (innerIsStringArray)
+                        storeMethod = StoreStringListMethod;
+                    else
+                        storeMethod = ResolveStorePrimitiveArrayMethod(
+                            inner.GetElementType()!);
+                    il.Emit(OpCodes.Call, storeMethod);
+                }
+                else
+                {
+                    il.Emit(OpCodes.Ldloca, optionLocal);
+                    il.Emit(OpCodes.Call, valueGetter);
+                    il.Emit(OpCodes.Call, ResolveStoreMethod(inner));
+                }
+            }
+
+            il.Emit(OpCodes.Br, endLabel);
+
+            // None: write disc=0 at retArea+baseOffset
+            il.MarkLabel(noneLabel);
+            EmitWriteByteAt(il, retAreaLocal, baseOffset, 0);
+
+            il.MarkLabel(endLabel);
+        }
+
+        // Helper: emit IL that writes a single u8 at retArea+offset.
+        private static void EmitWriteByteAt(ILGenerator il,
+            LocalBuilder retAreaLocal, int offset, int value)
+        {
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, MemoriesField);
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Ldelem_Ref);
+            il.Emit(OpCodes.Ldfld, MemoryDataField);
+            il.Emit(OpCodes.Ldloc, retAreaLocal);
+            if (offset != 0)
+            {
+                il.Emit(OpCodes.Ldc_I4, offset);
+                il.Emit(OpCodes.Add);
+            }
+            il.Emit(OpCodes.Ldc_I4, value);
+            il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(byte)));
+        }
+
+        // Recursive maximum alignment for any supported aggregate
+        // shape. Used by Option/Result emit to compute valueOffset.
+        private static int MaxAlignOf(Type t,
+            HostPackageResolver? resolver)
+        {
+            if (IsStorablePrimitive(t)) return AlignOfPrimitive(t);
+            if (IsTupleOfPrimitives(t) || IsRecordOfPrimitives(t))
+                return MaxFieldAlign(t);
+            if (t.IsGenericType)
+            {
+                var def = t.GetGenericTypeDefinition();
+                if (def == typeof(Option<>))
+                    return MaxAlignOf(t.GetGenericArguments()[0],
+                        resolver);
+                if (def == typeof(Result<,>))
+                {
+                    var args = t.GetGenericArguments();
+                    int a0 = MaxAlignOf(args[0], resolver);
+                    int a1 = MaxAlignOf(args[1], resolver);
+                    return a0 > a1 ? a0 : a1;
+                }
+            }
+            // string / byte[] / list<X> / resource interface — all
+            // i32-aligned (ptr or handle).
+            return 4;
         }
 
         // Emit IL for a list<own<R>> top-level return.
