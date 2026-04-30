@@ -543,6 +543,9 @@ namespace Wacs.Transpiler.AOT.Component
                     //     Resources.AllocateResource and StoreI32 it
                     //   - string / byte[]: cabi_realloc + memcpy +
                     //     StoreString / StoreByteArray
+                    //   - tuple / record of primitives: per-field
+                    //     write at the option value slot's nested
+                    //     offsets
                     var inner = method.ReturnType
                         .GetGenericArguments()[0];
                     bool innerIsResource = resolver != null
@@ -550,10 +553,14 @@ namespace Wacs.Transpiler.AOT.Component
                         && resourcesType != null;
                     bool innerIsString = inner == typeof(string);
                     bool innerIsByteArray = inner == typeof(byte[]);
+                    bool innerIsTuple = IsTupleOfPrimitives(inner);
+                    bool innerIsRecord = IsRecordOfPrimitives(inner);
                     int valueAlign;
                     if (innerIsResource || innerIsString
                         || innerIsByteArray)
                         valueAlign = 4;  // (ptr, len) pair starts on i32 boundary
+                    else if (innerIsTuple || innerIsRecord)
+                        valueAlign = MaxFieldAlign(inner);
                     else
                         valueAlign = AlignOfPrimitive(inner);
                     int valueOffset = Align(1, valueAlign);
@@ -583,53 +590,64 @@ namespace Wacs.Transpiler.AOT.Component
                     il.Emit(OpCodes.Ldc_I4_1);
                     il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(byte)));
 
-                    // Some: write value at retArea+valueOffset
-                    il.Emit(OpCodes.Ldarg_0);
-                    il.Emit(OpCodes.Ldfld, MemoriesField);
-                    il.Emit(OpCodes.Ldc_I4_0);
-                    il.Emit(OpCodes.Ldelem_Ref);
-                    il.Emit(OpCodes.Ldfld, MemoryDataField);
-                    il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
-                    if (valueOffset != 0)
+                    if (innerIsTuple || innerIsRecord)
                     {
-                        il.Emit(OpCodes.Ldc_I4, valueOffset);
-                        il.Emit(OpCodes.Add);
-                    }
-                    if (innerIsResource)
-                    {
-                        // Allocate a handle from the inner instance,
-                        // then StoreI32 it.
-                        il.Emit(OpCodes.Ldarg_0);
-                        il.Emit(OpCodes.Ldfld, ResourcesField);
-                        il.Emit(OpCodes.Castclass, resourcesType!);
-                        il.Emit(OpCodes.Ldtoken, inner);
-                        il.Emit(OpCodes.Call, GetTypeFromHandleMethod);
+                        // Stash inner aggregate, then per-field writes.
+                        var innerLocal = il.DeclareLocal(inner);
                         il.Emit(OpCodes.Ldloca, returnLocal);
                         il.Emit(OpCodes.Call, valueGetter);
-                        il.Emit(OpCodes.Callvirt,
-                            ResolveAllocateResourceMethod(resourcesType!));
-                        il.Emit(OpCodes.Call,
-                            ResolveStoreMethod(typeof(int)));
-                    }
-                    else if (innerIsString || innerIsByteArray)
-                    {
-                        // Stack at this point: [memory_data, retArea+valueOffset]
-                        // StoreString/StoreByteArray takes
-                        // (byte[] dest, int retAreaOffset, T value, Func realloc)
-                        // — push value + cabi_realloc + call.
-                        il.Emit(OpCodes.Ldloca, returnLocal);
-                        il.Emit(OpCodes.Call, valueGetter);
-                        il.Emit(OpCodes.Ldarg_0);
-                        il.Emit(OpCodes.Ldfld, CabiReallocField);
-                        il.Emit(OpCodes.Call, innerIsString
-                            ? StoreStringMethod
-                            : StoreByteArrayMethod);
+                        il.Emit(OpCodes.Stloc, innerLocal);
+                        EmitInlineRecordOrTupleStore(il, inner,
+                            temps[retAreaSlot], valueOffset, innerLocal);
                     }
                     else
                     {
-                        il.Emit(OpCodes.Ldloca, returnLocal);
-                        il.Emit(OpCodes.Call, valueGetter);
-                        il.Emit(OpCodes.Call, ResolveStoreMethod(inner));
+                        // Some: write value at retArea+valueOffset
+                        il.Emit(OpCodes.Ldarg_0);
+                        il.Emit(OpCodes.Ldfld, MemoriesField);
+                        il.Emit(OpCodes.Ldc_I4_0);
+                        il.Emit(OpCodes.Ldelem_Ref);
+                        il.Emit(OpCodes.Ldfld, MemoryDataField);
+                        il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
+                        if (valueOffset != 0)
+                        {
+                            il.Emit(OpCodes.Ldc_I4, valueOffset);
+                            il.Emit(OpCodes.Add);
+                        }
+                        if (innerIsResource)
+                        {
+                            // Allocate a handle from the inner instance,
+                            // then StoreI32 it.
+                            il.Emit(OpCodes.Ldarg_0);
+                            il.Emit(OpCodes.Ldfld, ResourcesField);
+                            il.Emit(OpCodes.Castclass, resourcesType!);
+                            il.Emit(OpCodes.Ldtoken, inner);
+                            il.Emit(OpCodes.Call, GetTypeFromHandleMethod);
+                            il.Emit(OpCodes.Ldloca, returnLocal);
+                            il.Emit(OpCodes.Call, valueGetter);
+                            il.Emit(OpCodes.Callvirt,
+                                ResolveAllocateResourceMethod(resourcesType!));
+                            il.Emit(OpCodes.Call,
+                                ResolveStoreMethod(typeof(int)));
+                        }
+                        else if (innerIsString || innerIsByteArray)
+                        {
+                            // Stack: [memory_data, retArea+valueOffset]
+                            // Push value + cabi_realloc + call.
+                            il.Emit(OpCodes.Ldloca, returnLocal);
+                            il.Emit(OpCodes.Call, valueGetter);
+                            il.Emit(OpCodes.Ldarg_0);
+                            il.Emit(OpCodes.Ldfld, CabiReallocField);
+                            il.Emit(OpCodes.Call, innerIsString
+                                ? StoreStringMethod
+                                : StoreByteArrayMethod);
+                        }
+                        else
+                        {
+                            il.Emit(OpCodes.Ldloca, returnLocal);
+                            il.Emit(OpCodes.Call, valueGetter);
+                            il.Emit(OpCodes.Call, ResolveStoreMethod(inner));
+                        }
                     }
                     il.Emit(OpCodes.Br, endLabel);
 
@@ -1479,6 +1497,12 @@ namespace Wacs.Transpiler.AOT.Component
                         && resolver.IsResourceInterface(inner)
                         && resolver.PreferredResourcesType != null)
                         return true;
+                    // Option<tuple-of-primitives> /
+                    // Option<record-of-primitives>: write each field
+                    // at its own offset within the option's value
+                    // slot. valueOffset = Align(1, max-field-align).
+                    if (IsTupleOfPrimitives(inner)) return true;
+                    if (IsRecordOfPrimitives(inner)) return true;
                     return false;
                 }
                 // Result<TOk, TErr>: each arm must be storable
@@ -1516,6 +1540,125 @@ namespace Wacs.Transpiler.AOT.Component
                 return true;
             }
             return false;
+        }
+
+        // True when t is ValueTuple<...> with all elements being
+        // canon-ABI primitives. Used for Option<tuple>/Result-arm
+        // tuple support without recursion into nested aggregates.
+        private static bool IsTupleOfPrimitives(Type t)
+        {
+            if (!t.IsGenericType) return false;
+            if (!IsValueTupleType(t.GetGenericTypeDefinition())) return false;
+            foreach (var ta in t.GetGenericArguments())
+                if (!IsStorablePrimitive(ta)) return false;
+            return true;
+        }
+
+        // True when t is a sealed POCO with all property types
+        // being canon-ABI primitives.
+        private static bool IsRecordOfPrimitives(Type t)
+        {
+            if (!IsLikelyRecordType(t)) return false;
+            foreach (var p in GetRecordProperties(t))
+                if (!IsStorablePrimitive(p.PropertyType)) return false;
+            return true;
+        }
+
+        // Max field alignment across a tuple/record-of-primitives.
+        private static int MaxFieldAlign(Type t)
+        {
+            int maxA = 1;
+            if (t.IsGenericType
+                && IsValueTupleType(t.GetGenericTypeDefinition()))
+            {
+                foreach (var ta in t.GetGenericArguments())
+                {
+                    int a = AlignOfPrimitive(ta);
+                    if (a > maxA) maxA = a;
+                }
+            }
+            else
+            {
+                foreach (var p in GetRecordProperties(t))
+                {
+                    int a = AlignOfPrimitive(p.PropertyType);
+                    if (a > maxA) maxA = a;
+                }
+            }
+            return maxA;
+        }
+
+        // Emit IL that stores a record/tuple of primitives at
+        // retArea+baseOffset, returning the post-write end offset.
+        // Reads each field/property via the appropriate access
+        // pattern (ValueTuple uses ldloca+ldfld; record uses
+        // ldloc+callvirt(getter)).
+        private static int EmitInlineRecordOrTupleStore(
+            ILGenerator il, Type type, LocalBuilder retAreaLocal,
+            int baseOffset, LocalBuilder valueLocal)
+        {
+            int offsetSoFar = baseOffset;
+            bool isTuple = type.IsGenericType
+                && IsValueTupleType(type.GetGenericTypeDefinition());
+
+            if (isTuple)
+            {
+                var elements = type.GetGenericArguments();
+                for (int i = 0; i < elements.Length; i++)
+                {
+                    var et = elements[i];
+                    int fieldAlign = AlignOfPrimitive(et);
+                    int fieldOffset = Align(offsetSoFar, fieldAlign);
+
+                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Ldfld, MemoriesField);
+                    il.Emit(OpCodes.Ldc_I4_0);
+                    il.Emit(OpCodes.Ldelem_Ref);
+                    il.Emit(OpCodes.Ldfld, MemoryDataField);
+                    il.Emit(OpCodes.Ldloc, retAreaLocal);
+                    if (fieldOffset != 0)
+                    {
+                        il.Emit(OpCodes.Ldc_I4, fieldOffset);
+                        il.Emit(OpCodes.Add);
+                    }
+
+                    il.Emit(OpCodes.Ldloca, valueLocal);
+                    il.Emit(OpCodes.Ldfld,
+                        type.GetField("Item" + (i + 1))!);
+                    il.Emit(OpCodes.Call, ResolveStoreMethod(et));
+
+                    offsetSoFar = fieldOffset + SizeOfPrimitive(et);
+                }
+            }
+            else
+            {
+                foreach (var p in GetRecordProperties(type))
+                {
+                    int fieldAlign = AlignOfPrimitive(p.PropertyType);
+                    int fieldOffset = Align(offsetSoFar, fieldAlign);
+
+                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Ldfld, MemoriesField);
+                    il.Emit(OpCodes.Ldc_I4_0);
+                    il.Emit(OpCodes.Ldelem_Ref);
+                    il.Emit(OpCodes.Ldfld, MemoryDataField);
+                    il.Emit(OpCodes.Ldloc, retAreaLocal);
+                    if (fieldOffset != 0)
+                    {
+                        il.Emit(OpCodes.Ldc_I4, fieldOffset);
+                        il.Emit(OpCodes.Add);
+                    }
+
+                    il.Emit(OpCodes.Ldloc, valueLocal);
+                    il.Emit(OpCodes.Callvirt, p.GetGetMethod()!);
+                    il.Emit(OpCodes.Call,
+                        ResolveStoreMethod(p.PropertyType));
+
+                    offsetSoFar = fieldOffset
+                        + SizeOfPrimitive(p.PropertyType);
+                }
+            }
+            return offsetSoFar;
         }
 
         // True when this CLR type maps directly to a single

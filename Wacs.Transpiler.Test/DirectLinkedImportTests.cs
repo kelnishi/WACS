@@ -761,6 +761,68 @@ namespace Wacs.Transpiler.Test
             public Evt Fire() => _v;
         }
 
+        // ====== Option<tuple<u32, u32>> return ===================
+        // Wire form: u8 disc @0 + (i32 a, i32 b) at retArea+4.
+        // Some path: disc=1, a@4, b@8. None path: disc=0.
+
+        [WitSource(@"interface opttup-env",
+            Package = "my:test@1.0.0", Interface = "opttup-env")]
+        public interface IMaybePair
+        {
+            [WitSource(@"pair: func() -> option<tuple<u32, u32>>;",
+                Package = "my:test@1.0.0", Interface = "opttup-env",
+                Item = "pair")]
+            Option<(uint, uint)> Pair();
+        }
+
+        public sealed class MaybePairBundle
+        {
+            public IMaybePair OpttupEnv { get; }
+            public MaybePairBundle(IMaybePair m)
+            { OpttupEnv = m; }
+        }
+
+        private sealed class FixedMaybePair : IMaybePair
+        {
+            private readonly Option<(uint, uint)> _v;
+            public FixedMaybePair(Option<(uint, uint)> v) { _v = v; }
+            public Option<(uint, uint)> Pair() => _v;
+        }
+
+        // ====== Option<record-of-primitives> return ==============
+        // Wire form: u8 disc @0 + record fields at retArea+4
+        // (per-field offsets per canon-ABI alignment rules).
+
+        public sealed class XYPair
+        {
+            public uint X { get; set; }
+            public uint Y { get; set; }
+        }
+
+        [WitSource(@"interface optrec-env",
+            Package = "my:test@1.0.0", Interface = "optrec-env")]
+        public interface IMaybeXY
+        {
+            [WitSource(@"xy: func() -> option<xy-pair>;",
+                Package = "my:test@1.0.0", Interface = "optrec-env",
+                Item = "xy")]
+            Option<XYPair> Xy();
+        }
+
+        public sealed class MaybeXYBundle
+        {
+            public IMaybeXY OptrecEnv { get; }
+            public MaybeXYBundle(IMaybeXY m)
+            { OptrecEnv = m; }
+        }
+
+        private sealed class FixedMaybeXY : IMaybeXY
+        {
+            private readonly Option<XYPair> _v;
+            public FixedMaybeXY(Option<XYPair> v) { _v = v; }
+            public Option<XYPair> Xy() => _v;
+        }
+
         // ====== Variant return: string-bearing payload =========
         // variant note { silent, label(string) }: empty + string
         // payload. canon-ABI joined-flat reserves max(align)=4 and
@@ -2211,6 +2273,126 @@ namespace Wacs.Transpiler.Test
             0x0B, 0x00,
             0x41, 0x10, 0x10, 0x00,
             0x41, 0x10, 0x28, 0x02, 0x04,
+            0x0B,
+        };
+
+        // Option<tuple<u32,u32>> retArea: u8 disc @0 + u32 a @4 +
+        // u32 b @8. Three probes per slot. No cabi_realloc needed.
+        private static byte[] BuildOptionTupleReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: (i32) → void, () → i32
+            0x01, 0x09, 0x02,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // module: "my:test/opttup-env@1.0.0" (24)
+            // entity: "pair" (4)
+            // size = 1 + 1 + 24 + 1 + 4 + 2 = 33 = 0x21
+            0x02, 0x21, 0x01,
+            0x18,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x6F, 0x70, 0x74, 0x74, 0x75, 0x70, 0x2D, 0x65,
+            0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x04,
+            0x70, 0x61, 0x69, 0x72,
+            0x00, 0x00,
+            // Function section: 3 local funcs of type 1
+            0x03, 0x04, 0x03, 0x01, 0x01, 0x01,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export section: 3 exports
+            //   call_pair_disc (14): 1+14+1+1 = 17
+            //   call_pair_a    (11): 1+11+1+1 = 14
+            //   call_pair_b    (11): 1+11+1+1 = 14
+            // size = 1 + 17 + 14 + 14 = 46 = 0x2E
+            0x07, 0x2E, 0x03,
+            0x0E,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x70, 0x61, 0x69,
+            0x72, 0x5F, 0x64, 0x69, 0x73, 0x63,
+            0x00, 0x01,
+            0x0B,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x70, 0x61, 0x69,
+            0x72, 0x5F, 0x61,
+            0x00, 0x02,
+            0x0B,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x70, 0x61, 0x69,
+            0x72, 0x5F, 0x62,
+            0x00, 0x03,
+            // Code section: 3 bodies (each 11 bytes → 12 framed)
+            // size = 1 + 12 + 12 + 12 = 37 = 0x25
+            0x0A, 0x25, 0x03,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x2D, 0x00, 0x00,
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x04,
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x08,
+            0x0B,
+        };
+
+        // Same shape as Option<tuple> fixture but for option<xy-pair>
+        // (record-of-primitives). Module "optrec-env" + entity "xy".
+        // Wire form is identical (u8 disc + 2 u32 fields).
+        private static byte[] BuildOptionRecordReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: (i32) → void, () → i32
+            0x01, 0x09, 0x02,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // module: "my:test/optrec-env@1.0.0" (24)
+            // entity: "xy" (2)
+            // size = 1 + 1 + 24 + 1 + 2 + 2 = 31 = 0x1F
+            0x02, 0x1F, 0x01,
+            0x18,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x6F, 0x70, 0x74, 0x72, 0x65, 0x63, 0x2D, 0x65,
+            0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x02,
+            0x78, 0x79,
+            0x00, 0x00,
+            // Function section: 3 local funcs of type 1
+            0x03, 0x04, 0x03, 0x01, 0x01, 0x01,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export section: 3 exports
+            //   call_xy_disc (12): 1+12+1+1 = 15
+            //   call_xy_a    (9):  1+9+1+1 = 12
+            //   call_xy_b    (9):  1+9+1+1 = 12
+            // size = 1 + 15 + 12 + 12 = 40 = 0x28
+            0x07, 0x28, 0x03,
+            0x0C,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x78, 0x79, 0x5F,
+            0x64, 0x69, 0x73, 0x63,
+            0x00, 0x01,
+            0x09,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x78, 0x79, 0x5F,
+            0x61,
+            0x00, 0x02,
+            0x09,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x78, 0x79, 0x5F,
+            0x62,
+            0x00, 0x03,
+            // Code section: same as Option<tuple>
+            0x0A, 0x25, 0x03,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x2D, 0x00, 0x00,
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x04,
+            0x0B,
+            0x0B, 0x00,
+            0x41, 0x10, 0x10, 0x00,
+            0x41, 0x10, 0x28, 0x02, 0x08,
             0x0B,
         };
 
@@ -8000,6 +8182,192 @@ namespace Wacs.Transpiler.Test
                 var callByte = result.ExportsInterface!.GetMethod(
                     InterfaceGenerator.SanitizeName("call_note_first_byte"))!;
                 Assert.Equal(0x48, (int)callByte.Invoke(fresh,
+                    Array.Empty<object>())!);
+            }
+        }
+
+        [Fact]
+        public void DirectLinkedImport_OptionTupleReturn_BothBranches()
+        {
+            // Option<(uint, uint)> retArea: u8 disc @0 + u32 a @4
+            // + u32 b @8. Some path writes per-element; None path
+            // writes disc=0 only.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/opttup-env@1.0.0", "pair"),
+                _ => throw new InvalidOperationException(
+                    "stub for pair must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildOptionTupleReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(MaybePairBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/opttup-env@1.0.0", "pair", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.OptTupRet", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_opttup_env_1_0_0_pair"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for pair must not be invoked"),
+                });
+
+            // Some((0x21, 0x33)) → disc=1, a=0x21, b=0x33.
+            {
+                var bundle = new MaybePairBundle(new FixedMaybePair(
+                    Option<(uint, uint)>.Some((0x21u, 0x33u))));
+
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callDisc = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_pair_disc"))!;
+                Assert.Equal(1, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+
+                var fresh = Activator.CreateInstance(result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callA = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_pair_a"))!;
+                Assert.Equal(0x21, (int)callA.Invoke(fresh,
+                    Array.Empty<object>())!);
+
+                var fresh2 = Activator.CreateInstance(result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callB = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_pair_b"))!;
+                Assert.Equal(0x33, (int)callB.Invoke(fresh2,
+                    Array.Empty<object>())!);
+            }
+
+            // None → disc=0; tuple slots stay default.
+            {
+                var bundle = new MaybePairBundle(new FixedMaybePair(
+                    Option<(uint, uint)>.None));
+
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callDisc = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_pair_disc"))!;
+                Assert.Equal(0, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+            }
+        }
+
+        [Fact]
+        public void DirectLinkedImport_OptionRecordReturn_BothBranches()
+        {
+            // Option<XYPair> retArea: same wire form as the tuple
+            // case (record-of-primitives is structurally identical
+            // for canon-ABI). Per-property write at retArea+4/+8.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/optrec-env@1.0.0", "xy"),
+                _ => throw new InvalidOperationException(
+                    "stub for xy must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildOptionRecordReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(MaybeXYBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/optrec-env@1.0.0", "xy", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.OptRecRet", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_optrec_env_1_0_0_xy"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for xy must not be invoked"),
+                });
+
+            // Some(XYPair { X=7, Y=21 }) → disc=1, a=7, b=21.
+            {
+                var bundle = new MaybeXYBundle(new FixedMaybeXY(
+                    Option<XYPair>.Some(new XYPair { X = 7, Y = 21 })));
+
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callDisc = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_xy_disc"))!;
+                Assert.Equal(1, (int)callDisc.Invoke(instance,
+                    Array.Empty<object>())!);
+
+                var fresh = Activator.CreateInstance(result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callA = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_xy_a"))!;
+                Assert.Equal(7, (int)callA.Invoke(fresh,
+                    Array.Empty<object>())!);
+
+                var fresh2 = Activator.CreateInstance(result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callB = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_xy_b"))!;
+                Assert.Equal(21, (int)callB.Invoke(fresh2,
+                    Array.Empty<object>())!);
+            }
+
+            // None → disc=0; record slots stay default.
+            {
+                var bundle = new MaybeXYBundle(new FixedMaybeXY(
+                    Option<XYPair>.None));
+
+                var instance = Activator.CreateInstance(
+                    result.ModuleClass!,
+                    new object[] { importsProxy, bundle })!;
+                var callDisc = result.ExportsInterface!.GetMethod(
+                    InterfaceGenerator.SanitizeName("call_xy_disc"))!;
+                Assert.Equal(0, (int)callDisc.Invoke(instance,
                     Array.Empty<object>())!);
             }
         }
