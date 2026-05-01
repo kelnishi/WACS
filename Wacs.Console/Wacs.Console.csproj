@@ -32,7 +32,7 @@
     <Version>1.1.0</Version>
     <AssemblyVersion>1.1.0</AssemblyVersion>
     <FileVersion>1.1.0</FileVersion>
-    <Description>WACS unified WebAssembly toolchain: run, build, inspect, bindgen. Supersedes wasm-transpile (WACS.Transpiler) and wit-bindgen-wacs (WACS.ComponentModel.Bindgen).</Description>
+    <Description>WACS unified WebAssembly toolchain: run, build, inspect, bindgen. Supersedes wasm-transpile (WACS.Transpiler).</Description>
     <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
     <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
