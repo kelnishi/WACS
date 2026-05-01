@@ -11,11 +11,11 @@
         <!-- Package identity -->
         <PackageId>WACS.Transpiler.Lib</PackageId>
         <Title>WACS Transpiler (Library)</Title>
-        <Version>0.3.0</Version>
-        <AssemblyVersion>0.3.0</AssemblyVersion>
+        <Version>0.4.0</Version>
+        <AssemblyVersion>0.4.0</AssemblyVersion>
         <Authors>Kelvin Nishikawa</Authors>
         <Copyright>(c) 2025 Kelvin Nishikawa</Copyright>
-        <Description>Library API for WACS.Transpiler — programmatic ahead-of-time WebAssembly-to-.NET IL transpilation, plus seamless loading of saved transpiled assemblies.</Description>
+        <Description>Library API for WACS.Transpiler — programmatic ahead-of-time WebAssembly-to-.NET IL transpilation, plus seamless loading of saved transpiled assemblies. v0.4 adds WebAssembly Component Model support: direct-linked imports, multi-input ModuleLinker composition, multi-core component-mode emit-main, ComponentBridge cross-engine adapters, and WASI Preview 2 host-package wiring.</Description>
         <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <RepositoryType>git</RepositoryType>

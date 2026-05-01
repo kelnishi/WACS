@@ -1,5 +1,95 @@
 # Changelog
 
+## [0.10.0] — Component Model
+
+The Component Model release. Adds WebAssembly Component Model
+support across the toolchain — six new packages, two existing
+packages bumped, and the unified `wacs` CLI replaces the legacy
+`wasm-transpile` tool. Single PR; commit-by-commit detail in the
+git history (`git log v0.9.1..v0.10.0`).
+
+**New packages.**
+
+- **`WACS.ComponentModel 0.1.0`** — pure-C# parser, decoder, and
+  interpreter for WebAssembly components. WIT text parsing, full
+  canonical-ABI lift/lower (string / list / option / result /
+  variant / record / tuple / resource handles), `ComponentInstance`
+  for end-to-end instantiation against a `WasmRuntime`, and
+  `ComponentBridge` adapters for cross-engine composition
+  (interpreter components consumed as transpiler-side host bundles
+  via `DispatchProxy`, and the inverse direction binding typed
+  exports as host functions).
+- **`WACS.ComponentModel.Bindgen 0.1.0`** — `wit-bindgen-csharp`
+  CLI that emits `[WitSource]`-tagged C# interfaces from a WIT
+  package directory.
+- **`WACS.ComponentModel.Bindgen.Lib 0.1.0`** — programmatic
+  surface for the same emitter (used by source generators and
+  build-time integrations).
+- **`WACS.WASI.Preview2 0.1.0`** — typed C# interfaces + default
+  implementations for the 25 WASI Preview 2 host packages
+  (cli/clocks/filesystem/http/io/random/sockets), backed by
+  `Wacs.ComponentModel`. Includes resource-table state via
+  `ResourceContext` so handles allocated by one interface
+  (`IStdout.GetStdout` returning `own<output-stream>`) resolve back
+  through another's instance methods.
+- **`WACS.WASI.Preview2.DependencyInjection 0.1.0`** —
+  `Microsoft.Extensions.DependencyInjection` extension that
+  registers the full Preview 2 surface plus a `WasiPreview2Bundle`
+  aggregate the transpiler's direct-linked path consumes.
+- **`WACS.Cli 1.0.0`** — unified `wacs` global tool that
+  supersedes `wasm-transpile`. Verb-based subcommand layout
+  (`wacs run` / `build` / `inspect`) matching `wasmtime` / `wasmer`
+  precedent. Direct-run shortcut (`wacs my.wasm` defaults to `run`),
+  smart component-vs-core auto-detect, multi-input ModuleLinker
+  composition, full instrumentation surface inherited from the
+  legacy `Wacs.Console` (gas, profile, instr-logging, super,
+  switch).
+
+**Bumped packages.**
+
+- **`WACS 0.9.1 → 0.10.0`** — `WasmRuntime` gains two methods
+  (`EnumerateBoundEntities`, `TryGetBoundHostFunctionType`) used
+  by the component-model validation layer. Removes legacy
+  `Wacs.Core/Components/` prototypes (replaced by
+  `Wacs.ComponentModel`).
+- **`WACS.Transpiler.Lib 0.3.0 → 0.4.0`** — major feature lands:
+  - `ComponentTranspiler` for component-mode AOT transpilation
+    (single-core + multi-core via primary canon-lift detection).
+  - `ModuleLinker` cross-module composition for multi-input runs.
+  - `MainEntryEmitter` + `ComponentMainEntryEmitter` for
+    `--emit-main` output.
+  - `DirectLinkedImportEmit`: inline IL through typed host bundles
+    (no delegate hop) for every canon-ABI shape: primitives,
+    string (utf8/utf16/latin1), `list<T>`, `option<T>`, `Result<T,E>`
+    (including `Result<Unit, Variant>`), records, variants with
+    payload-bearing cases, resource handles. Resource INSTANCE
+    methods returning aggregates work end-to-end.
+  - `ExportInterfaceEmit`: `[WitSource]`-tagged `I{Iface}` types
+    emitted into transpiled `.dll`s, so a transpiled component
+    serves as a host package for downstream transpiles
+    (chain mode).
+  - `WitContract.FromAssembly` two-path: embedded WIT first,
+    fallback to `[WitSource]`-tagged interfaces for
+    transpiled-output round-trip.
+  - 1300+ new tests (`Wacs.Transpiler.Test`, `Wacs.ComponentModel.Test`,
+    `Wacs.WASI.Preview2.Test`).
+
+**Deprecated.**
+
+- **`WACS.Transpiler 0.3.0 → 0.3.1`** — `wasm-transpile` is
+  superseded by `wacs`. Every flag still works; every invocation
+  prints a stderr deprecation banner pointing at the migration.
+  `<PackageDeprecationReason>` baked into the package metadata.
+  See the entry below.
+
+**End-to-end demo.** Multi-core WASI Preview 2 components run
+through direct-linked imports without a delegate hop:
+
+```bash
+$ wacs run --wasip2 --call greet wasi-hello-component.wasm
+hello
+```
+
 ## [WACS.Cli 1.0.0] — Unified CLI
 
 Ships a new `wacs` global tool that supersedes `wasm-transpile`.
