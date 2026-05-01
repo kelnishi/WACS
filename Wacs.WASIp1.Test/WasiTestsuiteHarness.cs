@@ -29,6 +29,13 @@ using Xunit.Abstractions;
 
 namespace Wacs.WASIp1.Test
 {
+    // Disables parallel execution within this test class. Multiple tests
+    // share the same fs-tests.dir preopen and would race on scratch
+    // directories otherwise.
+    [CollectionDefinition("WasiTestsuite", DisableParallelization = true)]
+    public class WasiTestsuiteCollection { }
+
+    [Collection("WasiTestsuite")]
     public class WasiTestsuiteHarness
     {
         // Per-test deadline. Some tests do legitimate IO; 30s is generous
@@ -74,6 +81,8 @@ namespace Wacs.WASIp1.Test
                 DefaultPermissions = FileAccess.ReadWrite,
                 AllowFileCreation = true,
                 AllowFileDeletion = true,
+                AllowSymbolicLinks = true,
+                AllowHardLinks = true,
             };
 
             if (manifest.Dirs != null)
@@ -81,6 +90,15 @@ namespace Wacs.WASIp1.Test
                 config.PreopenedDirectories = manifest.Dirs
                     .Select(d => new PreopenedDirectory(config, d))
                     .ToList();
+
+                // wasi-testsuite convention: each test creates/destroys
+                // scratch artifacts whose names match *.cleanup, and the
+                // harness must wipe leftovers from prior runs before
+                // each test (otherwise path_create_directory etc. fails
+                // with EEXIST). Spec: "*.cleanup files to be removed
+                // before testing".
+                foreach (var pre in config.PreopenedDirectories)
+                    CleanupResidue(pre.HostPath);
             }
 
             // Runtime operations run on a single worker thread so a hang
@@ -181,6 +199,27 @@ namespace Wacs.WASIp1.Test
                 return new Manifest();
             using var fs = File.OpenRead(path);
             return JsonSerializer.Deserialize<Manifest>(fs) ?? new Manifest();
+        }
+
+        private static void CleanupResidue(string hostDir)
+        {
+            try
+            {
+                if (!Directory.Exists(hostDir)) return;
+                foreach (var entry in Directory.EnumerateFileSystemEntries(
+                    hostDir, "*.cleanup", SearchOption.TopDirectoryOnly))
+                {
+                    try
+                    {
+                        if (Directory.Exists(entry))
+                            Directory.Delete(entry, recursive: true);
+                        else
+                            File.Delete(entry);
+                    }
+                    catch { /* best-effort */ }
+                }
+            }
+            catch { /* best-effort */ }
         }
 
         // argv[0] is conventionally the program name. Match the upstream

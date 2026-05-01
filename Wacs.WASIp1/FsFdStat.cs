@@ -77,19 +77,14 @@ namespace Wacs.WASIp1
                 return ErrNo.IO;
             }
 
-            // If it's a regular file with a FileStream, we can attempt to deduce some flags
+            // Start from the runtime-mutable flags the embedder/guest set
+            // via path_open or fd_fdstat_set_flags. Fold in any inferred
+            // bits the underlying FileStream can tell us about.
+            flags = fileDescriptor.Flags;
+
             if (fileDescriptor.Type == Filetype.RegularFile &&
                 fileDescriptor.Stream is FileStream fs)
             {
-                // For this minimal approach, interpret "can't timeout" as NonBlock
-                if (!fs.CanTimeout)
-                    flags |= FdFlags.NonBlock;
-
-                // If "Archive" attribute is set, interpret that as 'Append'
-                if ((attr & FileAttributes.Archive) == FileAttributes.Archive)
-                    flags |= FdFlags.Append;
-
-                // If the file is not async, interpret as "sync"
                 if (!fs.IsAsync)
                     flags |= FdFlags.Sync;
             }
@@ -116,7 +111,20 @@ namespace Wacs.WASIp1
         /// <returns>Returns ErrNo.Success if successful, otherwise an error code.</returns>
         public ErrNo FdFdstatSetFlags(ExecContext ctx, fd fd, FdFlags flags)
         {
-            return ErrNo.NotSup;
+            if (!GetFd(fd, out var fileDescriptor))
+                return ErrNo.NoEnt;
+
+            // Reject unknown bits.
+            const FdFlags known = FdFlags.Append | FdFlags.DSync |
+                                  FdFlags.NonBlock | FdFlags.RSync | FdFlags.Sync;
+            if ((flags & ~known) != 0)
+                return ErrNo.Inval;
+
+            // Append is honored by FdWrite/FdPwrite; the others are
+            // advisory in our synchronous backend (we accept and store
+            // them so fd_fdstat_get round-trips).
+            fileDescriptor.Flags = flags;
+            return ErrNo.Success;
         }
 
         /// <summary>
@@ -130,7 +138,20 @@ namespace Wacs.WASIp1
         /// <returns>Returns ErrNo.Success if successful, otherwise an error code.</returns>
         public ErrNo FdFdstatSetRights(ExecContext ctx, fd fd, Rights fs_rights_base, Rights fs_rights_inheriting)
         {
-            return ErrNo.NotSup;
+            if (!GetFd(fd, out var fileDescriptor))
+                return ErrNo.NoEnt;
+
+            // Spec: "can only be used to remove rights." Reject any bit
+            // the new request sets that the current set doesn't already
+            // grant; otherwise this becomes a privilege escalator.
+            if ((fs_rights_base & fileDescriptor.Rights) != fs_rights_base)
+                return ErrNo.NotCapable;
+            if ((fs_rights_inheriting & fileDescriptor.InheritedRights) != fs_rights_inheriting)
+                return ErrNo.NotCapable;
+
+            fileDescriptor.Rights = fs_rights_base;
+            fileDescriptor.InheritedRights = fs_rights_inheriting;
+            return ErrNo.Success;
         }
 
         /// <summary>
