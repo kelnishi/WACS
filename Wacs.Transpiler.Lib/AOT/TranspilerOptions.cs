@@ -74,6 +74,25 @@ namespace Wacs.Transpiler.AOT
         public DataSegmentStorage DataStorage { get; set; } = DataSegmentStorage.CompressedResource;
 
         /// <summary>
+        /// Optional override for the generated assembly's logical name
+        /// (i.e. the value of <c>Assembly.GetName().Name</c>). When null,
+        /// <c>ModuleTranspiler</c> appends a process-unique <c>_&lt;N&gt;</c>
+        /// suffix to the namespace + module name to avoid type collisions
+        /// across overlapping in-process transpilations — fine for the
+        /// `transpiler` runtime path but brittle for static linking.
+        ///
+        /// <para>When set, the transpiler uses this string verbatim and
+        /// skips the suffix. The matching saved <c>.dll</c> file should
+        /// be named <c>&lt;AssemblyName&gt;.dll</c> on disk so ILC's
+        /// resolver can find it via static <c>&lt;Reference&gt;</c> from
+        /// a NativeAOT consumer.</para>
+        ///
+        /// <para>Required for the wacs-aot whole-program build path; not
+        /// used by the in-process or load-via-AssemblyLoadContext paths.</para>
+        /// </summary>
+        public string? AssemblyName { get; set; }
+
+        /// <summary>
         /// GC type checking capabilities to enable in transpiled assemblies.
         /// Layer 0 (CLR inheritance) is always active. These flags enable additional layers.
         /// </summary>
