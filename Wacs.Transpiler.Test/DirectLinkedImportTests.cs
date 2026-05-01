@@ -668,6 +668,145 @@ namespace Wacs.Transpiler.Test
             public Tag Pick() => _v;
         }
 
+        // ====== Result<Unit, EmptyVariant> reduced fixture =========
+        // The wasi-hello gap: result<_, stream-error> direct-link
+        // crashes the verifier with InvalidProgramException because
+        // EmitResultArmStore doesn't dispatch into EmitVariantStoreAt
+        // for variant-base arms. This reduces to the smallest
+        // possible repro — Result<Unit, Tag> where Tag is a variant
+        // with NO payload-bearing cases (so the resource-payload
+        // path inside EmitVariantStoreAt is bypassed). If THIS
+        // direct-links cleanly, the variant-arm dispatch is sound
+        // and the wasi-hello gap is specifically about the resource-
+        // payload nesting.
+
+        [WitSource(@"interface flag-env",
+            Package = "my:test@1.0.0", Interface = "flag-env")]
+        public interface IFlagFactory
+        {
+            [WitSource(@"flag: func() -> result<_, tag>;",
+                Package = "my:test@1.0.0", Interface = "flag-env",
+                Item = "flag")]
+            Result<Unit, Tag> Flag();
+        }
+
+        public sealed class FlagBundle
+        {
+            public IFlagFactory FlagEnv { get; }
+            public FlagBundle(IFlagFactory f) { FlagEnv = f; }
+        }
+
+        private sealed class FixedFlag : IFlagFactory
+        {
+            private readonly Result<Unit, Tag> _v;
+            public FixedFlag(Result<Unit, Tag> v) { _v = v; }
+            public Result<Unit, Tag> Flag() => _v;
+        }
+
+        // ====== Result<Unit, Variant-with-primitive-payload> =====
+        // Next narrowing step toward wasi-hello's StreamError shape:
+        // variant Code { Ok, Count(u32), Max(u32) } already exists
+        // above. Test: Result<Unit, Code>.Err(Count(0x42)) should
+        // direct-link through the primitive-payload variant arm.
+
+        [WitSource(@"interface code-flag-env",
+            Package = "my:test@1.0.0", Interface = "code-flag-env")]
+        public interface ICodeFlagFactory
+        {
+            [WitSource(@"flag: func() -> result<_, code>;",
+                Package = "my:test@1.0.0", Interface = "code-flag-env",
+                Item = "flag")]
+            Result<Unit, Code> Flag();
+        }
+
+        public sealed class CodeFlagBundle
+        {
+            public ICodeFlagFactory CodeFlagEnv { get; }
+            public CodeFlagBundle(ICodeFlagFactory f) { CodeFlagEnv = f; }
+        }
+
+        private sealed class FixedCodeFlag : ICodeFlagFactory
+        {
+            private readonly Result<Unit, Code> _v;
+            public FixedCodeFlag(Result<Unit, Code> v) { _v = v; }
+            public Result<Unit, Code> Flag() => _v;
+        }
+
+        // ====== Result<Unit, Variant-with-resource-payload> ======
+        // The exact wasi-hello shape: variant arm with a case
+        // carrying a resource handle (own<R>). variant Issue {
+        //   Closed,                  // empty case
+        //   Failed(counter)          // resource payload
+        // }. Bundle returns Err(Failed(counter-instance)).
+
+        [WitSource(@"variant issue { closed, failed(counter) }",
+            Package = "my:test@1.0.0", Interface = "res-flag-env",
+            Item = "issue")]
+        public abstract class Issue
+        {
+            public sealed class IssueClosed : Issue { }
+            public sealed class IssueFailed : Issue
+            {
+                public ICounter Value { get; }
+                public IssueFailed(ICounter v) { Value = v; }
+            }
+        }
+
+        [WitSource(@"interface res-flag-env",
+            Package = "my:test@1.0.0", Interface = "res-flag-env")]
+        public interface IIssueFlagFactory
+        {
+            [WitSource(@"flag: func() -> result<_, issue>;",
+                Package = "my:test@1.0.0", Interface = "res-flag-env",
+                Item = "flag")]
+            Result<Unit, Issue> Flag();
+        }
+
+        public sealed class IssueFlagBundle
+        {
+            public IIssueFlagFactory ResFlagEnv { get; }
+            public IssueFlagBundle(IIssueFlagFactory f) { ResFlagEnv = f; }
+        }
+
+        private sealed class FixedIssueFlag : IIssueFlagFactory
+        {
+            private readonly Result<Unit, Issue> _v;
+            public FixedIssueFlag(Result<Unit, Issue> v) { _v = v; }
+            public Result<Unit, Issue> Flag() => _v;
+        }
+
+        // ====== Resource method returning Result<Unit, Variant> ====
+        // The exact wasi-hello shape: a resource INSTANCE method
+        // ([method]X.foo) that takes byte[] and returns
+        // Result<Unit, Variant-with-resource-payload>.
+        // Wire: [handle, ptr, len, retArea] (4 i32) → no return.
+
+        [WitSource(@"resource flagger { write: func(contents: list<u8>) -> result<_, issue>; }",
+            Package = "my:test@1.0.0", Interface = "res-method-flag-env",
+            Item = "flagger")]
+        public interface IFlagger
+        {
+            [WitSource(@"write: func(contents: list<u8>) -> result<_, issue>;",
+                Package = "my:test@1.0.0", Interface = "res-method-flag-env",
+                Item = "flagger.write")]
+            Result<Unit, Issue> Write(byte[] contents);
+        }
+
+        public sealed class FlaggerBundle
+        {
+            // Empty bundle — the flagger is a resource, so dispatch
+            // goes through ctx.Resources.GetResource not the bundle
+            // properties. Convention requires a bundle nonetheless.
+            public FlaggerBundle() { }
+        }
+
+        private sealed class FakeFlagger : IFlagger
+        {
+            private readonly Result<Unit, Issue> _v;
+            public FakeFlagger(Result<Unit, Issue> v) { _v = v; }
+            public Result<Unit, Issue> Write(byte[] contents) => _v;
+        }
+
         // ====== Variant return with payload-bearing cases ========
         // variant code { ok, count(u32), max(u32) }: 1 disc + 1
         // u32 joined-flat payload slot (4 bytes payload aligned at
@@ -2426,6 +2565,226 @@ namespace Wacs.Transpiler.Test
             0x0E, 0x00,
             0x41, 0x10, 0x10, 0x00,
             0x41, 0x10, 0x28, 0x02, 0x00,
+            0x2D, 0x00, 0x00,
+            0x0B,
+        };
+
+        // Result<Unit, Tag> reduced fixture (the wasi-hello variant
+        // arm gap, narrowed). Wasm calls `flag(retArea=0)` then
+        // returns memory[4] (the Tag variant disc, after the Result
+        // disc at memory[0]).
+        //
+        // Bundle returns Result<Unit, Tag>.Err(new Tag.TagBar()).
+        // Direct-link should: write 1 at retArea[0] (Result disc =
+        // Err), then write 1 at retArea[4] (variant disc = TagBar
+        // index). Reading memory[4] should yield 1.
+        private static byte[] BuildResultUnitVariantReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types
+            //   0: (i32) → void          [imp(retArea)]
+            //   1: () → i32              [call_flag()]
+            // size = count(1) + type0(4) + type1(4) = 9 = 0x09
+            0x01, 0x09, 0x02,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // module: "my:test/flag-env@1.0.0" (22)
+            // entity: "flag" (4)
+            // size = 1 + 1 + 22 + 1 + 4 + 2 = 31 = 0x1F
+            0x02, 0x1F, 0x01,
+            0x16,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x66, 0x6C, 0x61, 0x67, 0x2D, 0x65, 0x6E, 0x76,
+            0x40, 0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x04, 0x66, 0x6C, 0x61, 0x67,
+            0x00, 0x00,
+            // Function section: 1 func of type 1
+            0x03, 0x02, 0x01, 0x01,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export section: 1 export ("call_flag" → func 1)
+            // size = 1 + 1+9+1+1 = 13 = 0x0D
+            0x07, 0x0D, 0x01,
+            0x09, 0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x66, 0x6C, 0x61, 0x67, 0x00, 0x01,
+            // Code section: 1 body
+            // body: locals(1) + i32.const 0(2) + call(2) +
+            //       i32.const 4(2) + i32.load8_u align=0 offset=0(3) +
+            //       end(1) = 11
+            // size = 1 + 1 + 11 = 13 = 0x0D
+            0x0A, 0x0D, 0x01,
+            0x0B,
+            0x00,
+            0x41, 0x00,
+            0x10, 0x00,
+            0x41, 0x04,
+            0x2D, 0x00, 0x00,
+            0x0B,
+        };
+
+        // Result<Unit, Code> where Code is variant{Ok, Count(u32),
+        // Max(u32)}. Layout: Result disc @0, Code @4 (Code disc @4,
+        // u32 payload @8). Wasm calls flag(retArea=0), returns
+        // i32.load at memory[8] (the Count payload value).
+        // Module: my:test/code-flag-env@1.0.0, entity: flag
+        private static byte[] BuildResultUnitCodeReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types
+            //   0: (i32) → void          [imp(retArea)]
+            //   1: () → i32              [call_flag()]
+            // size = count(1) + type0(4) + type1(4) = 9 = 0x09
+            0x01, 0x09, 0x02,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // module: "my:test/code-flag-env@1.0.0" (27)
+            // entity: "flag" (4)
+            // size = 1 + 1 + 27 + 1 + 4 + 2 = 36 = 0x24
+            0x02, 0x24, 0x01,
+            0x1B,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x63, 0x6F, 0x64, 0x65, 0x2D, 0x66, 0x6C, 0x61,
+            0x67, 0x2D, 0x65, 0x6E, 0x76, 0x40, 0x31, 0x2E,
+            0x30, 0x2E, 0x30,
+            0x04, 0x66, 0x6C, 0x61, 0x67,
+            0x00, 0x00,
+            // Function section: 1 func of type 1
+            0x03, 0x02, 0x01, 0x01,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export section: 1 export ("call_flag" → func 1)
+            // size = 1 + 1+9+1+1 = 13 = 0x0D
+            0x07, 0x0D, 0x01,
+            0x09, 0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x66, 0x6C, 0x61, 0x67, 0x00, 0x01,
+            // Code section: 1 body
+            // body: locals(1) + i32.const 0(2) + call(2) +
+            //       i32.const 8(2) + i32.load align=2 offset=0(3) +
+            //       end(1) = 11
+            // size = 1 + 1 + 11 = 13 = 0x0D
+            0x0A, 0x0D, 0x01,
+            0x0B,
+            0x00,
+            0x41, 0x00,
+            0x10, 0x00,
+            0x41, 0x08,
+            0x28, 0x02, 0x00,
+            0x0B,
+        };
+
+        // Result<Unit, Issue> where Issue is variant{Closed,
+        // Failed(counter)}. Layout: Result disc @0, Issue @4
+        // (Issue disc @4, handle @8). Wasm calls flag(retArea=0),
+        // returns i32.load at memory[8] (the handle).
+        // Module: my:test/res-flag-env@1.0.0, entity: flag
+        private static byte[] BuildResultUnitIssueReturnFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types
+            //   0: (i32) → void          [imp(retArea)]
+            //   1: () → i32              [call_flag()]
+            // size = count(1) + type0(4) + type1(4) = 9 = 0x09
+            0x01, 0x09, 0x02,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // module: "my:test/res-flag-env@1.0.0" (26)
+            // entity: "flag" (4)
+            // size = 1 + 1 + 26 + 1 + 4 + 2 = 35 = 0x23
+            0x02, 0x23, 0x01,
+            0x1A,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x72, 0x65, 0x73, 0x2D, 0x66, 0x6C, 0x61, 0x67,
+            0x2D, 0x65, 0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30,
+            0x2E, 0x30,
+            0x04, 0x66, 0x6C, 0x61, 0x67,
+            0x00, 0x00,
+            // Function section: 1 func of type 1
+            0x03, 0x02, 0x01, 0x01,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export section: 1 export ("call_flag" → func 1)
+            // size = 1 + 1+9+1+1 = 13 = 0x0D
+            0x07, 0x0D, 0x01,
+            0x09, 0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x66, 0x6C, 0x61, 0x67, 0x00, 0x01,
+            // Code section: 1 body
+            // body: locals(1) + i32.const 0(2) + call(2) +
+            //       i32.const 8(2) + i32.load align=2 offset=0(3) +
+            //       end(1) = 11
+            // size = 1 + 1 + 11 = 13 = 0x0D
+            0x0A, 0x0D, 0x01,
+            0x0B,
+            0x00,
+            0x41, 0x00,
+            0x10, 0x00,
+            0x41, 0x08,
+            0x28, 0x02, 0x00,
+            0x0B,
+        };
+
+        // [method]flagger.write fixture — exact wasi-hello shape.
+        // Wire: write(handle, ptr, len, retArea) -> ()
+        // Wasm guest:
+        //   1. Pre-store byte[] "hi" at memory[100..102]
+        //   2. Allocate a Flagger resource via host (mocked: handle 0)
+        //   3. call write(handle=0, ptr=100, len=2, retArea=0)
+        //   4. Return memory[8] (the variant disc inside the Result Err arm)
+        // Module: my:test/res-method-flag-env@1.0.0, entity: [method]flagger.write
+        private static byte[] BuildResMethodResUnitIssueFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types
+            //   0: (i32 i32 i32 i32) → void   [imp(handle,ptr,len,retArea)]
+            //   1: () → i32                    [call_write()]
+            // size = count(1) + type0(7) + type1(4) = 12 = 0x0C
+            0x01, 0x0C, 0x02,
+            0x60, 0x04, 0x7F, 0x7F, 0x7F, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // module: "my:test/res-method-flag-env@1.0.0" (33)
+            // entity: "[method]flagger.write" (21)
+            // size = 1 + 1 + 33 + 1 + 21 + 2 = 59 = 0x3B
+            0x02, 0x3B, 0x01,
+            0x21,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x72, 0x65, 0x73, 0x2D, 0x6D, 0x65, 0x74, 0x68,
+            0x6F, 0x64, 0x2D, 0x66, 0x6C, 0x61, 0x67, 0x2D,
+            0x65, 0x6E, 0x76, 0x40, 0x31, 0x2E, 0x30, 0x2E,
+            0x30,
+            0x15,
+            0x5B, 0x6D, 0x65, 0x74, 0x68, 0x6F, 0x64, 0x5D,
+            0x66, 0x6C, 0x61, 0x67, 0x67, 0x65, 0x72, 0x2E,
+            0x77, 0x72, 0x69, 0x74, 0x65,
+            0x00, 0x00,
+            // Function section: 1 func of type 1
+            0x03, 0x02, 0x01, 0x01,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export section: 1 export ("call_write" → func 1)
+            // size = 1 + 1+10+1+1 = 14 = 0x0E
+            0x07, 0x0E, 0x01,
+            0x0A, 0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x77, 0x72, 0x69, 0x74, 0x65, 0x00, 0x01,
+            // Code section: 1 body
+            // body: locals(1) +
+            //   i32.const 0     (handle, 2)
+            //   i32.const 100   (ptr, 3 bytes signed LEB128: 0xE4 0x00)
+            //   i32.const 2     (len, 2)
+            //   i32.const 0     (retArea, 2)
+            //   call 0          (2)
+            //   i32.const 8     (load addr, 2)
+            //   i32.load8_u align=0 offset=0 (3)
+            //   end (1)
+            //   = 18
+            // size = 1 + 1 + 18 = 20 = 0x14
+            0x0A, 0x14, 0x01,
+            0x12,
+            0x00,
+            0x41, 0x00,
+            0x41, 0xE4, 0x00,
+            0x41, 0x02,
+            0x41, 0x00,
+            0x10, 0x00,
+            0x41, 0x08,
             0x2D, 0x00, 0x00,
             0x0B,
         };
@@ -8197,6 +8556,319 @@ namespace Wacs.Transpiler.Test
             Assert.NotNull(capturing.Captured);
             Assert.Equal(new[] { "hi", "hello" },
                 capturing.Captured);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_ResultUnitVariantReturn_VariantArmStores()
+        {
+            // Reduced wasi-hello: result<_, tag> where tag is a
+            // variant with 3 empty cases (no payloads). Bundle
+            // returns Err(TagBar=case 1). Direct-link should write
+            //   retArea[0] = 1   (Result disc = Err)
+            //   retArea[4] = 1   (variant disc = TagBar index)
+            //
+            // Wasm export reads memory[4] and returns it. Expected
+            // result: 1 (TagBar's index in the cases).
+            //
+            // If this passes, the variant-arm dispatch in
+            // EmitResultArmStore + EmitVariantStoreAt is sound, and
+            // the wasi-hello InvalidProgramException is specifically
+            // about the resource-handle-payload nested in the variant
+            // arm. If this fails the same way, the bug is in the
+            // basic recursion.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/flag-env@1.0.0", "flag"),
+                _ => throw new InvalidOperationException(
+                    "stub for flag must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildResultUnitVariantReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IFlagFactory).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(FlagBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/flag-env@1.0.0", "flag", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.ResUnitVar", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+
+            // The binding must have been picked up by the resolver
+            // — that means CanEmitDirect approved Result<Unit, Tag>.
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_flag_env_1_0_0_flag"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for flag must not be "
+                            + "invoked — direct-link should bypass it"),
+                });
+
+            var bundle = new FlagBundle(new FixedFlag(
+                Result<Unit, Tag>.FromErr(new Tag.TagBar())));
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+
+            var callFlag = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_flag"))!;
+            object? raw = callFlag.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<int>(raw);
+            // memory[4] = TagBar's index (1).
+            Assert.Equal(1, (int)raw);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_ResultUnitVariantPrimitivePayload_VariantArmStores()
+        {
+            // Next narrowing: Result<Unit, Code> where Code is
+            // variant{Ok, Count(u32), Max(u32)}. Bundle returns
+            // Err(Count(0x42)). Expected layout:
+            //   retArea[0] = 1   (Result disc = Err)
+            //   retArea[4] = 1   (Code disc = Count)
+            //   retArea[8..11] = 0x42  (u32 payload)
+            // Wasm reads memory[8] as i32 → expected 0x42.
+            //
+            // If this passes, primitive-payload variant arms work.
+            // The remaining wasi-hello gap is then specifically the
+            // resource-handle variant payload case.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/code-flag-env@1.0.0", "flag"),
+                _ => throw new InvalidOperationException(
+                    "stub for flag must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildResultUnitCodeReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(ICodeFlagFactory).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(CodeFlagBundle));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/code-flag-env@1.0.0", "flag", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.ResUnitCode", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_code_flag_env_1_0_0_flag"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for flag must not be invoked"),
+                });
+
+            var bundle = new CodeFlagBundle(new FixedCodeFlag(
+                Result<Unit, Code>.FromErr(new Code.CodeCount(0x42u))));
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle })!;
+
+            var callFlag = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_flag"))!;
+            object? raw = callFlag.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<int>(raw);
+            Assert.Equal(0x42, (int)raw);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_ResultUnitVariantResourcePayload_VariantArmStores()
+        {
+            // The exact wasi-hello shape: Result<Unit, Issue>
+            // where Issue.Failed carries an own<counter>. Bundle
+            // returns Err(Failed(counter-instance)). Direct-link
+            // should:
+            //   retArea[0] = 1   (Result disc = Err)
+            //   retArea[4] = 1   (Issue disc = Failed)
+            //   retArea[8..11] = handle (allocated by Resources.AllocateResource)
+            // Wasm reads memory[8] as i32. Since this is the first
+            // resource we allocate in the test's fresh ResourceContext,
+            // the handle should be 0 — but specifically NON-NEGATIVE
+            // (a real allocated handle, not a stub return value).
+            //
+            // If THIS passes, wasi-hello's BlockingWriteAndFlush
+            // direct-link should also work (same shape, different
+            // resource type).
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/res-flag-env@1.0.0", "flag"),
+                _ => throw new InvalidOperationException(
+                    "stub for flag must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildResultUnitIssueReturnFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IIssueFlagFactory).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(IssueFlagBundle),
+                resourcesType: typeof(TestResources));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/res-flag-env@1.0.0", "flag", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.ResUnitIssue", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_res_flag_env_1_0_0_flag"] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for flag must not be invoked"),
+                });
+
+            var resources = new TestResources();
+            var bundle = new IssueFlagBundle(new FixedIssueFlag(
+                Result<Unit, Issue>.FromErr(
+                    new Issue.IssueFailed(new FakeCounter(0u)))));
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            var callFlag = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_flag"))!;
+            object? raw = callFlag.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<int>(raw);
+            // Non-negative handle proves AllocateResource was called.
+            Assert.True((int)raw >= 0,
+                "Expected non-negative handle, got " + (int)raw);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_ResMethodResultUnitVariantResourcePayload_VariantArmStores()
+        {
+            // The TRUE wasi-hello shape: [method]flagger.write
+            // (resource INSTANCE method) returning Result<Unit,
+            // Issue> where Issue.Failed has resource payload.
+            // Wire: (i32 handle, i32 ptr, i32 len, i32 retArea) → ()
+            // CLR: Result<Unit, Issue> Write(byte[] contents)
+            //
+            // Bundle is empty (Flagger is a resource, dispatch via
+            // ctx.Resources). Pre-allocate a Flagger so handle 0
+            // resolves. Bundle returns Err(Failed(counter)) →
+            //   retArea[0] = 1 (Result disc)
+            //   retArea[4] = 1 (Issue disc = Failed)
+            //   retArea[8] = handle (allocated for the ICounter)
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int, int, int, int>>(
+                ("my:test/res-method-flag-env@1.0.0",
+                    "[method]flagger.write"),
+                (_, _, _, _) => throw new InvalidOperationException(
+                    "stub for write must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildResMethodResUnitIssueFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IFlagger).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(FlaggerBundle),
+                resourcesType: typeof(TestResources));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/res-method-flag-env@1.0.0",
+                "[method]flagger.write", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.ResMethodResUnitIssue", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_res_method_flag_env_1_0_0__method_flagger_write"]
+                        = _ => throw new InvalidOperationException(
+                            "IImports stub must not be invoked"),
+                });
+
+            // Pre-register the Flagger resource at handle 0 so the
+            // wasm fixture's hard-coded handle resolves.
+            var resources = new TestResources();
+            resources.Register(typeof(IFlagger), 0,
+                new FakeFlagger(Result<Unit, Issue>.FromErr(
+                    new Issue.IssueFailed(new FakeCounter(0u)))));
+
+            var bundle = new FlaggerBundle();
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            var callWrite = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_write"))!;
+            object? raw = callWrite.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<int>(raw);
+            // memory[8] = Issue.Failed disc (case 1).
+            Assert.Equal(1, (int)raw);
         }
 
         [Fact]

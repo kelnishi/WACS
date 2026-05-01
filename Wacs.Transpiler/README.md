@@ -854,17 +854,14 @@ dispatches through it.
   segments with non-i31 payloads) throw `NotSupportedException` from
   the codec at transpile time. Most modules — including CoreMark,
   typical emscripten/rustc output, and the spec suite — don't hit this.
-- **`Result<Unit, Variant>` return falls back to delegate dispatch**
-  when the variant arm has resource-handle payloads. The
-  `IsResultArmStorable` recognition + `EmitResultArmStore` recursion
-  through `EmitVariantStoreAt` produced an `InvalidProgramException`
-  in v0 attempts and needs a focused IL-debugging session to fix.
-  Concretely this means `wasi-hello-component`'s
-  `[method]output-stream.blocking-write-and-flush`
-  (signature `result<_, stream-error>`) silently no-ops through the
-  bundle path — the get-stdout + handle allocation work, but the
-  write itself doesn't reach `HostStream.BlockingWriteAndFlush`.
-  `Result<Unit, primitive>` still direct-links via the Unit-arm fix.
+- **Resource constructors with `Result<,>` return** still fall back
+  to the delegate path. Resource INSTANCE methods returning
+  aggregates work end-to-end (verified via wasi-hello-component's
+  `[method]output-stream.blocking-write-and-flush` printing
+  `hello\n` through the bundle). Constructors with aggregate-shaped
+  returns are uncommon (the wasm wire result is the i32 handle for
+  the constructed instance — wrapping that in a Result is a future
+  WIT shape).
 
 ## License
 
