@@ -28,10 +28,11 @@ namespace Wacs.Console.Verbs
             + "auto-detects via the layer header byte.")]
         public IEnumerable<string> Files { get; set; } = new List<string>();
 
-        [Option('o', "output", Required = true, HelpText =
-            "Output .dll path. With multiple inputs, this is the "
-            + "path for the LAST input; siblings land at "
-            + "<basename>.dll alongside.")]
+        [Option('o', "output", HelpText =
+            "Output .dll path. Omit (or pass a directory) to default to "
+            + "<inputBasename>.dll alongside the input. With multiple "
+            + "inputs, this is the path for the LAST input; siblings land "
+            + "at <basename>.dll alongside.")]
         public string Output { get; set; } = "";
 
         [Option("namespace", Default = "CompiledWasm", HelpText =
@@ -41,6 +42,23 @@ namespace Wacs.Console.Verbs
         [Option('m', "module", Default = "WasmModule", HelpText =
             "Name of the generated Module class.")]
         public string ModuleName { get; set; } = "WasmModule";
+
+        [Option("assembly-name", HelpText =
+            "Override the generated assembly's logical name. When set, "
+            + "skips the default `<namespace>.<module>_<uniqueId>` scheme. "
+            + "Required for the wacs-aot whole-program build path so "
+            + "ILC's resolver can find the .dll via static <Reference>; "
+            + "the on-disk filename should also be <assemblyname>.dll.")]
+        public string AssemblyName { get; set; } = "";
+
+        [Option("emission", Default = "standard", HelpText =
+            "Module ctor emission shape: standard (codec-encoded init "
+            + "data, works for in-process and cross-process load) or "
+            + "aot-linked (direct ThinContext construction, no codec "
+            + "wrapper, dead-strippable from a NativeAOT consumer's "
+            + "binary). aot-linked currently supports compute-only "
+            + "modules; coverage will grow.")]
+        public string Emission { get; set; } = "standard";
 
         // ---- Host packages / bindings ----
 
