@@ -4,7 +4,9 @@
 // Not rigorous (no BenchmarkDotNet, no warmup stabilization past a single call,
 // no GC forcing). Rough first-order numbers to guide generator work.
 
+using System;
 using System.Diagnostics;
+using System.IO;
 using Wacs.Core;
 using Wacs.Core.Runtime;
 

@@ -1,0 +1,6 @@
+package local:term;
+world demo {
+    import wasi:cli/terminal-stdin@0.2.3;
+    import wasi:cli/terminal-input@0.2.3;
+    export check: func() -> u32;
+}

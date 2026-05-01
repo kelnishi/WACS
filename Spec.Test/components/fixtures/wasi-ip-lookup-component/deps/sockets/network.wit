@@ -1,0 +1,11 @@
+package wasi:sockets@0.2.3;
+interface network {
+    enum error-code { unknown }
+    type ipv4-address = tuple<u8, u8, u8, u8>;
+    type ipv6-address = tuple<u16, u16, u16, u16, u16, u16, u16, u16>;
+    variant ip-address {
+        ipv4(ipv4-address),
+        ipv6(ipv6-address),
+    }
+    resource network;
+}

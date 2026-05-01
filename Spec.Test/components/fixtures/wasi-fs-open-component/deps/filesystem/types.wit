@@ -1,0 +1,22 @@
+package wasi:filesystem@0.2.3;
+interface types {
+    enum error-code { unknown }
+    flags path-flags { symlink-follow }
+    flags open-flags { create, directory, exclusive, truncate }
+    flags descriptor-flags {
+        read,
+        write,
+        file-integrity-sync,
+        data-integrity-sync,
+        requested-write-sync,
+        mutate-directory,
+    }
+    resource descriptor {
+        open-at: func(
+            path-flags: path-flags,
+            path: string,
+            open-flags: open-flags,
+            descriptor-flags: descriptor-flags,
+        ) -> result<descriptor, error-code>;
+    }
+}

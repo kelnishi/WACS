@@ -1,0 +1,4 @@
+package local:ad;
+world ad {
+    export add: func(x: u32, y: u32) -> u32;
+}

@@ -1,0 +1,8 @@
+package wasi:io@0.2.3;
+interface streams {
+    variant stream-error { last-operation-failed, closed }
+    resource input-stream;
+    resource output-stream {
+        splice: func(src: borrow<input-stream>, len: u64) -> result<u64, stream-error>;
+    }
+}

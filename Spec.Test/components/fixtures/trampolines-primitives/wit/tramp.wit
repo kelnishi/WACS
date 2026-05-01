@@ -1,0 +1,7 @@
+package local:tramp;
+interface ops {
+    add: func(a: u32, b: u32) -> u32;
+    square: func(n: s32) -> s32;
+    ping: func();
+}
+world tramp-world { export ops; }

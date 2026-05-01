@@ -1,0 +1,12 @@
+package local:iop;
+
+interface env {
+    get-pid: func() -> u32;
+    set-level: func(level: u8);
+    add: func(a: u32, b: u32) -> u32;
+    noop: func();
+}
+
+world iop-world {
+    import env;
+}

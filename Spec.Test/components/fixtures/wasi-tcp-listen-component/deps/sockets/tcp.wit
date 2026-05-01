@@ -1,0 +1,11 @@
+package wasi:sockets@0.2.3;
+interface tcp {
+    enum error-code { unknown }
+    enum shutdown-type { receive, send, both }
+    resource tcp-socket {
+        finish-bind: func() -> result<_, error-code>;
+        start-listen: func() -> result<_, error-code>;
+        finish-listen: func() -> result<_, error-code>;
+        shutdown: func(how: shutdown-type) -> result<_, error-code>;
+    }
+}

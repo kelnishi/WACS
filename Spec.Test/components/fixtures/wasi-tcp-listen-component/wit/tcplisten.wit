@@ -1,0 +1,8 @@
+package local:tcplisten;
+world demo {
+    import wasi:sockets/tcp@0.2.3;
+    /// Walks the bind/listen lifecycle: finish-bind →
+    /// start-listen → finish-listen → shutdown(both). Returns
+    /// the sum of outer-disc bytes (always-Ok = 0).
+    export ask-listen: func(handle: u32) -> u32;
+}

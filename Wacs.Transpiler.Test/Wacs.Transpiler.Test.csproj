@@ -24,9 +24,15 @@
 
     <ItemGroup>
       <ProjectReference Include="..\Wacs.Core\Wacs.Core.csproj" />
+      <ProjectReference Include="..\Wacs.ComponentModel\Wacs.ComponentModel.csproj" />
       <ProjectReference Include="..\Wacs.Transpiler.Lib\Wacs.Transpiler.Lib.csproj" />
       <ProjectReference Include="..\Wacs.Transpiler\Wacs.Transpiler.csproj" />
       <ProjectReference Include="..\Spec.Test.Data\Spec.Test.Data.csproj" />
+      <!-- Reference the production WASI host package + its DI
+           extensions so the resolver-compat tests probe the real
+           bundle / typed interfaces a guest would target. -->
+      <ProjectReference Include="..\Wacs.WASI.Preview2\Wacs.WASI.Preview2.csproj" />
+      <ProjectReference Include="..\Wacs.WASI.Preview2.DependencyInjection\Wacs.WASI.Preview2.DependencyInjection.csproj" />
     </ItemGroup>
 
     <ItemGroup>

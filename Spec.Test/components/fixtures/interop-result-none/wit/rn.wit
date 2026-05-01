@@ -1,0 +1,5 @@
+package local:rn;
+interface env {
+    ping: func() -> result;
+}
+world rn-world { import env; }

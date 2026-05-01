@@ -1,0 +1,10 @@
+package local:res2;
+interface env {
+    resource counter {
+        constructor(initial: u32);
+        from-bytes: static func(data: u32) -> counter;
+        get: func() -> u32;
+        increment: func();
+    }
+}
+world res2-world { import env; }

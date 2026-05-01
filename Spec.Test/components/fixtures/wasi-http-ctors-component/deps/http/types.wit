@@ -1,0 +1,13 @@
+package wasi:http@0.2.3;
+interface types {
+    resource fields;
+    resource request-options {
+        constructor();
+    }
+    resource outgoing-request {
+        constructor(headers: own<fields>);
+    }
+    resource outgoing-response {
+        constructor(headers: own<fields>);
+    }
+}

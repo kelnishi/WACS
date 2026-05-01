@@ -64,6 +64,7 @@ namespace Wacs.Transpiler.AOT
         private readonly DataSegmentEmitter? _dataEmitter;
         private readonly int _dataSegmentBaseId;
         private readonly int _elemSegmentBaseId;
+        private readonly TranspilerOptions? _options;
         private int _initDataId = -1;
         public int InitDataId => _initDataId;
 
@@ -78,7 +79,8 @@ namespace Wacs.Transpiler.AOT
             DataSegmentEmitter? dataEmitter = null,
             int dataSegmentBaseId = 0,
             int elemSegmentBaseId = 0,
-            FunctionType[]? allFunctionTypes = null)
+            FunctionType[]? allFunctionTypes = null,
+            TranspilerOptions? options = null)
         {
             _moduleBuilder = moduleBuilder;
             _namespace = @namespace;
@@ -94,6 +96,40 @@ namespace Wacs.Transpiler.AOT
             _dataSegmentBaseId = dataSegmentBaseId;
             _elemSegmentBaseId = elemSegmentBaseId;
             _allFunctionTypes = allFunctionTypes ?? Array.Empty<FunctionType>();
+            _options = options;
+        }
+
+        // True when the resolver matched at least one of this module's
+        // imports — the generated ctor needs a trailing `object hostBundle`
+        // param so the consumer can supply the typed-interface aggregate
+        // the direct-linked IL dispatches through.
+        private bool HasResolverBindings =>
+            _options?.ResolverImportBindings != null
+            && _options.ResolverImportBindings.Count > 0;
+
+        // True when the generated IL might dispatch into the
+        // resources lookup machinery — either because some binding
+        // is a [method]/[constructor] resource shape, or because
+        // the resolver knows about typed resource interfaces that
+        // could appear as own<R>/borrow<R> params on free functions.
+        // Adds an additional `object resources` ctor param.
+        private bool HasResourceBindings
+        {
+            get
+            {
+                var b = _options?.ResolverImportBindings;
+                if (b == null) return false;
+                var resolver = _options?.Resolver;
+                // Resolver knows about resource interfaces and has a
+                // resources type to dispatch through — even free-fn
+                // bindings might need it for own<R> params.
+                if (resolver?.PreferredResourcesType != null
+                    && resolver.ResourceInterfaceTypes.Count > 0)
+                    return true;
+                foreach (var kv in b)
+                    if (kv.Value.IsResourceMethod) return true;
+                return false;
+            }
         }
 
         /// <summary>
@@ -618,17 +654,46 @@ namespace Wacs.Transpiler.AOT
 
         private void EmitConstructor(FieldBuilder ctxField)
         {
-            var ctorParams = _interfaces.ImportsInterface != null
-                ? new[] { _interfaces.ImportsInterface }
-                : Type.EmptyTypes;
+            // ctor signature, in order:
+            //   [0] (implicit) this
+            //   [1] IImports imports          — when ImportsInterface != null
+            //   [2 or 1] object hostBundle    — when HasResolverBindings
+            //   [3 / 2 / 1] object resources  — when HasResourceBindings
+            // Bundle and resources are appended LAST so the existing
+            // (IImports)-only ctor shape stays binary-compatible for
+            // consumers that don't use direct linking.
+            var ctorParamList = new List<Type>();
+            if (_interfaces.ImportsInterface != null)
+                ctorParamList.Add(_interfaces.ImportsInterface);
+            if (HasResolverBindings)
+                ctorParamList.Add(typeof(object));
+            if (HasResourceBindings)
+                ctorParamList.Add(typeof(object));
+            var ctorParams = ctorParamList.ToArray();
 
             var ctor = ModuleType!.DefineConstructor(
                 MethodAttributes.Public,
                 CallingConventions.Standard,
                 ctorParams);
 
+            int paramOrdinal = 1;
             if (_interfaces.ImportsInterface != null)
-                ctor.DefineParameter(1, ParameterAttributes.None, "imports");
+                ctor.DefineParameter(paramOrdinal++,
+                    ParameterAttributes.None, "imports");
+            int bundleArgOrdinal = -1;
+            if (HasResolverBindings)
+            {
+                bundleArgOrdinal = paramOrdinal;
+                ctor.DefineParameter(paramOrdinal++,
+                    ParameterAttributes.None, "hostBundle");
+            }
+            int resourcesArgOrdinal = -1;
+            if (HasResourceBindings)
+            {
+                resourcesArgOrdinal = paramOrdinal;
+                ctor.DefineParameter(paramOrdinal++,
+                    ParameterAttributes.None, "resources");
+            }
 
             var il = ctor.GetILGenerator();
 
@@ -669,8 +734,35 @@ namespace Wacs.Transpiler.AOT
                 EmitImportDelegateWiring(il, ctxLocal);
             }
 
+            // === Stash the host-package bundle onto ctx.HostBundle ===
+            // Direct-linked import IL reads this field and dispatches
+            // through it instead of ImportDelegates[]. Slots in
+            // ImportDelegates for resolver-handled imports stay wired
+            // to the IImports stubs but the IL never reads them.
+            if (bundleArgOrdinal >= 0)
+            {
+                il.Emit(OpCodes.Ldloc, ctxLocal);
+                il.Emit(OpCodes.Ldarg, bundleArgOrdinal);
+                il.Emit(OpCodes.Stfld, typeof(ThinContext).GetField(
+                    nameof(ThinContext.HostBundle))!);
+            }
+            if (resourcesArgOrdinal >= 0)
+            {
+                il.Emit(OpCodes.Ldloc, ctxLocal);
+                il.Emit(OpCodes.Ldarg, resourcesArgOrdinal);
+                il.Emit(OpCodes.Stfld, typeof(ThinContext).GetField(
+                    nameof(ThinContext.Resources))!);
+            }
+
             // === Populate FuncTable ===
             EmitFuncTablePopulation(il, ctxLocal);
+
+            // === Cache cabi_realloc delegate, if exported ===
+            // Aggregate-RETURN emit (string / list<T>) needs a
+            // typed Func<int,int,int,int,int> reference to the
+            // component's cabi_realloc export. Cache once at
+            // ctor time so each return site is just a field load.
+            EmitCabiReallocCacheIfPresent(il, ctxLocal);
 
             // === Bind delegates into table elements ===
             // After FuncTable is populated, walk tables and replace raw funcref
@@ -745,6 +837,40 @@ namespace Wacs.Transpiler.AOT
 
                 il.Emit(OpCodes.Stelem_Ref);
             }
+        }
+
+        /// <summary>
+        /// If the module exports `cabi_realloc`, cache its typed
+        /// delegate on <c>ctx.CabiRealloc</c>. The funcIdx is
+        /// known at transpile time; the IL just casts the
+        /// matching FuncTable entry to
+        /// <c>Func&lt;int,int,int,int,int&gt;</c>.
+        /// </summary>
+        private void EmitCabiReallocCacheIfPresent(ILGenerator il,
+            LocalBuilder ctxLocal)
+        {
+            int? cabiFuncIdx = null;
+            foreach (var ex in _interfaces.ExportMethods)
+            {
+                if (ex.WasmName == "cabi_realloc")
+                {
+                    cabiFuncIdx = ex.FuncIndex;
+                    break;
+                }
+            }
+            if (cabiFuncIdx == null) return;
+
+            // ctx.CabiRealloc = (Func<int,int,int,int,int>) ctx.FuncTable[cabiFuncIdx]
+            il.Emit(OpCodes.Ldloc, ctxLocal);
+            il.Emit(OpCodes.Ldloc, ctxLocal);
+            il.Emit(OpCodes.Ldfld, typeof(ThinContext).GetField(
+                nameof(ThinContext.FuncTable))!);
+            il.Emit(OpCodes.Ldc_I4, cabiFuncIdx.Value);
+            il.Emit(OpCodes.Ldelem_Ref);
+            il.Emit(OpCodes.Castclass,
+                typeof(Func<int, int, int, int, int>));
+            il.Emit(OpCodes.Stfld, typeof(ThinContext).GetField(
+                nameof(ThinContext.CabiRealloc))!);
         }
 
         /// <summary>

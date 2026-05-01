@@ -20,11 +20,23 @@ namespace Wacs.Transpiler.Cli
     {
         // ---- I/O ----
 
-        [Option('i', "input", Required = true, HelpText = "Input .wasm file.")]
-        public string Input { get; set; } = "";
+        [Option('i', "input", Required = true, Min = 1, Separator = ',',
+            HelpText = "Input .wasm file(s). Repeat or comma-separate to "
+                + "transpile / interpret multiple modules. When more than one "
+                + "is supplied, the ModuleLinker composes them — module name "
+                + "for cross-module imports defaults to the file basename.")]
+        public IEnumerable<string> Inputs { get; set; } = System.Array.Empty<string>();
 
-        [Option('o', "output", Required = true, HelpText = "Output .dll path.")]
+        [Option('o', "output", Required = true,
+            HelpText = "Output .dll path. With multiple inputs, this is the path "
+                + "for the LAST input; siblings land at <basename>.dll alongside.")]
         public string Output { get; set; } = "";
+
+        [Option("engine", Default = "transpiler",
+            HelpText = "Execution engine: transpiler (compile to .NET assembly, "
+                + "default) or interpreter (parse + run in-process via the WACS "
+                + "interpreter, no .dll emitted).")]
+        public string Engine { get; set; } = "transpiler";
 
         [Option('n', "namespace", Default = "CompiledWasm",
             HelpText = "Root namespace for generated types.")]
@@ -83,6 +95,16 @@ namespace Wacs.Transpiler.Cli
         [Option("bind", Separator = ',',
             HelpText = "Path(s) to assemblies containing IBindable host libraries. The transpiler reflects each assembly, activates every concrete IBindable type with a parameterless ctor, and wires them into the runtime before transpilation. Repeat or comma-separate for multiple assemblies. Works with any library following the IBindable pattern (WASI, custom game hosts, etc.).")]
         public IEnumerable<string> Bind { get; set; } = System.Array.Empty<string>();
+
+        // ---- Component-mode host-package linking ----
+
+        [Option("host-package", Separator = ',',
+            HelpText = "Path(s) or assembly name(s) of host packages whose [WitSource]-tagged interfaces resolve a component's WASI/host imports at transpile time. Each guest call $import lowers to inline IL (typed callvirt) instead of routing through a runtime delegate table. Repeat or comma-separate for multiple packages. Component-mode only.")]
+        public IEnumerable<string> HostPackage { get; set; } = System.Array.Empty<string>();
+
+        [Option("wasip2",
+            HelpText = "Shorthand for `--host-package Wacs.WASI.Preview2`. Resolves a component's WASI Preview 2 imports against the typed interfaces shipped by the WACS host package. Component-mode only.")]
+        public bool Wasip2 { get; set; }
 
         [Value(0, MetaName = "args",
             HelpText = "Positional arguments forwarded to Program.Main when --run is set.")]

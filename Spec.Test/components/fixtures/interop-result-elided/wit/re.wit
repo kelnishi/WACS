@@ -1,0 +1,6 @@
+package local:re;
+interface env {
+    try-it: func(x: u32) -> result<_, u32>;
+    try-ok: func(x: u32) -> result<u32>;
+}
+world re-world { import env; }

@@ -1,0 +1,15 @@
+package wasi:http@0.2.3;
+interface types {
+    variant error-code { internal-error }
+    resource outgoing-request;
+    resource request-options;
+    resource future-incoming-response;
+}
+interface outgoing-handler {
+    use types.{outgoing-request, request-options,
+              future-incoming-response, error-code};
+    handle: func(
+        request: own<outgoing-request>,
+        options: option<own<request-options>>,
+    ) -> result<own<future-incoming-response>, error-code>;
+}

@@ -1,0 +1,14 @@
+package wasi:http@0.2.3;
+interface types {
+    type status-code = u16;
+    resource fields;
+    resource incoming-response {
+        status: func() -> status-code;
+        headers: func() -> fields;
+    }
+    resource outgoing-response {
+        status-code: func() -> status-code;
+        set-status-code: func(status-code: status-code)
+            -> result;
+    }
+}

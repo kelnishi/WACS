@@ -1,0 +1,5 @@
+package local:tup;
+interface env {
+    swap: func(p: tuple<u32, s32>) -> tuple<s32, u32>;
+}
+world tup-world { import env; }

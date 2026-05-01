@@ -1,0 +1,63 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>netstandard2.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <LangVersion>9</LangVersion>
+
+        <IsRoslynComponent>true</IsRoslynComponent>
+        <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+        <IsPackable>false</IsPackable>
+
+        <RootNamespace>Wacs.ComponentModel.Bindgen.SourceGen</RootNamespace>
+        <AssemblyName>Wacs.ComponentModel.Bindgen.SourceGen</AssemblyName>
+
+        <!-- Roslyn analyzers run as netstandard2.0; ship our shared
+             emission logic via <Compile Include> from the bindgen
+             tree rather than ProjectReference (which would force the
+             multi-targeted lib to also produce a netstandard2.0
+             output). -->
+        <DefineConstants>$(DefineConstants);WACS_SOURCEGEN</DefineConstants>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.3.4">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.3.0" />
+    </ItemGroup>
+
+    <!-- Share the emission + parser source files from the
+         non-source-gen tree. Single source of truth, no DLL
+         dependency. The shared files compile cleanly under
+         netstandard2.0 (their net8.0/netstandard2.1 host project
+         is just a more-permissive multi-target). -->
+    <ItemGroup>
+        <Compile Include="..\Wacs.ComponentModel\CSharpEmit\HostInterfaceEmit.cs"
+                 Link="Shared\CSharpEmit\HostInterfaceEmit.cs" />
+        <Compile Include="..\Wacs.ComponentModel\CSharpEmit\EmittedSource.cs"
+                 Link="Shared\CSharpEmit\EmittedSource.cs" />
+        <Compile Include="..\Wacs.ComponentModel\CSharpEmit\EmitOptions.cs"
+                 Link="Shared\CSharpEmit\EmitOptions.cs" />
+        <Compile Include="..\Wacs.ComponentModel\CSharpEmit\EmitAmbient.cs"
+                 Link="Shared\CSharpEmit\EmitAmbient.cs" />
+
+        <Compile Include="..\Wacs.ComponentModel\Types\**\*.cs"
+                 Link="Shared\Types\%(RecursiveDir)%(Filename)%(Extension)" />
+
+        <!-- WIT/ — exclude BinaryWitDecoder.cs (depends on
+             ComponentBinaryReader / ComponentPrim from the binary
+             component-format parser, which the source-gen
+             doesn't need — text-WIT only). -->
+        <Compile Include="..\Wacs.ComponentModel\WIT\WitLexer.cs"
+                 Link="Shared\WIT\WitLexer.cs" />
+        <Compile Include="..\Wacs.ComponentModel\WIT\WitLoader.cs"
+                 Link="Shared\WIT\WitLoader.cs" />
+        <Compile Include="..\Wacs.ComponentModel\WIT\WitModel.cs"
+                 Link="Shared\WIT\WitModel.cs" />
+        <Compile Include="..\Wacs.ComponentModel\WIT\WitParser.cs"
+                 Link="Shared\WIT\WitParser.cs" />
+    </ItemGroup>
+
+</Project>

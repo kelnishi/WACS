@@ -1,0 +1,8 @@
+package local:utf16p;
+world utf16p {
+    // Echo's wire shape exercises both the string-param lower
+    // (caller hands C# string → guest UTF-16 buffer + (ptr,
+    // codeUnits)) and the string-result lift (guest returns ptr
+    // to (strPtr, codeUnits) at retArea).
+    export echo: func(s: string) -> string;
+}

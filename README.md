@@ -7,15 +7,21 @@
 
 **NuGet packages**
 &nbsp;[![WACS](https://img.shields.io/nuget/v/WACS?label=WACS)](https://www.nuget.org/packages/WACS)
+&nbsp;[![WACS.Cli](https://img.shields.io/nuget/v/WACS.Cli?label=WACS.Cli)](https://www.nuget.org/packages/WACS.Cli)
 &nbsp;[![WACS.WASIp1](https://img.shields.io/nuget/v/WACS.WASIp1?label=WACS.WASIp1)](https://www.nuget.org/packages/WACS.WASIp1)
-&nbsp;[![WACS.Transpiler](https://img.shields.io/nuget/v/WACS.Transpiler?label=WACS.Transpiler)](https://www.nuget.org/packages/WACS.Transpiler)
 &nbsp;[![WACS.Transpiler.Lib](https://img.shields.io/nuget/v/WACS.Transpiler.Lib?label=WACS.Transpiler.Lib)](https://www.nuget.org/packages/WACS.Transpiler.Lib)
 &nbsp;[![Downloads](https://img.shields.io/nuget/dt/WACS?label=WACS%20downloads)](https://www.nuget.org/packages/WACS)
 
 ## Overview
 
 **Latest releases** (see the [CHANGELOG](CHANGELOG.md) for details):
-WACS `0.9.1` · WACS.WASIp1 `0.9.7` · WACS.Transpiler `0.3.0` · WACS.Transpiler.Lib `0.3.0` · WACS.WASI.Threads `0.1.0`
+WACS `0.10.0` · WACS.Cli `1.0.0` · WACS.WASIp1 `0.9.7` · WACS.Transpiler.Lib `0.4.0` · WACS.ComponentModel `0.1.0` · WACS.WASI.Preview2 `0.1.0` · WACS.WASI.Preview2.DependencyInjection `0.1.0` · WACS.ComponentModel.Bindgen `0.1.0` · WACS.ComponentModel.Bindgen.Lib `0.1.0` · WACS.WASI.Threads `0.1.0`
+
+> **CLI:** install the unified `wacs` global tool with
+> `dotnet tool install -g WACS.Cli`. The legacy `WACS.Transpiler`
+> (`wasm-transpile`) is deprecated and superseded — see
+> [`Wacs.Console/README.md`](Wacs.Console/README.md) for the
+> verb-based subcommand reference.
 
 **WACS** is a pure C# WebAssembly Interpreter for running WASM modules in .NET environments, including Godot and AOT environments like Unity's IL2CPP.
 
@@ -46,7 +52,7 @@ WACS supports the latest standardized webassembly feature extensions including *
 - **Pure C# Implementation**: Written in C# 9.0/.NET Standard 2.1. (No `unsafe` keyword blocks, no raw pointer arithmetic — see [notes on `System.Runtime.CompilerServices.Unsafe` in the switch dispatcher](#running-wacsconsole).)
 - **No Complex Dependencies**: Uses [FluentValidation](https://github.com/FluentValidation/FluentValidation) and [Microsoft.Extensions.ObjectPool](https://www.nuget.org/packages/Microsoft.Extensions.ObjectPool) as its only dependencies.
 - **WebAssembly 3.0 Spec Compliance**: Passes the [WebAssembly 3.0](https://webassembly.github.io/spec/versions/core/WebAssembly-3.0.pdf) spec [test suite](https://github.com/WebAssembly/spec/tree/wasm-3.0).
-- **First-class WAT / WAST**: Pure-C# reader and writer for the WebAssembly text format. `Wacs.Console` takes `.wat` directly; the spec `.wast` suite parses natively with no external `wast2json` / wabt dependency.
+- **First-class WAT / WAST**: Pure-C# reader and writer for the WebAssembly text format. The `wacs` CLI takes `.wat` directly; the spec `.wast` suite parses natively with no external `wast2json` / wabt dependency.
 - **Magical Interop**: Host bindings are validated with reflection, no boilerplate code required.
 - **Async Tasks**: [JSPI](https://github.com/WebAssembly/js-promise-integration)-like non-blocking calls for async functions.
 - **WASI:** Wacs.WASIp1 provides a [wasi\_snapshot\_preview1](https://github.com/WebAssembly/WASI/blob/main/legacy/preview1/docs.md) implementation.
@@ -105,34 +111,54 @@ dotnet add package WACS
 dotnet add package WACS.WASIp1
 ````
 
-### AOT Transpiler
+### `wacs` CLI
 
-`WACS.Transpiler` is a companion package that ahead-of-time transpiles a
-`.wasm` module into a .NET assembly. Installs as a [dotnet global
-tool](https://learn.microsoft.com/en-us/dotnet/core/tools/global-tools),
-backed by the same WACS runtime:
+`WACS.Cli` is the unified WebAssembly toolchain — `wacs` runs,
+compiles, and inspects WASM modules and components, backed by the
+WACS interpreter and the AOT transpiler library. Installs as a
+[dotnet global tool](https://learn.microsoft.com/en-us/dotnet/core/tools/global-tools):
 
 ```bash
-dotnet tool install -g WACS.Transpiler
-wasm-transpile -i module.wasm -o module.dll
+dotnet tool install -g WACS.Cli
+
+# Run (interpreter, default)
+wacs run module.wasm
+
+# Build to a .NET assembly
+wacs build module.wasm -o module.dll
 ```
 
 For WASI preview1 modules (CoreMark, anything built against `wasi-libc`):
 
 ```bash
-wasm-transpile -i coremark.wasm -o coremark.dll --wasi --entry-point _start --run
+wacs run coremark.wasm --wasi --engine transpiler
+# AOT-transpile in-process, then run through CLR-native dispatch
+# with WASI imports proxied through the interpreter (mixed-mode)
+
+# Or precompile then run through `dotnet`:
+wacs build coremark.wasm --wasi --emit-main -o coremark.dll
 ```
 
-`--wasi` binds `WACS.WASIp1` to the runtime, forwards all
-`wasi_snapshot_preview1` imports, shares memory with the interpreter
-bindings, and invokes the entry-point export in-process. For custom
-host imports (`env.sayc`, game bindings, etc.), use the library API
-(`WACS.Transpiler.Lib`, new in v0.2) with `BindHostFunction` + the
-built-in `TranspiledModuleLoader` or a custom `ImportDispatcher` proxy.
-See [`Wacs.Transpiler/README.md`](Wacs.Transpiler/README.md) for the
-full flag surface, the seamless-load API, and the remaining v0.3
-tracked items (non-scalar `--emit-main` argv parsing, exotic GC init
-values).
+`--wasi` binds `WACS.WASIp1`, forwards all `wasi_snapshot_preview1`
+imports, shares memory with the runtime, and invokes the entry-point
+export. For component-mode WASI Preview 2 (direct-linked, no
+delegate hop), use `--wasip2`:
+
+```bash
+wacs run app.component.wasm --wasip2
+```
+
+For custom host imports (`env.sayc`, game bindings, etc.), use
+`--bind <asm>` to load any `IBindable` host library, or — for
+programmatic embedding — reference
+[`WACS.Transpiler.Lib`](https://www.nuget.org/packages/WACS.Transpiler.Lib)
+and use `BindHostFunction` + the built-in `TranspiledModuleLoader`
+or a custom `ImportDispatcher` proxy.
+
+See [`Wacs.Console/README.md`](Wacs.Console/README.md) for the full
+verb reference (`run` / `build` / `inspect`), the direct-run
+shortcut, the engine-choice trade-off, and concrete migrations
+from the deprecated `wasm-transpile`.
 
 ### From source
 
@@ -329,7 +355,7 @@ How does this differ from executing the wasm instructions linearly with the WACS
 - Avoids instruction fetching and dispatch
 
 Throughput win is roughly 20–25% on compute-bound microbenchmarks (see the
-[Wacs.Console](#running-wacsconsole) section below for CoreMark numbers).
+[Running `wacs`](#running-wacs) section below for CoreMark numbers).
 Gains are situational: linking instructions into a tree can't always be
 determined across block boundaries, so WASM code heavy on function calls
 or branches sees less benefit — the rewriter passes those sequences
@@ -354,8 +380,8 @@ runtime.ExecContext.Attributes.UseSwitchSuperInstructions = true;  // (optional)
 var modInst = runtime.InstantiateModule(module);                   // must happen AFTER UseSwitchRuntime is set
 ```
 
-See the [Running Wacs.Console](#running-wacsconsole) section below for all
-CLI combinations across the polymorphic, super-instruction, switch, and
+See the [Running `wacs`](#running-wacs) section below for all CLI
+combinations across the polymorphic, super-instruction, switch, and
 AOT paths, plus benchmark numbers.
 
 Architectural details live in
@@ -382,15 +408,19 @@ ahead-of-time, producing native CLR methods the JIT can optimize like any other 
   so any invalid module trips at transpile time rather than as a runtime `InvalidProgramException`.
 - **Mixed-mode execution.** Transpilation is opportunistic: any function the transpiler declines (e.g. very large bodies
   under `--max-fn-size`) falls back to the Wacs.Core interpreter for that function only, so the module still runs.
-- **CLI + library.** The `WACS.Transpiler` NuGet package installs the
-  `wasm-transpile` dotnet global tool for one-shot `.wasm → .dll` builds.
-  The programmatic surface ships separately as
+- **CLI + library.** The `WACS.Cli` NuGet package installs the
+  `wacs` dotnet global tool — `wacs build` for one-shot `.wasm →
+  .dll` compilation, `wacs run --engine transpiler` for in-process
+  AOT execution. The programmatic surface ships separately as
   [`WACS.Transpiler.Lib`](https://www.nuget.org/packages/WACS.Transpiler.Lib)
-  (v0.2) — reference it to drive transpilation and loading from inside
-  a host. The library also includes `TranspiledModuleLoader` for
-  seamless dynamic loading of saved `.dll`s without `Reflection.Emit`.
-  See [`Wacs.Transpiler/README.md`](Wacs.Transpiler/README.md) for the
-  full flag surface.
+  — reference it to drive transpilation and loading from inside a
+  host. The library also includes `TranspiledModuleLoader` for
+  seamless dynamic loading of saved `.dll`s without
+  `Reflection.Emit`. See
+  [`Wacs.Console/README.md`](Wacs.Console/README.md) for the full
+  CLI verb reference. The legacy `WACS.Transpiler` /
+  `wasm-transpile` package is deprecated in favor of `WACS.Cli` but
+  remains installable for migration purposes.
 
 The transpiler is spec-equivalent to the interpreter on the WebAssembly 3.0 test suite (473/473), verified on macOS ARM64 and Linux x64.
 
@@ -405,21 +435,21 @@ compiled to WASM with `clang -O3` via emscripten — through each mode.
 
 | Mode | CoreMark iter/s | % of native |
 |---|---:|---:|
-| WACS polymorphic (default) | 274 | 0.79% |
-| WACS `--super` | 337 | 0.98% |
-| WACS `--switch` | 358 | 1.04% |
-| WACS `--switch --super` | 385 | 1.12% |
-| WACS `-t` / `--aot` (Reflection.Emit) | 17 552 | **50.9%** |
-| `wasm-transpile` pre-compiled `.dll` loaded via `TranspiledModuleLoader` | 17 552 | **50.9%** |
+| `wacs run` (polymorphic interpreter, default) | 274 | 0.79% |
+| `wacs run --super` | 337 | 0.98% |
+| `wacs run --switch` | 358 | 1.04% |
+| `wacs run --switch --super` | 385 | 1.12% |
+| `wacs run --engine transpiler` (Reflection.Emit AOT) | 17 552 | **50.9%** |
+| `wacs build` pre-compiled `.dll` loaded via `TranspiledModuleLoader` | 17 552 | **50.9%** |
 | Native `clang -O3` (same C source, no wasm) | 34 488 | 100% |
 
 Ballpark comparison to other WASM runtimes on the same workload (not
 measured on this machine — pulled from published numbers; treat as
 positioning, not apples-to-apples):
 
-- **WACS AOT (`-t`) ≈ WAMR "fast JIT" / Wasmer.** AOT-class wasm
-  runtimes typically land at 50–70% of native C on CoreMark; WACS's
-  51% is in that band.
+- **WACS AOT (`--engine transpiler`) ≈ WAMR "fast JIT" / Wasmer.**
+  AOT-class wasm runtimes typically land at 50–70% of native C on
+  CoreMark; WACS's 51% is in that band.
 - **WACS interpreter modes (274–385 iter/s) are slower than Wasm3**
   (typically 4–6 k iter/s on M-series). Wasm3 is heavily tuned for
   CoreMark-like tight loops; WACS's interpreter prioritises Unity
@@ -432,81 +462,109 @@ positioning, not apples-to-apples):
 
 **Choosing a mode:**
 
-- **Can you JIT?** (Desktop, server, `dotnet run`, Godot Mono) — use
-  `-t` / `--aot`. It's ~60× the interpreter and within ~2× of native
-  C speed.
+- **Can you JIT?** (Desktop, server, `dotnet run`, Godot Mono) —
+  use `wacs run --engine transpiler`. It's ~60× the interpreter and
+  within ~2× of native C speed.
 - **AOT-only target?** (Unity IL2CPP, `PublishAot`, iOS, full-AOT
   Mono) — pre-compile the `.wasm → .dll` on a JIT host with
-  [`wasm-transpile`](Wacs.Transpiler/README.md), ship the `.dll`,
-  load it at runtime with `WACS.Transpiler.Lib`'s
+  [`wacs build`](Wacs.Console/README.md#wacs-build--transpile-to-dll),
+  ship the `.dll`, load it at runtime with `WACS.Transpiler.Lib`'s
   `TranspiledModuleLoader`. Same AOT speed, no `Reflection.Emit`
   dependency at runtime.
 - **Locked-down / policy-reviewed target, can't ship a pre-compiled
-  `.dll`?** — use `--switch --super`. Build-time source-gen +
-  `System.Runtime.CompilerServices.Unsafe` intrinsics only, no
+  `.dll`?** — use `wacs run --switch --super`. Build-time source-gen
+  + `System.Runtime.CompilerServices.Unsafe` intrinsics only, no
   runtime codegen, no `unsafe` keyword blocks. ~1.4× over the
   polymorphic baseline.
-- **Maximum conservatism?** — default polymorphic, or `--super` for a
-  small safe boost. Pure managed, no source-gen, no `Unsafe` usage.
-  Fine for cold-path scripting, UGC validation, or logic that doesn't
-  dominate a frame budget — but don't put it in a hot inner loop.
+- **Maximum conservatism?** — default polymorphic, or `wacs run
+  --super` for a small safe boost. Pure managed, no source-gen, no
+  `Unsafe` usage. Fine for cold-path scripting, UGC validation, or
+  logic that doesn't dominate a frame budget — but don't put it in
+  a hot inner loop.
 
-### Running `Wacs.Console`
+### Running `wacs`
 
-`Wacs.Console` is the reference host — it wires WASI, parses argv, and
-drives execution through any of the available back-ends. All examples
-assume the repo is checked out and you're running `dotnet` from the
-repo root.
+`wacs` is the reference CLI — verb-based subcommand layout (`run`
+/ `build` / `inspect`) with a direct-run shortcut so a bare
+`wacs file.wasm` defaults to `run`. All examples assume the
+`WACS.Cli` global tool is installed (`dotnet tool install -g
+WACS.Cli`); the `dotnet run --project Wacs.Console -c Release --`
+form works identically when running from a checkout.
 
 ```bash
 # Default (polymorphic interpreter)
-dotnet run --project Wacs.Console -c Release -- Wacs.Console/Data/coremark.wasm
+wacs run Wacs.Console/Data/coremark.wasm
 
 # Polymorphic + super-instruction rewriter
-dotnet run --project Wacs.Console -c Release -- --super Wacs.Console/Data/coremark.wasm
+wacs run --super Wacs.Console/Data/coremark.wasm
 
 # Source-generated switch runtime
-dotnet run --project Wacs.Console -c Release -- --switch Wacs.Console/Data/coremark.wasm
+wacs run --switch Wacs.Console/Data/coremark.wasm
 
 # Switch runtime + bytecode-stream super-instruction fuser
-dotnet run --project Wacs.Console -c Release -- --switch --super Wacs.Console/Data/coremark.wasm
+wacs run --switch --super Wacs.Console/Data/coremark.wasm
 
-# AOT transpile to .NET IL and run through the JITted code (-t alias: --aot)
-dotnet run --project Wacs.Console -c Release -- -t Wacs.Console/Data/coremark.wasm
+# AOT transpile in-process and run through the JITted code
+wacs run --engine transpiler Wacs.Console/Data/coremark.wasm
 
-# AOT with hardware SIMD intrinsics + persist the .dll
-dotnet run --project Wacs.Console -c Release -- -t --aot_simd intrinsics --aot_save out.dll Wacs.Console/Data/coremark.wasm
+# AOT with hardware SIMD intrinsics + persist the .dll for re-loading
+wacs build --simd intrinsics -o out.dll Wacs.Console/Data/coremark.wasm
+wacs run --engine transpiler --simd intrinsics Wacs.Console/Data/coremark.wasm
 ```
 
 Invoking a specific export with arguments (applies across every mode):
 
 ```bash
-dotnet run --project Wacs.Console -c Release -- -i fib Wacs.Bench/fib.wasm 10
+wacs run --call fib Wacs.Bench/fib.wasm -- 10
+# Args after `--` are parsed per the function's wasm signature.
 ```
 
-**Flag cheatsheet:**
+**Engine + interpreter cheatsheet:**
 
 | Flag | Effect |
 |---|---|
-| *(none)* | Polymorphic virtual-dispatch interpreter. Baseline, canonical. |
+| *(default)* | Polymorphic virtual-dispatch interpreter. Baseline, canonical. |
 | `--super` | Enable super-instruction fusion on whichever runtime ends up executing — the polymorphic block-level rewriter, and (when paired with `--switch`) the switch runtime's bytecode-stream fuser. |
 | `--switch` | Source-generated monolithic-switch interpreter. Build-time code generation (Roslyn) + `System.Runtime.CompilerServices.Unsafe` intrinsics — see note below. |
-| `-t`, `--transpiler`, `--aot` | AOT transpile the **WASM module** to .NET IL and run the generated code. Requires `Reflection.Emit` at runtime — see note below. |
-| `--aot_simd {scalar,intrinsics,interpreter}` | SIMD strategy for the AOT path. |
-| `--aot_save <path>` | Persist the transpiled assembly to disk. |
-| `--aot_no_tail_calls` | Drop the CIL `tail.` prefix (debugging only). |
-| `--aot_max_fn_size N` | Skip functions larger than N instructions in the transpile pass. |
-| `--aot_data_storage {compressed,raw,static}` | How data segments are embedded in the saved assembly. |
+| `--engine transpiler` | AOT transpile the **WASM module** to .NET IL and run through the generated code. Requires `Reflection.Emit` at runtime — see note below. |
+| `--simd {scalar\|intrinsics\|interpreter}` | SIMD strategy for the transpiler engine. |
+| `--no-tail-calls` | Drop the CIL `tail.` prefix on the transpiler engine (debugging only). |
+| `--max-fn-size N` | Skip functions larger than N instructions in the transpile pass. |
+| `--data-storage {compressed\|raw\|static}` | How data segments are embedded in the saved assembly (`build` verb). |
+
+**Build verb (for shipping a pre-compiled `.dll`):**
+
+```bash
+# Single-file → .dll
+wacs build app.wasm -o app.dll
+
+# Multi-input ModuleLinker composition (siblings land at <basename>.dll)
+wacs build a.wasm b.wasm -o b.dll
+
+# Component with WASI Preview 2 + bake a runnable Main entry-point
+wacs build app.component.wasm --wasip2 --emit-main \
+    --entry-point greet -o app.dll
+```
+
+**Inspect verb (parse-only diagnostics):**
+
+```bash
+wacs inspect module.wasm                # stats summary (default)
+wacs inspect module.wasm --exports
+wacs inspect module.wasm --imports
+wacs inspect module.wasm --dump-wat     # round-trip WAT to stdout
+wacs inspect app.component.wasm         # component metadata
+```
 
 **Sampled CoreMark performance** (M3 Max, .NET 8, `Wacs.Console/Data/coremark.wasm`, default 6000 iterations; single run each):
 
 | Mode | CoreMark (iter/s) | Relative |
 |---|---:|---:|
-| polymorphic | 274 | 1.00× |
-| `--super` | 337 | 1.23× |
-| `--switch` | 358 | 1.31× |
-| `--switch --super` | 385 | 1.40× |
-| `-t` (AOT) | **17 552** | **64×** |
+| `wacs run` (polymorphic) | 274 | 1.00× |
+| `wacs run --super` | 337 | 1.23× |
+| `wacs run --switch` | 358 | 1.31× |
+| `wacs run --switch --super` | 385 | 1.40× |
+| `wacs run --engine transpiler` | **17 552** | **64×** |
 
 The AOT path emits ordinary .NET methods that the CLR JIT optimizes as
 native code, so the ~64× jump over the fastest interpreter mode is the
@@ -515,19 +573,20 @@ Expect similar ratios on any compute-bound workload; IO-bound / WASI-heavy
 workloads see a smaller lift because WASI calls still bridge back to the
 interpreter's host-function machinery.
 
-> **"AOT" here means *ahead-of-time compilation of the WASM module*, not
-> that the WACS runtime itself is AOT-safe.** `-t` / `--aot` uses
-> `System.Reflection.Emit` at runtime to synthesize a dynamic .NET
-> assembly containing the transpiled module. That's incompatible with
-> environments that disable dynamic code: **Unity IL2CPP, .NET Native
-> AOT (`PublishAot=true`), iOS, Mono AOT-only builds,** etc. On those
-> platforms use one of the three interpreter modes instead — all of
-> them (including the source-generated `--switch` runtime) are fully
-> AOT-compatible. If you need native-class speed in an IL2CPP target,
-> pre-compile the `.wasm → .dll` on a JIT-capable host with
-> [`wasm-transpile`](Wacs.Transpiler/README.md) and ship the resulting
-> assembly — the saved `.dll` runs without `Reflection.Emit` via
-> `WACS.Transpiler.Lib`'s `TranspiledModuleLoader`.
+> **"AOT" here means *ahead-of-time compilation of the WASM module*,
+> not that the WACS runtime itself is AOT-safe.** `wacs run --engine
+> transpiler` uses `System.Reflection.Emit` at runtime to synthesize
+> a dynamic .NET assembly containing the transpiled module. That's
+> incompatible with environments that disable dynamic code: **Unity
+> IL2CPP, .NET Native AOT (`PublishAot=true`), iOS, Mono AOT-only
+> builds,** etc. On those platforms use one of the three interpreter
+> modes instead — all of them (including the source-generated
+> `--switch` runtime) are fully AOT-compatible. If you need
+> native-class speed in an IL2CPP target, pre-compile the `.wasm →
+> .dll` on a JIT-capable host with
+> [`wacs build`](Wacs.Console/README.md#wacs-build--transpile-to-dll)
+> and ship the resulting assembly — the saved `.dll` runs without
+> `Reflection.Emit` via `WACS.Transpiler.Lib`'s `TranspiledModuleLoader`.
 
 > **`--switch` notes for restrictive targets.** The switch runtime
 > is AOT-compatible — it uses **no runtime codegen** — but two
@@ -618,24 +677,24 @@ The text pipeline lives under `Wacs.Core.Text`:
 
 ### Using it
 
-**CLI (`Wacs.Console`).** Pass a `.wat` path exactly like a `.wasm`
-path:
+**CLI (`wacs`).** Pass a `.wat` path exactly like a `.wasm` path
+— `wacs` auto-detects via the file extension:
 
 ```bash
 # Run a text-format module through the polymorphic interpreter
-dotnet run --project Wacs.Console -c Release -- path/to/module.wat
+wacs run path/to/module.wat
 
 # Round-trip a binary module out as parser-friendly WAT
-# (writes module.wat next to module.wasm via TextModuleWriter)
-dotnet run --project Wacs.Console -c Release -- -r path/to/module.wasm
+# (writes module.wat to the chosen --output-dir via TextModuleWriter)
+wacs inspect path/to/module.wasm --dump-wat --output-dir .
 
 # Re-run the emitted .wat through the interpreter to confirm round-trip
-dotnet run --project Wacs.Console -c Release -- path/to/module.wat
+wacs run path/to/module.wat
 ```
 
-Every back-end (`--super`, `--switch`, `-t` / `--aot`, …) works
-identically on `.wat` input since the parser produces the same
-`Module` object the binary path does.
+Every back-end (`--super`, `--switch`, `--engine transpiler`, …)
+works identically on `.wat` input since the parser produces the
+same `Module` object the binary path does.
 
 **Library.** One entry point, drops into any existing WACS flow:
 

@@ -1,0 +1,8 @@
+package local:vl;
+world vl {
+    variant scan {
+        empty,
+        found(list<u32>),
+    }
+    export discover: func() -> scan;
+}

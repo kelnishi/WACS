@@ -1,0 +1,8 @@
+package local:tcpoptions;
+world demo {
+    import wasi:sockets/tcp@0.2.3;
+    /// Calls is-listening (bool, no result), then several
+    /// setters + getters and asserts the values round-trip.
+    /// Returns: hop-limit (u8) on success.
+    export ask-options: func(handle: u32) -> u32;
+}

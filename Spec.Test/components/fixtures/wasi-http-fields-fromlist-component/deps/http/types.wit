@@ -1,0 +1,15 @@
+package wasi:http@0.2.3;
+interface types {
+    type field-key = string;
+    type field-value = list<u8>;
+    variant header-error {
+        invalid-syntax(tuple<field-key, field-value>),
+        forbidden,
+        immutable,
+    }
+    resource fields {
+        from-list: static func(entries: list<tuple<field-key,
+                                                   field-value>>)
+            -> result<own<fields>, header-error>;
+    }
+}

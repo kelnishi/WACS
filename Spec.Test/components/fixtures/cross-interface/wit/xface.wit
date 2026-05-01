@@ -1,0 +1,9 @@
+package local:xf;
+interface errors {
+    enum kind { io, parse, unknown }
+}
+interface ops {
+    use errors.{kind};
+    check: func(k: kind) -> bool;
+}
+world xf-world { export ops; }

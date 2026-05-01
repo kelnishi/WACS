@@ -1,0 +1,6 @@
+package wasi:http@0.2.3;
+interface types {
+    resource fields {
+        constructor();
+    }
+}

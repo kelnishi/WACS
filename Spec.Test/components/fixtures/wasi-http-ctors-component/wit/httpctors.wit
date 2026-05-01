@@ -1,0 +1,15 @@
+package local:httpctors;
+world demo {
+    import wasi:http/types@0.2.3;
+    /// Constructs request-options via [constructor]request-options;
+    /// returns the new handle.
+    export ask-new-request-options: func() -> u32;
+    /// Constructs outgoing-request via
+    /// [constructor]outgoing-request(headers); returns the
+    /// new handle.
+    export ask-new-outgoing-request: func(headers: u32) -> u32;
+    /// Constructs outgoing-response via
+    /// [constructor]outgoing-response(headers); returns the
+    /// new handle.
+    export ask-new-outgoing-response: func(headers: u32) -> u32;
+}

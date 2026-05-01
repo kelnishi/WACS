@@ -1,0 +1,12 @@
+package local:fsstat;
+world demo {
+    import wasi:filesystem/types@0.2.3;
+    /// Returns size (u64) from descriptor-stat.
+    export ask-stat-size: func(handle: u32) -> u64;
+    /// Returns mtime seconds (u64). Reads option-disc + seconds.
+    export ask-stat-mtime: func(handle: u32) -> u64;
+    /// Returns type (u32) at retArea+8.
+    export ask-stat-type: func(handle: u32) -> u32;
+    /// Returns mtime option-disc (u32) — verifies Some=1 vs None=0.
+    export ask-stat-mtime-disc: func(handle: u32) -> u32;
+}

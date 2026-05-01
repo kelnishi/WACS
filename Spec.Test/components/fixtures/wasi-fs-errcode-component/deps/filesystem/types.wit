@@ -1,0 +1,6 @@
+package wasi:filesystem@0.2.3;
+interface types {
+    use wasi:io/error@0.2.3.{error};
+    enum error-code { unknown }
+    filesystem-error-code: func(err: borrow<error>) -> option<error-code>;
+}

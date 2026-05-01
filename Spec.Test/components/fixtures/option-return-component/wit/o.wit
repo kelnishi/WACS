@@ -1,0 +1,4 @@
+package local:o;
+world o {
+    export find: func() -> option<u32>;
+}

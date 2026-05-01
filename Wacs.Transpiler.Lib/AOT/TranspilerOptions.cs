@@ -14,6 +14,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 
 namespace Wacs.Transpiler.AOT
 {
@@ -77,6 +78,52 @@ namespace Wacs.Transpiler.AOT
         /// Layer 0 (CLR inheritance) is always active. These flags enable additional layers.
         /// </summary>
         public TranspilerCapabilities GcTypeChecking { get; set; } = TranspilerCapabilities.None;
+
+        /// <summary>
+        /// Pre-built resolver derived from <see cref="HostPackages"/>.
+        /// The component transpiler builds this once per
+        /// <c>TranspileSingleModule</c> call (eagerly walking each
+        /// host package's <c>[WitSource]</c> interfaces) and stashes
+        /// it here so the call-site emitter can branch without
+        /// rebuilding the index per function. Null when host-package
+        /// resolution doesn't apply (core-wasm CLI path, or no
+        /// packages supplied).
+        /// </summary>
+        public Component.HostPackageResolver? Resolver { get; set; }
+
+        /// <summary>
+        /// Transient per-transpilation map: import function index →
+        /// resolved binding. Built by <c>ModuleTranspiler.Transpile</c>
+        /// from <see cref="Resolver"/> + the module's import section,
+        /// then read by <c>CallEmitter.EmitImportCall</c> to branch
+        /// each guest <c>call $import</c> between direct-linked IL
+        /// (resolver hit) and the legacy delegate-table dispatch
+        /// (miss). Reset at the start of each
+        /// <c>ModuleTranspiler.Transpile</c> call — concurrent uses
+        /// of the same <see cref="TranspilerOptions"/> instance
+        /// across overlapping transpilations are not supported.
+        /// </summary>
+        public IReadOnlyDictionary<int, Component.HostPackageResolver.Binding>?
+            ResolverImportBindings { get; set; }
+
+        /// <summary>
+        /// Host-package assemblies whose <c>[WitSource]</c>-tagged
+        /// interfaces resolve component-mode imports at transpile time.
+        /// For each guest <c>call $import</c>, the component transpiler
+        /// looks up a matching binding in this list and emits inline
+        /// IL (typed <c>callvirt</c>) instead of routing through the
+        /// runtime's delegate table. Missing or arity-mismatched
+        /// imports become a build-time error rather than an
+        /// instantiation-time one.
+        ///
+        /// <para>Empty by default. The CLI sets this from
+        /// <c>--host-package</c> (repeatable) and <c>--wasip2</c>.
+        /// Programmatic callers (component tests) can populate it
+        /// directly. Has no effect on core-wasm transpilation; only
+        /// the component path consumes it.</para>
+        /// </summary>
+        public IReadOnlyList<Assembly> HostPackages { get; set; }
+            = Array.Empty<Assembly>();
     }
 
     /// <summary>

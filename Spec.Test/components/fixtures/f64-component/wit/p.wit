@@ -1,0 +1,4 @@
+package local:p;
+world p {
+    export pi: func() -> f64;
+}

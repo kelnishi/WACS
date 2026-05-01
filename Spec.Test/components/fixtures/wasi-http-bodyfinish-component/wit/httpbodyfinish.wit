@@ -1,0 +1,10 @@
+package local:httpbodyfinish;
+world demo {
+    import wasi:http/types@0.2.3;
+    /// Calls outgoing-body.finish(handle, None); returns the
+    /// outer disc byte (0 = Ok).
+    export ask-finish-none: func(body: u32) -> u32;
+    /// Calls outgoing-body.finish(handle, Some(trailers));
+    /// returns the outer disc byte (0 = Ok).
+    export ask-finish-some: func(body: u32, trailers: u32) -> u32;
+}

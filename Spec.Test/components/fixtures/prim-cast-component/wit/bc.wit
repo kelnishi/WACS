@@ -1,0 +1,4 @@
+package local:bc;
+world bc {
+    export check: func() -> bool;
+}

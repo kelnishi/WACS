@@ -1,0 +1,16 @@
+package wasi:filesystem@0.2.3;
+interface types {
+    use wasi:clocks/wall-clock@0.2.3.{datetime};
+    enum error-code { unknown }
+    variant new-timestamp {
+        no-change,
+        now,
+        timestamp(datetime),
+    }
+    resource descriptor {
+        set-times: func(
+            data-access-timestamp: new-timestamp,
+            data-modification-timestamp: new-timestamp,
+        ) -> result<_, error-code>;
+    }
+}

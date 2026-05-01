@@ -1,0 +1,9 @@
+package wasi:filesystem@0.2.3;
+interface types {
+    enum error-code { unknown }
+    type filesize = u64;
+    resource descriptor {
+        read: func(length: filesize, offset: filesize)
+            -> result<tuple<list<u8>, bool>, error-code>;
+    }
+}

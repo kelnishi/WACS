@@ -1,0 +1,7 @@
+package local:iosplice;
+world demo {
+    import wasi:io/streams@0.2.3;
+    /// Calls splice(out, in, 32); returns the u64 count from
+    /// the Ok payload at retArea+8.
+    export ask-splice: func(out: u32, in: u32) -> u64;
+}

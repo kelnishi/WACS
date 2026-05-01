@@ -1,0 +1,12 @@
+package local:httpreqset;
+world demo {
+    import wasi:http/types@0.2.3;
+    /// Calls set-path-with-query(req, None); returns disc.
+    export ask-set-path-none: func(req: u32) -> u32;
+    /// Calls set-path-with-query(req, Some(s)) using an
+    /// inline UTF-8 buffer at offset 256; returns disc.
+    export ask-set-path-some: func(req: u32) -> u32;
+    /// Calls set-authority(req, Some(s)) using an inline
+    /// UTF-8 buffer at offset 384; returns disc.
+    export ask-set-authority-some: func(req: u32) -> u32;
+}

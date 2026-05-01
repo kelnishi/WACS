@@ -1,0 +1,13 @@
+package local:tcplocaladdr;
+world demo {
+    import wasi:sockets/tcp@0.2.3;
+    /// Calls local-address; returns a packed u32:
+    ///   (port_hi << 24) | (port_lo << 16) | (b0 << 8) | b1
+    /// using bytes from the ipv4 case at retArea+8/+10.
+    export ask-local-port: func(handle: u32) -> u32;
+    /// Returns the variant disc (0=ipv4, 1=ipv6).
+    export ask-local-disc: func(handle: u32) -> u32;
+    /// Returns the IPv4 address packed bytes (for ipv4 case
+    /// only): a<<24 | b<<16 | c<<8 | d
+    export ask-local-ipv4: func(handle: u32) -> u32;
+}

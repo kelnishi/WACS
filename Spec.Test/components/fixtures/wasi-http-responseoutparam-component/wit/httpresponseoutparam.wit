@@ -1,0 +1,14 @@
+package local:httpresponseoutparam;
+world demo {
+    import wasi:http/types@0.2.3;
+    /// Calls [static]response-outparam.set(param, Ok(response)).
+    export ask-set-ok: func(param: u32, response: u32) -> u32;
+    /// Err(internal-error(None)) — disc 38, all payload zero.
+    export ask-set-err: func(param: u32) -> u32;
+    /// Err(HTTP-request-body-size(Some(12345))) — exercises
+    /// the joined-flat i64 slot.
+    export ask-set-err-bodysize: func(param: u32) -> u32;
+    /// Err(internal-error(Some("bad"))) — exercises the
+    /// string ptr/len read from memory.
+    export ask-set-err-internal-msg: func(param: u32) -> u32;
+}

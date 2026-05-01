@@ -1,0 +1,9 @@
+package local:udpsend;
+world demo {
+    import wasi:sockets/udp@0.2.3;
+    /// Builds a list<outgoing-datagram> with one element:
+    ///   data="ping" (4 bytes), remote=Some(ipv4(127.0.0.1:7))
+    /// Calls send and returns the u64 count from the Ok
+    /// payload at retArea+8.
+    export ask-send: func(handle: u32) -> u64;
+}
