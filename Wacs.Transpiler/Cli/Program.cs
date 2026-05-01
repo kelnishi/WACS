@@ -18,6 +18,7 @@ using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Transpiler.AOT;
 using Wacs.Transpiler.AOT.Component;
+using Wacs.Transpiler.Hosting;
 using Wacs.WASIp1;
 
 namespace Wacs.Transpiler.Cli
