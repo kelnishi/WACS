@@ -1,0 +1,6 @@
+package local:l32;
+interface env {
+    send: func(vals: list<u32>);
+    recv: func() -> list<u32>;
+}
+world l32-world { import env; }

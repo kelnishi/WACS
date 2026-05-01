@@ -1,0 +1,8 @@
+package wasi:http@0.2.3;
+interface types {
+    resource future-trailers;
+    resource incoming-body {
+        finish: static func(this: own<incoming-body>)
+            -> own<future-trailers>;
+    }
+}

@@ -1,0 +1,9 @@
+package wasi:filesystem@0.2.3;
+interface types {
+    enum error-code { unknown }
+    resource descriptor {
+        create-directory-at: func(path: string) -> result<_, error-code>;
+        remove-directory-at: func(path: string) -> result<_, error-code>;
+        unlink-file-at: func(path: string) -> result<_, error-code>;
+    }
+}

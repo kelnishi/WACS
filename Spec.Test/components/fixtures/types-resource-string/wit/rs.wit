@@ -1,0 +1,8 @@
+package local:rs;
+interface env {
+    resource token {
+        to-debug: func() -> string;
+        tag: func() -> u32;
+    }
+}
+world rs-world { import env; }

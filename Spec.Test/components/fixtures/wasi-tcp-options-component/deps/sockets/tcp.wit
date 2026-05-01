@@ -1,0 +1,14 @@
+package wasi:sockets@0.2.3;
+interface tcp {
+    enum error-code { unknown }
+    resource tcp-socket {
+        is-listening: func() -> bool;
+        set-listen-backlog-size: func(value: u64) -> result<_, error-code>;
+        set-keep-alive-enabled: func(value: bool) -> result<_, error-code>;
+        keep-alive-enabled: func() -> result<bool, error-code>;
+        set-hop-limit: func(value: u8) -> result<_, error-code>;
+        hop-limit: func() -> result<u8, error-code>;
+        set-receive-buffer-size: func(value: u64) -> result<_, error-code>;
+        receive-buffer-size: func() -> result<u64, error-code>;
+    }
+}

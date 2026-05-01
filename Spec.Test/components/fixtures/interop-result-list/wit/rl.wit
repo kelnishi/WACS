@@ -1,0 +1,10 @@
+package local:rl;
+interface env {
+    variant err-kind {
+        not-found,
+        denied(u32),
+    }
+    read: func(n: u64) -> result<list<u8>, err-kind>;
+    read-u32: func(n: u64) -> result<list<u32>, err-kind>;
+}
+world rl-world { import env; }

@@ -1,0 +1,10 @@
+package local:rr;
+interface env {
+    resource box {
+        constructor();
+        set: func(value: u32) -> result<_, u32>;
+        get: func() -> result<u32, u32>;
+        ping: func() -> result;
+    }
+}
+world rr-world { import env; }

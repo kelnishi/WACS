@@ -1,0 +1,6 @@
+package local:hello;
+world demo {
+    import wasi:cli/stdout@0.2.3;
+    import wasi:io/streams@0.2.3;
+    export greet: func();
+}

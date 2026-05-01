@@ -1,0 +1,11 @@
+package wasi:sockets@0.2.3;
+interface tcp {
+    enum error-code { unknown }
+    type duration = u64;
+    resource tcp-socket {
+        set-keep-alive-idle-time: func(value: duration) -> result<_, error-code>;
+        keep-alive-idle-time: func() -> result<duration, error-code>;
+        set-keep-alive-count: func(value: u32) -> result<_, error-code>;
+        keep-alive-count: func() -> result<u32, error-code>;
+    }
+}

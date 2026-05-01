@@ -1,0 +1,7 @@
+package wasi:http@0.2.3;
+interface types {
+    resource outgoing-request {
+        path-with-query: func() -> option<string>;
+        authority: func() -> option<string>;
+    }
+}

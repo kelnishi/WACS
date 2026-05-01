@@ -1,0 +1,2038 @@
+// Copyright 2026 Kelvin Nishikawa
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Reflection.Emit;
+using Wacs.Core.Runtime;
+using Wacs.Transpiler.AOT;
+using Wacs.Transpiler.AOT.Component;
+using Xunit;
+
+namespace Wacs.Transpiler.Test
+{
+    /// <summary>
+    /// Phase 1b smoke tests: parse a real component binary and
+    /// extract its embedded core modules via the component
+    /// transpiler's entry point. Deeper IL-emit + roundtrip
+    /// verification lands as the canonical-ABI and interface-
+    /// emission pieces fill in.
+    /// </summary>
+    public class ComponentTranspilerTests
+    {
+        private static string FindTinyComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "tiny-component", "wasm",
+                                "tiny.component.wasm");
+        }
+
+        [Fact]
+        public void ParseFile_extracts_embedded_core_module()
+        {
+            var result = ComponentTranspiler.ParseFile(FindTinyComponentPath());
+
+            // tiny-component embeds exactly one core wasm module
+            // (greet() -> u32 returning 42). The parser should
+            // round-trip through the core wasm binary parser and
+            // produce a module whose single export is `greet`.
+            Assert.Single(result.CoreModules);
+            var core = result.CoreModules[0];
+            Assert.NotNull(core);
+            Assert.Contains(core.Exports, e => e.Name == "greet");
+        }
+
+        [Fact]
+        public void Embedded_core_module_transpiles_through_existing_pipeline()
+        {
+            // End-to-end: component binary → embedded core module
+            // → Wacs.Core parse → runtime instantiate →
+            // ModuleTranspiler.Transpile. Verifies the component
+            // transpiler's output is directly consumable by the
+            // existing per-module IL emitter — no further
+            // adaptation needed for the core-module layer.
+            var result = ComponentTranspiler.ParseFile(FindTinyComponentPath());
+            Assert.Single(result.CoreModules);
+
+            var runtime = new WasmRuntime();
+            var moduleInst = runtime.InstantiateModule(result.CoreModules[0]);
+
+            var transpiler = new ModuleTranspiler("Wacs.Transpiled.Tiny");
+            var transpileResult = transpiler.Transpile(
+                moduleInst, runtime, moduleName: "TinyModule");
+
+            Assert.NotNull(transpileResult);
+            Assert.NotNull(transpileResult.FunctionsType);
+        }
+
+        private static string FindPrimCastComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "prim-cast-component", "wasm",
+                                "bc.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lifts_option_u32_none_return()
+        {
+            // option-none-component exports `missing() -> option<u32>`
+            // with disc byte = 0 at offset 200. Should return
+            // the default value of uint? (null / HasValue = false).
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            var path = Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                     "fixtures", "option-none-component", "wasm",
+                                     "n.component.wasm");
+            using var fs = File.OpenRead(path);
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var missing = componentExports!.GetMethod("Missing");
+            var value = (uint?)missing!.Invoke(null, null);
+            Assert.False(value.HasValue);
+        }
+
+        private static string FindTupleReturnComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "tuple-return-component", "wasm",
+                                "t.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lifts_tuple_u32_u32_return()
+        {
+            // tuple-return-component exports
+            // `pair() -> tuple<u32, u32>`. Core returns retArea
+            // ptr 200; memory[200..204] = 7, memory[204..208] = 35.
+            // Expect (7u, 35u) as ValueTuple<uint, uint>.
+            using var fs = File.OpenRead(FindTupleReturnComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var pair = componentExports!.GetMethod("Pair");
+            Assert.NotNull(pair);
+            Assert.Equal(typeof(System.ValueTuple<uint, uint>), pair!.ReturnType);
+
+            var tuple = ((uint, uint))pair.Invoke(null, null)!;
+            Assert.Equal(7u, tuple.Item1);
+            Assert.Equal(35u, tuple.Item2);
+        }
+
+        private static string FindResultReturnComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "result-return-component", "wasm",
+                                "r.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lifts_result_u32_u32_ok_branch()
+        {
+            // result-return-component exports
+            // `divide() -> result<u32, u32>`. Core returns retArea
+            // ptr 200; memory[200..204] = 0 (Ok disc);
+            // memory[204..208] = 42 (payload). Expect tuple
+            // (true, 42u, 0u).
+            using var fs = File.OpenRead(FindResultReturnComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var divide = componentExports!.GetMethod("Divide");
+            Assert.NotNull(divide);
+            Assert.Equal(
+                typeof(System.ValueTuple<bool, uint, uint>),
+                divide!.ReturnType);
+
+            var tuple = ((bool ok, uint value, uint error))
+                divide.Invoke(null, null)!;
+            Assert.True(tuple.ok);
+            Assert.Equal(42u, tuple.value);
+            Assert.Equal(0u, tuple.error);
+        }
+
+        private static string FindOptionReturnComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "option-return-component", "wasm",
+                                "o.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lifts_option_u32_some_return()
+        {
+            // option-return-component exports `find() -> option<u32>`.
+            // Core returns retArea ptr = 200; memory[200] = 0x01
+            // (Some tag); memory[204..208] = 0x2a (payload = 42).
+            // ComponentExports.Find() → uint? with value 42u.
+            using var fs = File.OpenRead(FindOptionReturnComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var find = componentExports!.GetMethod("Find");
+            Assert.NotNull(find);
+            Assert.Equal(typeof(uint?), find!.ReturnType);
+
+            var value = (uint?)find.Invoke(null, null);
+            Assert.True(value.HasValue);
+            Assert.Equal(42u, value.Value);
+        }
+
+        private static string FindListReturnComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "list-return-component", "wasm",
+                                "l.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lifts_list_u8_return_from_guest_memory()
+        {
+            // list-return-component exports `bytes() -> list<u8>`.
+            // Core sig: `() -> i32`, returning the retArea ptr.
+            // Memory layout:
+            //   [100..105] = 01 02 03 04 05 (list payload)
+            //   [200..204] = 100 (dataPtr)
+            //   [204..208] = 5   (count)
+            // ComponentExports.Bytes() reads (dataPtr, count)
+            // from the return area and lifts via ListMarshal.LiftPrim<byte>.
+            using var fs = File.OpenRead(FindListReturnComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var bytes = componentExports!.GetMethod("Bytes");
+            Assert.NotNull(bytes);
+            Assert.Equal(typeof(byte[]), bytes!.ReturnType);
+
+            var value = (byte[])bytes.Invoke(null, null)!;
+            Assert.Equal(new byte[] { 1, 2, 3, 4, 5 }, value);
+        }
+
+        private static string FindStringReturnComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "string-return-component", "wasm",
+                                "h.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lifts_string_return_from_guest_memory()
+        {
+            // string-return-component exports `hello() -> string`.
+            // Core signature: `() -> i32`, returning a pointer P
+            // into linear memory where bytes [P..P+4] hold the
+            // string's ptr (= 100, pointing at "Hello") and
+            // bytes [P+4..P+8] hold its length (= 5).
+            // ComponentExports.Hello() reads (strPtr, strLen)
+            // from the return area and routes through
+            // StringMarshal.LiftUtf8 to get "Hello" as a C# string.
+            // First real exercise of the canonical-ABI return-
+            // area lift path through IL emission.
+            using var fs = File.OpenRead(FindStringReturnComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var hello = componentExports!.GetMethod("Hello");
+            Assert.NotNull(hello);
+            Assert.Equal(typeof(string), hello!.ReturnType);
+
+            var value = (string)hello.Invoke(null, null)!;
+            Assert.Equal("Hello", value);
+        }
+
+        private static string FindStringParamComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "string-param-component", "wasm",
+                                "sp.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lowers_string_param_via_cabi_realloc()
+        {
+            // string-param-component exports `echo(s: string) -> string`.
+            // Core signature: `(i32, i32) -> i32` — the two i32s
+            // are (ptr, len) into guest memory, the return i32
+            // points at a 2-word return area holding (ptr, len).
+            // The guest bump-allocates via cabi_realloc and echoes
+            // the input back by pointing the return area at the
+            // freshly-copied bytes. Exercises the param-side
+            // canonical-ABI lower path: UTF-8 encode, call
+            // cabi_realloc, memcpy into guest memory, pass
+            // (ptr, len) to the core function — all through IL.
+            using var fs = File.OpenRead(FindStringParamComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var echo = componentExports!.GetMethod("Echo");
+            Assert.NotNull(echo);
+            Assert.Equal(typeof(string), echo!.ReturnType);
+            var pars = echo.GetParameters();
+            Assert.Single(pars);
+            Assert.Equal(typeof(string), pars[0].ParameterType);
+
+            var value = (string)echo.Invoke(null, new object[] { "roundtrip" })!;
+            Assert.Equal("roundtrip", value);
+        }
+
+        private static string FindListParamComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "list-param-component", "wasm",
+                                "lp.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lowers_list_u32_param_via_cabi_realloc()
+        {
+            // list-param-component exports `sum(xs: list<u32>) -> u32`.
+            // Core signature: `(ptr: i32, count: i32) -> i32`.
+            // The emitted component adapter must byte-copy the
+            // input uint[] into guest memory via cabi_realloc and
+            // pass (ptr, count) — not (ptr, byteLen) — to the
+            // core function. Core then iterates and sums.
+            using var fs = File.OpenRead(FindListParamComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var sum = componentExports!.GetMethod("Sum");
+            Assert.NotNull(sum);
+            Assert.Equal(typeof(uint), sum!.ReturnType);
+            var pars = sum.GetParameters();
+            Assert.Single(pars);
+            Assert.Equal(typeof(uint[]), pars[0].ParameterType);
+
+            var value = (uint)sum.Invoke(null,
+                new object[] { new uint[] { 1, 2, 3, 4, 5 } })!;
+            Assert.Equal(15u, value);
+        }
+
+        private static string FindOptionStringComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "option-string-component", "wasm",
+                                "os.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lifts_option_string_some_and_none()
+        {
+            // option-string-component exports two zero-arg funcs,
+            // `maybe-some() -> option<string>` returning
+            // Some("greetings") and `maybe-none() -> option<string>`
+            // returning None. Core returns the retArea pointer;
+            // at that address the 1-byte discriminant picks the
+            // branch and offsets 4/8 hold (ptr, len) in the Some
+            // case. C# surface is plain `string` where null = None.
+            //
+            // Exercises both the option<string> lift path AND the
+            // component-func-idx resolver — wit-component emits
+            // this as interleaved canon + alias + export sections,
+            // making the second canon land at component-func idx 2
+            // (not 1). Flat-index lookup into Canons would drop
+            // maybe-none silently.
+            using var fs = File.OpenRead(FindOptionStringComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var maybeSome = componentExports!.GetMethod("MaybeSome");
+            var maybeNone = componentExports.GetMethod("MaybeNone");
+            Assert.NotNull(maybeSome);
+            Assert.NotNull(maybeNone);
+            Assert.Equal(typeof(string), maybeSome!.ReturnType);
+            Assert.Equal(typeof(string), maybeNone!.ReturnType);
+
+            Assert.Equal("greetings", maybeSome.Invoke(null, null));
+            Assert.Null(maybeNone.Invoke(null, null));
+        }
+
+        private static string FindResultStringComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "result-string-component", "wasm",
+                                "rs.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lifts_result_string_u32_both_branches()
+        {
+            // result-string-component exports two funcs each
+            // returning `result<string, u32>` — `greet()` takes
+            // the Ok branch ("fine") and `fail()` takes the Err
+            // branch (404). C# surface per the scope plan is
+            // ValueTuple<bool, string, uint>: Ok → (true, str,
+            // default(uint)); Err → (false, null, code).
+            using var fs = File.OpenRead(FindResultStringComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var greet = componentExports!.GetMethod("Greet");
+            var fail = componentExports.GetMethod("Fail");
+            Assert.NotNull(greet);
+            Assert.NotNull(fail);
+            var tupleType = typeof(System.ValueTuple<bool, string, uint>);
+            Assert.Equal(tupleType, greet!.ReturnType);
+            Assert.Equal(tupleType, fail!.ReturnType);
+
+            var okResult = ((bool ok, string msg, uint code))
+                greet.Invoke(null, null)!;
+            Assert.True(okResult.ok);
+            Assert.Equal("fine", okResult.msg);
+            Assert.Equal(0u, okResult.code);
+
+            var errResult = ((bool ok, string msg, uint code))
+                fail.Invoke(null, null)!;
+            Assert.False(errResult.ok);
+            Assert.Null(errResult.msg);
+            Assert.Equal(404u, errResult.code);
+        }
+
+        private static string FindResultVoidStringComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "result-void-string-component", "wasm",
+                                "rvs.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lifts_result_void_string_both_branches()
+        {
+            // result-void-string-component exports `ok() -> result<_, string>`
+            // taking the Ok branch (void payload) and `err() ->
+            // result<_, string>` taking the Err branch with
+            // "permission denied". Absent Ok side maps to `object`
+            // at the C# surface — will always be null.
+            using var fs = File.OpenRead(FindResultVoidStringComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var ok = componentExports!.GetMethod("Ok");
+            var err = componentExports.GetMethod("Err");
+            Assert.NotNull(ok);
+            Assert.NotNull(err);
+            var tupleType = typeof(System.ValueTuple<bool, object, string>);
+            Assert.Equal(tupleType, ok!.ReturnType);
+            Assert.Equal(tupleType, err!.ReturnType);
+
+            var okResult = ((bool ok, object val, string error))
+                ok.Invoke(null, null)!;
+            Assert.True(okResult.ok);
+            Assert.Null(okResult.val);
+            Assert.Null(okResult.error);
+
+            var errResult = ((bool ok, object val, string error))
+                err.Invoke(null, null)!;
+            Assert.False(errResult.ok);
+            Assert.Null(errResult.val);
+            Assert.Equal("permission denied", errResult.error);
+        }
+
+        private static string FindListStringComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "list-string-component", "wasm",
+                                "ls.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lifts_list_of_strings_from_guest_memory()
+        {
+            // list-string-component exports `words() -> list<string>`.
+            // Return area at retArea P carries (listPtr, count).
+            // Each element at listPtr + i*8 is a (strPtr, strLen)
+            // pair. Three pre-allocated UTF-8 strings get lifted
+            // via ListMarshal.LiftStringList, which walks the
+            // 8-byte pair array and calls StringMarshal.LiftUtf8
+            // per element — keeps the UTF-8 copy chokepoint
+            // discipline intact.
+            using var fs = File.OpenRead(FindListStringComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var words = componentExports!.GetMethod("Words");
+            Assert.NotNull(words);
+            Assert.Equal(typeof(string[]), words!.ReturnType);
+
+            var value = (string[])words.Invoke(null, null)!;
+            Assert.Equal(new[] { "alpha", "beta", "gamma" }, value);
+        }
+
+        private static string FindEnumComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "enum-component", "wasm",
+                                "en.component.wasm");
+        }
+
+        private static string FindEnumComponentTypeBlobPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "enum-component",
+                                "en.componenttype.bin");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_emits_named_enum_return_via_decoded_wit()
+        {
+            // enum-component declares `enum direction { north, south,
+            // east, west }` and exports `current() -> direction`.
+            // The .component.wasm strips the component-type custom
+            // section (wasm-tools component new behavior), so we
+            // pass the extracted blob via componentTypeOverride.
+            // The transpiler decodes the WIT, emits a public C#
+            // `Direction` enum into the assembly, and types the
+            // ComponentExports.Current method's return as that
+            // enum. Core returns i32=2 → C# value `Direction.East`.
+            using var fs = File.OpenRead(FindEnumComponentPath());
+            var witBytes = File.ReadAllBytes(FindEnumComponentTypeBlobPath());
+            var result = ComponentTranspiler.TranspileSingleModule(
+                fs, componentTypeOverride: witBytes);
+
+            var direction = result.Assembly
+                .GetType("Wacs.Transpiled.Component.Direction");
+            Assert.NotNull(direction);
+            Assert.True(direction!.IsEnum);
+            Assert.Equal(typeof(byte), direction.GetEnumUnderlyingType());
+
+            var members = direction.GetEnumNames();
+            Assert.Equal(new[] { "North", "South", "East", "West" }, members);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+            var current = componentExports!.GetMethod("Current");
+            Assert.NotNull(current);
+            Assert.Equal(direction, current!.ReturnType);
+
+            var value = current.Invoke(null, null);
+            Assert.NotNull(value);
+            Assert.Equal("East", value!.ToString());
+        }
+
+        private static string FindFlagsComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "flags-component", "wasm",
+                                "fl.component.wasm");
+        }
+
+        private static string FindFlagsComponentTypeBlobPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "flags-component",
+                                "fl.componenttype.bin");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_emits_named_flags_return_via_decoded_wit()
+        {
+            // flags-component declares `flags permissions { read,
+            // write, execute }` and exports `default-perms() ->
+            // permissions`. The transpiler emits a public C#
+            // `Permissions` enum with `[Flags]` and bit-power-
+            // of-two literals; `ComponentExports.DefaultPerms()`
+            // returns the bitmask `Read | Execute` (= 5).
+            using var fs = File.OpenRead(FindFlagsComponentPath());
+            var witBytes = File.ReadAllBytes(FindFlagsComponentTypeBlobPath());
+            var result = ComponentTranspiler.TranspileSingleModule(
+                fs, componentTypeOverride: witBytes);
+
+            var perms = result.Assembly
+                .GetType("Wacs.Transpiled.Component.Permissions");
+            Assert.NotNull(perms);
+            Assert.True(perms!.IsEnum);
+            Assert.Equal(typeof(byte), perms.GetEnumUnderlyingType());
+            Assert.NotNull(perms.GetCustomAttribute(
+                typeof(System.FlagsAttribute)));
+
+            var values = perms.GetEnumValues();
+            Assert.Equal((byte)1,
+                System.Convert.ToByte(values.GetValue(0)));
+            Assert.Equal((byte)2,
+                System.Convert.ToByte(values.GetValue(1)));
+            Assert.Equal((byte)4,
+                System.Convert.ToByte(values.GetValue(2)));
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var defaultPerms = componentExports!.GetMethod("DefaultPerms");
+            Assert.NotNull(defaultPerms);
+            Assert.Equal(perms, defaultPerms!.ReturnType);
+
+            var value = defaultPerms.Invoke(null, null);
+            Assert.Equal((byte)5, System.Convert.ToByte(value));
+            // [Flags] formatting: "Read, Execute".
+            Assert.Equal("Read, Execute", value!.ToString());
+        }
+
+        private static string FindRecordComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "record-component", "wasm",
+                                "rc.component.wasm");
+        }
+
+        private static string FindRecordComponentTypeBlobPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "record-component",
+                                "rc.componenttype.bin");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_emits_named_record_return_via_decoded_wit()
+        {
+            // record-component declares `record point { x: u32, y: u32 }`
+            // and exports `origin() -> point`. The transpiler emits
+            // a public C# `Point` class with `X`, `Y` readonly
+            // fields and a (uint, uint) constructor. The generated
+            // ComponentExports.Origin reads (7, 11) from the guest
+            // and constructs Point(7, 11).
+            using var fs = File.OpenRead(FindRecordComponentPath());
+            var witBytes = File.ReadAllBytes(FindRecordComponentTypeBlobPath());
+            var result = ComponentTranspiler.TranspileSingleModule(
+                fs, componentTypeOverride: witBytes);
+
+            var pointType = result.Assembly
+                .GetType("Wacs.Transpiled.Component.Point");
+            Assert.NotNull(pointType);
+            Assert.True(pointType!.IsClass);
+
+            var fieldX = pointType.GetField("X");
+            var fieldY = pointType.GetField("Y");
+            Assert.NotNull(fieldX);
+            Assert.NotNull(fieldY);
+            Assert.Equal(typeof(uint), fieldX!.FieldType);
+            Assert.Equal(typeof(uint), fieldY!.FieldType);
+
+            var ctor = pointType.GetConstructor(new[] { typeof(uint), typeof(uint) });
+            Assert.NotNull(ctor);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var origin = componentExports!.GetMethod("Origin");
+            Assert.NotNull(origin);
+            Assert.Equal(pointType, origin!.ReturnType);
+
+            var instance = origin.Invoke(null, null)!;
+            Assert.Equal(7u, fieldX.GetValue(instance));
+            Assert.Equal(11u, fieldY.GetValue(instance));
+        }
+
+        private static string FindVariantComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "variant-component", "wasm",
+                                "vt.component.wasm");
+        }
+
+        private static string FindVariantComponentTypeBlobPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "variant-component",
+                                "vt.componenttype.bin");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_emits_named_variant_return_via_decoded_wit()
+        {
+            // variant-component declares
+            //   `variant lookup-result { not-found, access-denied, found(u32) }`
+            //   `export lookup: func() -> lookup-result`
+            // The transpiler emits a public C# `LookupResult` class
+            // with Tag (byte) + per-payload-case fields (just
+            // `Found` here for the u32 payload). Core returns the
+            // retArea pointer; bytes (disc=2, padding, payload=42)
+            // produce LookupResult(Tag=2, Found=42).
+            using var fs = File.OpenRead(FindVariantComponentPath());
+            var witBytes = File.ReadAllBytes(FindVariantComponentTypeBlobPath());
+            var result = ComponentTranspiler.TranspileSingleModule(
+                fs, componentTypeOverride: witBytes);
+
+            var lookupResult = result.Assembly
+                .GetType("Wacs.Transpiled.Component.LookupResult");
+            Assert.NotNull(lookupResult);
+
+            var tagField = lookupResult!.GetField("Tag");
+            var foundField = lookupResult.GetField("Found");
+            Assert.NotNull(tagField);
+            Assert.NotNull(foundField);
+            Assert.Equal(typeof(byte), tagField!.FieldType);
+            Assert.Equal(typeof(uint), foundField!.FieldType);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var lookup = componentExports!.GetMethod("Lookup");
+            Assert.NotNull(lookup);
+            Assert.Equal(lookupResult, lookup!.ReturnType);
+
+            var instance = lookup.Invoke(null, null)!;
+            Assert.Equal((byte)2, tagField.GetValue(instance));
+            Assert.Equal(42u, foundField.GetValue(instance));
+        }
+
+        private static string FindResourceComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "resource-component", "wasm",
+                                "rsrc.component.wasm");
+        }
+
+        private static string FindResourceComponentTypeBlobPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "resource-component",
+                                "rsrc.componenttype.bin");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_emits_named_resource_class_via_decoded_wit()
+        {
+            // resource-component declares a `counter` resource at
+            // world level and exports `make: func() -> own<counter>`.
+            // The transpiler emits a public C# `Counter` class
+            // (sealed, holding the wasm handle as a public
+            // readonly int) and types ComponentExports.Make() to
+            // return `Counter`. Core returns handle = 1; the
+            // emitted IL wraps it in `new Counter(1)`.
+            using var fs = File.OpenRead(FindResourceComponentPath());
+            var witBytes = File.ReadAllBytes(FindResourceComponentTypeBlobPath());
+            var result = ComponentTranspiler.TranspileSingleModule(
+                fs, componentTypeOverride: witBytes);
+
+            var counter = result.Assembly
+                .GetType("Wacs.Transpiled.Component.Counter");
+            Assert.NotNull(counter);
+            Assert.True(counter!.IsClass);
+            Assert.True(counter.IsSealed);
+
+            var handleField = counter.GetField("Handle");
+            Assert.NotNull(handleField);
+            Assert.Equal(typeof(int), handleField!.FieldType);
+
+            var ctor = counter.GetConstructor(new[] { typeof(int) });
+            Assert.NotNull(ctor);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var make = componentExports!.GetMethod("Make");
+            Assert.NotNull(make);
+            Assert.Equal(counter, make!.ReturnType);
+
+            var instance = make.Invoke(null, null)!;
+            Assert.Equal(1, handleField.GetValue(instance));
+
+            // The fixture's core module exports
+            // `[resource-drop]counter` (a no-op `nop`), so the
+            // generated Counter class implements IDisposable. Calls
+            // shouldn't throw — the body invokes the core export
+            // and returns.
+            Assert.True(typeof(System.IDisposable).IsAssignableFrom(counter));
+            ((System.IDisposable)instance).Dispose();
+
+            // The fixture also exports `inspect: func(c: borrow<counter>)
+            // -> u32` returning 42 from the core. ComponentExports.Inspect
+            // takes a Counter, extracts its handle, and returns the u32.
+            var inspect = componentExports.GetMethod("Inspect");
+            Assert.NotNull(inspect);
+            var pars = inspect!.GetParameters();
+            Assert.Single(pars);
+            Assert.Equal(counter, pars[0].ParameterType);
+            Assert.Equal(typeof(uint), inspect.ReturnType);
+            var result2 = (uint)inspect.Invoke(null, new[] { instance })!;
+            Assert.Equal(42u, result2);
+
+            // The WIT declares `constructor()` and instance methods
+            // `value() -> u32` + `add(n: u32) -> u32` on the
+            // counter resource. The transpiler projects these from
+            // [constructor]counter / [method]counter.value /
+            // [method]counter.add core exports onto the Counter
+            // class.
+            var publicCtor = counter.GetConstructor(System.Type.EmptyTypes);
+            Assert.NotNull(publicCtor);
+            var fresh = publicCtor!.Invoke(null);
+            Assert.Equal(1, handleField.GetValue(fresh));   // [constructor] returns 1
+
+            var valueMethod = counter.GetMethod("Value", System.Type.EmptyTypes);
+            Assert.NotNull(valueMethod);
+            // Resource methods use the core IExports' CLR types
+            // for params + return — int rather than uint here.
+            // Surfacing the WIT-decoded signed/unsigned + named-
+            // type mapping is the natural followup once
+            // BinaryWitDecoder populates `CtResourceType.Methods`.
+            Assert.Equal(typeof(int), valueMethod!.ReturnType);
+            Assert.Equal(42, (int)valueMethod.Invoke(fresh, null)!);
+
+            var addMethod = counter.GetMethod("Add", new[] { typeof(int) });
+            Assert.NotNull(addMethod);
+            Assert.Equal(typeof(int), addMethod!.ReturnType);
+            // [method]counter.add returns n + 100; passing 5
+            // expects 105.
+            Assert.Equal(105, (int)addMethod.Invoke(fresh, new object[] { 5 })!);
+        }
+
+        private static string FindVariantStringComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "variant-string-component", "wasm",
+                                "vs.component.wasm");
+        }
+
+        private static string FindVariantStringComponentTypeBlobPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "variant-string-component",
+                                "vs.componenttype.bin");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_emits_variant_with_string_payload_via_decoded_wit()
+        {
+            // variant-string-component declares
+            //   `variant status { idle, denied(string), ok }`
+            //   `export describe: func() -> status`
+            // The fixture's retArea picks the `denied` case
+            // (disc=1) with the string payload "denied". The
+            // emitted Status class has Tag (byte) plus Denied
+            // (string) readonly fields; string lift goes through
+            // StringMarshal.LiftUtf8 at the variant payload
+            // offset.
+            using var fs = File.OpenRead(FindVariantStringComponentPath());
+            var witBytes = File.ReadAllBytes(
+                FindVariantStringComponentTypeBlobPath());
+            var result = ComponentTranspiler.TranspileSingleModule(
+                fs, componentTypeOverride: witBytes);
+
+            var status = result.Assembly
+                .GetType("Wacs.Transpiled.Component.Status");
+            Assert.NotNull(status);
+
+            var tagField = status!.GetField("Tag");
+            var deniedField = status.GetField("Denied");
+            Assert.NotNull(tagField);
+            Assert.NotNull(deniedField);
+            Assert.Equal(typeof(byte), tagField!.FieldType);
+            Assert.Equal(typeof(string), deniedField!.FieldType);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var describe = componentExports!.GetMethod("Describe");
+            Assert.NotNull(describe);
+            Assert.Equal(status, describe!.ReturnType);
+
+            var instance = describe.Invoke(null, null)!;
+            Assert.Equal((byte)1, tagField.GetValue(instance));
+            Assert.Equal("denied", deniedField.GetValue(instance));
+        }
+
+        private static string FindVariantListComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "variant-list-component", "wasm",
+                                "vl.component.wasm");
+        }
+
+        private static string FindVariantListComponentTypeBlobPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "variant-list-component",
+                                "vl.componenttype.bin");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_emits_variant_with_list_payload_via_decoded_wit()
+        {
+            // variant-list-component: `variant scan { empty,
+            // found(list<u32>) }` exported as `discover`. The
+            // fixture picks the `found` case with three u32
+            // elements [10, 20, 30]. Variant payload offset
+            // aligns to 4 (list pointer alignment); reading the
+            // (dataPtr, count) pair at offset 4/8 dispatches
+            // ListMarshal.LiftPrim<uint>.
+            using var fs = File.OpenRead(FindVariantListComponentPath());
+            var witBytes = File.ReadAllBytes(
+                FindVariantListComponentTypeBlobPath());
+            var result = ComponentTranspiler.TranspileSingleModule(
+                fs, componentTypeOverride: witBytes);
+
+            var scan = result.Assembly
+                .GetType("Wacs.Transpiled.Component.Scan");
+            Assert.NotNull(scan);
+
+            var tagField = scan!.GetField("Tag");
+            var foundField = scan.GetField("Found");
+            Assert.NotNull(tagField);
+            Assert.NotNull(foundField);
+            Assert.Equal(typeof(byte), tagField!.FieldType);
+            Assert.Equal(typeof(uint[]), foundField!.FieldType);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var discover = componentExports!.GetMethod("Discover");
+            Assert.NotNull(discover);
+            Assert.Equal(scan, discover!.ReturnType);
+
+            var instance = discover.Invoke(null, null)!;
+            Assert.Equal((byte)1, tagField.GetValue(instance));
+            Assert.Equal(new uint[] { 10, 20, 30 },
+                (uint[])foundField.GetValue(instance)!);
+        }
+
+        private static string FindVariantRecordComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "variant-record-component", "wasm",
+                                "vr.component.wasm");
+        }
+
+        private static string FindVariantRecordComponentTypeBlobPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "variant-record-component",
+                                "vr.componenttype.bin");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_emits_variant_with_record_payload_via_decoded_wit()
+        {
+            // variant-record-component:
+            //   `record point { x: u32, y: u32 }`
+            //   `variant shape { empty, dot(point) }`
+            //   `export locate: func() -> shape`.
+            // The fixture picks the `dot` case (disc=1) carrying
+            // `point { x:7, y:11 }`. Variant payload offset aligns
+            // to 4 (max field align of point); reading x at +4
+            // and y at +8 then `newobj Point` constructs the
+            // record. The variant ctor expects the Point CLR class
+            // as the Dot field type; emittedTypes resolves it via
+            // the case payload's CtTypeRef "point".
+            using var fs = File.OpenRead(FindVariantRecordComponentPath());
+            var witBytes = File.ReadAllBytes(
+                FindVariantRecordComponentTypeBlobPath());
+            var result = ComponentTranspiler.TranspileSingleModule(
+                fs, componentTypeOverride: witBytes);
+
+            var point = result.Assembly
+                .GetType("Wacs.Transpiled.Component.Point");
+            var shape = result.Assembly
+                .GetType("Wacs.Transpiled.Component.Shape");
+            Assert.NotNull(point);
+            Assert.NotNull(shape);
+
+            var tagField = shape!.GetField("Tag");
+            var dotField = shape.GetField("Dot");
+            Assert.NotNull(tagField);
+            Assert.NotNull(dotField);
+            Assert.Equal(typeof(byte), tagField!.FieldType);
+            Assert.Equal(point, dotField!.FieldType);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var locate = componentExports!.GetMethod("Locate");
+            Assert.NotNull(locate);
+            Assert.Equal(shape, locate!.ReturnType);
+
+            var instance = locate.Invoke(null, null)!;
+            Assert.Equal((byte)1, tagField.GetValue(instance));
+            var dotValue = dotField.GetValue(instance);
+            Assert.NotNull(dotValue);
+            Assert.IsType(point, dotValue);
+
+            var xField = point!.GetField("X");
+            var yField = point.GetField("Y");
+            Assert.NotNull(xField);
+            Assert.NotNull(yField);
+            Assert.Equal(typeof(uint), xField!.FieldType);
+            Assert.Equal((uint)7, xField.GetValue(dotValue));
+            Assert.Equal((uint)11, yField!.GetValue(dotValue));
+        }
+
+        private static string FindCompactUtf16ComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "compact-utf16-component", "wasm",
+                                "clu.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lifts_latin1_branch_of_compact_utf16()
+        {
+            // compact-utf16-component built with --encoding
+            // compact-utf16 → canon-lift's option is
+            // string-encoding=latin1+utf16. The `latin` export
+            // returns a buffer tagged with the high bit CLEAR;
+            // LiftLatin1OrUtf16 routes to the Latin-1 decode path,
+            // taking taggedLen as raw byte count. Fixture has
+            // 2 raw bytes 0x48 0x69 → "Hi".
+            using var fs = File.OpenRead(FindCompactUtf16ComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var latin = componentExports!.GetMethod("Latin");
+            Assert.NotNull(latin);
+            Assert.Equal("Hi", (string)latin!.Invoke(null, null)!);
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lifts_utf16_branch_of_compact_utf16()
+        {
+            // Companion test: the `wide` export returns a buffer
+            // tagged with the high bit SET; LiftLatin1OrUtf16
+            // masks the tag, treats the count as u16 code units,
+            // and decodes the buffer as UTF-16LE. Fixture stores
+            // "Hi" as 4 bytes (2 code units).
+            using var fs = File.OpenRead(FindCompactUtf16ComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var wide = componentExports!.GetMethod("Wide");
+            Assert.NotNull(wide);
+            Assert.Equal("Hi", (string)wide!.Invoke(null, null)!);
+        }
+
+        private static string FindNestedComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "nested-component", "wasm",
+                                "nested.component.wasm");
+        }
+
+        private static string FindNestedComponent2LevelPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "nested-component-2level", "wasm",
+                                "multi.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_resolves_through_two_level_nested_components()
+        {
+            // Composer-of-composer fixture: outer wraps middle
+            // wraps innermost. Each level is composer mode (zero
+            // core modules + one nested component) except the
+            // innermost which has the real core wasm. Recursive
+            // TranspileSingleModule sees each level as composer
+            // and emits a delegating ComponentExports — the
+            // outer's `Greet` calls middle's `MidGreet` calls
+            // innermost's `InnerGreet` which canon-lifts "Hi!".
+            using var fs = File.OpenRead(FindNestedComponent2LevelPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var greet = componentExports!.GetMethod("Greet");
+            Assert.NotNull(greet);
+            Assert.Equal("Hi!", (string)greet!.Invoke(null, null)!);
+        }
+
+        [Fact]
+        public void TranspileSingleModule_resolves_through_nested_component_alias()
+        {
+            // nested-component fixture: outer composes one inner
+            // component, alias-re-exporting its `inner-greet`
+            // export as `greet`. The transpiler detects no core
+            // modules + nested components, takes the composer
+            // path: recursively transpiles each nested component
+            // into its own assembly under a sub-namespace, then
+            // emits an outer ComponentExports class whose methods
+            // delegate to the matching inner ComponentExports
+            // method via cross-assembly call. Inner returns "Hi!".
+            using var fs = File.OpenRead(FindNestedComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var greet = componentExports!.GetMethod("Greet");
+            Assert.NotNull(greet);
+            Assert.Equal(typeof(string), greet!.ReturnType);
+
+            Assert.Equal("Hi!", (string)greet.Invoke(null, null)!);
+        }
+
+        private static string FindUtf16ParamComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "utf16-string-param-component", "wasm",
+                                "u16p.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_round_trips_utf16_string_param()
+        {
+            // utf16-string-param-component: echo(s: string) -> string
+            // built with --encoding utf16. Tests the lower path:
+            // caller passes a C# string → emitted IL encodes via
+            // EncodeUtf16, calls cabi_realloc(align=2, byteLen),
+            // copies the UTF-16LE bytes into guest memory, then
+            // pushes (ptr, codeUnits) — codeUnits = byteLen / 2,
+            // not byteLen. The guest's echo returns the same
+            // (ptr, codeUnits) at retArea so the lift round-trips
+            // back to the same string.
+            using var fs = File.OpenRead(FindUtf16ParamComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var echo = componentExports!.GetMethod("Echo");
+            Assert.NotNull(echo);
+            Assert.Equal(typeof(string), echo!.ReturnType);
+            Assert.Equal(typeof(string), echo.GetParameters()[0].ParameterType);
+
+            // ASCII round-trip — UTF-16 widens each char to 2 bytes
+            // but the lift narrows back to the same string.
+            Assert.Equal("Hello", (string)echo.Invoke(null, new object[] { "Hello" })!);
+
+            // Non-ASCII round-trip — UTF-16 native; UTF-8 would
+            // need 2 bytes per char so this exercises that we're
+            // really using UTF-16 not UTF-8.
+            Assert.Equal("café", (string)echo.Invoke(null, new object[] { "café" })!);
+        }
+
+        private static string FindUtf16StringComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "utf16-string-component", "wasm",
+                                "u16.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lifts_utf16_string_via_canon_option()
+        {
+            // utf16-string-component: greet() -> string built with
+            // `componentize-... --encoding utf16`. The canon-lift
+            // section on the .component.wasm carries
+            // string-encoding=utf16; the transpiler reads that
+            // option from the canon entry and dispatches the lift
+            // through StringMarshal.LiftUtf16 instead of LiftUtf8.
+            // Fixture stores "Hi" as UTF-16LE: H=0x48 i=0x69 →
+            // 4 bytes, 2 code units. (strPtr, codeUnitCount)
+            // at retArea = (100, 2).
+            using var fs = File.OpenRead(FindUtf16StringComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var greet = componentExports!.GetMethod("Greet");
+            Assert.NotNull(greet);
+            Assert.Equal(typeof(string), greet!.ReturnType);
+
+            Assert.Equal("Hi", (string)greet.Invoke(null, null)!);
+        }
+
+        private static string FindOptionStringNoneComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "option-string-none-component", "wasm",
+                                "osn.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_lifts_option_string_none()
+        {
+            // Companion to the option-string Some test — same
+            // shape, but the return-area discriminant is 0
+            // (None). The emitted IL's brfalse branch returns
+            // null without touching the payload slot, avoiding
+            // any UTF-8 decode on garbage bytes.
+            using var fs = File.OpenRead(FindOptionStringNoneComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var greeting = componentExports!.GetMethod("Greeting");
+            Assert.NotNull(greeting);
+            Assert.Equal(typeof(string), greeting!.ReturnType);
+
+            Assert.Null(greeting.Invoke(null, null));
+        }
+
+        private static string FindF64ComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "f64-component", "wasm",
+                                "p.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_f64_return_passes_through_precisely()
+        {
+            // f64-component exports `pi: func() -> f64` whose
+            // core returns the IEEE 754 64-bit constant for π.
+            // No canonical-ABI conversion — component f64 and
+            // core f64 share the IL double stack slot.
+            using var fs = File.OpenRead(FindF64ComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            var pi = componentExports!.GetMethod("Pi");
+            Assert.NotNull(pi);
+            Assert.Equal(typeof(double), pi!.ReturnType);
+
+            var value = (double)pi.Invoke(null, null)!;
+            Assert.Equal(3.141592653589793, value);
+        }
+
+        private static string FindU64ComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "u64-component", "wasm",
+                                "u.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_u64_return_preserves_full_64_bits()
+        {
+            // u64-component exports `big: func() -> u64` whose
+            // core returns the i64 literal 0x0123456789ABCDEF.
+            // Exercises the 64-bit passthrough path — component
+            // u64 and core i64 share an IL stack slot, so the
+            // ComponentExports method returns ulong without an
+            // explicit conversion instruction.
+            using var fs = File.OpenRead(FindU64ComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var big = componentExports!.GetMethod("Big",
+                System.Reflection.BindingFlags.Public |
+                System.Reflection.BindingFlags.Static);
+            Assert.NotNull(big);
+            Assert.Equal(typeof(ulong), big!.ReturnType);
+
+            var value = (ulong)big.Invoke(null, null)!;
+            Assert.Equal(0x0123456789ABCDEFUL, value);
+        }
+
+        private static string FindMemoryComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "memory-component", "wasm",
+                                "m.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_module_memory_accessor_exposes_guest_bytes()
+        {
+            // memory-component declares a linear memory with a
+            // 4-byte data segment containing 0x2A (=42) at
+            // offset 0. Its `ping` function returns that value
+            // via i32.load. The Module class should expose a
+            // `Memory` property returning the byte[] — this is
+            // the hook canonical-ABI adapters (strings, lists,
+            // aggregates) read guest memory through.
+            using var fs = File.OpenRead(FindMemoryComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            Assert.NotNull(result.ModuleClass);
+            var memProp = result.ModuleClass!.GetProperty("Memory");
+            Assert.NotNull(memProp);
+            Assert.Equal(typeof(byte[]), memProp!.PropertyType);
+
+            var ctor = result.ModuleClass.GetConstructor(System.Type.EmptyTypes);
+            var instance = ctor!.Invoke(null);
+            var memory = (byte[])memProp.GetValue(instance)!;
+            Assert.NotNull(memory);
+            // 64 KiB = one wasm page.
+            Assert.Equal(64 * 1024, memory.Length);
+            // Data segment wrote 0x2A at offset 0.
+            Assert.Equal(0x2A, memory[0]);
+        }
+
+        [Fact]
+        public void TranspileSingleModule_module_exposes_memory_property()
+        {
+            // The generated Module class emits a public
+            // `Memory` property of type byte[] that returns the
+            // core module's linear memory. This is the hook
+            // canonical-ABI adapters use to lift strings/lists/
+            // aggregates out of guest memory. Verify it's reachable
+            // end-to-end after transpilation of a simple component.
+            //
+            // tiny-component has no memory (no data segments, no
+            // memory ops), so `Memory` is null; but we can still
+            // verify the property exists with the right signature.
+            // A real-world component with declared memory will
+            // return the byte[].
+            using var fs = File.OpenRead(FindTinyComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            Assert.NotNull(result.ModuleClass);
+            var memProp = result.ModuleClass!.GetProperty("Memory");
+            // tiny.wat declares no memory → no Memory property
+            // is emitted. That's fine; the property appears on
+            // components whose core modules do declare memory.
+            if (memProp != null)
+            {
+                Assert.Equal(typeof(byte[]), memProp.PropertyType);
+            }
+        }
+
+        private static string FindAddComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "add-component", "wasm",
+                                "ad.component.wasm");
+        }
+
+        [Fact]
+        public void TranspileSingleModule_forwards_primitive_params_to_core()
+        {
+            // add-component's `add(x: u32, y: u32) -> u32`
+            // exercises the param-forwarding path: two u32
+            // arguments thread through the component wrapper,
+            // land as i32s on the core module's stack, and the
+            // result comes back through the return path.
+            using var fs = File.OpenRead(FindAddComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var add = componentExports!.GetMethod("Add",
+                System.Reflection.BindingFlags.Public |
+                System.Reflection.BindingFlags.Static);
+            Assert.NotNull(add);
+            Assert.Equal(typeof(uint), add!.ReturnType);
+
+            var pars = add.GetParameters();
+            Assert.Equal(2, pars.Length);
+            Assert.Equal(typeof(uint), pars[0].ParameterType);
+            Assert.Equal(typeof(uint), pars[1].ParameterType);
+
+            var value = (uint)add.Invoke(null, new object[] { 7u, 35u })!;
+            Assert.Equal(42u, value);
+        }
+
+        [Fact]
+        public void TranspileSingleModule_casts_i32_to_bool_on_return()
+        {
+            // prim-cast-component's core module returns i32
+            // constant 1 for `check`. The component signature
+            // says `check() -> bool`, so the ComponentExports
+            // method must cast the i32 to bool (via `!= 0`).
+            // Verifies the new primitive-cast IL actually runs.
+            using var fs = File.OpenRead(FindPrimCastComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var check = componentExports!.GetMethod("Check",
+                System.Reflection.BindingFlags.Public |
+                System.Reflection.BindingFlags.Static);
+            Assert.NotNull(check);
+            Assert.Equal(typeof(bool), check!.ReturnType);
+
+            var value = (bool)check.Invoke(null, null)!;
+            Assert.True(value);
+        }
+
+        [Fact]
+        public void TranspileSingleModule_component_exports_class_exposes_typed_greet()
+        {
+            // Full stack: parse + decode exports/canons/types,
+            // emit the ComponentExports class, instantiate
+            // through it, get `uint` (not `int`) as the public
+            // return type. This is the component-level surface
+            // users actually consume.
+            using var fs = File.OpenRead(FindTinyComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            var componentExports = result.Assembly
+                .GetType("Wacs.Transpiled.Component.ComponentExports");
+            Assert.NotNull(componentExports);
+
+            var greet = componentExports!.GetMethod("Greet",
+                System.Reflection.BindingFlags.Public |
+                System.Reflection.BindingFlags.Static);
+            Assert.NotNull(greet);
+            Assert.Equal(typeof(uint), greet!.ReturnType);
+            Assert.Empty(greet.GetParameters());
+
+            var value = (uint)greet.Invoke(null, null)!;
+            Assert.Equal(42u, value);
+        }
+
+        [Fact]
+        public void TranspileSingleModule_execute_greet_returns_42()
+        {
+            // End-to-end execution test: transpile the component,
+            // instantiate the generated Module class, invoke the
+            // exported `greet` via reflection on IExports, and
+            // assert the result is 42 — the value tiny.wat's
+            // core module is coded to return. Validates the full
+            // parse → transpile → load → invoke pipeline on real
+            // component bits.
+            using var fs = File.OpenRead(FindTinyComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            Assert.NotNull(result.ModuleClass);
+            Assert.NotNull(result.ExportsInterface);
+
+            // The generated Module class has an IImports-taking
+            // constructor (or a parameterless one when there are
+            // no imports). tiny-component has no imports, so a
+            // parameterless construction + IExports call works.
+            var ctor = result.ModuleClass!.GetConstructor(System.Type.EmptyTypes);
+            Assert.NotNull(ctor);
+            var moduleInstance = ctor!.Invoke(null);
+
+            var greetMethod = result.ExportsInterface!.GetMethods()
+                .First(m => string.Equals(m.Name, "greet",
+                            System.StringComparison.OrdinalIgnoreCase));
+            var value = greetMethod.Invoke(moduleInstance, null);
+
+            // Core module signature returns i32 → boxed as
+            // System.Int32. At the component level this is u32;
+            // bitwise-equivalent for small positive values.
+            Assert.Equal(42, System.Convert.ToInt32(value));
+        }
+
+        [Fact]
+        public void TranspileSingleModule_exposes_core_export_via_ExportsInterface()
+        {
+            // For primitive-only signatures, the component-level
+            // export and the core-module export have matching
+            // shapes (no canonical-ABI marshaling needed). The
+            // existing ModuleTranspiler's ExportsInterface
+            // captures the core export's `greet() -> u32` — we
+            // piggyback on that for v0. Proper component-level
+            // trampolines with canonical-ABI adapters will sit
+            // above this in follow-up commits.
+            using var fs = File.OpenRead(FindTinyComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(fs);
+
+            Assert.NotNull(result.ExportsInterface);
+            var methods = result.ExportsInterface!.GetMethods();
+            Assert.NotEmpty(methods);
+            // wit-bindgen-csharp emits PascalCase; existing
+            // transpiler uses the WIT name verbatim. Accept
+            // either: the point is that greet is visible.
+            Assert.Contains(methods,
+                m => string.Equals(m.Name, "greet",
+                        System.StringComparison.OrdinalIgnoreCase));
+        }
+
+        [Fact]
+        public void TranspileSingleModule_produces_valid_transpilation_result()
+        {
+            // Full path: parse component → instantiate embedded
+            // core module → ModuleTranspiler → bake metadata.
+            // Verifies no errors along the pipeline for the
+            // trivial tiny-component.
+            using var fs = File.OpenRead(FindTinyComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(
+                fs, assemblyNamespace: "Wacs.Transpiled.Tiny");
+
+            Assert.NotNull(result);
+            Assert.NotNull(result.FunctionsType);
+            Assert.NotEmpty(result.Methods);
+        }
+
+        [Fact]
+        public void EmitComponentMetadataClass_writes_wit_bytes_to_assembly()
+        {
+            // Exercise the metadata emitter directly with
+            // synthetic bytes. The transpiled assembly should
+            // carry a ComponentMetadata static class whose
+            // EmbeddedWitBytes field exposes the same bytes.
+            var assemblyName = new AssemblyName("Wacs.Test.MetadataEmit");
+            var ab = AssemblyBuilder.DefineDynamicAssembly(
+                assemblyName, AssemblyBuilderAccess.Run);
+            var mb = ab.DefineDynamicModule(assemblyName.Name!);
+
+            byte[] witBytes = { 0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03 };
+            ComponentAssemblyEmit.EmitComponentMetadataClass(
+                mb, "Wacs.Transpiled.Foo", witBytes);
+
+            var meta = ab.GetType("Wacs.Transpiled.Foo.ComponentMetadata");
+            Assert.NotNull(meta);
+            var field = meta!.GetField("EmbeddedWitBytes",
+                BindingFlags.Public | BindingFlags.Static);
+            Assert.NotNull(field);
+            var value = (byte[])field!.GetValue(null)!;
+            Assert.Equal(witBytes, value);
+        }
+
+        [Fact]
+        public void EmitComponentMetadataClass_is_noop_when_wit_null()
+        {
+            // No component-type:* section → no ComponentMetadata
+            // class. Keeps the transpiled assembly lean when the
+            // component doesn't carry metadata.
+            var assemblyName = new AssemblyName("Wacs.Test.NoMetadata");
+            var ab = AssemblyBuilder.DefineDynamicAssembly(
+                assemblyName, AssemblyBuilderAccess.Run);
+            var mb = ab.DefineDynamicModule(assemblyName.Name!);
+
+            ComponentAssemblyEmit.EmitComponentMetadataClass(
+                mb, "Wacs.Transpiled.Empty", witBytes: null);
+
+            var meta = ab.GetType("Wacs.Transpiled.Empty.ComponentMetadata");
+            Assert.Null(meta);
+        }
+
+        [Fact]
+        public void ParseFile_does_not_throw_on_missing_component_type_metadata()
+        {
+            // `wasm-tools component new` strips the
+            // `component-type:*` custom section during final
+            // component assembly — so tiny-component's binary
+            // doesn't carry it. componentize-dotnet DOES preserve
+            // it, so real-world components will have EmbeddedWit
+            // populated. Verify the parser handles both cases
+            // gracefully (null without throwing).
+            var result = ComponentTranspiler.ParseFile(FindTinyComponentPath());
+            // Just assert the parse succeeded — EmbeddedWit may
+            // legitimately be null here.
+            Assert.NotNull(result.Component);
+        }
+
+        [Fact]
+        public void ExportInterfaceEmit_synthesizes_WitSource_tagged_world_interface()
+        {
+            // Phase B chain mode entry point — verify
+            // ExportInterfaceEmit synthesizes a [WitSource]-tagged
+            // I{World}World interface for each world's freestanding
+            // exports, plus an I{Iface} interface for each named
+            // interface declared in the package. Construct a
+            // CtPackage by hand (so we don't depend on a
+            // particular fixture's component-type section
+            // preservation) and verify the emitted types.
+
+            var pkgName = new Wacs.ComponentModel.Types.CtPackageName(
+                "local",
+                new[] { "demo" },
+                "1.0.0");
+
+            // interface ops { add: func(x: u32, y: u32) -> u32; }
+            var addFn = new Wacs.ComponentModel.Types.CtInterfaceFunction(
+                "add",
+                new Wacs.ComponentModel.Types.CtFunctionType(
+                    new[]
+                    {
+                        new Wacs.ComponentModel.Types.CtFuncParam(
+                            "x", Wacs.ComponentModel.Types.CtPrimType.U32),
+                        new Wacs.ComponentModel.Types.CtFuncParam(
+                            "y", Wacs.ComponentModel.Types.CtPrimType.U32),
+                    },
+                    Wacs.ComponentModel.Types.CtPrimType.U32,
+                    null));
+            var iface = new Wacs.ComponentModel.Types.CtInterfaceType(
+                pkgName, "ops",
+                System.Array.Empty<Wacs.ComponentModel.Types.CtNamedType>(),
+                new[] { addFn },
+                System.Array.Empty<Wacs.ComponentModel.Types.CtUse>(),
+                System.Array.Empty<Wacs.ComponentModel.Types.CtNamedType>());
+
+            // world demo {
+            //   export greet: func(name: string) -> string;
+            // }
+            var greetFn = new Wacs.ComponentModel.Types.CtFunctionType(
+                new[]
+                {
+                    new Wacs.ComponentModel.Types.CtFuncParam(
+                        "name", Wacs.ComponentModel.Types.CtPrimType.String),
+                },
+                Wacs.ComponentModel.Types.CtPrimType.String,
+                null);
+            var world = new Wacs.ComponentModel.Types.CtWorldType(
+                pkgName, "demo",
+                System.Array.Empty<Wacs.ComponentModel.Types.CtNamedType>(),
+                System.Array.Empty<Wacs.ComponentModel.Types.CtUse>(),
+                System.Array.Empty<Wacs.ComponentModel.Types.CtWorldImport>(),
+                new[] { new Wacs.ComponentModel.Types.CtWorldExport(
+                    "greet",
+                    new Wacs.ComponentModel.Types.CtExternFunc(greetFn)) },
+                System.Array.Empty<Wacs.ComponentModel.Types.CtWorldInclude>());
+
+            var pkg = new Wacs.ComponentModel.Types.CtPackage(
+                pkgName,
+                new[] { iface },
+                new[] { world });
+
+            // Build a fresh dynamic assembly + module to host the
+            // emitted interfaces.
+            var an = new AssemblyName("Wacs.Test.PhaseB");
+            var ab = AssemblyBuilder.DefineDynamicAssembly(
+                an, AssemblyBuilderAccess.RunAndCollect);
+            var mb = ab.DefineDynamicModule(an.Name!);
+
+            var emitted = ExportInterfaceEmit.EmitInterfaces(
+                mb, "Wacs.Test.PhaseB", pkg);
+
+            Assert.Equal(2, emitted.Count);
+
+            // I{Iface} for declared interface "ops".
+            var iOps = ab.GetType("Wacs.Test.PhaseB.IOps");
+            Assert.NotNull(iOps);
+            Assert.True(iOps!.IsInterface);
+            var iOpsAttr = iOps.GetCustomAttribute<
+                Wacs.ComponentModel.Runtime.WitSourceAttribute>();
+            Assert.NotNull(iOpsAttr);
+            Assert.Equal("ops", iOpsAttr!.Interface);
+            Assert.Equal("local:demo@1.0.0", iOpsAttr.Package);
+            // add(x: u32, y: u32) → uint Add(uint, uint)
+            var addMethod = iOps.GetMethod("Add");
+            Assert.NotNull(addMethod);
+            Assert.Equal(typeof(uint), addMethod!.ReturnType);
+            Assert.Equal(2, addMethod.GetParameters().Length);
+            var addAttr = addMethod.GetCustomAttribute<
+                Wacs.ComponentModel.Runtime.WitSourceAttribute>();
+            Assert.NotNull(addAttr);
+            Assert.Equal("add", addAttr!.Item);
+
+            // I{World}World synthesized for world "demo".
+            var iDemo = ab.GetType("Wacs.Test.PhaseB.IDemoWorld");
+            Assert.NotNull(iDemo);
+            Assert.True(iDemo!.IsInterface);
+            var iDemoAttr = iDemo.GetCustomAttribute<
+                Wacs.ComponentModel.Runtime.WitSourceAttribute>();
+            Assert.NotNull(iDemoAttr);
+            Assert.Equal("demo-world", iDemoAttr!.Interface);
+            // greet(name: string) → string Greet(string)
+            var greetMethod = iDemo.GetMethod("Greet");
+            Assert.NotNull(greetMethod);
+            Assert.Equal(typeof(string), greetMethod!.ReturnType);
+            Assert.Equal(typeof(string),
+                greetMethod.GetParameters()[0].ParameterType);
+
+            // Phase B chain mode loop closes here: WitContract
+            // can recover an import-side contract from the
+            // emitted [WitSource] interfaces. This is what the
+            // resolver does internally when --host-package
+            // points at a transpiled .dll.
+            var contract = Wacs.ComponentModel.Validation.WitContract
+                .FromBindingTypes(new[] { iOps, iDemo });
+            // The contract walks importable interfaces; for our
+            // synthesized fixture neither the package "local:demo"
+            // nor the synthesized world is wired into a world's
+            // imports, so contract.Imports is empty — but the
+            // call must not throw.
+            Assert.NotNull(contract);
+        }
+
+        [Fact]
+        public void ExportInterfaceEmit_resolves_record_param_via_named_type_lookup()
+        {
+            // v1 surface — verify a method whose param/return uses
+            // a record CtTypeRef gets emitted (not silently skipped)
+            // by looking up the corresponding pre-emitted CLR type
+            // via @namespace + PascalCase. Mirrors the contract
+            // ComponentExportsEmit + ExportInterfaceEmit jointly
+            // satisfy: ComponentExportsEmit pre-bakes named types,
+            // ExportInterfaceEmit references them.
+            const string ns = "Wacs.Test.PhaseB.V1";
+            var an = new AssemblyName("Wacs.Test.PhaseB.V1");
+            var ab = AssemblyBuilder.DefineDynamicAssembly(
+                an, AssemblyBuilderAccess.RunAndCollect);
+            var mb = ab.DefineDynamicModule(an.Name!);
+
+            // Pre-emit a "Point" record type into the module —
+            // stand-in for what ComponentExportsEmit.EmitNamedTypes
+            // would do for `record point { x: u32, y: u32 }`.
+            var pointTb = mb.DefineType(ns + ".Point",
+                TypeAttributes.Public | TypeAttributes.Class
+                    | TypeAttributes.Sealed);
+            pointTb.DefineField("X", typeof(uint),
+                FieldAttributes.Public);
+            pointTb.DefineField("Y", typeof(uint),
+                FieldAttributes.Public);
+            pointTb.CreateType();
+
+            // interface geom { translate: func(p: point, dx: u32, dy: u32) -> point; }
+            var pointRef = new Wacs.ComponentModel.Types.CtTypeRef("point");
+            var translateFn = new Wacs.ComponentModel.Types.CtInterfaceFunction(
+                "translate",
+                new Wacs.ComponentModel.Types.CtFunctionType(
+                    new[]
+                    {
+                        new Wacs.ComponentModel.Types.CtFuncParam("p", pointRef),
+                        new Wacs.ComponentModel.Types.CtFuncParam(
+                            "dx", Wacs.ComponentModel.Types.CtPrimType.U32),
+                        new Wacs.ComponentModel.Types.CtFuncParam(
+                            "dy", Wacs.ComponentModel.Types.CtPrimType.U32),
+                    },
+                    pointRef,
+                    null));
+
+            var pkgName = new Wacs.ComponentModel.Types.CtPackageName(
+                "local", new[] { "v1" }, "1.0.0");
+            var iface = new Wacs.ComponentModel.Types.CtInterfaceType(
+                pkgName, "geom",
+                System.Array.Empty<Wacs.ComponentModel.Types.CtNamedType>(),
+                new[] { translateFn },
+                System.Array.Empty<Wacs.ComponentModel.Types.CtUse>(),
+                System.Array.Empty<Wacs.ComponentModel.Types.CtNamedType>());
+            var pkg = new Wacs.ComponentModel.Types.CtPackage(
+                pkgName,
+                new[] { iface },
+                System.Array.Empty<Wacs.ComponentModel.Types.CtWorldType>());
+
+            var emitted = ExportInterfaceEmit.EmitInterfaces(mb, ns, pkg);
+
+            Assert.Single(emitted);
+            var iGeom = ab.GetType(ns + ".IGeom");
+            Assert.NotNull(iGeom);
+            // The translate method must NOT have been skipped — the
+            // record lookup found Point in the same module.
+            var translate = iGeom!.GetMethod("Translate");
+            Assert.NotNull(translate);
+            var pointType = ab.GetType(ns + ".Point");
+            Assert.Equal(pointType, translate!.ReturnType);
+            var ps = translate.GetParameters();
+            Assert.Equal(3, ps.Length);
+            Assert.Equal(pointType, ps[0].ParameterType);
+            Assert.Equal(typeof(uint), ps[1].ParameterType);
+            Assert.Equal(typeof(uint), ps[2].ParameterType);
+        }
+
+        [Fact]
+        public void EmitMain_for_no_import_component_invokes_export()
+        {
+            // End-to-end --emit-main path for the simplest
+            // component-mode shape: no imports, single core
+            // module, scalar return. Tiny-component exports
+            // `greet: func() -> u32` returning 42.
+            //
+            // Proves: ComponentMainEntryEmitter wires
+            // typeof(Module) + args + exportName into a
+            // one-line ComponentMainHost.Run call; the host
+            // handles the no-import (parameterless) ctor path
+            // and routes the scalar return to the int exit code.
+
+            using var fs = File.OpenRead(FindTinyComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(
+                fs,
+                assemblyNamespace: "Wacs.Test.TinyMain",
+                moduleName: "TinyModule");
+
+            var programType =
+                Wacs.Transpiler.AOT.Component.ComponentMainEntryEmitter
+                    .Emit(result, "Program", "greet",
+                        System.Array.Empty<System.Reflection.Assembly>());
+
+            Assert.NotNull(programType);
+            var main = programType.GetMethod("Main",
+                BindingFlags.Public | BindingFlags.Static);
+            Assert.NotNull(main);
+
+            var rc = main!.Invoke(null,
+                new object?[] { System.Array.Empty<string>() });
+            // greet() returns u32(42) — Main casts to int exit code.
+            Assert.Equal(42, (int)rc!);
+        }
+
+        [Fact]
+        public void EmitMain_for_no_such_export_surfaces_emit_time_error()
+        {
+            // Asking for an export that doesn't exist must throw a
+            // ConstraintException with a clear message — matches
+            // the existing core-MainEntryEmitter contract.
+            using var fs = File.OpenRead(FindTinyComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(
+                fs,
+                assemblyNamespace: "Wacs.Test.TinyArgs",
+                moduleName: "TinyModule");
+
+            var ex = Assert.Throws<MainEntryEmitter.ConstraintException>(
+                () => Wacs.Transpiler.AOT.Component.ComponentMainEntryEmitter
+                    .Emit(result, "Program", "no-such-export",
+                        System.Array.Empty<System.Reflection.Assembly>()));
+            Assert.Contains("not found", ex.Message);
+        }
+
+        [Fact]
+        public void EmitMain_parses_argv_into_export_params_and_returns_result()
+        {
+            // add-component exports `add: func(x: u32, y: u32) -> u32`.
+            // Verifies argv parsing: Main called with ["7", "35"]
+            // → ParseArg coerces each to uint → method.Invoke →
+            // result 42u → exit code 42.
+            var addPath = FindAddComponentPath();
+            using var fs = File.OpenRead(addPath);
+            var result = ComponentTranspiler.TranspileSingleModule(
+                fs,
+                assemblyNamespace: "Wacs.Test.AddMain",
+                moduleName: "AddModule");
+
+            var programType =
+                Wacs.Transpiler.AOT.Component.ComponentMainEntryEmitter
+                    .Emit(result, "Program", "add",
+                        System.Array.Empty<System.Reflection.Assembly>());
+
+            var main = programType.GetMethod("Main",
+                BindingFlags.Public | BindingFlags.Static);
+            Assert.NotNull(main);
+
+            var rc = main!.Invoke(null,
+                new object?[] { new[] { "7", "35" } });
+            Assert.Equal(42, (int)rc!);
+        }
+
+        [Fact]
+        public void EmitMain_argv_parse_failure_surfaces_runtime_error()
+        {
+            // Bad input ("hello" for a uint param) should throw
+            // through TargetInvocationException with the
+            // ParseArg error message naming the offending arg.
+            var addPath = FindAddComponentPath();
+            using var fs = File.OpenRead(addPath);
+            var result = ComponentTranspiler.TranspileSingleModule(
+                fs,
+                assemblyNamespace: "Wacs.Test.AddBadArg",
+                moduleName: "AddModule");
+
+            var programType =
+                Wacs.Transpiler.AOT.Component.ComponentMainEntryEmitter
+                    .Emit(result, "Program", "add",
+                        System.Array.Empty<System.Reflection.Assembly>());
+
+            var main = programType.GetMethod("Main",
+                BindingFlags.Public | BindingFlags.Static)!;
+            var tie = Assert.Throws<TargetInvocationException>(() =>
+                main.Invoke(null,
+                    new object?[] { new[] { "hello", "35" } }));
+            Assert.Contains("argv[0]", tie.InnerException!.Message);
+        }
+
+        [Fact]
+        public void ExportInterfaceEmit_resolves_enum_and_tuple_via_named_type_lookup()
+        {
+            // v1 surface — enum CtTypeRef + tuple<u32, u32>
+            // composition. ValueTuple is a CLR built-in (not
+            // pre-emitted), enum lookups go through @namespace +
+            // PascalCase.
+            const string ns = "Wacs.Test.PhaseB.V1.EnumTuple";
+            var an = new AssemblyName("Wacs.Test.PhaseB.V1.EnumTuple");
+            var ab = AssemblyBuilder.DefineDynamicAssembly(
+                an, AssemblyBuilderAccess.RunAndCollect);
+            var mb = ab.DefineDynamicModule(an.Name!);
+
+            // Pre-emit "Color" enum (4-byte underlying).
+            var colorEb = mb.DefineEnum(ns + ".Color",
+                TypeAttributes.Public, typeof(int));
+            colorEb.DefineLiteral("Red", 0);
+            colorEb.DefineLiteral("Green", 1);
+            colorEb.DefineLiteral("Blue", 2);
+            colorEb.CreateType();
+
+            // interface palette {
+            //   pick: func(c: color) -> tuple<u32, u32>;
+            // }
+            var colorRef = new Wacs.ComponentModel.Types.CtTypeRef("color");
+            var tupleType = new Wacs.ComponentModel.Types.CtTupleType(
+                new[]
+                {
+                    (Wacs.ComponentModel.Types.CtValType)
+                        Wacs.ComponentModel.Types.CtPrimType.U32,
+                    (Wacs.ComponentModel.Types.CtValType)
+                        Wacs.ComponentModel.Types.CtPrimType.U32,
+                });
+            var pickFn = new Wacs.ComponentModel.Types.CtInterfaceFunction(
+                "pick",
+                new Wacs.ComponentModel.Types.CtFunctionType(
+                    new[]
+                    {
+                        new Wacs.ComponentModel.Types.CtFuncParam("c", colorRef),
+                    },
+                    tupleType,
+                    null));
+
+            var pkgName = new Wacs.ComponentModel.Types.CtPackageName(
+                "local", new[] { "v1" }, "1.0.0");
+            var iface = new Wacs.ComponentModel.Types.CtInterfaceType(
+                pkgName, "palette",
+                System.Array.Empty<Wacs.ComponentModel.Types.CtNamedType>(),
+                new[] { pickFn },
+                System.Array.Empty<Wacs.ComponentModel.Types.CtUse>(),
+                System.Array.Empty<Wacs.ComponentModel.Types.CtNamedType>());
+            var pkg = new Wacs.ComponentModel.Types.CtPackage(
+                pkgName,
+                new[] { iface },
+                System.Array.Empty<Wacs.ComponentModel.Types.CtWorldType>());
+
+            var emitted = ExportInterfaceEmit.EmitInterfaces(mb, ns, pkg);
+            Assert.Single(emitted);
+
+            var iPalette = ab.GetType(ns + ".IPalette");
+            Assert.NotNull(iPalette);
+            var pick = iPalette!.GetMethod("Pick");
+            Assert.NotNull(pick);
+
+            var colorType = ab.GetType(ns + ".Color");
+            Assert.Equal(colorType,
+                pick!.GetParameters()[0].ParameterType);
+            // tuple<u32, u32> → ValueTuple<uint, uint>
+            Assert.Equal(
+                typeof(System.ValueTuple<uint, uint>),
+                pick.ReturnType);
+        }
+    }
+}

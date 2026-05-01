@@ -36,6 +36,15 @@ namespace Wacs.Transpiler.AOT
         public int FuncIndex { get; }
         public MethodBuilder? Method { get; set; }
 
+        /// <summary>The wasm <c>(import "&lt;module&gt;" "&lt;entity&gt;")</c>
+        /// strings for an import method — null on export methods. The
+        /// component transpiler queries
+        /// <see cref="HostPackageResolver"/> via these strings to
+        /// decide whether to emit a direct-linked call or fall back to
+        /// the existing delegate dispatch.</summary>
+        public string? WasmImportModule { get; set; }
+        public string? WasmImportEntity { get; set; }
+
         public InterfaceMethod(string name, FunctionType wasmType, int funcIndex, string? wasmName = null)
         {
             Name = name;
@@ -114,7 +123,9 @@ namespace Wacs.Transpiler.AOT
                 var method = DefineInterfaceMethod(ImportsInterface, methodName, funcType);
                 ImportMethods.Add(new InterfaceMethod(methodName, funcType, funcImportIdx)
                 {
-                    Method = method
+                    Method = method,
+                    WasmImportModule = import.ModuleName,
+                    WasmImportEntity = import.Name,
                 });
                 funcImportIdx++;
             }

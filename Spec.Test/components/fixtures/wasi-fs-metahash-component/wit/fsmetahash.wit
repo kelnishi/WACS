@@ -1,0 +1,9 @@
+package local:fsmetahash;
+world demo {
+    import wasi:filesystem/types@0.2.3;
+    /// Calls metadata-hash; returns the lower u64 from the
+    /// Ok payload at retArea+8.
+    export ask-meta-lower: func(handle: u32) -> u64;
+    /// Same call, returns the upper u64 at retArea+16.
+    export ask-meta-upper: func(handle: u32) -> u64;
+}

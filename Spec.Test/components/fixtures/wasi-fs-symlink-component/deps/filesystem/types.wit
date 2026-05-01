@@ -1,0 +1,7 @@
+package wasi:filesystem@0.2.3;
+interface types {
+    enum error-code { unknown }
+    resource descriptor {
+        symlink-at: func(old-path: string, new-path: string) -> result<_, error-code>;
+    }
+}

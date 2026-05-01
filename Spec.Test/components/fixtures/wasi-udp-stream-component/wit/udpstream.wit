@@ -1,0 +1,13 @@
+package local:udpstream;
+world demo {
+    import wasi:sockets/udp@0.2.3;
+    /// Calls %stream(None) — passes option<ip-socket-address>
+    /// = None (disc=0). Drops the returned streams. Returns
+    /// the count of distinct non-zero handles (2).
+    export ask-stream-none: func(handle: u32) -> u32;
+    /// Calls %stream(Some(ipv4(127.0.0.1:5000))) — passes
+    /// option<ip-socket-address> = Some(ipv4) (option-disc=1,
+    /// variant-disc=0). Drops the returned streams. Returns
+    /// the count.
+    export ask-stream-some: func(handle: u32) -> u32;
+}

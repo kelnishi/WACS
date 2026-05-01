@@ -1,0 +1,31 @@
+package local:httpfields;
+world demo {
+    import wasi:http/types@0.2.3;
+    /// Calls fields.delete(handle, "X-Custom"); returns
+    /// the outer disc byte (always-Ok = 0).
+    export ask-delete: func(handle: u32) -> u32;
+    /// Calls fields.clone(handle); drops the returned
+    /// handle. Returns 1 if a non-zero handle came back.
+    export ask-clone: func(handle: u32) -> u32;
+    /// Calls fields.has(handle, "X-Present"); returns the
+    /// bool as u32.
+    export ask-has: func(handle: u32) -> u32;
+    /// Calls fields.append(handle, "X-New", "value");
+    /// returns the outer disc byte (0 = Ok).
+    export ask-append: func(handle: u32) -> u32;
+    /// Calls fields.entries(handle); returns the list-len
+    /// as u32.
+    export ask-entries-len: func(handle: u32) -> u32;
+    /// Returns first byte of the first entry's key.
+    export ask-entries-first-key: func(handle: u32) -> u32;
+    /// Returns first byte of the first entry's value.
+    export ask-entries-first-val: func(handle: u32) -> u32;
+    /// Calls fields.get(handle, "X-Foo"); returns the
+    /// list-len as u32.
+    export ask-get-len: func(handle: u32) -> u32;
+    /// Returns first byte of the first value's data.
+    export ask-get-first-byte: func(handle: u32) -> u32;
+    /// Calls fields.set(handle, "X-Set", ["one", "two"]);
+    /// returns the outer disc byte (0 = Ok).
+    export ask-set: func(handle: u32) -> u32;
+}

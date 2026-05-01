@@ -1,0 +1,10 @@
+package wasi:http@0.2.3;
+interface types {
+    variant method {
+        get, head, post, put, delete, connect, options,
+        trace, patch, other(string),
+    }
+    resource outgoing-request {
+        method: func() -> method;
+    }
+}

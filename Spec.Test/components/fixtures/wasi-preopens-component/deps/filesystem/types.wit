@@ -1,0 +1,4 @@
+package wasi:filesystem@0.2.3;
+interface types {
+    resource descriptor;
+}

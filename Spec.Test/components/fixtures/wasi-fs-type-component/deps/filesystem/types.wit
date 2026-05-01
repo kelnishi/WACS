@@ -1,0 +1,11 @@
+package wasi:filesystem@0.2.3;
+interface types {
+    enum error-code { unknown, access }
+    enum descriptor-type {
+        unknown, block-device, character-device, directory,
+        fifo, symbolic-link, regular-file, socket,
+    }
+    resource descriptor {
+        get-type: func() -> result<descriptor-type, error-code>;
+    }
+}

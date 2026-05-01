@@ -1,0 +1,9 @@
+package wasi:sockets@0.2.3;
+interface ip-name-lookup {
+    use network.{network, ip-address, error-code};
+    resource resolve-address-stream {
+        resolve-next-address: func() -> result<option<ip-address>, error-code>;
+    }
+    resolve-addresses: func(network: borrow<network>, name: string)
+        -> result<own<resolve-address-stream>, error-code>;
+}

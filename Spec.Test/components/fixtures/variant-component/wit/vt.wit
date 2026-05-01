@@ -1,0 +1,9 @@
+package local:vt;
+world vt {
+    variant lookup-result {
+        not-found,
+        access-denied,
+        found(u32),
+    }
+    export lookup: func() -> lookup-result;
+}

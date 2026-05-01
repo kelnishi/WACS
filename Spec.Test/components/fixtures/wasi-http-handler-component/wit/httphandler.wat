@@ -1,0 +1,38 @@
+(module
+  (import "wasi:http/outgoing-handler@0.2.3" "handle"
+    (func $h (param i32 i32 i32 i32)))
+  (import "wasi:http/types@0.2.3" "[resource-drop]future-incoming-response"
+    (func $drop (param i32)))
+  (memory (export "memory") 1)
+  (global $next (mut i32) (i32.const 1024))
+  (func $realloc (param i32 i32 i32 i32) (result i32)
+    (local $r i32) (local $align i32)
+    (local.set $align (local.get 2))
+    (global.set $next
+      (i32.and
+        (i32.add (global.get $next) (i32.sub (local.get $align) (i32.const 1)))
+        (i32.xor (i32.const -1) (i32.sub (local.get $align) (i32.const 1)))))
+    (local.set $r (global.get $next))
+    (global.set $next
+      (i32.add (global.get $next) (local.get 3)))
+    (local.get $r))
+  (export "cabi_realloc" (func $realloc))
+  (func (export "ask-handle-none") (param i32) (result i32)
+    (local $r i32) (local $disc i32) (local $h i32)
+    ;; result<own<resource>, _>: 8 bytes (disc + 3 pad + handle)
+    (local.set $r (call $realloc (i32.const 0) (i32.const 0) (i32.const 4) (i32.const 8)))
+    ;; handle(req, option<own<opts>> = None: disc=0, handle=0)
+    (call $h (local.get 0) (i32.const 0) (i32.const 0) (local.get $r))
+    (local.set $disc (i32.load8_u (local.get $r)))
+    (local.set $h (i32.load offset=4 (local.get $r)))
+    (call $drop (local.get $h))
+    (local.get $disc))
+  (func (export "ask-handle-some") (param i32 i32) (result i32)
+    (local $r i32) (local $disc i32) (local $h i32)
+    (local.set $r (call $realloc (i32.const 0) (i32.const 0) (i32.const 4) (i32.const 8)))
+    ;; handle(req, Some(opts): disc=1, handle=opts-handle)
+    (call $h (local.get 0) (i32.const 1) (local.get 1) (local.get $r))
+    (local.set $disc (i32.load8_u (local.get $r)))
+    (local.set $h (i32.load offset=4 (local.get $r)))
+    (call $drop (local.get $h))
+    (local.get $disc)))

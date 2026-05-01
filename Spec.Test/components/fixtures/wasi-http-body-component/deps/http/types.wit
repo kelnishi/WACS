@@ -1,0 +1,17 @@
+package wasi:http@0.2.3;
+interface types {
+    use wasi:io/streams@0.2.3.{input-stream, output-stream};
+    variant error-code { internal-error }
+    resource incoming-body {
+        %stream: func() -> result<own<input-stream>>;
+    }
+    resource outgoing-body {
+        write: func() -> result<own<output-stream>>;
+    }
+    resource outgoing-request {
+        body: func() -> result<own<outgoing-body>>;
+    }
+    resource incoming-response {
+        consume: func() -> result<own<incoming-body>>;
+    }
+}

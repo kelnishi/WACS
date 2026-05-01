@@ -1,0 +1,9 @@
+package wasi:sockets@0.2.3;
+interface tcp {
+    use wasi:io/poll@0.2.3.{pollable};
+    enum ip-address-family { ipv4, ipv6 }
+    resource tcp-socket {
+        address-family: func() -> ip-address-family;
+        subscribe: func() -> pollable;
+    }
+}

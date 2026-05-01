@@ -141,7 +141,7 @@ namespace Wacs.Transpiler.AOT.Emitters
                     break;
 
                 case CallStrategy.ImportDispatch:
-                    EmitImportCall(il, site, moduleInst);
+                    EmitImportCall(il, site, moduleInst, options);
                     break;
 
                 case CallStrategy.TableIndirect:
@@ -248,11 +248,39 @@ namespace Wacs.Transpiler.AOT.Emitters
             typeof(ThinContext).GetField(nameof(ThinContext.FuncTable))!;
 
         /// <summary>
-        /// ImportDispatch: load typed delegate from ctx.ImportDelegates[idx], invoke directly.
-        /// No Value[] marshaling, no OpStack. Delegate signature matches WASM function type.
+        /// ImportDispatch: by default, load typed delegate from
+        /// ctx.ImportDelegates[idx] and invoke directly. When
+        /// <paramref name="options"/> carries a
+        /// <see cref="TranspilerOptions.ResolverImportBindings"/> map
+        /// AND this import has a binding AND the binding's typed-
+        /// interface signature is primitive-compatible with the wasm
+        /// function type, route to <see cref="Component.DirectLinkedImportEmit"/>
+        /// instead — the call lowers to inline IL through the
+        /// <see cref="ThinContext.HostBundle"/> field, skipping the
+        /// delegate table entirely.
         /// </summary>
-        private static void EmitImportCall(ILGenerator il, CallSite site, ModuleInstance moduleInst)
+        private static void EmitImportCall(ILGenerator il, CallSite site,
+            ModuleInstance moduleInst, TranspilerOptions? options)
         {
+            var bindings = options?.ResolverImportBindings;
+            if (bindings != null
+                && bindings.TryGetValue(site.FuncIdx, out var binding)
+                && options!.Resolver?.PreferredBundleType != null
+                && Component.DirectLinkedImportEmit.CanEmitDirect(
+                    binding, site.FuncType, options.Resolver)
+                // Resource methods need a resolved resources type;
+                // without one the call still falls back to the
+                // legacy delegate dispatch.
+                && (!binding.IsResourceMethod
+                    || options.Resolver.PreferredResourcesType != null))
+            {
+                Component.DirectLinkedImportEmit.Emit(il, binding,
+                    site.FuncType,
+                    options.Resolver.PreferredBundleType,
+                    options.Resolver.PreferredResourcesType,
+                    options.Resolver);
+                return;
+            }
             EmitTypedDelegateCall(il, site, ImportDelegatesField, site.FuncIdx, moduleInst);
         }
 

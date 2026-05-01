@@ -1,0 +1,11 @@
+package wasi:http@0.2.3;
+interface types {
+    variant error-code { internal-error }
+    type trailers = fields;
+    resource fields;
+    resource outgoing-body {
+        finish: static func(this: own<outgoing-body>,
+                            trailers: option<own<trailers>>)
+            -> result<_, error-code>;
+    }
+}

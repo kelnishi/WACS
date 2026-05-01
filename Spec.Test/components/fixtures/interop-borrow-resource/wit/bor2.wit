@@ -1,0 +1,9 @@
+package local:bor2;
+interface env {
+    resource alpha {
+        constructor();
+        poke: func(other: borrow<alpha>) -> u32;
+    }
+    scan: func(a: borrow<alpha>, b: borrow<alpha>) -> u32;
+}
+world bor2-world { import env; }

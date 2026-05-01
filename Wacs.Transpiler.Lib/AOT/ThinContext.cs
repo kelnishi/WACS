@@ -102,6 +102,32 @@ namespace Wacs.Transpiler.AOT
         // Used by call_indirect/call_ref for dynamic dispatch.
         public Delegate[] FuncTable;
 
+        // HostBundle: opaque reference to a host package's typed-interface
+        // aggregate (e.g. WasiPreview2Bundle). Used by the transpiler's
+        // direct-linked import path — for each guest call $import that
+        // matches a binding in TranspilerOptions.Resolver, the emitted
+        // IL loads this field, casts to the bundle type, and dispatches
+        // through a typed callvirt instead of the ImportDelegates table.
+        // Typed object? to keep ThinContext free of WASI/host-package deps.
+        public object? HostBundle;
+
+        // Resources: opaque reference to a resource-resolver object that
+        // exposes a public `object GetResource(Type, int handle)` method.
+        // Used by direct-linked resource-method import IL: for each
+        // [method]X.foo guest import, the emitted IL pops the leading i32
+        // handle off the stack, calls GetResource(typeof(IX), handle),
+        // casts to IX, then invokes the typed instance method. Typed
+        // object? for the same WASI/host-package independence reason.
+        public object? Resources;
+
+        // CabiRealloc: typed delegate for the component's
+        // `cabi_realloc(oldPtr, oldLen, align, newLen) -> i32`
+        // export. Cached at module-class instantiation when the
+        // component exports it; null otherwise. Used by direct-
+        // linked aggregate-RETURN emit (string / list returns)
+        // to allocate guest-side buffers.
+        public Func<int, int, int, int, int>? CabiRealloc;
+
         // === Interpreter interop (nullable — not needed for standalone) ===
         // When running inside the WACS framework, these enable mixed-mode
         // execution with interpreted modules. When standalone, they are null.

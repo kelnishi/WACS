@@ -1,0 +1,5 @@
+package local:rb;
+world rb {
+    import wasi:random/random@0.2.3;
+    export fetch: func(n: u64) -> list<u8>;
+}

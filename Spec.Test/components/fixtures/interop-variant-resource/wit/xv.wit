@@ -1,0 +1,14 @@
+package local:xv;
+interface errs {
+    resource fail;
+}
+interface env {
+    use errs.{fail};
+    variant status {
+        ok-msg(u32),
+        failed(fail),
+        closed,
+    }
+    query: func() -> status;
+}
+world xv-world { import errs; import env; }

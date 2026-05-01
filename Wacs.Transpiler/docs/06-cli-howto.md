@@ -1,8 +1,18 @@
-# Doc 6 — `wasm-transpile` CLI Walkthrough
+# Doc 6 — `wasm-transpile` CLI Walkthrough (legacy)
 
-**Audience:** end users of the `WACS.Transpiler` NuGet package.
-Internal design docs live in `01`–`05`; this is the first user-facing
-doc in the series.
+> ⚠ **DEPRECATED.** `wasm-transpile` is superseded by the unified
+> `wacs` CLI in `WACS.Cli`. This walkthrough remains accurate for
+> the legacy tool — every flag still works — but new readers should
+> start from
+> [`Wacs.Console/README.md`](../../Wacs.Console/README.md), which
+> covers the verb-based subcommand layout (`wacs run` / `build` /
+> `inspect`). The migration table at the top of the
+> [parent README](../README.md) maps every `wasm-transpile`
+> invocation to its `wacs` equivalent.
+
+**Audience:** end users of the legacy `WACS.Transpiler` NuGet
+package. Internal design docs live in `01`–`05`; this is the only
+user-facing doc in the series.
 
 This is a step-by-step walkthrough of installing the `wasm-transpile`
 CLI, transpiling a `.wasm` module into a .NET assembly, invoking it

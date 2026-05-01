@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <ImplicitUsings>disable</ImplicitUsings>
@@ -6,41 +6,82 @@
     <LangVersion>9</LangVersion>
     <TargetFramework>net8.0</TargetFramework>
     <OutputType>Exe</OutputType>
-    
+
     <!--
       PublishAot/PublishTrimmed pin IsDynamicCodeSupported=false via AOT
       analyzers even during `dotnet run`. That breaks the runtime
-      Reflection.Emit path behind the new [[-]]aot flag. Gate on
+      Reflection.Emit path behind the new aot flag. Gate on
       _IsPublishing so dev builds keep dynamic-code support, and
       `dotnet publish` still produces the fully-AOT standalone binary.
     -->
     <PublishAot Condition="'$(_IsPublishing)' == 'true'">true</PublishAot>
     <SelfContained Condition="'$(_IsPublishing)' == 'true'">true</SelfContained>
     <PublishTrimmed Condition="'$(_IsPublishing)' == 'true'">true</PublishTrimmed>
-    
-    <AssemblyVersion>0.0.1</AssemblyVersion>
-    <FileVersion>0.0.1</FileVersion>
+
     <Company>Kelvin Nishikawa</Company>
-    <Version>0.0.1</Version>
     <Authors>Kelvin Nishikawa</Authors>
-    <IsPackable>false</IsPackable>
-    <PackageId>Wacs.Console</PackageId>
-    <Product>Wacs.Console</Product>
+    <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
+    <Product>WACS</Product>
+
+    <!-- Package identity: ships as the unified `wacs` global tool that
+         supersedes wasm-transpile (WACS.Transpiler). The PackageId is
+         WACS.Cli (the bare WACS id is owned by Wacs.Core, the runtime
+         library); the tool command users type is still `wacs`. -->
+    <PackageId>WACS.Cli</PackageId>
+    <Title>WACS CLI</Title>
+    <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0</AssemblyVersion>
+    <FileVersion>1.0.0</FileVersion>
+    <Description>WACS unified WebAssembly toolchain: run, build, inspect. Supersedes wasm-transpile (WACS.Transpiler).</Description>
+    <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageTags>wasm;webassembly;wacs;component-model;wasi;dotnet-tool</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+
+    <!-- dotnet tool -->
+    <IsPackable>true</IsPackable>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>wacs</ToolCommandName>
   </PropertyGroup>
 
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
     <DefineConstants>TRACE;STRICT_EXECUTION</DefineConstants>
   </PropertyGroup>
-  
+
+  <ItemGroup>
+    <None Include="README.md">
+      <Pack>true</Pack>
+      <PackagePath/>
+    </None>
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Wacs.Core\Wacs.Core.csproj" />
     <ProjectReference Include="..\Wacs.WASIp1\Wacs.WASIp1.csproj" />
     <ProjectReference Include="..\Wacs.Transpiler.Lib\Wacs.Transpiler.Lib.csproj" />
+    <!-- Bundled with the apphost so component-mode emit-main can
+         reflectively construct WasiPreview2Bundle at runtime via
+         AddWasiPreview2(). ExcludeAssets=compile keeps these out
+         of the public API surface; only the apphost ships them. -->
+    <ProjectReference Include="..\Wacs.WASI.Preview2\Wacs.WASI.Preview2.csproj"
+                      ExcludeAssets="compile" />
+    <ProjectReference Include="..\Wacs.WASI.Preview2.DependencyInjection\Wacs.WASI.Preview2.DependencyInjection.csproj"
+                      ExcludeAssets="compile" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="CommandLineParser" Version="2.9.1" />
     <PackageReference Include="JetBrains.Profiler.Api" Version="1.4.8" />
+    <!-- Pulled in so component-mode build/run emit-main can build
+         WasiPreview2Bundle via WasiPreview2ServiceCollectionExtensions
+         without an extra install step. -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection"
+                      Version="8.0.0" />
   </ItemGroup>
 
 </Project>

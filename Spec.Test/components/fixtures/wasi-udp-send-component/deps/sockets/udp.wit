@@ -1,0 +1,12 @@
+package wasi:sockets@0.2.3;
+interface udp {
+    use network.{ip-socket-address, error-code};
+    record outgoing-datagram {
+        data: list<u8>,
+        remote-address: option<ip-socket-address>,
+    }
+    resource outgoing-datagram-stream {
+        send: func(datagrams: list<outgoing-datagram>)
+            -> result<u64, error-code>;
+    }
+}

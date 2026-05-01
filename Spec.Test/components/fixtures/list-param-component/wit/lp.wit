@@ -1,0 +1,4 @@
+package local:lp;
+world lp {
+    export sum: func(xs: list<u32>) -> u32;
+}
