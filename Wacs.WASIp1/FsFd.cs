@@ -574,7 +574,11 @@ namespace Wacs.WASIp1
             fileDescriptor.Stream.Seek(newPosition, SeekOrigin.Begin);
 
             var mem = ctx.DefaultMemory;
-            mem.WriteInt32(newoffsetPtr, (int)newPosition);
+            // Spec slot is *newoffset: filesize (u64). Writing only 4 bytes
+            // would leave the upper half of the guest's 8-byte read as
+            // stale linear-memory contents, breaking any guest that reads
+            // it as u64 even on small files.
+            mem.WriteInt64(newoffsetPtr, newPosition);
 
             return ErrNo.Success;
         }
