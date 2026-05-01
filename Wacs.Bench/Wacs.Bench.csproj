@@ -9,6 +9,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Wacs.Core\Wacs.Core.csproj" />
+    <ProjectReference Include="..\Wacs.Transpiler.Lib\Wacs.Transpiler.Lib.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Include="fib.wasm" CopyToOutputDirectory="PreserveNewest" />
