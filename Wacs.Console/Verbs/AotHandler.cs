@@ -50,14 +50,15 @@ namespace Wacs.Console.Verbs
                 // emission, stable assembly name, --emit-main so the .dll has
                 // its own Program.Main that we can call from the consumer.
                 var assemblyName = SanitizeAssemblyName(baseName);
-                Log($"transpile → {assemblyName}.dll (aot-linked, --emit-main)");
+                string emission = opts.AotLinked ? "aot-linked" : "standard";
+                Log($"transpile → {assemblyName}.dll (emission={emission}, --emit-main)");
                 var dllPath = Path.Combine(tempDir, assemblyName + ".dll");
                 var buildOpts = new BuildOptions
                 {
                     Files = new[] { inputAbs },
                     Output = dllPath,
                     AssemblyName = assemblyName,
-                    Emission = "aot-linked",
+                    Emission = emission,
                     Namespace = opts.Namespace,
                     ModuleName = "Module",
                     Simd = opts.Simd,
