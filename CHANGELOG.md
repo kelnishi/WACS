@@ -1,5 +1,85 @@
 # Changelog
 
+## [WACS.WASIp1 0.9.8] — wasi-testsuite integration + correctness pass
+
+Wires the dormant `Spec.Test/wasi` submodule (now pinned to
+`prod/testsuite-base` for the prebuilt fixtures) into a new
+`Wacs.WASIp1.Test` xUnit project that runs as part of `dotnet test`
+in CI. **43 of 72 conformance fixtures pass** at HEAD; the rest are
+in `Wacs.WASIp1.Test/skip.json` with documented Phase-4 follow-ups.
+
+Sockets are no longer stubbed — the four `sock_*` host functions are
+implemented over `System.Net.Sockets.Socket`, gated on a default-off
+`AllowNetworkSockets` flag plus the requirement that the embedder
+hand WACS pre-bound, pre-listening sockets via the new
+`PreopenedSockets` config list. WASI Preview 1 has no `sock_open` /
+`sock_bind` / `sock_listen`, so this is the same model `wasmtime
+serve` uses for HTTP.
+
+### Bug fixes
+
+- `fd_seek` no longer truncates `*newoffset` to 32 bits — it's a u64
+  in the spec and was overflowing on files >2 GB and silently
+  corrupting the upper 4 bytes of the slot even on small files.
+- `fd_prestat_get` / `fd_prestat_dir_name` strip the internal
+  leading `/` from the directory name and report exactly
+  `pr_name_len` bytes (no nul terminator). Matches what
+  wasi-libc's `open_scratch_directory` expects, and was responsible
+  for ~80% of the conformance fixtures' baseline failures.
+- `fd_pread` / `fd_pwrite` / `fd_advise` / `fd_allocate` /
+  `fd_filestat_set_size` accept their `filesize` (u64) arguments as
+  `long` in the binding signatures and cast inside, since the binding
+  dispatcher can't auto-coerce `wasm i64 → System.Int64 →
+  System.UInt64`.
+- `poll_oneoff` clock subscriptions correctly compute "now" per the
+  subscription's `clock_id` in nanoseconds (was mixing .NET 100 ns
+  ticks with the guest's nanoseconds, breaking absolute timeouts
+  outright); `clock_id` is now actually consulted; write-readiness no
+  longer uses the inverted `Position < Length` gate.
+- `fd_filestat_set_times` / `path_filestat_set_times` reject
+  `(ATIM | ATIM_NOW)` and `(MTIM | MTIM_NOW)` flag combinations per
+  spec instead of silently letting NOW override the explicit value.
+- `path_filestat_get` honors `LookupFlags.SymlinkFollow` — without
+  the flag set, it reports `SYMBOLIC_LINK` for symlinks instead of
+  resolving through them. Required bypassing the path mapper for the
+  leaf component (the mapper resolves symlinks for sandbox safety,
+  which is correct everywhere except `lstat`).
+
+### New / lifted features
+
+- `path_link` and `path_symlink` are real implementations (P/Invoke
+  `link(2)` + `CreateHardLinkW` for hard links;
+  `File.CreateSymbolicLink` for symbolic). Both gated on the
+  matching `WasiConfiguration.AllowHardLinks` /
+  `AllowSymbolicLinks` flags (still default-off).
+- `fd_fdstat_set_flags` validates against known `FdFlags` bits and
+  stores them on the `FileDescriptor`; `Append` is honored by
+  `fd_write` (seek-to-end before write); the others are advisory.
+- `fd_fdstat_set_rights` enforces "can only remove rights" per
+  spec (returns `NotCapable` on any privilege escalation request);
+  `fd_read` / `fd_write` / `fd_pread` / `fd_pwrite` enforce the
+  resulting rights bits.
+
+### New configuration knobs
+
+- `WasiConfiguration.AllowNetworkSockets` (default `false`) +
+  `PreopenedSockets` list.
+- `WasiConfiguration.PreopenHostRootDirectory` (default `true` for
+  back-compat with the `Wacs.Console` "fd 3 = cwd" model). Flip
+  false to follow the wasmtime convention where fd 3 is the first
+  explicit preopen.
+
+### Other
+
+- `FileDescriptor` gains `Flags`, `Socket`, and `IsListening` fields
+  (used by the above).
+- New `Wacs.WASIp1.SocketStream` — a `Stream` wrapper over a
+  `Socket` so the existing `fd_read` / `fd_write` iovec paths work
+  unchanged on connected sockets.
+- New optional Python adapter at `Spec.Test/wasi-adapters/wacs.py`
+  for users who want to run the upstream `wasi-testsuite` Python
+  harness against an installed `wacs` global tool.
+
 ## [WACS.Cli 1.1.0] — `wacs bindgen` verb
 
 Rolls binding generation into the unified `wacs` tool as a fourth

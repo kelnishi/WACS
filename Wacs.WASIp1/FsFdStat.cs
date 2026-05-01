@@ -478,7 +478,55 @@ namespace Wacs.WASIp1
 
             var pathStr = mem.ReadString(pathPtr, pathLen);
             var guestPath = Path.Combine(dirFileDescriptor.Path, pathStr);
-            var hostPath = _state.PathMapper.MapToHostPath(guestPath);
+
+            // Per spec: with LookupFlags.SymlinkFollow set, walk through
+            // any leading symlinks (stat semantics). Without it, return
+            // info about the link itself (lstat semantics). The
+            // PathMapper resolves symlinks for sandbox safety, so for
+            // lstat semantics we build the host path directly from the
+            // directory's resolved host path + the literal leaf — that
+            // way File.GetAttributes / FileInfo.LinkTarget see the link
+            // itself, not the target it points to.
+            bool followSymlink = (flags & LookupFlags.SymlinkFollow) != 0;
+            string hostPath;
+            if (followSymlink)
+            {
+                hostPath = _state.PathMapper.MapToHostPath(guestPath);
+            }
+            else
+            {
+                var hostDir = _state.PathMapper.MapToHostPath(dirFileDescriptor.Path);
+                hostPath = Path.Combine(hostDir, pathStr);
+            }
+
+#if NET6_0_OR_GREATER
+            if (!followSymlink)
+            {
+                FileSystemInfo? linkInfo;
+                try
+                {
+                    linkInfo = File.Exists(hostPath) || Directory.Exists(hostPath)
+                        ? (FileSystemInfo)(File.Exists(hostPath)
+                            ? new FileInfo(hostPath)
+                            : new DirectoryInfo(hostPath))
+                        : null;
+                }
+                catch (UnauthorizedAccessException) { return ErrNo.Acces; }
+                catch (IOException)                 { return ErrNo.IO; }
+
+                if (linkInfo == null) return ErrNo.NoEnt;
+                if (!string.IsNullOrEmpty(linkInfo.LinkTarget))
+                {
+                    // Report SYMBOLIC_LINK without following.
+                    var symStat = BuildFileStatForFile(
+                        new FileDescriptor { Type = Filetype.SymbolicLink },
+                        new FileInfo(hostPath));
+                    symStat.Mode = Filetype.SymbolicLink;
+                    mem.WriteStruct(buf, ref symStat);
+                    return ErrNo.Success;
+                }
+            }
+#endif
 
             FileAttributes attr;
             try
