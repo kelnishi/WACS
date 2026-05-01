@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <LangVersion>9</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RootNamespace>Wacs.Bench.Aot</RootNamespace>
+    <!-- Opt the consuming entry point into AOT analyzer warnings. -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <PublishAot>true</PublishAot>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- UndefineProperties stops PublishAot from propagating into Wacs.Core's
+         netstandard2.1 leg or the Wacs.Compilation source generator's
+         netstandard2.0 build, both of which trip NETSDK1207 even though
+         neither ships at runtime in this configuration. -->
+    <ProjectReference Include="..\Wacs.Core\Wacs.Core.csproj"
+                      UndefineProperties="PublishAot;PublishTrimmed;PublishReadyToRun;SelfContained;RuntimeIdentifier" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\Wacs.Bench\fib.wasm" Link="fib.wasm" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
