@@ -20,6 +20,8 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Wacs.Core.Runtime;
 using Wacs.Core.WASIp1;
+using Wacs.HostBindings;
+using Wacs.WASI.Preview1.Internal;
 using Wacs.WASI.Preview1.Types;
 using ptr = System.UInt32;
 using fd = System.UInt32;
@@ -33,61 +35,65 @@ namespace Wacs.WASI.Preview1
     {
         private static readonly int FdStatSize = Marshal.SizeOf<FdStat>();
         private static readonly int FileStatSize = Marshal.SizeOf<FileStat>();
+        private static readonly int PrestatSize = Marshal.SizeOf<Prestat>();
 
-        /// <summary>
-        /// Get the attributes of a file descriptor.
-        /// This is similar to fcntl(fd, F_GETFL) in POSIX, as well as additional fields.
-        /// </summary>
-        /// <param name="ctx">The execution context.</param>
-        /// <param name="fd">The file descriptor to obtain attributes for.</param>
-        /// <param name="bufPtr">Pointer to the buffer where the file descriptor's attributes will be stored.</param>
-        /// <returns>Returns ErrNo.Success if successful, otherwise an error code.</returns>
+        // Interpreter wrappers — delegate to AOT-friendly statics below.
+
         public ErrNo FdFdstatGet(ExecContext ctx, fd fd, ptr bufPtr)
+            => (ErrNo)FdFdstatGetCore(Clock.WacsHost(ctx), _state, (int)fd, (int)bufPtr);
+
+        public ErrNo FdFdstatSetFlags(ExecContext ctx, fd fd, FdFlags flags)
+            => (ErrNo)FdFdstatSetFlagsCore(_state, (int)fd, (int)flags);
+
+        public ErrNo FdFdstatSetRights(ExecContext ctx, fd fd, Rights fs_rights_base, Rights fs_rights_inheriting)
+            => (ErrNo)FdFdstatSetRightsCore(_state, (int)fd, (long)fs_rights_base, (long)fs_rights_inheriting);
+
+        public ErrNo FdFilestatGet(ExecContext ctx, fd fd, ptr bufPtr)
+            => (ErrNo)FdFilestatGetCore(Clock.WacsHost(ctx), _state, (int)fd, (int)bufPtr);
+
+        public ErrNo FdFilestatSetSize(ExecContext ctx, fd fd, filesize stSize)
+            => (ErrNo)FdFilestatSetSizeCore(_state, (int)fd, (long)stSize);
+
+        public ErrNo FdFilestatSetTimes(ExecContext ctx, fd fd, timestamp atim, timestamp mtim, FstFlags flags)
+            => (ErrNo)FdFilestatSetTimesCore(_state, (int)fd, atim, mtim, (int)flags);
+
+        public ErrNo FdPrestatGet(ExecContext ctx, fd fd, ptr bufPtr)
+            => (ErrNo)FdPrestatGetCore(Clock.WacsHost(ctx), _state, (int)fd, (int)bufPtr);
+
+        public ErrNo FdPrestatDirName(ExecContext ctx, fd fd, ptr pathPtr, size pathLen)
+            => (ErrNo)FdPrestatDirNameCore(Clock.WacsHost(ctx), _state, (int)fd, (int)pathPtr, (int)pathLen);
+
+        public ErrNo PathFilestatGet(ExecContext ctx, fd fd, LookupFlags flags, ptr pathPtr, size pathLen, ptr buf)
+            => (ErrNo)PathFilestatGetCore(Clock.WacsHost(ctx), _state, (int)fd, (int)flags, (int)pathPtr, (int)pathLen, (int)buf);
+
+        public ErrNo PathFilestatSetTimes(ExecContext ctx, fd fd, LookupFlags flags,
+            ptr pathPtr, size pathLen, timestamp stAtim, timestamp stMtim, FstFlags fstFlags)
+            => (ErrNo)PathFilestatSetTimesCore(Clock.WacsHost(ctx), _state, (int)fd, (int)flags,
+                (int)pathPtr, (int)pathLen, stAtim, stMtim, (int)fstFlags);
+
+        // ============================================================
+        // AOT-friendly static entry points — discovered by
+        // WACS.HostBindings.SourceGen via [WacsImport].
+        // ============================================================
+
+        [WacsImport("wasi_snapshot_preview1", "fd_fdstat_get")]
+        public static int FdFdstatGetCore(WacsHostMemory mem, State state, int fd, int bufPtr)
         {
-            var mem = ctx.DefaultMemory;
-            if (!mem.Contains((int)bufPtr, FdStatSize))
-                return ErrNo.Inval;
+            if (!mem.Contains(bufPtr, FdStatSize)) return (int)ErrNo.Inval;
+            if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
+                return (int)ErrNo.NoEnt;
 
-            if (!GetFd(fd, out var fileDescriptor))
-                return ErrNo.NoEnt;
+            var hostPath = state.PathMapper.MapToHostPath(fileDescriptor.Path);
+            try { File.GetAttributes(hostPath); }
+            catch (FileNotFoundException)      { return (int)ErrNo.NoEnt; }
+            catch (DirectoryNotFoundException) { return (int)ErrNo.NoEnt; }
+            catch (UnauthorizedAccessException) { return (int)ErrNo.Acces; }
+            catch (IOException)                { return (int)ErrNo.IO; }
 
-            FdFlags flags = FdFlags.None;
-
-            var hostPath = _state.PathMapper.MapToHostPath(fileDescriptor.Path);
-
-            FileAttributes attr;
-            try
-            {
-                attr = File.GetAttributes(hostPath);
-            }
-            catch (FileNotFoundException)
-            {
-                return ErrNo.NoEnt;
-            }
-            catch (DirectoryNotFoundException)
-            {
-                return ErrNo.NoEnt;
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return ErrNo.Acces;
-            }
-            catch (IOException)
-            {
-                return ErrNo.IO;
-            }
-
-            // Start from the runtime-mutable flags the embedder/guest set
-            // via path_open or fd_fdstat_set_flags. Fold in any inferred
-            // bits the underlying FileStream can tell us about.
-            flags = fileDescriptor.Flags;
-
+            FdFlags flags = fileDescriptor.Flags;
             if (fileDescriptor.Type == Filetype.RegularFile &&
-                fileDescriptor.Stream is FileStream fs)
-            {
-                if (!fs.IsAsync)
-                    flags |= FdFlags.Sync;
-            }
+                fileDescriptor.Stream is FileStream fs && !fs.IsAsync)
+                flags |= FdFlags.Sync;
 
             var fdStat = new FdStat
             {
@@ -96,244 +102,120 @@ namespace Wacs.WASI.Preview1
                 RightsBase = fileDescriptor.Rights,
                 RightsInheriting = fileDescriptor.InheritedRights,
             };
-
-            mem.WriteStruct(bufPtr, ref fdStat);
-            return ErrNo.Success;
+            mem.WriteStruct(bufPtr, fdStat);
+            return (int)ErrNo.Success;
         }
 
-        /// <summary>
-        /// Adjust the flags associated with a file descriptor.
-        /// This is similar to fcntl(fd, F_SETFL, flags) in POSIX.
-        /// </summary>
-        /// <param name="ctx">The execution context.</param>
-        /// <param name="fd">The file descriptor whose flags are to be adjusted.</param>
-        /// <param name="flags">The desired values of the file descriptor flags.</param>
-        /// <returns>Returns ErrNo.Success if successful, otherwise an error code.</returns>
-        public ErrNo FdFdstatSetFlags(ExecContext ctx, fd fd, FdFlags flags)
+        [WacsImport("wasi_snapshot_preview1", "fd_fdstat_set_flags")]
+        public static int FdFdstatSetFlagsCore(State state, int fd, int flags)
         {
-            if (!GetFd(fd, out var fileDescriptor))
-                return ErrNo.NoEnt;
+            if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
+                return (int)ErrNo.NoEnt;
 
-            // Reject unknown bits.
             const FdFlags known = FdFlags.Append | FdFlags.DSync |
                                   FdFlags.NonBlock | FdFlags.RSync | FdFlags.Sync;
-            if ((flags & ~known) != 0)
-                return ErrNo.Inval;
+            var f = (FdFlags)flags;
+            if ((f & ~known) != 0) return (int)ErrNo.Inval;
 
-            // Append is honored by FdWrite/FdPwrite; the others are
-            // advisory in our synchronous backend (we accept and store
-            // them so fd_fdstat_get round-trips).
-            fileDescriptor.Flags = flags;
-            return ErrNo.Success;
+            fileDescriptor.Flags = f;
+            return (int)ErrNo.Success;
         }
 
-        /// <summary>
-        /// Adjust the rights associated with a file descriptor.
-        /// This can only be used to remove rights.
-        /// </summary>
-        /// <param name="ctx">The execution context.</param>
-        /// <param name="fd">The file descriptor to adjust rights for.</param>
-        /// <param name="fs_rights_base">The desired rights of the file descriptor.</param>
-        /// <param name="fs_rights_inheriting">The maximum set of rights that may be installed on new file descriptors created through this file descriptor.</param>
-        /// <returns>Returns ErrNo.Success if successful, otherwise an error code.</returns>
-        public ErrNo FdFdstatSetRights(ExecContext ctx, fd fd, Rights fs_rights_base, Rights fs_rights_inheriting)
+        [WacsImport("wasi_snapshot_preview1", "fd_fdstat_set_rights")]
+        public static int FdFdstatSetRightsCore(State state, int fd,
+            long fs_rights_base, long fs_rights_inheriting)
         {
-            if (!GetFd(fd, out var fileDescriptor))
-                return ErrNo.NoEnt;
+            if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
+                return (int)ErrNo.NoEnt;
 
-            // Spec: "can only be used to remove rights." Reject any bit
-            // the new request sets that the current set doesn't already
-            // grant; otherwise this becomes a privilege escalator.
-            if ((fs_rights_base & fileDescriptor.Rights) != fs_rights_base)
-                return ErrNo.NotCapable;
-            if ((fs_rights_inheriting & fileDescriptor.InheritedRights) != fs_rights_inheriting)
-                return ErrNo.NotCapable;
+            var newBase = (Rights)fs_rights_base;
+            var newInherit = (Rights)fs_rights_inheriting;
+            // Spec: "can only be used to remove rights."
+            if ((newBase & fileDescriptor.Rights) != newBase)
+                return (int)ErrNo.NotCapable;
+            if ((newInherit & fileDescriptor.InheritedRights) != newInherit)
+                return (int)ErrNo.NotCapable;
 
-            fileDescriptor.Rights = fs_rights_base;
-            fileDescriptor.InheritedRights = fs_rights_inheriting;
-            return ErrNo.Success;
+            fileDescriptor.Rights = newBase;
+            fileDescriptor.InheritedRights = newInherit;
+            return (int)ErrNo.Success;
         }
 
-        /// <summary>
-        /// Return the attributes of an open file.
-        /// </summary>
-        /// <param name="ctx">The execution context.</param>
-        /// <param name="fd">The file descriptor of the file to inspect.</param>
-        /// <param name="bufPtr">Pointer to the buffer where the file's attributes will be stored.</param>
-        /// <returns>Returns ErrNo.Success if successful, otherwise an error code.</returns>
-        public ErrNo FdFilestatGet(ExecContext ctx, fd fd, ptr bufPtr)
+        [WacsImport("wasi_snapshot_preview1", "fd_filestat_get")]
+        public static int FdFilestatGetCore(WacsHostMemory mem, State state, int fd, int bufPtr)
         {
-            var mem = ctx.DefaultMemory;
-            if (!mem.Contains((int)bufPtr, FileStatSize))
-                return ErrNo.Inval;
+            if (!mem.Contains(bufPtr, FileStatSize)) return (int)ErrNo.Inval;
+            if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
+                return (int)ErrNo.NoEnt;
 
-            if (!GetFd(fd, out var fileDescriptor))
-                return ErrNo.NoEnt;
-
-            // For stdio (fd < 3), we usually provide dummy stats
+            // For stdio (fd < 3), provide dummy stats.
             if (fd < 3)
             {
-                var dummyStat = new FileStat
+                var dummy = new FileStat
                 {
-                    Device = 0,
-                    Ino = fd, // treat FD number as inode
-                    Mode = fileDescriptor.Type,
-                    NLink = 1,
-                    Size = 0,
-                    ATim = 0,
-                    MTim = 0,
-                    CTim = 0,
+                    Device = 0, Ino = (ulong)fd, Mode = fileDescriptor.Type,
+                    NLink = 1, Size = 0, ATim = 0, MTim = 0, CTim = 0,
                 };
-
-                mem.WriteStruct(bufPtr, ref dummyStat);
-                return ErrNo.Success;
+                mem.WriteStruct(bufPtr, dummy);
+                return (int)ErrNo.Success;
             }
 
-            // Otherwise, check if it's a file or directory
-            var hostPath = _state.PathMapper.MapToHostPath(fileDescriptor.Path);
-
+            var hostPath = state.PathMapper.MapToHostPath(fileDescriptor.Path);
             FileAttributes attr;
-            try
-            {
-                attr = File.GetAttributes(hostPath);
-            }
-            catch (FileNotFoundException)
-            {
-                return ErrNo.NoEnt;
-            }
-            catch (DirectoryNotFoundException)
-            {
-                return ErrNo.NoEnt;
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return ErrNo.Acces;
-            }
-            catch (IOException)
-            {
-                return ErrNo.IO;
-            }
+            try { attr = File.GetAttributes(hostPath); }
+            catch (FileNotFoundException)      { return (int)ErrNo.NoEnt; }
+            catch (DirectoryNotFoundException) { return (int)ErrNo.NoEnt; }
+            catch (UnauthorizedAccessException) { return (int)ErrNo.Acces; }
+            catch (IOException)                { return (int)ErrNo.IO; }
 
             bool isDir = attr.HasFlag(FileAttributes.Directory);
-            // If it's not a directory, we assume it's a file. In Windows, FileAttributes.Normal can indicate a standard file.
-            bool isFile = !isDir;
-
-            if (!isDir && !isFile)
-                return ErrNo.NoEnt;
-
-            if (isDir)
-            {
-                var dirInfo = new DirectoryInfo(hostPath);
-                var fileStat = BuildFileStatForDirectory(fileDescriptor, dirInfo);
-                mem.WriteStruct(bufPtr, ref fileStat);
-            }
-            else
-            {
-                var fileInfo = new FileInfo(hostPath);
-                var fileStat = BuildFileStatForFile(fileDescriptor, fileInfo);
-                mem.WriteStruct(bufPtr, ref fileStat);
-            }
-
-            return ErrNo.Success;
+            FileStat fileStat = isDir
+                ? WasiFsHelpers.BuildFileStatForDirectory(new DirectoryInfo(hostPath))
+                : WasiFsHelpers.BuildFileStatForFile(new FileInfo(hostPath));
+            mem.WriteStruct(bufPtr, fileStat);
+            return (int)ErrNo.Success;
         }
 
-        /// <summary>
-        /// Adjust the size of an open file. If this increases the file's size, the extra bytes are filled with zeros.
-        /// This is similar to ftruncate in POSIX.
-        /// </summary>
-        /// <param name="ctx">The execution context.</param>
-        /// <param name="fd">The file descriptor of the file to resize.</param>
-        /// <param name="stSize">The desired file size.</param>
-        /// <returns>Returns ErrNo.Success if successful, otherwise an error code.</returns>
-        public ErrNo FdFilestatSetSize(ExecContext ctx, fd fd, filesize stSize)
+        [WacsImport("wasi_snapshot_preview1", "fd_filestat_set_size")]
+        public static int FdFilestatSetSizeCore(State state, int fd, long stSize)
         {
-            if (!GetFd(fd, out var fileDescriptor))
-                return ErrNo.NoEnt;
+            if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
+                return (int)ErrNo.NoEnt;
+            if (fileDescriptor.Type == Filetype.Directory) return (int)ErrNo.IsDir;
 
-            // If directory => EISDIR
-            if (fileDescriptor.Type == Filetype.Directory)
-                return ErrNo.IsDir;
-
-            try
-            {
-                fileDescriptor.Stream.SetLength((long)stSize);
-            }
-            catch (NotSupportedException)
-            {
-                return ErrNo.Inval;
-            }
-            catch (IOException)
-            {
-                return ErrNo.IO;
-            }
-
-            return ErrNo.Success;
+            try { fileDescriptor.Stream.SetLength(stSize); }
+            catch (NotSupportedException) { return (int)ErrNo.Inval; }
+            catch (IOException) { return (int)ErrNo.IO; }
+            return (int)ErrNo.Success;
         }
 
-        /// <summary>
-        /// Adjust the timestamps of an open file or directory.
-        /// This is similar to futimens in POSIX.
-        /// </summary>
-        /// <param name="ctx">The execution context.</param>
-        /// <param name="fd">The file descriptor of the file or directory.</param>
-        /// <param name="atim">The desired value of the data access timestamp.</param>
-        /// <param name="mtim">The desired value of the data modification timestamp.</param>
-        /// <param name="flags">A bitmask indicating which timestamps to adjust.</param>
-        /// <returns>Returns ErrNo.Success if successful, otherwise an error code.</returns>
-        public ErrNo FdFilestatSetTimes(ExecContext ctx, fd fd, timestamp atim, timestamp mtim, FstFlags flags)
+        [WacsImport("wasi_snapshot_preview1", "fd_filestat_set_times")]
+        public static int FdFilestatSetTimesCore(State state, int fd,
+            long atim, long mtim, int flags)
         {
-            if (!GetFd(fd, out var fileDescriptor))
-                return ErrNo.NoEnt;
+            if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
+                return (int)ErrNo.NoEnt;
 
-            var hostPath = _state.PathMapper.MapToHostPath(fileDescriptor.Path);
-
+            var hostPath = state.PathMapper.MapToHostPath(fileDescriptor.Path);
             FileAttributes attr;
-            try
-            {
-                attr = File.GetAttributes(hostPath);
-            }
-            catch (FileNotFoundException)
-            {
-                return ErrNo.NoEnt;
-            }
-            catch (DirectoryNotFoundException)
-            {
-                return ErrNo.NoEnt;
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return ErrNo.Acces;
-            }
-            catch (IOException)
-            {
-                return ErrNo.IO;
-            }
+            try { attr = File.GetAttributes(hostPath); }
+            catch (FileNotFoundException)      { return (int)ErrNo.NoEnt; }
+            catch (DirectoryNotFoundException) { return (int)ErrNo.NoEnt; }
+            catch (UnauthorizedAccessException) { return (int)ErrNo.Acces; }
+            catch (IOException)                { return (int)ErrNo.IO; }
 
             bool isDir = attr.HasFlag(FileAttributes.Directory);
-            bool isFile = !isDir;
+            var f = (FstFlags)flags;
+            if ((f & (FstFlags.ATim | FstFlags.ATimNow)) == (FstFlags.ATim | FstFlags.ATimNow))
+                return (int)ErrNo.Inval;
+            if ((f & (FstFlags.MTim | FstFlags.MTimNow)) == (FstFlags.MTim | FstFlags.MTimNow))
+                return (int)ErrNo.Inval;
 
-            if (!isDir && !isFile)
-                return ErrNo.NoEnt;
-
-            // Spec: it is an error to specify both an explicit time and
-            // its corresponding NOW flag.
-            if ((flags & (FstFlags.ATim | FstFlags.ATimNow)) == (FstFlags.ATim | FstFlags.ATimNow))
-                return ErrNo.Inval;
-            if ((flags & (FstFlags.MTim | FstFlags.MTimNow)) == (FstFlags.MTim | FstFlags.MTimNow))
-                return ErrNo.Inval;
-
-            DateTime newAtime = DateTime.UtcNow;
-            DateTime newMtime = DateTime.UtcNow;
-
-            if ((flags & FstFlags.ATim) != 0)
-                newAtime = Clock.ToDateTimeUtc(atim);
-            else if ((flags & FstFlags.ATimNow) != 0)
-                newAtime = DateTime.UtcNow;
-
-            if ((flags & FstFlags.MTim) != 0)
-                newMtime = Clock.ToDateTimeUtc(mtim);
-            else if ((flags & FstFlags.MTimNow) != 0)
-                newMtime = DateTime.UtcNow;
+            DateTime newAtime = DateTime.UtcNow, newMtime = DateTime.UtcNow;
+            if ((f & FstFlags.ATim) != 0)         newAtime = Clock.ToDateTimeUtc(atim);
+            else if ((f & FstFlags.ATimNow) != 0) newAtime = DateTime.UtcNow;
+            if ((f & FstFlags.MTim) != 0)         newMtime = Clock.ToDateTimeUtc(mtim);
+            else if ((f & FstFlags.MTimNow) != 0) newMtime = DateTime.UtcNow;
 
             try
             {
@@ -348,55 +230,29 @@ namespace Wacs.WASI.Preview1
                     File.SetLastAccessTimeUtc(hostPath, newAtime);
                 }
             }
-            catch (IOException)
-            {
-                return ErrNo.IO;
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return ErrNo.Acces;
-            }
-
-            return ErrNo.Success;
+            catch (IOException)                { return (int)ErrNo.IO; }
+            catch (UnauthorizedAccessException) { return (int)ErrNo.Acces; }
+            return (int)ErrNo.Success;
         }
 
-        /// <summary>
-        /// Return a description of the given preopened file descriptor.
-        /// </summary>
-        /// <param name="ctx">The execution context.</param>
-        /// <param name="fd">The file descriptor of the preopened file.</param>
-        /// <param name="bufPtr">Pointer to the buffer where the description will be stored.</param>
-        /// <returns>Returns ErrNo.Success if successful, otherwise an error code.</returns>
-        public ErrNo FdPrestatGet(ExecContext ctx, fd fd, ptr bufPtr)
+        [WacsImport("wasi_snapshot_preview1", "fd_prestat_get")]
+        public static int FdPrestatGetCore(WacsHostMemory mem, State state, int fd, int bufPtr)
         {
-            var mem = ctx.DefaultMemory;
-            if (!mem.Contains((int)bufPtr, Marshal.SizeOf<Prestat>()))
-                return ErrNo.Inval;
+            if (!mem.Contains(bufPtr, PrestatSize)) return (int)ErrNo.Inval;
+            if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
+                return (int)ErrNo.Badf;
 
-            if (!GetFd(fd, out var fileDescriptor))
-                return ErrNo.Badf;
-
-            // wasi-libc reads exactly pr_name_len bytes via
-            // fd_prestat_dir_name (no nul terminator) and compares them
-            // against the embedder-supplied prefix string. The internal
-            // Path stores a leading "/" we strip to match the wasmtime
-            // convention. Keep the two functions in lockstep.
             var name = fileDescriptor.Path;
-            if (name.Length > 1 && name[0] == '/')
-                name = name.Substring(1);
+            if (name.Length > 1 && name[0] == '/') name = name.Substring(1);
             var utf8Name = Encoding.UTF8.GetBytes(name);
 
-            // Typically, for WASI, only directories are truly "preopened"
             Prestat prestat;
             if (fileDescriptor.Type == Filetype.Directory)
             {
                 prestat = new Prestat
                 {
                     Tag = PrestatTag.Dir,
-                    Dir = new PrestatDir
-                    {
-                        NameLen = (uint)utf8Name.Length
-                    }
+                    Dir = new PrestatDir { NameLen = (uint)utf8Name.Length },
                 };
             }
             else
@@ -404,100 +260,51 @@ namespace Wacs.WASI.Preview1
                 prestat = new Prestat
                 {
                     Tag = PrestatTag.NotDir,
-                    Dir = new PrestatDir
-                    {
-                        NameLen = 0
-                    }
+                    Dir = new PrestatDir { NameLen = 0 },
                 };
             }
-
-            mem.WriteStruct(bufPtr, ref prestat);
-            return ErrNo.Success;
+            mem.WriteStruct(bufPtr, prestat);
+            return (int)ErrNo.Success;
         }
 
-        /// <summary>
-        /// Return the name of the directory associated with the preopened file descriptor.
-        /// </summary>
-        /// <param name="ctx">The execution context.</param>
-        /// <param name="fd">The file descriptor of the preopened directory.</param>
-        /// <param name="pathPtr">Pointer to the buffer to write the directory name.</param>
-        /// <param name="pathLen">The length of the directory name buffer.</param>
-        /// <returns>Returns ErrNo.Success if successful, otherwise an error code.</returns>
-        public ErrNo FdPrestatDirName(ExecContext ctx, fd fd, ptr pathPtr, size pathLen)
+        [WacsImport("wasi_snapshot_preview1", "fd_prestat_dir_name")]
+        public static int FdPrestatDirNameCore(WacsHostMemory mem, State state,
+            int fd, int pathPtr, int pathLen)
         {
-            var mem = ctx.DefaultMemory;
-            if (!mem.Contains((int)pathPtr, (int)pathLen))
-                return ErrNo.Inval;
+            if (!mem.Contains(pathPtr, pathLen)) return (int)ErrNo.Inval;
+            if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
+                return (int)ErrNo.NoEnt;
+            if (fileDescriptor.Type != Filetype.Directory) return (int)ErrNo.NotDir;
 
-            if (!GetFd(fd, out var fileDescriptor))
-                return ErrNo.NoEnt;
-
-            if (fileDescriptor.Type != Filetype.Directory)
-                return ErrNo.NotDir;
-
-            // See fd_prestat_get above for the convention. Write exactly
-            // pr_name_len bytes (no nul) so the guest's bytewise
-            // comparison succeeds.
             var name = fileDescriptor.Path;
-            if (name.Length > 1 && name[0] == '/')
-                name = name.Substring(1);
+            if (name.Length > 1 && name[0] == '/') name = name.Substring(1);
             var utf8Name = Encoding.UTF8.GetBytes(name);
-            if (utf8Name.Length > pathLen)
-                return ErrNo.TooBig;
+            if (utf8Name.Length > pathLen) return (int)ErrNo.TooBig;
 
-            mem.WriteUtf8String(pathPtr, name, false);
-            return ErrNo.Success;
+            mem.WriteUtf8String(pathPtr, name, nullTerminate: false);
+            return (int)ErrNo.Success;
         }
 
-        /// <summary>
-        /// Return the attributes of a file or directory.
-        /// This is similar to stat in POSIX.
-        /// </summary>
-        /// <param name="ctx">The execution context.</param>
-        /// <param name="fd">The file descriptor to use for resolving the path.</param>
-        /// <param name="flags">Flags determining how the path is resolved.</param>
-        /// <param name="pathPtr">Pointer to the path of the file or directory.</param>
-        /// <param name="pathLen">The length of the path.</param>
-        /// <param name="buf">Pointer to the buffer where the attributes will be stored.</param>
-        /// <returns>Returns ErrNo.Success if successful, otherwise an error code.</returns>
-        public ErrNo PathFilestatGet(ExecContext ctx, fd fd, LookupFlags flags, ptr pathPtr, size pathLen, ptr buf)
+        [WacsImport("wasi_snapshot_preview1", "path_filestat_get")]
+        public static int PathFilestatGetCore(WacsHostMemory mem, State state,
+            int fd, int flags, int pathPtr, int pathLen, int buf)
         {
-            var mem = ctx.DefaultMemory;
-            if (!mem.Contains((int)buf, FileStatSize))
-                return ErrNo.Inval;
-
-            if (!mem.Contains((int)pathPtr, (int)pathLen))
-                return ErrNo.Inval;
-
-            if (!GetFd(fd, out var dirFileDescriptor))
-                return ErrNo.NoEnt;
-
-            // If dirFileDescriptor is not a directory (and not FD < 3?), we can't interpret paths from it
+            if (!mem.Contains(buf, FileStatSize)) return (int)ErrNo.Inval;
+            if (!mem.Contains(pathPtr, pathLen)) return (int)ErrNo.Inval;
+            if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var dirFileDescriptor))
+                return (int)ErrNo.NoEnt;
             if (dirFileDescriptor.Type != Filetype.Directory && fd >= 3)
-                return ErrNo.NotDir;
+                return (int)ErrNo.NotDir;
 
             var pathStr = mem.ReadString(pathPtr, pathLen);
             var guestPath = Path.Combine(dirFileDescriptor.Path, pathStr);
 
-            // Per spec: with LookupFlags.SymlinkFollow set, walk through
-            // any leading symlinks (stat semantics). Without it, return
-            // info about the link itself (lstat semantics). The
-            // PathMapper resolves symlinks for sandbox safety, so for
-            // lstat semantics we build the host path directly from the
-            // directory's resolved host path + the literal leaf — that
-            // way File.GetAttributes / FileInfo.LinkTarget see the link
-            // itself, not the target it points to.
-            bool followSymlink = (flags & LookupFlags.SymlinkFollow) != 0;
+            bool followSymlink = ((LookupFlags)flags & LookupFlags.SymlinkFollow) != 0;
             string hostPath;
             if (followSymlink)
-            {
-                hostPath = _state.PathMapper.MapToHostPath(guestPath);
-            }
+                hostPath = state.PathMapper.MapToHostPath(guestPath);
             else
-            {
-                var hostDir = _state.PathMapper.MapToHostPath(dirFileDescriptor.Path);
-                hostPath = Path.Combine(hostDir, pathStr);
-            }
+                hostPath = Path.Combine(state.PathMapper.MapToHostPath(dirFileDescriptor.Path), pathStr);
 
 #if NET6_0_OR_GREATER
             if (!followSymlink)
@@ -511,158 +318,70 @@ namespace Wacs.WASI.Preview1
                             : new DirectoryInfo(hostPath))
                         : null;
                 }
-                catch (UnauthorizedAccessException) { return ErrNo.Acces; }
-                catch (IOException)                 { return ErrNo.IO; }
+                catch (UnauthorizedAccessException) { return (int)ErrNo.Acces; }
+                catch (IOException)                 { return (int)ErrNo.IO; }
 
-                if (linkInfo == null) return ErrNo.NoEnt;
+                if (linkInfo == null) return (int)ErrNo.NoEnt;
                 if (!string.IsNullOrEmpty(linkInfo.LinkTarget))
                 {
-                    // Report SYMBOLIC_LINK without following.
-                    var symStat = BuildFileStatForFile(
-                        new FileDescriptor { Type = Filetype.SymbolicLink },
-                        new FileInfo(hostPath));
+                    var symStat = WasiFsHelpers.BuildFileStatForFile(new FileInfo(hostPath));
                     symStat.Mode = Filetype.SymbolicLink;
-                    mem.WriteStruct(buf, ref symStat);
-                    return ErrNo.Success;
+                    mem.WriteStruct(buf, symStat);
+                    return (int)ErrNo.Success;
                 }
             }
 #endif
 
             FileAttributes attr;
-            try
-            {
-                attr = File.GetAttributes(hostPath);
-            }
-            catch (FileNotFoundException)
-            {
-                return ErrNo.NoEnt;
-            }
-            catch (DirectoryNotFoundException)
-            {
-                return ErrNo.NoEnt;
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return ErrNo.Acces;
-            }
-            catch (IOException)
-            {
-                return ErrNo.IO;
-            }
+            try { attr = File.GetAttributes(hostPath); }
+            catch (FileNotFoundException)      { return (int)ErrNo.NoEnt; }
+            catch (DirectoryNotFoundException) { return (int)ErrNo.NoEnt; }
+            catch (UnauthorizedAccessException) { return (int)ErrNo.Acces; }
+            catch (IOException)                { return (int)ErrNo.IO; }
 
             bool isDir = attr.HasFlag(FileAttributes.Directory);
-            bool isFile = !isDir;
-
-            if (!isDir && !isFile)
-                return ErrNo.NoEnt;
-
-            FileStat fileStat;
-            if (isDir)
-            {
-                var dirInfo = new DirectoryInfo(hostPath);
-                fileStat = BuildFileStatForDirectory(
-                    new FileDescriptor { Type = Filetype.Directory },
-                    dirInfo
-                );
-            }
-            else
-            {
-                var fileInfo = new FileInfo(hostPath);
-                fileStat = BuildFileStatForFile(
-                    new FileDescriptor { Type = Filetype.RegularFile },
-                    fileInfo
-                );
-            }
-
-            mem.WriteStruct(buf, ref fileStat);
-            return ErrNo.Success;
+            FileStat fileStat = isDir
+                ? WasiFsHelpers.BuildFileStatForDirectory(new DirectoryInfo(hostPath))
+                : WasiFsHelpers.BuildFileStatForFile(new FileInfo(hostPath));
+            mem.WriteStruct(buf, fileStat);
+            return (int)ErrNo.Success;
         }
 
-        /// <summary>
-        /// Adjust the timestamps of a file or directory.
-        /// This is similar to utimensat in POSIX.
-        /// </summary>
-        /// <param name="ctx">The execution context.</param>
-        /// <param name="fd">The file descriptor to use for resolving the path.</param>
-        /// <param name="flags">Flags determining how the path is resolved.</param>
-        /// <param name="pathPtr">Pointer to the path of the file or directory.</param>
-        /// <param name="pathLen">The length of the path.</param>
-        /// <param name="stAtim">The desired value of the data access timestamp.</param>
-        /// <param name="stMtim">The desired value of the data modification timestamp.</param>
-        /// <param name="fstFlags">A bitmask indicating which timestamps to adjust.</param>
-        /// <returns>Returns ErrNo.Success if successful, otherwise an error code.</returns>
-        public ErrNo PathFilestatSetTimes(
-            ExecContext ctx,
-            fd fd,
-            LookupFlags flags,
-            ptr pathPtr,
-            size pathLen,
-            timestamp stAtim,
-            timestamp stMtim,
-            FstFlags fstFlags
-        )
+        [WacsImport("wasi_snapshot_preview1", "path_filestat_set_times")]
+        public static int PathFilestatSetTimesCore(WacsHostMemory mem, State state,
+            int fd, int flags, int pathPtr, int pathLen,
+            long stAtim, long stMtim, int fstFlags)
         {
-            var mem = ctx.DefaultMemory;
-            if (!mem.Contains((int)pathPtr, (int)pathLen))
-                return ErrNo.Inval;
-
-            if (!GetFd(fd, out var dirFileDescriptor))
-                return ErrNo.NoEnt;
-
-            // If not a directory and fd>=3, can't interpret the path
+            if (!mem.Contains(pathPtr, pathLen)) return (int)ErrNo.Inval;
+            if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var dirFileDescriptor))
+                return (int)ErrNo.NoEnt;
             if (dirFileDescriptor.Type != Filetype.Directory && fd >= 3)
-                return ErrNo.NotDir;
+                return (int)ErrNo.NotDir;
 
             var pathStr = mem.ReadString(pathPtr, pathLen);
             var guestPath = Path.Combine(dirFileDescriptor.Path, pathStr);
-            var hostPath = _state.PathMapper.MapToHostPath(guestPath);
+            var hostPath = state.PathMapper.MapToHostPath(guestPath);
 
             FileAttributes attr;
-            try
-            {
-                attr = File.GetAttributes(hostPath);
-            }
-            catch (FileNotFoundException)
-            {
-                return ErrNo.NoEnt;
-            }
-            catch (DirectoryNotFoundException)
-            {
-                return ErrNo.NoEnt;
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return ErrNo.Acces;
-            }
-            catch (IOException)
-            {
-                return ErrNo.IO;
-            }
+            try { attr = File.GetAttributes(hostPath); }
+            catch (FileNotFoundException)      { return (int)ErrNo.NoEnt; }
+            catch (DirectoryNotFoundException) { return (int)ErrNo.NoEnt; }
+            catch (UnauthorizedAccessException) { return (int)ErrNo.Acces; }
+            catch (IOException)                { return (int)ErrNo.IO; }
 
             bool isDir = attr.HasFlag(FileAttributes.Directory);
-            bool isFile = !isDir;
-            if (!isDir && !isFile)
-                return ErrNo.NoEnt;
 
-            // Spec: it is an error to specify both an explicit time and
-            // its corresponding NOW flag.
-            if ((fstFlags & (FstFlags.ATim | FstFlags.ATimNow)) == (FstFlags.ATim | FstFlags.ATimNow))
-                return ErrNo.Inval;
-            if ((fstFlags & (FstFlags.MTim | FstFlags.MTimNow)) == (FstFlags.MTim | FstFlags.MTimNow))
-                return ErrNo.Inval;
+            var f = (FstFlags)fstFlags;
+            if ((f & (FstFlags.ATim | FstFlags.ATimNow)) == (FstFlags.ATim | FstFlags.ATimNow))
+                return (int)ErrNo.Inval;
+            if ((f & (FstFlags.MTim | FstFlags.MTimNow)) == (FstFlags.MTim | FstFlags.MTimNow))
+                return (int)ErrNo.Inval;
 
-            DateTime newAtime = DateTime.UtcNow;
-            DateTime newMtime = DateTime.UtcNow;
-
-            if ((fstFlags & FstFlags.ATim) != 0)
-                newAtime = Clock.ToDateTimeUtc(stAtim);
-            else if ((fstFlags & FstFlags.ATimNow) != 0)
-                newAtime = DateTime.UtcNow;
-
-            if ((fstFlags & FstFlags.MTim) != 0)
-                newMtime = Clock.ToDateTimeUtc(stMtim);
-            else if ((fstFlags & FstFlags.MTimNow) != 0)
-                newMtime = DateTime.UtcNow;
+            DateTime newAtime = DateTime.UtcNow, newMtime = DateTime.UtcNow;
+            if ((f & FstFlags.ATim) != 0)         newAtime = Clock.ToDateTimeUtc(stAtim);
+            else if ((f & FstFlags.ATimNow) != 0) newAtime = DateTime.UtcNow;
+            if ((f & FstFlags.MTim) != 0)         newMtime = Clock.ToDateTimeUtc(stMtim);
+            else if ((f & FstFlags.MTimNow) != 0) newMtime = DateTime.UtcNow;
 
             try
             {
@@ -677,58 +396,9 @@ namespace Wacs.WASI.Preview1
                     File.SetLastAccessTimeUtc(hostPath, newAtime);
                 }
             }
-            catch (IOException)
-            {
-                return ErrNo.IO;
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return ErrNo.Acces;
-            }
-
-            return ErrNo.Success;
+            catch (IOException)                { return (int)ErrNo.IO; }
+            catch (UnauthorizedAccessException) { return (int)ErrNo.Acces; }
+            return (int)ErrNo.Success;
         }
-
-        #region Helper Methods to Build FileStat
-
-        /// <summary>
-        /// Builds a <see cref="FileStat"/> for a file using its FileInfo.
-        /// </summary>
-        private FileStat BuildFileStatForFile(FileDescriptor fd, FileInfo fileInfo)
-        {
-            var inode = FileUtil.GenerateInode(fileInfo);
-            return new FileStat
-            {
-                Device = 0,
-                Ino = inode,
-                Mode = Filetype.RegularFile,
-                NLink = 1,
-                Size = (filesize)fileInfo.Length,
-                ATim = Clock.ToTimestamp(fileInfo.LastAccessTimeUtc),
-                MTim = Clock.ToTimestamp(fileInfo.LastWriteTimeUtc),
-                CTim = Clock.ToTimestamp(fileInfo.CreationTimeUtc)
-            };
-        }
-
-        /// <summary>
-        /// Builds a <see cref="FileStat"/> for a directory using its DirectoryInfo.
-        /// </summary>
-        private FileStat BuildFileStatForDirectory(FileDescriptor fd, DirectoryInfo dirInfo)
-        {
-            var inode = FileUtil.GenerateInode(dirInfo);
-            return new FileStat
-            {
-                Device = 0,
-                Ino = inode,
-                Mode = Filetype.Directory,
-                NLink = 1,
-                Size = 0, // Directories typically show 0 size in WASI
-                ATim = Clock.ToTimestamp(dirInfo.LastAccessTimeUtc),
-                MTim = Clock.ToTimestamp(dirInfo.LastWriteTimeUtc),
-                CTim = Clock.ToTimestamp(dirInfo.CreationTimeUtc)
-            };
-        }
-
-        #endregion
     }
 }
