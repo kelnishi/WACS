@@ -15,7 +15,7 @@
 ## Overview
 
 **Latest releases** (see the [CHANGELOG](CHANGELOG.md) for details):
-WACS `0.10.0` · WACS.Cli `1.1.0` · WACS.WASIp1 `0.9.8` · WACS.Transpiler.Lib `0.4.0` · WACS.ComponentModel `0.1.0` · WACS.WASI.Preview2 `0.1.0` · WACS.WASI.Preview2.DependencyInjection `0.1.0` · WACS.ComponentModel.Bindgen.Lib `0.1.0` · WACS.WASI.Threads `0.1.0`
+WACS `0.10.0` · WACS.Cli `1.1.0` · WACS.WASIp1 `0.10.0` · WACS.Transpiler.Lib `0.4.0` · WACS.ComponentModel `0.1.0` · WACS.WASI.Preview2 `0.1.0` · WACS.WASI.Preview2.DependencyInjection `0.1.0` · WACS.ComponentModel.Bindgen.Lib `0.1.0` · WACS.WASI.Threads `0.1.0`
 
 > **CLI:** install the unified `wacs` global tool with
 > `dotnet tool install -g WACS.Cli`. The legacy `WACS.Transpiler`

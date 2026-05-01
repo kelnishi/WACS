@@ -1,6 +1,6 @@
 # Changelog
 
-## [WACS.WASIp1 0.9.8] — wasi-testsuite integration + correctness pass
+## [WACS.WASIp1 0.10.0] — wasi-testsuite integration + correctness pass
 
 Wires the dormant `Spec.Test/wasi` submodule (now pinned to
 `prod/testsuite-base` for the prebuilt fixtures) into a new
