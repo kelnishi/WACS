@@ -21,7 +21,7 @@ namespace Wacs.Transpiler.AOT
 {
     /// <summary>
     /// Wraps a TranspilationResult as an IBindable, following the same pattern
-    /// as Wacs.WASIp1 modules (Env, FileSystem, Clock, etc.).
+    /// as Wacs.WASI.Preview1 modules (Env, FileSystem, Clock, etc.).
     ///
     /// Each exported transpiled function is bound as a host function under the
     /// given module name, using the standard BindHostFunction path.
