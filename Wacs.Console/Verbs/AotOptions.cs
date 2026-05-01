@@ -64,6 +64,14 @@ namespace Wacs.Console.Verbs
             + "inspecting the scaffolded csproj / Program.cs.")]
         public bool KeepTemp { get; set; }
 
+        [Option("aot-linked", HelpText =
+            "Use the AotLinked transpiler emission target (skip the codec "
+            + "wrapper for ~50 KB binary-size reduction). Currently only "
+            + "supports compute-only modules — fails on modules declaring "
+            + "memory, tables, globals, or data segments. Default emission "
+            + "(Standard) covers all wasms but keeps the codec wrapper.")]
+        public bool AotLinked { get; set; }
+
         [Option('v', "verbose", HelpText =
             "Print each step (transpile, scaffold, publish, copy).")]
         public bool Verbose { get; set; }
