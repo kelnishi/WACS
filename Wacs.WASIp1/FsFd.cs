@@ -193,6 +193,9 @@ namespace Wacs.WASIp1
                 return ErrNo.NoEnt; // The file descriptor does not exist.
             }
 
+            if ((fileDescriptor.Rights & Rights.FD_READ) == 0)
+                return ErrNo.NotCapable;
+
             if (fileDescriptor.Type == Filetype.Directory)
                 return ErrNo.IsDir;
 
@@ -253,6 +256,9 @@ namespace Wacs.WASIp1
             {
                 return ErrNo.NoEnt;
             }
+
+            if ((fileDescriptor.Rights & Rights.FD_WRITE) == 0)
+                return ErrNo.NotCapable;
 
             if (fileDescriptor.Type == Filetype.Directory)
             {
@@ -327,6 +333,9 @@ namespace Wacs.WASIp1
             {
                 return ErrNo.NoEnt;
             }
+
+            if ((fileDescriptor.Rights & Rights.FD_READ) == 0)
+                return ErrNo.NotCapable;
 
             if (fileDescriptor.Type == Filetype.Directory)
             {
@@ -652,6 +661,9 @@ namespace Wacs.WASIp1
                 return ErrNo.NoEnt; // The file descriptor does not exist.
             }
 
+            if ((fileDescriptor.Rights & Rights.FD_WRITE) == 0)
+                return ErrNo.NotCapable;
+
             if (fileDescriptor.Type == Filetype.Directory)
                 return ErrNo.IsDir;
 
@@ -659,6 +671,13 @@ namespace Wacs.WASIp1
                 return ErrNo.IO;
 
             var mem = ctx.DefaultMemory;
+
+            // O_APPEND / FD_APPEND semantics: seek to end before each
+            // write so concurrent writers don't clobber each other.
+            // Set by path_open or fd_fdstat_set_flags.
+            if ((fileDescriptor.Flags & FdFlags.Append) != 0 &&
+                fileDescriptor.Stream.CanSeek)
+                fileDescriptor.Stream.Seek(0, SeekOrigin.End);
 
             IoVec[] iovs = mem.ReadStructs<IoVec>(iovsPtr, iovsLen);
             int totalWritten = 0;

@@ -38,6 +38,14 @@ namespace Wacs.WASIp1.Types
 
         public Rights InheritedRights { get; set; }
 
+        // Runtime-mutable fdflags as set by fd_fdstat_set_flags. Append
+        // is honored by fd_write/fd_pwrite (seek to end before writing);
+        // Nonblock/Sync/Dsync/Rsync are advisory in our synchronous
+        // backend. Stored separately from path_open's initial flags so
+        // a guest's fd_fdstat_set_flags(0) doesn't clear FD_APPEND when
+        // the file was opened with O_APPEND.
+        public FdFlags Flags { get; set; }
+
         /// <summary>
         /// Computes the WASI <see cref="Rights"/> for a directory.
         /// </summary>
