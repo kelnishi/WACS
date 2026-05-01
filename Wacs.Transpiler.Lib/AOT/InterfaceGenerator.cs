@@ -121,6 +121,12 @@ namespace Wacs.Transpiler.AOT
                 string methodName = SanitizeName($"{import.ModuleName}_{import.Name}");
 
                 var method = DefineInterfaceMethod(ImportsInterface, methodName, funcType);
+
+                // Track the (methodName, module, name) tuple — the
+                // ModuleTranspiler will fold it into a single
+                // [assembly: WacsImportNames(...)] attribute (Lokad.ILPack
+                // doesn't preserve method-level attributes through the
+                // PE serializer, so we hoist them to the assembly level).
                 ImportMethods.Add(new InterfaceMethod(methodName, funcType, funcImportIdx)
                 {
                     Method = method,

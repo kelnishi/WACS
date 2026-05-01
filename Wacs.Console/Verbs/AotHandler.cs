@@ -49,17 +49,20 @@ namespace Wacs.Console.Verbs
             try
             {
                 // Step 1 — Transpile via the existing BuildHandler. With
-                // --wasi, the transpile step needs WASI bound during the
-                // intermediate instantiation (otherwise unresolved imports
-                // trip the parser); skip --emit-main because emit-main
-                // currently rejects modules with imports — we'll write our
-                // own Program.cs in step 3 that wires up the source-gen
-                // adapter instead.
+                // --wasi or --wasip2, the transpile step binds the host
+                // package during instantiation (otherwise unresolved
+                // imports trip the parser); skip --emit-main because the
+                // current emit-main rejects modules with imports
+                // (core-mode) or runs through reflection-heavy
+                // ComponentMainHost (component-mode) — we'll write our
+                // own Program.cs in step 3 that wires up source-gen
+                // adapters / DI bundles instead.
                 var assemblyName = SanitizeAssemblyName(baseName);
                 string emission = opts.AotLinked ? "aot-linked" : "standard";
-                bool useEmitMain = !opts.Wasi;
-                Log($"transpile → {assemblyName}.dll (emission={emission}"
-                    + (useEmitMain ? ", --emit-main" : ", --wasi") + ")");
+                bool useEmitMain = !opts.Wasi && !opts.Wasip2;
+                string emitMode = useEmitMain ? "--emit-main"
+                    : (opts.Wasip2 ? "--wasip2" : "--wasi");
+                Log($"transpile → {assemblyName}.dll (emission={emission}, {emitMode})");
                 var dllPath = Path.Combine(tempDir, assemblyName + ".dll");
                 var buildOpts = new BuildOptions
                 {
@@ -75,6 +78,7 @@ namespace Wacs.Console.Verbs
                     MainClass = "Program",
                     DataStorage = "static",
                     Wasi = opts.Wasi,
+                    Wasip2 = opts.Wasip2,
                 };
                 int buildRc = BuildHandler.Execute(buildOpts);
                 if (buildRc != 0)
@@ -105,6 +109,9 @@ namespace Wacs.Console.Verbs
                 string? wacsWasiDll = null;
                 string? hostBindingsAbstractionsDll = null;
                 string? hostBindingsSourceGenDll = null;
+                string? wacsWasip2Dll = null;
+                string? wacsWasip2DiDll = null;
+                string? wacsComponentModelDll = null;
                 if (opts.Wasi)
                 {
                     // Wacs.WASI.Preview1 holds the [WacsImport] bindings.
@@ -123,6 +130,28 @@ namespace Wacs.Console.Verbs
                     Log($"host bindings:   {hostBindingsAbstractionsDll}");
                     Log($"source generator: {hostBindingsSourceGenDll}");
                 }
+                if (opts.Wasip2)
+                {
+                    wacsWasip2Dll = LocateAssemblyByName(typeof(WasmRuntime).Assembly, "Wacs.WASI.Preview2");
+                    wacsWasip2DiDll = LocateAssemblyByName(typeof(WasmRuntime).Assembly, "Wacs.WASI.Preview2.DependencyInjection");
+                    wacsComponentModelDll = LocateAssemblyByName(typeof(WasmRuntime).Assembly, "Wacs.ComponentModel");
+                    // Source generator is needed for the (likely-empty) IImports adapter on the component.
+                    hostBindingsAbstractionsDll = LocateAssemblyByName(typeof(WasmRuntime).Assembly, "Wacs.HostBindings.Abstractions");
+                    hostBindingsSourceGenDll = LocateAnalyzerDll();
+                    if (wacsWasip2Dll == null || wacsWasip2DiDll == null || wacsComponentModelDll == null
+                        || hostBindingsAbstractionsDll == null || hostBindingsSourceGenDll == null)
+                    {
+                        System.Console.Error.WriteLine(
+                            "error: --wasip2 requires Wacs.WASI.Preview2.dll, "
+                            + "Wacs.WASI.Preview2.DependencyInjection.dll, Wacs.ComponentModel.dll, "
+                            + "Wacs.HostBindings.Abstractions.dll, and Wacs.HostBindings.SourceGen.dll "
+                            + "alongside the CLI.");
+                        return 1;
+                    }
+                    Log($"wasip2 bindings: {wacsWasip2Dll}");
+                    Log($"wasip2 DI:       {wacsWasip2DiDll}");
+                    Log($"component model: {wacsComponentModelDll}");
+                }
 
                 // Step 3 — Scaffold the throwaway consumer csproj + Program.cs.
                 string hostName = assemblyName + ".host";
@@ -138,6 +167,16 @@ namespace Wacs.Console.Verbs
                             wacsWasiDll!, hostBindingsAbstractionsDll!, hostBindingsSourceGenDll!));
                     File.WriteAllText(programCsPath,
                         GenerateWasiConsumerProgramCs(opts.Namespace, opts.Preopen?.ToList()));
+                }
+                else if (opts.Wasip2)
+                {
+                    File.WriteAllText(csprojPath,
+                        GenerateWasip2ConsumerCsproj(assemblyName, dllPath,
+                            wacsCoreDll, wacsTranspilerLibDll,
+                            wacsWasip2Dll!, wacsWasip2DiDll!, wacsComponentModelDll!,
+                            hostBindingsAbstractionsDll!, hostBindingsSourceGenDll!));
+                    File.WriteAllText(programCsPath,
+                        GenerateWasip2ConsumerProgramCs(opts.Namespace, opts.EntryPoint));
                 }
                 else
                 {
@@ -364,6 +403,97 @@ catch (Wacs.Core.WASIp1.SystemExitException ex)
     return ex.Signal;
 }}
 ";
+        }
+
+        // ---- WASI Preview 2 (component-mode) consumer ----
+
+        private static string GenerateWasip2ConsumerCsproj(
+            string assemblyName, string dllPath,
+            string wacsCoreDll, string wacsTranspilerLibDll,
+            string wacsWasip2Dll, string wacsWasip2DiDll, string wacsComponentModelDll,
+            string hostBindingsAbstractionsDll, string hostBindingsSourceGenDll) =>
+$@"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <LangVersion>10</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RootNamespace>{assemblyName}.Host</RootNamespace>
+    <IsAotCompatible>true</IsAotCompatible>
+    <PublishAot>true</PublishAot>
+    <!-- Preview 2's DI plumbing trips a few generic-instantiation
+         analyzer warnings under PublishAot; the bundle construction is
+         all typed so they're benign at runtime. -->
+    <NoWarn>$(NoWarn);IL2026;IL2070;IL2075;IL2087;IL3050</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include=""Wacs.Core""><HintPath>{wacsCoreDll}</HintPath><Private>true</Private></Reference>
+    <Reference Include=""Wacs.Transpiler.Lib""><HintPath>{wacsTranspilerLibDll}</HintPath><Private>true</Private></Reference>
+    <Reference Include=""Wacs.ComponentModel""><HintPath>{wacsComponentModelDll}</HintPath><Private>true</Private></Reference>
+    <Reference Include=""Wacs.WASI.Preview2""><HintPath>{wacsWasip2Dll}</HintPath><Private>true</Private></Reference>
+    <Reference Include=""Wacs.WASI.Preview2.DependencyInjection""><HintPath>{wacsWasip2DiDll}</HintPath><Private>true</Private></Reference>
+    <Reference Include=""Wacs.HostBindings.Abstractions""><HintPath>{hostBindingsAbstractionsDll}</HintPath><Private>true</Private></Reference>
+    <Reference Include=""{assemblyName}""><HintPath>{dllPath}</HintPath><Private>true</Private></Reference>
+    <Analyzer Include=""{hostBindingsSourceGenDll}"" />
+    <PackageReference Include=""Microsoft.Extensions.DependencyInjection"" Version=""8.0.0"" />
+  </ItemGroup>
+</Project>
+";
+
+        private static string GenerateWasip2ConsumerProgramCs(string @namespace, string entryPoint)
+        {
+            // Sanitize the wasm export name to a C# identifier. The
+            // transpiler does the same in InterfaceGenerator.SanitizeName
+            // (alphanumerics + '_' kept verbatim, hyphens → '_').
+            var clrEntryPoint = SanitizeExportName(entryPoint);
+            return
+$@"// Auto-generated by `wacs aot --wasip2`. Constructs a
+// WasiPreview2Bundle via Microsoft.Extensions.DependencyInjection,
+// instantiates the transpiled component, and invokes its export.
+using System;
+using {@namespace}.Module;
+using {@namespace}.Module.WacsGenerated;
+using Microsoft.Extensions.DependencyInjection;
+using Wacs.WASI.Preview2.DependencyInjection;
+
+var services = new ServiceCollection();
+services.AddWasiPreview2();
+var sp = services.BuildServiceProvider();
+using var scope = sp.CreateScope();
+var bundle = scope.ServiceProvider.GetRequiredService<WasiPreview2Bundle>();
+var resources = scope.ServiceProvider.GetRequiredService<WasiPreview2Resources>();
+
+// Component-mode IImports is direct-linked: every wasi:* import was
+// resolved at transpile time, so the source-generated GeneratedHostImports
+// is essentially an empty adapter. Pass it as the IImports arg.
+var imports = new GeneratedHostImports();
+
+var module = new Module(imports, bundle, resources);
+try
+{{
+    module.{clrEntryPoint}();
+}}
+catch (Wacs.WASI.Preview2.Cli.ExitException ex)
+{{
+    return ex.ExitCode;
+}}
+return 0;
+";
+        }
+
+        // Mirror InterfaceGenerator.SanitizeName: keep alphanumerics +
+        // '_', map any other byte to '_'. Avoids guest export names
+        // like ""set-pixel"" surfacing as ""set_pixel"" in C# and
+        // matches what the transpiler emitted.
+        private static string SanitizeExportName(string name)
+        {
+            var sb = new System.Text.StringBuilder(name.Length);
+            foreach (var c in name)
+                sb.Append(char.IsLetterOrDigit(c) || c == '_' ? c : '_');
+            if (sb.Length > 0 && char.IsDigit(sb[0])) sb.Insert(0, '_');
+            return sb.ToString();
         }
 
         // ---- publish helper ----

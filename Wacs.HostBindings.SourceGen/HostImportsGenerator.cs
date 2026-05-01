@@ -30,6 +30,7 @@ namespace Wacs.HostBindings.SourceGen
     public sealed class HostImportsGenerator : IIncrementalGenerator
     {
         private const string WacsImportAttrFqn = "Wacs.HostBindings.WacsImportAttribute";
+        private const string WacsImportNamesAttrFqn = "Wacs.HostBindings.WacsImportNamesAttribute";
         private const string WacsTranspiledImportsAttrFqn = "Wacs.HostBindings.WacsTranspiledImportsAttribute";
         private const string WacsHostMemoryFqn = "Wacs.HostBindings.WacsHostMemory";
 
@@ -48,16 +49,95 @@ namespace Wacs.HostBindings.SourceGen
             var importsProvider = context.CompilationProvider.Select(
                 static (compilation, _) => CollectTranspiledImports(compilation));
 
-            // 3. Combine and emit.
-            var combined = bindingsProvider.Combine(importsProvider);
+            // 3. Pull the (methodName → (module, name)) mapping the
+            //    transpiler stamps as an assembly-level
+            //    [WacsImportNames(...)] attribute. Lokad.ILPack drops
+            //    method-level attributes so the table is hoisted to
+            //    assembly scope.
+            var mappingProvider = context.CompilationProvider.Select(
+                static (compilation, _) => CollectImportNameMappings(compilation));
+
+            // 4. Combine and emit.
+            var combined = bindingsProvider.Combine(importsProvider).Combine(mappingProvider);
             context.RegisterSourceOutput(combined, static (spc, source) =>
             {
-                var (bindings, importsList) = source;
+                var ((bindings, importsList), mappings) = source;
                 foreach (var imports in importsList)
                 {
-                    EmitOneAdapter(spc, imports, bindings);
+                    EmitOneAdapter(spc, imports, bindings, mappings);
                 }
             });
+        }
+
+        /// <summary>
+        /// Read every <c>[assembly: WacsImportNames(...)]</c> attribute in
+        /// the compilation's references + own source, decode each, and
+        /// merge into a single (methodName → (module, name)) table.
+        /// </summary>
+        private static ImmutableDictionary<string, (string Module, string Name)>
+            CollectImportNameMappings(Compilation compilation)
+        {
+            var attrSym = compilation.GetTypeByMetadataName(WacsImportNamesAttrFqn);
+            if (attrSym is null)
+                return ImmutableDictionary<string, (string, string)>.Empty;
+
+            var builder = ImmutableDictionary.CreateBuilder<string, (string, string)>();
+
+            void Scan(IAssemblySymbol asm)
+            {
+                foreach (var attr in asm.GetAttributes())
+                {
+                    if (!SymbolEqualityComparer.Default.Equals(attr.AttributeClass, attrSym))
+                        continue;
+                    if (attr.ConstructorArguments.Length != 1) continue;
+                    if (attr.ConstructorArguments[0].Value is string mapping)
+                    {
+                        foreach (var entry in DecodeMapping(mapping))
+                            builder[entry.MethodName] = (entry.Module, entry.Name);
+                    }
+                }
+            }
+
+            Scan(compilation.Assembly);
+            foreach (var refAsm in compilation.SourceModule.ReferencedAssemblySymbols)
+                Scan(refAsm);
+
+            return builder.ToImmutable();
+        }
+
+        // Mirrors WacsImportNamesAttribute.Decode (the source gen can't
+        // reference WACS.HostBindings.Abstractions's runtime types because
+        // the analyzer .dll loads against an older Roslyn-pinned version
+        // of that package than the consumer's compilation references).
+        private static IEnumerable<(string MethodName, string Module, string Name)> DecodeMapping(string mapping)
+        {
+            if (string.IsNullOrEmpty(mapping)) yield break;
+            int i = 0;
+            while (i < mapping.Length)
+            {
+                var fields = new string[3];
+                for (int f = 0; f < 3; f++)
+                {
+                    var sb = new StringBuilder();
+                    while (i < mapping.Length)
+                    {
+                        char c = mapping[i];
+                        if (c == '\\' && i + 1 < mapping.Length)
+                        {
+                            sb.Append(mapping[i + 1]);
+                            i += 2;
+                            continue;
+                        }
+                        if (c == ':' || c == ';') break;
+                        sb.Append(c);
+                        i++;
+                    }
+                    fields[f] = sb.ToString();
+                    if (f < 2 && i < mapping.Length && mapping[i] == ':') i++;
+                }
+                if (i < mapping.Length && mapping[i] == ';') i++;
+                yield return (fields[0], fields[1], fields[2]);
+            }
         }
 
         // -----------------------------------------------------------------
@@ -176,7 +256,8 @@ namespace Wacs.HostBindings.SourceGen
         private static void EmitOneAdapter(
             SourceProductionContext spc,
             INamedTypeSymbol importsInterface,
-            ImmutableDictionary<(string Module, string Name), ImmutableArray<BindingDescriptor>> bindings)
+            ImmutableDictionary<(string Module, string Name), ImmutableArray<BindingDescriptor>> bindings,
+            ImmutableDictionary<string, (string Module, string Name)> nameMappings)
         {
             // Discover all shared-state types across this interface's methods'
             // matched bindings, so the generated ctor can request them once.
@@ -193,7 +274,7 @@ namespace Wacs.HostBindings.SourceGen
                 if (ifaceMethod.MethodKind != MethodKind.Ordinary) continue;
                 var sig = ifaceMethod.Name + "(" + FormatParamTypes(ifaceMethod.Parameters) + ")";
                 if (!seenSignatures.Add(sig)) continue;
-                var (mod, name) = ParseImportModuleAndName(ifaceMethod);
+                var (mod, name) = ResolveImportModuleAndName(ifaceMethod, nameMappings);
                 if (!bindings.TryGetValue((mod, name), out var matches))
                 {
                     spc.ReportDiagnostic(Diagnostic.Create(
@@ -359,8 +440,17 @@ namespace Wacs.HostBindings.SourceGen
 
             if (binding is null)
             {
-                sb.AppendLine("            throw new WacsHostFault(\"no host binding registered for "
-                              + iface.Name + "\");");
+                // No matched binding — emit a no-op stub returning default.
+                // Component-mode wasm direct-links imports at transpile time,
+                // so the IImports methods exist for type-system completeness
+                // but only specific resource-management calls (e.g.
+                // wasi:io/streams [resource-drop]output-stream) actually route
+                // through here at runtime. The actual cleanup happens via
+                // the matching ResourceContext, so a silent no-op is correct.
+                // Embedders who want strict matching can promote WACS001 to
+                // error via /warnaserror:WACS001.
+                if (!iface.ReturnsVoid)
+                    sb.AppendLine("            return default;");
             }
             else
             {
@@ -390,18 +480,19 @@ namespace Wacs.HostBindings.SourceGen
 
         private static string StateFieldName(int i) => "_state" + i;
 
-        private static (string Module, string Name) ParseImportModuleAndName(IMethodSymbol m)
+        private static (string Module, string Name) ResolveImportModuleAndName(
+            IMethodSymbol m,
+            ImmutableDictionary<string, (string Module, string Name)> nameMappings)
         {
-            // The transpiler-generated IImports method names use the pattern
-            // <module>_<name>, with separators sanitized to '_'. Heuristic:
-            // split on the LAST '_' to get name, treat the rest as module.
-            // For wasi imports: "wasi_snapshot_preview1_fd_write" → module
-            // "wasi_snapshot_preview1", name "fd_write". The transpiler's
-            // sanitize collapses every non-alphanumeric to '_', so this
-            // heuristic isn't perfect — Phase 4b will switch to a structured
-            // [WacsImportName] attribute the transpiler emits per method.
+            // Prefer the assembly-level [WacsImportNames(...)] mapping the
+            // transpiler emits — it carries the original wasm names
+            // verbatim and survives Lokad.ILPack's PE serialization.
+            if (nameMappings.TryGetValue(m.Name, out var pair))
+                return pair;
+
+            // Legacy heuristic for IImports interfaces that pre-date the
+            // attribute (Wacs.Transpiler.Lib < 0.5).
             var n = m.Name;
-            // Recognize known WASI prefix as a special case for now.
             const string wasiPrefix = "wasi_snapshot_preview1_";
             if (n.StartsWith(wasiPrefix))
                 return ("wasi_snapshot_preview1", n.Substring(wasiPrefix.Length));

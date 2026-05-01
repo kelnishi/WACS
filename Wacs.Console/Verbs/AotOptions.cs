@@ -82,6 +82,17 @@ namespace Wacs.Console.Verbs
             + "args become the wasm's argv.")]
         public bool Wasi { get; set; }
 
+        [Option("wasip2", HelpText =
+            "Component-mode counterpart to --wasi. The input must be a "
+            + "WebAssembly Component (header byte = 0x02). The transpiler "
+            + "direct-links wasi:* imports against WACS.WASI.Preview2's "
+            + "typed C# host interfaces at build time; the scaffolded "
+            + "consumer references WACS.WASI.Preview2 + "
+            + "WACS.WASI.Preview2.DependencyInjection and constructs the "
+            + "WasiPreview2Bundle via Microsoft.Extensions.DependencyInjection "
+            + "before invoking the named export.")]
+        public bool Wasip2 { get; set; }
+
         [Option("preopen", Separator = ',', HelpText =
             "WASI directory preopens, one per --preopen, formatted as "
             + "<host-path>::<guest-path>. Repeat or comma-separate for "
