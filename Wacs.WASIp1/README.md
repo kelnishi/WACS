@@ -69,6 +69,60 @@ if (runtime.TryGetExportedFunction(("mymodule", "main"), out var mainAddr))
 }
 ```
 
+## Capability flags
+
+`WasiConfiguration` exposes a few opt-in capability gates beyond the
+filesystem preopens:
+
+| Flag | Default | What it enables |
+|---|---|---|
+| `AllowFileCreation` | `false` | `path_open(O_CREAT)` and `path_create_directory` |
+| `AllowFileDeletion` | `false` | `path_unlink_file` and `path_remove_directory` |
+| `AllowSymbolicLinks` | `false` | `path_symlink` (creates real host symlinks via `File.CreateSymbolicLink`) |
+| `AllowHardLinks` | `false` | `path_link` (P/Invoke `link(2)` on Unix, `CreateHardLinkW` on Windows) |
+| `AllowTimeAccess` | `true` | `clock_time_get` and `clock_res_get` |
+| `AllowNetworkSockets` | `false` | Preopened sockets (see below) |
+| `PreopenHostRootDirectory` | `true` | Auto-binds `HostRootDirectory` as a preopen at fd 3 (legacy `Wacs.Console` behavior; flip false to follow the wasmtime convention where fd 3 is the first explicit preopen) |
+
+## Network sockets
+
+WASI Preview 1's socket surface is intentionally narrow: there is no
+`sock_open` / `sock_bind` / `sock_listen`. Listening sockets are
+handed in by the embedder as preopens (the same model `wasmtime serve`
+uses for HTTP), and `sock_accept` mints connection fds from them.
+
+```csharp
+using System.Net;
+using System.Net.Sockets;
+using Wacs.WASIp1.Types;
+
+var listener = new Socket(AddressFamily.InterNetwork,
+    SocketType.Stream, ProtocolType.Tcp);
+listener.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+listener.Listen(8);
+
+var wasiConfig = new WasiConfiguration {
+    HostRootDirectory = Directory.GetCurrentDirectory(),
+    AllowNetworkSockets = true,
+    PreopenedSockets = { (listener, FdFlags.NonBlock) },
+};
+```
+
+The guest's `accept(3)` on fd 3 (after stdio at 0/1/2) will produce a
+working TCP connection. Two layers of explicit consent before any
+network egress: the flag must be on AND the embedder must have
+already constructed and bound the `Socket`.
+
+## Conformance
+
+Tested continuously against the official
+[WebAssembly/wasi-testsuite](https://github.com/WebAssembly/wasi-testsuite)
+fixtures via `Wacs.WASIp1.Test`. The harness reads each test's
+`*.json` manifest, runs the wasm under WACS with the prescribed
+preopens / args / env, and asserts on exit code + stdout + stderr. The
+test project's `skip.json` documents which conformance fixtures are
+deliberately not yet asserting (each entry carries a reason).
+
 ## License
 
 WACS is distributed under the [Apache 2.0 License](https://github.com/kelnishi/WACS/blob/main/LICENSE), allowing usage in both open-source and commercial projects.
