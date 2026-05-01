@@ -51,6 +51,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.HostBindings.Abstracti
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.HostBindings.Test", "Wacs.HostBindings.Test\Wacs.HostBindings.Test.csproj", "{9C452F90-6D28-430D-8DCF-548BC485EF5E}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.HostBindings.SourceGen", "Wacs.HostBindings.SourceGen\Wacs.HostBindings.SourceGen.csproj", "{46A3C77F-120F-44E4-BB6A-C5A028C2DC49}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -157,5 +159,9 @@ Global
 		{9C452F90-6D28-430D-8DCF-548BC485EF5E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{9C452F90-6D28-430D-8DCF-548BC485EF5E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{9C452F90-6D28-430D-8DCF-548BC485EF5E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{46A3C77F-120F-44E4-BB6A-C5A028C2DC49}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{46A3C77F-120F-44E4-BB6A-C5A028C2DC49}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{46A3C77F-120F-44E4-BB6A-C5A028C2DC49}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{46A3C77F-120F-44E4-BB6A-C5A028C2DC49}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

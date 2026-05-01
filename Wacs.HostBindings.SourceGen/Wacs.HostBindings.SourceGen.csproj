@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <Nullable>enable</Nullable>
+        <LangVersion>10</LangVersion>
+        <Title>Wacs Host Bindings Source Generator</Title>
+        <PackageId>WACS.HostBindings.SourceGen</PackageId>
+        <Authors>Kelvin Nishikawa</Authors>
+        <Description>Roslyn source generator that emits a GeneratedHostImports class implementing a transpiled wasm module's IImports interface. Discovers the IImports via [WacsTranspiledImports] on referenced assemblies and matches each method to a [WacsImport(module, name)]-annotated static binding. Used by `wacs aot` and DIY embedders to satisfy host-function imports without DispatchProxy / runtime IL emission.</Description>
+        <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
+        <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <Version>0.1.0</Version>
+        <RepositoryType>git</RepositoryType>
+
+        <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+        <IsRoslynComponent>true</IsRoslynComponent>
+        <IncludeBuildOutput>false</IncludeBuildOutput>
+        <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+        <DevelopmentDependency>true</DevelopmentDependency>
+
+        <RootNamespace>Wacs.HostBindings.SourceGen</RootNamespace>
+        <TargetFramework>netstandard2.0</TargetFramework>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.3.4">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
+    </ItemGroup>
+
+    <!-- Pack the analyzer .dll into the analyzers/dotnet/cs nuget folder
+         so consumers loading the package get it as a build-time analyzer
+         rather than a runtime reference. -->
+    <ItemGroup>
+        <None Include="$(OutputPath)\$(AssemblyName).dll"
+              Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+        <None Include="README.md" Pack="true" PackagePath="" />
+    </ItemGroup>
+
+</Project>
