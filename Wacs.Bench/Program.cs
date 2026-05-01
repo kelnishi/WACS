@@ -10,6 +10,9 @@ using System.IO;
 using Wacs.Core;
 using Wacs.Core.Runtime;
 
+if (args.Length > 0 && args[0] == "coldstart")
+    return Coldstart.Run(args);
+
 static long RunOne(string wasmPath, bool useSwitch, bool superInst, bool useMinimal, bool switchSuper, Bench b)
 {
     var bytes = File.ReadAllBytes(wasmPath);
