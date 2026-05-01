@@ -35,7 +35,7 @@ namespace Wacs.Console
         private static readonly HashSet<string> VerbKeywords =
             new(StringComparer.OrdinalIgnoreCase)
             {
-                "run", "build", "inspect",
+                "run", "build", "inspect", "bindgen",
                 "help", "--help", "-h",
                 "version", "--version",
             };
@@ -76,7 +76,7 @@ namespace Wacs.Console
             });
 
             var parsed = parser.ParseArguments<
-                RunOptions, BuildOptions, InspectOptions>(verbArgs);
+                RunOptions, BuildOptions, InspectOptions, BindgenOptions>(verbArgs);
 
             return parsed.MapResult(
                 (RunOptions o) =>
@@ -86,6 +86,7 @@ namespace Wacs.Console
                 },
                 (BuildOptions o) => BuildHandler.Execute(o),
                 (InspectOptions o) => InspectHandler.Execute(o),
+                (BindgenOptions o) => BindgenHandler.Execute(o),
                 _ => 1);
         }
 
