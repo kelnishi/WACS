@@ -3,10 +3,18 @@ name: Publish Updated Packages to NuGet
 on:
   push:
     tags:
+      # Existing prefixes (pre-v0.10.0).
       - 'WACS-v*.*.*'
       - 'WASIp1-v*.*.*'
       - 'WACS-Transpiler-v*.*.*'
       - 'WACS-WASI-Threads-v*.*.*'
+      # New prefixes for the v0.10.0 release surface. Related
+      # packages share a prefix so a single tag publishes the
+      # group (e.g. WACS-ComponentModel-v0.1.0 publishes both
+      # the runtime + the bindgen lib).
+      - 'WACS-Cli-v*.*.*'
+      - 'WACS-ComponentModel-v*.*.*'
+      - 'WACS-WASI-Preview2-v*.*.*'
 
 jobs:
   build-and-publish:
@@ -18,6 +26,7 @@ jobs:
     strategy:
       matrix:
         include:
+          # Pre-v0.10.0 packages.
           - path: Wacs.Core
             package_name: WACS
             tag_prefix: WACS-v
@@ -33,6 +42,31 @@ jobs:
           - path: Wacs.WASI.Threads
             package_name: WACS.WASI.Threads
             tag_prefix: WACS-WASI-Threads-v
+
+          # v0.10.0 release surface.
+          # `WACS-Cli-v*` → wacs CLI apphost.
+          - path: Wacs.Console
+            package_name: WACS.Cli
+            tag_prefix: WACS-Cli-v
+
+          # `WACS-ComponentModel-v*` → component-model runtime +
+          # bindgen library (versioned together; both 0.1.0 today).
+          - path: Wacs.ComponentModel
+            package_name: WACS.ComponentModel
+            tag_prefix: WACS-ComponentModel-v
+          - path: Wacs.ComponentModel.Bindgen.Lib
+            package_name: WACS.ComponentModel.Bindgen.Lib
+            tag_prefix: WACS-ComponentModel-v
+
+          # `WACS-WASI-Preview2-v*` → typed WASI Preview 2 host
+          # interfaces + the Microsoft.Extensions.DependencyInjection
+          # extension (versioned together; both 0.1.0 today).
+          - path: Wacs.WASI.Preview2
+            package_name: WACS.WASI.Preview2
+            tag_prefix: WACS-WASI-Preview2-v
+          - path: Wacs.WASI.Preview2.DependencyInjection
+            package_name: WACS.WASI.Preview2.DependencyInjection
+            tag_prefix: WACS-WASI-Preview2-v
 
     steps:
       - name: Checkout code
