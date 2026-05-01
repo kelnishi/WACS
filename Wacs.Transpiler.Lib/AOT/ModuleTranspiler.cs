@@ -235,6 +235,28 @@ namespace Wacs.Transpiler.AOT
                 assemblyBuilder.SetCustomAttribute(new CustomAttributeBuilder(
                     attrCtor,
                     new object[] { interfaceGen.ImportsInterface!.FullName! }));
+
+                // Also stamp the (methodName, wasmModule, wasmName) table
+                // for source-gen binding match. Hoisted to assembly level
+                // because Lokad.ILPack doesn't preserve method-level
+                // custom attributes.
+                if (interfaceGen.ImportMethods.Count > 0)
+                {
+                    var entries = new System.Collections.Generic.List<(string, string, string)>();
+                    foreach (var im in interfaceGen.ImportMethods)
+                    {
+                        if (im.WasmImportModule != null && im.WasmImportEntity != null)
+                            entries.Add((im.Name, im.WasmImportModule, im.WasmImportEntity));
+                    }
+                    if (entries.Count > 0)
+                    {
+                        var mapping = Wacs.HostBindings.WacsImportNamesAttribute.Encode(entries);
+                        var namesCtor = typeof(Wacs.HostBindings.WacsImportNamesAttribute)
+                            .GetConstructor(new[] { typeof(string) })!;
+                        assemblyBuilder.SetCustomAttribute(new CustomAttributeBuilder(
+                            namesCtor, new object[] { mapping }));
+                    }
+                }
             }
 
             // === Pass 0a.1: Resolve direct-linked host imports ===

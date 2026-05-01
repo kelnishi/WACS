@@ -13,9 +13,17 @@ namespace Wacs.HostBindings.SourceGen
             title: "No host binding for wasm import",
             messageFormat: "No [WacsImport(\"{0}\", \"{1}\")] static method found in any referenced assembly. " +
                            "The transpiled module's IImports interface has a method '{2}' that maps to this " +
-                           "wasm import. Add the binding (e.g. via WACS.WASI.Preview1) or implement it locally.",
+                           "wasm import. Add the binding (e.g. via WACS.WASI.Preview1) or implement it locally. " +
+                           "The generated adapter throws WacsHostFault if the method is invoked.",
             category: "Wacs.HostBindings",
-            defaultSeverity: DiagnosticSeverity.Error,
+            // Warning, not error — component-mode wasm direct-links its
+            // imports at transpile time, so the IImports methods exist for
+            // type-system completeness but are never called at runtime. A
+            // hard error there would block the build for no functional
+            // reason. Embedders who consume IImports directly (core wasm
+            // wired via the source-generated adapter) can promote this to
+            // an error via /warnaserror:WACS001 or .editorconfig.
+            defaultSeverity: DiagnosticSeverity.Warning,
             isEnabledByDefault: true);
 
         public static readonly DiagnosticDescriptor SignatureMismatch = new(
