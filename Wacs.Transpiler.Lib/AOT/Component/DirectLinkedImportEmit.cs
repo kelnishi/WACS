@@ -2537,6 +2537,10 @@ namespace Wacs.Transpiler.AOT.Component
             HostPackageResolver? resolver,
             bool allowVariableLength = false)
         {
+            // Unit — the empty arm of result<_, X> / option<_>.
+            // Wire form: nothing past the discriminant. Storable
+            // by emitting only the disc write, no value store.
+            if (t == typeof(Unit)) return true;
             if (IsStorablePrimitive(t)) return true;
             if (resolver != null
                 && resolver.IsResourceInterface(t)
@@ -2564,6 +2568,11 @@ namespace Wacs.Transpiler.AOT.Component
                     && IsAggregateReturnSupported(t, resolver))
                     return true;
             }
+            // Variant-base arms (e.g. Result<Unit, StreamError>
+            // where StreamError is the abstract base of
+            // LastOperationFailed/Closed cases) need broader emit
+            // wiring through EmitVariantStoreAt — deferred. Falls
+            // back to delegate dispatch for now.
             return false;
         }
 
@@ -2595,6 +2604,10 @@ namespace Wacs.Transpiler.AOT.Component
             CanonOption.Kind stringEncoding =
                 CanonOption.Kind.StringUtf8)
         {
+            // Unit — empty arm, no value to write past the
+            // discriminant byte. Caller already stored disc.
+            if (armType == typeof(Unit)) return;
+
             bool isResource = resolver != null
                 && resolver.IsResourceInterface(armType)
                 && resourcesType != null;

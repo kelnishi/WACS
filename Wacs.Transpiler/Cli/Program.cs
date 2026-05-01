@@ -47,21 +47,41 @@ namespace Wacs.Transpiler.Cli
 
         private static int Run(CliOptions opts)
         {
-            var input = Path.GetFullPath(opts.Input);
-            var output = Path.GetFullPath(opts.Output);
-
-            if (!File.Exists(input))
+            var inputs = opts.Inputs
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .Select(Path.GetFullPath)
+                .ToList();
+            if (inputs.Count == 0)
             {
-                Console.Error.WriteLine($"error: input file not found: {input}");
+                Console.Error.WriteLine("error: at least one --input file required");
                 return ExitUsage;
             }
+            foreach (var i in inputs)
+                if (!File.Exists(i))
+                {
+                    Console.Error.WriteLine($"error: input file not found: {i}");
+                    return ExitUsage;
+                }
+            var primaryInput = inputs[inputs.Count - 1];   // last input drives the export entry-point
+            var output = Path.GetFullPath(opts.Output);
 
             bool hasHostBindings = opts.Wasi || opts.Bind.Any();
             bool hasComponentHostBindings = opts.Wasip2 || opts.HostPackage.Any();
-            if (opts.Run && !opts.EmitMain && !hasHostBindings && !hasComponentHostBindings)
+            bool isInterpreterEngine = string.Equals(opts.Engine,
+                "interpreter", StringComparison.OrdinalIgnoreCase);
+            if (opts.Run && !opts.EmitMain && !hasHostBindings
+                && !hasComponentHostBindings && !isInterpreterEngine)
             {
                 Console.Error.WriteLine(
-                    "error: --run requires --emit-main, --wasi, --bind, --wasip2, or --host-package");
+                    "error: --run requires --emit-main, --wasi, --bind, --wasip2, "
+                    + "--host-package, or --engine interpreter");
+                return ExitUsage;
+            }
+            if (isInterpreterEngine && (opts.Wasip2 || opts.HostPackage.Any()))
+            {
+                Console.Error.WriteLine(
+                    "error: --engine interpreter doesn't yet thread --wasip2 / "
+                    + "--host-package; use the default transpiler engine for those.");
                 return ExitUsage;
             }
 
@@ -78,7 +98,7 @@ namespace Wacs.Transpiler.Cli
 
             if (opts.Verbose)
             {
-                Console.WriteLine($"input         {input}");
+                Console.WriteLine($"input         {string.Join(", ", inputs.Select(Path.GetFileName))}");
                 Console.WriteLine($"output        {output}");
                 Console.WriteLine($"namespace     {opts.Namespace}");
                 Console.WriteLine($"module        {opts.ModuleName}");
@@ -96,14 +116,11 @@ namespace Wacs.Transpiler.Cli
             // Component-mode detection: peek at the first 8 bytes.
             // Component binaries carry layer=0x0001; core modules have
             // layer=0x0000. ComponentBinaryParser.IsComponentHeader is
-            // the canonical discriminator. Direct callers / library
-            // users go through ComponentTranspiler.TranspileSingleModule
-            // for components — we mirror that decision here so the CLI
-            // routes a `.component.wasm` file through the same path.
+            // the canonical discriminator.
             bool isComponent;
             try
             {
-                isComponent = DetectComponent(input);
+                isComponent = DetectComponent(primaryInput);
             }
             catch (Exception ex)
             {
@@ -111,8 +128,27 @@ namespace Wacs.Transpiler.Cli
                 return ExitTranspileFailure;
             }
 
+            if (inputs.Count > 1 && isComponent)
+            {
+                Console.Error.WriteLine(
+                    "error: multi-input mode currently supports core .wasm modules only; "
+                    + "for cross-component composition use --host-package against a "
+                    + "previously transpiled .dll.");
+                return ExitUsage;
+            }
+
             if (isComponent)
-                return RunComponent(opts, input, output, options, timer);
+                return RunComponent(opts, primaryInput, output, options, timer);
+
+            // Multi-input core-WASM path: parse each, register with a
+            // shared WasmRuntime so cross-module imports resolve via
+            // the interpreter's binding system, then either transpile
+            // each (and save N .dlls) or run via the interpreter.
+            if (inputs.Count > 1 || isInterpreterEngine)
+                return RunMultiOrInterpreter(opts, inputs, output, options,
+                    isInterpreterEngine, timer);
+
+            var input = primaryInput;
 
             Module module;
             WasmRuntime runtime;
@@ -245,6 +281,228 @@ namespace Wacs.Transpiler.Cli
 
             foreach (var d in disposables) d.Dispose();
             return runExit;
+        }
+
+        // Multi-module / interpreter-engine path. Mirrors the
+        // ModuleLinker pattern AotSpecTests uses for spec multi-
+        // module fixtures: one shared WasmRuntime, each module
+        // registered under its file basename so cross-module
+        // imports resolve through the runtime's binding table.
+        // For --engine interpreter, runs through the interpreter
+        // and skips the transpile / save step; otherwise transpiles
+        // each module to its own sibling .dll (the linker wires
+        // them up at load time via the same name keys).
+        private static int RunMultiOrInterpreter(CliOptions opts,
+            List<string> inputs, string output, TranspilerOptions options,
+            bool isInterpreterEngine, Stopwatch timer)
+        {
+            if (opts.Verbose)
+            {
+                Console.WriteLine($"engine        {(isInterpreterEngine ? "interpreter" : "transpiler")}");
+                Console.WriteLine($"modules       {inputs.Count}");
+            }
+
+            var runtime = new WasmRuntime();
+            var hostBindings = new List<IBindable>();
+            var disposables = new List<IDisposable>();
+
+            // --wasi / --bind apply to the SHARED runtime — any
+            // module's host imports satisfied by the same set.
+            if (opts.Wasi)
+            {
+                var wasiCfg = Wasi.DefaultConfiguration();
+                wasiCfg.Arguments = new List<string>
+                    { Path.GetFileName(inputs[inputs.Count - 1]) };
+                wasiCfg.Arguments.AddRange(opts.Args);
+                var wasiBinding = new Wasi(wasiCfg);
+                hostBindings.Add(wasiBinding);
+                disposables.Add(wasiBinding);
+            }
+            foreach (var asmPath in opts.Bind)
+            {
+                var loaded = BindingLoader.LoadFromAssembly(asmPath);
+                foreach (var b in loaded)
+                {
+                    hostBindings.Add(b);
+                    if (b is IDisposable d) disposables.Add(d);
+                }
+            }
+            foreach (var b in hostBindings) b.BindToRuntime(runtime);
+
+            // Parse + instantiate each module in input order. The
+            // runtime resolves cross-module imports as each module's
+            // exports become discoverable under its registered name.
+            var parsed = new List<(string Name, Module M, ModuleInstance Inst)>();
+            foreach (var inputPath in inputs)
+            {
+                var name = Path.GetFileNameWithoutExtension(inputPath);
+                Module m;
+                ModuleInstance inst;
+                try
+                {
+                    using var fs = new FileStream(inputPath, FileMode.Open,
+                        FileAccess.Read);
+                    m = BinaryModuleParser.ParseWasm(fs);
+                    inst = runtime.InstantiateModule(m);
+                    runtime.RegisterModule(name, inst);
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine(
+                        $"error: failed to parse/instantiate '{name}': {ex.Message}");
+                    foreach (var d in disposables) d.Dispose();
+                    return ExitTranspileFailure;
+                }
+                parsed.Add((name, m, inst));
+                if (opts.Verbose)
+                    Console.WriteLine($"registered    {name}");
+            }
+
+            // --engine interpreter: skip transpile + save. Run the
+            // chosen export on the LAST module via the interpreter's
+            // own dispatch.
+            if (isInterpreterEngine)
+            {
+                int exit = ExitOk;
+                if (opts.Run)
+                {
+                    var last = parsed[parsed.Count - 1];
+                    try
+                    {
+                        if (!runtime.TryGetExportedFunction(
+                                (last.Name, opts.EntryPoint), out var addr))
+                        {
+                            Console.Error.WriteLine(
+                                $"error: export '{opts.EntryPoint}' not found on '{last.Name}'");
+                            exit = ExitRunFailure;
+                        }
+                        else
+                        {
+                            var invoker = runtime.CreateStackInvoker(addr);
+                            // Parse trailing args as scalar Values per
+                            // the function type. v0 supports primitives
+                            // only — argv is positional.
+                            var ftype = runtime.GetFunctionType(addr);
+                            var args = ParseInterpreterArgs(opts.Args.ToArray(),
+                                ftype.ParameterTypes.Types);
+                            var results = invoker(args);
+                            if (results.Length == 1)
+                                Console.WriteLine(FormatValue(results[0]));
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine($"error: interpreter run failed: {ex.Message}");
+                        exit = ExitRunFailure;
+                    }
+                }
+                timer.Stop();
+                if (opts.Verbose)
+                    Console.WriteLine($"interpreter run completed in {timer.ElapsedMilliseconds}ms");
+                foreach (var d in disposables) d.Dispose();
+                return exit;
+            }
+
+            // Transpiler path: transpile each module separately and
+            // save N .dlls. Output naming: -o is taken as the path for
+            // the LAST module; siblings land at <basename>.dll in the
+            // same directory. Cross-module wiring lives in the runtime
+            // binding table the loader needs to reconstruct (see
+            // TranspiledModuleLoader for the planned chain-mode
+            // helper; today the .dlls are usable individually).
+            var outputDir = Path.GetDirectoryName(output) ?? ".";
+            var outputs = new List<string>();
+            int totalTranspiled = 0;
+            for (int i = 0; i < parsed.Count; i++)
+            {
+                var (name, _, inst) = parsed[i];
+                var perOutput = i == parsed.Count - 1
+                    ? output
+                    : Path.Combine(outputDir, name + ".dll");
+
+                TranspilationResult result;
+                try
+                {
+                    var transpiler = new ModuleTranspiler(opts.Namespace, options);
+                    result = transpiler.Transpile(inst, runtime, name);
+                    totalTranspiled += result.TranspiledCount;
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine(
+                        $"error: transpilation of '{name}' failed: {ex.Message}");
+                    foreach (var d in disposables) d.Dispose();
+                    return ExitTranspileFailure;
+                }
+
+                try
+                {
+                    if (!Directory.Exists(outputDir))
+                        Directory.CreateDirectory(outputDir);
+                    result.SaveAssembly(perOutput);
+                    outputs.Add(perOutput);
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine(
+                        $"error: saving '{name}' to {perOutput} failed: {ex.Message}");
+                    foreach (var d in disposables) d.Dispose();
+                    return ExitTranspileFailure;
+                }
+            }
+
+            timer.Stop();
+            if (opts.Verbose)
+            {
+                foreach (var p in outputs) Console.WriteLine($"wrote         {p}");
+                Console.WriteLine($"transpiled {totalTranspiled} functions in {timer.ElapsedMilliseconds}ms");
+            }
+            else
+            {
+                Console.WriteLine(
+                    $"wrote {outputs.Count} dll(s) to {outputDir} ({totalTranspiled} functions, {timer.ElapsedMilliseconds}ms)");
+            }
+
+            foreach (var d in disposables) d.Dispose();
+            return ExitOk;
+        }
+
+        // Parse trailing CLI args as Values for the interpreter
+        // run path. Only primitive scalars (i32/i64/f32/f64). Other
+        // shapes fall through unparsed; those exports surface as a
+        // run-time validation failure.
+        private static Value[] ParseInterpreterArgs(string[] argv,
+            Wacs.Core.Types.Defs.ValType[] paramTypes)
+        {
+            var vals = new Value[paramTypes.Length];
+            for (int i = 0; i < paramTypes.Length; i++)
+            {
+                var s = i < argv.Length ? argv[i] : "0";
+                var ic = System.Globalization.CultureInfo.InvariantCulture;
+                vals[i] = paramTypes[i] switch
+                {
+                    Wacs.Core.Types.Defs.ValType.I32 => new Value(int.Parse(s, ic)),
+                    Wacs.Core.Types.Defs.ValType.I64 => new Value(long.Parse(s, ic)),
+                    Wacs.Core.Types.Defs.ValType.F32 => new Value(float.Parse(s, ic)),
+                    Wacs.Core.Types.Defs.ValType.F64 => new Value(double.Parse(s, ic)),
+                    _ => throw new ArgumentException(
+                        $"unsupported interpreter arg type {paramTypes[i]}"),
+                };
+            }
+            return vals;
+        }
+
+        private static string FormatValue(Value v)
+        {
+            var ic = System.Globalization.CultureInfo.InvariantCulture;
+            return v.Type switch
+            {
+                Wacs.Core.Types.Defs.ValType.I32 => v.Data.Int32.ToString(ic),
+                Wacs.Core.Types.Defs.ValType.I64 => v.Data.Int64.ToString(ic),
+                Wacs.Core.Types.Defs.ValType.F32 => v.Data.Float32.ToString(ic),
+                Wacs.Core.Types.Defs.ValType.F64 => v.Data.Float64.ToString(ic),
+                _ => v.ToString()!,
+            };
         }
 
         // Read the first 8 bytes and ask ComponentBinaryParser which

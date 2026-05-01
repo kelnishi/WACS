@@ -271,8 +271,18 @@ namespace Wacs.Transpiler.Test
                 ipNameLookup: new StubDns(),
                 outgoingHandler: new StubHttpHandler());
 
+            // Module ctor: (importsProxy, bundle, resources?). The
+            // production WasiPreview2 resolver auto-discovers a
+            // resources class when the bundle is the production
+            // WasiPreview2Bundle and resource interfaces appear on
+            // it (which they do — IOutputStream etc). Free-fn
+            // tests like this don't exercise the resources, but
+            // the ctor signature still demands the 3rd slot.
+            var resources = new Wacs.WASI.Preview2.DependencyInjection
+                .WasiPreview2Resources(
+                    new Wacs.WASI.Preview2.HostBinding.ResourceContext());
             var instance = Activator.CreateInstance(result.ModuleClass!,
-                new object[] { importsProxy, bundle })!;
+                new object[] { importsProxy, bundle, resources })!;
 
             var callRandom = result.ExportsInterface!.GetMethod(
                 InterfaceGenerator.SanitizeName("call_random"))!;
@@ -379,8 +389,18 @@ namespace Wacs.Transpiler.Test
                 ipNameLookup: new StubDns(),
                 outgoingHandler: new StubHttpHandler());
 
+            // Module ctor: (importsProxy, bundle, resources?). The
+            // production WasiPreview2 resolver auto-discovers a
+            // resources class when the bundle is the production
+            // WasiPreview2Bundle and resource interfaces appear on
+            // it (which they do — IOutputStream etc). Free-fn
+            // tests like this don't exercise the resources, but
+            // the ctor signature still demands the 3rd slot.
+            var resources = new Wacs.WASI.Preview2.DependencyInjection
+                .WasiPreview2Resources(
+                    new Wacs.WASI.Preview2.HostBinding.ResourceContext());
             var instance = Activator.CreateInstance(result.ModuleClass!,
-                new object[] { importsProxy, bundle })!;
+                new object[] { importsProxy, bundle, resources })!;
 
             var callAll = result.ExportsInterface!.GetMethod(
                 InterfaceGenerator.SanitizeName("call_all"))!;

@@ -337,9 +337,24 @@ namespace Wacs.Transpiler.AOT.Component
             // delegate dispatch.
             Type? bundle = bundleType ?? FindWasiPreview2Bundle(assemblies);
 
+            // Auto-discover resources only when the resolver also
+            // auto-discovered the bundle AND it's the WASI Preview 2
+            // bundle. A caller-supplied custom bundle gets no
+            // implicit resources class — it must opt in via the
+            // explicit resourcesType parameter, otherwise mismatched
+            // discovery would force a 3-arg ctor on a custom Module
+            // class that only takes 2.
+            Type? resources = resourcesType;
+            if (resources == null && bundleType == null && bundle != null
+                && bundle.FullName ==
+                    "Wacs.WASI.Preview2.DependencyInjection.WasiPreview2Bundle")
+            {
+                resources = FindWasiPreview2Resources(assemblies);
+            }
+
             return new HostPackageResolver(assemblies, bindings,
                 interfaceTypes, resourceInterfaceTypes,
-                bundle, resourcesType);
+                bundle, resources);
         }
 
         // wasi:cli@0.2.3 + exit  →  wasi:cli/exit@0.2.3
@@ -493,6 +508,39 @@ namespace Wacs.Transpiler.AOT.Component
                 var asm = Assembly.Load(
                     "Wacs.WASI.Preview2.DependencyInjection");
                 return asm.GetType(bundleQualifiedName, false);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        // Companion to FindWasiPreview2Bundle — resolves the
+        // resources bridge that satisfies the
+        // GetResource/AllocateResource convention. Shipped in the
+        // same DI package so a single Assembly.Load covers both.
+        private static Type? FindWasiPreview2Resources(
+            IReadOnlyList<Assembly> assemblies)
+        {
+            const string resourcesQualifiedName =
+                "Wacs.WASI.Preview2.DependencyInjection.WasiPreview2Resources";
+
+            foreach (var asm in assemblies)
+            {
+                var t = asm.GetType(resourcesQualifiedName, false);
+                if (t != null) return t;
+            }
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                if (asm.IsDynamic) continue;
+                var t = asm.GetType(resourcesQualifiedName, false);
+                if (t != null) return t;
+            }
+            try
+            {
+                var asm = Assembly.Load(
+                    "Wacs.WASI.Preview2.DependencyInjection");
+                return asm.GetType(resourcesQualifiedName, false);
             }
             catch
             {
