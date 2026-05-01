@@ -22,6 +22,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Wacs.Core.Runtime;
 using Wacs.Core.WASIp1;
+using Wacs.HostBindings;
 using Wacs.WASI.Preview1.Types;
 using ptr = System.UInt32;
 using fd = System.UInt32;
@@ -655,47 +656,58 @@ namespace Wacs.WASI.Preview1
         /// <param name="nwrittenPtr">Pointer to where the number of bytes written will be stored.</param>
         /// <returns>An error code indicating success or failure.</returns>
         public ErrNo FdWrite(ExecContext ctx, fd fd, ptr iovsPtr, size iovsLen, ptr nwrittenPtr)
+            => (ErrNo)FdWriteCore(Clock.WacsHost(ctx), _state, (int)fd, (int)iovsPtr, (int)iovsLen, (int)nwrittenPtr);
+
+        // Plain-int signature so the source-generated GeneratedHostImports
+        // adapter — which sees IImports methods as (int, int, int, int) — can
+        // bind without same-width-signed/unsigned conversion plumbing. Returns
+        // the raw ErrNo numeric value as int so the binding fits the IImports
+        // method's `int` return.
+        [WacsImport("wasi_snapshot_preview1", "fd_write")]
+        public static int FdWriteCore(WacsHostMemory mem, State state,
+                                       int fd, int iovsPtr, int iovsLen, int nwrittenPtr)
         {
-            if (!GetFd(fd, out var fileDescriptor))
-            {
-                return ErrNo.NoEnt; // The file descriptor does not exist.
-            }
+            if (!state.FileDescriptors.TryGetValue((uint)fd, out var fileDescriptor))
+                return (int)ErrNo.NoEnt;
 
             if ((fileDescriptor.Rights & Rights.FD_WRITE) == 0)
-                return ErrNo.NotCapable;
+                return (int)ErrNo.NotCapable;
 
             if (fileDescriptor.Type == Filetype.Directory)
-                return ErrNo.IsDir;
+                return (int)ErrNo.IsDir;
 
             if (!fileDescriptor.Stream.CanWrite)
-                return ErrNo.IO;
-
-            var mem = ctx.DefaultMemory;
+                return (int)ErrNo.IO;
 
             // O_APPEND / FD_APPEND semantics: seek to end before each
             // write so concurrent writers don't clobber each other.
-            // Set by path_open or fd_fdstat_set_flags.
             if ((fileDescriptor.Flags & FdFlags.Append) != 0 &&
                 fileDescriptor.Stream.CanSeek)
                 fileDescriptor.Stream.Seek(0, SeekOrigin.End);
 
-            IoVec[] iovs = mem.ReadStructs<IoVec>(iovsPtr, iovsLen);
+            // Each iovec is 8 bytes: u32 bufPtr + u32 bufLen.
             int totalWritten = 0;
-
-            foreach (var iov in iovs)
+            for (int i = 0; i < iovsLen; i++)
             {
-                var src = mem[(int)iov.bufPtr..(int)(iov.bufPtr + iov.bufLen)];
-                fileDescriptor.Stream.Write(src.ToArray(), 0, src.Length);
-                totalWritten += src.Length;
+                int iovOff = iovsPtr + i * 8;
+                if (!mem.Contains(iovOff, 8)) return (int)ErrNo.Fault;
+                int bufPtr = mem.ReadInt32LE(iovOff);
+                int bufLen = mem.ReadInt32LE(iovOff + 4);
+                if (!mem.Contains(bufPtr, bufLen)) return (int)ErrNo.Fault;
 
-                // Check for full write
-                if (src.Length < iov.bufLen)
-                    break;
+                var span = mem.AsSpan(bufPtr, bufLen);
+#if NET8_0_OR_GREATER
+                fileDescriptor.Stream.Write(span);
+#else
+                fileDescriptor.Stream.Write(span.ToArray(), 0, bufLen);
+#endif
+                totalWritten += bufLen;
             }
 
-            mem.WriteInt32(nwrittenPtr, totalWritten);
+            if (!mem.Contains(nwrittenPtr, 4)) return (int)ErrNo.Fault;
+            mem.WriteInt32LE(nwrittenPtr, totalWritten);
 
-            return ErrNo.Success;
+            return (int)ErrNo.Success;
         }
     }
 }

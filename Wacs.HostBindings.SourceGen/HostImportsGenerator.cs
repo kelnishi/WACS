@@ -122,9 +122,12 @@ namespace Wacs.HostBindings.SourceGen
         }
 
         /// <summary>
-        /// Find every <c>[WacsTranspiledImports(typeof(IImports))]</c> entry
+        /// Find every <c>[WacsTranspiledImports("Ns.IImports")]</c> entry
         /// across the compilation's referenced assemblies + own source, and
-        /// resolve each to its IImports interface symbol.
+        /// resolve each name back to its INamedTypeSymbol. The attribute's
+        /// arg is a string (not <c>typeof(T)</c>) so Lokad.ILPack can
+        /// serialize the attribute blob without resolving a self-referential
+        /// Type — see WacsTranspiledImportsAttribute.cs.
         /// </summary>
         private static ImmutableArray<INamedTypeSymbol> CollectTranspiledImports(Compilation compilation)
         {
@@ -140,8 +143,22 @@ namespace Wacs.HostBindings.SourceGen
                     if (!SymbolEqualityComparer.Default.Equals(attr.AttributeClass, attrSym))
                         continue;
                     if (attr.ConstructorArguments.Length != 1) continue;
-                    if (attr.ConstructorArguments[0].Value is INamedTypeSymbol iface)
-                        found.Add(iface);
+                    var argVal = attr.ConstructorArguments[0].Value;
+                    if (argVal is string fqn)
+                    {
+                        // Resolve in the carrying assembly first (the common
+                        // case — saved transpiler .dll naming its own
+                        // IImports). Falls back to the whole compilation
+                        // if the type lives elsewhere.
+                        var iface = asm.GetTypeByMetadataName(fqn)
+                                    ?? compilation.GetTypeByMetadataName(fqn);
+                        if (iface != null) found.Add(iface);
+                    }
+                    else if (argVal is INamedTypeSymbol typeArg)
+                    {
+                        // Fallback: tolerate legacy typeof()-shaped attrs.
+                        found.Add(typeArg);
+                    }
                 }
             }
 
