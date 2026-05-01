@@ -22,6 +22,7 @@ using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Wacs.Core.Runtime;
 using Wacs.Core.WASIp1;
+using Wacs.HostBindings;
 using Wacs.WASI.Preview1.Types;
 using fd = System.UInt32;
 using ptr = System.UInt32;
@@ -44,39 +45,62 @@ namespace Wacs.WASI.Preview1
             runtime.BindHostFunction<Func<ExecContext, fd, SdFlags, ErrNo>>((module, "sock_shutdown"), SockShutdown);
         }
 
+        // Interpreter wrappers
         public ErrNo SockAccept(ExecContext ctx, fd sock, FdFlags flags, ptr ro_fd)
+            => (ErrNo)SockAcceptCore(Clock.WacsHost(ctx), _state, (int)sock, (int)flags, (int)ro_fd);
+
+        public ErrNo SockRecv(ExecContext ctx, fd sock,
+            ptr ri_data, size ri_datalen, RiFlags ri_flags,
+            ptr ro_data_len, ptr ro_flags)
+            => (ErrNo)SockRecvCore(Clock.WacsHost(ctx), _state, (int)sock,
+                (int)ri_data, (int)ri_datalen, (int)ri_flags,
+                (int)ro_data_len, (int)ro_flags);
+
+        public ErrNo SockSend(ExecContext ctx, fd sock,
+            ptr si_data, size si_data_len, SiFlags si_flags,
+            ptr ret_data_len)
+            => (ErrNo)SockSendCore(Clock.WacsHost(ctx), _state, (int)sock,
+                (int)si_data, (int)si_data_len, (int)si_flags,
+                (int)ret_data_len);
+
+        public ErrNo SockShutdown(ExecContext ctx, fd sock, SdFlags how)
+            => (ErrNo)SockShutdownCore(_state, (int)sock, (int)how);
+
+        // ============================================================
+        // AOT-friendly static entry points
+        // ============================================================
+
+        [WacsImport("wasi_snapshot_preview1", "sock_accept")]
+        public static int SockAcceptCore(WacsHostMemory mem, State state,
+            int sock, int flags, int ro_fd)
         {
-            if (!_state.FileDescriptors.TryGetValue(sock, out var fileDescriptor))
-                return ErrNo.Badf;
+            if (!state.FileDescriptors.TryGetValue((uint)sock, out var fileDescriptor))
+                return (int)ErrNo.Badf;
             if (fileDescriptor.Type != Filetype.SocketStream)
-                return ErrNo.NotSock;
+                return (int)ErrNo.NotSock;
             if (fileDescriptor.Socket is null || !fileDescriptor.IsListening)
-                return ErrNo.Inval;
+                return (int)ErrNo.Inval;
 
             try
             {
                 Socket conn;
                 if ((fileDescriptor.Flags & FdFlags.NonBlock) != 0)
                 {
-                    // Non-blocking listener: only accept if a connection
-                    // is already pending; otherwise return EAGAIN.
                     if (!fileDescriptor.Socket.Poll(0, SelectMode.SelectRead))
-                        return ErrNo.Again;
+                        return (int)ErrNo.Again;
                     conn = fileDescriptor.Socket.Accept();
                 }
                 else
                 {
-                    // Task.Run escapes any captured sync context (avoids
-                    // deadlock under UI hosts like Unity).
                     conn = Task.Run(() => fileDescriptor.Socket.AcceptAsync())
                         .GetAwaiter().GetResult();
                 }
 
-                fd newFd = _state.GetNextFd;
+                uint newFd = state.GetNextFd;
                 Rights rights = Rights.FD_READ | Rights.FD_WRITE
                     | Rights.POLL_FD_READWRITE | Rights.SOCK_SHUTDOWN
                     | Rights.FD_FDSTAT_SET_FLAGS;
-                _state.FileDescriptors[newFd] = new FileDescriptor
+                state.FileDescriptors[newFd] = new FileDescriptor
                 {
                     Fd = newFd,
                     Stream = new SocketStream(conn, isListening: false),
@@ -86,35 +110,33 @@ namespace Wacs.WASI.Preview1
                     Type = Filetype.SocketStream,
                     Rights = rights,
                     InheritedRights = rights,
-                    Flags = flags,
+                    Flags = (FdFlags)flags,
                     Socket = conn,
                     IsListening = false,
                 };
 
-                ctx.DefaultMemory.WriteInt32((int)ro_fd, (int)newFd);
-                return ErrNo.Success;
+                mem.WriteInt32(ro_fd, (int)newFd);
+                return (int)ErrNo.Success;
             }
-            catch (SocketException) { return ErrNo.IO; }
-            catch (ObjectDisposedException) { return ErrNo.Badf; }
+            catch (SocketException) { return (int)ErrNo.IO; }
+            catch (ObjectDisposedException) { return (int)ErrNo.Badf; }
         }
 
-        public ErrNo SockRecv(ExecContext ctx, fd sock,
-            ptr ri_data, size ri_datalen, RiFlags ri_flags,
-            ptr ro_data_len, ptr ro_flags)
+        [WacsImport("wasi_snapshot_preview1", "sock_recv")]
+        public static int SockRecvCore(WacsHostMemory mem, State state, int sock,
+            int ri_data, int ri_datalen, int ri_flags, int ro_data_len, int ro_flags)
         {
-            if (!_state.FileDescriptors.TryGetValue(sock, out var fileDescriptor))
-                return ErrNo.Badf;
+            if (!state.FileDescriptors.TryGetValue((uint)sock, out var fileDescriptor))
+                return (int)ErrNo.Badf;
             if (fileDescriptor.Type != Filetype.SocketStream &&
                 fileDescriptor.Type != Filetype.SocketDgram)
-                return ErrNo.NotSock;
+                return (int)ErrNo.NotSock;
             if (fileDescriptor.Socket is null || fileDescriptor.IsListening)
-                return ErrNo.Inval;
+                return (int)ErrNo.Inval;
 
-            var mem = ctx.DefaultMemory;
             var iovs = mem.ReadStructs<IoVec>(ri_data, ri_datalen);
             var sockFlags = SocketFlags.None;
-            if ((ri_flags & RiFlags.RecvPeek) != 0)    sockFlags |= SocketFlags.Peek;
-            // RiFlags.RecvWaitAll → loop until full or EOF below.
+            if (((RiFlags)ri_flags & RiFlags.RecvPeek) != 0) sockFlags |= SocketFlags.Peek;
 
             int totalRead = 0;
             try
@@ -123,7 +145,7 @@ namespace Wacs.WASI.Preview1
                 {
                     if (iov.bufLen == 0) continue;
                     var dest = new byte[iov.bufLen];
-                    if ((ri_flags & RiFlags.RecvWaitAll) != 0)
+                    if (((RiFlags)ri_flags & RiFlags.RecvWaitAll) != 0)
                     {
                         int got = 0;
                         while (got < dest.Length)
@@ -134,7 +156,7 @@ namespace Wacs.WASI.Preview1
                             got += n;
                         }
                         new ReadOnlySpan<byte>(dest, 0, got).CopyTo(
-                            mem[(int)iov.bufPtr..(int)(iov.bufPtr + (uint)got)]);
+                            mem.AsSpan((int)iov.bufPtr, got));
                         totalRead += got;
                         if (got < iov.bufLen) break;
                     }
@@ -142,37 +164,34 @@ namespace Wacs.WASI.Preview1
                     {
                         int n = fileDescriptor.Socket.Receive(dest, 0, dest.Length, sockFlags);
                         new ReadOnlySpan<byte>(dest, 0, n).CopyTo(
-                            mem[(int)iov.bufPtr..(int)(iov.bufPtr + (uint)n)]);
+                            mem.AsSpan((int)iov.bufPtr, n));
                         totalRead += n;
                         if (n < iov.bufLen) break;
                     }
                 }
-                mem.WriteInt32((int)ro_data_len, totalRead);
-                // No out-of-band bits implemented; flags stay 0.
-                mem.WriteInt32((int)ro_flags, 0);
-                return ErrNo.Success;
+                mem.WriteInt32(ro_data_len, totalRead);
+                mem.WriteInt32(ro_flags, 0);
+                return (int)ErrNo.Success;
             }
             catch (SocketException se) when (se.SocketErrorCode == SocketError.WouldBlock)
-                { return ErrNo.Again; }
-            catch (SocketException) { return ErrNo.IO; }
-            catch (ObjectDisposedException) { return ErrNo.Badf; }
+                { return (int)ErrNo.Again; }
+            catch (SocketException) { return (int)ErrNo.IO; }
+            catch (ObjectDisposedException) { return (int)ErrNo.Badf; }
         }
 
-        public ErrNo SockSend(ExecContext ctx, fd sock,
-            ptr si_data, size si_data_len, SiFlags si_flags,
-            ptr ret_data_len)
+        [WacsImport("wasi_snapshot_preview1", "sock_send")]
+        public static int SockSendCore(WacsHostMemory mem, State state, int sock,
+            int si_data, int si_data_len, int si_flags, int ret_data_len)
         {
-            if (!_state.FileDescriptors.TryGetValue(sock, out var fileDescriptor))
-                return ErrNo.Badf;
+            if (!state.FileDescriptors.TryGetValue((uint)sock, out var fileDescriptor))
+                return (int)ErrNo.Badf;
             if (fileDescriptor.Type != Filetype.SocketStream &&
                 fileDescriptor.Type != Filetype.SocketDgram)
-                return ErrNo.NotSock;
+                return (int)ErrNo.NotSock;
             if (fileDescriptor.Socket is null || fileDescriptor.IsListening)
-                return ErrNo.Inval;
+                return (int)ErrNo.Inval;
 
-            // si_flags is reserved in WASI Preview 1 (no defined bits);
-            // accept any value.
-            var mem = ctx.DefaultMemory;
+            // si_flags is reserved in WASI Preview 1 (no defined bits); accept any.
             var iovs = mem.ReadStructs<IoVec>(si_data, si_data_len);
             int totalSent = 0;
             try
@@ -180,48 +199,45 @@ namespace Wacs.WASI.Preview1
                 foreach (var iov in iovs)
                 {
                     if (iov.bufLen == 0) continue;
-                    var src = mem[(int)iov.bufPtr..(int)(iov.bufPtr + iov.bufLen)];
-                    var buf = src.ToArray();
+                    var buf = mem.AsSpan((int)iov.bufPtr, (int)iov.bufLen).ToArray();
                     int n = fileDescriptor.Socket.Send(buf, 0, buf.Length, SocketFlags.None);
                     totalSent += n;
                     if (n < iov.bufLen) break;
                 }
-                mem.WriteInt32((int)ret_data_len, totalSent);
-                return ErrNo.Success;
+                mem.WriteInt32(ret_data_len, totalSent);
+                return (int)ErrNo.Success;
             }
             catch (SocketException se) when (se.SocketErrorCode == SocketError.WouldBlock)
-                { return ErrNo.Again; }
-            catch (SocketException) { return ErrNo.IO; }
-            catch (ObjectDisposedException) { return ErrNo.Badf; }
+                { return (int)ErrNo.Again; }
+            catch (SocketException) { return (int)ErrNo.IO; }
+            catch (ObjectDisposedException) { return (int)ErrNo.Badf; }
         }
 
-        public ErrNo SockShutdown(ExecContext ctx, fd sock, SdFlags how)
+        [WacsImport("wasi_snapshot_preview1", "sock_shutdown")]
+        public static int SockShutdownCore(State state, int sock, int how)
         {
-            if (!_state.FileDescriptors.TryGetValue(sock, out var fileDescriptor))
-                return ErrNo.Badf;
+            if (!state.FileDescriptors.TryGetValue((uint)sock, out var fileDescriptor))
+                return (int)ErrNo.Badf;
             if (fileDescriptor.Type != Filetype.SocketStream &&
                 fileDescriptor.Type != Filetype.SocketDgram)
-                return ErrNo.NotSock;
+                return (int)ErrNo.NotSock;
             if (fileDescriptor.Socket is null)
-                return ErrNo.NotConn;
+                return (int)ErrNo.NotConn;
 
             SocketShutdown dir;
-            if ((how & SdFlags.Rd) != 0 && (how & SdFlags.Wr) != 0)
-                dir = SocketShutdown.Both;
-            else if ((how & SdFlags.Rd) != 0)
-                dir = SocketShutdown.Receive;
-            else if ((how & SdFlags.Wr) != 0)
-                dir = SocketShutdown.Send;
-            else
-                return ErrNo.Inval;
+            var sd = (SdFlags)how;
+            if ((sd & SdFlags.Rd) != 0 && (sd & SdFlags.Wr) != 0) dir = SocketShutdown.Both;
+            else if ((sd & SdFlags.Rd) != 0) dir = SocketShutdown.Receive;
+            else if ((sd & SdFlags.Wr) != 0) dir = SocketShutdown.Send;
+            else return (int)ErrNo.Inval;
 
             try
             {
                 fileDescriptor.Socket.Shutdown(dir);
-                return ErrNo.Success;
+                return (int)ErrNo.Success;
             }
-            catch (SocketException) { return ErrNo.IO; }
-            catch (ObjectDisposedException) { return ErrNo.Badf; }
+            catch (SocketException) { return (int)ErrNo.IO; }
+            catch (ObjectDisposedException) { return (int)ErrNo.Badf; }
         }
     }
 }
