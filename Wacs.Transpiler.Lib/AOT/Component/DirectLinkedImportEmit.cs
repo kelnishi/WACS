@@ -308,8 +308,13 @@ namespace Wacs.Transpiler.AOT.Component
             // peeled slot count.
             // Aggregate-return mode mirrors the CanEmitDirect
             // detection: trailing wasm i32 is the retArea ptr.
-            bool emitAggregateReturn = !isInstance && !isStatic
-                && !isConstructor
+            // Resource INSTANCE methods can also return aggregates
+            // (e.g. wasi-hello's [method]output-stream.blocking-
+            // write-and-flush returning Result<Unit, StreamError>).
+            // Constructors are excluded — their wasm result IS the
+            // i32 handle, not a retArea ptr. Statics behave like
+            // free functions here.
+            bool emitAggregateReturn = !isConstructor
                 && wasmType.ResultType.Types.Length == 0
                 && method.ReturnType != typeof(void)
                 && wasmParams.Length >= 1
@@ -2568,13 +2573,22 @@ namespace Wacs.Transpiler.AOT.Component
                     && IsAggregateReturnSupported(t, resolver))
                     return true;
             }
-            // Variant-base arms (e.g. Result<Unit, StreamError>
-            // where StreamError is a variant) need an emit-side
-            // dispatch we haven't wired yet — EmitResultArmStore
-            // recursing into EmitVariantStoreAt at the arm offset
-            // produced InvalidProgramException in v0 attempts.
-            // Falls back to delegate dispatch for now; tracked as
-            // the wasi-hello hello\n print gap.
+            // Variant-base arms (e.g. Result<Unit, EmptyVariant>):
+            // recurse into EmitResultArmStore which dispatches
+            // through EmitVariantStoreAt at the arm offset.
+            if (allowVariableLength && IsLikelyVariantBase(t))
+            {
+                var cases = GetVariantCases(t);
+                if (cases.Length == 0) return false;
+                foreach (var c in cases)
+                {
+                    if (c.Payload == null) continue;
+                    if (!IsResultArmStorable(c.Payload, resolver,
+                            allowVariableLength: true))
+                        return false;
+                }
+                return true;
+            }
             return false;
         }
 
@@ -2609,6 +2623,21 @@ namespace Wacs.Transpiler.AOT.Component
             // Unit — empty arm, no value to write past the
             // discriminant byte. Caller already stored disc.
             if (armType == typeof(Unit)) return;
+
+            // Variant base type — recurse into EmitVariantStoreAt
+            // at the arm's offset. Mirrors the nested Option/Result
+            // patterns below.
+            if (IsLikelyVariantBase(armType))
+            {
+                var armLocal = il.DeclareLocal(armType);
+                il.Emit(OpCodes.Ldloca, returnLocal);
+                il.Emit(OpCodes.Call, armGetter);
+                il.Emit(OpCodes.Stloc, armLocal);
+                EmitVariantStoreAt(il, armType, armLocal,
+                    retAreaLocal, valueOffset, resolver,
+                    resourcesType, stringEncoding);
+                return;
+            }
 
             bool isResource = resolver != null
                 && resolver.IsResourceInterface(armType)
