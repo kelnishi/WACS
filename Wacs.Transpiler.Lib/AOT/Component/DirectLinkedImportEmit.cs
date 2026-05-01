@@ -2569,10 +2569,12 @@ namespace Wacs.Transpiler.AOT.Component
                     return true;
             }
             // Variant-base arms (e.g. Result<Unit, StreamError>
-            // where StreamError is the abstract base of
-            // LastOperationFailed/Closed cases) need broader emit
-            // wiring through EmitVariantStoreAt — deferred. Falls
-            // back to delegate dispatch for now.
+            // where StreamError is a variant) need an emit-side
+            // dispatch we haven't wired yet — EmitResultArmStore
+            // recursing into EmitVariantStoreAt at the arm offset
+            // produced InvalidProgramException in v0 attempts.
+            // Falls back to delegate dispatch for now; tracked as
+            // the wasi-hello hello\n print gap.
             return false;
         }
 
