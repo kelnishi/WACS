@@ -96,7 +96,7 @@ Harnessed results from [wasm-feature-detect](https://github.com/GoogleChromeLabs
 |[Threads](https://github.com/webassembly/threads)|threads|✅|
 |[Web Content Security Policy](https://github.com/WebAssembly/content-security-policy)||<span title="Browser idioms, not directly supported">🌐</span>|
 
-Legend: ✅ supported · ❌ not yet · ✳️ [conceptually supported (browser idiom)](./BROWSER_IDIOMS.md) · 🌐 browser-only / N/A for non-web hosts
+Legend: ✅ supported · ❌ not yet · ✳️ [conceptually supported (browser idiom)](./docs/BROWSER_IDIOMS.md) · 🌐 browser-only / N/A for non-web hosts
 
 ###### Grouping follows [webassembly.org/features](https://webassembly.org/features/): Phase 5 is the combined standardized set (including finished proposals merged to the core spec) and Phase 4 is the active standardize queue. Phase assignments cross-checked against [WebAssembly/proposals@1584fdf](https://github.com/WebAssembly/proposals/commit/1584fdf) (2026-03-24) and [WebAssembly/proposals/finished-proposals.md](https://github.com/WebAssembly/proposals/blob/main/finished-proposals.md). Browser-idiom ✳️/🌐 results harnessed from [wasm-feature-detect](https://github.com/GoogleChromeLabs/wasm-feature-detect) via the [Feature.Detect](./Feature.Detect) test harness.
 
