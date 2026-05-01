@@ -182,7 +182,17 @@ namespace Wacs.ComponentModel.Runtime
         /// 0-based core-module index, or null if the trace
         /// fails (caller surfaces an InvalidOperationException
         /// since no other heuristic fits).</summary>
-        private static int? FindPrimaryCoreModuleIdx(ComponentModule component)
+        /// <summary>
+        /// Locate the "primary" core module in a multi-core-module
+        /// component — the one whose exports are component-visible
+        /// via the first canon-lift. wit-component emits adapter +
+        /// post-return modules around the user module; tracing the
+        /// first canon-lift back through alias→core-instance gives
+        /// the user module's index. Returns null when the trace
+        /// fails (unrecognized layout). Public so the transpiler
+        /// can reuse the same heuristic.
+        /// </summary>
+        public static int? FindPrimaryCoreModuleIdx(ComponentModule component)
         {
             // Build core-func-idx → core-instance-idx map from
             // alias entries (the core-export form). Walk

@@ -99,25 +99,113 @@ namespace Wacs.Transpiler.AOT.Component
                     "Export '" + exportName + "' (sanitized '" + sanitized
                     + "') not found on " + exportsInterface.FullName + ".");
 
-            // v0: only zero-arg exports are supported. Argv parsing
-            // for component-shape params (string, list<u8>, etc.) is
-            // a follow-up — the surface is much wider than core-WASM
-            // scalars.
-            if (method.GetParameters().Length != 0)
+            // Parse argv into the export's CLR param types. v0
+            // covers primitives (i32/u32/i64/u64/f32/f64 + narrow
+            // ints + bool), strings (passed verbatim), and byte[]
+            // (UTF-8 encoded). Aggregate component-shape params
+            // (Option<T>, list<T>, records) ride later — they need
+            // an argv grammar (today: positional args).
+            var pars = method.GetParameters();
+            if (args.Length < pars.Length)
                 throw new InvalidOperationException(
-                    "v0 --emit-main on components only supports zero-argument "
-                    + "exports; '" + sanitized + "' takes "
-                    + method.GetParameters().Length + " arg(s).");
+                    "Export '" + sanitized + "' expects "
+                    + pars.Length + " argument(s); got " + args.Length + ".");
+            var parsedArgs = new object?[pars.Length];
+            for (int i = 0; i < pars.Length; i++)
+                parsedArgs[i] = ParseArg(args[i], pars[i].ParameterType,
+                    sanitized, i);
 
-            object? result = method.Invoke(instance, Array.Empty<object>());
+            object? result = method.Invoke(instance, parsedArgs);
 
+            return RenderResult(result);
+        }
+
+        // Parse one CLI arg into the expected CLR type. Throws an
+        // InvalidOperationException with a clear message on
+        // unsupported shapes — the caller surfaces this as the
+        // CLI's --run failure exit.
+        private static object? ParseArg(string raw, Type t,
+            string exportName, int idx)
+        {
+            try
+            {
+                if (t == typeof(string)) return raw;
+                if (t == typeof(byte[]))
+                    return System.Text.Encoding.UTF8.GetBytes(raw);
+                if (t == typeof(bool))
+                    return bool.Parse(raw);
+                if (t == typeof(int))
+                    return int.Parse(raw, System.Globalization.CultureInfo.InvariantCulture);
+                if (t == typeof(uint))
+                    return uint.Parse(raw, System.Globalization.CultureInfo.InvariantCulture);
+                if (t == typeof(long))
+                    return long.Parse(raw, System.Globalization.CultureInfo.InvariantCulture);
+                if (t == typeof(ulong))
+                    return ulong.Parse(raw, System.Globalization.CultureInfo.InvariantCulture);
+                if (t == typeof(short))
+                    return short.Parse(raw, System.Globalization.CultureInfo.InvariantCulture);
+                if (t == typeof(ushort))
+                    return ushort.Parse(raw, System.Globalization.CultureInfo.InvariantCulture);
+                if (t == typeof(byte))
+                    return byte.Parse(raw, System.Globalization.CultureInfo.InvariantCulture);
+                if (t == typeof(sbyte))
+                    return sbyte.Parse(raw, System.Globalization.CultureInfo.InvariantCulture);
+                if (t == typeof(float))
+                    return float.Parse(raw, System.Globalization.CultureInfo.InvariantCulture);
+                if (t == typeof(double))
+                    return double.Parse(raw, System.Globalization.CultureInfo.InvariantCulture);
+            }
+            catch (FormatException ex)
+            {
+                throw new InvalidOperationException(
+                    "Could not parse argv[" + idx + "] = '" + raw
+                    + "' as " + t.Name + " for export '" + exportName
+                    + "': " + ex.Message);
+            }
+            throw new InvalidOperationException(
+                "Export '" + exportName + "' parameter " + idx
+                + " has unsupported type " + t.FullName + " for argv "
+                + "parsing. Supported: primitives, bool, string, byte[].");
+        }
+
+        private static int RenderResult(object? result)
+        {
             if (result == null) return 0;
             if (result is int i32) return i32;
             if (result is long i64) return unchecked((int)i64);
             if (result is uint u32) return unchecked((int)u32);
             if (result is ulong u64) return unchecked((int)u64);
-            // Non-scalar (string, byte[], record, etc.) — print and
-            // return 0. The component-shape print is a follow-up.
+            if (result is short i16) return i16;
+            if (result is ushort u16) return u16;
+            if (result is byte u8) return u8;
+            if (result is sbyte i8) return i8;
+            if (result is bool b) return b ? 1 : 0;
+            if (result is float f32)
+            {
+                Console.WriteLine(f32.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture));
+                return 0;
+            }
+            if (result is double f64)
+            {
+                Console.WriteLine(f64.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture));
+                return 0;
+            }
+            if (result is string s)
+            {
+                Console.WriteLine(s);
+                return 0;
+            }
+            if (result is byte[] bytes)
+            {
+                Console.Out.Write(System.Text.Encoding.UTF8
+                    .GetString(bytes));
+                return 0;
+            }
+            // Aggregate (record / variant / Option / Result / etc.)
+            // — fall back to ToString for human inspection. A
+            // structured renderer is a follow-up.
             Console.WriteLine(result);
             return 0;
         }

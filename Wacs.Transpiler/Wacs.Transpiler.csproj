@@ -42,10 +42,25 @@
 
     <ItemGroup>
         <ProjectReference Include="..\Wacs.Transpiler.Lib\Wacs.Transpiler.Lib.csproj" />
+        <!-- Pulled in so component-mode emit-main + wasip2 can
+             reflect the WasiPreview2Bundle and its DI registration
+             from the bundled CLI. ExcludeAssets=compile keeps
+             these out of the public API surface; only the
+             apphost ships them. -->
+        <ProjectReference Include="..\Wacs.WASI.Preview2\Wacs.WASI.Preview2.csproj"
+                          ExcludeAssets="compile" />
+        <ProjectReference Include="..\Wacs.WASI.Preview2.DependencyInjection\Wacs.WASI.Preview2.DependencyInjection.csproj"
+                          ExcludeAssets="compile" />
     </ItemGroup>
 
     <ItemGroup>
         <PackageReference Include="CommandLineParser" Version="2.9.1" />
+        <!-- Bundles the DI implementation alongside the apphost so
+             component emit-main can build the WasiPreview2Bundle
+             at runtime via WasiPreview2ServiceCollectionExtensions
+             without an extra install step. -->
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection"
+                          Version="8.0.0" />
     </ItemGroup>
 
 </Project>

@@ -306,13 +306,21 @@ namespace Wacs.Transpiler.Cli
                         // the IL bypasses the table — so a throwing
                         // stub is the right shape: absence is silent
                         // success, presence-then-invocation surfaces
-                        // a real bug.
+                        // a real bug. For multi-core components,
+                        // stub the primary user module's imports
+                        // (the same heuristic TranspileSingleModule
+                        // uses to pick which core to transpile).
                         using var fs2 = new FileStream(input,
                             FileMode.Open, FileAccess.Read);
                         var parsed = ComponentTranspiler.Parse(fs2);
-                        if (parsed.CoreModules.Count == 1)
-                            ComponentImportStubs.RegisterAll(rt,
-                                parsed.CoreModules[0]);
+                        if (parsed.CoreModules.Count == 0) return;
+                        int primary = parsed.CoreModules.Count == 1
+                            ? 0
+                            : (Wacs.ComponentModel.Runtime.ComponentInstance
+                                .FindPrimaryCoreModuleIdx(parsed.Component)
+                              ?? 0);
+                        ComponentImportStubs.RegisterAll(rt,
+                            parsed.CoreModules[primary]);
                     });
             }
             catch (Exception ex)

@@ -69,10 +69,17 @@ wasm-transpile -i add.wasm -o add.dll --emit-main --entry-point add
 # now load + call Program.Main reflectively, or wrap in a dotnet host
 ```
 
-v0.1 `--emit-main` constraints:
-- Module must have no imports.
+Core-WASM `--emit-main` constraints:
+- Module must have no imports. (Component binaries with imports
+  use the `--wasip2` / `--host-package` route — see Component
+  Model mode below.)
 - The export named by `--entry-point` (default `_start`) must take scalar
   `i32`/`i64`/`f32`/`f64` params and return void or a single scalar.
+
+Component-mode `--emit-main` is wider — argv parsing covers
+primitives, `bool`, `string`, and `byte[]`; multi-core
+wit-component output is handled by routing through the primary
+user core. See [Component Model mode](#component-model-mode).
 
 ### `--bind`: link against any WACS host library
 
@@ -368,6 +375,35 @@ Verify direct linking actually replaced the delegate hop:
 ildasm app.dll | grep -i BindHostFunction
 # (no output — every import dispatches inline)
 ```
+
+#### `--emit-main` for components
+
+Same flag as the core-WASM path; the CLI auto-detects component
+binaries via the layer byte and routes accordingly. Emits a
+`Program.Main(string[] args)` that constructs the host bundle
+(when `--wasip2` is set), instantiates the module, parses argv
+into the export's CLR param types, and invokes the chosen export:
+
+```bash
+# add: func(x: u32, y: u32) -> u32 — argv → typed params, return → exit code.
+wasm-transpile -i ad.component.wasm -o ad.dll \
+  --emit-main --entry-point add --run 7 35
+# exit code: 42
+
+# Multi-core WASI components (typical wit-component output) work too.
+# The transpiler picks the primary user core via the first canon-lift,
+# matching how ComponentInstance.InstantiateMultiCore selects it.
+wasm-transpile -i hello.component.wasm -o hello.dll \
+  --wasip2 --emit-main --entry-point greet --run
+```
+
+v0 argv parsing covers primitives (`i32`/`u32`/`i64`/`u64`/`f32`/
+`f64` plus narrow ints), `bool`, `string` (verbatim), and `byte[]`
+(UTF-8). Aggregate component-shape params (`Option<T>`, `list<T>`,
+records, variants) ride later — the run surfaces a clean
+`Could not parse argv[N]` error pointing at the offending param.
+Scalar return types route through the int exit code; `string` /
+`byte[]` returns print to stdout and return 0.
 
 ### Programmatic transpile
 
@@ -777,11 +813,14 @@ dispatches through it.
 
 ## Remaining limitations (tracked for v0.3)
 
-- **`--emit-main` rejects modules with imports.** A `--wasi-host` flag
-  backed by `WACS.WASIp1` and an `--allow-missing-imports` escape hatch
-  (throwing stubs) are planned.
-- **Scalar args only** for `--emit-main` — `i32`/`i64`/`f32`/`f64`.
-  Ref-typed and `v128` params aren't parsed from argv yet.
+- **`--emit-main` on core-WASM modules rejects imports.** Use the
+  component-mode path with `--wasip2` / `--host-package` instead;
+  it threads imports through the typed bundle. A `--wasi-host` flag
+  backed by `WACS.WASIp1` for the core-WASM path is still planned.
+- **Scalar argv only** for core-WASM `--emit-main`. Ref-typed and
+  `v128` params aren't parsed from argv. Component-mode `--emit-main`
+  parses primitives, `bool`, `string`, and `byte[]`; aggregates
+  (`Option<T>`, `list<T>`, records, variants) ride later.
 - **Rare GC init patterns** (struct/array values in active element
   segments with non-i31 payloads) throw `NotSupportedException` from
   the codec at transpile time. Most modules — including CoreMark,
