@@ -180,7 +180,7 @@ shim, and a telemetry sink can all be linked in at once.
 Constraints for auto-discovery:
 - Each binding class needs a **parameterless constructor**. Bindings
   that require configuration should either provide sensible defaults
-  in the parameterless ctor (`Wacs.WASIp1.Wasi()` does this) or be
+  in the parameterless ctor (`Wacs.WASI.Preview1.Wasi()` does this) or be
   driven from the library API below.
 - `IBindable`s that also implement `IDisposable` are disposed after
   the run. Good for file handles, network sockets, etc.
@@ -191,7 +191,7 @@ Constraints for auto-discovery:
 
 For modules that import `wasi_snapshot_preview1` (anything compiled
 against a C/Rust/Go/Zig `wasi-libc` / `wasi` target), `--wasi` is a
-shortcut that's equivalent to `--bind <path-to-Wacs.WASIp1.dll>` with
+shortcut that's equivalent to `--bind <path-to-Wacs.WASI.Preview1.dll>` with
 the CLI's trailing positional args exposed as WASI `argv`.
 
 ```bash
@@ -203,7 +203,7 @@ wasm-transpile -i coremark.wasm \
 ```
 
 What happens:
-1. Before instantiation, `Wacs.WASIp1.Wasi` is constructed with a
+1. Before instantiation, `Wacs.WASI.Preview1.Wasi` is constructed with a
    default configuration (stdio attached, host env inherited,
    `Directory.GetCurrentDirectory()` as the root, argv =
    `[wasm-filename, …trailing-args]`) and bound to the runtime.
@@ -313,7 +313,7 @@ using Wacs.Core;
 using Wacs.Core.Runtime;
 using Wacs.Transpiler.AOT;
 using Wacs.Transpiler.Cli;
-using Wacs.WASIp1;
+using Wacs.WASI.Preview1;
 
 var runtime = new WasmRuntime();
 var argv = new[] { "coremark.wasm", "1", "1", "1", "1" };
@@ -880,7 +880,7 @@ dispatches through it.
 - **`--emit-main` on core-WASM modules rejects imports.** Use the
   component-mode path with `--wasip2` / `--host-package` instead;
   it threads imports through the typed bundle. A `--wasi-host` flag
-  backed by `WACS.WASIp1` for the core-WASM path is still planned.
+  backed by `WACS.WASI.Preview1` for the core-WASM path is still planned.
 - **Scalar argv only** for core-WASM `--emit-main`. Ref-typed and
   `v128` params aren't parsed from argv. Component-mode `--emit-main`
   parses primitives, `bool`, `string`, and `byte[]`; aggregates

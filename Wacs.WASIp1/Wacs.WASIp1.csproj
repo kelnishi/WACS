@@ -1,42 +1,55 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!--
+      Deprecated metapackage. The actual implementation moved to
+      WACS.WASI.Preview1; this package exists only so existing
+      <PackageReference Include="WACS.WASIp1" /> entries keep restoring.
+      Consumers must update their `using Wacs.WASIp1;` lines to
+      `using Wacs.WASI.Preview1;` (mechanical sed) — TypeForwardedTo
+      cannot bridge a namespace rename.
+    -->
 
     <PropertyGroup>
         <LangVersion>9</LangVersion>
         <Nullable>enable</Nullable>
-        <Title>Wacs WASIp1</Title>
+        <Title>Wacs WASIp1 (deprecated — use WACS.WASI.Preview1)</Title>
         <PackageId>WACS.WASIp1</PackageId>
         <Authors>Kelvin Nishikawa</Authors>
-        <Description>WASI preview 1 implementation for WACS</Description>
+        <Description>DEPRECATED. This package has been renamed to WACS.WASI.Preview1 (consolidating with WACS.WASI.Preview2 under one namespace prefix). It is now a metapackage that pulls in WACS.WASI.Preview1 transitively. Existing <PackageReference Include="WACS.WASIp1" /> entries still resolve, but consumer code must update its `using Wacs.WASIp1;` lines to `using Wacs.WASI.Preview1;`.</Description>
         <Copyright>(c) 2024 Kelvin Nishikawa</Copyright>
         <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.WASIp1</AssemblyName>
-        <AssemblyVersion>0.10.0</AssemblyVersion>
-        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-        <Version>0.10.0</Version>
+        <RootNamespace>Wacs.WASIp1</RootNamespace>
+        <AssemblyVersion>0.11.0</AssemblyVersion>
+        <Version>0.11.0</Version>
         <RepositoryType>git</RepositoryType>
         <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
         <IsAotCompatible>true</IsAotCompatible>
-    </PropertyGroup>
-
-    <PropertyGroup>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
         <PackageReadmeFile>README.md</PackageReadmeFile>
     </PropertyGroup>
 
     <ItemGroup>
-        <None Include="README.md">
-            <Pack>true</Pack>
-            <PackagePath/>
-        </None>
+      <None Include="README.md">
+        <Pack>true</Pack>
+        <PackagePath/>
+      </None>
+      <!--
+        Ship a build-time deprecation warning into consumer projects.
+        NuGet auto-imports build/<package-id>.targets when the package
+        is referenced, so any csproj still pulling WACS.WASIp1 will see
+        the migration pointer once per build.
+      -->
+      <None Include="build\WACS.WASIp1.targets">
+        <Pack>true</Pack>
+        <PackagePath>build\</PackagePath>
+      </None>
     </ItemGroup>
-    
-    <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
-      <DebugSymbols>true</DebugSymbols>
-    </PropertyGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\Wacs.Core\Wacs.Core.csproj" />
+      <ProjectReference Include="..\Wacs.WASI.Preview1\Wacs.WASI.Preview1.csproj" />
     </ItemGroup>
 
 </Project>

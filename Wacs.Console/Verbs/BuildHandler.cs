@@ -52,15 +52,31 @@ namespace Wacs.Console.Verbs
                     return 1;
                 }
             }
+            var primaryInput = files[files.Count - 1];
+
+            // Resolve --output. If omitted, default to <inputBasename>.dll
+            // next to the input. If a directory is given, append the basename.
+            // The basename is derived from --assembly-name when set (so the
+            // file matches ILC's resolver expectations for static linking),
+            // otherwise from the wasm input's filename.
+            string defaultBaseName = !string.IsNullOrEmpty(opts.AssemblyName)
+                ? opts.AssemblyName
+                : Path.GetFileNameWithoutExtension(primaryInput);
+            string output;
             if (string.IsNullOrEmpty(opts.Output))
             {
-                System.Console.Error.WriteLine(
-                    "error: wacs build requires --output (-o) <path>.");
-                return 1;
+                output = Path.Combine(Path.GetDirectoryName(primaryInput) ?? "",
+                    defaultBaseName + ".dll");
             }
-
-            var output = Path.GetFullPath(opts.Output);
-            var primaryInput = files[files.Count - 1];
+            else if (Directory.Exists(opts.Output))
+            {
+                output = Path.Combine(opts.Output, defaultBaseName + ".dll");
+            }
+            else
+            {
+                output = opts.Output;
+            }
+            output = Path.GetFullPath(output);
 
             bool entryIsComponent;
             try
@@ -363,7 +379,7 @@ namespace Wacs.Console.Verbs
                 var wasiCfg = Wasi.DefaultConfiguration();
                 wasiCfg.Arguments = new List<string>
                     { Path.GetFileName(primaryInput) };
-                var wasiBinding = new Wacs.WASIp1.Wasi(wasiCfg);
+                var wasiBinding = new Wacs.WASI.Preview1.Wasi(wasiCfg);
                 wasiBinding.BindToRuntime(runtime);
                 disposables.Add(wasiBinding);
             }
@@ -425,8 +441,20 @@ namespace Wacs.Console.Verbs
                 MaxFunctionSize = opts.MaxFnSize,
                 DataStorage = ParseDataStorage(opts.DataStorage),
                 GcTypeChecking = ParseGcChecking(opts.GcChecking),
+                AssemblyName = string.IsNullOrEmpty(opts.AssemblyName) ? null : opts.AssemblyName,
+                Emission = ParseEmissionTarget(opts.Emission),
             };
         }
+
+        private static EmissionTarget ParseEmissionTarget(string s) => (s ?? "").ToLowerInvariant() switch
+        {
+            ""           => EmissionTarget.Standard,
+            "standard"   => EmissionTarget.Standard,
+            "aot-linked" => EmissionTarget.AotLinked,
+            "aotlinked"  => EmissionTarget.AotLinked,
+            _ => throw new ArgumentException(
+                $"unknown --emission value '{s}' (expected: standard | aot-linked)"),
+        };
 
         private static bool Save(TranspilationResult result, string output)
         {

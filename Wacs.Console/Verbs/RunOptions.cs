@@ -64,7 +64,7 @@ namespace Wacs.Console.Verbs
 
         [Option("wasi", HelpText =
             "Bind WASI Preview 1 host imports before execution. "
-            + "Equivalent to `--bind <Wacs.WASIp1>`.")]
+            + "Equivalent to `--bind <Wacs.WASI.Preview1>`.")]
         public bool Wasi { get; set; }
 
         // ---- Component-mode host packages ----
