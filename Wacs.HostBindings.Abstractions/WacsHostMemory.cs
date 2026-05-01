@@ -106,6 +106,74 @@ namespace Wacs.HostBindings
             _data[offset + 3] = (byte)(value >> 24);
         }
 
+        /// <summary>Convenience reader for an 8-byte little-endian long.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public long ReadInt64LE(int offset)
+        {
+            CheckRange(offset, 8);
+            uint lo = (uint)(_data[offset]
+                          | (_data[offset + 1] << 8)
+                          | (_data[offset + 2] << 16)
+                          | (_data[offset + 3] << 24));
+            uint hi = (uint)(_data[offset + 4]
+                          | (_data[offset + 5] << 8)
+                          | (_data[offset + 6] << 16)
+                          | (_data[offset + 7] << 24));
+            return (long)((ulong)hi << 32 | lo);
+        }
+
+        /// <summary>Convenience writer for an 8-byte little-endian long.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteInt64LE(int offset, long value)
+        {
+            CheckRange(offset, 8);
+            _data[offset]     = (byte)value;
+            _data[offset + 1] = (byte)(value >> 8);
+            _data[offset + 2] = (byte)(value >> 16);
+            _data[offset + 3] = (byte)(value >> 24);
+            _data[offset + 4] = (byte)(value >> 32);
+            _data[offset + 5] = (byte)(value >> 40);
+            _data[offset + 6] = (byte)(value >> 48);
+            _data[offset + 7] = (byte)(value >> 56);
+        }
+
+        /// <summary>True if [offset, offset+byteCount) lies within the
+        /// memory's authoritative length. Doesn't throw.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool Contains(int offset, int byteCount)
+            => (uint)offset <= (uint)_length
+            && (uint)byteCount <= (uint)(_length - offset);
+
+        /// <summary>
+        /// Encode a string as UTF-8 at <paramref name="offset"/>. Returns the
+        /// number of bytes written (including the trailing nul if
+        /// <paramref name="nullTerminate"/>). Throws on out-of-range.
+        /// </summary>
+        public int WriteUtf8String(int offset, string value, bool nullTerminate)
+        {
+            if (value == null) throw new ArgumentNullException(nameof(value));
+            int byteCount = System.Text.Encoding.UTF8.GetByteCount(value);
+            int total = byteCount + (nullTerminate ? 1 : 0);
+            CheckRange(offset, total);
+            // Encoding.UTF8.GetBytes(string, byte[], int) is available on both
+            // netstandard2.0 and net8.0; the (string, Span<byte>) overload is
+            // net5+ only.
+            System.Text.Encoding.UTF8.GetBytes(value, 0, value.Length, _data, offset);
+            if (nullTerminate) _data[offset + byteCount] = 0;
+            return total;
+        }
+
+        /// <summary>
+        /// Read a UTF-8 string from <paramref name="offset"/> spanning
+        /// <paramref name="byteCount"/> bytes (no nul-terminator handling
+        /// — pass the explicit length). Throws on out-of-range.
+        /// </summary>
+        public string ReadUtf8String(int offset, int byteCount)
+        {
+            CheckRange(offset, byteCount);
+            return System.Text.Encoding.UTF8.GetString(_data, offset, byteCount);
+        }
+
         /// <summary>The underlying backing array. Use with care; prefer
         /// the typed accessors above.</summary>
         public byte[] Data => _data;

@@ -18,6 +18,7 @@ using System;
 using System.Security.Cryptography;
 using Wacs.Core.Runtime;
 using Wacs.Core.WASIp1;
+using Wacs.HostBindings;
 using ptr = System.Int32;
 using size = System.Int32;
 
@@ -35,15 +36,16 @@ namespace Wacs.WASI.Preview1
         }
 
         public ErrNo RandomGet(ExecContext ctx, ptr bufOffsetPtr, size bufLen)
+            => RandomGetCore(Clock.WacsHost(ctx), bufOffsetPtr, bufLen);
+
+        [WacsImport("wasi_snapshot_preview1", "random_get")]
+        public static ErrNo RandomGetCore(WacsHostMemory mem, ptr bufOffsetPtr, size bufLen)
         {
-            var mem = ctx.DefaultMemory;
             if (!mem.Contains(bufOffsetPtr, bufLen))
                 return ErrNo.Fault;
-            
-            var buf = mem[bufOffsetPtr..(bufOffsetPtr + bufLen)];
-            
+
             // Fill the span with cryptographically secure random data.
-            RandomNumberGenerator.Fill(buf);
+            RandomNumberGenerator.Fill(mem.AsSpan(bufOffsetPtr, bufLen));
 
             return ErrNo.Success;
         }

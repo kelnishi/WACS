@@ -38,6 +38,7 @@
 
     <ItemGroup>
       <ProjectReference Include="..\Wacs.Core\Wacs.Core.csproj" />
+      <ProjectReference Include="..\Wacs.HostBindings.Abstractions\Wacs.HostBindings.Abstractions.csproj" />
     </ItemGroup>
 
 </Project>
