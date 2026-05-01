@@ -237,7 +237,7 @@ matrix, alongside JS BigInt↔i64 and JSPI — the *wasm-level* semantics
 are observably supported, but the *JS-API surface* (the namespace
 name `wasm:js-string`, the JS-engine-recognized import handling) is a
 browser idiom WACS emulates rather than implements natively. New
-[`BROWSER_IDIOMS.md`](BROWSER_IDIOMS.md) explainer covers all three
+[`BROWSER_IDIOMS.md`](docs/BROWSER_IDIOMS.md) explainer covers all three
 ✳️ features: how each proposal maps to a native .NET primitive
 (`long`, `System.String`, `Task`/`async`) and the host-side API for
 each.
