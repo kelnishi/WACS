@@ -33,6 +33,7 @@ WACS supports the latest standardized webassembly feature extensions including *
 
 - [Features](#features)
 - [WebAssembly Feature Extensions](#webassembly-feature-extensions)
+- [Component Model & WASI Preview 2](#component-model--wasi-preview-2)
 - [Getting Started](#getting-started)
 - [Installation](#installation)
 - [Usage](#usage)
@@ -42,7 +43,6 @@ WACS supports the latest standardized webassembly feature extensions including *
 - [Customization](#customization)
 - [Performance](#performance)
 - [WebAssembly Text Format (WAT / WAST)](#webassembly-text-format-wat--wast)
-- [Roadmap](#roadmap)
 - [License](#license)
 
 ## Features
@@ -56,6 +56,7 @@ WACS supports the latest standardized webassembly feature extensions including *
 - **Magical Interop**: Host bindings are validated with reflection, no boilerplate code required.
 - **Async Tasks**: [JSPI](https://github.com/WebAssembly/js-promise-integration)-like non-blocking calls for async functions.
 - **WASI:** Wacs.WASIp1 provides a [wasi\_snapshot\_preview1](https://github.com/WebAssembly/WASI/blob/main/legacy/preview1/docs.md) implementation.
+- **Component Model & WASI Preview 2:** Full canonical-ABI lift/lower with WIT ↔ C# bindgen (forward and reverse); `Wacs.WASI.Preview2` ships default host implementations for every WASI 0.2.3 subsystem (`cli` / `clocks` / `filesystem` / `http` / `io` / `random` / `sockets`).
 
 **WACS is for _mobile games_**. 
 
@@ -99,6 +100,65 @@ Harnessed results from [wasm-feature-detect](https://github.com/GoogleChromeLabs
 Legend: ✅ supported · ❌ not yet · ✳️ [conceptually supported (browser idiom)](./BROWSER_IDIOMS.md) · 🌐 browser-only / N/A for non-web hosts
 
 ###### Grouping follows [webassembly.org/features](https://webassembly.org/features/): Phase 5 is the combined standardized set (including finished proposals merged to the core spec) and Phase 4 is the active standardize queue. Phase assignments cross-checked against [WebAssembly/proposals@1584fdf](https://github.com/WebAssembly/proposals/commit/1584fdf) (2026-03-24) and [WebAssembly/proposals/finished-proposals.md](https://github.com/WebAssembly/proposals/blob/main/finished-proposals.md). Browser-idiom ✳️/🌐 results harnessed from [wasm-feature-detect](https://github.com/GoogleChromeLabs/wasm-feature-detect) via the [Feature.Detect](./Feature.Detect) test harness.
+
+## Component Model & WASI Preview 2
+
+WACS implements the [WebAssembly Component Model](https://github.com/WebAssembly/component-model) on the same parse / validate / link pipeline used for core modules. The `WACS.ComponentModel` package handles canonical-ABI lift/lower, WIT type emission, and cross-engine composition; `WACS.WASI.Preview2` ships default host implementations for every WASI 0.2.3 subsystem.
+
+### What's supported
+
+- **Component runtime** — instantiation, resource handles (`own` / `borrow`), variants, options, results, lists, records / tuples / flags. Both interpreted and AOT-transpiled execution.
+- **Canonical ABI** — full lift/lower including aggregate returns through retArea, UTF-8 / UTF-16 / Latin-1 string encodings, recursive variant arms, and instance-method resource calls.
+- **WIT ↔ C# bindgen** — forward (`.wit` → typed C# interfaces tagged with `[WitSource]`) and reverse (transpiled `.dll` → regenerated WIT + bindings) directions, available as `wacs bindgen` or programmatically via `WACS.ComponentModel.Bindgen.Lib`.
+- **Direct-linked imports** — under `--engine transpiler`, Preview 2 calls bypass the delegate dispatch table and inline straight into the generated CLR methods.
+- **Cross-engine composition** — `ComponentBridge.AsTypedInterface<T>` / `AsHostBundle` adapters let interpreted and transpiled components compose against the same typed contract.
+- **Contract validation** — `Linker.Validate(WitContract.FromAssembly(...))` cross-checks bound host implementations against the WIT contract embedded in the bindings assembly, catching drift at link time.
+
+### Components Quick start
+
+```bash
+# Run a component with the bundled WASI Preview 2 hosts
+wacs run hello.component.wasm --wasip2
+
+# Generate C# bindings from a WIT package
+wacs bindgen wit/cli/world.wit -o ./gen
+
+# Reverse: regenerate bindings from a transpiled .dll
+wacs bindgen app.dll -o ./regen
+```
+
+### Embedding
+
+For `Microsoft.Extensions.DependencyInjection` consumers, `WACS.WASI.Preview2.DependencyInjection` registers every subsystem default and a pre-wired `Linker` in one call:
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using Wacs.WASI.Preview2.DependencyInjection;
+
+var services = new ServiceCollection();
+services.AddWasiPreview2();   // every subsystem, scoped lifetime by default
+
+using var sp = services.BuildServiceProvider();
+using var scope = sp.CreateScope();
+
+var linker = scope.ServiceProvider.GetRequiredService<Linker>();
+var runtime = linker.Runtime;
+// ... instantiate the component
+```
+
+Selective overrides use DI's normal `TryAdd` semantics — see
+[`Wacs.WASI.Preview2/README.md`](Wacs.WASI.Preview2/README.md) for
+manual wiring (no DI), per-subsystem impl hooks, and validation
+patterns.
+
+### Packages
+
+| Package | Purpose |
+|---|---|
+| [`WACS.ComponentModel`](https://www.nuget.org/packages/WACS.ComponentModel) | Component runtime, canonical-ABI lift/lower, `ComponentBridge` cross-engine adapter |
+| [`WACS.ComponentModel.Bindgen.Lib`](https://www.nuget.org/packages/WACS.ComponentModel.Bindgen.Lib) | Programmatic forward / reverse bindgen (used by `wacs bindgen`) |
+| [`WACS.WASI.Preview2`](https://www.nuget.org/packages/WACS.WASI.Preview2) | Typed host impls for `wasi:cli` / `clocks` / `filesystem` / `http` / `io` / `random` / `sockets` |
+| [`WACS.WASI.Preview2.DependencyInjection`](https://www.nuget.org/packages/WACS.WASI.Preview2.DependencyInjection) | One-call DI registration of the bundle |
 
 ## Getting Started
 
@@ -734,12 +794,6 @@ typed function references, exception handling, tail-call, SIMD,
 relaxed SIMD, multi-memory, memory64, threads/atomics, and
 annotations all parse to structurally identical `Module` objects
 regardless of which parser built them.
-
-## Roadmap
-
-- **WebAssembly Component Model**: implement the [component-model
-  proposal](https://github.com/WebAssembly/component-model) on top of
-  the existing WACS core runtime, including Preview 2 WASI wiring.
 
 ## Sponsorship & Collaboration
 
