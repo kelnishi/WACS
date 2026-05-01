@@ -603,6 +603,45 @@ namespace Wacs.Transpiler.AOT
         private FieldBuilder? _embeddedInitField;
 
         /// <summary>
+        /// Validate that the prepared module fits the current AotLinked emission
+        /// scope (no memories, tables, globals, or data segments — i.e. compute-
+        /// only wasm). Throws <see cref="InvalidOperationException"/> with a
+        /// specific reason if not. Coverage will grow incrementally; the
+        /// thrower keeps users from silently shipping a Module class with
+        /// missing initialization.
+        /// </summary>
+        private void AssertAotLinkedFeasible()
+        {
+            if (_initDataId < 0) PrepareInitData();
+            var data = InitRegistry.Get(_initDataId);
+
+            // Only flag features that the AotLinked `new ThinContext()` ctor would
+            // leave uninitialized AND that the emitted function IL would actually
+            // reach. TypeHashes / TypeIsFunc, for instance, are populated on any
+            // module declaring a type — but they're only read by ref.test/ref.cast
+            // code, which fib-style modules never emit. For the MVP, we trust the
+            // user to only enable AotLinked on modules that don't use those code
+            // paths; they'll be supported as the AotLinked ctor grows.
+            var unsupported = new List<string>();
+            if (data.Memories.Length > 0)              unsupported.Add($"{data.Memories.Length} memories");
+            if (data.Tables.Length > 0)                unsupported.Add($"{data.Tables.Length} tables");
+            if (data.Globals.Length > 0)               unsupported.Add($"{data.Globals.Length} globals");
+            if (data.ActiveDataSegments.Length > 0)    unsupported.Add($"{data.ActiveDataSegments.Length} active data segments");
+            if (data.SavedDataSegments.Count > 0)      unsupported.Add($"{data.SavedDataSegments.Count} saved data segments");
+            if (data.ActiveElementSegments.Length > 0) unsupported.Add($"{data.ActiveElementSegments.Length} active element segments");
+            if (data.GcGlobalInits.Count > 0)          unsupported.Add($"{data.GcGlobalInits.Count} GC global inits");
+            if (data.DeferredGlobalInits.Count > 0)    unsupported.Add($"{data.DeferredGlobalInits.Count} deferred global inits");
+            if (data.GcElementValues.Count > 0)        unsupported.Add("GC element values");
+
+            if (unsupported.Count > 0)
+                throw new InvalidOperationException(
+                    "TranspilerOptions.Emission = AotLinked is not yet supported for this module. " +
+                    "Unsupported features: " + string.Join(", ", unsupported) +
+                    ". Use Emission = Standard for modules with non-trivial init data " +
+                    "(coverage will grow in subsequent transpiler releases).");
+        }
+
+        /// <summary>
         /// Encode the prepared <see cref="ModuleInitData"/> via
         /// <see cref="InitDataCodec.Encode"/> and persist the bytes into a
         /// static <c>byte[]</c> field on a generated <c>__WACSInit</c> type
@@ -701,32 +740,57 @@ namespace Wacs.Transpiler.AOT
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Call, typeof(object).GetConstructor(Type.EmptyTypes)!);
 
-            // === Initialize via InitializationHelper from embedded init-data ===
-            // The generator embeds a codec-encoded ModuleInitData as a static
-            // byte[] on a sibling type (__WACSInit.Data, built below). The
-            // ctor reads it, decodes into a ModuleInitData, and drives
-            // InitializeFromData — which handles both in-process (where
-            // ModuleInit registrations already exist) and cross-process
-            // (.dll loaded in a fresh process) via data-segment remapping.
-            var initDataField = EmitEmbeddedInitData();
-
-            // ThinContext ctx = InitializationHelper.InitializeFromEmbedded(
-            //     __WACSInit.Data, _initDataId);
-            //
-            // The helper's dual path: in-process (InitRegistry has the
-            // transpile-time entry, side-tables like GcTypeRegistry /
-            // MultiReturnMethodRegistry are populated under _initDataId)
-            // takes the fast Initialize(int) branch. Cross-process (fresh
-            // process — InitRegistry empty) falls through to a codec
-            // Decode of the embedded byte[] and an InitializeFromData
-            // with the transpile-time id as a hint.
-            il.Emit(OpCodes.Ldsfld, initDataField);
-            il.Emit(OpCodes.Ldc_I4, _initDataId);
-            il.Emit(OpCodes.Call, typeof(InitializationHelper).GetMethod(
-                nameof(InitializationHelper.InitializeFromEmbedded),
-                BindingFlags.Public | BindingFlags.Static)!);
+            // === Initialize ThinContext ===
+            // Two emission shapes:
+            //   Standard:  ThinContext ctx = InitializationHelper.InitializeFromEmbedded(
+            //                  __WACSInit.Data, _initDataId);
+            //   AotLinked: ThinContext ctx = new ThinContext();
+            //              (skips the codec roundtrip; only valid for modules with no
+            //               memories/tables/globals/data — fuller support pending.)
             var ctxLocal = il.DeclareLocal(typeof(ThinContext));
-            il.Emit(OpCodes.Stloc, ctxLocal);
+            if (_options?.Emission == EmissionTarget.AotLinked)
+            {
+                AssertAotLinkedFeasible();
+                // ThinContext ctx = new ThinContext(null, null, null, null, null);
+                // (the standalone ctor's params are optional in C# but the IL sig
+                // has all five — load nulls and let the ctor's null-coalescing
+                // initializer fill in Array.Empty<T>() for each.)
+                var standaloneCtor = typeof(ThinContext).GetConstructor(new[]
+                {
+                    typeof(MemoryInstance[]),
+                    typeof(TableInstance[]),
+                    typeof(GlobalInstance[]),
+                    typeof(Delegate[]),
+                    typeof(Delegate[]),
+                })!;
+                for (int i = 0; i < 5; i++) il.Emit(OpCodes.Ldnull);
+                il.Emit(OpCodes.Newobj, standaloneCtor);
+                il.Emit(OpCodes.Stloc, ctxLocal);
+            }
+            else
+            {
+                // The generator embeds a codec-encoded ModuleInitData as a static
+                // byte[] on a sibling type (__WACSInit.Data, built below). The
+                // ctor reads it, decodes into a ModuleInitData, and drives
+                // InitializeFromData — which handles both in-process (where
+                // ModuleInit registrations already exist) and cross-process
+                // (.dll loaded in a fresh process) via data-segment remapping.
+                var initDataField = EmitEmbeddedInitData();
+
+                // The helper's dual path: in-process (InitRegistry has the
+                // transpile-time entry, side-tables like GcTypeRegistry /
+                // MultiReturnMethodRegistry are populated under _initDataId)
+                // takes the fast Initialize(int) branch. Cross-process (fresh
+                // process — InitRegistry empty) falls through to a codec
+                // Decode of the embedded byte[] and an InitializeFromData
+                // with the transpile-time id as a hint.
+                il.Emit(OpCodes.Ldsfld, initDataField);
+                il.Emit(OpCodes.Ldc_I4, _initDataId);
+                il.Emit(OpCodes.Call, typeof(InitializationHelper).GetMethod(
+                    nameof(InitializationHelper.InitializeFromEmbedded),
+                    BindingFlags.Public | BindingFlags.Static)!);
+                il.Emit(OpCodes.Stloc, ctxLocal);
+            }
 
             // === Wire import delegates from IImports ===
             if (_interfaces.ImportsInterface != null && _interfaces.ImportMethods.Count > 0)

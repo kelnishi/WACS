@@ -74,6 +74,22 @@ namespace Wacs.Transpiler.AOT
         public DataSegmentStorage DataStorage { get; set; } = DataSegmentStorage.CompressedResource;
 
         /// <summary>
+        /// Selects the Module ctor emission shape. Default <see cref="EmissionTarget.Standard"/>
+        /// emits a ctor that calls <see cref="InitializationHelper.InitializeFromEmbedded"/>
+        /// against a base64-encoded blob (works for in-process and cross-process load
+        /// equally). <see cref="EmissionTarget.AotLinked"/> emits a leaner ctor that
+        /// constructs the <see cref="ThinContext"/> directly from inlined IL constants,
+        /// targeting whole-program NativeAOT consumers where the codec machinery is
+        /// pure overhead and would just bloat the native binary.
+        ///
+        /// <para>Currently, AotLinked emission only supports modules with no memories,
+        /// tables, globals, or data segments (e.g. compute-only wasm). Modules that
+        /// declare any of these fall back to <c>Standard</c> with a diagnostic.
+        /// Coverage will grow incrementally.</para>
+        /// </summary>
+        public EmissionTarget Emission { get; set; } = EmissionTarget.Standard;
+
+        /// <summary>
         /// Optional override for the generated assembly's logical name
         /// (i.e. the value of <c>Assembly.GetName().Name</c>). When null,
         /// <c>ModuleTranspiler</c> appends a process-unique <c>_&lt;N&gt;</c>
@@ -143,6 +159,30 @@ namespace Wacs.Transpiler.AOT
         /// </summary>
         public IReadOnlyList<Assembly> HostPackages { get; set; }
             = Array.Empty<Assembly>();
+    }
+
+    /// <summary>
+    /// Module-class emission shape. See <see cref="TranspilerOptions.Emission"/>.
+    /// </summary>
+    public enum EmissionTarget
+    {
+        /// <summary>
+        /// Module ctor goes through <see cref="InitializationHelper.InitializeFromEmbedded"/>
+        /// against a codec-encoded byte[] holder. Works for both in-process and
+        /// cross-process load (the helper branches internally). The default.
+        /// </summary>
+        Standard,
+
+        /// <summary>
+        /// Module ctor constructs <see cref="ThinContext"/> directly from inlined
+        /// IL constants — no <c>__WACSInit</c> holder, no <see cref="InitDataCodec"/>
+        /// call, no <see cref="InitRegistry"/> dependency. Allows a NativeAOT
+        /// consumer's trimmer to dead-strip the codec/registry machinery from the
+        /// final native binary. Only the AOT-linked workflow needs this — the
+        /// in-process and saved-DLL-via-AssemblyLoadContext paths still want
+        /// Standard for their cross-process safety.
+        /// </summary>
+        AotLinked,
     }
 
     /// <summary>
