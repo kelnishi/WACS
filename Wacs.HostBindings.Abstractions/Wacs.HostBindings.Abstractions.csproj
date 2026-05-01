@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <LangVersion>9</LangVersion>
+        <Nullable>enable</Nullable>
+        <Title>Wacs Host Bindings Abstractions</Title>
+        <PackageId>WACS.HostBindings.Abstractions</PackageId>
+        <Authors>Kelvin Nishikawa</Authors>
+        <Description>Tiny shared-vocabulary assembly for WACS host bindings. Defines [WacsImport] (annotates a static method as a wasm import implementation) and WacsHostMemory (lightweight wasm-memory accessor passed into binding methods). Consumed by WACS.WASI.Preview1, WACS.WASI.Preview2, WACS.HostBindings.SourceGen, and any third-party host-binding package that wants to be discoverable by the wacs-aot source generator.</Description>
+        <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
+        <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <AssemblyName>Wacs.HostBindings.Abstractions</AssemblyName>
+        <RootNamespace>Wacs.HostBindings</RootNamespace>
+        <AssemblyVersion>0.1.0</AssemblyVersion>
+        <Version>0.1.0</Version>
+        <RepositoryType>git</RepositoryType>
+        <!-- netstandard2.0 so the matching source generator (also
+             netstandard2.0 by Roslyn requirement) can reference this
+             at analyzer-load time without target-framework gymnastics. -->
+        <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
+        <IsAotCompatible Condition="'$(TargetFramework)' == 'net8.0'">true</IsAotCompatible>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <None Include="README.md">
+        <Pack>true</Pack>
+        <PackagePath/>
+      </None>
+    </ItemGroup>
+
+    <!-- Span<T> isn't in-box for netstandard2.0; pull System.Memory in
+         only on that target. net8.0 has Span built-in. -->
+    <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+      <PackageReference Include="System.Memory" Version="4.5.5" />
+    </ItemGroup>
+
+</Project>
