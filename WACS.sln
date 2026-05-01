@@ -5,7 +5,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Core", "Wacs.Core\Wacs
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Console", "Wacs.Console\Wacs.Console.csproj", "{E355AFC4-1C09-44AF-BF44-AFF1515AE359}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASIp1", "Wacs.WASIp1\Wacs.WASIp1.csproj", "{A7D87353-CC96-4718-8A86-454F27F5BB72}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.Preview1", "Wacs.WASI.Preview1\Wacs.WASI.Preview1.csproj", "{A7D87353-CC96-4718-8A86-454F27F5BB72}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Spec.Test", "Spec.Test\Spec.Test.csproj", "{2200F588-3506-4A4B-BD86-1C8FABA5A19E}"
 EndProject
@@ -41,9 +41,11 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.Preview2.Test", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.Preview2.DependencyInjection", "Wacs.WASI.Preview2.DependencyInjection\Wacs.WASI.Preview2.DependencyInjection.csproj", "{57FEE854-BFFE-4F23-B9FA-6D3127C29A5B}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASIp1.Test", "Wacs.WASIp1.Test\Wacs.WASIp1.Test.csproj", "{BA061514-ADB0-44B7-ADFF-D2D637F14151}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.Preview1.Test", "Wacs.WASI.Preview1.Test\Wacs.WASI.Preview1.Test.csproj", "{BA061514-ADB0-44B7-ADFF-D2D637F14151}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Bench.Aot", "Wacs.Bench.Aot\Wacs.Bench.Aot.csproj", "{6F7F8FF4-AA7F-41CA-8AFB-65C9A512D5E7}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASIp1", "Wacs.WASIp1\Wacs.WASIp1.csproj", "{BF832CCF-4865-4FCF-BA7F-A348239B1C2D}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -139,5 +141,9 @@ Global
 		{6F7F8FF4-AA7F-41CA-8AFB-65C9A512D5E7}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{6F7F8FF4-AA7F-41CA-8AFB-65C9A512D5E7}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{6F7F8FF4-AA7F-41CA-8AFB-65C9A512D5E7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BF832CCF-4865-4FCF-BA7F-A348239B1C2D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BF832CCF-4865-4FCF-BA7F-A348239B1C2D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BF832CCF-4865-4FCF-BA7F-A348239B1C2D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BF832CCF-4865-4FCF-BA7F-A348239B1C2D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

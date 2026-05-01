@@ -379,7 +379,7 @@ namespace Wacs.Console.Verbs
                 var wasiCfg = Wasi.DefaultConfiguration();
                 wasiCfg.Arguments = new List<string>
                     { Path.GetFileName(primaryInput) };
-                var wasiBinding = new Wacs.WASIp1.Wasi(wasiCfg);
+                var wasiBinding = new Wacs.WASI.Preview1.Wasi(wasiCfg);
                 wasiBinding.BindToRuntime(runtime);
                 disposables.Add(wasiBinding);
             }

@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <LangVersion>9</LangVersion>
+        <Nullable>enable</Nullable>
+        <Title>Wacs WASI Preview 1</Title>
+        <PackageId>WACS.WASI.Preview1</PackageId>
+        <Authors>Kelvin Nishikawa</Authors>
+        <Description>WASI Preview 1 implementation for WACS. Successor to the deprecated WACS.WASIp1 package; identical API under the new Wacs.WASI.Preview1 namespace, with TypeForwardedTo back-compat for the old name.</Description>
+        <Copyright>(c) 2024 Kelvin Nishikawa</Copyright>
+        <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <AssemblyName>Wacs.WASI.Preview1</AssemblyName>
+        <RootNamespace>Wacs.WASI.Preview1</RootNamespace>
+        <AssemblyVersion>0.11.0</AssemblyVersion>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <Version>0.11.0</Version>
+        <RepositoryType>git</RepositoryType>
+        <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
+        <IsAotCompatible>true</IsAotCompatible>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="README.md">
+            <Pack>true</Pack>
+            <PackagePath/>
+        </None>
+    </ItemGroup>
+
+    <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+      <DebugSymbols>true</DebugSymbols>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\Wacs.Core\Wacs.Core.csproj" />
+    </ItemGroup>
+
+</Project>

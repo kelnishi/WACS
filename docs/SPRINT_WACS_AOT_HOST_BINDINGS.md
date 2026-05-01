@@ -112,20 +112,27 @@ commit.
 - Move `namespace Wacs.WASIp1` → `namespace Wacs.WASI.Preview1` across all
   files.
 - Bump version `0.10.0` → `0.11.0`.
-- Create a new `Wacs.WASIp1` thin-shim project (assembly + NuGet identity
-  preserved) containing only `[assembly: TypeForwardedTo(...)]` for every
-  previously-public type. Depends on `WACS.WASI.Preview1`.
+- Create a new `Wacs.WASIp1` deprecated metapackage. CLR's
+  `TypeForwardedTo` only redirects same-named types between assemblies,
+  it doesn't bridge a namespace rename — so the shim is just a NuGet
+  metapackage that pulls in `WACS.WASI.Preview1` transitively. Consumers
+  need a one-shot sed to update `using Wacs.WASIp1;` lines (see migration
+  doc in Phase 7).
 - Update internal references: `Wacs.Console`, `Wacs.Bench.Aot`,
   `Wacs.WASIp1.Test` (rename to `Wacs.WASI.Preview1.Test`), all CLI `using`
   lines.
 - Mark old `WACS.WASIp1` package with deprecation note + pointer.
 
 **Verification:** `dotnet test Wacs.WASI.Preview1.Test`, full Spec.Test,
-build a sample with `<PackageReference Include="WACS.WASIp1" />` to confirm
-type forwarding resolves.
+build a sample with `<PackageReference Include="WACS.WASIp1" />` and
+confirm it transitively pulls in `WACS.WASI.Preview1`.
 
-**Risk:** Lokad.ILPack producing the shim assembly with TypeForwardedTo —
-verify day 1; fallback is a hand-written `.cs` shim project.
+**Why no source-level back-compat:** CLR `TypeForwardedTo` only redirects
+*same-named* types across assembly boundaries; it has no mechanism for
+"these types used to be at namespace X, look there if X.Y isn't found in
+the new namespace." The .NET ecosystem's standard pattern for namespace
+renames is package-level deprecation + source migration (one sed). We
+follow that.
 
 ### Phase 2 — `WACS.HostBindings.Abstractions` package (~0.25 day)
 
@@ -256,18 +263,20 @@ attribute-annotation rather than a full refactor. `wacs aot --wasip2` follows.
 | `wacs aot fib.wasm -o fib` (no imports) | works | works | Phase 5 (no-op) |
 | `wacs aot hello-wasi.wasm -o hello --wasi` | n/a | works, prints "hello world" | Phase 5 |
 | `wacs aot mycomp.wasm -o mycomp --wasip2` | n/a | works | Phase 6 |
-| `using Wacs.WASIp1;` in legacy embedder code | works | works (TypeForwardedTo) | Phase 1 |
-| `<PackageReference Include="WACS.WASIp1" />` | works | works (metapackage) | Phase 1 |
+| `using Wacs.WASIp1;` in legacy embedder code | works | breaks (one-line sed migration) | Phase 1 |
+| `<PackageReference Include="WACS.WASIp1" />` | works | works (deprecated metapackage) | Phase 1 |
 | Custom host with `[WacsImport]` static methods | n/a | discoverable by source gen | Phase 4 |
 
 ## Migration story (zero-friction)
 
 For an existing embedder of `WACS.WASIp1`:
 
-- **Do nothing** — `using Wacs.WASIp1;` keeps resolving via type forwarding
-  indefinitely
-- **Optional bump** — switch `<PackageReference>` to `WACS.WASI.Preview1`,
-  update `using` lines (mechanical sed). No API change.
+- **Update** the package reference and using lines (mechanical sed —
+  see `docs/MIGRATION_WASIp1_to_WASI.md` shipped in Phase 7)
+- The deprecated `WACS.WASIp1` metapackage continues to restore
+  (transitively pulls in `WACS.WASI.Preview1`), but consumer code must
+  swap `using Wacs.WASIp1;` for `using Wacs.WASI.Preview1;`. No API
+  surface change.
 
 For a new embedder targeting NativeAOT:
 
@@ -277,9 +286,9 @@ For a new embedder targeting NativeAOT:
 
 ## Risks & open questions
 
-1. **Lokad.ILPack TypeForwardedTo support** — verify in Phase 1 day 1.
-   Fallback: ship `Wacs.WASIp1.dll` as a hand-written compile-time forwarding
-   shim instead of a Lokad-generated PE.
+1. ~~**Lokad.ILPack TypeForwardedTo support**~~ — moot: TypeForwardedTo
+   doesn't bridge namespace renames in any framework, so we don't use it.
+   The shim is a deprecated metapackage instead. (Discovered Phase 1 day 1.)
 2. **Source-gen ergonomics for `State` initialization** — the generator needs
    to know how to construct shared state objects per binding package. Initial
    design: each binding package defines a
