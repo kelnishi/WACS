@@ -7,36 +7,20 @@ it's distinct from steady-state throughput.
 
 WACS ships four execution paths. They all parse the same wasm and
 implement the same semantics, but they make very different cold-start
-trade-offs. This doc walks through where the time goes in each, and
-how to pick one for a given embedding.
+trade-offs. A fifth path — statically linking a transpiled module's
+.dll into a NativeAOT-published consumer — is achievable today with
+hand-wired csproj plumbing and is the likely target of a future single-
+shot `wacs aot` workflow.
 
-The numbers below come from `Wacs.Bench/Coldstart.cs` running on
-macOS / arm64 / net8.0 Release, 2026-05-01. Reproduce with:
-
-```bash
-# JIT-only baseline
-dotnet run -c Release --project Wacs.Bench -- coldstart
-
-# R2R (works for all four runtimes)
-dotnet publish Wacs.Bench -c Release -r osx-arm64 \
-    --self-contained -p:PublishReadyToRun=true -o /tmp/wacs-r2r
-/tmp/wacs-r2r/Wacs.Bench coldstart
-
-# NativeAOT (interpreter-only — see Wacs.Bench.Aot)
-dotnet publish Wacs.Bench.Aot -c Release -r osx-arm64 -o /tmp/wacs-aot
-/tmp/wacs-aot/Wacs.Bench.Aot
-```
-
-The bench spawns one fresh child process per runtime (so the .NET CLR +
-shared parser/runtime JIT cost is paid honestly by each), then runs 7
-trials of each: trial 0 is reported as "first," the median of trials 1–6
-as "subsequent." Workload is `fib.wasm` (242 bytes, no imports), called
-with `fib(100)` (startup-dominated) and `fib(5_000_000)` (execution-
-dominated).
+The numbers below come from `Wacs.Bench/Coldstart.cs` (and a since-
+removed `Wacs.Bench.Aot.Saved` experiment for the AOT-linked row),
+running on macOS / arm64 / net8.0 Release, 2026-05-01. The
+[Methodology](#methodology) section shows exactly how to reproduce each
+column.
 
 ---
 
-## The four runtimes
+## The execution paths
 
 ### `interp-poly` — the default polymorphic interpreter
 
@@ -81,43 +65,71 @@ instantiate, no IL emission.
 Cold-start path: `LoadFromStream` → resolve types → `Activator
 .CreateInstance` → invoke.
 
+### `transpiler-aot-linked` — statically link the transpiled .dll into a NativeAOT host
+
+The pre-built .dll is referenced as a regular assembly from a NativeAOT-
+publishing consumer csproj. NativeAOT's ILC pulls the transpiled wasm's
+IL into the same single native binary as the host, so the wasm methods
+become direct typed CLR calls in the final native code. No JIT, no
+Reflection.Emit, no Assembly.Load, no `MethodInfo.Invoke`.
+
+Cold-start path: `new Module()` (ctor — direct C# `new`) → typed
+virtual call into the wasm function.
+
 ---
 
 ## Cold-start numbers
 
 `fib(100)` — trivial body, exposes the per-runtime startup floor.
 
-| runtime            | JIT-only cold (µs) | R2R cold (µs) | NativeAOT cold (µs) |
-|--------------------|-------------------:|--------------:|--------------------:|
-| interp-poly        |             35,676 |        24,336 |                 988 |
-| interp-switch      |             45,230 |        16,396 |             **319** |
-| transpiler         |             54,737 |        29,983 |   not supported     |
-| transpiler-saved   |              1,715 |           998 |   not supported     |
+| runtime                  | JIT-only cold (µs) | R2R cold (µs) | NativeAOT cold (µs) |
+|--------------------------|-------------------:|--------------:|--------------------:|
+| interp-poly              |             35,676 |        24,336 |                 988 |
+| interp-switch            |             45,230 |        16,396 |             **319** |
+| transpiler               |             54,737 |        29,983 |       not supported |
+| transpiler-saved         |              1,715 |           998 |       not supported |
+| **transpiler-aot-linked** |              n/a |           n/a |             **501** |
 
-NativeAOT only applies to the interpreter rows — see "Build-time
-configuration" below for why both transpiler paths require a JIT.
+NativeAOT only applies to runtimes without runtime IL emission/loading
+— see [Build-time configuration](#build-time-configuration-what-users-can-opt-into)
+below for why.
 
 `fib(5,000,000)` — long inner loop, exposes per-op execution cost on
 first call. Build configuration barely matters here because the inner
 loop runs in already-tier-1 code regardless: R2R precompiles, JIT tiers
 up almost immediately, AOT compiles ahead of time.
 
-| runtime            | JIT-only cold (µs) | R2R cold (µs) | NativeAOT cold (µs) |
-|--------------------|-------------------:|--------------:|--------------------:|
-| interp-poly        |            453,920 |       492,535 |             459,964 |
-| interp-switch      |            262,543 |       257,656 |             260,830 |
-| transpiler         |              3,274 |         3,348 |       not supported |
-| **transpiler-saved** |          **2,922** |     **3,202** |       not supported |
+| runtime                  | JIT-only cold (µs) | R2R cold (µs) | NativeAOT cold (µs) |
+|--------------------------|-------------------:|--------------:|--------------------:|
+| interp-poly              |            453,920 |       492,535 |             459,964 |
+| interp-switch            |            262,543 |       257,656 |             260,830 |
+| transpiler               |              3,274 |         3,348 |       not supported |
+| transpiler-saved         |              2,922 |         3,202 |       not supported |
+| **transpiler-aot-linked** |              n/a |           n/a |           **2,628** |
 
 Build-time cost for the saved-DLL path (paid once per module ever, not
 at startup): transpile + Lokad.ILPack save = ~100 ms. The saved .dll is
 4,608 bytes for a 242-byte wasm input — typical PE-format overhead.
 
+Native binary sizes (single self-contained executable, macOS arm64):
+
+| binary                   | size  |
+|--------------------------|------:|
+| `Wacs.Bench.Aot` (interpreter-only)              | 9.8 MB |
+| `Wacs.Bench.Aot.Saved` (transpiler-aot-linked)   | 4.3 MB |
+| `Wacs.Bench` self-contained R2R                  |  ~70 MB |
+| Default JIT publish (managed assemblies + apphost) |  ~30 MB |
+
+Smaller for the AOT-linked variant because trimming proves the
+interpreter, parser, and transpiler emitter are all dead code — only
+the specific transpiled functions plus the runtime support types
+(`ThinContext`, `InitializationHelper`) survive.
+
 ---
 
 ## Where the time goes
 
-Per-phase breakdown of trial-0 cold start, fib(100):
+Per-phase breakdown of trial-0 cold start, fib(100), JIT-only:
 
 | runtime          | parse | inst  | xpile  | activate | first invoke | total  |
 |------------------|------:|------:|-------:|---------:|-------------:|-------:|
@@ -131,31 +143,45 @@ Per-phase breakdown of trial-0 cold start, fib(100):
 ctor + `InitializationHelper`. There is no parse or xpile because the
 build did them already.)
 
+For `transpiler-aot-linked`, fib(100) cold trial 0 is just:
+
+| activate (Module ctor) | first invoke | total |
+|-----------------------:|-------------:|------:|
+|                    501 |          0.1 |   501 |
+
+The first-invoke time is genuinely sub-microsecond — no JIT, no
+indirection, just the AOT-compiled fib loop running on bare arm64.
+Verified with a result sink in the bench so the optimizer can't
+elide the call.
+
 What stands out:
 
-- **The interpreters' "parse" and "inst" first-call numbers are 14–17 ms,
+- **The interpreters' "parse" and "inst" first-call numbers are 14–17 ms**
   not because parsing 242 bytes intrinsically takes that long, but because
   the parser + instantiator code is paying its own .NET tier-1 JIT cost
-  the first time it runs in the process.** Subsequent trials in the same
+  the first time it runs in the process. Subsequent trials in the same
   process do parse + inst in 30–100 µs.
 
-- **The switch interpreter's first invoke is ~14 ms** — that's RyuJIT
-  promoting the prefix-split `TryDispatch_XX` methods to tier 1. After
-  that, they execute at ~6 µs per fib(100) call, beating polymorphic's
-  50 µs by 8×. This is the trade: cheap steady state, expensive first
-  call.
+- **The switch interpreter's first invoke is ~14 ms** under JIT — that's
+  RyuJIT promoting the prefix-split `TryDispatch_XX` methods to tier 1.
+  After that, they execute at ~6 µs per fib(100) call, beating
+  polymorphic's 50 µs by 8×. Under R2R or NativeAOT the tier-1 cost
+  vanishes (R2R: 977 µs first invoke; AOT: 26 µs).
 
 - **The in-process transpiler pays an extra ~25 ms for `xpile`** —
   Reflection.Emit warming up plus IL emission for fib's small functions.
-  Once that's done, every invoke is sub-millisecond. The trade-off only
-  pays back if you're doing real work (fib(5M) goes from 454 ms cold on
-  poly to 3.3 ms cold on the transpiler — **138× faster**).
+  Once that's done, every invoke is sub-millisecond.
 
 - **`transpiler-saved` skips parse, inst, and xpile entirely.** What
   remains is `AssemblyLoadContext.LoadFromStream` (41 µs), type
   resolution (44 µs), the module's init ctor (1.5 ms), and the first
-  JITted invoke (136 µs). Total cold: 1.7 ms — **20× faster than the
-  fastest interpreter**, **32× faster than in-process transpile**.
+  JITted invoke (136 µs).
+
+- **`transpiler-aot-linked` is `transpiler-saved` minus the JIT and the
+  load.** All the fib code is in the host process's native image at
+  build time. Cold start is just the Module ctor's first-time class
+  initialization (~500 µs trial 0, ~50 µs subsequent) plus an actual
+  function call (~100 ns).
 
 ---
 
@@ -199,16 +225,21 @@ The blast radius of dynamic codegen is genuinely contained:
   `Runtime/Types/HostFunction.cs`, for binding host-function adapter
   classes — easy to make AOT-safe with a
   `[DynamicallyAccessedMembers]` annotation if needed).
-- `Wacs.Transpiler.Lib` uses Reflection.Emit. AOT-incompatible.
+- `Wacs.Transpiler.Lib` uses Reflection.Emit at *transpile* time, but
+  its *runtime* support types (`ThinContext`,
+  `InitializationHelper`) are AOT-compatible — that's why
+  `transpiler-aot-linked` works.
 - `Wacs.ComponentModel` uses `MakeGenericMethod` + `DispatchProxy`.
   AOT-incompatible.
-- The saved-DLL path uses `AssemblyLoadContext.LoadFromStream` to
-  load IL that needs a JIT — also AOT-incompatible (NativeAOT
-  processes have no JIT).
+- The `transpiler-saved` runtime path uses `AssemblyLoadContext
+  .LoadFromStream` to load IL that needs a JIT — also AOT-
+  incompatible (NativeAOT processes have no JIT). The `transpiler-
+  aot-linked` path avoids this by linking the .dll at build time.
 
 So an AOT WACS embedding includes the parser + both interpreters +
-WASIp1 + host-binding APIs, but excludes the transpiler and
-component-model. That's a real but bounded trade-off.
+WASIp1 + host-binding APIs, plus optionally a build-time-transpiled
+wasm linked statically. It excludes the in-process transpiler,
+component-model, and runtime saved-DLL loading.
 
 The MSBuild trick to make AOT publish work: put `<PublishAot>true
 </PublishAot>` **inside the consumer's csproj**, not on the CLI
@@ -229,7 +260,10 @@ For "what users can ship today":
 
 - **R2R** for any embedding (works with all four runtimes).
 - **NativeAOT** for interpreter-only embeddings (component-model and
-  transpiler users stay on R2R or JIT).
+  in-process-transpiler users stay on R2R or JIT).
+- **NativeAOT + linked transpiled .dll** for the absolute floor on
+  cold-start *and* steady-state, when the wasm is known at build
+  time. Manual plumbing today; tracked for `wacs aot` automation.
 
 ---
 
@@ -245,15 +279,7 @@ For "what users can ship today":
 | Serverless / edge / cold-boot-sensitive (transpiler ok) | **`transpiler-saved`** | R2R |
 | Game engine, plug-ins shipped pre-transpiled        | **`transpiler-saved`** | R2R       |
 | Game engine, IL2CPP-style AOT (iOS/console)         | `interp-switch`       | NativeAOT  |
-
-The two interpreters have a similar cold-start floor under JIT (~35–45
-ms, mostly .NET JIT warmup); pick between them based on steady-state
-hotness, not cold start. Under R2R the picture sharpens: `interp-switch`
-becomes the cold-start winner among interpreters (16 ms vs 24 ms for
-poly) because R2R kills its expensive first-invoke tier-1 JIT cost.
-Once you decide you can absorb ~14–25 ms of in-process xpile or move it
-to build time, the transpiler is the right answer for anything that
-runs more than trivial work.
+| Embedded wasm known at host build time, every µs counts | **`transpiler-aot-linked`** | **NativeAOT** |
 
 For the "I can transpile at build time" path, the workflow is:
 
@@ -271,6 +297,107 @@ module.InvokeExport("_start", Array.Empty<Value>());
 `TranspiledModuleLoader` (in `Wacs.Transpiler.Lib/Hosting/`) handles
 finding the `Module` type, wiring imports, and turning exports into
 typed delegates.
+
+---
+
+## Methodology
+
+Each cell in the tables above was measured with a separate command.
+Reproduce in this order on macOS arm64 / .NET 8 (Linux x64 and Windows
+x64 differ in absolute terms but the per-runtime ratios hold).
+
+### JIT-only baseline (all four runtimes)
+
+```bash
+dotnet run -c Release --project Wacs.Bench -- coldstart
+```
+
+Spawns one fresh child process per runtime via
+`Process.Start(Environment.ProcessPath)`. Each child runs 7 trials of
+its assigned runtime: trial 0 is reported as "first," the median of
+trials 1–6 as "subsequent." Workload is `Wacs.Bench/fib.wasm` (242
+bytes), called with `fib(100)` (startup-dominated) and
+`fib(5_000_000)` (execution-dominated).
+
+A `coldstart in-process` mode runs everything in one CLR (cheaper but
+shared-JIT-warmup makes only the first runtime's "first" column honest).
+
+### R2R (all four runtimes)
+
+```bash
+dotnet publish Wacs.Bench -c Release -r osx-arm64 \
+    --self-contained -p:PublishReadyToRun=true -o /tmp/wacs-r2r
+/tmp/wacs-r2r/Wacs.Bench coldstart
+```
+
+`-r osx-arm64` is platform-specific — substitute `linux-x64` or
+`win-x64` as needed. `--self-contained` is required so the published
+output ships its own R2R-precompiled framework runtime; without it,
+only the WACS code is R2R-precompiled while the BCL falls back to its
+upstream R2R image (which is the JIT-only baseline already).
+
+### NativeAOT (interpreter-only)
+
+```bash
+dotnet publish Wacs.Bench.Aot -c Release -r osx-arm64 -o /tmp/wacs-aot
+/tmp/wacs-aot/Wacs.Bench.Aot
+```
+
+`Wacs.Bench.Aot/` is a separate consumer that references only
+`Wacs.Core` (no transpiler, no component-model) and sets
+`<PublishAot>true</PublishAot>` inside its csproj. Output is a
+self-contained ~10 MB native binary. Measures the same fib(100) +
+fib(5M) workload across `interp-poly` and `interp-switch`.
+
+### NativeAOT + linked transpiled .dll (`transpiler-aot-linked`)
+
+This isn't yet a one-shot user workflow. The numbers in the tables come
+from a manually-wired experiment that has since been removed from the
+repo. To replicate:
+
+```bash
+# 1) Produce the saved .dll. The transpiler currently appends a
+#    _<uniqueId> suffix to the assembly name, which makes static
+#    references brittle. Capture the actual name from the output.
+dotnet run -c Release --project Wacs.Console -- build app.wasm --out app.dll
+
+# 2) Inspect the assembly's logical name (e.g. "Wacs.Transpiled.App_1")
+#    and rename the file on disk to match — ILC's resolver requires
+#    file name == assembly name.
+mv app.dll Wacs.Transpiled.App_1.dll
+
+# 3) Create a tiny consumer csproj like Wacs.Bench.Aot's, with these
+#    additions:
+#
+#      <ProjectReference Include="..\Wacs.Transpiler.Lib\..."
+#                        UndefineProperties="PublishAot;PublishTrimmed;..." />
+#      <Reference Include="Wacs.Transpiled.App_1">
+#        <HintPath>$(MSBuildThisFileDirectory)Wacs.Transpiled.App_1.dll</HintPath>
+#        <Private>true</Private>
+#      </Reference>
+#
+# 4) In Program.cs:
+#      using Wacs.Transpiled.App;
+#      var m = new Module();
+#      m.SomeExport(arg);
+#
+# 5) Publish.
+dotnet publish MyHost -c Release -r osx-arm64 -o /tmp/myhost
+```
+
+The plumbing pain (steps 1–3) is exactly what a future `wacs aot`
+subcommand should automate — see the followup tracked in this
+project's notes for the three concrete blockers
+(`ModuleTranspiler` stable assembly naming, filename = assembly name
+emit convention, MSBuild target).
+
+### Bench code locations
+
+- Top-level dispatcher: `Wacs.Bench/Program.cs`
+- Coldstart logic and per-runtime drivers: `Wacs.Bench/Coldstart.cs`
+- AOT bench (interpreter-only): `Wacs.Bench.Aot/`
+- Steady-state dispatch microbench (orthogonal to coldstart):
+  `Wacs.Bench/BASELINE.md`
 
 ---
 
@@ -297,3 +424,8 @@ typed delegates.
   `AssemblyLoadContext` per trial so the load isn't cached, but they
   still benefit from in-process JIT warmup of the loader code itself.
   True per-process cold start in the bench is the trial-0 column.
+- `transpiler-aot-linked` numbers were measured with a result sink
+  (`Sink.V += instance.fib(arg);`) so NativeAOT's optimizer couldn't
+  elide the call as dead code. The sink showed real fib values
+  (e.g. -13,721,502,550 summed across trials of fib(100), which
+  overflows i32 as wasm fib does after ~46 iterations).
