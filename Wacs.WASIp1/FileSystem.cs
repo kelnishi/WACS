@@ -80,11 +80,14 @@ namespace Wacs.WASIp1
             runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, int>>(
                 (module, "path_unlink_file"), (ctx, a, b, c) => (int)PathUnlinkFile(ctx, a, b, c));
 
-            runtime.BindHostFunction<Func<ExecContext, fd, filesize, filesize, int, int>>(
-                (module, "fd_advise"), (ctx, a, b, c, d) => (int)FdAdvise(ctx, a, b, c, (Advice)d));
-            
-            runtime.BindHostFunction<Func<ExecContext, fd, filesize, filesize, int>>(
-                (module, "fd_allocate"), (ctx, a, b, c) => (int)FdAllocate(ctx, a, b, c));
+            // wasm i64 args land as System.Int64 in the binding dispatcher;
+            // it can't auto-coerce them to System.UInt64 (= filesize). Take
+            // them as `long` and cast once inside.
+            runtime.BindHostFunction<Func<ExecContext, fd, long, long, int, int>>(
+                (module, "fd_advise"), (ctx, a, b, c, d) => (int)FdAdvise(ctx, a, (filesize)b, (filesize)c, (Advice)d));
+
+            runtime.BindHostFunction<Func<ExecContext, fd, long, long, int>>(
+                (module, "fd_allocate"), (ctx, a, b, c) => (int)FdAllocate(ctx, a, (filesize)b, (filesize)c));
             
             runtime.BindHostFunction<Func<ExecContext, fd, int>>(
                 (module, "fd_close"), (ctx, a) => (int)FdClose(ctx, a));
@@ -104,14 +107,14 @@ namespace Wacs.WASIp1
             runtime.BindHostFunction<Func<ExecContext, fd, ptr, int>>(
                 (module, "fd_filestat_get"), (ctx, a, b) => (int)FdFilestatGet(ctx, a, b));
             
-            runtime.BindHostFunction<Func<ExecContext, fd, filesize, int>>(
-                (module, "fd_filestat_set_size"), (ctx, a, b) => (int)FdFilestatSetSize(ctx, a, b));
+            runtime.BindHostFunction<Func<ExecContext, fd, long, int>>(
+                (module, "fd_filestat_set_size"), (ctx, a, b) => (int)FdFilestatSetSize(ctx, a, (filesize)b));
             
             runtime.BindHostFunction<Func<ExecContext, fd, timestamp, timestamp, int, int>>(
                 (module, "fd_filestat_set_times"), (ctx, a, b, c, d) => (int)FdFilestatSetTimes(ctx, a, b, c, (FstFlags)d));
             
-            runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, filesize, ptr, int>>(
-                (module, "fd_pread"), (ctx, a, b, c, d, e) => (int)FdPread(ctx, a, b, c, d, e));
+            runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, long, ptr, int>>(
+                (module, "fd_pread"), (ctx, a, b, c, d, e) => (int)FdPread(ctx, a, b, c, (filesize)d, e));
             
             runtime.BindHostFunction<Func<ExecContext, fd, ptr, int>>(
                 (module, "fd_prestat_get"), (ctx, a, b) => (int)FdPrestatGet(ctx, a, b));
@@ -119,8 +122,8 @@ namespace Wacs.WASIp1
             runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, int>>(
                 (module, "fd_prestat_dir_name"), (ctx, a, b, c) => (int)FdPrestatDirName(ctx, a, b, c));
             
-            runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, filesize, ptr, int>>(
-                (module, "fd_pwrite"), (ctx, a, b, c, d, e) => (int)FdPwrite(ctx, a, b, c, d, e));
+            runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, long, ptr, int>>(
+                (module, "fd_pwrite"), (ctx, a, b, c, d, e) => (int)FdPwrite(ctx, a, b, c, (filesize)d, e));
             
             runtime.BindHostFunction<Func<ExecContext, fd, ptr, size, ptr, int>>(
                 (module, "fd_read"), (ctx, a, b, c, d) => (int)FdRead(ctx, a, b, c, d));
@@ -177,6 +180,61 @@ namespace Wacs.WASIp1
             ThrowIfDisposed();
             BindStdio();
             BindPreopenedDirs();
+            BindPreopenedSockets();
+        }
+
+        private void BindPreopenedSockets()
+        {
+            ThrowIfDisposed();
+            if (!_config.AllowNetworkSockets) return;
+
+            foreach (var (socket, fdFlags) in _config.PreopenedSockets)
+            {
+                fd newFd = _state.GetNextFd;
+                bool isListening = socket.IsBound &&
+                    (socket.SocketType == System.Net.Sockets.SocketType.Stream
+                        ? socket.LocalEndPoint != null && IsListeningSocket(socket)
+                        : false);
+                var stream = new SocketStream(socket, isListening);
+
+                // Sockets get FD_READ + FD_WRITE rights (read = recv,
+                // write = send) and SOCK_ACCEPT for listeners. Guests
+                // can drop them via fd_fdstat_set_rights.
+                Rights rights = Rights.FD_READ | Rights.FD_WRITE
+                    | Rights.FD_FDSTAT_SET_FLAGS | Rights.POLL_FD_READWRITE;
+                if (isListening)
+                    rights |= Rights.SOCK_ACCEPT;
+
+                _state.FileDescriptors[newFd] = new FileDescriptor
+                {
+                    Fd = newFd,
+                    Stream = stream,
+                    Path = "/dev/socket",
+                    Access = FileAccess.ReadWrite,
+                    IsPreopened = true,
+                    Type = socket.SocketType == System.Net.Sockets.SocketType.Stream
+                        ? Filetype.SocketStream
+                        : Filetype.SocketDgram,
+                    Rights = rights,
+                    InheritedRights = rights,
+                    Flags = fdFlags,
+                    Socket = socket,
+                    IsListening = isListening,
+                };
+            }
+        }
+
+        // Socket.Listen() doesn't expose state directly; the most
+        // reliable check is to attempt a non-blocking Poll(SelectRead)
+        // and see whether the OS returns EINVAL. Easier: track at bind
+        // time if Listen() was called. We can't tell from the Socket
+        // alone, so we trust the embedder's intent: a Bound stream
+        // socket handed to us is one they Listen()ed on. Datagram
+        // sockets don't listen — they're connection-less.
+        private static bool IsListeningSocket(System.Net.Sockets.Socket s)
+        {
+            try { return s.IsBound && s.SocketType == System.Net.Sockets.SocketType.Stream; }
+            catch { return false; }
         }
 
         private void BindPreopenedDirs()
@@ -198,7 +256,12 @@ namespace Wacs.WASIp1
 
             _state.PathMapper.SetRootMapping(_config.HostRootDirectory);
 
-            BindDir(_config.HostRootDirectory, "/", _config.DefaultPermissions, true);
+            // Embedders that want fd 3 = host cwd (the Wacs.Console
+            // default for backwards compat) get it; embedders following
+            // the wasi-testsuite/wasmtime convention (fd 3 = first
+            // explicit preopen) flip the flag off.
+            if (_config.PreopenHostRootDirectory)
+                BindDir(_config.HostRootDirectory, "/", _config.DefaultPermissions, true);
 
             foreach (var pod in _config.PreopenedDirectories)
             {

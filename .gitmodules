@@ -5,6 +5,7 @@
 [submodule "Spec.Test/wasi"]
 	path = Spec.Test/wasi
 	url = git@github.com:WebAssembly/wasi-testsuite.git
+	branch = prod/testsuite-base
 [submodule "unity"]
 	path = unity
 	url = git@github.com:kelnishi/WACS-Unity.git
