@@ -386,10 +386,38 @@ dotnet publish MyHost -c Release -r osx-arm64 -o /tmp/myhost
 ```
 
 The plumbing pain (steps 1–3) is exactly what a future `wacs aot`
-subcommand should automate — see the followup tracked in this
-project's notes for the three concrete blockers
-(`ModuleTranspiler` stable assembly naming, filename = assembly name
-emit convention, MSBuild target).
+subcommand should automate. The known follow-up work to make
+`wacs aot app.wasm -o app` a single-shot user workflow:
+
+- **Stable assembly naming.** `ModuleTranspiler.cs:154` appends a
+  `_<uniqueId>` suffix to avoid in-process collisions; saved-to-static-
+  reference usage needs a predictable name. Add an explicit
+  `assemblyName` parameter to `Transpile` / `SaveAssembly`.
+- **Filename = assembly name on emit.** ILC's resolver requires the
+  on-disk file to be named after the assembly's logical name, so
+  `wacs build` should emit `<assemblyname>.dll` by default rather
+  than letting the consumer pick.
+- **AOT-linked emission mode.** Today every saved .dll's Module ctor
+  routes through a base64 → `Convert.FromBase64String` →
+  `InitDataCodec.Decode` → `InitializeFromEmbedded` wrapper that
+  exists to bridge cross-process state transfer (in-process registry
+  was empty when the .dll loaded). For AOT-linked, transpile and
+  consume are different processes by definition AND the toolchain
+  knows it at emission time. A
+  `TranspilerOptions.EmissionTarget = AotLinked` flag would let the
+  generator emit a Module ctor that directly constructs the
+  `ThinContext` from inlined IL constants and static `byte[]` fields
+  (generalizing the existing `DataSegmentStorage.StaticArrays` mode),
+  dead-stripping the codec / embedded-bytes machinery from the AOT
+  binary entirely. Negligible win on tiny modules, significant for
+  multi-MB-data-segment ones (replaces base64 + binary-decode + heap
+  alloc + memcpy with straight `Buffer.MemoryCopy` from PE-resident
+  bytes).
+- **MSBuild integration.** A `<WasmModule Include="app.wasm" />`
+  item that an SDK target turns into build-time `wacs transpile` +
+  auto-`<Reference>`, OR a `wacs aot` CLI subcommand that scaffolds a
+  throwaway csproj and runs `dotnet publish -p:PublishAot=true`. The
+  CLI form is easier to prototype without a custom SDK.
 
 ### Bench code locations
 
