@@ -1,50 +1,56 @@
-# WACS.WASIp1 for WACS
+# WACS.WASI.Preview1
 
-A C# implementation of WASI preview 1 for the WACS WebAssembly Interpreter.
+A C# implementation of WASI Preview 1 for the WACS WebAssembly
+Interpreter. Supersedes the deprecated `WACS.WASIp1` package — see
+[`docs/MIGRATION_WASIp1_to_WASI.md`](https://github.com/kelnishi/WACS/blob/main/docs/MIGRATION_WASIp1_to_WASI.md)
+for a one-shot sed migration.
 
 ## Installation
 
-Add the assembly from NuGet:
+Add the package from NuGet:
+
 ```bash
-dotnet add package WACS.WASIp1
+dotnet add package WACS.WASI.Preview1
 ```
 
-## Usage Example
+## Usage example
 
-Here's a basic example demonstrating how to bind WASIp1 to the WACS WebAssembly runtime:
+Bind WASI Preview 1 to a `WasmRuntime`:
 
 ```csharp
 using System;
 using System.IO;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using Wacs.Core;
 using Wacs.Core.Runtime;
-using Wacs.Core.WASIp1;
-using Wacs.WASI.Preview1.Types;
+using Wacs.Core.WASIp1;          // IBindable, ErrNo, SystemExitException, SignalException
+using Wacs.WASI.Preview1;        // Wasi, WasiConfiguration
+using Wacs.WASI.Preview1.Types;  // FdFlags, etc.
 
 var runtime = new WasmRuntime();
-var wasiConfig = new WasiConfiguration() {
-    StandardInput = System.Console.OpenStandardInput(),
-    StandardOutput = System.Console.OpenStandardOutput(),
-    StandardError = System.Console.OpenStandardError(),
-    
+var wasiConfig = new WasiConfiguration
+{
+    StandardInput  = Console.OpenStandardInput(),
+    StandardOutput = Console.OpenStandardOutput(),
+    StandardError  = Console.OpenStandardError(),
+
     Arguments = Environment.GetCommandLineArgs()
         .Skip(1)
         .ToList(),
-    
+
     EnvironmentVariables = Environment.GetEnvironmentVariables()
         .Cast<DictionaryEntry>()
-        .ToDictionary(de => de.Key.ToString()!, de => de.Value?.ToString()??""),
-    
+        .ToDictionary(de => de.Key.ToString()!, de => de.Value?.ToString() ?? ""),
+
     HostRootDirectory = Directory.GetCurrentDirectory(),
 };
-var wasi = new WASIp1.Wasi(wasiConfig);
+var wasi = new Wasi(wasiConfig);
 wasi.BindToRuntime(runtime);
 
 using var fileStream = new FileStream("module.wasm", FileMode.Open);
-var module = BinaryModuleParser.ParseWasm(fileStream);
-
+var module  = BinaryModuleParser.ParseWasm(fileStream);
 var modInst = runtime.InstantiateModule(module);
 runtime.RegisterModule("mymodule", modInst);
 
@@ -58,16 +64,22 @@ if (runtime.TryGetExportedFunction(("mymodule", "main"), out var mainAddr))
     }
     catch (TrapException exc)
     {
-        System.Console.Error.WriteLine(exc);
+        Console.Error.WriteLine(exc);
         return 1;
     }
     catch (SignalException exc)
     {
-        System.Console.Error.WriteLine($"{exc.HumanReadable}");
+        Console.Error.WriteLine(exc.HumanReadable);
         return exc.Signal;
     }
 }
 ```
+
+The split between `Wacs.Core.WASIp1` (interpreter wiring — `IBindable`,
+`ErrNo`, exceptions) and `Wacs.WASI.Preview1` (host implementation —
+`Wasi`, `WasiConfiguration`) is intentional. Migrating from
+`WACS.WASIp1` only changes the second `using`; the `Wacs.Core.WASIp1`
+namespace stays.
 
 ## Capability flags
 
@@ -94,6 +106,7 @@ uses for HTTP), and `sock_accept` mints connection fds from them.
 ```csharp
 using System.Net;
 using System.Net.Sockets;
+using Wacs.WASI.Preview1;
 using Wacs.WASI.Preview1.Types;
 
 var listener = new Socket(AddressFamily.InterNetwork,
@@ -101,10 +114,11 @@ var listener = new Socket(AddressFamily.InterNetwork,
 listener.Bind(new IPEndPoint(IPAddress.Loopback, 0));
 listener.Listen(8);
 
-var wasiConfig = new WasiConfiguration {
-    HostRootDirectory = Directory.GetCurrentDirectory(),
+var wasiConfig = new WasiConfiguration
+{
+    HostRootDirectory   = Directory.GetCurrentDirectory(),
     AllowNetworkSockets = true,
-    PreopenedSockets = { (listener, FdFlags.NonBlock) },
+    PreopenedSockets    = { (listener, FdFlags.NonBlock) },
 };
 ```
 
@@ -125,4 +139,6 @@ deliberately not yet asserting (each entry carries a reason).
 
 ## License
 
-WACS is distributed under the [Apache 2.0 License](https://github.com/kelnishi/WACS/blob/main/LICENSE), allowing usage in both open-source and commercial projects.
+WACS is distributed under the [Apache 2.0
+License](https://github.com/kelnishi/WACS/blob/main/LICENSE), allowing
+usage in both open-source and commercial projects.

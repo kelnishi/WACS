@@ -8,14 +8,16 @@
 **NuGet packages**
 &nbsp;[![WACS](https://img.shields.io/nuget/v/WACS?label=WACS)](https://www.nuget.org/packages/WACS)
 &nbsp;[![WACS.Cli](https://img.shields.io/nuget/v/WACS.Cli?label=WACS.Cli)](https://www.nuget.org/packages/WACS.Cli)
-&nbsp;[![WACS.WASIp1](https://img.shields.io/nuget/v/WACS.WASIp1?label=WACS.WASIp1)](https://www.nuget.org/packages/WACS.WASIp1)
+&nbsp;[![WACS.WASI.Preview1](https://img.shields.io/nuget/v/WACS.WASI.Preview1?label=WACS.WASI.Preview1)](https://www.nuget.org/packages/WACS.WASI.Preview1)
 &nbsp;[![WACS.Transpiler.Lib](https://img.shields.io/nuget/v/WACS.Transpiler.Lib?label=WACS.Transpiler.Lib)](https://www.nuget.org/packages/WACS.Transpiler.Lib)
 &nbsp;[![Downloads](https://img.shields.io/nuget/dt/WACS?label=WACS%20downloads)](https://www.nuget.org/packages/WACS)
 
 ## Overview
 
 **Latest releases** (see the [CHANGELOG](CHANGELOG.md) for details):
-WACS `0.10.0` · WACS.Cli `1.1.0` · WACS.WASIp1 `0.10.0` · WACS.Transpiler.Lib `0.4.0` · WACS.ComponentModel `0.1.0` · WACS.WASI.Preview2 `0.1.0` · WACS.WASI.Preview2.DependencyInjection `0.1.0` · WACS.ComponentModel.Bindgen.Lib `0.1.0` · WACS.WASI.Threads `0.1.0`
+WACS `0.10.0` · WACS.Cli `1.2.0` · WACS.WASI.Preview1 `0.11.0` · WACS.HostBindings.Abstractions `0.1.0` · WACS.HostBindings.SourceGen `0.1.0` · WACS.Transpiler.Lib `0.4.0` · WACS.ComponentModel `0.1.0` · WACS.WASI.Preview2 `0.1.0` · WACS.WASI.Preview2.DependencyInjection `0.1.0` · WACS.ComponentModel.Bindgen.Lib `0.1.0` · WACS.WASI.Threads `0.1.0`
+
+> **Renaming notice (0.11.0):** the `WACS.WASIp1` package has been renamed to `WACS.WASI.Preview1` to make room for `WACS.WASI.Preview2` / `.Preview3` under one prefix. The old id still restores (it's now a metapackage) but emits a build-time warning. See [docs/MIGRATION_WASIp1_to_WASI.md](docs/MIGRATION_WASIp1_to_WASI.md) for the one-shot sed.
 
 > **CLI:** install the unified `wacs` global tool with
 > `dotnet tool install -g WACS.Cli`. The legacy `WACS.Transpiler`
@@ -55,7 +57,7 @@ WACS supports the latest standardized webassembly feature extensions including *
 - **First-class WAT / WAST**: Pure-C# reader and writer for the WebAssembly text format. The `wacs` CLI takes `.wat` directly; the spec `.wast` suite parses natively with no external `wast2json` / wabt dependency.
 - **Magical Interop**: Host bindings are validated with reflection, no boilerplate code required.
 - **Async Tasks**: [JSPI](https://github.com/WebAssembly/js-promise-integration)-like non-blocking calls for async functions.
-- **WASI:** Wacs.WASIp1 provides a [wasi\_snapshot\_preview1](https://github.com/WebAssembly/WASI/blob/main/legacy/preview1/docs.md) implementation.
+- **WASI:** WACS.WASI.Preview1 provides a [wasi\_snapshot\_preview1](https://github.com/WebAssembly/WASI/blob/main/legacy/preview1/docs.md) implementation.
 - **Component Model & WASI Preview 2:** Full canonical-ABI lift/lower with WIT ↔ C# bindgen (forward and reverse); `Wacs.WASI.Preview2` ships default host implementations for every WASI 0.2.3 subsystem (`cli` / `clocks` / `filesystem` / `http` / `io` / `random` / `sockets`).
 
 **WACS is for _mobile games_**. 
@@ -162,24 +164,29 @@ patterns.
 
 ## WASI Preview 1
 
-`Wacs.WASIp1` implements all 47 `wasi_snapshot_preview1` host functions
-— args / environ, two-clock time, the full file-descriptor and path
-surface (read / write / pread / pwrite / readdir / seek / sync /
-allocate / fdstat / filestat / advise / renumber / link / symlink /
-unlink / rename / create_directory / remove_directory / readlink),
-poll_oneoff, proc_exit / proc_raise / sched_yield, random_get, and the
-full sock_* surface (accept / recv / send / shutdown). Network sockets
-are gated behind a default-off `WasiConfiguration.AllowNetworkSockets`
-flag plus the requirement that the embedder hand WACS pre-bound,
-pre-listening sockets via `PreopenedSockets` — two layers of explicit
-consent before any guest can do network IO.
+`WACS.WASI.Preview1` implements all 47 `wasi_snapshot_preview1` host
+functions — args / environ, two-clock time, the full file-descriptor
+and path surface (read / write / pread / pwrite / readdir / seek /
+sync / allocate / fdstat / filestat / advise / renumber / link /
+symlink / unlink / rename / create_directory / remove_directory /
+readlink), poll_oneoff, proc_exit / proc_raise / sched_yield,
+random_get, and the full sock_* surface (accept / recv / send /
+shutdown). Network sockets are gated behind a default-off
+`WasiConfiguration.AllowNetworkSockets` flag plus the requirement that
+the embedder hand WACS pre-bound, pre-listening sockets via
+`PreopenedSockets` — two layers of explicit consent before any guest
+can do network IO.
 
 Conformance is verified continuously against the official
 [WebAssembly/wasi-testsuite](https://github.com/WebAssembly/wasi-testsuite)
 fixtures (Rust + C + AssemblyScript). The runner lives at
-`Wacs.WASIp1.Test/` and runs as part of `dotnet test` in CI; the
-test project's `skip.json` documents which conformance fixtures are
-deliberately not yet asserting (each entry carries a reason).
+`Wacs.WASI.Preview1.Test/` and runs as part of `dotnet test` in CI;
+the test project's `skip.json` documents which conformance fixtures
+are deliberately not yet asserting (each entry carries a reason).
+
+> The package was renamed from `WACS.WASIp1` in 0.11.0. The old id
+> still restores via a metapackage shim (with a build-time warning).
+> See [docs/MIGRATION_WASIp1_to_WASI.md](docs/MIGRATION_WASIp1_to_WASI.md).
 
 ## Getting Started
 
@@ -189,7 +196,7 @@ The easiest way to use WACS is to add the package from NuGet
 
 ```bash
 dotnet add package WACS
-dotnet add package WACS.WASIp1
+dotnet add package WACS.WASI.Preview1
 ````
 
 ### `wacs` CLI
@@ -207,6 +214,12 @@ wacs run module.wasm
 
 # Build to a .NET assembly
 wacs build module.wasm -o module.dll
+
+# Build directly to a self-contained NativeAOT native binary
+wacs aot module.wasm -o module
+# (transpile + scaffold + dotnet publish -p:PublishAot=true,
+# all in one shot. Output is a real native exe — no .NET runtime
+# required to run.)
 ```
 
 For WASI preview1 modules (CoreMark, anything built against `wasi-libc`):
@@ -218,15 +231,19 @@ wacs run coremark.wasm --wasi --engine transpiler
 
 # Or precompile then run through `dotnet`:
 wacs build coremark.wasm --wasi --emit-main -o coremark.dll
+
+# Or go all the way to a NativeAOT binary:
+wacs aot coremark.wasm --wasi -o coremark
 ```
 
-`--wasi` binds `WACS.WASIp1`, forwards all `wasi_snapshot_preview1`
+`--wasi` binds `WACS.WASI.Preview1`, forwards all `wasi_snapshot_preview1`
 imports, shares memory with the runtime, and invokes the entry-point
 export. For component-mode WASI Preview 2 (direct-linked, no
 delegate hop), use `--wasip2`:
 
 ```bash
 wacs run app.component.wasm --wasip2
+wacs aot app.component.wasm --wasip2 -o app   # all the way to NativeAOT
 ```
 
 For custom host imports (`env.sayc`, game bindings, etc.), use
@@ -330,7 +347,7 @@ WACS simplifies host function bindings, allowing you to easily call .NET functio
 This allows seamless communication between your host environment and WebAssembly without boilerplate code.
 Similarly, calling into wasm code is done by generating a typed delegate.
 
-Example from WASIp1:
+Example from WASI Preview 1:
 
 ```csharp
 //Alias your types for readability
@@ -349,7 +366,7 @@ public enum ErrNo : ushort
 runtime.BindHostFunction<Func<ExecContext,ptr,ptr,ErrNo>>(
    (module, "args_get"), ArgsGet);
 
-// WASIp1's args_get
+// WASI Preview 1's args_get
 public ErrNo ArgsGet(ExecContext ctx, ptr argvPtr, ptr argvBufPtr)
 {
     var mem = ctx.DefaultMemory;
@@ -375,7 +392,7 @@ public ErrNo ArgsGet(ExecContext ctx, ptr argvPtr, ptr argvBufPtr)
 
 If you'd like to customize the wasm runtime environment, I recommend downloading the full source for examples.
 
-The `Wacs.WASIp1` implementation is a good starting point for how to set up your own library of bindings.
+The `Wacs.WASI.Preview1` implementation is a good starting point for how to set up your own library of bindings.
 It also contains examples of more advanced usage like binding multiple return values and full operand stack access.
 
 The `Spec.Test` project runs the wasm spec test suite. This also contains examples for binding other runtime environment

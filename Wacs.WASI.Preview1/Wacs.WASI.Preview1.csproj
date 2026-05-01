@@ -6,7 +6,7 @@
         <Title>Wacs WASI Preview 1</Title>
         <PackageId>WACS.WASI.Preview1</PackageId>
         <Authors>Kelvin Nishikawa</Authors>
-        <Description>WASI Preview 1 implementation for WACS. Successor to the deprecated WACS.WASIp1 package; identical API under the new Wacs.WASI.Preview1 namespace, with TypeForwardedTo back-compat for the old name.</Description>
+        <Description>WASI Preview 1 implementation for WACS. Successor to the deprecated WACS.WASIp1 package; identical API under the new Wacs.WASI.Preview1 namespace. C# `TypeForwardedTo` cannot bridge a namespace rename, so the deprecated WACS.WASIp1 package is now a metapackage that pulls this assembly in transitively while consumers update their `using Wacs.WASIp1;` lines to `using Wacs.WASI.Preview1;` (one-shot sed in docs/MIGRATION_WASIp1_to_WASI.md).</Description>
         <Copyright>(c) 2024 Kelvin Nishikawa</Copyright>
         <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>

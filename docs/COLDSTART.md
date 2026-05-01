@@ -5,12 +5,11 @@ function returning a value. It's the latency a CLI tool, a serverless
 worker, or a game-engine plug-in pays before doing useful work — and
 it's distinct from steady-state throughput.
 
-WACS ships four execution paths. They all parse the same wasm and
+WACS ships five execution paths. They all parse the same wasm and
 implement the same semantics, but they make very different cold-start
-trade-offs. A fifth path — statically linking a transpiled module's
-.dll into a NativeAOT-published consumer — is achievable today with
-hand-wired csproj plumbing and is the likely target of a future single-
-shot `wacs aot` workflow.
+trade-offs. The fifth — statically linking a transpiled module's
+.dll into a NativeAOT-published consumer — is now a one-shot CLI:
+`wacs aot input.wasm -o app`. See the `wacs aot` section below.
 
 The numbers below come from `Wacs.Bench/Coldstart.cs` (and a since-
 removed `Wacs.Bench.Aot.Saved` experiment for the AOT-linked row),
@@ -263,7 +262,9 @@ For "what users can ship today":
   in-process-transpiler users stay on R2R or JIT).
 - **NativeAOT + linked transpiled .dll** for the absolute floor on
   cold-start *and* steady-state, when the wasm is known at build
-  time. Manual plumbing today; tracked for `wacs aot` automation.
+  time. One-shot CLI: `wacs aot input.wasm -o app` (transpile +
+  scaffold + `dotnet publish` in a single command). `--wasi` and
+  `--wasip2` cover the WASI Preview 1 / Preview 2 host surfaces.
 
 ---
 
@@ -351,73 +352,65 @@ fib(5M) workload across `interp-poly` and `interp-switch`.
 
 ### NativeAOT + linked transpiled .dll (`transpiler-aot-linked`)
 
-This isn't yet a one-shot user workflow. The numbers in the tables come
-from a manually-wired experiment that has since been removed from the
-repo. To replicate:
+This is now a one-shot CLI:
 
 ```bash
-# 1) Produce the saved .dll. The transpiler currently appends a
-#    _<uniqueId> suffix to the assembly name, which makes static
-#    references brittle. Capture the actual name from the output.
-dotnet run -c Release --project Wacs.Console -- build app.wasm --out app.dll
+# Compute-only module → native binary
+wacs aot app.wasm -o app
+./app
 
-# 2) Inspect the assembly's logical name (e.g. "Wacs.Transpiled.App_1")
-#    and rename the file on disk to match — ILC's resolver requires
-#    file name == assembly name.
-mv app.dll Wacs.Transpiled.App_1.dll
+# WASI Preview 1 (wasi-libc / wasi-sdk world)
+wacs aot coremark.wasm --wasi -o coremark
+./coremark 1 1 1 1     # trailing argv → guest
 
-# 3) Create a tiny consumer csproj like Wacs.Bench.Aot's, with these
-#    additions:
-#
-#      <ProjectReference Include="..\Wacs.Transpiler.Lib\..."
-#                        UndefineProperties="PublishAot;PublishTrimmed;..." />
-#      <Reference Include="Wacs.Transpiled.App_1">
-#        <HintPath>$(MSBuildThisFileDirectory)Wacs.Transpiled.App_1.dll</HintPath>
-#        <Private>true</Private>
-#      </Reference>
-#
-# 4) In Program.cs:
-#      using Wacs.Transpiled.App;
-#      var m = new Module();
-#      m.SomeExport(arg);
-#
-# 5) Publish.
-dotnet publish MyHost -c Release -r osx-arm64 -o /tmp/myhost
+# Component with WASI Preview 2
+wacs aot app.component.wasm --wasip2 --entry-point greet -o app
+./app
 ```
 
-The plumbing pain (steps 1–3) is exactly what a future `wacs aot`
-subcommand should automate. The known follow-up work to make
-`wacs aot app.wasm -o app` a single-shot user workflow:
+`wacs aot` does internally what the table-row numbers were originally
+hand-wired for:
 
-- **Stable assembly naming.** `ModuleTranspiler.cs:154` appends a
-  `_<uniqueId>` suffix to avoid in-process collisions; saved-to-static-
-  reference usage needs a predictable name. Add an explicit
-  `assemblyName` parameter to `Transpile` / `SaveAssembly`.
-- **Filename = assembly name on emit.** ILC's resolver requires the
-  on-disk file to be named after the assembly's logical name, so
-  `wacs build` should emit `<assemblyname>.dll` by default rather
-  than letting the consumer pick.
-- **AOT-linked emission mode.** Today every saved .dll's Module ctor
-  routes through a base64 → `Convert.FromBase64String` →
-  `InitDataCodec.Decode` → `InitializeFromEmbedded` wrapper that
-  exists to bridge cross-process state transfer (in-process registry
-  was empty when the .dll loaded). For AOT-linked, transpile and
-  consume are different processes by definition AND the toolchain
-  knows it at emission time. A
-  `TranspilerOptions.EmissionTarget = AotLinked` flag would let the
-  generator emit a Module ctor that directly constructs the
-  `ThinContext` from inlined IL constants and static `byte[]` fields
-  (generalizing the existing `DataSegmentStorage.StaticArrays` mode),
-  dead-stripping the codec / embedded-bytes machinery from the AOT
-  binary entirely. Negligible win on tiny modules, significant for
-  multi-MB-data-segment ones (replaces base64 + binary-decode + heap
-  alloc + memcpy with straight `Buffer.MemoryCopy` from PE-resident
-  bytes).
-- **MSBuild integration.** A `<WasmModule Include="app.wasm" />`
-  item that an SDK target turns into build-time `wacs transpile` +
-  auto-`<Reference>`, OR a `wacs aot` CLI subcommand that scaffolds a
-  throwaway csproj and runs `dotnet publish -p:PublishAot=true`. The
-  CLI form is easier to prototype without a custom SDK.
+1. **Transpile** with a stable assembly name — no `_<uniqueId>`
+   suffix, the on-disk file matches the assembly's logical name so
+   ILC's resolver finds it.
+2. **Scaffold** a throwaway consumer csproj that statically
+   `<Reference>`s the .dll plus the WACS runtime support assemblies.
+   For `--wasi` the scaffold pulls in `WACS.WASI.Preview1` plus
+   `WACS.HostBindings.SourceGen`, which Roslyn-generates the
+   `IImports` adapter that wires the wasm's
+   `wasi_snapshot_preview1.*` imports straight to the
+   `[WacsImport]`-annotated statics. No reflection, no
+   `DispatchProxy`, no runtime `Reflection.Emit`.
+3. **`dotnet publish -p:PublishAot=true -r <rid>`** — ILC pulls the
+   transpiled wasm's IL into the same single native binary as the
+   host. The wasm methods become direct typed CLR calls in the final
+   native code.
+4. **Copy + clean up.** The native binary lands at the requested
+   `-o` path; the temp build dir is removed unless `--keep-temp`.
+
+The `--aot-linked` flag picks the `EmissionTarget.AotLinked`
+emission target, which skips the base64 / `InitDataCodec.Decode`
+codec wrapper that the default emission target carries to bridge
+the saved-to-static-reference path's empty in-process registry.
+AotLinked emits a `Module` ctor that directly constructs the
+`ThinContext` from inlined IL constants — memory + active data
+segments, globals (primitive inits), tables, and active element
+segments are all covered. The trimmer dead-strips the codec
+machinery; the persisted .dll's bytes contain no `__WACSInit` holder
+type, no `InitializeFromEmbedded` reference. Negligible win on tiny
+modules, ~22% size reduction on small modules and significantly more
+on data-segment-heavy ones (replaces base64 + binary-decode + heap
+alloc + memcpy with straight `Buffer.MemoryCopy` from PE-resident
+bytes).
+
+For ad-hoc deeper customization (e.g. multi-input linker
+composition, custom host bindings beyond WASI), use `wacs build` to
+produce a stable-named `.dll` and reference it from your own csproj
+manually — the same shape `wacs aot` scaffolds, but you own the
+plumbing. The csproj `<Reference>` pattern is the same as `wacs
+aot`'s temp scaffold (use `--keep-temp` to inspect a working
+example).
 
 ### Bench code locations
 

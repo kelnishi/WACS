@@ -1,5 +1,83 @@
 # Changelog
 
+## [WACS.Cli 1.2.0 + WACS.WASI.Preview1 0.11.0 + WACS.HostBindings.* 0.1.0] — `wacs aot` end-to-end + WASI rename
+
+A wasm input is now one CLI call away from a self-contained NativeAOT
+native binary:
+
+```bash
+wacs aot app.wasm -o app                          # compute-only
+wacs aot coremark.wasm --wasi -o coremark         # WASI Preview 1
+wacs aot app.component.wasm --wasip2 -o app       # WASI Preview 2
+```
+
+Internally `wacs aot` transpiles the wasm to a stable-named .dll,
+scaffolds a throwaway consumer csproj with the right reference set
+(WACS runtime + the new `WACS.HostBindings.*` source-generated
+adapter for WASI), and runs `dotnet publish -p:PublishAot=true`. The
+final native binary is copied to the requested output path and the
+temp directory is removed (unless `--keep-temp`). No JIT, no
+`Reflection.Emit`, no `Assembly.Load`, no `MethodInfo.Invoke` at run
+time.
+
+### New: `WACS.HostBindings.*` packages
+
+- **`WACS.HostBindings.Abstractions`** — the `[WacsImport]` /
+  `[WacsImportNames]` / `[WacsTranspiledImports]` attributes that mark
+  static methods as wasm import bindings. Tiny, attribute-only, AOT-
+  trim safe. Both `WACS.WASI.Preview1` and `WACS.WASI.Preview2`
+  reference it to annotate their host functions.
+- **`WACS.HostBindings.SourceGen`** — a Roslyn incremental source
+  generator that, at consumer-build time, scans the assembly's
+  `[assembly: WacsTranspiledImports("Ns.IImports")]` reference and
+  emits an `IImports` adapter that wires the transpiled wasm's
+  imports straight to the `[WacsImport]`-annotated statics. No
+  reflection, no DispatchProxy, no runtime IL emission — pure
+  source-gen, fully NativeAOT-compatible.
+- **`Wacs.WASI.Preview1`** — every host function gets an
+  ExecContext-free static entry-point variant alongside the existing
+  instance method, so the source generator can wire them in directly.
+  Behavior unchanged for embedders using the instance API.
+- **`Wacs.WASI.Preview2`** — same treatment for the Component-Model
+  hosts, including the existing `WasiPreview2Bundle` DI registration.
+
+### AotLinked emission
+
+`TranspilerOptions.Emission = EmissionTarget.AotLinked` skips the
+codec wrapper that normally bridges the saved-to-static-reference
+path's empty in-process registry. Direct `new ThinContext(...)` from
+inlined IL constants instead. Now covers memories + active data
+segments, globals (primitive inits), tables, and active element
+segments — i.e. enough to run real wasm modules. Trimmer evidence:
+the `__WACSInit` codec holder type is not present in the persisted
+.dll's bytes. ~22% binary-size reduction on small modules; larger on
+data-segment-heavy ones.
+
+### `WACS.WASIp1` renamed → `WACS.WASI.Preview1`
+
+The `WACS.WASIp1` package has been renamed to `WACS.WASI.Preview1` to
+make room for `WACS.WASI.Preview2` (and eventually `.Preview3`) under
+a single, consistent prefix. The shipped behavior is identical — same
+types, same methods, same conformance posture against
+`wasi-testsuite`.
+
+The old `WACS.WASIp1` package id is now a **metapackage**: it
+transitively pulls in `WACS.WASI.Preview1`, so existing
+`<PackageReference Include="WACS.WASIp1" />` entries continue to
+restore. C# `TypeForwardedTo` cannot bridge a namespace rename, so
+consumer source code must update `using Wacs.WASIp1;` to
+`using Wacs.WASI.Preview1;` (one-shot sed). The metapackage emits a
+build-time warning (`WACS_WASIp1_DEPRECATED`) pointing at the
+migration guide; suppress with
+`<SuppressWacsWasip1DeprecationWarning>true</…>` while you migrate.
+
+The `Wacs.Core.WASIp1` namespace inside `Wacs.Core` (`IBindable`,
+`ErrNo`, `SystemExitException`, etc.) is **not** renamed. Those
+types are interpreter-wiring conventions, not WASI host code.
+
+See [`docs/MIGRATION_WASIp1_to_WASI.md`](docs/MIGRATION_WASIp1_to_WASI.md)
+for the full migration guide and the sed one-liner.
+
 ## [WACS.WASIp1 0.10.0] — wasi-testsuite integration + correctness pass
 
 Wires the dormant `Spec.Test/wasi` submodule (now pinned to
