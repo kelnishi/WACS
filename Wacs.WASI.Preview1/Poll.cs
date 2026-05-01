@@ -24,6 +24,7 @@ using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Wacs.Core.Runtime;
 using Wacs.Core.WASIp1;
+using Wacs.HostBindings;
 using Wacs.WASI.Preview1.Types;
 using ptr = System.Int32;
 using size = System.UInt32;
@@ -56,83 +57,72 @@ namespace Wacs.WASI.Preview1
         /// <param name="neventsPtr"></param>
         /// <returns></returns>
         public ErrNo PollOneoff(ExecContext ctx, ptr inPtr, ptr outPtr, size nsubscriptions, ptr neventsPtr)
+            => (ErrNo)PollOneoffCore(Clock.WacsHost(ctx), _state, inPtr, outPtr, (int)nsubscriptions, neventsPtr);
+
+        [WacsImport("wasi_snapshot_preview1", "poll_oneoff")]
+        public static int PollOneoffCore(WacsHostMemory mem, State state,
+            int inPtr, int outPtr, int nsubscriptions, int neventsPtr)
         {
             if (nsubscriptions == 0)
-                return ErrNo.Inval; // Invalid argument.
-            
-            var mem = ctx.DefaultMemory;
-            
-            Subscription[] subs = new Subscription[nsubscriptions];
-            for (int i = 0; i < nsubscriptions; ++i)
-            {
-                var inMem = mem[inPtr..(inPtr + SubSize)];
-                subs[i] = MemoryMarshal.Read<Subscription>(inMem);
-                inPtr += SubSize;
-            }
-            
-            // Run the async polling operation synchronously
+                return (int)ErrNo.Inval;
+
+            Subscription[] subs = mem.ReadStructs<Subscription>(inPtr, nsubscriptions);
+
             try
             {
                 var events = new List<Event>();
-                ErrNo result = PollAsync(subs.ToList(), events).GetAwaiter().GetResult();
+                ErrNo result = PollAsync(state, subs.ToList(), events)
+                    .GetAwaiter().GetResult();
 
                 if (result != ErrNo.Success)
-                    return result;
-                
-                //Write the events back to memory
+                    return (int)result;
+
                 foreach (var evt in events)
                 {
                     Event vevt = evt;
-                    int size = mem.WriteStruct(outPtr, ref vevt);
-                    outPtr += size;
+                    mem.WriteStruct(outPtr, vevt);
+                    outPtr += SubSize;
                 }
                 mem.WriteInt32(neventsPtr, events.Count);
             }
             catch (Exception)
             {
-                return ErrNo.Inval;
+                return (int)ErrNo.Inval;
             }
-            
-            return ErrNo.Success;
+
+            return (int)ErrNo.Success;
         }
 
-        private async Task<ErrNo> PollAsync(List<Subscription> subscriptions, List<Event> events)
+        private static async Task<ErrNo> PollAsync(State state, List<Subscription> subscriptions, List<Event> events)
         {
-            // Create tasks for all subscriptions
             var tasks = new List<Task<Event?>>();
-
             foreach (var sub in subscriptions)
             {
                 switch (sub.Union.Tag)
                 {
                     case EventType.Clock:
-                        tasks.Add(CreateClockTask(sub));
+                        tasks.Add(CreateClockTask(state, sub));
                         break;
-
                     case EventType.FdRead:
                     case EventType.FdWrite:
-                        tasks.Add(CreateFdTask(sub));
+                        tasks.Add(CreateFdTask(state, sub));
                         break;
                 }
             }
 
-            // Wait for any task to complete
             while (tasks.Count > 0 && events.Count < subscriptions.Count)
             {
                 var completed = await Task.WhenAny(tasks);
                 tasks.Remove(completed);
-
                 var result = await completed;
                 if (result.HasValue)
-                {
                     events.Add(result.Value);
-                }
             }
 
             return 0;
         }
 
-        private async Task<Event?> CreateClockTask(Subscription sub)
+        private static async Task<Event?> CreateClockTask(State state, Subscription sub)
         {
             // Spec: subscription_clock.timeout is in nanoseconds, relative
             // to (or absolute against) the subscription's clock_id. The
@@ -152,7 +142,7 @@ namespace Wacs.WASI.Preview1
             try
             {
                 if (delayMs > 0)
-                    await Task.Delay(delayMs, _state.Cts.Token);
+                    await Task.Delay(delayMs, state.Cts.Token);
 
                 return new Event
                 {
@@ -192,12 +182,11 @@ namespace Wacs.WASI.Preview1
             }
         }
 
-        private async Task<Event?> CreateFdTask(Subscription sub)
+        private static async Task<Event?> CreateFdTask(State state, Subscription sub)
         {
             var fdSub = sub.Union.FdReadWrite;
-        
-            
-            if (!_state.FileDescriptors.TryGetValue(fdSub.Fd, out var fd))
+
+            if (!state.FileDescriptors.TryGetValue(fdSub.Fd, out var fd))
             {
                 return new Event
                 {
