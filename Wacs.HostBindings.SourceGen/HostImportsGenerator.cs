@@ -183,9 +183,16 @@ namespace Wacs.HostBindings.SourceGen
             var stateTypes = new List<ITypeSymbol>();
             var resolvedMethods = new List<(IMethodSymbol Iface, BindingDescriptor? Binding, ITypeSymbol[] StateParams)>();
 
+            // Some transpiled IImports interfaces declare the same method
+            // multiple times when the wasm imports the same name twice (e.g.
+            // wasm-bindgen-style indirect-call shims). Dedupe by signature
+            // so we don't emit duplicate adapter methods (CS0111).
+            var seenSignatures = new HashSet<string>();
             foreach (var ifaceMethod in importsInterface.GetMembers().OfType<IMethodSymbol>())
             {
                 if (ifaceMethod.MethodKind != MethodKind.Ordinary) continue;
+                var sig = ifaceMethod.Name + "(" + FormatParamTypes(ifaceMethod.Parameters) + ")";
+                if (!seenSignatures.Add(sig)) continue;
                 var (mod, name) = ParseImportModuleAndName(ifaceMethod);
                 if (!bindings.TryGetValue((mod, name), out var matches))
                 {
@@ -207,22 +214,18 @@ namespace Wacs.HostBindings.SourceGen
                 }
                 var binding = matches[0];
 
-                // Validate: binding params = (WacsHostMemory, [state0..stateN-1], wasm0..wasmK-1)
-                // where wasm0..wasmK-1 type-match ifaceMethod's params in order.
+                // Validate: binding params = ([WacsHostMemory mem,]
+                //                              [state0..stateN-1,]
+                //                              wasm0..wasmK-1)
+                // where wasm0..wasmK-1 type-match ifaceMethod's params in
+                // order. WacsHostMemory is optional — bindings that don't
+                // touch linear memory (proc_exit, sched_yield, ...) skip it.
                 var bp = binding.Method.Parameters;
-                if (bp.Length < 1 || bp[0].Type.ToDisplayString() != WacsHostMemoryFqn)
-                {
-                    spc.ReportDiagnostic(Diagnostic.Create(
-                        Diagnostics.SignatureMismatch, location: null,
-                        mod, name, binding.Method.Name, ifaceMethod.Name,
-                        FormatParamTypes(ifaceMethod.Parameters),
-                        FormatParamTypes(binding.Method.Parameters)));
-                    resolvedMethods.Add((ifaceMethod, null, Array.Empty<ITypeSymbol>()));
-                    continue;
-                }
+                bool hasMemory = bp.Length >= 1 && bp[0].Type.ToDisplayString() == WacsHostMemoryFqn;
+                int memSlots = hasMemory ? 1 : 0;
 
                 int wasmArgCount = ifaceMethod.Parameters.Length;
-                int stateCount = bp.Length - 1 - wasmArgCount;
+                int stateCount = bp.Length - memSlots - wasmArgCount;
                 if (stateCount < 0)
                 {
                     spc.ReportDiagnostic(Diagnostic.Create(
@@ -238,7 +241,7 @@ namespace Wacs.HostBindings.SourceGen
                 bool ok = true;
                 for (int i = 0; i < wasmArgCount; i++)
                 {
-                    var bindingParam = bp[1 + stateCount + i].Type;
+                    var bindingParam = bp[memSlots + stateCount + i].Type;
                     var ifaceParam = ifaceMethod.Parameters[i].Type;
                     if (!SymbolEqualityComparer.Default.Equals(bindingParam, ifaceParam))
                     {
@@ -257,7 +260,7 @@ namespace Wacs.HostBindings.SourceGen
                 }
 
                 var stateParams = new ITypeSymbol[stateCount];
-                for (int i = 0; i < stateCount; i++) stateParams[i] = bp[1 + i].Type;
+                for (int i = 0; i < stateCount; i++) stateParams[i] = bp[memSlots + i].Type;
 
                 // Dedupe state types into the ctor's parameter list (one ctor
                 // arg per distinct state type, regardless of how many bindings
@@ -362,11 +365,14 @@ namespace Wacs.HostBindings.SourceGen
             else
             {
                 bool isVoid = iface.ReturnsVoid;
+                var bp = binding.Value.Method.Parameters;
+                bool hasMemory = bp.Length >= 1 && bp[0].Type.ToDisplayString() == WacsHostMemoryFqn;
                 sb.Append("            ");
                 if (!isVoid) sb.Append("return ");
                 sb.Append(binding.Value.Method.ContainingType.ToDisplayString()).Append('.');
                 sb.Append(binding.Value.Method.Name).Append('(');
-                var args = new List<string> { "MemoryProvider()" };
+                var args = new List<string>();
+                if (hasMemory) args.Add("MemoryProvider()");
                 foreach (var st in stateParams)
                 {
                     int idx = allStateTypes.FindIndex(t =>
