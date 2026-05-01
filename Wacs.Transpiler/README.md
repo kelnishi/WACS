@@ -854,14 +854,28 @@ dispatches through it.
   segments with non-i31 payloads) throw `NotSupportedException` from
   the codec at transpile time. Most modules — including CoreMark,
   typical emscripten/rustc output, and the spec suite — don't hit this.
-- **Resource constructors with `Result<,>` return** still fall back
-  to the delegate path. Resource INSTANCE methods returning
-  aggregates work end-to-end (verified via wasi-hello-component's
-  `[method]output-stream.blocking-write-and-flush` printing
-  `hello\n` through the bundle). Constructors with aggregate-shaped
-  returns are uncommon (the wasm wire result is the i32 handle for
-  the constructed instance — wrapping that in a Result is a future
-  WIT shape).
+- **Direct-linked import shapes outside the recognized matrix
+  fall back to the delegate-table dispatch.** `CanEmitDirect`
+  rejects unsupported shapes silently — by design, so a single
+  unsupported import in a host package doesn't bring the whole
+  transpile down. The call site keeps the legacy
+  `ImportDelegates[i].Invoke` path for those bindings.
+  When the emit IS attempted on an unsupported shape (e.g. a
+  recognition-vs-emit mismatch in the resolver), the unsupported-
+  pattern paths throw `InvalidOperationException` at IL-emit time
+  with a message naming the offending `(module, entity)` and CLR
+  method — never `InvalidProgramException` at runtime.
+  Concrete shapes that still take the delegate path:
+  - Resource **constructors** wrapping their handle in `Result<,>`
+    (canon-ABI lowers `[constructor]X` to a single i32 handle —
+    fallible construction is expressed as `[static]X.try-make`
+    returning `result<own<X>, err>`, which DOES direct-link).
+  - Variant case payloads of arbitrarily-nested aggregates
+    (`variant<X(list<option<Y>>)>`) — the per-shape branch in
+    `EmitVariantStoreAt` covers the common cases (primitive,
+    string, byte[], primitive[], string[], tuple/record of
+    primitives, `Option<X>`, `Result<X,Y>`, resource handle) but
+    extreme nesting falls back.
 
 ## License
 

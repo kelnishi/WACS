@@ -226,7 +226,22 @@ namespace Wacs.Transpiler.AOT.Component
             if (binding.IsResourceMethod && resourcesType == null)
                 throw new ArgumentNullException(
                     nameof(resourcesType),
-                    "resourcesType is required for resource-method bindings");
+                    "resourcesType is required for resource-method binding "
+                    + binding.Module + "." + binding.Entity);
+
+            // CanEmitDirect is the gate. If we're called for a binding
+            // it would refuse, the per-shape branches below will hit
+            // their defensive throws — but pre-check here so the
+            // message names the offending (module, entity) up front.
+            if (!CanEmitDirect(binding, wasmType, resolver))
+                throw new InvalidOperationException(
+                    "DirectLinkedImportEmit.Emit was called for a binding "
+                    + "that CanEmitDirect rejects: " + binding.Module + "."
+                    + binding.Entity + " (CLR method "
+                    + binding.Method.DeclaringType?.FullName + "."
+                    + binding.Method.Name + "). The call-site emitter "
+                    + "should have routed this to the legacy delegate "
+                    + "dispatch instead — file a bug if this fires.");
 
             var method = binding.Method;
             var clrParams = method.GetParameters();
@@ -2624,6 +2639,22 @@ namespace Wacs.Transpiler.AOT.Component
             // discriminant byte. Caller already stored disc.
             if (armType == typeof(Unit)) return;
 
+            // Resource-interface arm without a configured resources
+            // class is unreachable per CanEmitDirect (the
+            // IsResultArmStorable check requires PreferredResourcesType
+            // to be non-null), but if it ever happens, surface the
+            // gap clearly instead of falling into ResolveStoreMethod
+            // which would emit an obscure "no StoreMethod" throw.
+            if (resolver != null && resolver.IsResourceInterface(armType)
+                && resourcesType == null)
+                throw new InvalidOperationException(
+                    "Cannot emit Result arm of resource-interface type "
+                    + armType.FullName + " without a configured resources "
+                    + "class. Pass resourcesType to "
+                    + "HostPackageResolver.FromAssemblies or use a host "
+                    + "package whose resolver auto-discovers one (e.g. "
+                    + "WasiPreview2Resources).");
+
             // Variant base type — recurse into EmitVariantStoreAt
             // at the arm's offset. Mirrors the nested Option/Result
             // patterns below.
@@ -2829,7 +2860,17 @@ namespace Wacs.Transpiler.AOT.Component
                 else if (underlying == typeof(double)) name = "StoreF64";
                 else if (underlying == typeof(bool)) name = "StoreBool";
                 else throw new InvalidOperationException(
-                    "no StoreMethod for " + t);
+                    "Direct-linked emit fell through to a primitive store "
+                    + "for an unsupported type: " + t.FullName + ". This "
+                    + "usually means a Result-arm / variant-case / "
+                    + "Option-inner shape was recognized as storable but "
+                    + "the per-shape branch in EmitResultArmStore / "
+                    + "EmitVariantStoreAt / EmitOptionStoreAt didn't fire. "
+                    + "Either the IsAggregateReturnSupported recognition "
+                    + "is over-eager for this shape, or a per-shape "
+                    + "branch is missing. Falling back to delegate "
+                    + "dispatch by removing the matching IsResultArmStorable "
+                    + "branch is the safe workaround.");
                 return typeof(PrimitiveStore).GetMethod(name,
                     BindingFlags.Public | BindingFlags.Static)!;
             });
