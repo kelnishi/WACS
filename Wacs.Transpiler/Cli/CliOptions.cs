@@ -20,11 +20,23 @@ namespace Wacs.Transpiler.Cli
     {
         // ---- I/O ----
 
-        [Option('i', "input", Required = true, HelpText = "Input .wasm file.")]
-        public string Input { get; set; } = "";
+        [Option('i', "input", Required = true, Min = 1, Separator = ',',
+            HelpText = "Input .wasm file(s). Repeat or comma-separate to "
+                + "transpile / interpret multiple modules. When more than one "
+                + "is supplied, the ModuleLinker composes them — module name "
+                + "for cross-module imports defaults to the file basename.")]
+        public IEnumerable<string> Inputs { get; set; } = System.Array.Empty<string>();
 
-        [Option('o', "output", Required = true, HelpText = "Output .dll path.")]
+        [Option('o', "output", Required = true,
+            HelpText = "Output .dll path. With multiple inputs, this is the path "
+                + "for the LAST input; siblings land at <basename>.dll alongside.")]
         public string Output { get; set; } = "";
+
+        [Option("engine", Default = "transpiler",
+            HelpText = "Execution engine: transpiler (compile to .NET assembly, "
+                + "default) or interpreter (parse + run in-process via the WACS "
+                + "interpreter, no .dll emitted).")]
+        public string Engine { get; set; } = "transpiler";
 
         [Option('n', "namespace", Default = "CompiledWasm",
             HelpText = "Root namespace for generated types.")]

@@ -69,17 +69,22 @@ namespace Wacs.Transpiler.AOT.Component
                 var importsStub = ImportDispatcher.Create(importsType,
                     new Dictionary<string, Func<object?[], object?>>());
 
-                // Second param (when present): host bundle. v0 builds
-                // the WASI Preview 2 bundle via the DI extension.
+                // Bundle (host functions) + resources (handle
+                // table bridge) both come from the same DI scope
+                // so they share a single ResourceContext — that's
+                // the property that lets stdout.get-stdout's
+                // returned handle resolve back through
+                // streams.[method]output-stream.blocking-write-and-flush.
                 object? bundle = null;
+                object? resources = null;
                 if (ctorParams.Length >= 2)
-                    bundle = BuildWasiPreview2Bundle();
+                    (bundle, resources) = BuildWasip2BundleAndResources();
 
                 instance = ctorParams.Length switch
                 {
                     1 => ctor.Invoke(new object?[] { importsStub }),
                     2 => ctor.Invoke(new object?[] { importsStub, bundle }),
-                    3 => ctor.Invoke(new object?[] { importsStub, bundle, null }),
+                    3 => ctor.Invoke(new object?[] { importsStub, bundle, resources }),
                     _ => throw new InvalidOperationException(
                         "Unsupported module ctor arity " + ctorParams.Length),
                 };
@@ -229,11 +234,16 @@ namespace Wacs.Transpiler.AOT.Component
             return new string(chars);
         }
 
-        private static object BuildWasiPreview2Bundle()
+        // Build the bundle + resources pair from a single
+        // DI scope so they share a single per-instance
+        // ResourceContext. The scope lives for the rest of the
+        // process — Main returns shortly after the export
+        // invocation. Reflective construction keeps this library
+        // free of compile-time refs on Wacs.WASI.Preview2.* and
+        // Microsoft.Extensions.DependencyInjection.
+        private static (object bundle, object? resources)
+            BuildWasip2BundleAndResources()
         {
-            // Locate the bundle / DI extension via reflection so the
-            // transpiler library doesn't carry a hard reference on
-            // the WASI Preview 2 packages.
             var diAsmName = "Wacs.WASI.Preview2.DependencyInjection";
             Assembly diAsm;
             try { diAsm = Assembly.Load(diAsmName); }
@@ -248,15 +258,13 @@ namespace Wacs.Transpiler.AOT.Component
                 diAsmName + ".WasiPreview2Bundle")
                 ?? throw new InvalidOperationException(
                     "Could not find WasiPreview2Bundle in " + diAsmName);
+            var resourcesType = diAsm.GetType(
+                diAsmName + ".WasiPreview2Resources");
             var extType = diAsm.GetType(
                 diAsmName + ".WasiPreview2ServiceCollectionExtensions")
                 ?? throw new InvalidOperationException(
                     "Could not find WasiPreview2ServiceCollectionExtensions in " + diAsmName);
 
-            // Microsoft.Extensions.DependencyInjection lives in two
-            // assemblies — Abstractions for ServiceCollection /
-            // ServiceProvider extensions, the main package for the
-            // ServiceCollection class itself.
             var mediAsm = Assembly.Load("Microsoft.Extensions.DependencyInjection");
             var mediAbstractionsAsm = Assembly.Load("Microsoft.Extensions.DependencyInjection.Abstractions");
 
@@ -265,15 +273,12 @@ namespace Wacs.Transpiler.AOT.Component
             var iServiceCollectionType = mediAbstractionsAsm.GetType(
                 "Microsoft.Extensions.DependencyInjection.IServiceCollection")!;
 
-            // services = new ServiceCollection();
             var services = Activator.CreateInstance(serviceCollectionType)!;
 
-            // services.AddWasiPreview2();
             var addMethod = extType.GetMethod("AddWasiPreview2",
                 BindingFlags.Public | BindingFlags.Static)!;
             addMethod.Invoke(null, new object?[] { services, null });
 
-            // sp = services.BuildServiceProvider();
             var containerExtType = mediAsm.GetType(
                 "Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions")!;
             var buildSp = containerExtType.GetMethods(
@@ -284,10 +289,19 @@ namespace Wacs.Transpiler.AOT.Component
                         == iServiceCollectionType);
             var sp = buildSp.Invoke(null, new object?[] { services })!;
 
-            // bundle = sp.GetRequiredService<WasiPreview2Bundle>();
-            var iServiceProviderType = typeof(IServiceProvider);
+            // Create a scope so InstanceLifetime=Scoped services
+            // (ResourceContext, WasiPreview2Resources) resolve.
             var spExtType = mediAbstractionsAsm.GetType(
                 "Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions")!;
+            var createScope = spExtType.GetMethods(
+                BindingFlags.Public | BindingFlags.Static)
+                .First(m => m.Name == "CreateScope"
+                    && m.GetParameters().Length == 1);
+            var scope = createScope.Invoke(null, new object?[] { sp })!;
+            var scopeSp = scope.GetType()
+                .GetProperty("ServiceProvider")!.GetValue(scope)!;
+
+            var iServiceProviderType = typeof(IServiceProvider);
             var getRequired = spExtType.GetMethods(
                 BindingFlags.Public | BindingFlags.Static)
                 .First(m => m.Name == "GetRequiredService"
@@ -295,8 +309,15 @@ namespace Wacs.Transpiler.AOT.Component
                     && m.GetParameters().Length == 1
                     && m.GetParameters()[0].ParameterType
                         == iServiceProviderType);
-            var typed = getRequired.MakeGenericMethod(bundleType);
-            return typed.Invoke(null, new object?[] { sp })!;
+
+            var bundle = getRequired.MakeGenericMethod(bundleType)
+                .Invoke(null, new object?[] { scopeSp })!;
+            object? resources = null;
+            if (resourcesType != null)
+                resources = getRequired.MakeGenericMethod(resourcesType)
+                    .Invoke(null, new object?[] { scopeSp });
+
+            return (bundle, resources);
         }
     }
 }

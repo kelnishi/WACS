@@ -48,6 +48,35 @@ diagnostics:
 wasm-transpile -i module.wasm -o module.dll -v
 ```
 
+### Multiple inputs: cross-module composition
+
+Pass `-i` multiple times (or comma-separate) to transpile/interpret
+N modules in one shot. Each input's exports become discoverable
+under the file basename so cross-module imports resolve through
+the shared `WasmRuntime`'s binding table — the same pattern the
+spec test runner uses for multi-module fixtures.
+
+```bash
+# Two modules: b.wasm imports "a.double" from a.wasm.
+# Transpile both, save sibling .dlls in the output directory.
+# The last input drives the -o filename; siblings land at <basename>.dll.
+wasm-transpile -i a.wasm,b.wasm -o b.dll
+# wrote a.dll, b.dll
+
+# Or run through the interpreter (no .dll emitted), invoking the
+# last module's named export with positional args.
+wasm-transpile -i a.wasm,b.wasm -o b.dll \
+  --engine interpreter --run --entry-point quadruple 7
+# 28
+```
+
+The transpiler emits one `.dll` per input. To compose them at load
+time, register each module under its basename so cross-module
+import lookups succeed — see the
+[Library Usage](#library-usage) section for the
+`ImportDispatcher.Create` pattern that wires `b.IImports` to A's
+exported methods.
+
 ### Options that map to `TranspilerOptions`
 
 | Flag | Values | Default | Purpose |

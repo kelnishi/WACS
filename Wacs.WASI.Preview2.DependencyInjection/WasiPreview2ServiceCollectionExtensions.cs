@@ -151,6 +151,20 @@ namespace Wacs.WASI.Preview2.DependencyInjection
             services.TryAdd(new ServiceDescriptor(
                 typeof(ResourceContext), typeof(ResourceContext),
                 opts.InstanceLifetime));
+
+            // WasiPreview2Resources — the (GetResource, AllocateResource)
+            // bridge the transpiler's direct-linked resource-method
+            // IL targets. Shares the per-instance ResourceContext
+            // so handles allocated from one interface's bundle
+            // method (e.g. IStdout.GetStdout returning own<output-stream>)
+            // resolve back to the same instance from another
+            // interface's instance-method dispatch (e.g.
+            // IOutputStream.BlockingWriteAndFlush).
+            services.TryAdd(new ServiceDescriptor(
+                typeof(WasiPreview2Resources),
+                sp => new WasiPreview2Resources(
+                    sp.GetRequiredService<ResourceContext>()),
+                opts.InstanceLifetime));
             services.TryAdd(new ServiceDescriptor(
                 typeof(WasmRuntime), typeof(WasmRuntime),
                 opts.InstanceLifetime));
