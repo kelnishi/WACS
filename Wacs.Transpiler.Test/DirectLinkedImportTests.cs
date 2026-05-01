@@ -807,6 +807,49 @@ namespace Wacs.Transpiler.Test
             public Result<Unit, Issue> Write(byte[] contents) => _v;
         }
 
+        // ====== [static]X.foo returning Result<own<X>, primitive> =
+        // The fallible-factory shape — symmetric to wasi-hello but
+        // through the static-method path. WIT:
+        //   resource gadget {
+        //     try-make: static func() -> result<own<gadget>, u32>;
+        //   }
+        // Wire (static, retArea-style aggregate return):
+        //   (i32 retArea) -> ()
+        // retArea layout: u8 disc @0, value @4 (handle on Ok,
+        // u32 on Err).
+
+        [WitSource(@"resource gadget { try-make: static func() -> result<own<gadget>, u32>; }",
+            Package = "my:test@1.0.0", Interface = "static-fac-env",
+            Item = "gadget")]
+        public interface IGadget
+        {
+            [WitSource(@"id: func() -> u32;",
+                Package = "my:test@1.0.0", Interface = "static-fac-env",
+                Item = "gadget.id")]
+            uint Id();
+
+            [WitSource(@"try-make: static func() -> result<own<gadget>, u32>;",
+                Package = "my:test@1.0.0", Interface = "static-fac-env",
+                Item = "[static]gadget.try-make")]
+            static Result<IGadget, uint> TryMake() =>
+                Result<IGadget, uint>.FromOk(new FakeGadget(0xDEAD));
+        }
+
+        public sealed class FakeGadget : IGadget
+        {
+            private readonly uint _id;
+            public FakeGadget(uint id) { _id = id; }
+            public uint Id() => _id;
+        }
+
+        public sealed class GadgetBundle
+        {
+            // Empty — gadget is a resource, dispatched via
+            // ctx.Resources. The static method goes via static
+            // dispatch and doesn't need a bundle property.
+            public GadgetBundle() { }
+        }
+
         // ====== Variant return with payload-bearing cases ========
         // variant code { ok, count(u32), max(u32) }: 1 disc + 1
         // u32 joined-flat payload slot (4 bytes payload aligned at
@@ -2786,6 +2829,63 @@ namespace Wacs.Transpiler.Test
             0x10, 0x00,
             0x41, 0x08,
             0x2D, 0x00, 0x00,
+            0x0B,
+        };
+
+        // [static]gadget.try-make returning Result<own<gadget>, u32>.
+        // Wire: (i32 retArea) -> (). retArea layout:
+        //   byte[0] = Result disc (0=Ok, 1=Err)
+        //   byte[4..7] = value (handle when Ok, u32 when Err)
+        // Wasm calls try-make(retArea=0), returns memory[4] (the
+        // Ok-arm handle). Pre-resolved Resources allocates handle 1
+        // (first allocation, _nextHandle starts at 1).
+        // Module: my:test/static-fac-env@1.0.0,
+        // entity: [static]gadget.try-make
+        private static byte[] BuildStaticFacResultOwnPrimFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types
+            //   0: (i32) → ()        [imp(retArea)]
+            //   1: () → i32          [call_try_make()]
+            // size = count(1) + type0(4) + type1(4) = 9 = 0x09
+            0x01, 0x09, 0x02,
+            0x60, 0x01, 0x7F, 0x00,
+            0x60, 0x00, 0x01, 0x7F,
+            // Import section
+            // module: "my:test/static-fac-env@1.0.0" (28)
+            // entity: "[static]gadget.try-make" (23)
+            // size = 1 + 1 + 28 + 1 + 23 + 2 = 56 = 0x38
+            0x02, 0x38, 0x01,
+            0x1C,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x73, 0x74, 0x61, 0x74, 0x69, 0x63, 0x2D, 0x66,
+            0x61, 0x63, 0x2D, 0x65, 0x6E, 0x76, 0x40, 0x31,
+            0x2E, 0x30, 0x2E, 0x30,
+            0x17,
+            0x5B, 0x73, 0x74, 0x61, 0x74, 0x69, 0x63, 0x5D,
+            0x67, 0x61, 0x64, 0x67, 0x65, 0x74, 0x2E, 0x74,
+            0x72, 0x79, 0x2D, 0x6D, 0x61, 0x6B, 0x65,
+            0x00, 0x00,
+            // Function section: 1 func of type 1
+            0x03, 0x02, 0x01, 0x01,
+            // Memory: 1 page
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // Export section: 1 export ("call_try_make" → func 1)
+            // size = 1 + 1+13+1+1 = 17 = 0x11
+            0x07, 0x11, 0x01,
+            0x0D, 0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x74, 0x72, 0x79, 0x5F, 0x6D, 0x61, 0x6B, 0x65, 0x00, 0x01,
+            // Code section: 1 body
+            // body: locals(1) + i32.const 0(2) + call(2) +
+            //       i32.const 4(2) + i32.load align=2 offset=0(3) +
+            //       end(1) = 11
+            // size = 1 + 1 + 11 = 13 = 0x0D
+            0x0A, 0x0D, 0x01,
+            0x0B,
+            0x00,
+            0x41, 0x00,
+            0x10, 0x00,
+            0x41, 0x04,
+            0x28, 0x02, 0x00,
             0x0B,
         };
 
@@ -8868,6 +8968,76 @@ namespace Wacs.Transpiler.Test
                 Array.Empty<object>());
             Assert.IsType<int>(raw);
             // memory[8] = Issue.Failed disc (case 1).
+            Assert.Equal(1, (int)raw);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_StaticResMethodResultOwnPrim_OkArmAllocatesHandle()
+        {
+            // [static]gadget.try-make returning Result<own<gadget>, u32>.
+            // Symmetric to the wasi-hello fix but through the
+            // STATIC-method dispatch path. Bundle's Ok arm carries
+            // an IGadget instance — the IL must allocate a handle
+            // and write it at retArea[4]. Verifies the same
+            // emitAggregateReturn path works for static methods
+            // (not just instance methods).
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/static-fac-env@1.0.0", "[static]gadget.try-make"),
+                _ => throw new InvalidOperationException(
+                    "stub for try-make must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildStaticFacResultOwnPrimFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IGadget).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(GadgetBundle),
+                resourcesType: typeof(TestResources));
+
+            Assert.True(resolver.TryResolve(
+                "my:test/static-fac-env@1.0.0",
+                "[static]gadget.try-make", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.StaticFacResOwn", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Single(options.ResolverImportBindings!);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    ["my_test_static_fac_env_1_0_0__static_gadget_try_make"]
+                        = _ => throw new InvalidOperationException(
+                            "IImports stub must not be invoked"),
+                });
+
+            var resources = new TestResources();
+            var bundle = new GadgetBundle();
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            var callTryMake = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_try_make"))!;
+            object? raw = callTryMake.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<int>(raw);
+            // First allocation in fresh TestResources gets handle 1.
             Assert.Equal(1, (int)raw);
         }
 
