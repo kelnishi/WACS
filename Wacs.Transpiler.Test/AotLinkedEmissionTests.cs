@@ -82,20 +82,36 @@ namespace Wacs.Transpiler.Test
         }
 
         [Fact]
-        public void AotLinkedThrowsOnModuleWithMemory()
+        public void AotLinkedSupportsMemoryAndActiveDataSegment()
         {
-            // Same minimal module-with-memory as CrossProcessLoadTests.BuildMemoryWasm —
-            // declares (memory 1) and a data segment, both currently outside the
-            // AotLinked MVP scope.
+            // Module with (memory 1) + data segment "*" at offset 0,
+            // exporting `read` returning the byte at offset 0.
+            // AotLinked must allocate the memory and copy the data
+            // segment in the ctor so the export sees 0x2A.
             var (modInst, runtime) = ParseAndInstantiate(BuildMemoryWasm());
 
+            var result = new ModuleTranspiler("Wacs.AotLink.Mem",
+                new TranspilerOptions { Emission = EmissionTarget.AotLinked })
+                .Transpile(modInst, runtime, "MemMod");
+
+            int read = (int)Invoke(result, "read");
+            Assert.Equal(0x2A, read);
+        }
+
+        [Fact]
+        public void AotLinkedThrowsOnModuleWithGlobals()
+        {
+            // Globals still aren't supported by the AotLinked ctor —
+            // confirm the feasibility check still trips on them.
+            var (modInst, runtime) = ParseAndInstantiate(BuildGlobalWasm());
+
             var ex = Assert.Throws<InvalidOperationException>(() =>
-                new ModuleTranspiler("Wacs.AotLink.MemReject",
+                new ModuleTranspiler("Wacs.AotLink.GlobReject",
                     new TranspilerOptions { Emission = EmissionTarget.AotLinked })
-                    .Transpile(modInst, runtime, "MemMod"));
+                    .Transpile(modInst, runtime, "GlobMod"));
 
             Assert.Contains("AotLinked", ex.Message);
-            Assert.Contains("memories", ex.Message);
+            Assert.Contains("globals", ex.Message);
         }
 
         // -----------------------------------------------------------------
@@ -128,6 +144,24 @@ namespace Wacs.Transpiler.Test
             0x03, 0x02, 0x01, 0x00,
             0x07, 0x07, 0x01, 0x03, 0x61, 0x64, 0x64, 0x00, 0x00,
             0x0A, 0x09, 0x01, 0x07, 0x00, 0x20, 0x00, 0x20, 0x01, 0x6A, 0x0B,
+        };
+
+        // (module
+        //   (global $g i32 (i32.const 99))
+        //   (func (export "read") (result i32) global.get $g))
+        private static byte[] BuildGlobalWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // type: () -> i32
+            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F,
+            // function: 1 func, type 0
+            0x03, 0x02, 0x01, 0x00,
+            // global: 1 global, i32 const 99
+            0x06, 0x06, 0x01, 0x7F, 0x00, 0x41, 0x63, 0x0B,
+            // export: "read" -> func 0
+            0x07, 0x08, 0x01, 0x04, 0x72, 0x65, 0x61, 0x64, 0x00, 0x00,
+            // code: global.get 0; end
+            0x0A, 0x06, 0x01, 0x04, 0x00, 0x23, 0x00, 0x0B,
         };
 
         // (module

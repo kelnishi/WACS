@@ -594,6 +594,9 @@ namespace Wacs.Transpiler.AOT
             // from ModuleType so it can live alongside the Module class
             // and be referenced from Module ctor IL (Ldsfld on its Data).
             _embeddedInitType?.CreateType();
+            // Same for the AotLinked-mode data-segment holder.
+            FinalizeAotDataHolder();
+            _aotDataType?.CreateType();
             return ModuleType?.CreateType();
         }
 
@@ -610,24 +613,217 @@ namespace Wacs.Transpiler.AOT
         /// thrower keeps users from silently shipping a Module class with
         /// missing initialization.
         /// </summary>
+        // ============================================================
+        // AotLinked ctor body emission
+        // ============================================================
+
+        // Holder type with one static byte[] field per active data
+        // segment. Built lazily on first call to GetAotDataSegmentField.
+        private TypeBuilder? _aotDataType;
+        private FieldBuilder?[]? _aotDataFields;
+
+        /// <summary>
+        /// Emit the IL body for the AotLinked Module ctor. Runs after
+        /// <c>base()</c>; leaves a fully-initialized <see cref="ThinContext"/>
+        /// in <paramref name="ctxLocal"/> so the standard wiring (imports,
+        /// FuncTable, BindTableDelegates) can take over.
+        ///
+        /// <para>Coverage today: empty modules + memories + active data
+        /// segments. Tables, globals, element segments, GC inits, and
+        /// deferred globals fall back to <c>Standard</c> via
+        /// <see cref="AssertAotLinkedFeasible"/>.</para>
+        /// </summary>
+        private void EmitAotLinkedCtorBody(ILGenerator il, LocalBuilder ctxLocal)
+        {
+            if (_initDataId < 0) PrepareInitData();
+            var data = InitRegistry.Get(_initDataId);
+
+            // (1) Allocate MemoryInstance[N] from inlined limits.
+            //     ctx = new ThinContext(memories, null, null, null, null);
+            EmitMemoryArray(il, data);
+            for (int i = 0; i < 4; i++) il.Emit(OpCodes.Ldnull);
+            var standaloneCtor = typeof(ThinContext).GetConstructor(new[]
+            {
+                typeof(MemoryInstance[]),
+                typeof(TableInstance[]),
+                typeof(GlobalInstance[]),
+                typeof(Delegate[]),
+                typeof(Delegate[]),
+            })!;
+            il.Emit(OpCodes.Newobj, standaloneCtor);
+            il.Emit(OpCodes.Stloc, ctxLocal);
+
+            // (2) Copy each active data segment into its memory at offset.
+            EmitDataSegmentCopies(il, ctxLocal, data);
+        }
+
+        /// <summary>
+        /// IL: <c>new MemoryInstance[N] { new MemoryInstance(new MemoryType((uint)min[0], (uint?)max[0])), ... }</c>.
+        /// Pushes the memories array onto the stack.
+        /// </summary>
+        private void EmitMemoryArray(ILGenerator il, ModuleInitData data)
+        {
+            int n = data.Memories.Length;
+            il.Emit(OpCodes.Ldc_I4, n);
+            il.Emit(OpCodes.Newarr, typeof(MemoryInstance));
+            if (n == 0) return;
+
+            var memoryTypeCtor = typeof(MemoryType).GetConstructor(new[]
+                { typeof(uint), typeof(uint?), typeof(Wacs.Core.Types.Defs.AddrType) })!;
+            var nullableUintCtor = typeof(uint?).GetConstructor(new[] { typeof(uint) })!;
+            var memoryInstanceCtor = typeof(MemoryInstance).GetConstructor(new[] { typeof(MemoryType) })!;
+
+            for (int i = 0; i < n; i++)
+            {
+                var (min, max) = data.Memories[i];
+                il.Emit(OpCodes.Dup);
+                il.Emit(OpCodes.Ldc_I4, i);
+
+                // new MemoryType((uint)min, max.HasValue ? (uint?)max : default(uint?), AddrType.I32)
+                il.Emit(OpCodes.Ldc_I4, (int)(uint)min);
+                if (max.HasValue)
+                {
+                    il.Emit(OpCodes.Ldc_I4, (int)(uint)max.Value);
+                    il.Emit(OpCodes.Newobj, nullableUintCtor);
+                }
+                else
+                {
+                    var nullableLoc = il.DeclareLocal(typeof(uint?));
+                    il.Emit(OpCodes.Ldloca, nullableLoc);
+                    il.Emit(OpCodes.Initobj, typeof(uint?));
+                    il.Emit(OpCodes.Ldloc, nullableLoc);
+                }
+                il.Emit(OpCodes.Ldc_I4, (int)Wacs.Core.Types.Defs.AddrType.I32);
+                il.Emit(OpCodes.Newobj, memoryTypeCtor);
+
+                il.Emit(OpCodes.Newobj, memoryInstanceCtor);
+                il.Emit(OpCodes.Stelem_Ref);
+            }
+        }
+
+        /// <summary>
+        /// IL: for each active data segment, copy the segment's bytes
+        /// (loaded from a static <c>__WACSAotData.Segment_N</c> field) into
+        /// the right memory's <c>Data</c> array at the right offset via
+        /// <see cref="Buffer.BlockCopy"/>.
+        /// </summary>
+        private void EmitDataSegmentCopies(ILGenerator il, LocalBuilder ctxLocal, ModuleInitData data)
+        {
+            if (data.ActiveDataSegments.Length == 0) return;
+
+            var memoriesField = typeof(ThinContext).GetField(nameof(ThinContext.Memories))!;
+            var memoryDataField = typeof(MemoryInstance).GetField(nameof(MemoryInstance.Data))!;
+            var blockCopyMethod = typeof(Buffer).GetMethod(nameof(Buffer.BlockCopy),
+                new[] { typeof(Array), typeof(int), typeof(Array), typeof(int), typeof(int) })!;
+
+            foreach (var (memIdx, offset, segId) in data.ActiveDataSegments)
+            {
+                if (!data.SavedDataSegments.TryGetValue(segId, out var bytes) || bytes == null) continue;
+                if (bytes.Length == 0) continue;
+                var segField = GetAotDataSegmentField(segId, bytes);
+
+                // Buffer.BlockCopy(__WACSAotData.Segment_N, 0,
+                //                  ctx.Memories[memIdx].Data, (int)offset,
+                //                  bytes.Length);
+                il.Emit(OpCodes.Ldsfld, segField);
+                il.Emit(OpCodes.Ldc_I4_0);
+
+                il.Emit(OpCodes.Ldloc, ctxLocal);
+                il.Emit(OpCodes.Ldfld, memoriesField);
+                il.Emit(OpCodes.Ldc_I4, memIdx);
+                il.Emit(OpCodes.Ldelem_Ref);
+                il.Emit(OpCodes.Ldfld, memoryDataField);
+
+                il.Emit(OpCodes.Ldc_I4, (int)offset);
+                il.Emit(OpCodes.Ldc_I4, bytes.Length);
+                il.Emit(OpCodes.Call, blockCopyMethod);
+            }
+        }
+
+        /// <summary>
+        /// Get-or-create a static <c>byte[]</c> field on the
+        /// <c>__WACSAotData</c> holder type, populated from
+        /// <paramref name="bytes"/> via a base64-decode in the holder's
+        /// static ctor. Same workaround as <see cref="EmitEmbeddedInitData"/>:
+        /// <c>DefineInitializedData</c> trips a Lokad.ILPack NRE, so we
+        /// stash a base64 string literal that decodes once at first access.
+        /// </summary>
+        private FieldBuilder GetAotDataSegmentField(int segId, byte[] bytes)
+        {
+            if (_aotDataType == null)
+            {
+                _aotDataType = _moduleBuilder.DefineType(
+                    $"{_namespace}.__WACSAotData",
+                    TypeAttributes.Public | TypeAttributes.Abstract | TypeAttributes.Sealed);
+                // The maximum segId we see at transpile time bounds the array.
+                _aotDataFields = new FieldBuilder?[InitRegistry.Get(_initDataId)
+                    .SavedDataSegments.Keys.DefaultIfEmpty(0).Max() + 1];
+            }
+            if (segId < _aotDataFields!.Length && _aotDataFields[segId] != null)
+                return _aotDataFields[segId]!;
+
+            // Grow the array if we hit a sparse / out-of-range segId.
+            if (segId >= _aotDataFields.Length)
+            {
+                var grown = new FieldBuilder?[segId + 1];
+                Array.Copy(_aotDataFields, grown, _aotDataFields.Length);
+                _aotDataFields = grown;
+            }
+
+            var field = _aotDataType.DefineField(
+                $"Segment_{segId}", typeof(byte[]),
+                FieldAttributes.Public | FieldAttributes.Static | FieldAttributes.InitOnly);
+            _aotDataFields[segId] = field;
+            return field;
+        }
+
+        /// <summary>
+        /// Once all data-segment fields have been declared, emit the
+        /// <c>__WACSAotData</c> static ctor that base64-decodes the bytes
+        /// for each. Called from <see cref="Generate"/> after the Module
+        /// class has fully wired its references to these fields, so the
+        /// holder's metadata is final before <c>CreateType()</c>.
+        /// </summary>
+        private void FinalizeAotDataHolder()
+        {
+            if (_aotDataType == null || _aotDataFields == null) return;
+            var data = InitRegistry.Get(_initDataId);
+            var fromBase64 = typeof(Convert).GetMethod(
+                nameof(Convert.FromBase64String),
+                BindingFlags.Public | BindingFlags.Static,
+                binder: null,
+                types: new[] { typeof(string) },
+                modifiers: null)!;
+
+            var cctor = _aotDataType.DefineTypeInitializer();
+            var il = cctor.GetILGenerator();
+            for (int segId = 0; segId < _aotDataFields.Length; segId++)
+            {
+                var field = _aotDataFields[segId];
+                if (field == null) continue;
+                if (!data.SavedDataSegments.TryGetValue(segId, out var bytes) || bytes == null)
+                    continue;
+                il.Emit(OpCodes.Ldstr, Convert.ToBase64String(bytes));
+                il.Emit(OpCodes.Call, fromBase64);
+                il.Emit(OpCodes.Stsfld, field);
+            }
+            il.Emit(OpCodes.Ret);
+        }
+
         private void AssertAotLinkedFeasible()
         {
             if (_initDataId < 0) PrepareInitData();
             var data = InitRegistry.Get(_initDataId);
 
-            // Only flag features that the AotLinked `new ThinContext()` ctor would
-            // leave uninitialized AND that the emitted function IL would actually
-            // reach. TypeHashes / TypeIsFunc, for instance, are populated on any
-            // module declaring a type — but they're only read by ref.test/ref.cast
-            // code, which fib-style modules never emit. For the MVP, we trust the
-            // user to only enable AotLinked on modules that don't use those code
-            // paths; they'll be supported as the AotLinked ctor grows.
+            // Only flag features that the AotLinked ctor still doesn't
+            // initialize. As of this commit:
+            //   • memories + active data segments     — supported
+            //   • everything else (tables, globals, element segments,
+            //     GC globals, deferred globals, GC element values) —
+            //     coverage will grow incrementally
             var unsupported = new List<string>();
-            if (data.Memories.Length > 0)              unsupported.Add($"{data.Memories.Length} memories");
             if (data.Tables.Length > 0)                unsupported.Add($"{data.Tables.Length} tables");
             if (data.Globals.Length > 0)               unsupported.Add($"{data.Globals.Length} globals");
-            if (data.ActiveDataSegments.Length > 0)    unsupported.Add($"{data.ActiveDataSegments.Length} active data segments");
-            if (data.SavedDataSegments.Count > 0)      unsupported.Add($"{data.SavedDataSegments.Count} saved data segments");
             if (data.ActiveElementSegments.Length > 0) unsupported.Add($"{data.ActiveElementSegments.Length} active element segments");
             if (data.GcGlobalInits.Count > 0)          unsupported.Add($"{data.GcGlobalInits.Count} GC global inits");
             if (data.DeferredGlobalInits.Count > 0)    unsupported.Add($"{data.DeferredGlobalInits.Count} deferred global inits");
@@ -751,21 +947,7 @@ namespace Wacs.Transpiler.AOT
             if (_options?.Emission == EmissionTarget.AotLinked)
             {
                 AssertAotLinkedFeasible();
-                // ThinContext ctx = new ThinContext(null, null, null, null, null);
-                // (the standalone ctor's params are optional in C# but the IL sig
-                // has all five — load nulls and let the ctor's null-coalescing
-                // initializer fill in Array.Empty<T>() for each.)
-                var standaloneCtor = typeof(ThinContext).GetConstructor(new[]
-                {
-                    typeof(MemoryInstance[]),
-                    typeof(TableInstance[]),
-                    typeof(GlobalInstance[]),
-                    typeof(Delegate[]),
-                    typeof(Delegate[]),
-                })!;
-                for (int i = 0; i < 5; i++) il.Emit(OpCodes.Ldnull);
-                il.Emit(OpCodes.Newobj, standaloneCtor);
-                il.Emit(OpCodes.Stloc, ctxLocal);
+                EmitAotLinkedCtorBody(il, ctxLocal);
             }
             else
             {
