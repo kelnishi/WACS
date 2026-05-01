@@ -39,6 +39,19 @@ namespace Wacs.Transpiler.Cli
 
         public static int Main(string[] args)
         {
+            // Deprecation banner: wasm-transpile is superseded by the
+            // unified `wacs` CLI (WACS.Cli). The legacy tool keeps
+            // working unchanged so existing pipelines don't break,
+            // but every invocation surfaces the migration path on
+            // stderr (so it doesn't pollute --help / --version /
+            // captured-stdout flows).
+            Console.Error.WriteLine(
+                "[deprecation] wasm-transpile is deprecated and will not "
+                + "receive new features.");
+            Console.Error.WriteLine(
+                "[deprecation] Migrate to: dotnet tool install -g WACS.Cli "
+                + "&& wacs run/build/inspect");
+
             int exit = ExitOk;
             Parser.Default.ParseArguments<CliOptions>(args)
                 .WithParsed(opts => exit = Run(opts))
