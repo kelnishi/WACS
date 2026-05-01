@@ -14,7 +14,10 @@ The numbers below come from `Wacs.Bench/Coldstart.cs` running on
 macOS / arm64 / net8.0 Release, 2026-05-01. Reproduce with:
 
 ```bash
-dotnet run -c Release --project Wacs.Bench -- coldstart
+dotnet run -c Release --project Wacs.Bench -- coldstart            # JIT-only baseline
+dotnet publish Wacs.Bench -c Release -r osx-arm64 \
+    --self-contained -p:PublishReadyToRun=true -o /tmp/wacs-r2r
+/tmp/wacs-r2r/Wacs.Bench coldstart                                 # R2R numbers
 ```
 
 The bench spawns one fresh child process per runtime (so the .NET CLR +
@@ -77,22 +80,24 @@ Cold-start path: `LoadFromStream` → resolve types → `Activator
 
 `fib(100)` — trivial body, exposes the per-runtime startup floor.
 
-| runtime            | cold (µs) | subsequent median (µs) |
-|--------------------|----------:|----------------------:|
-| interp-poly        |    35,676 |                   155 |
-| interp-switch      |    45,230 |                   129 |
-| transpiler         |    54,737 |                   572 |
-| **transpiler-saved** |  **1,715** |                  **458** |
+| runtime            | JIT-only cold (µs) | R2R cold (µs) | R2R speedup |
+|--------------------|-------------------:|--------------:|------------:|
+| interp-poly        |             35,676 |        24,336 |       1.47× |
+| interp-switch      |             45,230 |        16,396 |       2.76× |
+| transpiler         |             54,737 |        29,983 |       1.83× |
+| **transpiler-saved** |          **1,715** |       **998** |   **1.72×** |
 
 `fib(5,000,000)` — long inner loop, exposes per-op execution cost on
-first call.
+first call. R2R doesn't help here because the inner loop runs in tier-1
+JIT (interpreter) or transpiled IL (transpiler) regardless of host
+configuration, and is too long to be cold-dominated.
 
-| runtime            | cold (µs) | subsequent median (µs) |
-|--------------------|----------:|----------------------:|
-| interp-poly        |   453,920 |               356,601 |
-| interp-switch      |   262,543 |               261,326 |
-| transpiler         |     3,274 |                 3,254 |
-| **transpiler-saved** |  **2,922** |                **3,006** |
+| runtime            | JIT-only cold (µs) | R2R cold (µs) |
+|--------------------|-------------------:|--------------:|
+| interp-poly        |            453,920 |       492,535 |
+| interp-switch      |            262,543 |       257,656 |
+| transpiler         |              3,274 |         3,348 |
+| **transpiler-saved** |          **2,922** |     **3,202** |
 
 Build-time cost (paid once per module ever, not at startup): transpile +
 Lokad.ILPack save = ~100 ms. The saved .dll is 4,608 bytes for a
@@ -144,6 +149,52 @@ What stands out:
 
 ---
 
+## Build-time configuration: what users can opt into
+
+The "JIT-only" column above is what you get from a default
+`dotnet publish -c Release` (or `dotnet run`). Every row improves under
+**ReadyToRun (R2R)**, which precompiles the WACS managed code to native
+during publish. The cost is binary size (`Wacs.Core.dll` grows from
+1.5 MB to 2.9 MB) and platform-specific publish artifacts. For a
+serverless or game-engine embedder where startup matters, the trade is
+near-always worth it.
+
+Per-phase, R2R changes:
+
+| phase                                | improvement   | why |
+|--------------------------------------|---------------|-----|
+| interpreter `parse` first call       | ~2× faster    | no tier-1 JIT for the parser |
+| interpreter `inst` first call        | ~2× faster    | same — instantiator is precompiled |
+| `interp-switch` first invoke         | **~14× faster** | the giant `TryDispatch_XX` methods stop paying tier-1 JIT (this is the headline win) |
+| `transpiler` `xpile` first call      | ~1.8× faster  | Reflection.Emit warmup |
+| `transpiler-saved` cold total        | ~1.7× faster  | loader code precompiled; the loaded .dll is still pure IL though |
+| any `subsequent` median              | unchanged     | already tier-1 in steady state |
+
+Two further dials exist but are **not currently usable** for WACS:
+
+- **NativeAOT** (`-p:PublishAot=true`) would deliver the largest
+  cold-start improvement of all (no JIT in the process, no .NET runtime
+  startup, single-file native binary). It's blocked today by two
+  things: (1) `Wacs.Compilation` targets netstandard2.0 only, and AOT
+  requires net8.0 across the dep graph; (2) AOT is incompatible with
+  both the in-process transpiler (Reflection.Emit emits IL that needs
+  a JIT) and the saved-DLL path (the loaded .dll is plain IL, also
+  JIT-required). An AOT-flavored WACS embedding would be **interpreter-
+  only**, which gives up the transpiler's 100×+ steady-state advantage.
+  Not obviously a win.
+
+- **IL trimming** (`-p:PublishTrimmed=true`) would shrink the published
+  binary but the WACS code base uses reflection in places that aren't
+  trim-annotated (component-model bridge, transpiler interface
+  generation), so trimming today produces a binary that may fail at
+  runtime when those paths are exercised. Tracking work would be
+  per-call-site `[DynamicallyAccessedMembers]` annotations.
+
+For "what users can ship today," **R2R is the realistic upgrade**.
+NativeAOT and trimming are both 2026-or-later refactors.
+
+---
+
 ## Picking a runtime
 
 | Embedding                                           | Recommendation        |
@@ -155,11 +206,14 @@ What stands out:
 | Serverless / edge / cold-boot-sensitive             | **`transpiler-saved`** |
 | Game engine, plug-ins shipped pre-transpiled        | **`transpiler-saved`** |
 
-The two interpreters have effectively the same cold-start floor (~35–45
-ms on a tiny module, mostly .NET JIT warmup); pick between them based
-on steady-state hotness, not cold start. Once you decide you can absorb
-~25 ms of in-process xpile or move it to build time, the transpiler is
-the right answer for anything that runs more than trivial work.
+The two interpreters have a similar cold-start floor under JIT (~35–45
+ms, mostly .NET JIT warmup); pick between them based on steady-state
+hotness, not cold start. Under R2R the picture sharpens: `interp-switch`
+becomes the cold-start winner among interpreters (16 ms vs 24 ms for
+poly) because R2R kills its expensive first-invoke tier-1 JIT cost.
+Once you decide you can absorb ~14–25 ms of in-process xpile or move it
+to build time, the transpiler is the right answer for anything that
+runs more than trivial work.
 
 For the "I can transpile at build time" path, the workflow is:
 
@@ -185,6 +239,12 @@ typed delegates.
 - These are wall-clock numbers from a single machine on a single day.
   Treat the *ratios* as durable; treat the absolute microseconds as
   approximate.
+- The bench's R2R numbers come from `dotnet publish -r osx-arm64
+  --self-contained -p:PublishReadyToRun=true`. R2R is platform-
+  specific — Linux x64 and Windows x64 numbers will differ in absolute
+  terms but the per-runtime story should hold. The framework BCL
+  always ships R2R'd, so even the "JIT-only" rows already benefit
+  from precompiled `System.*`.
 - "Cold" here means a fresh OS process, but a warm OS file cache. If
   your wasm or .dll isn't already in cache, add disk read time.
 - The bench uses fib's 242-byte module. Larger modules shift the
