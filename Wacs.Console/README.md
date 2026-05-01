@@ -9,11 +9,9 @@ AOT engine, and the
 [WACS.ComponentModel.Bindgen.Lib](https://www.nuget.org/packages/WACS.ComponentModel.Bindgen.Lib)
 binding generator.
 
-> **Note:** This tool supersedes both
-> [`wasm-transpile` (`WACS.Transpiler`)](https://www.nuget.org/packages/WACS.Transpiler)
-> and
-> [`wit-bindgen-wacs` (`WACS.ComponentModel.Bindgen`)](https://www.nuget.org/packages/WACS.ComponentModel.Bindgen).
-> Both legacy packages are deprecated; install `WACS.Cli` instead. The
+> **Note:** This tool supersedes
+> [`wasm-transpile` (`WACS.Transpiler`)](https://www.nuget.org/packages/WACS.Transpiler).
+> The legacy package is deprecated; install `WACS.Cli` instead. The
 > package id is `WACS.Cli` (the bare `WACS` id is the runtime library,
 > [`Wacs.Core`](https://www.nuget.org/packages/WACS)); the tool command
 > users type is `wacs`.
@@ -393,31 +391,12 @@ but every flag still functions. Concrete migrations:
 | `wasm-transpile -i a.wasm,b.wasm -o b.dll` | `wacs build a.wasm b.wasm -o b.dll` |
 | `wasm-transpile -i x.wasm -o x.dll --engine interpreter --run` | `wacs run x.wasm --engine interpreter` |
 
-## Migration from `wit-bindgen-wacs`
-
-The standalone `WACS.ComponentModel.Bindgen` package
-(`wit-bindgen-wacs` CLI) is also deprecated in favor of the
-`bindgen` verb here. Like `wasm-transpile`, the legacy CLI keeps
-working — every flag still functions, output is byte-identical —
-but every invocation prints a stderr deprecation banner.
-
-| `wit-bindgen-wacs` | `wacs` |
-|---|---|
-| `wit-bindgen-wacs --wit foo.wit -o gen/` | `wacs bindgen foo.wit -o gen/` |
-| `wit-bindgen-wacs --wit-dir wit/ -o gen/` | `wacs bindgen wit/ -o gen/` |
-| `wit-bindgen-wacs --dll app.dll -o regen/` | `wacs bindgen app.dll -o regen/` |
-| `wit-bindgen-wacs --dll app.dll -o regen/ --write-wit` | `wacs bindgen app.dll -o regen --write-wit` |
-
-The new verb infers direction from the input shape (`.dll` →
-reverse, `.wit` → forward single-file, directory → forward tree)
-so the explicit `--wit` / `--wit-dir` / `--dll` flags collapse to
-a single positional argument.
-
-The `WACS.ComponentModel.Bindgen.Lib` package (programmatic
-surface) is **not** deprecated — source generators and
-build-time integrations should keep referencing it directly.
-
----
+> The standalone `WACS.ComponentModel.Bindgen` package
+> (`wit-bindgen-wacs` CLI) was rolled into the `bindgen` verb
+> here before its first NuGet release; users only ever see
+> `wacs bindgen`. The `WACS.ComponentModel.Bindgen.Lib` package
+> (programmatic surface) is unaffected — source generators and
+> build-time integrations should keep referencing it directly.
 
 The `-i` short flag is retired (Console used it for `--invoke`,
 Transpiler for `--input` — incompatible). Inputs are positional in

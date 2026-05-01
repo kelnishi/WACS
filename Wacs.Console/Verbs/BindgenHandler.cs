@@ -20,8 +20,7 @@ namespace Wacs.Console.Verbs
     /// metadata); `.wit` → forward single-file; otherwise treat as
     /// a directory tree of WIT files. Wraps
     /// <see cref="WitForward"/> and <see cref="WitReverse"/>
-    /// (shipped in <c>WACS.ComponentModel.Bindgen.Lib</c>) so the
-    /// behavior matches the legacy <c>wit-bindgen-wacs</c> CLI 1:1.
+    /// shipped in <c>WACS.ComponentModel.Bindgen.Lib</c>.
     /// </summary>
     public static class BindgenHandler
     {
