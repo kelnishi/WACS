@@ -33,6 +33,7 @@ wacs --help
 |---|---|---|
 | `run` | Execute a `.wasm` module | interpreter (default) or transpiler |
 | `build` | Transpile to a `.dll` | transpiler |
+| `aot` | Build a self-contained NativeAOT native binary (transpile + scaffold + `dotnet publish`) | transpiler + ILC |
 | `inspect` | Diagnostics: WAT dump, stats, exports/imports | parse-only |
 | `bindgen` | Generate C# bindings from WIT (forward) or regenerate WIT + bindings from a transpiled `.dll` (reverse) | parse-only |
 
@@ -249,6 +250,88 @@ wacs build app.wasm -o app.dll \
 | `--gc-checking <flags>` | None | Extra GC type-check layers. |
 | `--no-validate` | off | Skip module validation. |
 | `-v, --verbose` | off | Diagnostics + per-function counts. |
+
+## `wacs aot` — wasm → NativeAOT native binary
+
+```
+wacs aot <input.wasm> [-o <output>] [options] [-- argv...]
+```
+
+End-to-end: transpile the input wasm to a stable-named .dll,
+scaffold a throwaway consumer csproj that statically references it
+plus the WACS runtime support assemblies, and run `dotnet publish
+-p:PublishAot=true -r <rid>`. The resulting native binary is copied
+to the output path; the temp build dir is removed unless
+`--keep-temp`.
+
+Cold-start equivalent of `transpiler-aot-linked` from
+[`docs/COLDSTART.md`](../docs/COLDSTART.md): `new Module()` → typed
+direct call into the wasm function. No JIT, no Reflection.Emit, no
+Assembly.Load, no MethodInfo.Invoke at run time.
+
+### Examples
+
+**Compute-only module to native binary:**
+
+```bash
+wacs aot fib.wasm -o fib
+./fib                 # native exe — no .NET runtime required
+```
+
+**WASI Preview 1 (the wasi-libc / wasi-sdk world):**
+
+```bash
+wacs aot coremark.wasm --wasi -o coremark
+./coremark 1 1 1 1    # trailing argv forwarded to the guest
+```
+
+`--wasi` references `WACS.WASI.Preview1` from the scaffolded
+consumer; the source generator in `WACS.HostBindings.SourceGen` emits
+an `IImports` adapter that wires the wasm's
+`wasi_snapshot_preview1.*` imports straight to the
+`[WacsImport]`-annotated statics. No reflection, no `DispatchProxy`,
+fully NativeAOT-trim-safe.
+
+**Component with WASI Preview 2:**
+
+```bash
+wacs aot app.component.wasm --wasip2 --entry-point greet -o app
+./app
+```
+
+The component's `wasi:*` imports are direct-linked at transpile time
+against the typed C# host interfaces in `WACS.WASI.Preview2`; the
+consumer constructs the `WasiPreview2Bundle` via
+`Microsoft.Extensions.DependencyInjection` before invoking the
+named export.
+
+**Pick the AotLinked emission target (smaller binary):**
+
+```bash
+wacs aot fib.wasm --aot-linked -o fib
+# Skips the codec wrapper. Default emission keeps it; AotLinked
+# inlines memory/data/globals/tables straight into the Module ctor
+# and lets the trimmer dead-strip the codec machinery.
+```
+
+### `aot` flag reference
+
+| Flag | Default | Notes |
+|---|---|---|
+| `-o, --output <path>` | `<inputBasename>` in cwd | Path for the produced native binary (no `.exe` suffix by default — set explicitly on Windows). |
+| `--rid <rid>` | host RID | Target .NET runtime identifier (`osx-arm64`, `linux-x64`, `win-x64`). |
+| `--entry-point <export>` | `_start` | WASM export the emitted `Program.Main` invokes (scalar args only). |
+| `--namespace <name>` | `WacsAot` | Root namespace for generated types in the transpiled .dll. |
+| `--simd` | `scalar` | `interpreter \| scalar \| intrinsics`. |
+| `--aot-linked` | off | Use the `EmissionTarget.AotLinked` emission target — skips the codec wrapper for a smaller binary. Covers memory / data / globals / tables / element segments. |
+| `--wasi` | off | Bake `WACS.WASI.Preview1` bindings into the produced binary. |
+| `--wasip2` | off | Component-mode counterpart to `--wasi` — direct-links `wasi:*` imports against `WACS.WASI.Preview2`. |
+| `--preopen <H::G>` | — | WASI directory preopen `<host-path>::<guest-path>`. Repeat for multiple. Only with `--wasi`. |
+| `--keep-temp` | off | Don't delete the scaffolded build dir (useful for inspecting the generated csproj / Program.cs). |
+| `-v, --verbose` | off | Print each step (transpile, scaffold, publish, copy). |
+
+Trailing positional args after the input file are forwarded to the
+guest as `argv` when `--wasi` is set.
 
 ## `wacs inspect` — diagnostics
 

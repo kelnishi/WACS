@@ -36,6 +36,16 @@
         <Pack>true</Pack>
         <PackagePath/>
       </None>
+      <!--
+        Ship a build-time deprecation warning into consumer projects.
+        NuGet auto-imports build/<package-id>.targets when the package
+        is referenced, so any csproj still pulling WACS.WASIp1 will see
+        the migration pointer once per build.
+      -->
+      <None Include="build\WACS.WASIp1.targets">
+        <Pack>true</Pack>
+        <PackagePath>build\</PackagePath>
+      </None>
     </ItemGroup>
 
     <ItemGroup>

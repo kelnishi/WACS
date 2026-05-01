@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Shipped inside the WACS.WASIp1 nupkg under build/. NuGet
+  automatically imports build/<package-id>.targets into any
+  consuming project, so this fires once per build for every
+  project still referencing the deprecated metapackage.
+
+  The WACS.WASIp1 package id has been renamed to WACS.WASI.Preview1
+  to make room for WACS.WASI.Preview2 / .Preview3 under one prefix.
+  This metapackage continues to restore (it transitively pulls in
+  WACS.WASI.Preview1), but C# `using Wacs.WASIp1;` lines won't
+  compile against the new assembly — TypeForwardedTo can't bridge
+  a namespace rename. Consumers must update their using lines and
+  switch their PackageReference to WACS.WASI.Preview1.
+
+  See docs/MIGRATION_WASIp1_to_WASI.md for the one-shot sed.
+-->
+<Project>
+  <Target Name="WacsWasip1DeprecationWarning"
+          BeforeTargets="CoreCompile"
+          Condition="'$(SuppressWacsWasip1DeprecationWarning)' != 'true'">
+    <Warning Code="WACS_WASIp1_DEPRECATED"
+             Text="The WACS.WASIp1 NuGet package has been renamed to WACS.WASI.Preview1. This metapackage still works (it transitively pulls in the new assembly), but C# `using Wacs.WASIp1;` lines must be updated to `using Wacs.WASI.Preview1;` (TypeForwardedTo cannot bridge a namespace rename). See https://github.com/kelnishi/WACS/blob/main/docs/MIGRATION_WASIp1_to_WASI.md for the one-shot sed migration. To silence this warning while you migrate, set &lt;SuppressWacsWasip1DeprecationWarning&gt;true&lt;/SuppressWacsWasip1DeprecationWarning&gt; in your project." />
+  </Target>
+</Project>

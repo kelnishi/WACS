@@ -11,7 +11,7 @@
 - **Godot Compatibility**: Compatible with **Godot Engine - [.NET](https://docs.godotengine.org/en/stable/tutorials/scripting/c_sharp/c_sharp_basics.html)**.
 - **Full WebAssembly MVP Compliance**: Passes the WebAssembly spec test suite.
 - **Interop Bindings**: Host bindings created through reflection, requiring no boilerplate.
-- **WASI Support**: WACS.WASIp1 provides a wasi_snapshot_preview1 implementation.
+- **WASI Support**: WACS.WASI.Preview1 provides a wasi_snapshot_preview1 implementation.
 
 ## Installation
 
