@@ -99,19 +99,25 @@ namespace Wacs.Transpiler.Test
         }
 
         [Fact]
-        public void AotLinkedThrowsOnModuleWithGlobals()
+        public void AotLinkedSupportsGlobalWithI32Const()
         {
-            // Globals still aren't supported by the AotLinked ctor —
-            // confirm the feasibility check still trips on them.
-            var (modInst, runtime) = ParseAndInstantiate(BuildGlobalWasm());
+            // First confirm the wasm itself parses + reads 99 via Standard
+            // emission — pin down whether this is a wasm-bytes problem or
+            // an AotLinked emission problem.
+            var (m1, r1) = ParseAndInstantiate(BuildGlobalWasm());
+            var stdResult = new ModuleTranspiler("Wacs.AotLink.GlobStd",
+                new TranspilerOptions { Emission = EmissionTarget.Standard })
+                .Transpile(m1, r1, "GlobMod");
+            int stdRead = (int)Invoke(stdResult, "read");
+            Assert.Equal(99, stdRead);
 
-            var ex = Assert.Throws<InvalidOperationException>(() =>
-                new ModuleTranspiler("Wacs.AotLink.GlobReject",
-                    new TranspilerOptions { Emission = EmissionTarget.AotLinked })
-                    .Transpile(modInst, runtime, "GlobMod"));
-
-            Assert.Contains("AotLinked", ex.Message);
-            Assert.Contains("globals", ex.Message);
+            // Now AotLinked.
+            var (m2, r2) = ParseAndInstantiate(BuildGlobalWasm());
+            var aotResult = new ModuleTranspiler("Wacs.AotLink.Glob",
+                new TranspilerOptions { Emission = EmissionTarget.AotLinked })
+                .Transpile(m2, r2, "GlobMod");
+            int aotRead = (int)Invoke(aotResult, "read");
+            Assert.Equal(99, aotRead);
         }
 
         // -----------------------------------------------------------------
@@ -146,9 +152,54 @@ namespace Wacs.Transpiler.Test
             0x0A, 0x09, 0x01, 0x07, 0x00, 0x20, 0x00, 0x20, 0x01, 0x6A, 0x0B,
         };
 
+        [Fact]
+        public void AotLinkedSupportsCallIndirectViaElementSegment()
+        {
+            // (module
+            //   (type $ft (func (result i32)))
+            //   (table 1 funcref)
+            //   (elem (i32.const 0) $forty_two)
+            //   (func $forty_two (result i32) i32.const 42)
+            //   (func (export "trampoline") (result i32)
+            //     i32.const 0 call_indirect (type $ft)))
+            // call_indirect 0 hits the table[0] slot, which the element
+            // segment populates with funcidx for $forty_two.
+            var (modInst, runtime) = ParseAndInstantiate(BuildCallIndirectWasm());
+            var result = new ModuleTranspiler("Wacs.AotLink.CallInd",
+                new TranspilerOptions { Emission = EmissionTarget.AotLinked })
+                .Transpile(modInst, runtime, "CallIndMod");
+            int n = (int)Invoke(result, "trampoline");
+            Assert.Equal(42, n);
+        }
+
+        private static byte[] BuildCallIndirectWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // type: () -> i32 (one type)
+            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F,
+            // function: 2 funcs, both type 0
+            0x03, 0x03, 0x02, 0x00, 0x00,
+            // table: 1 table, funcref limits min=1 (no max)
+            0x04, 0x04, 0x01, 0x70, 0x00, 0x01,
+            // export: "trampoline" -> func 1
+            0x07, 0x0E, 0x01, 0x0A, 0x74, 0x72, 0x61, 0x6D, 0x70, 0x6F, 0x6C, 0x69, 0x6E, 0x65, 0x00, 0x01,
+            // element: 1 segment, mode 0, (i32.const 0), 1 funcidx 0
+            0x09, 0x07, 0x01, 0x00, 0x41, 0x00, 0x0B, 0x01, 0x00,
+            // code: 2 bodies — func 0: i32.const 42; end. func 1: i32.const 0; call_indirect type 0 table 0; end.
+            // Body 1 size = 1 (locals=0 byte) + 3 (i32.const 0x2A, end) = 4.
+            // Body 2 size = 1 + 5 (i32.const 0, call_indirect type 0 table 0, end) = 6.
+            // Wait: i32.const 0 = 0x41 0x00 = 2 bytes; call_indirect = 0x11 0x00 0x00 = 3; end = 0x0B = 1 → 6 bytes content.
+            // Section bytes: count(1) + body1.size(1) + body1(4) + body2.size(1) + body2(7) = 14 = 0x0E
+            0x0A, 0x0E, 0x02,
+              0x04, 0x00, 0x41, 0x2A, 0x0B,
+              0x07, 0x00, 0x41, 0x00, 0x11, 0x00, 0x00, 0x0B,
+        };
+
         // (module
         //   (global $g i32 (i32.const 99))
         //   (func (export "read") (result i32) global.get $g))
+        // Note: 99 sleb128 = 0xE3 0x00 (single-byte 0x63 would be -29, since
+        // sleb128 sign-extends bit 6 of the last byte).
         private static byte[] BuildGlobalWasm() => new byte[]
         {
             0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
@@ -156,8 +207,8 @@ namespace Wacs.Transpiler.Test
             0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F,
             // function: 1 func, type 0
             0x03, 0x02, 0x01, 0x00,
-            // global: 1 global, i32 const 99
-            0x06, 0x06, 0x01, 0x7F, 0x00, 0x41, 0x63, 0x0B,
+            // global: 1 global, i32 const 99 (encoded 0xE3 0x00)
+            0x06, 0x07, 0x01, 0x7F, 0x00, 0x41, 0xE3, 0x00, 0x0B,
             // export: "read" -> func 0
             0x07, 0x08, 0x01, 0x04, 0x72, 0x65, 0x61, 0x64, 0x00, 0x00,
             // code: global.get 0; end
