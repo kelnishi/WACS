@@ -174,6 +174,75 @@ namespace Wacs.HostBindings
             return System.Text.Encoding.UTF8.GetString(_data, offset, byteCount);
         }
 
+        /// <summary>Alias for <see cref="ReadUtf8String(int,int)"/> matching
+        /// the <c>MemoryInstance.ReadString</c> name used in existing
+        /// WASI binding code.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public string ReadString(int offset, int byteCount)
+            => ReadUtf8String(offset, byteCount);
+
+        /// <summary>Alias for <see cref="WriteInt32LE"/> — wasm linear
+        /// memory is always little-endian, so the LE/native distinction
+        /// matches.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteInt32(int offset, int value) => WriteInt32LE(offset, value);
+
+        /// <summary>Alias for <see cref="WriteInt64LE"/>.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void WriteInt64(int offset, long value) => WriteInt64LE(offset, value);
+
+        /// <summary>Alias for <see cref="ReadInt32LE"/>.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public int ReadInt32(int offset) => ReadInt32LE(offset);
+
+        /// <summary>Alias for <see cref="ReadInt64LE"/>.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public long ReadInt64(int offset) => ReadInt64LE(offset);
+
+        /// <summary>
+        /// Read an array of <typeparamref name="T"/> structs from contiguous
+        /// memory at <paramref name="offset"/>. T must be unmanaged (no
+        /// references); this constraint is enforced by the C# compiler at
+        /// each call site.
+        /// </summary>
+        public T[] ReadStructs<T>(int offset, int count) where T : unmanaged
+        {
+            int sz = System.Runtime.CompilerServices.Unsafe.SizeOf<T>();
+            CheckRange(offset, sz * count);
+            var span = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, T>(
+                _data.AsSpan(offset, sz * count));
+            var arr = new T[count];
+            span.CopyTo(arr);
+            return arr;
+        }
+
+        /// <summary>
+        /// Read one <typeparamref name="T"/> struct at <paramref name="offset"/>.
+        /// </summary>
+        public T ReadStruct<T>(int offset) where T : unmanaged
+        {
+            int sz = System.Runtime.CompilerServices.Unsafe.SizeOf<T>();
+            CheckRange(offset, sz);
+            return System.Runtime.InteropServices.MemoryMarshal.Read<T>(
+                _data.AsSpan(offset, sz));
+        }
+
+        /// <summary>
+        /// Write one <typeparamref name="T"/> struct at <paramref name="offset"/>.
+        /// </summary>
+        public void WriteStruct<T>(int offset, T value) where T : unmanaged
+        {
+            int sz = System.Runtime.CompilerServices.Unsafe.SizeOf<T>();
+            CheckRange(offset, sz);
+            System.Runtime.InteropServices.MemoryMarshal.Write(
+                _data.AsSpan(offset, sz),
+#if NET8_0_OR_GREATER
+                in value);
+#else
+                ref value);
+#endif
+        }
+
         /// <summary>The underlying backing array. Use with care; prefer
         /// the typed accessors above.</summary>
         public byte[] Data => _data;
