@@ -594,6 +594,9 @@ namespace Wacs.Transpiler.AOT
             // from ModuleType so it can live alongside the Module class
             // and be referenced from Module ctor IL (Ldsfld on its Data).
             _embeddedInitType?.CreateType();
+            // Same for the AotLinked-mode data-segment holder.
+            FinalizeAotDataHolder();
+            _aotDataType?.CreateType();
             return ModuleType?.CreateType();
         }
 
@@ -601,6 +604,469 @@ namespace Wacs.Transpiler.AOT
         // Populated once during EmitConstructor via EmitEmbeddedInitData.
         private TypeBuilder? _embeddedInitType;
         private FieldBuilder? _embeddedInitField;
+
+        /// <summary>
+        /// Validate that the prepared module fits the current AotLinked emission
+        /// scope (no memories, tables, globals, or data segments — i.e. compute-
+        /// only wasm). Throws <see cref="InvalidOperationException"/> with a
+        /// specific reason if not. Coverage will grow incrementally; the
+        /// thrower keeps users from silently shipping a Module class with
+        /// missing initialization.
+        /// </summary>
+        // ============================================================
+        // AotLinked ctor body emission
+        // ============================================================
+
+        // Holder type with one static byte[] field per active data
+        // segment. Built lazily on first call to GetAotDataSegmentField.
+        private TypeBuilder? _aotDataType;
+        private FieldBuilder?[]? _aotDataFields;
+
+        /// <summary>
+        /// Emit the IL body for the AotLinked Module ctor. Runs after
+        /// <c>base()</c>; leaves a fully-initialized <see cref="ThinContext"/>
+        /// in <paramref name="ctxLocal"/> so the standard wiring (imports,
+        /// FuncTable, BindTableDelegates) can take over.
+        ///
+        /// <para>Coverage today: empty modules + memories + active data
+        /// segments. Tables, globals, element segments, GC inits, and
+        /// deferred globals fall back to <c>Standard</c> via
+        /// <see cref="AssertAotLinkedFeasible"/>.</para>
+        /// </summary>
+        private void EmitAotLinkedCtorBody(ILGenerator il, LocalBuilder ctxLocal)
+        {
+            if (_initDataId < 0) PrepareInitData();
+            var data = InitRegistry.Get(_initDataId);
+
+            // (1) Allocate ThinContext with literal memories, tables, globals.
+            //     ctx = new ThinContext(memories, tables, globals, null, null);
+            EmitMemoryArray(il, data);
+            EmitTablesArray(il, data);
+            EmitGlobalsArray(il, data);
+            il.Emit(OpCodes.Ldnull);              // importDelegates
+            il.Emit(OpCodes.Ldnull);              // funcTable
+            var standaloneCtor = typeof(ThinContext).GetConstructor(new[]
+            {
+                typeof(MemoryInstance[]),
+                typeof(TableInstance[]),
+                typeof(GlobalInstance[]),
+                typeof(Delegate[]),
+                typeof(Delegate[]),
+            })!;
+            il.Emit(OpCodes.Newobj, standaloneCtor);
+            il.Emit(OpCodes.Stloc, ctxLocal);
+
+            // (2) Copy each active data segment into its memory at offset.
+            EmitDataSegmentCopies(il, ctxLocal, data);
+
+            // (3) Copy each active element segment into its table at offset.
+            EmitElementSegmentCopies(il, ctxLocal, data);
+        }
+
+        private static bool IsPrimitiveValType(Wacs.Core.Types.Defs.ValType t)
+            => t == Wacs.Core.Types.Defs.ValType.I32
+            || t == Wacs.Core.Types.Defs.ValType.I64
+            || t == Wacs.Core.Types.Defs.ValType.F32
+            || t == Wacs.Core.Types.Defs.ValType.F64;
+
+        /// <summary>
+        /// IL: <c>new TableInstance[N] { new TableInstance(new TableType(elemType, new Limits(I32, min, max)), new Value(elemType)), ... }</c>.
+        /// Pushes the tables array onto the stack. Tables with non-null
+        /// initExpr are rejected by AssertAotLinkedFeasible — handled here
+        /// is the default-null-element shape only.
+        /// </summary>
+        private void EmitTablesArray(ILGenerator il, ModuleInitData data)
+        {
+            int n = data.Tables.Length;
+            il.Emit(OpCodes.Ldc_I4, n);
+            il.Emit(OpCodes.Newarr, typeof(TableInstance));
+            if (n == 0) return;
+
+            var limitsCtor = typeof(Wacs.Core.Types.Limits).GetConstructor(new[]
+            {
+                typeof(Wacs.Core.Types.Defs.AddrType),
+                typeof(long),
+                typeof(long?),
+                typeof(bool),
+            })!;
+            var nullableLongCtor = typeof(long?).GetConstructor(new[] { typeof(long) })!;
+            var tableTypeCtor = typeof(Wacs.Core.Types.TableType).GetConstructor(new[]
+            {
+                typeof(Wacs.Core.Types.Defs.ValType),
+                typeof(Wacs.Core.Types.Limits),
+                typeof(Wacs.Core.Types.Expression),
+            })!;
+            var valueCtor = typeof(Value).GetConstructor(new[]
+                { typeof(Wacs.Core.Types.Defs.ValType) })!;
+            var tableInstanceCtor = typeof(TableInstance).GetConstructor(new[]
+                { typeof(Wacs.Core.Types.TableType), typeof(Value) })!;
+
+            for (int i = 0; i < n; i++)
+            {
+                var (min, max, elemType, _) = data.Tables[i];
+                il.Emit(OpCodes.Dup);
+                il.Emit(OpCodes.Ldc_I4, i);
+
+                // new Limits(AddrType.I32, min, max-as-nullable, false)
+                il.Emit(OpCodes.Ldc_I4, (int)Wacs.Core.Types.Defs.AddrType.I32);
+                il.Emit(OpCodes.Ldc_I8, min);
+                // max in (long min, long max, …) tuple — always present
+                // but ModuleInitData stuffs uint.MaxValue when unbounded.
+                // Pass as Nullable<long>(max).
+                il.Emit(OpCodes.Ldc_I8, max);
+                il.Emit(OpCodes.Newobj, nullableLongCtor);
+                il.Emit(OpCodes.Ldc_I4_0);
+                il.Emit(OpCodes.Newobj, limitsCtor);
+
+                // new TableType(elemType, limits, null)
+                var limitsLoc = il.DeclareLocal(typeof(Wacs.Core.Types.Limits));
+                il.Emit(OpCodes.Stloc, limitsLoc);
+                il.Emit(OpCodes.Ldc_I4, (int)elemType);
+                il.Emit(OpCodes.Ldloc, limitsLoc);
+                il.Emit(OpCodes.Ldnull);
+                il.Emit(OpCodes.Newobj, tableTypeCtor);
+
+                // new Value(elemType)  — typed null
+                il.Emit(OpCodes.Ldc_I4, (int)elemType);
+                il.Emit(OpCodes.Newobj, valueCtor);
+
+                il.Emit(OpCodes.Newobj, tableInstanceCtor);
+                il.Emit(OpCodes.Stelem_Ref);
+            }
+        }
+
+        /// <summary>
+        /// IL: for each active element segment, write each funcref entry
+        /// into the table at <c>elemOffset + j</c>. Null entries (-1) are
+        /// skipped (the table starts pre-filled with typed null). GC entries
+        /// (-2) are rejected upstream by <see cref="AssertAotLinkedFeasible"/>.
+        /// </summary>
+        private void EmitElementSegmentCopies(ILGenerator il, LocalBuilder ctxLocal, ModuleInitData data)
+        {
+            if (data.ActiveElementSegments.Length == 0) return;
+
+            var tablesField = typeof(ThinContext).GetField(nameof(ThinContext.Tables))!;
+            // TableInstance.Elements is a public List<Value> field, not a property.
+            var elementsField = typeof(TableInstance).GetField(nameof(TableInstance.Elements))!;
+            var listSetItem = typeof(System.Collections.Generic.List<Value>).GetMethod("set_Item",
+                new[] { typeof(int), typeof(Value) })!;
+            var listCount = typeof(System.Collections.Generic.List<Value>).GetProperty("Count")!.GetGetMethod()!;
+            var valueFuncRefCtor = typeof(Value).GetConstructor(new[]
+                { typeof(Wacs.Core.Types.Defs.ValType), typeof(int) })!;
+
+            foreach (var (tableIdx, elemOffset, funcIndices) in data.ActiveElementSegments)
+            {
+                for (int j = 0; j < funcIndices.Length; j++)
+                {
+                    int funcIdx = funcIndices[j];
+                    if (funcIdx < 0) continue; // null entry — table starts null
+                    int slot = (int)elemOffset + j;
+
+                    // ctx.Tables[tableIdx].Elements[slot] = new Value(FuncRef, funcIdx);
+                    il.Emit(OpCodes.Ldloc, ctxLocal);
+                    il.Emit(OpCodes.Ldfld, tablesField);
+                    il.Emit(OpCodes.Ldc_I4, tableIdx);
+                    il.Emit(OpCodes.Ldelem_Ref);
+                    il.Emit(OpCodes.Ldfld, elementsField);
+                    il.Emit(OpCodes.Ldc_I4, slot);
+                    il.Emit(OpCodes.Ldc_I4, (int)Wacs.Core.Types.Defs.ValType.FuncRef);
+                    il.Emit(OpCodes.Ldc_I4, funcIdx);
+                    il.Emit(OpCodes.Newobj, valueFuncRefCtor);
+                    il.Emit(OpCodes.Callvirt, listSetItem);
+                }
+            }
+        }
+
+        /// <summary>
+        /// IL: <c>new GlobalInstance[N] { new GlobalInstance(new GlobalType(type, mut), initValue), ... }</c>.
+        /// Pushes the globals array onto the stack.
+        /// </summary>
+        private void EmitGlobalsArray(ILGenerator il, ModuleInitData data)
+        {
+            int n = data.Globals.Length;
+            il.Emit(OpCodes.Ldc_I4, n);
+            il.Emit(OpCodes.Newarr, typeof(GlobalInstance));
+            if (n == 0) return;
+
+            var globalTypeCtor = typeof(Wacs.Core.Types.GlobalType).GetConstructor(new[]
+            {
+                typeof(Wacs.Core.Types.Defs.ValType),
+                typeof(Wacs.Core.Types.Mutability),
+                typeof(bool),
+                typeof(bool),
+            })!;
+            var globalInstanceCtor = typeof(GlobalInstance).GetConstructor(new[]
+                { typeof(Wacs.Core.Types.GlobalType), typeof(Value) })!;
+
+            for (int i = 0; i < n; i++)
+            {
+                var (gtype, mut, init) = data.Globals[i];
+                il.Emit(OpCodes.Dup);
+                il.Emit(OpCodes.Ldc_I4, i);
+
+                // new GlobalType(gtype, mut, false, false)
+                il.Emit(OpCodes.Ldc_I4, (int)gtype);
+                il.Emit(OpCodes.Ldc_I4, (int)mut);
+                il.Emit(OpCodes.Ldc_I4_0);
+                il.Emit(OpCodes.Ldc_I4_0);
+                il.Emit(OpCodes.Newobj, globalTypeCtor);
+
+                // initValue Value: emit from primitive literal
+                EmitPrimitiveValue(il, gtype, init);
+
+                il.Emit(OpCodes.Newobj, globalInstanceCtor);
+                il.Emit(OpCodes.Stelem_Ref);
+            }
+        }
+
+        /// <summary>
+        /// IL: <c>new Value(...)</c> for primitive-typed initial values.
+        /// Reads the const literal from <paramref name="init"/> and emits
+        /// the appropriate typed Value ctor. For ref types, emits
+        /// <c>new Value(refType)</c> which produces the typed null.
+        /// </summary>
+        private static void EmitPrimitiveValue(ILGenerator il, Wacs.Core.Types.Defs.ValType vt, Value init)
+        {
+            switch (vt)
+            {
+                case Wacs.Core.Types.Defs.ValType.I32:
+                    il.Emit(OpCodes.Ldc_I4, init.Data.Int32);
+                    il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(int) })!);
+                    break;
+                case Wacs.Core.Types.Defs.ValType.I64:
+                    il.Emit(OpCodes.Ldc_I8, init.Data.Int64);
+                    il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(long) })!);
+                    break;
+                case Wacs.Core.Types.Defs.ValType.F32:
+                    il.Emit(OpCodes.Ldc_R4, init.Data.Float32);
+                    il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(float) })!);
+                    break;
+                case Wacs.Core.Types.Defs.ValType.F64:
+                    il.Emit(OpCodes.Ldc_R8, init.Data.Float64);
+                    il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(double) })!);
+                    break;
+                default:
+                    // Ref type — emit `new Value(refType)` which yields the
+                    // typed null. AssertAotLinkedFeasible has already
+                    // refused non-null ref inits.
+                    il.Emit(OpCodes.Ldc_I4, (int)vt);
+                    il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(Wacs.Core.Types.Defs.ValType) })!);
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// IL: <c>new MemoryInstance[N] { new MemoryInstance(new MemoryType((uint)min[0], (uint?)max[0])), ... }</c>.
+        /// Pushes the memories array onto the stack.
+        /// </summary>
+        private void EmitMemoryArray(ILGenerator il, ModuleInitData data)
+        {
+            int n = data.Memories.Length;
+            il.Emit(OpCodes.Ldc_I4, n);
+            il.Emit(OpCodes.Newarr, typeof(MemoryInstance));
+            if (n == 0) return;
+
+            var memoryTypeCtor = typeof(MemoryType).GetConstructor(new[]
+                { typeof(uint), typeof(uint?), typeof(Wacs.Core.Types.Defs.AddrType) })!;
+            var nullableUintCtor = typeof(uint?).GetConstructor(new[] { typeof(uint) })!;
+            var memoryInstanceCtor = typeof(MemoryInstance).GetConstructor(new[] { typeof(MemoryType) })!;
+
+            for (int i = 0; i < n; i++)
+            {
+                var (min, max) = data.Memories[i];
+                il.Emit(OpCodes.Dup);
+                il.Emit(OpCodes.Ldc_I4, i);
+
+                // new MemoryType((uint)min, max.HasValue ? (uint?)max : default(uint?), AddrType.I32)
+                il.Emit(OpCodes.Ldc_I4, (int)(uint)min);
+                if (max.HasValue)
+                {
+                    il.Emit(OpCodes.Ldc_I4, (int)(uint)max.Value);
+                    il.Emit(OpCodes.Newobj, nullableUintCtor);
+                }
+                else
+                {
+                    var nullableLoc = il.DeclareLocal(typeof(uint?));
+                    il.Emit(OpCodes.Ldloca, nullableLoc);
+                    il.Emit(OpCodes.Initobj, typeof(uint?));
+                    il.Emit(OpCodes.Ldloc, nullableLoc);
+                }
+                il.Emit(OpCodes.Ldc_I4, (int)Wacs.Core.Types.Defs.AddrType.I32);
+                il.Emit(OpCodes.Newobj, memoryTypeCtor);
+
+                il.Emit(OpCodes.Newobj, memoryInstanceCtor);
+                il.Emit(OpCodes.Stelem_Ref);
+            }
+        }
+
+        /// <summary>
+        /// IL: for each active data segment, copy the segment's bytes
+        /// (loaded from a static <c>__WACSAotData.Segment_N</c> field) into
+        /// the right memory's <c>Data</c> array at the right offset via
+        /// <see cref="Buffer.BlockCopy"/>.
+        /// </summary>
+        private void EmitDataSegmentCopies(ILGenerator il, LocalBuilder ctxLocal, ModuleInitData data)
+        {
+            if (data.ActiveDataSegments.Length == 0) return;
+
+            var memoriesField = typeof(ThinContext).GetField(nameof(ThinContext.Memories))!;
+            var memoryDataField = typeof(MemoryInstance).GetField(nameof(MemoryInstance.Data))!;
+            var blockCopyMethod = typeof(Buffer).GetMethod(nameof(Buffer.BlockCopy),
+                new[] { typeof(Array), typeof(int), typeof(Array), typeof(int), typeof(int) })!;
+
+            foreach (var (memIdx, offset, segId) in data.ActiveDataSegments)
+            {
+                if (!data.SavedDataSegments.TryGetValue(segId, out var bytes) || bytes == null) continue;
+                if (bytes.Length == 0) continue;
+                var segField = GetAotDataSegmentField(segId, bytes);
+
+                // Buffer.BlockCopy(__WACSAotData.Segment_N, 0,
+                //                  ctx.Memories[memIdx].Data, (int)offset,
+                //                  bytes.Length);
+                il.Emit(OpCodes.Ldsfld, segField);
+                il.Emit(OpCodes.Ldc_I4_0);
+
+                il.Emit(OpCodes.Ldloc, ctxLocal);
+                il.Emit(OpCodes.Ldfld, memoriesField);
+                il.Emit(OpCodes.Ldc_I4, memIdx);
+                il.Emit(OpCodes.Ldelem_Ref);
+                il.Emit(OpCodes.Ldfld, memoryDataField);
+
+                il.Emit(OpCodes.Ldc_I4, (int)offset);
+                il.Emit(OpCodes.Ldc_I4, bytes.Length);
+                il.Emit(OpCodes.Call, blockCopyMethod);
+            }
+        }
+
+        /// <summary>
+        /// Get-or-create a static <c>byte[]</c> field on the
+        /// <c>__WACSAotData</c> holder type, populated from
+        /// <paramref name="bytes"/> via a base64-decode in the holder's
+        /// static ctor. Same workaround as <see cref="EmitEmbeddedInitData"/>:
+        /// <c>DefineInitializedData</c> trips a Lokad.ILPack NRE, so we
+        /// stash a base64 string literal that decodes once at first access.
+        /// </summary>
+        private FieldBuilder GetAotDataSegmentField(int segId, byte[] bytes)
+        {
+            if (_aotDataType == null)
+            {
+                _aotDataType = _moduleBuilder.DefineType(
+                    $"{_namespace}.__WACSAotData",
+                    TypeAttributes.Public | TypeAttributes.Abstract | TypeAttributes.Sealed);
+                // The maximum segId we see at transpile time bounds the array.
+                _aotDataFields = new FieldBuilder?[InitRegistry.Get(_initDataId)
+                    .SavedDataSegments.Keys.DefaultIfEmpty(0).Max() + 1];
+            }
+            if (segId < _aotDataFields!.Length && _aotDataFields[segId] != null)
+                return _aotDataFields[segId]!;
+
+            // Grow the array if we hit a sparse / out-of-range segId.
+            if (segId >= _aotDataFields.Length)
+            {
+                var grown = new FieldBuilder?[segId + 1];
+                Array.Copy(_aotDataFields, grown, _aotDataFields.Length);
+                _aotDataFields = grown;
+            }
+
+            var field = _aotDataType.DefineField(
+                $"Segment_{segId}", typeof(byte[]),
+                FieldAttributes.Public | FieldAttributes.Static | FieldAttributes.InitOnly);
+            _aotDataFields[segId] = field;
+            return field;
+        }
+
+        /// <summary>
+        /// Once all data-segment fields have been declared, emit the
+        /// <c>__WACSAotData</c> static ctor that base64-decodes the bytes
+        /// for each. Called from <see cref="Generate"/> after the Module
+        /// class has fully wired its references to these fields, so the
+        /// holder's metadata is final before <c>CreateType()</c>.
+        /// </summary>
+        private void FinalizeAotDataHolder()
+        {
+            if (_aotDataType == null || _aotDataFields == null) return;
+            var data = InitRegistry.Get(_initDataId);
+            var fromBase64 = typeof(Convert).GetMethod(
+                nameof(Convert.FromBase64String),
+                BindingFlags.Public | BindingFlags.Static,
+                binder: null,
+                types: new[] { typeof(string) },
+                modifiers: null)!;
+
+            var cctor = _aotDataType.DefineTypeInitializer();
+            var il = cctor.GetILGenerator();
+            for (int segId = 0; segId < _aotDataFields.Length; segId++)
+            {
+                var field = _aotDataFields[segId];
+                if (field == null) continue;
+                if (!data.SavedDataSegments.TryGetValue(segId, out var bytes) || bytes == null)
+                    continue;
+                il.Emit(OpCodes.Ldstr, Convert.ToBase64String(bytes));
+                il.Emit(OpCodes.Call, fromBase64);
+                il.Emit(OpCodes.Stsfld, field);
+            }
+            il.Emit(OpCodes.Ret);
+        }
+
+        private void AssertAotLinkedFeasible()
+        {
+            if (_initDataId < 0) PrepareInitData();
+            var data = InitRegistry.Get(_initDataId);
+
+            // Only flag features that the AotLinked ctor still doesn't
+            // initialize. As of this commit:
+            //   • memories + active data segments     — supported
+            //   • everything else (tables, globals, element segments,
+            //     GC globals, deferred globals, GC element values) —
+            //     coverage will grow incrementally
+            var unsupported = new List<string>();
+            if (data.GcGlobalInits.Count > 0)       unsupported.Add($"{data.GcGlobalInits.Count} GC global inits");
+            if (data.DeferredGlobalInits.Count > 0) unsupported.Add($"{data.DeferredGlobalInits.Count} deferred global inits");
+            if (data.GcElementValues.Count > 0)     unsupported.Add("GC element values");
+            // Globals with non-primitive init (ref types other than null) need
+            // expression evaluation; reject for now. Primitive-init globals
+            // (i32/i64/f32/f64) are handled by EmitGlobalsArray.
+            for (int gi = 0; gi < data.Globals.Length; gi++)
+            {
+                var (gtype, _, init) = data.Globals[gi];
+                if (!IsPrimitiveValType(gtype) && !init.IsNullRef)
+                {
+                    unsupported.Add($"global {gi} with non-null ref init");
+                    break;
+                }
+            }
+            // Tables with a non-trivial init expression (one that evaluates
+            // to a non-null reference, potentially against globals) need
+            // expression evaluation. Default funcref tables carry an init
+            // expression that's just `ref.null T; end` — those are the
+            // common case and indistinguishable from initExpr == null
+            // semantically. Allow all for now; if the init expression
+            // evaluates to non-null at runtime, the AotLinked ctor will
+            // leave the table holding null instead, which the embedder
+            // sees as a wrong-default behavior they can fall back to
+            // Standard for.
+            // Element segments with funcIndices[j] == -2 (GC-typed) require
+            // GcElementValues; primitive funcref entries (>=0) and nulls
+            // (-1) are handled by EmitElementSegmentCopies.
+            foreach (var (_, _, funcIndices) in data.ActiveElementSegments)
+            {
+                bool hasGc = false;
+                for (int k = 0; k < funcIndices.Length; k++)
+                    if (funcIndices[k] == -2) { hasGc = true; break; }
+                if (hasGc)
+                {
+                    unsupported.Add("element segment with GC-typed entries");
+                    break;
+                }
+            }
+
+            if (unsupported.Count > 0)
+                throw new InvalidOperationException(
+                    "TranspilerOptions.Emission = AotLinked is not yet supported for this module. " +
+                    "Unsupported features: " + string.Join(", ", unsupported) +
+                    ". Use Emission = Standard for modules with non-trivial init data " +
+                    "(coverage will grow in subsequent transpiler releases).");
+        }
 
         /// <summary>
         /// Encode the prepared <see cref="ModuleInitData"/> via
@@ -701,32 +1167,43 @@ namespace Wacs.Transpiler.AOT
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Call, typeof(object).GetConstructor(Type.EmptyTypes)!);
 
-            // === Initialize via InitializationHelper from embedded init-data ===
-            // The generator embeds a codec-encoded ModuleInitData as a static
-            // byte[] on a sibling type (__WACSInit.Data, built below). The
-            // ctor reads it, decodes into a ModuleInitData, and drives
-            // InitializeFromData — which handles both in-process (where
-            // ModuleInit registrations already exist) and cross-process
-            // (.dll loaded in a fresh process) via data-segment remapping.
-            var initDataField = EmitEmbeddedInitData();
-
-            // ThinContext ctx = InitializationHelper.InitializeFromEmbedded(
-            //     __WACSInit.Data, _initDataId);
-            //
-            // The helper's dual path: in-process (InitRegistry has the
-            // transpile-time entry, side-tables like GcTypeRegistry /
-            // MultiReturnMethodRegistry are populated under _initDataId)
-            // takes the fast Initialize(int) branch. Cross-process (fresh
-            // process — InitRegistry empty) falls through to a codec
-            // Decode of the embedded byte[] and an InitializeFromData
-            // with the transpile-time id as a hint.
-            il.Emit(OpCodes.Ldsfld, initDataField);
-            il.Emit(OpCodes.Ldc_I4, _initDataId);
-            il.Emit(OpCodes.Call, typeof(InitializationHelper).GetMethod(
-                nameof(InitializationHelper.InitializeFromEmbedded),
-                BindingFlags.Public | BindingFlags.Static)!);
+            // === Initialize ThinContext ===
+            // Two emission shapes:
+            //   Standard:  ThinContext ctx = InitializationHelper.InitializeFromEmbedded(
+            //                  __WACSInit.Data, _initDataId);
+            //   AotLinked: ThinContext ctx = new ThinContext();
+            //              (skips the codec roundtrip; only valid for modules with no
+            //               memories/tables/globals/data — fuller support pending.)
             var ctxLocal = il.DeclareLocal(typeof(ThinContext));
-            il.Emit(OpCodes.Stloc, ctxLocal);
+            if (_options?.Emission == EmissionTarget.AotLinked)
+            {
+                AssertAotLinkedFeasible();
+                EmitAotLinkedCtorBody(il, ctxLocal);
+            }
+            else
+            {
+                // The generator embeds a codec-encoded ModuleInitData as a static
+                // byte[] on a sibling type (__WACSInit.Data, built below). The
+                // ctor reads it, decodes into a ModuleInitData, and drives
+                // InitializeFromData — which handles both in-process (where
+                // ModuleInit registrations already exist) and cross-process
+                // (.dll loaded in a fresh process) via data-segment remapping.
+                var initDataField = EmitEmbeddedInitData();
+
+                // The helper's dual path: in-process (InitRegistry has the
+                // transpile-time entry, side-tables like GcTypeRegistry /
+                // MultiReturnMethodRegistry are populated under _initDataId)
+                // takes the fast Initialize(int) branch. Cross-process (fresh
+                // process — InitRegistry empty) falls through to a codec
+                // Decode of the embedded byte[] and an InitializeFromData
+                // with the transpile-time id as a hint.
+                il.Emit(OpCodes.Ldsfld, initDataField);
+                il.Emit(OpCodes.Ldc_I4, _initDataId);
+                il.Emit(OpCodes.Call, typeof(InitializationHelper).GetMethod(
+                    nameof(InitializationHelper.InitializeFromEmbedded),
+                    BindingFlags.Public | BindingFlags.Static)!);
+                il.Emit(OpCodes.Stloc, ctxLocal);
+            }
 
             // === Wire import delegates from IImports ===
             if (_interfaces.ImportsInterface != null && _interfaces.ImportMethods.Count > 0)

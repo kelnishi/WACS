@@ -18,7 +18,7 @@ using System;
 using System.Collections;
 using System.IO;
 using System.Linq;
-using Wacs.WASIp1;
+using Wacs.WASI.Preview1;
 
 namespace Wacs.Console
 {

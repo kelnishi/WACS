@@ -1,0 +1,404 @@
+// /*
+//  * Copyright 2024 Kelvin Nishikawa
+//  *
+//  * Licensed under the Apache License, Version 2.0 (the "License");
+//  * you may not use this file except in compliance with the License.
+//  * You may obtain a copy of the License at
+//  *
+//  *     http://www.apache.org/licenses/LICENSE-2.0
+//  *
+//  * Unless required by applicable law or agreed to in writing, software
+//  * distributed under the License is distributed on an "AS IS" BASIS,
+//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//  * See the License for the specific language governing permissions and
+//  * limitations under the License.
+//  */
+
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
+using Wacs.Core.Runtime;
+using Wacs.Core.WASIp1;
+using Wacs.HostBindings;
+using Wacs.WASI.Preview1.Internal;
+using Wacs.WASI.Preview1.Types;
+using ptr = System.UInt32;
+using fd = System.UInt32;
+using filesize = System.UInt64;
+using size = System.UInt32;
+using timestamp = System.Int64;
+
+namespace Wacs.WASI.Preview1
+{
+    public partial class FileSystem
+    {
+        private static readonly int FdStatSize = Marshal.SizeOf<FdStat>();
+        private static readonly int FileStatSize = Marshal.SizeOf<FileStat>();
+        private static readonly int PrestatSize = Marshal.SizeOf<Prestat>();
+
+        // Interpreter wrappers — delegate to AOT-friendly statics below.
+
+        public ErrNo FdFdstatGet(ExecContext ctx, fd fd, ptr bufPtr)
+            => (ErrNo)FdFdstatGetCore(Clock.WacsHost(ctx), _state, (int)fd, (int)bufPtr);
+
+        public ErrNo FdFdstatSetFlags(ExecContext ctx, fd fd, FdFlags flags)
+            => (ErrNo)FdFdstatSetFlagsCore(_state, (int)fd, (int)flags);
+
+        public ErrNo FdFdstatSetRights(ExecContext ctx, fd fd, Rights fs_rights_base, Rights fs_rights_inheriting)
+            => (ErrNo)FdFdstatSetRightsCore(_state, (int)fd, (long)fs_rights_base, (long)fs_rights_inheriting);
+
+        public ErrNo FdFilestatGet(ExecContext ctx, fd fd, ptr bufPtr)
+            => (ErrNo)FdFilestatGetCore(Clock.WacsHost(ctx), _state, (int)fd, (int)bufPtr);
+
+        public ErrNo FdFilestatSetSize(ExecContext ctx, fd fd, filesize stSize)
+            => (ErrNo)FdFilestatSetSizeCore(_state, (int)fd, (long)stSize);
+
+        public ErrNo FdFilestatSetTimes(ExecContext ctx, fd fd, timestamp atim, timestamp mtim, FstFlags flags)
+            => (ErrNo)FdFilestatSetTimesCore(_state, (int)fd, atim, mtim, (int)flags);
+
+        public ErrNo FdPrestatGet(ExecContext ctx, fd fd, ptr bufPtr)
+            => (ErrNo)FdPrestatGetCore(Clock.WacsHost(ctx), _state, (int)fd, (int)bufPtr);
+
+        public ErrNo FdPrestatDirName(ExecContext ctx, fd fd, ptr pathPtr, size pathLen)
+            => (ErrNo)FdPrestatDirNameCore(Clock.WacsHost(ctx), _state, (int)fd, (int)pathPtr, (int)pathLen);
+
+        public ErrNo PathFilestatGet(ExecContext ctx, fd fd, LookupFlags flags, ptr pathPtr, size pathLen, ptr buf)
+            => (ErrNo)PathFilestatGetCore(Clock.WacsHost(ctx), _state, (int)fd, (int)flags, (int)pathPtr, (int)pathLen, (int)buf);
+
+        public ErrNo PathFilestatSetTimes(ExecContext ctx, fd fd, LookupFlags flags,
+            ptr pathPtr, size pathLen, timestamp stAtim, timestamp stMtim, FstFlags fstFlags)
+            => (ErrNo)PathFilestatSetTimesCore(Clock.WacsHost(ctx), _state, (int)fd, (int)flags,
+                (int)pathPtr, (int)pathLen, stAtim, stMtim, (int)fstFlags);
+
+        // ============================================================
+        // AOT-friendly static entry points — discovered by
+        // WACS.HostBindings.SourceGen via [WacsImport].
+        // ============================================================
+
+        [WacsImport("wasi_snapshot_preview1", "fd_fdstat_get")]
+        public static int FdFdstatGetCore(WacsHostMemory mem, State state, int fd, int bufPtr)
+        {
+            if (!mem.Contains(bufPtr, FdStatSize)) return (int)ErrNo.Inval;
+            if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
+                return (int)ErrNo.NoEnt;
+
+            var hostPath = state.PathMapper.MapToHostPath(fileDescriptor.Path);
+            try { File.GetAttributes(hostPath); }
+            catch (FileNotFoundException)      { return (int)ErrNo.NoEnt; }
+            catch (DirectoryNotFoundException) { return (int)ErrNo.NoEnt; }
+            catch (UnauthorizedAccessException) { return (int)ErrNo.Acces; }
+            catch (IOException)                { return (int)ErrNo.IO; }
+
+            FdFlags flags = fileDescriptor.Flags;
+            if (fileDescriptor.Type == Filetype.RegularFile &&
+                fileDescriptor.Stream is FileStream fs && !fs.IsAsync)
+                flags |= FdFlags.Sync;
+
+            var fdStat = new FdStat
+            {
+                Filetype = fileDescriptor.Type,
+                Flags = flags,
+                RightsBase = fileDescriptor.Rights,
+                RightsInheriting = fileDescriptor.InheritedRights,
+            };
+            mem.WriteStruct(bufPtr, fdStat);
+            return (int)ErrNo.Success;
+        }
+
+        [WacsImport("wasi_snapshot_preview1", "fd_fdstat_set_flags")]
+        public static int FdFdstatSetFlagsCore(State state, int fd, int flags)
+        {
+            if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
+                return (int)ErrNo.NoEnt;
+
+            const FdFlags known = FdFlags.Append | FdFlags.DSync |
+                                  FdFlags.NonBlock | FdFlags.RSync | FdFlags.Sync;
+            var f = (FdFlags)flags;
+            if ((f & ~known) != 0) return (int)ErrNo.Inval;
+
+            fileDescriptor.Flags = f;
+            return (int)ErrNo.Success;
+        }
+
+        [WacsImport("wasi_snapshot_preview1", "fd_fdstat_set_rights")]
+        public static int FdFdstatSetRightsCore(State state, int fd,
+            long fs_rights_base, long fs_rights_inheriting)
+        {
+            if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
+                return (int)ErrNo.NoEnt;
+
+            var newBase = (Rights)fs_rights_base;
+            var newInherit = (Rights)fs_rights_inheriting;
+            // Spec: "can only be used to remove rights."
+            if ((newBase & fileDescriptor.Rights) != newBase)
+                return (int)ErrNo.NotCapable;
+            if ((newInherit & fileDescriptor.InheritedRights) != newInherit)
+                return (int)ErrNo.NotCapable;
+
+            fileDescriptor.Rights = newBase;
+            fileDescriptor.InheritedRights = newInherit;
+            return (int)ErrNo.Success;
+        }
+
+        [WacsImport("wasi_snapshot_preview1", "fd_filestat_get")]
+        public static int FdFilestatGetCore(WacsHostMemory mem, State state, int fd, int bufPtr)
+        {
+            if (!mem.Contains(bufPtr, FileStatSize)) return (int)ErrNo.Inval;
+            if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
+                return (int)ErrNo.NoEnt;
+
+            // For stdio (fd < 3), provide dummy stats.
+            if (fd < 3)
+            {
+                var dummy = new FileStat
+                {
+                    Device = 0, Ino = (ulong)fd, Mode = fileDescriptor.Type,
+                    NLink = 1, Size = 0, ATim = 0, MTim = 0, CTim = 0,
+                };
+                mem.WriteStruct(bufPtr, dummy);
+                return (int)ErrNo.Success;
+            }
+
+            var hostPath = state.PathMapper.MapToHostPath(fileDescriptor.Path);
+            FileAttributes attr;
+            try { attr = File.GetAttributes(hostPath); }
+            catch (FileNotFoundException)      { return (int)ErrNo.NoEnt; }
+            catch (DirectoryNotFoundException) { return (int)ErrNo.NoEnt; }
+            catch (UnauthorizedAccessException) { return (int)ErrNo.Acces; }
+            catch (IOException)                { return (int)ErrNo.IO; }
+
+            bool isDir = attr.HasFlag(FileAttributes.Directory);
+            FileStat fileStat = isDir
+                ? WasiFsHelpers.BuildFileStatForDirectory(new DirectoryInfo(hostPath))
+                : WasiFsHelpers.BuildFileStatForFile(new FileInfo(hostPath));
+            mem.WriteStruct(bufPtr, fileStat);
+            return (int)ErrNo.Success;
+        }
+
+        [WacsImport("wasi_snapshot_preview1", "fd_filestat_set_size")]
+        public static int FdFilestatSetSizeCore(State state, int fd, long stSize)
+        {
+            if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
+                return (int)ErrNo.NoEnt;
+            if (fileDescriptor.Type == Filetype.Directory) return (int)ErrNo.IsDir;
+
+            try { fileDescriptor.Stream.SetLength(stSize); }
+            catch (NotSupportedException) { return (int)ErrNo.Inval; }
+            catch (IOException) { return (int)ErrNo.IO; }
+            return (int)ErrNo.Success;
+        }
+
+        [WacsImport("wasi_snapshot_preview1", "fd_filestat_set_times")]
+        public static int FdFilestatSetTimesCore(State state, int fd,
+            long atim, long mtim, int flags)
+        {
+            if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
+                return (int)ErrNo.NoEnt;
+
+            var hostPath = state.PathMapper.MapToHostPath(fileDescriptor.Path);
+            FileAttributes attr;
+            try { attr = File.GetAttributes(hostPath); }
+            catch (FileNotFoundException)      { return (int)ErrNo.NoEnt; }
+            catch (DirectoryNotFoundException) { return (int)ErrNo.NoEnt; }
+            catch (UnauthorizedAccessException) { return (int)ErrNo.Acces; }
+            catch (IOException)                { return (int)ErrNo.IO; }
+
+            bool isDir = attr.HasFlag(FileAttributes.Directory);
+            var f = (FstFlags)flags;
+            if ((f & (FstFlags.ATim | FstFlags.ATimNow)) == (FstFlags.ATim | FstFlags.ATimNow))
+                return (int)ErrNo.Inval;
+            if ((f & (FstFlags.MTim | FstFlags.MTimNow)) == (FstFlags.MTim | FstFlags.MTimNow))
+                return (int)ErrNo.Inval;
+
+            DateTime newAtime = DateTime.UtcNow, newMtime = DateTime.UtcNow;
+            if ((f & FstFlags.ATim) != 0)         newAtime = Clock.ToDateTimeUtc(atim);
+            else if ((f & FstFlags.ATimNow) != 0) newAtime = DateTime.UtcNow;
+            if ((f & FstFlags.MTim) != 0)         newMtime = Clock.ToDateTimeUtc(mtim);
+            else if ((f & FstFlags.MTimNow) != 0) newMtime = DateTime.UtcNow;
+
+            try
+            {
+                if (isDir)
+                {
+                    Directory.SetLastWriteTimeUtc(hostPath, newMtime);
+                    Directory.SetLastAccessTimeUtc(hostPath, newAtime);
+                }
+                else
+                {
+                    File.SetLastWriteTimeUtc(hostPath, newMtime);
+                    File.SetLastAccessTimeUtc(hostPath, newAtime);
+                }
+            }
+            catch (IOException)                { return (int)ErrNo.IO; }
+            catch (UnauthorizedAccessException) { return (int)ErrNo.Acces; }
+            return (int)ErrNo.Success;
+        }
+
+        [WacsImport("wasi_snapshot_preview1", "fd_prestat_get")]
+        public static int FdPrestatGetCore(WacsHostMemory mem, State state, int fd, int bufPtr)
+        {
+            if (!mem.Contains(bufPtr, PrestatSize)) return (int)ErrNo.Inval;
+            if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
+                return (int)ErrNo.Badf;
+
+            var name = fileDescriptor.Path;
+            if (name.Length > 1 && name[0] == '/') name = name.Substring(1);
+            var utf8Name = Encoding.UTF8.GetBytes(name);
+
+            Prestat prestat;
+            if (fileDescriptor.Type == Filetype.Directory)
+            {
+                prestat = new Prestat
+                {
+                    Tag = PrestatTag.Dir,
+                    Dir = new PrestatDir { NameLen = (uint)utf8Name.Length },
+                };
+            }
+            else
+            {
+                prestat = new Prestat
+                {
+                    Tag = PrestatTag.NotDir,
+                    Dir = new PrestatDir { NameLen = 0 },
+                };
+            }
+            mem.WriteStruct(bufPtr, prestat);
+            return (int)ErrNo.Success;
+        }
+
+        [WacsImport("wasi_snapshot_preview1", "fd_prestat_dir_name")]
+        public static int FdPrestatDirNameCore(WacsHostMemory mem, State state,
+            int fd, int pathPtr, int pathLen)
+        {
+            if (!mem.Contains(pathPtr, pathLen)) return (int)ErrNo.Inval;
+            if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
+                return (int)ErrNo.NoEnt;
+            if (fileDescriptor.Type != Filetype.Directory) return (int)ErrNo.NotDir;
+
+            var name = fileDescriptor.Path;
+            if (name.Length > 1 && name[0] == '/') name = name.Substring(1);
+            var utf8Name = Encoding.UTF8.GetBytes(name);
+            if (utf8Name.Length > pathLen) return (int)ErrNo.TooBig;
+
+            mem.WriteUtf8String(pathPtr, name, nullTerminate: false);
+            return (int)ErrNo.Success;
+        }
+
+        [WacsImport("wasi_snapshot_preview1", "path_filestat_get")]
+        public static int PathFilestatGetCore(WacsHostMemory mem, State state,
+            int fd, int flags, int pathPtr, int pathLen, int buf)
+        {
+            if (!mem.Contains(buf, FileStatSize)) return (int)ErrNo.Inval;
+            if (!mem.Contains(pathPtr, pathLen)) return (int)ErrNo.Inval;
+            if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var dirFileDescriptor))
+                return (int)ErrNo.NoEnt;
+            if (dirFileDescriptor.Type != Filetype.Directory && fd >= 3)
+                return (int)ErrNo.NotDir;
+
+            var pathStr = mem.ReadString(pathPtr, pathLen);
+            var guestPath = Path.Combine(dirFileDescriptor.Path, pathStr);
+
+            bool followSymlink = ((LookupFlags)flags & LookupFlags.SymlinkFollow) != 0;
+            string hostPath;
+            if (followSymlink)
+                hostPath = state.PathMapper.MapToHostPath(guestPath);
+            else
+                hostPath = Path.Combine(state.PathMapper.MapToHostPath(dirFileDescriptor.Path), pathStr);
+
+#if NET6_0_OR_GREATER
+            if (!followSymlink)
+            {
+                FileSystemInfo? linkInfo;
+                try
+                {
+                    linkInfo = File.Exists(hostPath) || Directory.Exists(hostPath)
+                        ? (FileSystemInfo)(File.Exists(hostPath)
+                            ? new FileInfo(hostPath)
+                            : new DirectoryInfo(hostPath))
+                        : null;
+                }
+                catch (UnauthorizedAccessException) { return (int)ErrNo.Acces; }
+                catch (IOException)                 { return (int)ErrNo.IO; }
+
+                if (linkInfo == null) return (int)ErrNo.NoEnt;
+                if (!string.IsNullOrEmpty(linkInfo.LinkTarget))
+                {
+                    var symStat = WasiFsHelpers.BuildFileStatForFile(new FileInfo(hostPath));
+                    symStat.Mode = Filetype.SymbolicLink;
+                    mem.WriteStruct(buf, symStat);
+                    return (int)ErrNo.Success;
+                }
+            }
+#endif
+
+            FileAttributes attr;
+            try { attr = File.GetAttributes(hostPath); }
+            catch (FileNotFoundException)      { return (int)ErrNo.NoEnt; }
+            catch (DirectoryNotFoundException) { return (int)ErrNo.NoEnt; }
+            catch (UnauthorizedAccessException) { return (int)ErrNo.Acces; }
+            catch (IOException)                { return (int)ErrNo.IO; }
+
+            bool isDir = attr.HasFlag(FileAttributes.Directory);
+            FileStat fileStat = isDir
+                ? WasiFsHelpers.BuildFileStatForDirectory(new DirectoryInfo(hostPath))
+                : WasiFsHelpers.BuildFileStatForFile(new FileInfo(hostPath));
+            mem.WriteStruct(buf, fileStat);
+            return (int)ErrNo.Success;
+        }
+
+        [WacsImport("wasi_snapshot_preview1", "path_filestat_set_times")]
+        public static int PathFilestatSetTimesCore(WacsHostMemory mem, State state,
+            int fd, int flags, int pathPtr, int pathLen,
+            long stAtim, long stMtim, int fstFlags)
+        {
+            if (!mem.Contains(pathPtr, pathLen)) return (int)ErrNo.Inval;
+            if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var dirFileDescriptor))
+                return (int)ErrNo.NoEnt;
+            if (dirFileDescriptor.Type != Filetype.Directory && fd >= 3)
+                return (int)ErrNo.NotDir;
+
+            var pathStr = mem.ReadString(pathPtr, pathLen);
+            var guestPath = Path.Combine(dirFileDescriptor.Path, pathStr);
+            var hostPath = state.PathMapper.MapToHostPath(guestPath);
+
+            FileAttributes attr;
+            try { attr = File.GetAttributes(hostPath); }
+            catch (FileNotFoundException)      { return (int)ErrNo.NoEnt; }
+            catch (DirectoryNotFoundException) { return (int)ErrNo.NoEnt; }
+            catch (UnauthorizedAccessException) { return (int)ErrNo.Acces; }
+            catch (IOException)                { return (int)ErrNo.IO; }
+
+            bool isDir = attr.HasFlag(FileAttributes.Directory);
+
+            var f = (FstFlags)fstFlags;
+            if ((f & (FstFlags.ATim | FstFlags.ATimNow)) == (FstFlags.ATim | FstFlags.ATimNow))
+                return (int)ErrNo.Inval;
+            if ((f & (FstFlags.MTim | FstFlags.MTimNow)) == (FstFlags.MTim | FstFlags.MTimNow))
+                return (int)ErrNo.Inval;
+
+            DateTime newAtime = DateTime.UtcNow, newMtime = DateTime.UtcNow;
+            if ((f & FstFlags.ATim) != 0)         newAtime = Clock.ToDateTimeUtc(stAtim);
+            else if ((f & FstFlags.ATimNow) != 0) newAtime = DateTime.UtcNow;
+            if ((f & FstFlags.MTim) != 0)         newMtime = Clock.ToDateTimeUtc(stMtim);
+            else if ((f & FstFlags.MTimNow) != 0) newMtime = DateTime.UtcNow;
+
+            try
+            {
+                if (isDir)
+                {
+                    Directory.SetLastWriteTimeUtc(hostPath, newMtime);
+                    Directory.SetLastAccessTimeUtc(hostPath, newAtime);
+                }
+                else
+                {
+                    File.SetLastWriteTimeUtc(hostPath, newMtime);
+                    File.SetLastAccessTimeUtc(hostPath, newAtime);
+                }
+            }
+            catch (IOException)                { return (int)ErrNo.IO; }
+            catch (UnauthorizedAccessException) { return (int)ErrNo.Acces; }
+            return (int)ErrNo.Success;
+        }
+    }
+}

@@ -89,7 +89,7 @@ namespace Wacs.Transpiler.Cli
         public bool Run { get; set; }
 
         [Option("wasi",
-            HelpText = "Shortcut for `--bind <path-to-Wacs.WASIp1.dll>`. Binds WASI preview1 imports before running. Trailing positional args populate argv.")]
+            HelpText = "Shortcut for `--bind <path-to-Wacs.WASI.Preview1.dll>`. Binds WASI preview1 imports before running. Trailing positional args populate argv.")]
         public bool Wasi { get; set; }
 
         [Option("bind", Separator = ',',

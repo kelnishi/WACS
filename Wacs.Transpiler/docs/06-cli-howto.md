@@ -148,7 +148,7 @@ main.Invoke(null, new object?[] { new[] { "2", "3" } }); // prints 5
 
 For modules with `wasi_snapshot_preview1` imports (anything built
 against `wasi-libc`: C / Rust / Go / Zig targeting `wasm32-wasi`),
-`--wasi` binds `WACS.WASIp1` before transpilation and invokes the
+`--wasi` binds `WACS.WASI.Preview1` before transpilation and invokes the
 entry-point export in-process. Trailing positional args become WASI
 `argv`.
 
@@ -162,7 +162,7 @@ wasm-transpile -i coremark.wasm \
 
 What you get:
 - `fd_write`, `args_get`, `args_sizes_get`, `clock_time_get`,
-  `proc_exit`, etc. are all routed to `Wacs.WASIp1`'s implementations
+  `proc_exit`, etc. are all routed to `Wacs.WASI.Preview1`'s implementations
   through the interpreter's host bindings.
 - The transpiled module's linear memory is swapped for the one the
   interpreter owns, so WASI syscalls and AOT reads/writes share bytes.

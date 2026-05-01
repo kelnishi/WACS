@@ -21,7 +21,7 @@ using Wacs.Transpiler.AOT;
 using Wacs.Transpiler.AOT.Component;
 using Wacs.Transpiler.Cli;          // HostedRunner (legacy ns inside Lib)
 using Wacs.Transpiler.Hosting;
-using Wacs.WASIp1.Types;
+using Wacs.WASI.Preview1.Types;
 
 namespace Wacs.Console.Verbs
 {
@@ -170,7 +170,7 @@ namespace Wacs.Console.Verbs
                     ?? Enumerable.Empty<string>())
                 .Select(path => new PreopenedDirectory(wasiConfig, path))
                 .ToList();
-            using var wasi = new WASIp1.Wasi(wasiConfig);
+            using var wasi = new WASI.Preview1.Wasi(wasiConfig);
             wasi.BindToRuntime(runtime);
 
             // --bind: load custom IBindable host packages.
@@ -361,7 +361,7 @@ namespace Wacs.Console.Verbs
                 wasiCfg.Arguments = new List<string>
                     { Path.GetFileName(files[files.Count - 1]) };
                 wasiCfg.Arguments.AddRange(opts.Args ?? Enumerable.Empty<string>());
-                var wasiBinding = new WASIp1.Wasi(wasiCfg);
+                var wasiBinding = new WASI.Preview1.Wasi(wasiCfg);
                 wasiBinding.BindToRuntime(runtime);
                 disposables.Add(wasiBinding);
             }

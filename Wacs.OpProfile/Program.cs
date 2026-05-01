@@ -39,8 +39,8 @@ using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.WASIp1;
-using Wacs.WASIp1;
-using Wacs.WASIp1.Types;
+using Wacs.WASI.Preview1;
+using Wacs.WASI.Preview1.Types;
 
 var specs = ParseSpecs(args);
 if (specs.Count == 0)
@@ -158,7 +158,7 @@ static ProfileReport Profile(ModuleSpec spec)
         BindEmscriptenStubs(runtime);
     }
 
-    Wacs.WASIp1.Wasi wasi = null;
+    Wacs.WASI.Preview1.Wasi wasi = null;
     if (spec.Wasi)
     {
         // In-memory stdout / stderr sinks so the perl test doesn't fill the
@@ -185,7 +185,7 @@ static ProfileReport Profile(ModuleSpec spec)
         {
             new(wasiConfig, "."),
         };
-        wasi = new Wacs.WASIp1.Wasi(wasiConfig);
+        wasi = new Wacs.WASI.Preview1.Wasi(wasiConfig);
         wasi.BindToRuntime(runtime);
     }
 

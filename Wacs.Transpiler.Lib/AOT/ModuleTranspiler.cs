@@ -150,8 +150,19 @@ namespace Wacs.Transpiler.AOT
         {
             // Each transpilation gets a unique assembly name to prevent type conflicts
             // across multiple dynamic assemblies (e.g., WasmStruct_0 in different modules).
-            var uniqueId = System.Threading.Interlocked.Increment(ref _assemblyCounter);
-            var assemblyName = new AssemblyName($"{_namespace}.{moduleName}_{uniqueId}");
+            // Callers that need a predictable name (whole-program AOT linkage, where the
+            // saved .dll is statically referenced from a consumer csproj) set
+            // TranspilerOptions.AssemblyName to skip the suffix.
+            AssemblyName assemblyName;
+            if (!string.IsNullOrEmpty(_options.AssemblyName))
+            {
+                assemblyName = new AssemblyName(_options.AssemblyName);
+            }
+            else
+            {
+                var uniqueId = System.Threading.Interlocked.Increment(ref _assemblyCounter);
+                assemblyName = new AssemblyName($"{_namespace}.{moduleName}_{uniqueId}");
+            }
             var assemblyBuilder = AssemblyBuilder.DefineDynamicAssembly(
                 assemblyName,
                 AssemblyBuilderAccess.Run);
@@ -208,6 +219,45 @@ namespace Wacs.Transpiler.AOT
                 moduleBuilder, $"{_namespace}.{moduleName}",
                 moduleInst.Repr, moduleInst, runtime, importCount);
             interfaceGen.Generate();
+
+            // Mark the assembly with [WacsTranspiledImports("Ns.IImports")]
+            // so WACS.HostBindings.SourceGen can find the IImports interface
+            // from a consumer's compilation references and synthesize an
+            // adapter. Only emit when there are actually imports — modules
+            // with no IImports interface have nothing for the source gen
+            // to adapt. String-based (not typeof(T)) so Lokad.ILPack can
+            // serialize the attribute blob without resolving a Type that
+            // lives in the still-being-saved assembly.
+            if (interfaceGen.ImportsInterface != null)
+            {
+                var attrCtor = typeof(Wacs.HostBindings.WacsTranspiledImportsAttribute)
+                    .GetConstructor(new[] { typeof(string) })!;
+                assemblyBuilder.SetCustomAttribute(new CustomAttributeBuilder(
+                    attrCtor,
+                    new object[] { interfaceGen.ImportsInterface!.FullName! }));
+
+                // Also stamp the (methodName, wasmModule, wasmName) table
+                // for source-gen binding match. Hoisted to assembly level
+                // because Lokad.ILPack doesn't preserve method-level
+                // custom attributes.
+                if (interfaceGen.ImportMethods.Count > 0)
+                {
+                    var entries = new System.Collections.Generic.List<(string, string, string)>();
+                    foreach (var im in interfaceGen.ImportMethods)
+                    {
+                        if (im.WasmImportModule != null && im.WasmImportEntity != null)
+                            entries.Add((im.Name, im.WasmImportModule, im.WasmImportEntity));
+                    }
+                    if (entries.Count > 0)
+                    {
+                        var mapping = Wacs.HostBindings.WacsImportNamesAttribute.Encode(entries);
+                        var namesCtor = typeof(Wacs.HostBindings.WacsImportNamesAttribute)
+                            .GetConstructor(new[] { typeof(string) })!;
+                        assemblyBuilder.SetCustomAttribute(new CustomAttributeBuilder(
+                            namesCtor, new object[] { mapping }));
+                    }
+                }
+            }
 
             // === Pass 0a.1: Resolve direct-linked host imports ===
             // For each import method, query the resolver (if any) for a

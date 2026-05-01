@@ -11,11 +11,11 @@
         <!-- Package identity -->
         <PackageId>WACS.Transpiler.Lib</PackageId>
         <Title>WACS Transpiler (Library)</Title>
-        <Version>0.4.0</Version>
-        <AssemblyVersion>0.4.0</AssemblyVersion>
+        <Version>0.5.0</Version>
+        <AssemblyVersion>0.5.0</AssemblyVersion>
         <Authors>Kelvin Nishikawa</Authors>
-        <Copyright>(c) 2025 Kelvin Nishikawa</Copyright>
-        <Description>Library API for WACS.Transpiler — programmatic ahead-of-time WebAssembly-to-.NET IL transpilation, plus seamless loading of saved transpiled assemblies. v0.4 adds WebAssembly Component Model support: direct-linked imports, multi-input ModuleLinker composition, multi-core component-mode emit-main, ComponentBridge cross-engine adapters, and WASI Preview 2 host-package wiring.</Description>
+        <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
+        <Description>Library API for WACS.Transpiler — programmatic ahead-of-time WebAssembly-to-.NET IL transpilation, plus seamless loading of saved transpiled assemblies. v0.5 adds the AotLinked emission target (skips the codec wrapper for ~22% binary-size reduction; covers memory / data / globals / tables / element segments) and a stable AssemblyName option for static-reference / NativeAOT-linked workflows. The transpiler now emits `[assembly: WacsTranspiledImports]` + `[assembly: WacsImportNames]` so the new WACS.HostBindings.SourceGen Roslyn generator can wire imports straight to `[WacsImport]`-annotated host statics — no reflection, no DispatchProxy. Together these enable the one-shot `wacs aot` CLI.</Description>
         <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <RepositoryType>git</RepositoryType>
@@ -34,7 +34,8 @@
     <ItemGroup>
         <ProjectReference Include="..\Wacs.Core\Wacs.Core.csproj" />
         <ProjectReference Include="..\Wacs.ComponentModel\Wacs.ComponentModel.csproj" />
-        <ProjectReference Include="..\Wacs.WASIp1\Wacs.WASIp1.csproj" />
+        <ProjectReference Include="..\Wacs.WASI.Preview1\Wacs.WASI.Preview1.csproj" />
+        <ProjectReference Include="..\Wacs.HostBindings.Abstractions\Wacs.HostBindings.Abstractions.csproj" />
     </ItemGroup>
 
     <ItemGroup>
