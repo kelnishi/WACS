@@ -43,6 +43,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.Preview2.Dependen
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASIp1.Test", "Wacs.WASIp1.Test\Wacs.WASIp1.Test.csproj", "{BA061514-ADB0-44B7-ADFF-D2D637F14151}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Bench.Aot", "Wacs.Bench.Aot\Wacs.Bench.Aot.csproj", "{6F7F8FF4-AA7F-41CA-8AFB-65C9A512D5E7}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -133,5 +135,9 @@ Global
 		{BA061514-ADB0-44B7-ADFF-D2D637F14151}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{BA061514-ADB0-44B7-ADFF-D2D637F14151}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{BA061514-ADB0-44B7-ADFF-D2D637F14151}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6F7F8FF4-AA7F-41CA-8AFB-65C9A512D5E7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6F7F8FF4-AA7F-41CA-8AFB-65C9A512D5E7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6F7F8FF4-AA7F-41CA-8AFB-65C9A512D5E7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6F7F8FF4-AA7F-41CA-8AFB-65C9A512D5E7}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
