@@ -150,8 +150,19 @@ namespace Wacs.Transpiler.AOT
         {
             // Each transpilation gets a unique assembly name to prevent type conflicts
             // across multiple dynamic assemblies (e.g., WasmStruct_0 in different modules).
-            var uniqueId = System.Threading.Interlocked.Increment(ref _assemblyCounter);
-            var assemblyName = new AssemblyName($"{_namespace}.{moduleName}_{uniqueId}");
+            // Callers that need a predictable name (whole-program AOT linkage, where the
+            // saved .dll is statically referenced from a consumer csproj) set
+            // TranspilerOptions.AssemblyName to skip the suffix.
+            AssemblyName assemblyName;
+            if (!string.IsNullOrEmpty(_options.AssemblyName))
+            {
+                assemblyName = new AssemblyName(_options.AssemblyName);
+            }
+            else
+            {
+                var uniqueId = System.Threading.Interlocked.Increment(ref _assemblyCounter);
+                assemblyName = new AssemblyName($"{_namespace}.{moduleName}_{uniqueId}");
+            }
             var assemblyBuilder = AssemblyBuilder.DefineDynamicAssembly(
                 assemblyName,
                 AssemblyBuilderAccess.Run);
