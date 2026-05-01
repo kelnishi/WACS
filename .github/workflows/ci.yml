@@ -58,3 +58,6 @@ jobs:
 
       - name: Run Transpiler Tests
         run: dotnet test --configuration Release --no-build --verbosity normal Wacs.Transpiler.Test/Wacs.Transpiler.Test.csproj
+
+      - name: Run WASIp1 Tests
+        run: dotnet test --configuration Release --no-build --verbosity normal Wacs.WASIp1.Test/Wacs.WASIp1.Test.csproj
