@@ -1,5 +1,33 @@
 # Changelog
 
+## [WACS.Cli 1.1.0] — `wacs bindgen` verb
+
+Rolls the standalone `wit-bindgen-wacs` CLI into the unified
+`wacs` tool as a fourth verb. Symmetric with the
+`wasm-transpile → wacs` consolidation that just landed: one CLI,
+verb-based, smart auto-detect.
+
+```bash
+wacs bindgen ./wit -o ./gen/        # forward: WIT directory → C# bindings
+wacs bindgen ./wit/foo.wit -o ./gen/ # forward: single .wit file
+wacs bindgen ./app.dll -o ./regen/  # reverse: regenerate from a transpiled .dll
+```
+
+Direction inferred from input shape — `.dll` triggers reverse,
+`.wit` is forward single-file, a directory is forward tree (with
+`deps/` recursion). The explicit `--wit` / `--wit-dir` / `--dll`
+flags from `wit-bindgen-wacs` collapse to a single positional
+argument.
+
+The standalone `WACS.ComponentModel.Bindgen` package
+(`wit-bindgen-wacs` CLI) is deprecated → 0.1.1 with a stderr
+banner pointing at the new verb. Output is byte-identical;
+existing pipelines keep working unchanged.
+
+`WACS.ComponentModel.Bindgen.Lib` (programmatic surface) is
+**not** deprecated — source generators and build-time
+integrations should keep referencing it directly.
+
 ## [0.10.0] — Component Model
 
 The Component Model release. Adds WebAssembly Component Model
