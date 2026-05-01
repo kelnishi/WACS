@@ -1,6 +1,6 @@
 # Changelog
 
-## [WACS.Cli 1.2.0 + WACS.WASI.Preview1 0.11.0 + WACS.HostBindings.* 0.1.0] — `wacs aot` end-to-end + WASI rename
+## [WACS.Cli 1.2.0 + WACS.WASI.Preview1 0.11.0 + WACS.HostBindings.* 0.1.0 + WACS.Transpiler.Lib 0.5.0] — `wacs aot` end-to-end + WASI rename
 
 A wasm input is now one CLI call away from a self-contained NativeAOT
 native binary:
