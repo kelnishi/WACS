@@ -653,12 +653,80 @@ adapter satisfies — `HostPackageResolver` indexes them by
 `(Package, Interface, Item)`, which is exactly what the wasm
 component's import strings encode.
 
-> **Status:** Phase B chain mode's transpile-time loop is shipped
-> — `WitContract.FromAssembly` round-trips the contract from
-> either an embedded-WIT host package or a transpiled `.dll`. The
-> runtime adapter (mapping B's `IExports` to A's expected
-> `[WitSource]`-interface bundle) is currently caller-built; the
-> auto-generated adapter is a v0.4 follow-up.
+### Mixed-engine composition
+
+Either side of a component-to-component edge can be interpreter-
+backed or transpiler-backed. The seam is `[WitSource]`-tagged C#
+interfaces (the same shape `wit-bindgen-csharp` and
+`ExportInterfaceEmit` produce); `Wacs.ComponentModel.Runtime.ComponentBridge`
+provides the cross-engine adapters.
+
+**Transpiled A consumes interpreted B** — wrap the interpreter
+component as a host bundle satisfying A's `[WitSource]` interface
+contract. No per-import glue:
+
+```csharp
+using Wacs.ComponentModel.Runtime;
+
+// B is an interpreter component instance.
+var b = ComponentInstance.Instantiate(File.ReadAllBytes("B.component.wasm"));
+
+// Build the typed bundle A's transpiled .dll expects. Each
+// constructor parameter on `ABundleType` is a [WitSource]-tagged
+// interface; AsHostBundle wires each one to a DispatchProxy that
+// routes calls through b.Invoke(...).
+var aBundle = ComponentBridge.AsHostBundle(b, typeof(ABundleType));
+
+// Drop into A's generated module ctor as the host bundle slot.
+var aModule = Activator.CreateInstance(
+    aModuleType, importsStub, aBundle)!;
+```
+
+Or grab a single typed interface (useful when A's bundle takes
+multiple sources — some interpreter, some real impls):
+
+```csharp
+var iStdout = ComponentBridge.AsTypedInterface<IStdout>(b);
+var bundle = new MyMixedBundle(iStdout, /* …other deps */);
+```
+
+By default the proxy uses each method's `[WitSource].Item` as the
+export name passed to `b.Invoke(...)`. Override via the
+`exportNameMapper` parameter when the wasm-side path doesn't match
+(typical for nested-interface exports).
+
+**Interpreted A imports from transpiled B** — bind B's typed
+exports as host functions on A's interpreter runtime:
+
+```csharp
+// B is a transpiled .dll instance.
+var bModule = Activator.CreateInstance(bModuleType, importsStub, wasi)!;
+
+// Bind B's IExports methods as host functions, addressable by
+// their wit-qualified (module, entity) name. ComponentBridge walks
+// the [WitSource] attributes to derive each binding key.
+var runtime = new WasmRuntime();
+ComponentBridge.BindAsImports(runtime, bModule, typeof(IBExports));
+
+// Then instantiate A through the interpreter as usual — its
+// imports now resolve through B.
+var a = ComponentInstance.Instantiate(aBytes,
+    rt => { /* runtime is already pre-bound; merge here */ });
+```
+
+The contract is symmetric: a transpiled component is a host
+package by reflection over its `[WitSource]`-tagged interfaces, an
+interpreter component is one through `ComponentBridge.AsHostBundle`.
+The same code consumes either.
+
+> **v0 scope:** `ComponentBridge` covers the freestanding-export
+> shape (each interface method's `[WitSource].Item` is the wasm
+> export name `ComponentInstance.Invoke` accepts). Nested-interface
+> exports — where the wasm-side path is the qualified
+> `<package>/<interface>.<item>` — work via the explicit
+> `exportNameMapper` callback. Resource handles, async, and
+> non-primitive arg marshaling on the `BindAsImports` direction
+> ride incrementally.
 
 ### Building a custom host package
 
