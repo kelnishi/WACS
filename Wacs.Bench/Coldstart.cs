@@ -76,9 +76,7 @@ internal static class Coldstart
 
     private static int RunChild(string runtime)
     {
-        var here = AppContext.BaseDirectory;
-        var fibWasm = Path.GetFullPath(Path.Combine(here, "..", "..", "..", "fib.wasm"));
-        var bytes = File.ReadAllBytes(fibWasm);
+        var bytes = File.ReadAllBytes(LocateFib());
 
         // For the saved-DLL runtime, transpile + persist to a temp .dll once
         // before the trial loop. This is the build-time cost — paid once per
@@ -119,9 +117,7 @@ internal static class Coldstart
 
     private static int RunInProcess()
     {
-        var here = AppContext.BaseDirectory;
-        var fibWasm = Path.GetFullPath(Path.Combine(here, "..", "..", "..", "fib.wasm"));
-        var bytes = File.ReadAllBytes(fibWasm);
+        var bytes = File.ReadAllBytes(LocateFib());
 
         Console.WriteLine($"Coldstart benchmark — fib.wasm ({bytes.Length} bytes) — IN-PROCESS");
         Console.WriteLine($"  warning: only the first runtime listed gets true cold .NET JIT;");
@@ -314,6 +310,20 @@ internal static class Coldstart
 
     private static double ToUs(Stopwatch sw)
         => sw.ElapsedTicks * 1_000_000.0 / Stopwatch.Frequency;
+
+    // Resolve fib.wasm in either the development tree (run from
+    // bin/Release/net8.0/) or a published self-contained directory (where
+    // CopyToOutputDirectory drops it alongside the binary).
+    private static string LocateFib()
+    {
+        var here = AppContext.BaseDirectory;
+        var sideBySide = Path.Combine(here, "fib.wasm");
+        if (File.Exists(sideBySide)) return sideBySide;
+        var devTree = Path.GetFullPath(Path.Combine(here, "..", "..", "..", "fib.wasm"));
+        if (File.Exists(devTree)) return devTree;
+        throw new FileNotFoundException(
+            $"fib.wasm not found next to the binary or in the dev tree (looked at {sideBySide} and {devTree})");
+    }
 
     // ---------- transpiler-saved (.dll) driver ----------
 
