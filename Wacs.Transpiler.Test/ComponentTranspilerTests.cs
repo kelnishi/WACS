@@ -1854,6 +1854,64 @@ namespace Wacs.Transpiler.Test
         }
 
         [Fact]
+        public void EmitMain_for_no_import_component_invokes_export()
+        {
+            // End-to-end --emit-main path for the simplest
+            // component-mode shape: no imports, single core
+            // module, scalar return. Tiny-component exports
+            // `greet: func() -> u32` returning 42.
+            //
+            // Proves: ComponentMainEntryEmitter wires
+            // typeof(Module) + args + exportName into a
+            // one-line ComponentMainHost.Run call; the host
+            // handles the no-import (parameterless) ctor path
+            // and routes the scalar return to the int exit code.
+
+            using var fs = File.OpenRead(FindTinyComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(
+                fs,
+                assemblyNamespace: "Wacs.Test.TinyMain",
+                moduleName: "TinyModule");
+
+            var programType =
+                Wacs.Transpiler.AOT.Component.ComponentMainEntryEmitter
+                    .Emit(result, "Program", "greet",
+                        System.Array.Empty<System.Reflection.Assembly>());
+
+            Assert.NotNull(programType);
+            var main = programType.GetMethod("Main",
+                BindingFlags.Public | BindingFlags.Static);
+            Assert.NotNull(main);
+
+            var rc = main!.Invoke(null,
+                new object?[] { System.Array.Empty<string>() });
+            // greet() returns u32(42) — Main casts to int exit code.
+            Assert.Equal(42, (int)rc!);
+        }
+
+        [Fact]
+        public void EmitMain_rejects_export_with_args()
+        {
+            // tiny-component's greet() is zero-arg, but if we ask
+            // for a hypothetical export taking args, the v0
+            // emitter must reject it cleanly (argv parsing for
+            // component-shape params is a follow-up).
+            using var fs = File.OpenRead(FindTinyComponentPath());
+            var result = ComponentTranspiler.TranspileSingleModule(
+                fs,
+                assemblyNamespace: "Wacs.Test.TinyArgs",
+                moduleName: "TinyModule");
+
+            // No such export → caller-facing error matches the
+            // existing core-MainEntryEmitter style.
+            var ex = Assert.Throws<MainEntryEmitter.ConstraintException>(
+                () => Wacs.Transpiler.AOT.Component.ComponentMainEntryEmitter
+                    .Emit(result, "Program", "no-such-export",
+                        System.Array.Empty<System.Reflection.Assembly>()));
+            Assert.Contains("not found", ex.Message);
+        }
+
+        [Fact]
         public void ExportInterfaceEmit_resolves_enum_and_tuple_via_named_type_lookup()
         {
             // v1 surface — enum CtTypeRef + tuple<u32, u32>

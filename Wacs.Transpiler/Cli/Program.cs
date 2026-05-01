@@ -12,10 +12,12 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using CommandLine;
+using Wacs.ComponentModel.Runtime.Parser;
 using Wacs.Core;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Transpiler.AOT;
+using Wacs.Transpiler.AOT.Component;
 using Wacs.WASIp1;
 
 namespace Wacs.Transpiler.Cli
@@ -55,9 +57,11 @@ namespace Wacs.Transpiler.Cli
             }
 
             bool hasHostBindings = opts.Wasi || opts.Bind.Any();
-            if (opts.Run && !opts.EmitMain && !hasHostBindings)
+            bool hasComponentHostBindings = opts.Wasip2 || opts.HostPackage.Any();
+            if (opts.Run && !opts.EmitMain && !hasHostBindings && !hasComponentHostBindings)
             {
-                Console.Error.WriteLine("error: --run requires --emit-main, --wasi, or --bind");
+                Console.Error.WriteLine(
+                    "error: --run requires --emit-main, --wasi, --bind, --wasip2, or --host-package");
                 return ExitUsage;
             }
 
@@ -88,6 +92,27 @@ namespace Wacs.Transpiler.Cli
             }
 
             var timer = Stopwatch.StartNew();
+
+            // Component-mode detection: peek at the first 8 bytes.
+            // Component binaries carry layer=0x0001; core modules have
+            // layer=0x0000. ComponentBinaryParser.IsComponentHeader is
+            // the canonical discriminator. Direct callers / library
+            // users go through ComponentTranspiler.TranspileSingleModule
+            // for components — we mirror that decision here so the CLI
+            // routes a `.component.wasm` file through the same path.
+            bool isComponent;
+            try
+            {
+                isComponent = DetectComponent(input);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"error: failed to read input header: {ex.Message}");
+                return ExitTranspileFailure;
+            }
+
+            if (isComponent)
+                return RunComponent(opts, input, output, options, timer);
 
             Module module;
             WasmRuntime runtime;
@@ -219,6 +244,149 @@ namespace Wacs.Transpiler.Cli
             }
 
             foreach (var d in disposables) d.Dispose();
+            return runExit;
+        }
+
+        // Read the first 8 bytes and ask ComponentBinaryParser which
+        // shape it is. Files smaller than 8 bytes can't be either —
+        // surface that as a non-component to let the core parser
+        // produce its own clearer error.
+        private static bool DetectComponent(string path)
+        {
+            using var fs = new FileStream(path, FileMode.Open,
+                FileAccess.Read, FileShare.Read);
+            Span<byte> header = stackalloc byte[8];
+            int read = 0;
+            while (read < header.Length)
+            {
+                int n = fs.Read(header.Slice(read));
+                if (n <= 0) break;
+                read += n;
+            }
+            return read == header.Length
+                && ComponentBinaryParser.IsComponentHeader(header);
+        }
+
+        // Component-mode routing: parse + transpile via
+        // ComponentTranspiler, threading --wasip2 / --host-package
+        // host packages, then optionally emit Main + run + save.
+        private static int RunComponent(CliOptions opts, string input,
+            string output, TranspilerOptions options, Stopwatch timer)
+        {
+            if (opts.Verbose)
+                Console.WriteLine("mode          component");
+
+            // --bind / --wasi are core-WASI helpers that don't apply
+            // to components — flag them as a usage error so users
+            // don't expect them to wire WASI Preview 2 (which goes
+            // through --wasip2 / --host-package instead).
+            if (opts.Wasi || opts.Bind.Any())
+            {
+                Console.Error.WriteLine(
+                    "error: --wasi / --bind do not apply to component binaries; " +
+                    "use --wasip2 or --host-package <name> instead.");
+                return ExitUsage;
+            }
+
+            TranspilationResult result;
+            try
+            {
+                using var fs = new FileStream(input, FileMode.Open,
+                    FileAccess.Read);
+                result = ComponentTranspiler.TranspileSingleModule(
+                    fs,
+                    assemblyNamespace: opts.Namespace,
+                    moduleName: opts.ModuleName,
+                    options: options,
+                    configureImports: rt =>
+                    {
+                        // The runtime's instantiate-time validation
+                        // wants a binding for every function import.
+                        // Direct-linked imports never call through —
+                        // the IL bypasses the table — so a throwing
+                        // stub is the right shape: absence is silent
+                        // success, presence-then-invocation surfaces
+                        // a real bug.
+                        using var fs2 = new FileStream(input,
+                            FileMode.Open, FileAccess.Read);
+                        var parsed = ComponentTranspiler.Parse(fs2);
+                        if (parsed.CoreModules.Count == 1)
+                            ComponentImportStubs.RegisterAll(rt,
+                                parsed.CoreModules[0]);
+                    });
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"error: component transpilation failed: {ex.Message}");
+                return ExitTranspileFailure;
+            }
+
+            Type? programType = null;
+            if (opts.EmitMain)
+            {
+                try
+                {
+                    programType = ComponentMainEntryEmitter.Emit(
+                        result, opts.MainClass, opts.EntryPoint,
+                        options.HostPackages);
+                }
+                catch (MainEntryEmitter.ConstraintException ex)
+                {
+                    Console.Error.WriteLine($"error: --emit-main: {ex.Message}");
+                    return ExitEmitMainConstraint;
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"error: --emit-main failed: {ex.Message}");
+                    return ExitTranspileFailure;
+                }
+            }
+
+            int runExit = ExitOk;
+            if (opts.Run)
+            {
+                if (!opts.EmitMain)
+                {
+                    Console.Error.WriteLine(
+                        "error: --run on component binaries requires --emit-main.");
+                    return ExitUsage;
+                }
+                runExit = InvokeEmittedMain(programType!, opts);
+            }
+
+            try
+            {
+                var outDir = Path.GetDirectoryName(output);
+                if (!string.IsNullOrEmpty(outDir) && !Directory.Exists(outDir))
+                    Directory.CreateDirectory(outDir);
+                result.SaveAssembly(output);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"error: failed to write output: {ex.Message}");
+                return ExitTranspileFailure;
+            }
+
+            timer.Stop();
+
+            if (opts.Verbose)
+            {
+                Console.WriteLine();
+                Console.WriteLine($"transpiled {result.TranspiledCount} functions" +
+                    (result.FallbackCount > 0 ? $" ({result.FallbackCount} fallback)" : "") +
+                    $" in {timer.ElapsedMilliseconds}ms");
+                if (result.Diagnostics.Count > 0)
+                {
+                    Console.WriteLine($"{result.Diagnostics.Count} diagnostic(s):");
+                    foreach (var d in result.Diagnostics)
+                        Console.WriteLine($"  {d}");
+                }
+            }
+            else
+            {
+                Console.WriteLine($"wrote {output} ({result.TranspiledCount} functions, {timer.ElapsedMilliseconds}ms)");
+            }
+
             return runExit;
         }
 
