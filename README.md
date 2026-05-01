@@ -563,6 +563,31 @@ positioning, not apples-to-apples):
   logic that doesn't dominate a frame budget — but don't put it in
   a hot inner loop.
 
+### Cold-Start
+
+The runtime numbers above are *steady-state*. The first invocation
+also pays the .NET tier-1 JIT cost, and a transpiler embedding pays
+its `Reflection.Emit` warm-up — together that's ~30–55 ms of cold
+start out of the box on a tiny module. Two build-time switches knock
+that down dramatically; pick the row that matches what your embedding
+ships:
+
+| tier | build flag | cold to first call (fib(100), 242-byte module) | trade-off |
+|------|------------|---------------------------------:|-----------|
+| **default** | plain `dotnet publish -c Release` | 35–55 ms | Smallest deploy artifact, every runtime works. JIT warmup dominates. |
+| **better**  | `-p:PublishReadyToRun=true --self-contained` | 16–30 ms | Larger publish (~70 MB self-contained). All four runtimes still work. ~1.5–2.8× faster cold; the `--switch` interpreter sees the biggest win (45 → 16 ms) because R2R skips the giant prefix-split-switch tier-1 JIT. |
+| **best (interpreter-only)** | `<PublishAot>true</PublishAot>` in csproj | **0.3–1.0 ms** | Single ~10 MB native binary, no JIT in the process. Excludes `transpiler` and `Wacs.ComponentModel` (both need runtime IL emission). `--switch` interpreter hits 319 µs cold. |
+| **best (transpiler ok)** | `wacs build` then `TranspiledModuleLoader.Load` under R2R | **~1 ms** | Run the transpile once at build time and ship the `.dll`. Same R2R caveats, plus a one-time ~100 ms transpile cost off the runtime path. Steady-state matches the in-process transpiler. |
+
+For the absolute cold-start floor — both startup *and* steady-state on
+a single machine — there's a fifth path worth knowing about: link the
+transpiled `.dll` statically into a NativeAOT-published consumer (501 µs
+cold and ~100 ns per fib(100) call, in a 4.3 MB native binary). Today
+this requires hand-wired csproj plumbing; a future `wacs aot` workflow
+will automate it. Full breakdown, methodology, and the four-runtime ×
+three-build-flag matrix in
+[`docs/COLDSTART.md`](docs/COLDSTART.md).
+
 ### Running `wacs`
 
 `wacs` is the reference CLI — verb-based subcommand layout (`run`
