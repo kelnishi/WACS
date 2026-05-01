@@ -10,14 +10,24 @@
         <AssemblyName>Wacs.Transpiler</AssemblyName>
         <StartupObject>Wacs.Transpiler.Cli.Program</StartupObject>
 
-        <!-- Package identity -->
+        <!-- Package identity. DEPRECATED — replaced by WACS.Cli.
+             The package stays installable so existing pipelines
+             keep working, but ships a stderr deprecation banner on
+             every invocation pointing at `wacs`. -->
         <PackageId>WACS.Transpiler</PackageId>
-        <Title>WACS Transpiler</Title>
-        <Version>0.3.0</Version>
-        <AssemblyVersion>0.3.0</AssemblyVersion>
+        <Title>WACS Transpiler (deprecated)</Title>
+        <Version>0.3.1</Version>
+        <AssemblyVersion>0.3.1</AssemblyVersion>
         <Authors>Kelvin Nishikawa</Authors>
         <Copyright>(c) 2025 Kelvin Nishikawa</Copyright>
-        <Description>Ahead-of-time WebAssembly-to-.NET IL transpiler for WACS. Installs the `wasm-transpile` CLI tool. For programmatic use, reference WACS.Transpiler.Lib.</Description>
+        <Description>DEPRECATED — superseded by WACS.Cli (command: `wacs`). Install with: dotnet tool install -g WACS.Cli. Original: ahead-of-time WebAssembly-to-.NET IL transpiler for WACS. Installs the `wasm-transpile` CLI tool. For programmatic use, reference WACS.Transpiler.Lib.</Description>
+
+        <!-- Surface the deprecation in the NuGet UI: the official
+             <PackageDeprecation> element isn't authored at .nuspec
+             time (it's set server-side via push metadata), but this
+             reason text gets baked into the package description so
+             the gallery prominently displays the migration path. -->
+        <PackageDeprecationReason>Replaced by WACS.Cli (command: wacs). Install with: dotnet tool install -g WACS.Cli</PackageDeprecationReason>
         <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <RepositoryType>git</RepositoryType>

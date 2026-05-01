@@ -1,4 +1,24 @@
-# WACS.Transpiler
+# WACS.Transpiler — DEPRECATED
+
+> ⚠ **DEPRECATED.** This package and the `wasm-transpile` CLI are
+> superseded by **`WACS.Cli`** (command: `wacs`). The legacy package
+> stays installable so existing pipelines keep working, but won't
+> receive new features.
+>
+> ```bash
+> dotnet tool install -g WACS.Cli
+> ```
+>
+> Migration:
+> - `wasm-transpile -i x.wasm -o x.dll`         → `wacs build x.wasm -o x.dll`
+> - `wasm-transpile -i x.wasm -o x.dll --run`   → `wacs run x.wasm`
+> - `wasm-transpile -i x.wasm -o x.dll --wasip2 --emit-main` →
+>   `wacs build x.wasm --wasip2 --emit-main -o x.dll`
+>
+> See the [`WACS.Cli` README](https://github.com/kelnishi/WACS/tree/main/Wacs.Console)
+> for the full verb-based subcommand layout.
+
+---
 
 An ahead-of-time transpiler that compiles WebAssembly modules to .NET
 assemblies (`.dll`), built on top of [WACS](https://www.nuget.org/packages/WACS).
