@@ -19,6 +19,7 @@ using System.Linq;
 using System.Text;
 using Wacs.Core.Runtime;
 using Wacs.Core.WASIp1;
+using Wacs.HostBindings;
 using ptr = System.Int32;
 using size = System.UInt32;
 
@@ -45,83 +46,78 @@ namespace Wacs.WASI.Preview1
             runtime.BindHostFunction<Func<ExecContext,ptr,ptr,ErrNo>>((module, "environ_get"), EnvironGet);
         }
 
-        /// <summary>
-        /// Copies the number and size of the command-line arguments to linear memory.
-        /// </summary>
+        // Interpreter wrappers (unchanged binding contract)
         public ErrNo ArgsSizesGet(ExecContext ctx, ptr argcPtr, ptr argvBufSizePtr)
-        {
-            var mem = ctx.DefaultMemory;
-            
-            int argc = _config.Arguments.Count;
-            int argvBufSize = _config.Arguments.Sum(arg => Encoding.UTF8.GetByteCount(arg) + 1);
+            => ArgsSizesGetCore(Clock.WacsHost(ctx), _config, argcPtr, argvBufSizePtr);
 
-            // Write the counts to the provided pointers.
-            mem.WriteInt32(argcPtr, argc);
-            mem.WriteInt32(argvBufSizePtr, argvBufSize);
-            
+        public ErrNo ArgsGet(ExecContext ctx, ptr argvPtr, ptr argvBufPtr)
+            => ArgsGetCore(Clock.WacsHost(ctx), _config, argvPtr, argvBufPtr);
+
+        public ErrNo EnvironSizesGet(ExecContext ctx, ptr environCountPtr, ptr environBufSizePtr)
+            => EnvironSizesGetCore(Clock.WacsHost(ctx), _config, environCountPtr, environBufSizePtr);
+
+        public ErrNo EnvironGet(ExecContext ctx, ptr environPtr, ptr environBufPtr)
+            => EnvironGetCore(Clock.WacsHost(ctx), _config, environPtr, environBufPtr);
+
+        // ============================================================
+        // AOT-friendly static entry points
+        // ============================================================
+
+        /// <summary>Counts and total UTF-8 buffer size for argv.</summary>
+        [WacsImport("wasi_snapshot_preview1", "args_sizes_get")]
+        public static ErrNo ArgsSizesGetCore(WacsHostMemory mem, WasiConfiguration config,
+                                              ptr argcPtr, ptr argvBufSizePtr)
+        {
+            int argc = config.Arguments.Count;
+            int argvBufSize = config.Arguments.Sum(arg => Encoding.UTF8.GetByteCount(arg) + 1);
+
+            mem.WriteInt32LE(argcPtr, argc);
+            mem.WriteInt32LE(argvBufSizePtr, argvBufSize);
             return ErrNo.Success;
         }
 
-        /// <summary>
-        /// Copies command-line argument data to linear memory.
-        /// </summary>
-        public ErrNo ArgsGet(ExecContext ctx, ptr argvPtr, ptr argvBufPtr)
+        /// <summary>Copy argv strings + pointer table into linear memory.</summary>
+        [WacsImport("wasi_snapshot_preview1", "args_get")]
+        public static ErrNo ArgsGetCore(WacsHostMemory mem, WasiConfiguration config,
+                                         ptr argvPtr, ptr argvBufPtr)
         {
-            var mem = ctx.DefaultMemory;
-            
-            foreach (string arg in _config.Arguments)
+            foreach (string arg in config.Arguments)
             {
-                // Copy argument string to argvBufPtr.
-                int strLen = mem.WriteUtf8String((uint)argvBufPtr, arg, true);
-                
-                // Write pointer to argument in argvPtr.
-                mem.WriteInt32(argvPtr, argvBufPtr);
-
-                // Update offsets.
+                int strLen = mem.WriteUtf8String(argvBufPtr, arg, nullTerminate: true);
+                mem.WriteInt32LE(argvPtr, argvBufPtr);
                 argvBufPtr += strLen;
                 argvPtr += sizeof(ptr);
             }
-
             return ErrNo.Success;
         }
 
-        /// <summary>
-        /// Copies the number and size of the environment variables to linear memory.
-        /// </summary>
-        public ErrNo EnvironSizesGet(ExecContext ctx, ptr environCountPtr, ptr environBufSizePtr)
+        /// <summary>Counts and total UTF-8 buffer size for environ.</summary>
+        [WacsImport("wasi_snapshot_preview1", "environ_sizes_get")]
+        public static ErrNo EnvironSizesGetCore(WacsHostMemory mem, WasiConfiguration config,
+                                                 ptr environCountPtr, ptr environBufSizePtr)
         {
-            var mem = ctx.DefaultMemory;
-            // Get the total number of environment variables.
-            size environCount = (size)_config.EnvironmentVariables.Count;
-            size environBufSize = (size)_config.EnvironmentVariables.Sum(envVar =>
+            int environCount = config.EnvironmentVariables.Count;
+            int environBufSize = config.EnvironmentVariables.Sum(envVar =>
                 Encoding.UTF8.GetByteCount($"{envVar.Key}={envVar.Value}") + 1);
-            // Write the counts to the provided pointers.
-            mem.WriteInt32(environCountPtr, environCount);
-            mem.WriteInt32(environBufSizePtr,environBufSize);
+
+            mem.WriteInt32LE(environCountPtr, environCount);
+            mem.WriteInt32LE(environBufSizePtr, environBufSize);
             return ErrNo.Success;
         }
 
-        /// <summary>
-        /// Copies environment variable data to linear memory.
-        /// </summary>
-        public ErrNo EnvironGet(ExecContext ctx, ptr environPtr, ptr environBufPtr)
+        /// <summary>Copy environ strings + pointer table into linear memory.</summary>
+        [WacsImport("wasi_snapshot_preview1", "environ_get")]
+        public static ErrNo EnvironGetCore(WacsHostMemory mem, WasiConfiguration config,
+                                            ptr environPtr, ptr environBufPtr)
         {
-            var mem = ctx.DefaultMemory;
-            foreach (var envVar in _config.EnvironmentVariables)
+            foreach (var envVar in config.EnvironmentVariables)
             {
                 string envEntry = $"{envVar.Key}={envVar.Value}";
-
-                // Copy environment string to environBufPtr.
-                int strLen = mem.WriteUtf8String((uint)environBufPtr, envEntry, true);
-
-                // Write pointer to environment variable in environPtr.
-                mem.WriteInt32(environPtr, environBufPtr);
-                
-                // Update offsets.
+                int strLen = mem.WriteUtf8String(environBufPtr, envEntry, nullTerminate: true);
+                mem.WriteInt32LE(environPtr, environBufPtr);
                 environBufPtr += strLen;
                 environPtr += sizeof(ptr);
             }
-
             return ErrNo.Success;
         }
     }

@@ -18,6 +18,7 @@ using System;
 using System.Diagnostics;
 using Wacs.Core.Runtime;
 using Wacs.Core.WASIp1;
+using Wacs.HostBindings;
 using Wacs.WASI.Preview1.Types;
 using ptr = System.Int32;
 
@@ -37,37 +38,54 @@ namespace Wacs.WASI.Preview1
             runtime.BindHostFunction<Func<ExecContext,ClockId,timestamp,ptr,ErrNo>>((module, "clock_time_get"), ClockTimeGet);
         }
 
+        // The interpreter binds these instance methods through IBindable; they
+        // pull memory off ExecContext and forward to the AOT-friendly statics
+        // below. Source-gen for the AOT path discovers the statics directly via
+        // [WacsImport] and never sees ExecContext.
+
         /// <summary>
         /// Return the resolution of a clock. Implementations are required to provide a non-zero value for supported
         /// clocks. For unsupported clocks, return errno::inval. Note: This is similar to clock_getres in POSIX.
         /// </summary>
-        /// <param name="ctx"></param>
-        /// <param name="clockId">The clock for which to return the resolution.</param>
-        /// <param name="resolutionPtr"></param>
-        /// <returns></returns>
         public ErrNo ClockGetRes(ExecContext ctx, ClockId clockId, ptr resolutionPtr)
+            => ClockResGetCore(WacsHost(ctx), _config, clockId, resolutionPtr);
+
+        /// <summary>
+        /// Retrieves the current time of the specified clock. Implementations
+        /// should return the time in nanoseconds since the epoch or for
+        /// specific clocks as defined in the WASI specification.
+        /// </summary>
+        public ErrNo ClockTimeGet(ExecContext ctx, ClockId clockId, timestamp precision, ptr timestampPtr)
+            => ClockTimeGetCore(WacsHost(ctx), _config, clockId, precision, timestampPtr);
+
+        // ============================================================
+        // AOT-friendly static entry points. Discovered by
+        // WACS.HostBindings.SourceGen via [WacsImport] and called
+        // directly from the generated GeneratedHostImports adapter.
+        // ============================================================
+
+        [WacsImport("wasi_snapshot_preview1", "clock_res_get")]
+        public static ErrNo ClockResGetCore(WacsHostMemory mem, WasiConfiguration config,
+                                             ClockId clockId, ptr resolutionPtr)
         {
-            if (!_config.AllowTimeAccess)
-                return ErrNo.NoSys; // Function not supported
-            
-            var mem = ctx.DefaultMemory;
+            if (!config.AllowTimeAccess)
+                return ErrNo.NoSys;
             if (!mem.Contains(resolutionPtr, 8))
                 return ErrNo.Fault;
-            
+
             switch (clockId)
             {
                 case ClockId.Realtime:
-                    //Typical, 1ms in ns
-                    mem.WriteInt64(resolutionPtr,1_000_000ul);
+                    // Typical, 1ms in ns
+                    mem.WriteInt64LE(resolutionPtr, 1_000_000L);
                     return ErrNo.Success;
                 case ClockId.Monotonic:
-                    // Calculate the duration of a single tick.
-                    ulong resolution = (ulong)(1_000_000_000L / Stopwatch.Frequency);
-                    mem.WriteInt64(resolutionPtr,resolution);
+                    long resolution = 1_000_000_000L / Stopwatch.Frequency;
+                    mem.WriteInt64LE(resolutionPtr, resolution);
                     return ErrNo.Success;
                 case ClockId.ProcessCputimeId:
-                    //100ns
-                    mem.WriteInt64(resolutionPtr,1ul);
+                    // 100ns
+                    mem.WriteInt64LE(resolutionPtr, 1L);
                     return ErrNo.Success;
                 case ClockId.ThreadCputimeId:
                     return ErrNo.NoSys;
@@ -76,28 +94,19 @@ namespace Wacs.WASI.Preview1
             }
         }
 
-        /// <summary>
-        /// Retrieves the current time of the specified clock. Implementations should return the time in nanoseconds since the epoch or for specific clocks as defined in the WASI specification.
-        /// </summary>
-        /// <param name="ctx"></param>
-        /// <param name="clockId">The clock for which to return the time.</param>
-        /// <param name="precision">The maximum lag (exclusive) that the returned time value may have, compared to its actual value.</param>
-        /// <param name="timestampPtrPtr">Pointer where the retrieved timestamp will be stored.</param>
-        /// <returns></returns>
-        public ErrNo ClockTimeGet(ExecContext ctx, ClockId clockId, timestamp precision, ptr timestampPtr)
+        [WacsImport("wasi_snapshot_preview1", "clock_time_get")]
+        public static ErrNo ClockTimeGetCore(WacsHostMemory mem, WasiConfiguration config,
+                                              ClockId clockId, timestamp precision, ptr timestampPtr)
         {
-            if (!_config.AllowTimeAccess)
-                return ErrNo.NoSys; // Function not supported
-            
-            var mem = ctx.DefaultMemory;
-            
-            //HACK: We're ignoring precision.
-            
+            if (!config.AllowTimeAccess)
+                return ErrNo.NoSys;
+
+            // HACK: precision is ignored.
+
             if (!mem.Contains(timestampPtr, 8))
                 return ErrNo.Fault;
-            
-            timestamp timestamp;
 
+            timestamp timestamp;
             switch (clockId)
             {
                 case ClockId.Realtime:
@@ -112,7 +121,7 @@ namespace Wacs.WASI.Preview1
                 case ClockId.ProcessCputimeId:
                 {
                     TimeSpan cpuTime = Process.GetCurrentProcess().TotalProcessorTime;
-                    timestamp = cpuTime.Ticks * 1_000_000L / TimeSpan.TicksPerMillisecond; //ns
+                    timestamp = cpuTime.Ticks * 1_000_000L / TimeSpan.TicksPerMillisecond; // ns
                 } break;
                 case ClockId.ThreadCputimeId:
                     return ErrNo.NoSys;
@@ -120,8 +129,22 @@ namespace Wacs.WASI.Preview1
                     return ErrNo.Inval;
             }
 
-            mem.WriteInt64(timestampPtr,timestamp);
+            mem.WriteInt64LE(timestampPtr, timestamp);
             return ErrNo.Success;
+        }
+
+        // ============================================================
+        // Helpers
+        // ============================================================
+
+        // Wrap a runtime ExecContext's default memory in WacsHostMemory.
+        // The ExecContext path is interpreter-side only; AOT-side
+        // callers construct WacsHostMemory directly from their host's
+        // byte-buffer view.
+        internal static WacsHostMemory WacsHost(ExecContext ctx)
+        {
+            var m = ctx.DefaultMemory;
+            return new WacsHostMemory(m.Data, m.Data.Length);
         }
 
         public static timestamp ToTimestamp(DateTime time) => ToTimestamp(new DateTimeOffset(time));

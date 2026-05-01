@@ -17,6 +17,7 @@
 using System;
 using Wacs.Core.Runtime;
 using Wacs.Core.WASIp1;
+using Wacs.HostBindings;
 using Wacs.WASI.Preview1.Types;
 using exitcode = System.Int32;
 
@@ -36,53 +37,50 @@ namespace Wacs.WASI.Preview1
             runtime.BindHostFunction<Func<ExecContext,ErrNo>>((module, "sched_yield"), SchedYield);
         }
 
-        private void ProcExit(exitcode exitCode)
+        private void ProcExit(exitcode exitCode) => ProcExitCore(_state, exitCode);
+
+        public ErrNo ProcRaise(int signal) => ProcRaiseCore(_state, signal);
+
+        public ErrNo SchedYield(ExecContext ctx) => SchedYieldCore();
+
+        // ============================================================
+        // AOT-friendly static entry points
+        // ============================================================
+
+        [WacsImport("wasi_snapshot_preview1", "proc_exit")]
+        public static void ProcExitCore(State state, exitcode exitCode)
         {
-            _state.ExitCode = exitCode;
+            state.ExitCode = exitCode;
             throw new SystemExitException(exitCode);
         }
 
         /// <summary>
         /// Sends a signal to the process.
         /// </summary>
-        /// <param name="signal">
-        /// The signal number to send to the process.
-        /// </param>
-        /// <returns>
-        /// Returns 0 (<see cref="ErrNo.Success"/>) on success,
-        /// or a non-zero WASI error code on failure.
-        /// </returns>
-        public ErrNo ProcRaise(int signal)
+        [WacsImport("wasi_snapshot_preview1", "proc_raise")]
+        public static ErrNo ProcRaiseCore(State state, int signal)
         {
             // Handle common signals as per WASI specification.
             switch ((Signal)signal)
             {
-                case Signal.SIGINT: // SIGINT
-                case Signal.SIGTERM: // SIGTERM
-                case Signal.SIGKILL: // SIGKILL
-                    // Update the state to reflect the received signal.
-                    _state.LastSignal = signal;
-
-                    // Depending on the signal, perform appropriate actions.
-                    // For SIGINT and SIGTERM, we might initiate graceful shutdown.
-                    // For demonstration, we'll throw an exception to simulate termination.
+                case Signal.SIGINT:
+                case Signal.SIGTERM:
+                case Signal.SIGKILL:
+                    state.LastSignal = signal;
+                    // For SIGINT/SIGTERM/SIGKILL we surface a SignalException
+                    // up through the wasm runtime's trap-propagation machinery.
                     throw new SignalException(signal);
-
                 default:
-                    // Unsupported signal.
-                    return ErrNo.Inval; // Invalid argument.
+                    return ErrNo.Inval;
             }
         }
 
         /// <summary>
-        /// Temporarily yield execution of the calling thread. Note: This is similar to sched_yield in POSIX.
+        /// Temporarily yield execution of the calling thread. Note: This is
+        /// similar to sched_yield in POSIX. No-op today; future work could
+        /// notify the host scheduler.
         /// </summary>
-        /// <returns></returns>
-        public ErrNo SchedYield(ExecContext ctx)
-        {
-            //Does nothing for now, perhaps we should notify ctx for suspension
-
-            return ErrNo.Success;
-        }
+        [WacsImport("wasi_snapshot_preview1", "sched_yield")]
+        public static ErrNo SchedYieldCore() => ErrNo.Success;
     }
 }
