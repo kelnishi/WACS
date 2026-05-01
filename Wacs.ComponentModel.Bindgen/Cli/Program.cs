@@ -35,6 +35,17 @@ namespace Wacs.ComponentModel.Bindgen.Cli
 
         public static int Main(string[] args)
         {
+            // Deprecation banner: wit-bindgen-wacs is superseded
+            // by the `wacs bindgen` verb in WACS.Cli. Routed to
+            // stderr so it doesn't pollute pipelines that consume
+            // generation summaries from stdout.
+            Console.Error.WriteLine(
+                "[deprecation] wit-bindgen-wacs is deprecated and "
+                + "will not receive new features.");
+            Console.Error.WriteLine(
+                "[deprecation] Migrate to: dotnet tool install -g "
+                + "WACS.Cli && wacs bindgen <input> -o <out>");
+
             int exit = ExitOk;
             Parser.Default.ParseArguments<CliOptions>(args)
                 .WithParsed(opts => exit = Run(opts))

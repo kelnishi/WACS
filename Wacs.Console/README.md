@@ -1,15 +1,19 @@
 # WACS
 
 The unified WebAssembly toolchain for .NET. One CLI — `wacs` — covers
-running, compiling, and inspecting WebAssembly modules and components,
-backed by the [WACS](https://www.nuget.org/packages/WACS) interpreter
-and the
+running, compiling, inspecting, and generating bindings for
+WebAssembly modules and components, backed by the
+[WACS](https://www.nuget.org/packages/WACS) interpreter, the
 [WACS.Transpiler.Lib](https://www.nuget.org/packages/WACS.Transpiler.Lib)
-AOT engine.
+AOT engine, and the
+[WACS.ComponentModel.Bindgen.Lib](https://www.nuget.org/packages/WACS.ComponentModel.Bindgen.Lib)
+binding generator.
 
-> **Note:** This tool supersedes
-> [`wasm-transpile` (`WACS.Transpiler`)](https://www.nuget.org/packages/WACS.Transpiler).
-> The legacy package is deprecated; install `WACS.Cli` instead. The
+> **Note:** This tool supersedes both
+> [`wasm-transpile` (`WACS.Transpiler`)](https://www.nuget.org/packages/WACS.Transpiler)
+> and
+> [`wit-bindgen-wacs` (`WACS.ComponentModel.Bindgen`)](https://www.nuget.org/packages/WACS.ComponentModel.Bindgen).
+> Both legacy packages are deprecated; install `WACS.Cli` instead. The
 > package id is `WACS.Cli` (the bare `WACS` id is the runtime library,
 > [`Wacs.Core`](https://www.nuget.org/packages/WACS)); the tool command
 > users type is `wacs`.
@@ -32,6 +36,7 @@ wacs --help
 | `run` | Execute a `.wasm` module | interpreter (default) or transpiler |
 | `build` | Transpile to a `.dll` | transpiler |
 | `inspect` | Diagnostics: WAT dump, stats, exports/imports | parse-only |
+| `bindgen` | Generate C# bindings from WIT (forward) or regenerate WIT + bindings from a transpiled `.dll` (reverse) | parse-only |
 
 ### Direct-run shortcut
 
@@ -312,6 +317,67 @@ wacs inspect module.wasm --dump-wat --output-dir .  # writes module.wat
 | `--dump-wat` | Render parser-friendly WAT (core only — components route to their embedded core modules). |
 | `--output-dir <path>` | Write `<basename>.wat` here instead of stdout. |
 
+## `wacs bindgen` — WIT ↔ C# bindings
+
+```
+wacs bindgen <input> -o <output-dir> [options]
+```
+
+Two directions on one verb, auto-detected by input shape:
+
+- **Forward** — a `.wit` file or a directory tree of WIT files
+  (recurses into `deps/`) → `[WitSource]`-tagged C# interfaces.
+  Use this when authoring components: pre-generate the host
+  binding surface for offline AOT targets that can't use the
+  runtime transpiler.
+- **Reverse** — a transpiled `.dll` carrying embedded
+  component-type metadata → regenerated WIT + C# bindings. Use
+  this when the original `.wit` is gone but the shipped `.dll` is
+  still on hand.
+
+### Examples
+
+**Forward, single WIT file:**
+
+```bash
+wacs bindgen ./wit/hello.wit -o ./Generated/
+```
+
+**Forward, WIT directory tree (with `deps/`):**
+
+```bash
+wacs bindgen ./wit -o ./Generated/
+# Recurses into deps/ subdirectories. Headerless files attribute
+# to the parent package per the wit-bindgen-csharp convention.
+```
+
+**Reverse, regenerate from a transpiled `.dll`:**
+
+```bash
+wacs bindgen ./app.dll -o ./regenerated/
+# Extracts the embedded component-type metadata, decodes it to
+# WIT, and regenerates the [WitSource]-tagged C# binding surface.
+# Errors with exit code 3 if the .dll has no embedded WIT.
+```
+
+**Reverse with raw bytes preserved:**
+
+```bash
+wacs bindgen ./app.dll -o ./regen --write-wit
+# Also writes <basename>.componenttype.bin alongside the .cs files
+# (useful for `wasm-tools component wit` round-trip inspection).
+```
+
+### `bindgen` flag reference
+
+| Flag | Notes |
+|---|---|
+| `<input>` (positional) | `.wit` / WIT directory / `.dll`. Direction inferred from extension. |
+| `-o, --output <dir>` (required) | Output directory. One `.cs` file per emitted interface / world / package. |
+| `--namespace <name>` | Root C# namespace override. Currently a warning — Phase 1d uses pinned `wit-bindgen-csharp` conventions; explicit override is a follow-up. |
+| `--write-wit` | Reverse mode only. Persist the raw extracted component-type bytes alongside the `.cs` files. |
+| `-v, --verbose` | Per-file emission progress. |
+
 ## Migration from `wasm-transpile`
 
 The legacy `wasm-transpile` (`WACS.Transpiler`) CLI keeps working
@@ -326,6 +392,32 @@ but every flag still functions. Concrete migrations:
 | `wasm-transpile -i x.wasm -o x.dll --wasip2 --emit-main` | `wacs build x.wasm --wasip2 --emit-main -o x.dll` |
 | `wasm-transpile -i a.wasm,b.wasm -o b.dll` | `wacs build a.wasm b.wasm -o b.dll` |
 | `wasm-transpile -i x.wasm -o x.dll --engine interpreter --run` | `wacs run x.wasm --engine interpreter` |
+
+## Migration from `wit-bindgen-wacs`
+
+The standalone `WACS.ComponentModel.Bindgen` package
+(`wit-bindgen-wacs` CLI) is also deprecated in favor of the
+`bindgen` verb here. Like `wasm-transpile`, the legacy CLI keeps
+working — every flag still functions, output is byte-identical —
+but every invocation prints a stderr deprecation banner.
+
+| `wit-bindgen-wacs` | `wacs` |
+|---|---|
+| `wit-bindgen-wacs --wit foo.wit -o gen/` | `wacs bindgen foo.wit -o gen/` |
+| `wit-bindgen-wacs --wit-dir wit/ -o gen/` | `wacs bindgen wit/ -o gen/` |
+| `wit-bindgen-wacs --dll app.dll -o regen/` | `wacs bindgen app.dll -o regen/` |
+| `wit-bindgen-wacs --dll app.dll -o regen/ --write-wit` | `wacs bindgen app.dll -o regen --write-wit` |
+
+The new verb infers direction from the input shape (`.dll` →
+reverse, `.wit` → forward single-file, directory → forward tree)
+so the explicit `--wit` / `--wit-dir` / `--dll` flags collapse to
+a single positional argument.
+
+The `WACS.ComponentModel.Bindgen.Lib` package (programmatic
+surface) is **not** deprecated — source generators and
+build-time integrations should keep referencing it directly.
+
+---
 
 The `-i` short flag is retired (Console used it for `--invoke`,
 Transpiler for `--input` — incompatible). Inputs are positional in

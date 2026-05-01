@@ -10,14 +10,18 @@
         <AssemblyName>Wacs.ComponentModel.Bindgen</AssemblyName>
         <StartupObject>Wacs.ComponentModel.Bindgen.Cli.Program</StartupObject>
 
-        <!-- Package identity -->
+        <!-- Package identity. DEPRECATED — superseded by the
+             `wacs bindgen` verb in WACS.Cli. The package stays
+             installable so existing pipelines keep working, but
+             ships a stderr deprecation banner on every invocation. -->
         <PackageId>WACS.ComponentModel.Bindgen</PackageId>
-        <Title>WACS Component Model Bindgen</Title>
-        <Version>0.1.0</Version>
-        <AssemblyVersion>0.1.0</AssemblyVersion>
+        <Title>WACS Component Model Bindgen (deprecated)</Title>
+        <Version>0.1.1</Version>
+        <AssemblyVersion>0.1.1</AssemblyVersion>
         <Authors>Kelvin Nishikawa</Authors>
         <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
-        <Description>WIT → C# binding generator for WACS components. Installs the `wit-bindgen-wacs` CLI tool. Forward direction: WIT text → C# bindings (offline pre-generation for AOT targets that can't use the runtime transpiler). Reverse direction: transpiled .dll → WIT + C# bindings (regenerate from a shipped assembly with no original .wit). For programmatic use, reference WACS.ComponentModel.Bindgen.Lib.</Description>
+        <Description>DEPRECATED — superseded by `wacs bindgen` in WACS.Cli (install with: dotnet tool install -g WACS.Cli). Original: WIT → C# binding generator for WACS components. For programmatic use, reference WACS.ComponentModel.Bindgen.Lib (still maintained).</Description>
+        <PackageDeprecationReason>Replaced by `wacs bindgen` verb in WACS.Cli. Install with: dotnet tool install -g WACS.Cli</PackageDeprecationReason>
         <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <RepositoryType>git</RepositoryType>
