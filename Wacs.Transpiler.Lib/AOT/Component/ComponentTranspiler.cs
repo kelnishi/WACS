@@ -177,12 +177,36 @@ namespace Wacs.Transpiler.AOT.Component
                     moduleName, componentTypeOverride);
             }
 
-            if (parsed.CoreModules.Count != 1)
+            // Multi-core-module mode (wit-component output for
+            // aggregate-typed canon-lowers — typical of WASI
+            // Preview 2 components). Pick the "primary" user
+            // module by tracing the first canon-lift through
+            // alias→core-instance back to its module index, the
+            // same heuristic ComponentInstance.InstantiateMultiCore
+            // uses. Adapter / post-return scaffolding modules stay
+            // unbound — direct-linked imports satisfy the user
+            // module's needs without going through them.
+            int primaryCoreIdx = 0;
+            if (parsed.CoreModules.Count > 1)
+            {
+                var idx = ComponentInstance.FindPrimaryCoreModuleIdx(
+                    parsed.Component);
+                if (idx == null)
+                    throw new System.InvalidOperationException(
+                        "TranspileSingleModule could not identify the primary "
+                        + "user core module in this " + parsed.CoreModules.Count
+                        + "-core-module component. The first canon-lift's "
+                        + "core-func-idx didn't trace back to an "
+                        + "InstantiateCoreModule entry.");
+                primaryCoreIdx = idx.Value;
+            }
+            else if (parsed.CoreModules.Count == 0)
+            {
                 throw new System.InvalidOperationException(
-                    "TranspileSingleModule requires exactly one embedded core "
-                    + "module; got " + parsed.CoreModules.Count
-                    + ". Use the lower-level Parse + per-module transpile for "
-                    + "multi-module components.");
+                    "TranspileSingleModule requires at least one embedded core "
+                    + "module; got 0. Use Parse + ComponentExports composition "
+                    + "for composer-mode components.");
+            }
 
             // The override path lets callers feed in a separately-
             // sourced `component-type:*` blob — useful for
@@ -231,7 +255,8 @@ namespace Wacs.Transpiler.AOT.Component
             // pattern in the interpreter path.
             configureImports?.Invoke(runtime);
 
-            var instance = runtime.InstantiateModule(parsed.CoreModules[0]);
+            var instance = runtime.InstantiateModule(
+                parsed.CoreModules[primaryCoreIdx]);
             var transpiler = new ModuleTranspiler(assemblyNamespace,
                 effectiveOptions);
             var result = transpiler.Transpile(instance, runtime, moduleName);

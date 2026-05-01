@@ -73,13 +73,17 @@ namespace Wacs.Transpiler.AOT.Component
                     + available + "]");
             }
 
-            // Confirm zero-arg shape.
-            if (export.WasmType.ParameterTypes.Types.Length != 0)
-                throw new MainEntryEmitter.ConstraintException(
-                    "export '" + exportName + "' takes "
-                    + export.WasmType.ParameterTypes.Types.Length
-                    + " parameter(s); v0 component --emit-main requires "
-                    + "zero-argument exports.");
+            // Argv parsing is wired in ComponentMainHost.ParseArg —
+            // it covers primitives, bool, string, byte[]. The
+            // export's IExports method may take aggregate types we
+            // can't parse from argv yet (Option<T>, list<T>,
+            // records). Defer the type-shape check to runtime,
+            // where ComponentMainHost surfaces a clean error
+            // pointing at the offending param. Emit-time check
+            // here is unnecessary — looking up the IExports method
+            // type happens after the dynamic assembly bakes (the
+            // typed signature isn't observable from the
+            // ExportMethods metadata).
 
             var moduleBuilder = result.ModuleBuilder;
             var ns = result.ModuleClass.Namespace;

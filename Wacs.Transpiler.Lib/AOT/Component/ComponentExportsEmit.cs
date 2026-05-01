@@ -57,15 +57,20 @@ namespace Wacs.Transpiler.AOT.Component
             var emittable = FindEmittableExports(component);
             if (emittable.Count == 0) return null;
 
+            // Imports-less components only — components with
+            // imports need a factory method (deferred). Bail BEFORE
+            // DefineType so Lokad.ILPack doesn't trip over an
+            // un-CreateType'd TypeBuilder at save time.
+            var coreCtor = coreModuleClass.GetConstructor(Type.EmptyTypes);
+            if (coreCtor == null) return null;
+
             var typeBuilder = module.DefineType(
                 @namespace + ".ComponentExports",
                 TypeAttributes.Public | TypeAttributes.Abstract
                     | TypeAttributes.Sealed);
 
             // Cached default Module instance — every export
-            // call reuses it. Imports-less components only.
-            // Imports-having components need a factory method;
-            // left for the multi-module / composition pass.
+            // call reuses it.
             var instanceField = typeBuilder.DefineField(
                 "_instance",
                 coreModuleClass,
@@ -74,10 +79,7 @@ namespace Wacs.Transpiler.AOT.Component
 
             var cctor = typeBuilder.DefineTypeInitializer();
             var cctorIl = cctor.GetILGenerator();
-            var ctor = coreModuleClass.GetConstructor(Type.EmptyTypes);
-            if (ctor == null)
-                return null;   // imports-required — defer
-            cctorIl.Emit(OpCodes.Newobj, ctor);
+            cctorIl.Emit(OpCodes.Newobj, coreCtor);
             cctorIl.Emit(OpCodes.Stsfld, instanceField);
             cctorIl.Emit(OpCodes.Ret);
 

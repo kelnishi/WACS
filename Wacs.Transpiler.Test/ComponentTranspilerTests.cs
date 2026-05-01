@@ -1890,25 +1890,76 @@ namespace Wacs.Transpiler.Test
         }
 
         [Fact]
-        public void EmitMain_rejects_export_with_args()
+        public void EmitMain_for_no_such_export_surfaces_emit_time_error()
         {
-            // tiny-component's greet() is zero-arg, but if we ask
-            // for a hypothetical export taking args, the v0
-            // emitter must reject it cleanly (argv parsing for
-            // component-shape params is a follow-up).
+            // Asking for an export that doesn't exist must throw a
+            // ConstraintException with a clear message — matches
+            // the existing core-MainEntryEmitter contract.
             using var fs = File.OpenRead(FindTinyComponentPath());
             var result = ComponentTranspiler.TranspileSingleModule(
                 fs,
                 assemblyNamespace: "Wacs.Test.TinyArgs",
                 moduleName: "TinyModule");
 
-            // No such export → caller-facing error matches the
-            // existing core-MainEntryEmitter style.
             var ex = Assert.Throws<MainEntryEmitter.ConstraintException>(
                 () => Wacs.Transpiler.AOT.Component.ComponentMainEntryEmitter
                     .Emit(result, "Program", "no-such-export",
                         System.Array.Empty<System.Reflection.Assembly>()));
             Assert.Contains("not found", ex.Message);
+        }
+
+        [Fact]
+        public void EmitMain_parses_argv_into_export_params_and_returns_result()
+        {
+            // add-component exports `add: func(x: u32, y: u32) -> u32`.
+            // Verifies argv parsing: Main called with ["7", "35"]
+            // → ParseArg coerces each to uint → method.Invoke →
+            // result 42u → exit code 42.
+            var addPath = FindAddComponentPath();
+            using var fs = File.OpenRead(addPath);
+            var result = ComponentTranspiler.TranspileSingleModule(
+                fs,
+                assemblyNamespace: "Wacs.Test.AddMain",
+                moduleName: "AddModule");
+
+            var programType =
+                Wacs.Transpiler.AOT.Component.ComponentMainEntryEmitter
+                    .Emit(result, "Program", "add",
+                        System.Array.Empty<System.Reflection.Assembly>());
+
+            var main = programType.GetMethod("Main",
+                BindingFlags.Public | BindingFlags.Static);
+            Assert.NotNull(main);
+
+            var rc = main!.Invoke(null,
+                new object?[] { new[] { "7", "35" } });
+            Assert.Equal(42, (int)rc!);
+        }
+
+        [Fact]
+        public void EmitMain_argv_parse_failure_surfaces_runtime_error()
+        {
+            // Bad input ("hello" for a uint param) should throw
+            // through TargetInvocationException with the
+            // ParseArg error message naming the offending arg.
+            var addPath = FindAddComponentPath();
+            using var fs = File.OpenRead(addPath);
+            var result = ComponentTranspiler.TranspileSingleModule(
+                fs,
+                assemblyNamespace: "Wacs.Test.AddBadArg",
+                moduleName: "AddModule");
+
+            var programType =
+                Wacs.Transpiler.AOT.Component.ComponentMainEntryEmitter
+                    .Emit(result, "Program", "add",
+                        System.Array.Empty<System.Reflection.Assembly>());
+
+            var main = programType.GetMethod("Main",
+                BindingFlags.Public | BindingFlags.Static)!;
+            var tie = Assert.Throws<TargetInvocationException>(() =>
+                main.Invoke(null,
+                    new object?[] { new[] { "hello", "35" } }));
+            Assert.Contains("argv[0]", tie.InnerException!.Message);
         }
 
         [Fact]
