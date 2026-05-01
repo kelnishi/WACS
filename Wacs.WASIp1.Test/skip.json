@@ -1,12 +1,9 @@
 {
-  "_comment": "Tests deliberately skipped at the current Phase. Each `reason` names the Phase that lifts the skip. Phases 0-2 done (40/72 active passes); remaining skips are Phase 3 (sockets) and Phase 4 (path_filestat_get symlink handling, fd_readdir cookie layout, trailing-slash semantics, etc.).",
+  "_comment": "Tests deliberately skipped at the current Phase. Each `reason` names the Phase that lifts the skip. Phases 0-3 done (43/72 active passes); remaining 29 skips are all Phase 4 (path_filestat_get symlink-type reporting, fd_readdir layout, trailing-slash semantics, and a handful of edge cases).",
   "skip": [
     { "test": "assemblyscript/fd_write-to-invalid-fd", "reason": "Phase 4: fd_write on bad fd needs proper errno (assemblyscript abort)" },
 
-    { "test": "c/fopen-with-no-access",      "reason": "Phase 4: traps with no preopens — needs investigation" },
     { "test": "c/pwrite-with-access",        "reason": "Phase 4: pwrite to an existing file traps — likely fd_pwrite stream interaction" },
-    { "test": "c/sock_shutdown-invalid_fd",  "reason": "Phase 3a: sock_shutdown errno paths" },
-    { "test": "c/sock_shutdown-not_sock",    "reason": "Phase 3a: sock_shutdown errno paths" },
 
     { "test": "rust/close_preopen",                       "reason": "Phase 4: fd_close on a preopen FD" },
     { "test": "rust/dangling_symlink",                    "reason": "Phase 4: path_filestat_get must report SYMBOLIC_LINK without follow" },

@@ -16,6 +16,7 @@
 
 using System.Collections.Generic;
 using System.IO;
+using System.Net.Sockets;
 using Wacs.WASIp1.Types;
 
 namespace Wacs.WASIp1
@@ -51,5 +52,24 @@ namespace Wacs.WASIp1
         public Dictionary<string, string> EnvironmentVariables { get; set; } = new();
 
         public bool AllowTimeAccess { get; set; } = true;
+
+        // Whether to auto-bind HostRootDirectory as a preopen at fd 3.
+        // Kept true by default for backwards compatibility with the
+        // existing Wacs.Console flow (which always exposed cwd as fd 3),
+        // but the wasi-testsuite expects fd 3 to be unbound when no
+        // dirs are preopened — so the harness sets this false.
+        public bool PreopenHostRootDirectory { get; set; } = true;
+
+        // Network capability gate. Default off; flipping it on alone
+        // does nothing — the embedder must also hand WACS pre-bound,
+        // pre-listening sockets via PreopenedSockets. Two layers of
+        // explicit consent before any guest can do network IO.
+        public bool AllowNetworkSockets { get; set; } = false;
+
+        // Listening sockets handed in by the embedder. Each one
+        // becomes a preopened fd (alongside dirs); guests use
+        // sock_accept on it to mint connection fds.
+        public List<(Socket Socket, FdFlags Flags)> PreopenedSockets { get; set; }
+            = new();
     }
 }

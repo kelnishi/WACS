@@ -16,6 +16,7 @@
 
 using System;
 using System.IO;
+using System.Net.Sockets;
 
 namespace Wacs.WASIp1.Types
 {
@@ -45,6 +46,14 @@ namespace Wacs.WASIp1.Types
         // a guest's fd_fdstat_set_flags(0) doesn't clear FD_APPEND when
         // the file was opened with O_APPEND.
         public FdFlags Flags { get; set; }
+
+        // Set for SocketStream/SocketDgram fds. Stream is a SocketStream
+        // wrapper for IO; the bare Socket is needed for accept/poll/
+        // shutdown which Stream doesn't expose. IsListening
+        // distinguishes a preopened listener (sock_accept produces new
+        // fds) from a connected socket (read/write iovec to it).
+        public Socket? Socket { get; set; }
+        public bool IsListening { get; set; }
 
         /// <summary>
         /// Computes the WASI <see cref="Rights"/> for a directory.

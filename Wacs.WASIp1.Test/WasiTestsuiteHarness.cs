@@ -83,6 +83,10 @@ namespace Wacs.WASIp1.Test
                 AllowFileDeletion = true,
                 AllowSymbolicLinks = true,
                 AllowHardLinks = true,
+                // Tests that don't preopen any dirs expect fd 3 to be
+                // unbound (so e.g. shutdown(3, ...) returns EBADF
+                // rather than ENOTSOCK on a phantom dir fd).
+                PreopenHostRootDirectory = false,
             };
 
             if (manifest.Dirs != null)
@@ -151,18 +155,19 @@ namespace Wacs.WASIp1.Test
                 Assert.Fail($"test exceeded {TestTimeout.TotalSeconds}s timeout " +
                     $"(likely poll_oneoff or sleep hang)");
             }
+
+            var stdoutText = Encoding.UTF8.GetString(stdout.ToArray());
+            var stderrText = Encoding.UTF8.GetString(stderr.ToArray());
+
+            _output.WriteLine($"-- stdout ({stdoutText.Length} bytes) --\n{stdoutText}");
+            _output.WriteLine($"-- stderr ({stderrText.Length} bytes) --\n{stderrText}");
+
             if (caught != null)
             {
                 _output.WriteLine($"-- exception --\n{caught}");
                 throw new Xunit.Sdk.XunitException(
                     $"{caught.GetType().Name}: {caught.Message}");
             }
-
-            var stdoutText = Encoding.UTF8.GetString(stdout.ToArray());
-            var stderrText = Encoding.UTF8.GetString(stderr.ToArray());
-
-            if (stdoutText.Length > 0) _output.WriteLine($"-- stdout --\n{stdoutText}");
-            if (stderrText.Length > 0) _output.WriteLine($"-- stderr --\n{stderrText}");
 
             int expectedExit = manifest.ExitCode ?? 0;
             Assert.True(exitCode == expectedExit,
