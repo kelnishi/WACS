@@ -16,6 +16,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.Sockets;
@@ -99,14 +100,13 @@ namespace Wacs.WASIp1
         {
             // Create tasks for all subscriptions
             var tasks = new List<Task<Event?>>();
-            var now = (timestamp)DateTime.UtcNow.Ticks;
 
             foreach (var sub in subscriptions)
             {
                 switch (sub.Union.Tag)
                 {
                     case EventType.Clock:
-                        tasks.Add(CreateClockTask(sub, now));
+                        tasks.Add(CreateClockTask(sub));
                         break;
 
                     case EventType.FdRead:
@@ -132,27 +132,28 @@ namespace Wacs.WASIp1
             return 0;
         }
 
-        private async Task<Event?> CreateClockTask(Subscription sub, timestamp now)
+        private async Task<Event?> CreateClockTask(Subscription sub)
         {
+            // Spec: subscription_clock.timeout is in nanoseconds, relative
+            // to (or absolute against) the subscription's clock_id. The
+            // previous implementation mixed .NET's 100ns DateTime ticks
+            // with the guest's nanoseconds, which broke absolute timeouts
+            // outright and ignored clock_id entirely.
             var clockSub = sub.Union.Clock;
-            timestamp targetTime;
+            long nowNs = NowNanos(clockSub.Id);
+            long delayNs = (clockSub.Flags & SubclockFlags.SubscriptionClockAbstime) != 0
+                ? Math.Max(0, clockSub.Timeout - nowNs)
+                : Math.Max(0, clockSub.Timeout);
 
-            if ((clockSub.Flags & SubclockFlags.SubscriptionClockAbstime) != 0)
-            {
-                targetTime = clockSub.Timeout;
-            }
-            else
-            {
-                targetTime = now + clockSub.Timeout;
-            }
-
-            var delayTicks = Math.Max(0, targetTime - now);
-            var delayMs = delayTicks / TimeSpan.TicksPerMillisecond;
+            // Task.Delay's resolution is ms; we round up so a sub-ms
+            // request still waits long enough rather than spinning.
+            int delayMs = (int)Math.Min(int.MaxValue, (delayNs + 999_999L) / 1_000_000L);
 
             try
             {
-                await Task.Delay((int)delayMs, _state.Cts.Token);
-            
+                if (delayMs > 0)
+                    await Task.Delay(delayMs, _state.Cts.Token);
+
                 return new Event
                 {
                     UserData = sub.UserData,
@@ -163,6 +164,31 @@ namespace Wacs.WASIp1
             catch (TaskCanceledException)
             {
                 return null;
+            }
+        }
+
+        private static long NowNanos(ClockId id)
+        {
+            switch (id)
+            {
+                case ClockId.Realtime:
+                    // Unix epoch nanoseconds. ToUnixTimeMilliseconds is
+                    // millisecond-precision; tack on the sub-ms remainder
+                    // from .NET ticks (100ns each).
+                    var now = DateTimeOffset.UtcNow;
+                    long ms = now.ToUnixTimeMilliseconds();
+                    long subMsTicks = now.UtcDateTime.Ticks % TimeSpan.TicksPerMillisecond;
+                    return ms * 1_000_000L + subMsTicks * 100L;
+                case ClockId.Monotonic:
+                    return Stopwatch.GetTimestamp() * (1_000_000_000L / Stopwatch.Frequency);
+                case ClockId.ProcessCputimeId:
+                case ClockId.ThreadCputimeId:
+                    // Best-effort: process CPU time. Per-thread CPU time
+                    // isn't trivially available cross-platform; fold it
+                    // into the same source for now.
+                    return Process.GetCurrentProcess().TotalProcessorTime.Ticks * 100L;
+                default:
+                    return 0;
             }
         }
 
@@ -202,15 +228,20 @@ namespace Wacs.WASIp1
                 }
                 else // FdWrite
                 {
-                    // For write readiness, check if we're at the end of the stream
-                    if (fd.Stream.CanWrite && fd.Stream.Position < fd.Stream.Length)
+                    // For ordinary writable streams, "ready" means the
+                    // stream accepts writes — there's no equivalent of a
+                    // socket send-buffer high-water mark. The earlier
+                    // Position<Length test was inverted: it returned ready
+                    // only when the file was *shorter* than the position
+                    // (i.e. effectively never).
+                    if (fd.Stream.CanWrite)
                     {
                         return new Event
                         {
                             UserData = sub.UserData,
                             Error = 0,
                             Type = EventType.FdWrite,
-                            FdReadWrite = new EventFdReadWrite { NBytes = (ulong)(fd.Stream.Length - fd.Stream.Position) }
+                            FdReadWrite = new EventFdReadWrite { NBytes = ulong.MaxValue }
                         };
                     }
                 }

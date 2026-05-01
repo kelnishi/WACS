@@ -294,23 +294,24 @@ namespace Wacs.WASIp1
             if (!isDir && !isFile)
                 return ErrNo.NoEnt;
 
+            // Spec: it is an error to specify both an explicit time and
+            // its corresponding NOW flag.
+            if ((flags & (FstFlags.ATim | FstFlags.ATimNow)) == (FstFlags.ATim | FstFlags.ATimNow))
+                return ErrNo.Inval;
+            if ((flags & (FstFlags.MTim | FstFlags.MTimNow)) == (FstFlags.MTim | FstFlags.MTimNow))
+                return ErrNo.Inval;
+
             DateTime newAtime = DateTime.UtcNow;
             DateTime newMtime = DateTime.UtcNow;
 
-            // If user provided explicit atime
             if ((flags & FstFlags.ATim) != 0)
                 newAtime = Clock.ToDateTimeUtc(atim);
-
-            // If user said "ATimNow", override with "now"
-            if ((flags & FstFlags.ATimNow) != 0)
+            else if ((flags & FstFlags.ATimNow) != 0)
                 newAtime = DateTime.UtcNow;
 
-            // If user provided explicit mtime
             if ((flags & FstFlags.MTim) != 0)
                 newMtime = Clock.ToDateTimeUtc(mtim);
-
-            // If user said "MTimNow", override with "now"
-            if ((flags & FstFlags.MTimNow) != 0)
+            else if ((flags & FstFlags.MTimNow) != 0)
                 newMtime = DateTime.UtcNow;
 
             try
@@ -354,7 +355,14 @@ namespace Wacs.WASIp1
             if (!GetFd(fd, out var fileDescriptor))
                 return ErrNo.Badf;
 
+            // wasi-libc reads exactly pr_name_len bytes via
+            // fd_prestat_dir_name (no nul terminator) and compares them
+            // against the embedder-supplied prefix string. The internal
+            // Path stores a leading "/" we strip to match the wasmtime
+            // convention. Keep the two functions in lockstep.
             var name = fileDescriptor.Path;
+            if (name.Length > 1 && name[0] == '/')
+                name = name.Substring(1);
             var utf8Name = Encoding.UTF8.GetBytes(name);
 
             // Typically, for WASI, only directories are truly "preopened"
@@ -366,7 +374,7 @@ namespace Wacs.WASIp1
                     Tag = PrestatTag.Dir,
                     Dir = new PrestatDir
                     {
-                        NameLen = (uint)(utf8Name.Length + 1)
+                        NameLen = (uint)utf8Name.Length
                     }
                 };
             }
@@ -406,12 +414,17 @@ namespace Wacs.WASIp1
             if (fileDescriptor.Type != Filetype.Directory)
                 return ErrNo.NotDir;
 
+            // See fd_prestat_get above for the convention. Write exactly
+            // pr_name_len bytes (no nul) so the guest's bytewise
+            // comparison succeeds.
             var name = fileDescriptor.Path;
+            if (name.Length > 1 && name[0] == '/')
+                name = name.Substring(1);
             var utf8Name = Encoding.UTF8.GetBytes(name);
-            if (utf8Name.Length + 1 > pathLen)
+            if (utf8Name.Length > pathLen)
                 return ErrNo.TooBig;
 
-            mem.WriteUtf8String(pathPtr, name, true);
+            mem.WriteUtf8String(pathPtr, name, false);
             return ErrNo.Success;
         }
 
@@ -562,17 +575,24 @@ namespace Wacs.WASIp1
             if (!isDir && !isFile)
                 return ErrNo.NoEnt;
 
+            // Spec: it is an error to specify both an explicit time and
+            // its corresponding NOW flag.
+            if ((fstFlags & (FstFlags.ATim | FstFlags.ATimNow)) == (FstFlags.ATim | FstFlags.ATimNow))
+                return ErrNo.Inval;
+            if ((fstFlags & (FstFlags.MTim | FstFlags.MTimNow)) == (FstFlags.MTim | FstFlags.MTimNow))
+                return ErrNo.Inval;
+
             DateTime newAtime = DateTime.UtcNow;
             DateTime newMtime = DateTime.UtcNow;
 
             if ((fstFlags & FstFlags.ATim) != 0)
                 newAtime = Clock.ToDateTimeUtc(stAtim);
-            if ((fstFlags & FstFlags.ATimNow) != 0)
+            else if ((fstFlags & FstFlags.ATimNow) != 0)
                 newAtime = DateTime.UtcNow;
 
             if ((fstFlags & FstFlags.MTim) != 0)
                 newMtime = Clock.ToDateTimeUtc(stMtim);
-            if ((fstFlags & FstFlags.MTimNow) != 0)
+            else if ((fstFlags & FstFlags.MTimNow) != 0)
                 newMtime = DateTime.UtcNow;
 
             try
