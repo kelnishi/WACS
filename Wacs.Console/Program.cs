@@ -1,18 +1,16 @@
-﻿// /*
-//  * Copyright 2024 Kelvin Nishikawa
-//  *
-//  * Licensed under the Apache License, Version 2.0 (the "License");
-//  * you may not use this file except in compliance with the License.
-//  * You may obtain a copy of the License at
-//  *
-//  *     http://www.apache.org/licenses/LICENSE-2.0
-//  *
-//  * Unless required by applicable law or agreed to in writing, software
-//  * distributed under the License is distributed on an "AS IS" BASIS,
-//  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  * See the License for the specific language governing permissions and
-//  * limitations under the License.
-//  */
+// Copyright 2024 Kelvin Nishikawa
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System;
 using System.Collections.Generic;
@@ -21,6 +19,7 @@ using System.IO;
 using System.Linq;
 using CommandLine;
 using FluentValidation;
+using Wacs.Console.Verbs;
 using Wacs.Core;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
@@ -34,39 +33,95 @@ namespace Wacs.Console
 {
     public class Program
     {
+        // Verb keywords the CLI dispatcher recognizes. Anything else
+        // in argv[0] gets the direct-run shortcut treatment.
+        private static readonly HashSet<string> VerbKeywords =
+            new(StringComparer.OrdinalIgnoreCase)
+            {
+                "run", "build", "inspect",
+                "help", "--help", "-h",
+                "version", "--version",
+            };
+
         static int Main(string[] args)
         {
-            List<string> subargs = new List<string>();
-            var moduleArg = args.FirstOrDefault(arg => File.Exists(arg));
-            if (moduleArg != null)
+            // Direct-run shortcut: if argv[0] looks like a wasm/wat
+            // path (and isn't a verb keyword), prepend `run`.
+            //   wacs my.wasm                    → wacs run my.wasm
+            //   wacs run my.wasm                → unchanged
+            //   wacs build my.wasm -o app.dll   → unchanged
+            //   wacs --help / -h / version      → unchanged
+            if (args.Length > 0 && !VerbKeywords.Contains(args[0]))
             {
-                int moduleIndex = Array.IndexOf(args, moduleArg) + 1;
-                subargs.AddRange(args[moduleIndex..]);
-                args = args[0..moduleIndex];
+                if (LooksLikeWasmPath(args[0]))
+                {
+                    var rerouted = new string[args.Length + 1];
+                    rerouted[0] = "run";
+                    Array.Copy(args, 0, rerouted, 1, args.Length);
+                    args = rerouted;
+                }
             }
+
+            // Split argv at `--` so the wasm guest's positional argv
+            // (e.g. coremark-style perf-suite args) doesn't get
+            // reinterpreted as more --options. CommandLineParser's
+            // EnableDashDash mostly handles this, but we also want
+            // the trailing args explicitly threaded into RunOptions.Args.
+            var (verbArgs, trailingArgs) = SplitAtDoubleDash(args);
 
             var parser = new Parser(with =>
             {
                 with.EnableDashDash = true;
-                with.AutoHelp = true;        // Suppress automatic help
-                with.AutoVersion = true;      // Suppress automatic version
+                with.AutoHelp = true;
+                with.AutoVersion = true;
                 with.HelpWriter = System.Console.Out;
+                with.CaseInsensitiveEnumValues = true;
             });
 
-            // Map subargs to ExecutableArgs in the options
-            var parsedResult = parser.ParseArguments<CommandLineOptions>(args);
+            var parsed = parser.ParseArguments<
+                RunOptions, BuildOptions, InspectOptions>(verbArgs);
 
-            return parsedResult.MapResult(
-                opts =>
+            return parsed.MapResult(
+                (RunOptions o) =>
                 {
-                    opts.ExecutableArgs = subargs; // Assign subargs to ExecutableArgs
-                    return RunWithOptions(opts);
+                    if (trailingArgs.Count > 0) o.Args = trailingArgs;
+                    return RunHandler.Execute(o);
                 },
-                _ => 1
-            );
+                (BuildOptions o) => BuildHandler.Execute(o),
+                (InspectOptions o) => InspectHandler.Execute(o),
+                _ => 1);
         }
 
-        static int RunWithOptions(CommandLineOptions opts)
+        // The first positional arg looks like a wasm/wat input when it
+        // ends in .wasm/.wat AND a file actually exists at that path.
+        // The exists check guards against typoed verbs ("rin my.wasm")
+        // being silently misread as direct-run.
+        private static bool LooksLikeWasmPath(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return false;
+            var ext = Path.GetExtension(s).ToLowerInvariant();
+            if (ext != ".wasm" && ext != ".wat") return false;
+            return File.Exists(s);
+        }
+
+        private static (string[], List<string>) SplitAtDoubleDash(string[] args)
+        {
+            int dd = Array.IndexOf(args, "--");
+            if (dd < 0) return (args, new List<string>());
+            var head = new string[dd];
+            Array.Copy(args, 0, head, 0, dd);
+            var tail = args.Skip(dd + 1).ToList();
+            return (head, tail);
+        }
+
+        // ================================================================
+        // Legacy single-file entry point. Phase 1 keeps this in place so
+        // the legacy CommandLineOptions-based RunWithOptions body remains
+        // callable through the new RunHandler shim. Phase 2 deletes the
+        // shim and folds this body into RunHandler.Execute.
+        // ================================================================
+
+        internal static int RunWithOptions(CommandLineOptions opts)
         {
             // Validate executable path
             if (!File.Exists(opts.WasmModule))
@@ -130,7 +185,7 @@ namespace Wacs.Console
             {
                 parseTimer.Start();
             }
-            
+
             //Parse the module — dispatch on extension.
             Wacs.Core.Module module;
             using (var fileStream = new FileStream(opts.WasmModule, FileMode.Open))
@@ -145,7 +200,7 @@ namespace Wacs.Console
                 parseTimer.Stop();
                 System.Console.Error.WriteLine($"Parsing module took {parseTimer.ElapsedMilliseconds:#0.###}ms");
             }
-            
+
             if (opts.Render)
             {
                 string outputFilePath = Path.ChangeExtension(opts.WasmModule, ".wat");
