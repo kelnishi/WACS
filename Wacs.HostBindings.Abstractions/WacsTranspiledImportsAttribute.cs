@@ -28,11 +28,21 @@ namespace Wacs.HostBindings
     [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true, Inherited = false)]
     public sealed class WacsTranspiledImportsAttribute : Attribute
     {
-        public Type ImportsInterface { get; }
+        /// <summary>
+        /// Fully qualified name of the IImports interface (namespace + type
+        /// name, no assembly qualifier). The source generator resolves this
+        /// against types declared in the carrying assembly at consumer
+        /// compile time. Stored as a string rather than <c>typeof(T)</c>
+        /// because Lokad.ILPack — our dynamic-assembly → PE serializer —
+        /// can't reliably encode self-referential Type arguments in
+        /// custom-attribute blobs.
+        /// </summary>
+        public string ImportsInterfaceFullName { get; }
 
-        public WacsTranspiledImportsAttribute(Type importsInterface)
+        public WacsTranspiledImportsAttribute(string importsInterfaceFullName)
         {
-            ImportsInterface = importsInterface ?? throw new ArgumentNullException(nameof(importsInterface));
+            ImportsInterfaceFullName = importsInterfaceFullName
+                ?? throw new ArgumentNullException(nameof(importsInterfaceFullName));
         }
     }
 }
