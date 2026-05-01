@@ -72,8 +72,31 @@ namespace Wacs.Console.Verbs
             + "(Standard) covers all wasms but keeps the codec wrapper.")]
         public bool AotLinked { get; set; }
 
+        [Option("wasi", HelpText =
+            "Bake WASI Preview 1 bindings into the produced binary. The "
+            + "scaffolded consumer references WACS.WASI.Preview1 + "
+            + "WACS.HostBindings.SourceGen + WACS.HostBindings.Abstractions; "
+            + "the source generator emits an IImports adapter that wires "
+            + "the wasm's wasi_snapshot_preview1.* imports to the "
+            + "annotated bindings in WACS.WASI.Preview1. Trailing positional "
+            + "args become the wasm's argv.")]
+        public bool Wasi { get; set; }
+
+        [Option("preopen", Separator = ',', HelpText =
+            "WASI directory preopens, one per --preopen, formatted as "
+            + "<host-path>::<guest-path>. Repeat or comma-separate for "
+            + "multiple. Only meaningful with --wasi.")]
+        public System.Collections.Generic.IEnumerable<string> Preopen { get; set; }
+            = System.Array.Empty<string>();
+
         [Option('v', "verbose", HelpText =
             "Print each step (transpile, scaffold, publish, copy).")]
         public bool Verbose { get; set; }
+
+        [Value(1, MetaName = "args", HelpText =
+            "Trailing positional args forwarded to the wasm guest (e.g. as "
+            + "argv when --wasi is set).")]
+        public System.Collections.Generic.IEnumerable<string> GuestArgs { get; set; }
+            = System.Array.Empty<string>();
     }
 }
