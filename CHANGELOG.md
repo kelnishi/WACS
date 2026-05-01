@@ -1,5 +1,61 @@
 # Changelog
 
+## [WACS.Cli 1.0.0] — Unified CLI
+
+Ships a new `wacs` global tool that supersedes `wasm-transpile`.
+Verb-based subcommand layout (`wacs run` / `build` / `inspect`)
+matches `wasmtime` / `wasmer` industry precedent — keeps execution
+flags (gas, profile, instr-logging) separate from compilation flags
+(simd strategy, data-storage, tail-call) instead of cramming both
+into a single CLI surface.
+
+**Verbs.**
+- `wacs run` — execute via interpreter (default) or transpiler
+  engine. Carries the full Wacs.Console instrumentation surface
+  (`--profile`, `--gas-limit`, `--log-execution`, `--stats`,
+  `--super`, `--switch`) plus the multi-input ModuleLinker
+  composition + component-mode auto-detect inherited from
+  `wasm-transpile`. With `--wasip2` / `--host-package` for a
+  component, implicitly upgrades to the transpiler engine since
+  the typed bundle is a transpile-time concept.
+- `wacs build` — transpile to a `.dll`. Multi-input runs land
+  siblings as `<basename>.dll` alongside the chosen `--output`
+  path. `--emit-main` bakes a `Program.Main(string[])` boilerplate
+  into the output.
+- `wacs inspect` — parse-only diagnostics: stats summary
+  (functions / exports / memory / data segment bytes), exports /
+  imports listing, `--dump-wat` round-trip via TextModuleWriter.
+
+**Direct-run shortcut.** `wacs my.wasm` defaults to `wacs run my.wasm`
+when the first positional arg is a `.wasm` / `.wat` file path that
+exists.
+
+**Smart defaults.** Component-vs-core auto-detect via the layer
+header byte; multi-file input → ModuleLinker composition.
+
+**Migration.** The legacy `wasm-transpile` (`WACS.Transpiler`)
+package stays installable at `0.3.1` so existing pipelines keep
+working — every flag still functions, output is byte-identical —
+but invocations now print a stderr deprecation banner pointing at
+the migration. See
+[`Wacs.Console/README.md`](Wacs.Console/README.md) for the
+verb-by-verb migration table.
+
+**PackageId.** `WACS.Cli` (the bare `WACS` id is the runtime
+library, `Wacs.Core`); the tool command users type is `wacs`.
+
+```bash
+dotnet tool install -g WACS.Cli
+```
+
+## [WACS.Transpiler 0.3.1] — Deprecation banner
+
+Final release of the legacy `wasm-transpile` CLI before its
+sunset. Every flag still works; every invocation prints two
+deprecation lines to stderr pointing at `WACS.Cli` (`wacs`).
+NuGet metadata's `<PackageDeprecationReason>` baked in. README
+fronted with a deprecation block + migration table.
+
 ## [0.9.1] — JS String Builtins
 
 Implements the full [JS String Builtins

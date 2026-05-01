@@ -2,21 +2,36 @@
 
 > ⚠ **DEPRECATED.** This package and the `wasm-transpile` CLI are
 > superseded by **`WACS.Cli`** (command: `wacs`). The legacy package
-> stays installable so existing pipelines keep working, but won't
+> stays installable so existing pipelines keep working — every flag
+> still functions, every output is byte-identical — but it won't
 > receive new features.
 >
 > ```bash
 > dotnet tool install -g WACS.Cli
 > ```
 >
-> Migration:
-> - `wasm-transpile -i x.wasm -o x.dll`         → `wacs build x.wasm -o x.dll`
-> - `wasm-transpile -i x.wasm -o x.dll --run`   → `wacs run x.wasm`
-> - `wasm-transpile -i x.wasm -o x.dll --wasip2 --emit-main` →
->   `wacs build x.wasm --wasip2 --emit-main -o x.dll`
+> ### Migration
+>
+> The new CLI uses a verb-based layout (`run` / `build` / `inspect`)
+> matching `wasmtime` / `wasmer` precedent. Inputs are now positional
+> (no `-i` flag); the `-i` short flag was retired because the legacy
+> `Wacs.Console` tool used it for `--invoke` (incompatible meaning).
+>
+> | `wasm-transpile` | `wacs` |
+> |---|---|
+> | `wasm-transpile -i x.wasm -o x.dll` | `wacs build x.wasm -o x.dll` |
+> | `wasm-transpile -i x.wasm -o x.dll --run` | `wacs run x.wasm` |
+> | `wasm-transpile -i x.wasm -o x.dll --wasi --run` | `wacs run x.wasm --wasi` |
+> | `wasm-transpile -i x.wasm -o x.dll --wasip2 --emit-main` | `wacs build x.wasm --wasip2 --emit-main -o x.dll` |
+> | `wasm-transpile -i a.wasm,b.wasm -o b.dll` | `wacs build a.wasm b.wasm -o b.dll` |
+> | `wasm-transpile -i x.wasm -o x.dll --engine interpreter --run` | `wacs run x.wasm --engine interpreter` |
+> | `wasm-transpile ... --bind ./MyHost.dll` | `wacs run x.wasm --bind ./MyHost.dll` |
+> | `wasm-transpile ... --emit-main --entry-point greet` | `wacs build x.wasm --emit-main --entry-point greet -o x.dll` |
 >
 > See the [`WACS.Cli` README](https://github.com/kelnishi/WACS/tree/main/Wacs.Console)
-> for the full verb-based subcommand layout.
+> for the full verb-based subcommand layout, including the new
+> `wacs inspect` verb (WAT dump, stats, exports/imports listing) that
+> didn't exist in `wasm-transpile`.
 
 ---
 
