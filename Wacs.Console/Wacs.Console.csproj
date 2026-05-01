@@ -29,10 +29,10 @@
          library); the tool command users type is still `wacs`. -->
     <PackageId>WACS.Cli</PackageId>
     <Title>WACS CLI</Title>
-    <Version>1.0.0</Version>
-    <AssemblyVersion>1.0.0</AssemblyVersion>
-    <FileVersion>1.0.0</FileVersion>
-    <Description>WACS unified WebAssembly toolchain: run, build, inspect. Supersedes wasm-transpile (WACS.Transpiler).</Description>
+    <Version>1.1.0</Version>
+    <AssemblyVersion>1.1.0</AssemblyVersion>
+    <FileVersion>1.1.0</FileVersion>
+    <Description>WACS unified WebAssembly toolchain: run, build, inspect, bindgen. Supersedes wasm-transpile (WACS.Transpiler).</Description>
     <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
     <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
@@ -64,6 +64,11 @@
     <ProjectReference Include="..\Wacs.Core\Wacs.Core.csproj" />
     <ProjectReference Include="..\Wacs.WASIp1\Wacs.WASIp1.csproj" />
     <ProjectReference Include="..\Wacs.Transpiler.Lib\Wacs.Transpiler.Lib.csproj" />
+    <!-- Powers the `wacs bindgen` verb (WIT ↔ C# binding
+         generation, forward + reverse). The standalone
+         WACS.ComponentModel.Bindgen tool (`wit-bindgen-wacs`) is
+         deprecated in favor of this verb. -->
+    <ProjectReference Include="..\Wacs.ComponentModel.Bindgen.Lib\Wacs.ComponentModel.Bindgen.Lib.csproj" />
     <!-- Bundled with the apphost so component-mode emit-main can
          reflectively construct WasiPreview2Bundle at runtime via
          AddWasiPreview2(). ExcludeAssets=compile keeps these out
