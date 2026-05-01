@@ -77,19 +77,14 @@ namespace Wacs.WASIp1
                 return ErrNo.IO;
             }
 
-            // If it's a regular file with a FileStream, we can attempt to deduce some flags
+            // Start from the runtime-mutable flags the embedder/guest set
+            // via path_open or fd_fdstat_set_flags. Fold in any inferred
+            // bits the underlying FileStream can tell us about.
+            flags = fileDescriptor.Flags;
+
             if (fileDescriptor.Type == Filetype.RegularFile &&
                 fileDescriptor.Stream is FileStream fs)
             {
-                // For this minimal approach, interpret "can't timeout" as NonBlock
-                if (!fs.CanTimeout)
-                    flags |= FdFlags.NonBlock;
-
-                // If "Archive" attribute is set, interpret that as 'Append'
-                if ((attr & FileAttributes.Archive) == FileAttributes.Archive)
-                    flags |= FdFlags.Append;
-
-                // If the file is not async, interpret as "sync"
                 if (!fs.IsAsync)
                     flags |= FdFlags.Sync;
             }
@@ -116,7 +111,20 @@ namespace Wacs.WASIp1
         /// <returns>Returns ErrNo.Success if successful, otherwise an error code.</returns>
         public ErrNo FdFdstatSetFlags(ExecContext ctx, fd fd, FdFlags flags)
         {
-            return ErrNo.NotSup;
+            if (!GetFd(fd, out var fileDescriptor))
+                return ErrNo.NoEnt;
+
+            // Reject unknown bits.
+            const FdFlags known = FdFlags.Append | FdFlags.DSync |
+                                  FdFlags.NonBlock | FdFlags.RSync | FdFlags.Sync;
+            if ((flags & ~known) != 0)
+                return ErrNo.Inval;
+
+            // Append is honored by FdWrite/FdPwrite; the others are
+            // advisory in our synchronous backend (we accept and store
+            // them so fd_fdstat_get round-trips).
+            fileDescriptor.Flags = flags;
+            return ErrNo.Success;
         }
 
         /// <summary>
@@ -130,7 +138,20 @@ namespace Wacs.WASIp1
         /// <returns>Returns ErrNo.Success if successful, otherwise an error code.</returns>
         public ErrNo FdFdstatSetRights(ExecContext ctx, fd fd, Rights fs_rights_base, Rights fs_rights_inheriting)
         {
-            return ErrNo.NotSup;
+            if (!GetFd(fd, out var fileDescriptor))
+                return ErrNo.NoEnt;
+
+            // Spec: "can only be used to remove rights." Reject any bit
+            // the new request sets that the current set doesn't already
+            // grant; otherwise this becomes a privilege escalator.
+            if ((fs_rights_base & fileDescriptor.Rights) != fs_rights_base)
+                return ErrNo.NotCapable;
+            if ((fs_rights_inheriting & fileDescriptor.InheritedRights) != fs_rights_inheriting)
+                return ErrNo.NotCapable;
+
+            fileDescriptor.Rights = fs_rights_base;
+            fileDescriptor.InheritedRights = fs_rights_inheriting;
+            return ErrNo.Success;
         }
 
         /// <summary>
@@ -294,23 +315,24 @@ namespace Wacs.WASIp1
             if (!isDir && !isFile)
                 return ErrNo.NoEnt;
 
+            // Spec: it is an error to specify both an explicit time and
+            // its corresponding NOW flag.
+            if ((flags & (FstFlags.ATim | FstFlags.ATimNow)) == (FstFlags.ATim | FstFlags.ATimNow))
+                return ErrNo.Inval;
+            if ((flags & (FstFlags.MTim | FstFlags.MTimNow)) == (FstFlags.MTim | FstFlags.MTimNow))
+                return ErrNo.Inval;
+
             DateTime newAtime = DateTime.UtcNow;
             DateTime newMtime = DateTime.UtcNow;
 
-            // If user provided explicit atime
             if ((flags & FstFlags.ATim) != 0)
                 newAtime = Clock.ToDateTimeUtc(atim);
-
-            // If user said "ATimNow", override with "now"
-            if ((flags & FstFlags.ATimNow) != 0)
+            else if ((flags & FstFlags.ATimNow) != 0)
                 newAtime = DateTime.UtcNow;
 
-            // If user provided explicit mtime
             if ((flags & FstFlags.MTim) != 0)
                 newMtime = Clock.ToDateTimeUtc(mtim);
-
-            // If user said "MTimNow", override with "now"
-            if ((flags & FstFlags.MTimNow) != 0)
+            else if ((flags & FstFlags.MTimNow) != 0)
                 newMtime = DateTime.UtcNow;
 
             try
@@ -354,7 +376,14 @@ namespace Wacs.WASIp1
             if (!GetFd(fd, out var fileDescriptor))
                 return ErrNo.Badf;
 
+            // wasi-libc reads exactly pr_name_len bytes via
+            // fd_prestat_dir_name (no nul terminator) and compares them
+            // against the embedder-supplied prefix string. The internal
+            // Path stores a leading "/" we strip to match the wasmtime
+            // convention. Keep the two functions in lockstep.
             var name = fileDescriptor.Path;
+            if (name.Length > 1 && name[0] == '/')
+                name = name.Substring(1);
             var utf8Name = Encoding.UTF8.GetBytes(name);
 
             // Typically, for WASI, only directories are truly "preopened"
@@ -366,7 +395,7 @@ namespace Wacs.WASIp1
                     Tag = PrestatTag.Dir,
                     Dir = new PrestatDir
                     {
-                        NameLen = (uint)(utf8Name.Length + 1)
+                        NameLen = (uint)utf8Name.Length
                     }
                 };
             }
@@ -406,12 +435,17 @@ namespace Wacs.WASIp1
             if (fileDescriptor.Type != Filetype.Directory)
                 return ErrNo.NotDir;
 
+            // See fd_prestat_get above for the convention. Write exactly
+            // pr_name_len bytes (no nul) so the guest's bytewise
+            // comparison succeeds.
             var name = fileDescriptor.Path;
+            if (name.Length > 1 && name[0] == '/')
+                name = name.Substring(1);
             var utf8Name = Encoding.UTF8.GetBytes(name);
-            if (utf8Name.Length + 1 > pathLen)
+            if (utf8Name.Length > pathLen)
                 return ErrNo.TooBig;
 
-            mem.WriteUtf8String(pathPtr, name, true);
+            mem.WriteUtf8String(pathPtr, name, false);
             return ErrNo.Success;
         }
 
@@ -444,7 +478,55 @@ namespace Wacs.WASIp1
 
             var pathStr = mem.ReadString(pathPtr, pathLen);
             var guestPath = Path.Combine(dirFileDescriptor.Path, pathStr);
-            var hostPath = _state.PathMapper.MapToHostPath(guestPath);
+
+            // Per spec: with LookupFlags.SymlinkFollow set, walk through
+            // any leading symlinks (stat semantics). Without it, return
+            // info about the link itself (lstat semantics). The
+            // PathMapper resolves symlinks for sandbox safety, so for
+            // lstat semantics we build the host path directly from the
+            // directory's resolved host path + the literal leaf — that
+            // way File.GetAttributes / FileInfo.LinkTarget see the link
+            // itself, not the target it points to.
+            bool followSymlink = (flags & LookupFlags.SymlinkFollow) != 0;
+            string hostPath;
+            if (followSymlink)
+            {
+                hostPath = _state.PathMapper.MapToHostPath(guestPath);
+            }
+            else
+            {
+                var hostDir = _state.PathMapper.MapToHostPath(dirFileDescriptor.Path);
+                hostPath = Path.Combine(hostDir, pathStr);
+            }
+
+#if NET6_0_OR_GREATER
+            if (!followSymlink)
+            {
+                FileSystemInfo? linkInfo;
+                try
+                {
+                    linkInfo = File.Exists(hostPath) || Directory.Exists(hostPath)
+                        ? (FileSystemInfo)(File.Exists(hostPath)
+                            ? new FileInfo(hostPath)
+                            : new DirectoryInfo(hostPath))
+                        : null;
+                }
+                catch (UnauthorizedAccessException) { return ErrNo.Acces; }
+                catch (IOException)                 { return ErrNo.IO; }
+
+                if (linkInfo == null) return ErrNo.NoEnt;
+                if (!string.IsNullOrEmpty(linkInfo.LinkTarget))
+                {
+                    // Report SYMBOLIC_LINK without following.
+                    var symStat = BuildFileStatForFile(
+                        new FileDescriptor { Type = Filetype.SymbolicLink },
+                        new FileInfo(hostPath));
+                    symStat.Mode = Filetype.SymbolicLink;
+                    mem.WriteStruct(buf, ref symStat);
+                    return ErrNo.Success;
+                }
+            }
+#endif
 
             FileAttributes attr;
             try
@@ -562,17 +644,24 @@ namespace Wacs.WASIp1
             if (!isDir && !isFile)
                 return ErrNo.NoEnt;
 
+            // Spec: it is an error to specify both an explicit time and
+            // its corresponding NOW flag.
+            if ((fstFlags & (FstFlags.ATim | FstFlags.ATimNow)) == (FstFlags.ATim | FstFlags.ATimNow))
+                return ErrNo.Inval;
+            if ((fstFlags & (FstFlags.MTim | FstFlags.MTimNow)) == (FstFlags.MTim | FstFlags.MTimNow))
+                return ErrNo.Inval;
+
             DateTime newAtime = DateTime.UtcNow;
             DateTime newMtime = DateTime.UtcNow;
 
             if ((fstFlags & FstFlags.ATim) != 0)
                 newAtime = Clock.ToDateTimeUtc(stAtim);
-            if ((fstFlags & FstFlags.ATimNow) != 0)
+            else if ((fstFlags & FstFlags.ATimNow) != 0)
                 newAtime = DateTime.UtcNow;
 
             if ((fstFlags & FstFlags.MTim) != 0)
                 newMtime = Clock.ToDateTimeUtc(stMtim);
-            if ((fstFlags & FstFlags.MTimNow) != 0)
+            else if ((fstFlags & FstFlags.MTimNow) != 0)
                 newMtime = DateTime.UtcNow;
 
             try

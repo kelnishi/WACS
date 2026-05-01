@@ -15,7 +15,7 @@
 ## Overview
 
 **Latest releases** (see the [CHANGELOG](CHANGELOG.md) for details):
-WACS `0.10.0` · WACS.Cli `1.1.0` · WACS.WASIp1 `0.9.7` · WACS.Transpiler.Lib `0.4.0` · WACS.ComponentModel `0.1.0` · WACS.WASI.Preview2 `0.1.0` · WACS.WASI.Preview2.DependencyInjection `0.1.0` · WACS.ComponentModel.Bindgen.Lib `0.1.0` · WACS.WASI.Threads `0.1.0`
+WACS `0.10.0` · WACS.Cli `1.1.0` · WACS.WASIp1 `0.10.0` · WACS.Transpiler.Lib `0.4.0` · WACS.ComponentModel `0.1.0` · WACS.WASI.Preview2 `0.1.0` · WACS.WASI.Preview2.DependencyInjection `0.1.0` · WACS.ComponentModel.Bindgen.Lib `0.1.0` · WACS.WASI.Threads `0.1.0`
 
 > **CLI:** install the unified `wacs` global tool with
 > `dotnet tool install -g WACS.Cli`. The legacy `WACS.Transpiler`
@@ -159,6 +159,27 @@ patterns.
 | [`WACS.ComponentModel.Bindgen.Lib`](https://www.nuget.org/packages/WACS.ComponentModel.Bindgen.Lib) | Programmatic forward / reverse bindgen (used by `wacs bindgen`) |
 | [`WACS.WASI.Preview2`](https://www.nuget.org/packages/WACS.WASI.Preview2) | Typed host impls for `wasi:cli` / `clocks` / `filesystem` / `http` / `io` / `random` / `sockets` |
 | [`WACS.WASI.Preview2.DependencyInjection`](https://www.nuget.org/packages/WACS.WASI.Preview2.DependencyInjection) | One-call DI registration of the bundle |
+
+## WASI Preview 1
+
+`Wacs.WASIp1` implements all 47 `wasi_snapshot_preview1` host functions
+— args / environ, two-clock time, the full file-descriptor and path
+surface (read / write / pread / pwrite / readdir / seek / sync /
+allocate / fdstat / filestat / advise / renumber / link / symlink /
+unlink / rename / create_directory / remove_directory / readlink),
+poll_oneoff, proc_exit / proc_raise / sched_yield, random_get, and the
+full sock_* surface (accept / recv / send / shutdown). Network sockets
+are gated behind a default-off `WasiConfiguration.AllowNetworkSockets`
+flag plus the requirement that the embedder hand WACS pre-bound,
+pre-listening sockets via `PreopenedSockets` — two layers of explicit
+consent before any guest can do network IO.
+
+Conformance is verified continuously against the official
+[WebAssembly/wasi-testsuite](https://github.com/WebAssembly/wasi-testsuite)
+fixtures (Rust + C + AssemblyScript). The runner lives at
+`Wacs.WASIp1.Test/` and runs as part of `dotnet test` in CI; the
+test project's `skip.json` documents which conformance fixtures are
+deliberately not yet asserting (each entry carries a reason).
 
 ## Getting Started
 

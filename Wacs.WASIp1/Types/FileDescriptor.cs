@@ -16,6 +16,7 @@
 
 using System;
 using System.IO;
+using System.Net.Sockets;
 
 namespace Wacs.WASIp1.Types
 {
@@ -37,6 +38,22 @@ namespace Wacs.WASIp1.Types
         public Rights Rights { get; set; }
 
         public Rights InheritedRights { get; set; }
+
+        // Runtime-mutable fdflags as set by fd_fdstat_set_flags. Append
+        // is honored by fd_write/fd_pwrite (seek to end before writing);
+        // Nonblock/Sync/Dsync/Rsync are advisory in our synchronous
+        // backend. Stored separately from path_open's initial flags so
+        // a guest's fd_fdstat_set_flags(0) doesn't clear FD_APPEND when
+        // the file was opened with O_APPEND.
+        public FdFlags Flags { get; set; }
+
+        // Set for SocketStream/SocketDgram fds. Stream is a SocketStream
+        // wrapper for IO; the bare Socket is needed for accept/poll/
+        // shutdown which Stream doesn't expose. IsListening
+        // distinguishes a preopened listener (sock_accept produces new
+        // fds) from a connected socket (read/write iovec to it).
+        public Socket? Socket { get; set; }
+        public bool IsListening { get; set; }
 
         /// <summary>
         /// Computes the WASI <see cref="Rights"/> for a directory.

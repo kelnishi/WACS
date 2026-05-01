@@ -132,40 +132,68 @@ namespace Wacs.WASIp1
             if (!_config.AllowHardLinks)
                 return ErrNo.NotSup;
 
-            return ErrNo.NotSup;
-            // var mem = ctx.DefaultMemory;
-            // if (!mem.Contains((int)oldPathPtr, (int)oldPathLen) || !mem.Contains((int)newPathPtr, (int)newPathLen))
-            //     return ErrNo.Inval;
-            //
-            // var oldFileDescriptor = GetFD(oldFd);
-            // if ((oldFileDescriptor.Access & FileAccess.Read) == 0)
-            //     return ErrNo.Acces;
-            //
-            // var newFileDescriptor = GetFD(newFd);
-            // if (!newFileDescriptor.AllowFileCreation || (newFileDescriptor.Access & FileAccess.Write) == 0)
-            //     return ErrNo.Acces;
-            //
-            // try
-            // {
-            //     var oldSourcePath = mem.ReadString(oldPathPtr, oldPathLen);
-            //     var newDestinationPath = mem.ReadString(newPathPtr, newPathLen);
-            //     var oldHostPath = _state.PathMapper.MapToHostPath(oldSourcePath);
-            //     var newHostPath = _state.PathMapper.MapToHostPath(newDestinationPath);
-            //
-            //     // Creating hard link is system dependent
-            //     System.IO.File.CreateHardLink(newHostPath, oldHostPath);
-            // }
-            // catch (IOException ex) when (ex is DirectoryNotFoundException)
-            // {
-            //     return ErrNo.NoSys;
-            // }
-            // catch (IOException ex)
-            // {
-            //     return ErrNo.Exist;
-            // }
-            //
-            // return ErrNo.Success;
+            var mem = ctx.DefaultMemory;
+            if (!mem.Contains((int)oldPathPtr, (int)oldPathLen) ||
+                !mem.Contains((int)newPathPtr, (int)newPathLen))
+                return ErrNo.Inval;
+
+            if (!GetFd(oldFd, out var oldDir)) return ErrNo.NoEnt;
+            if ((oldDir.Access & FileAccess.Read) == 0) return ErrNo.Acces;
+            if (!GetFd(newFd, out var newDir)) return ErrNo.NoEnt;
+            if ((newDir.Access & FileAccess.Write) == 0) return ErrNo.Acces;
+
+            try
+            {
+                var oldRel = mem.ReadString(oldPathPtr, oldPathLen);
+                var newRel = mem.ReadString(newPathPtr, newPathLen);
+
+                var oldGuest = Path.Combine(oldDir.Path, oldRel);
+                var newGuest = Path.Combine(newDir.Path, newRel);
+                var oldHost = _state.PathMapper.MapToHostPath(oldGuest);
+                var newHost = _state.PathMapper.MapToHostPath(newGuest);
+
+                if (System.Runtime.InteropServices.RuntimeInformation
+                        .IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
+                {
+                    if (!CreateHardLinkW(newHost, oldHost, IntPtr.Zero))
+                    {
+                        int err = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
+                        // ERROR_ALREADY_EXISTS = 183
+                        return err == 183 ? ErrNo.Exist : ErrNo.IO;
+                    }
+                }
+                else
+                {
+                    int rc = link(oldHost, newHost);
+                    if (rc != 0)
+                    {
+                        int errno = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
+                        return errno switch
+                        {
+                            17 => ErrNo.Exist,   // EEXIST
+                            2  => ErrNo.NoEnt,   // ENOENT
+                            13 => ErrNo.Acces,   // EACCES
+                            _  => ErrNo.IO,
+                        };
+                    }
+                }
+                return ErrNo.Success;
+            }
+            catch (UnauthorizedAccessException) { return ErrNo.Acces; }
+            catch (IOException) { return ErrNo.IO; }
         }
+
+        // .NET has no portable HardLink helper, so reach for the OS calls.
+        // Both APIs use last-error semantics; swap on platform.
+        [System.Runtime.InteropServices.DllImport("kernel32.dll",
+            CharSet = System.Runtime.InteropServices.CharSet.Unicode,
+            SetLastError = true, EntryPoint = "CreateHardLinkW")]
+        [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+        private static extern bool CreateHardLinkW(string lpFileName, string lpExistingFileName,
+            IntPtr lpSecurityAttributes);
+
+        [System.Runtime.InteropServices.DllImport("libc", SetLastError = true)]
+        private static extern int link(string oldpath, string newpath);
 
         // This function signiature may SEGFAULT dotnet runtimes, but is required for some where reflection isn't 100% available.
         // * provided for situations like Unity
@@ -269,6 +297,11 @@ namespace Wacs.WASIp1
                                 dirFileDescriptor.Access,
                                 dirFileDescriptor.Rights,
                                 fsRightsInheriting);
+
+                            // Carry over the open-time fdflags so
+                            // FdWrite honors O_APPEND etc.
+                            if (_state.FileDescriptors.TryGetValue(newFd, out var openedFd))
+                                openedFd.Flags = fsFlags;
 
                             mem.WriteInt32(fdPtr, (int)newFd);
 
@@ -380,6 +413,11 @@ namespace Wacs.WASIp1
                             fileAccess,
                             dirFileDescriptor.Rights,
                             fsRightsInheriting);
+
+                        // Carry over the open-time fdflags so FdWrite
+                        // honors O_APPEND etc.
+                        if (_state.FileDescriptors.TryGetValue(newFd, out var openedFd2))
+                            openedFd2.Flags = fsFlags;
 
                         mem.WriteInt32(fdPtr, (int)newFd);
 
@@ -674,42 +712,44 @@ namespace Wacs.WASIp1
             if (!_config.AllowSymbolicLinks)
                 return ErrNo.NotSup;
 
+#if NET6_0_OR_GREATER
+            var mem = ctx.DefaultMemory;
+            if (!mem.Contains((int)oldPathPtr, (int)oldPathLen) ||
+                !mem.Contains((int)newPathPtr, (int)newPathLen))
+                return ErrNo.Inval;
+
+            if (!GetFd(fd, out var dirFileDescriptor))
+                return ErrNo.NoEnt;
+            if ((dirFileDescriptor.Access & FileAccess.Write) == 0)
+                return ErrNo.Acces;
+            if (dirFileDescriptor.Type != Filetype.Directory)
+                return ErrNo.NotDir;
+
+            try
+            {
+                // The symlink "target" (oldPath) is stored as-is — no
+                // host-mapping. WASI symlinks contain a guest-relative
+                // path string that the guest will later traverse via
+                // path_open; the host doesn't need to resolve it now and
+                // doing so would cause sandbox escape via dangling
+                // symlinks.
+                var oldPath = mem.ReadString(oldPathPtr, oldPathLen);
+                var newPath = mem.ReadString(newPathPtr, newPathLen);
+
+                var guestPath = Path.Combine(dirFileDescriptor.Path, newPath);
+                var newHostPath = _state.PathMapper.MapToHostPath(guestPath);
+
+                File.CreateSymbolicLink(newHostPath, oldPath);
+                return ErrNo.Success;
+            }
+            catch (DirectoryNotFoundException) { return ErrNo.NoEnt; }
+            catch (FileNotFoundException)      { return ErrNo.NoEnt; }
+            catch (IOException ioe) when (ioe.HResult == unchecked((int)0x80070050)) { return ErrNo.Exist; }
+            catch (IOException)                { return ErrNo.IO; }
+            catch (UnauthorizedAccessException) { return ErrNo.Acces; }
+#else
             return ErrNo.NotSup;
-            // var mem = ctx.DefaultMemory;
-            // if (!mem.Contains((int)oldPathPtr, (int)oldPathLen) || !mem.Contains((int)newPathPtr, (int)newPathLen))
-            //     return ErrNo.Inval;
-            //
-            // var dirFileDescriptor = GetFD(fd);
-            // if ((dirFileDescriptor.Access & FileAccess.Write) == 0)
-            //     return ErrNo.Acces;
-            //
-            // try
-            // {
-            //     var oldPath = mem.ReadString(oldPathPtr, oldPathLen);
-            //     var oldHostPath = _state.PathMapper.MapToHostPath(oldPath);
-            //     var newPath = mem.ReadString(newPathPtr, newPathLen);
-            //     var guestPath = Path.Combine(dirFileDescriptor.Path, newPath);
-            //     var newHostPath = _state.PathMapper.MapToHostPath(guestPath);
-            //     
-            //     var target = new FileInfo(oldHostPath);
-            //     var symlink = new FileInfo(newHostPath);
-            //     //Symlinks can be created as of .NET 5/.NET Core 3.0
-            //     symlink.CreateSymbolicLink(target.FullName);
-            // }
-            // catch (IOException ex) when (ex is DirectoryNotFoundException)
-            // {
-            //     return ErrNo.NoSys;
-            // }
-            // catch (IOException ex)
-            // {
-            //     return ErrNo.Exist;
-            // }
-            // catch (UnauthorizedAccessException)
-            // {
-            //     return ErrNo.Acces;
-            // }
-            //
-            // return ErrNo.Success;
+#endif
         }
 
         /// <summary>
