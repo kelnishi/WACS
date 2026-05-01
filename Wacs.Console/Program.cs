@@ -76,7 +76,7 @@ namespace Wacs.Console
             });
 
             var parsed = parser.ParseArguments<
-                RunOptions, BuildOptions, InspectOptions, BindgenOptions>(verbArgs);
+                RunOptions, BuildOptions, AotOptions, InspectOptions, BindgenOptions>(verbArgs);
 
             return parsed.MapResult(
                 (RunOptions o) =>
@@ -85,6 +85,7 @@ namespace Wacs.Console
                     return RunHandler.Execute(o);
                 },
                 (BuildOptions o) => BuildHandler.Execute(o),
+                (AotOptions o) => AotHandler.Execute(o),
                 (InspectOptions o) => InspectHandler.Execute(o),
                 (BindgenOptions o) => BindgenHandler.Execute(o),
                 _ => 1);
