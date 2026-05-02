@@ -261,8 +261,42 @@ namespace Wacs.WASI.Preview1
             var hostPath = state.PathMapper.MapToHostPath(fileDescriptor.Path);
             var entries = DirectoryExtensions.EnumerateFileSystemEntriesSafely(hostPath);
 
+            // Synthesize "." and ".." — Directory.EnumerateFileSystemEntries
+            // omits them on .NET, but rust/fd_readdir asserts both are
+            // present in any non-error readdir. Inode for "." matches the
+            // dir itself; ".." reaches for the parent (falls back to self
+            // for the root preopen with no parent).
+            ulong selfInode = 0;
+            try { selfInode = FileUtil.GenerateInode(new DirectoryInfo(hostPath)); } catch { }
+            ulong parentInode = selfInode;
+            try
+            {
+                var parent = Path.GetDirectoryName(hostPath);
+                if (!string.IsNullOrEmpty(parent))
+                    parentInode = FileUtil.GenerateInode(new DirectoryInfo(parent));
+            }
+            catch { }
+
             var array = new List<(long, DirEnt, byte[])>();
             long runningCookie = 0;
+            void AddEntry(string name, Filetype fileType, ulong inode)
+            {
+                byte[] nameBytes = Encoding.UTF8.GetBytes(name);
+                long nameLen = nameBytes.Length;
+                long mycookie = runningCookie;
+                runningCookie += DirEntSize + nameLen;
+                array.Add((mycookie, new DirEnt
+                {
+                    DNext = runningCookie,
+                    DIno = inode,
+                    DNamlen = (uint)nameLen,
+                    DType = fileType,
+                }, nameBytes));
+            }
+
+            AddEntry(".",  Filetype.Directory, selfInode);
+            AddEntry("..", Filetype.Directory, parentInode);
+
             foreach (var entry in entries)
             {
                 if (entry == "." || entry == "..") continue;
@@ -277,20 +311,7 @@ namespace Wacs.WASI.Preview1
 
                 var name = Path.GetFileName(entry);
                 if (string.IsNullOrEmpty(name)) continue;
-
-                byte[] nameBytes = Encoding.UTF8.GetBytes(name);
-                long nameLen = nameBytes.Length;
-                long mycookie = runningCookie;
-                runningCookie += DirEntSize + nameLen;
-
-                var dirent = new DirEnt
-                {
-                    DNext = runningCookie,
-                    DIno = inode,
-                    DNamlen = (uint)nameLen,
-                    DType = fileType,
-                };
-                array.Add((mycookie, dirent, nameBytes));
+                AddEntry(name, fileType, inode);
             }
 
             byte[] allDirEnts = new byte[runningCookie];
