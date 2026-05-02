@@ -168,7 +168,7 @@ namespace Wacs.Core.Text
             // Normalize: find the high bit of m. Conceptually we want to
             // extract bits [bitLen-1 .. bitLen-1-mantissaBits] (the explicit
             // bit + mantissaBits) and round using the rest.
-            int bitLen = (int)m.GetBitLength();
+            int bitLen = BigIntBitLength(m);
             // Implicit-bit representation: target form is 1.xxx × 2^E.
             // The total bits needed are mantissaBits + 1 (the leading 1 +
             // the trailing fraction bits). Extract those bits, with proper
@@ -254,7 +254,7 @@ namespace Wacs.Core.Text
         private static ulong EncodeIeee754Long(BigInteger m, long exp, int mantissaBits, int expBits)
         {
             if (m.IsZero) return 0;
-            int bitLen = (int)m.GetBitLength();
+            int bitLen = BigIntBitLength(m);
             int keep = mantissaBits + 1;
             long unbiasedExp = exp + (bitLen - 1);
             long biasedExp = unbiasedExp + ((1L << (expBits - 1)) - 1);
@@ -318,6 +318,21 @@ namespace Wacs.Core.Text
             }
 
             return ((ulong)biasedExp << mantissaBits) | mantissaBitsValue;
+        }
+
+        // BigInteger.GetBitLength is .NET 5+; polyfill for netstandard2.1.
+        private static int BigIntBitLength(BigInteger v)
+        {
+            if (v.IsZero) return 0;
+            // Always positive in our usage (mantissa).
+            byte[] bytes = v.ToByteArray();
+            // Trim trailing zeros (BigInteger little-endian; high bytes last).
+            int high = bytes.Length - 1;
+            while (high > 0 && bytes[high] == 0) high--;
+            int bits = high * 8;
+            byte top = bytes[high];
+            while (top != 0) { bits++; top >>= 1; }
+            return bits;
         }
 
         private static bool TryHexDigit(char c, out int value)
