@@ -877,7 +877,12 @@ namespace Wacs.Core.Text
 
             // Mode detection: look at the first child.
             Module.ElementMode mode;
-            ValType reftype = ValType.FuncRef;
+            // Default reftype matches the binary parser's elemkind 0x00
+            // (ValType.Func, non-nullable). Necessary for active
+            // elements like `(elem (i32.const N) $f)` to match
+            // non-nullable `(ref func)` tables — see ParseElementKind
+            // in ElementSection.cs for the matching binary side.
+            ValType reftype = ValType.Func;
             int restStart = i;
 
             if (i < form.Children.Count
@@ -965,15 +970,19 @@ namespace Wacs.Core.Text
             // Optional `func` keyword between mode and inits (legacy /
             // sugar for funcidx lists):
             //   (elem (offset …) func $f1 $f2 …)
-            // Skip it — the reftype is funcref and the following atoms are
-            // funcidx references.
+            // Skip it; reftype was already set to ValType.Func above
+            // and matches the binary parser's elemkind 0x00 decoding.
+            // Setting FuncRef (nullable) here was the source of the
+            // "Active ElementMode (funcref) is not valid for table
+            // type (ref func)" failures on elem.wast modules using
+            // legacy `func` shorthand against non-nullable tables.
             if (i < form.Children.Count
                 && form.Children[i].Kind == SExprKind.Atom
                 && form.Children[i].Token.Kind == TokenKind.Keyword
                 && form.Children[i].AtomText() == "func")
             {
                 i++;
-                reftype = ValType.FuncRef;
+                reftype = ValType.Func;
             }
 
             // Parse remaining children as init expressions.
