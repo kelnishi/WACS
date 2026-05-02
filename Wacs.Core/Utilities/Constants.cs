@@ -26,6 +26,10 @@ namespace Wacs.Core.Utilities
         public const uint HostMaxPages = 0x0_80_00; //2^15 32K (C# generally only accomodates 2GB array)
 
         //Table
-        public const uint MaxTableSize = 0xFFFF_FFFF; //2^32 - 1
+        // Runtime cap on List<>-backed table storage. Spec K (3.2.4)
+        // is 2^32 for table32 and 2^64 for table64; the validator handles
+        // those bounds independently. This constant is the .NET-side
+        // ceiling that gates Grow / instantiation.
+        public const long MaxTableSize = 0xFFFF_FFFFL; //runtime cap: 2^32 - 1
     }
 }
