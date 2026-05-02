@@ -129,14 +129,27 @@ namespace Spec.Test
                 {
                     testData = WastScriptAdapter.FromWastFile(file, TraceExecution);
                 }
-                catch (Exception)
+                catch (Exception e)
                 {
-                    // .wast files that the WACS parser can't yet
-                    // handle are skipped silently — better than
-                    // aborting the whole test run. Track via SkipWasts
-                    // if a specific file needs to be excluded
-                    // explicitly.
-                    continue;
+                    // No silent skips. Surface the parse failure as a
+                    // visible test failure so the WAT/WAST parser gap
+                    // shows up in CI rather than vanishing — every
+                    // missing instruction or construct is tracked
+                    // until the WAT parser reaches binary-parser parity.
+                    var name = Path.GetFileName(file);
+                    testData = new WastJson.WastJson
+                    {
+                        SourceFilename = file,
+                        Path = Path.GetDirectoryName(file) ?? string.Empty,
+                        Commands = new List<WastJson.ICommand>
+                        {
+                            new WastJson.ScriptParseFailureCommand
+                            {
+                                ParseError = $"{e.GetType().Name}: {e.Message}",
+                            }
+                        },
+                        TraceExecution = TraceExecution,
+                    };
                 }
 
                 if (!string.IsNullOrEmpty(SingleTest) && SingleTest != testData.TestName)

@@ -55,15 +55,11 @@ namespace Spec.Test
             };
 
             foreach (var cmd in script)
-            {
-                var converted = Convert(cmd);
-                if (converted != null)
-                    result.Commands.Add(converted);
-            }
+                result.Commands.Add(Convert(cmd));
             return result;
         }
 
-        private static ICommand? Convert(ScriptCommand cmd)
+        private static ICommand Convert(ScriptCommand cmd)
         {
             switch (cmd)
             {
@@ -78,7 +74,13 @@ namespace Spec.Test
                 case ScriptAssertMalformed am: return ConvertAssertMalformed(am);
                 case ScriptAssertUnlinkable au: return ConvertAssertUnlinkable(au);
                 case ScriptAssertException axe: return ConvertAssertException(axe);
-                default: return null;
+                // No silent drops: any new ScriptCommand subtype must be
+                // mapped explicitly. Throwing here surfaces the gap as a
+                // test failure rather than letting commands disappear
+                // from the runner.
+                default:
+                    throw new System.NotSupportedException(
+                        $"WastScriptAdapter.Convert: no mapping for {cmd.GetType().Name} at line {cmd.Line}");
             }
         }
 
