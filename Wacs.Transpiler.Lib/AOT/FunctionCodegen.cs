@@ -82,6 +82,26 @@ namespace Wacs.Transpiler.AOT
         // prove per-label reachability from inside a try region.
         private bool _functionHasTryTable;
 
+        /// <summary>
+        /// Cold-block emission queue. Branch-hinted cold arms can be
+        /// deferred onto this list so they emit AFTER the function body
+        /// proper (between the body's terminating jump and
+        /// <see cref="funcEndLabel"/>'s mark) instead of inline. Each
+        /// action receives nothing — closures capture the ILGenerator
+        /// + the cold body's CIL label + the rejoin target.
+        ///
+        /// Reachable only via explicit jump (e.g. <c>brtrue</c> from
+        /// within the body). The body's End handling always emits a
+        /// terminating <c>Br</c>/<c>Leave</c>/<c>Ret</c>, so linear
+        /// flow can't fall into the cold tail.
+        ///
+        /// Used by Phase 3 of the Branch Hinting work for
+        /// <c>if</c>-without-<c>else</c> with an unlikely hint, where
+        /// the only meaningful improvement is to lift the cold then-body
+        /// out of the linear flow entirely.
+        /// </summary>
+        private readonly List<Action> _coldTailEmissions = new List<Action>();
+
         // Module-bound wrappers that disambiguate concrete type indices.
         // Without the module, concrete func types would be misclassified as
         // GC refs (doc 2 §1 invariant 3).
@@ -219,6 +239,18 @@ namespace Wacs.Transpiler.AOT
             }
 
             _blockStack.Pop();
+
+            // Phase 3 (Branch Hinting): emit any cold-tail actions
+            // registered during body emission. Each action marks its
+            // label, emits a cold body, and back-jumps to the
+            // continuation point inside the main body. The body's
+            // own End handling already emits a Br/Leave/Ret terminator,
+            // so this position is unreachable from sequential flow —
+            // safe to insert blocks here without an extra skip jump.
+            foreach (var emit in _coldTailEmissions)
+                emit();
+            _coldTailEmissions.Clear();
+
             _il.MarkLabel(funcEndLabel);
 
             // If shuttle locals were allocated for the function-level block
@@ -648,8 +680,12 @@ namespace Wacs.Transpiler.AOT
                 case WasmOpCode.If:
                 {
                     int sh = (_currentInfo?.StackHeightBefore ?? 1) - 1;
+                    // Reference-keyed lookup works for both binary
+                    // (joined by FinalizeModule) and WAT-parsed inputs.
+                    var hint = _moduleInst.Repr.BranchHints?.TryGet(inst);
                     ControlEmitter.EmitIf(il, (InstIf)inst, _blockStack, EmitInstruction,
-                        sh, _moduleInst, _tryDepth, _functionHasTryTable);
+                        sh, _moduleInst, _tryDepth, _functionHasTryTable, hint,
+                        _coldTailEmissions.Add);
                     break;
                 }
 

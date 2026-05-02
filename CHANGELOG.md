@@ -1,5 +1,49 @@
 # Changelog
 
+## [WACS 0.11.0 + WACS.Transpiler.Lib 0.6.0] — Branch hinting
+
+Wires the WebAssembly [Branch Hinting](https://github.com/WebAssembly/branch-hinting)
+proposal end-to-end:
+
+- **WACS 0.11.0** parses the `metadata.code.branch_hint` custom
+  section into `Module.BranchHints` (a `(funcIdx → byte_offset →
+  BranchHint)` map). The full payload is retained verbatim including
+  the length-prefixed data vector so future revisions to the
+  proposal can extend the hint encoding without a parser change.
+  Every parsed instruction inside a function body now carries its
+  body-relative byte offset on `InstructionBase.ByteOffsetInFunc` —
+  the lookup key against the hint map.
+
+- **WACS.Transpiler.Lib 0.6.0** consumes the hints in two emission
+  shapes:
+    * `if`-with-`else` hint=unlikely → `EmitIf` swaps the test
+      (`Brtrue then_label` instead of `Brfalse else_label`) and
+      emits the else-arm as the hot fall-through with the then-arm
+      as the cold side-jump.
+    * `if`-without-`else` hint=unlikely → new `_coldTailEmissions`
+      mechanism on `FunctionCodegen` lifts the body out of the
+      linear flow entirely. Hot path is `Brtrue cold_label;
+      <fall-through>`; cold body is emitted between the function
+      body's terminator and the funcEndLabel mark, with a back-jump
+      to the if's endLabel to resume normal flow. Non-reducible CFG;
+      RyuJIT and ILC handle it.
+
+  Optimistic per design: the IL expresses the hint via ordering and
+  branch sense. We don't claim downstream JIT/AOT honors it beyond
+  what its own block-layout pass already does (RyuJIT tier-1 will
+  eventually overrule us with profile data anyway). The bet pays
+  off most for `wacs aot` / NativeAOT cold paths where there's no
+  profile data to rely on.
+
+The README's Branch Hinting feature row updates from "Custom section
+ignored" to describe the new transpiler integration.
+
+Validation is intentionally permissive ("optimistic"): the parser
+rejects duplicate `(funcidx, offset)` entries and out-of-range
+funcidx, but does NOT cross-validate that each hint's target offset
+lands on an `if`/`br_if` instruction. Consumers can re-check at
+use site if they need stricter semantics.
+
 ## [WACS.Cli 1.2.0 + WACS.WASI.Preview1 0.11.0 + WACS.HostBindings.* 0.1.0 + WACS.Transpiler.Lib 0.5.0] — `wacs aot` end-to-end + WASI rename
 
 A wasm input is now one CLI call away from a self-contained NativeAOT
