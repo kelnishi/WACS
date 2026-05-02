@@ -449,7 +449,7 @@ namespace Wacs.Core.Text
                     var child = inlineElemForm.Children[k];
                     inits.Add(ParseElemInit(ctx, child, elementType));
                 }
-                var offset = BuildConstOffset(0);
+                var offset = BuildConstOffset(0, limits.AddressType);
                 var mode = new Module.ElementMode.ActiveMode((TableIdx)idx, offset);
                 var segment = Module.ElementSegment.Create(elementType, inits.ToArray(), mode);
                 var existingE = ctx.Module.Elements;
@@ -563,8 +563,9 @@ namespace Wacs.Core.Text
                 int idx = ctx.Mems.Declare(name);
                 ctx.Module.Memories.Add(new MemoryType(limits));
                 FlushExports(ctx, pendingExports, ExternalKind.Memory, idx);
-                // Synthesize the active data segment at offset 0.
-                var offsetExpr = BuildConstOffset(0);
+                // Synthesize the active data segment at offset 0,
+                // typed to match the memory's address space (i32 vs i64).
+                var offsetExpr = BuildConstOffset(0, addrT);
                 var seg = Module.Data.Create(
                     new Module.DataMode.ActiveMode((MemIdx)idx, offsetExpr),
                     bytes);
@@ -980,16 +981,25 @@ namespace Wacs.Core.Text
         {
             if (node.Kind == SExprKind.Atom)
             {
-                // Treat as funcidx → ref.func $f
+                // Treat as funcidx → ref.func $f. The binary parser
+                // produces a 2-instruction sequence (RefFunc + End)
+                // for each initializer; mirror that shape here so
+                // FinalizeModule's flat-instructions walk and the
+                // validator's End-terminator check both find what
+                // they expect.
                 uint funcIdx = ResolveNamespaceIdx(ctx.Funcs, node, "func");
                 var inst = Wacs.Core.Instructions.SpecFactory.Factory.CreateInstruction((ByteCode)OpCode.RefFunc);
                 var reader = WatBinaryEncoder.BuildReader(w => w.WriteLeb128U32(funcIdx));
                 var configured = inst.Parse(reader);
-                return new Expression(1, configured);
+                var seq = new InstructionSequence(
+                    new List<InstructionBase> { configured!, new InstEnd() });
+                return new Expression(1, seq, isStatic: true);
             }
             if (node.IsForm("item"))
             {
-                // (item expr) — parse the inner expr.
+                // (item expr) — parse the inner expr. The inner
+                // expression may be folded `(item (ref.func $f))` OR
+                // unfolded `(item ref.func $f)`; both must work.
                 if (node.Children.Count < 2) return Expression.Empty;
                 return ParseInitExpressionForm(ctx, node, startIndex: 1);
             }
@@ -1106,6 +1116,30 @@ namespace Wacs.Core.Text
         }
 
         /// <summary>
+        /// Build a constant offset expression matching a memory or
+        /// table's address type. The spec's inline-data and inline-elem
+        /// abbreviations expand to an active segment whose offset is
+        /// `(memory64.AddrType.const 0)` — i32.const for an i32-indexed
+        /// container, i64.const for an i64-indexed one. Picking the
+        /// wrong type triggers the validator's
+        /// "Wrong operand type I32 at top of stack. Expected: I64"
+        /// across memory64 / call_indirect / float_memory64 wasts.
+        /// </summary>
+        private static Expression BuildConstOffset(int value, AddrType addrType)
+        {
+            if (addrType == AddrType.I64)
+            {
+                var i64 = new Wacs.Core.Instructions.Numeric.InstI64Const();
+                // InstI64Const has no public Immediate(long) — assign the
+                // internal Value field directly. Visible from this assembly.
+                i64.Value = value;
+                var seq64 = new InstructionSequence(new List<InstructionBase> { i64, new InstEnd() });
+                return new Expression(1, seq64, isStatic: true);
+            }
+            return BuildConstOffset(value);
+        }
+
+        /// <summary>
         /// Heuristic: does this list look like an instruction form (const,
         /// global.get, ref.func, ref.null) rather than a structural form
         /// like (elem), (func), etc.?
@@ -1157,14 +1191,17 @@ namespace Wacs.Core.Text
         /// </summary>
         private static Expression ParseInitExpressionForm(TextParseContext ctx, SExpr form, int startIndex)
         {
+            // Route through ParseInstrList so we accept both the
+            // folded form `(ref.func $f)` and the unfolded form
+            // `ref.func $f` (atoms-and-immediates) inside the wrapping
+            // form. Skipping atoms — as the previous loop did — drops
+            // unfolded `(item ref.func $f)` instructions on the floor,
+            // which is how elem.wast's `(item ref.func $f)` lost the
+            // RefFunc and ended up with a pure End-only initializer.
             var fctx = new TextFunctionContext(ctx);
-            var output = new List<InstructionBase>();
-            for (int k = startIndex; k < form.Children.Count; k++)
-            {
-                var child = form.Children[k];
-                if (child.Kind != SExprKind.List) continue;
-                ParseFoldedInstruction(fctx, child, output);
-            }
+            int idx = startIndex;
+            var insts = ParseInstrList(fctx, form, ref idx, InstrStop.None, out _);
+            var output = new List<InstructionBase>(insts);
             output.Add(new InstEnd());
             return new Expression(1, new InstructionSequence(output), isStatic: true);
         }

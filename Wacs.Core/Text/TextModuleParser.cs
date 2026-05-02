@@ -279,6 +279,12 @@ namespace Wacs.Core.Text
             // doesn't assert on uint.MaxValue.
             if (module.DataCount == uint.MaxValue)
                 module.DataCount = (uint)module.Datas.Length;
+
+            // Mirror the binary parser's ref.func declaration walk so
+            // (elem declare func $f) actually flips $f.ElementDeclared.
+            // Without this, every ref.func inside a function body fails
+            // validation with "func N is not fully declared".
+            BinaryModuleParser.PropagateRefFuncDeclarations(module);
         }
 
         // ---- Helpers shared across section parsers ------------------------
