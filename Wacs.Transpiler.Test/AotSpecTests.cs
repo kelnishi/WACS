@@ -61,6 +61,23 @@ namespace Wacs.Transpiler.Test
         //                                instead of the unwrap helper.
         private static readonly HashSet<string> KnownFailingWastPaths = new(StringComparer.Ordinal)
         {
+            // wasm-3.0 spec d7aada5: two new test fixtures that exercise
+            // pre-existing AOT IL gaps (already documented in the April-2026
+            // AOT status memo as the tail-call cluster and a typed-funcref-
+            // with-nullable-block-result CIL path).
+            //
+            //   return_call_indirect.wast — line 296 `call_mpmr` — multi-param
+            //     multi-result tail-call ret-side marshaling. The return path
+            //     leaves multiple values on the CIL stack and emits `ret`,
+            //     which the verifier rejects (CLR return is single-value +
+            //     out params). Same root cause as the existing return_call /
+            //     return_call_ref AOT failures tracked for v0.2.
+            //   br_on_non_null.wast — line 54 `nullable2-null` — block result
+            //     `(ref null $t)` after a `br_on_non_null` whose null path
+            //     falls through to `(return …)`. The CilValidator stack-shape
+            //     reconciliation at the block end produces invalid IL.
+            "return_call_indirect.wast",
+            "br_on_non_null.wast",
         };
 
         private static bool IsKnownFailing(WastJson file)

@@ -56,13 +56,16 @@ namespace Wacs.Transpiler.Test
         }
 
         /// <summary>
-        /// Verify that the transpiler can process each module in a wast test plan
-        /// without crashing. Walks the command sequence inline, just like the core
-        /// test suite, so that imports are available and only valid modules are tested.
+        /// Verify that the AOT transpiler can process each module in a wast
+        /// test plan without crashing. Walks the command sequence inline, just
+        /// like the core test suite, so that imports are available and only
+        /// valid modules are tested. The runtime's polymorphic-interpreter
+        /// SuperInstruction flag is unrelated to the AOT transpiler — it's
+        /// turned off here only to keep the interpreter side deterministic.
         /// </summary>
         [Theory]
         [ClassData(typeof(TranspilerTestDefinitions))]
-        public void ApplySuperInstructions(WastJson file)
+        public void TranspileEachWastModuleNoCrash(WastJson file)
         {
             _output.WriteLine($"Transpile: {file.TestName}");
             var env = new SpecTestEnv();
