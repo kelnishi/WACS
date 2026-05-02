@@ -30,7 +30,11 @@ namespace Wacs.Core.Instructions
     public class InstReturnCall : InstructionBase, ICallInstruction
     {
         public FuncIdx X;
-        private FunctionInstance _functionInstance;
+        // IFunctionInstance covers both wasm and host targets. Host
+        // tail-calls degrade to a plain host invocation followed by an
+        // immediate FunctionReturn — semantically equivalent to call+return,
+        // which is what the spec's tail-call proposal requires.
+        private IFunctionInstance _functionInstance;
 
         public InstReturnCall() : base(ByteCode.ReturnCall) 
             => IsAsync = false;
@@ -75,22 +79,13 @@ namespace Wacs.Core.Instructions
             context.Assert( context.Frame.Module.FuncAddrs.Contains(X),
                 $"Instruction call failed. Function address for {X} was not in the Context.");
             var linkedX = context.Frame.Module.FuncAddrs[X];
-            var inst = context.Store[linkedX];
+            _functionInstance = context.Store[linkedX];
 
-            switch (inst)
-            {
-                case FunctionInstance func:
-                    _functionInstance = func;
-                    break;
-                case HostFunction: 
-                    throw new InvalidDataException($"Host functions are invalid tail-call targets.");
-            }
-
-            var funcType = inst.Type;
+            var funcType = _functionInstance.Type;
 
             int stackDiff = -funcType.ParameterTypes.Arity +funcType.ResultType.Arity;
             context.DeltaStack(stackDiff, 0);
-            
+
             context.LinkUnreachable = true;
 
             IsAsync = false;
@@ -100,7 +95,16 @@ namespace Wacs.Core.Instructions
         // @Spec 4.4.8.10. call
         public override void Execute(ExecContext context)
         {
-            _functionInstance.TailInvoke(context);
+            switch (_functionInstance)
+            {
+                case FunctionInstance wasmFunc:
+                    wasmFunc.TailInvoke(context);
+                    break;
+                case HostFunction hostFunc:
+                    hostFunc.Invoke(context);
+                    context.FunctionReturn();
+                    break;
+            }
         }
 
         public override async ValueTask ExecuteAsync(ExecContext context)

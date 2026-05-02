@@ -309,30 +309,18 @@ namespace Wacs.Core.Instructions.GC
                 $"Instruction {Op.GetMnemonic()} failed. FieldType does not have a valid bitwidth {ft}.");
             //14
             var z = ft.BitWidth().ByteSize();
-            //15
-            int end = s + n * z;
-            int span = end;
-            if (z != 4)
-            {
-                span -= z;
-                span += 1;
-            }
-            if (span > datainst.Data.Length)
-                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Array size exceeds data length");
-            //16
-            //HACK: Unaligned read is some nonsense
-            if (end > datainst.Data.Length)
-            {
-                end = datainst.Data.Length;
-                s = end - n * z;
-            }
+            //15 — @Spec 4.5.3.5: trap if s + n*|t| > |data.Data|.
+            // s and n are u32 on the wasm stack (popped as i32 here);
+            // do the size math in 64-bit to avoid overflow on
+            // pathological inputs.
+            long sU = (uint)s;
+            long nU = (uint)n;
+            long endLong = sU + nU * z;
+            if (endLong > datainst.Data.Length)
+                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. out of bounds memory access");
 
-            if (s < 0)
-                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Out of bounds Array start index");
-            if (end > datainst.Data.Length)
-                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Out of bounds Array end index");
-            
-            var b = datainst.Data.AsSpan()[s..end];
+            int end = (int)endLong;
+            var b = datainst.Data.AsSpan()[(int)sU..end];
             //19 skip the stack since we're inline
             var a = context.Store.AddArray();
             //17,18

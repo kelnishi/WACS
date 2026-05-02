@@ -139,12 +139,26 @@ namespace Wacs.Core.Types
         /// </summary>
         public class Validator : AbstractValidator<TableType>
         {
-            public static readonly Limits.Validator Limits = new(Constants.MaxTableSize);
+            // table32 K = 2^32, table64 K = 2^64 per spec § 3.2.4.
+            // The K parameter is interpreted unsigned by Limits.Validator,
+            // so passing -1L (= ulong.MaxValue) yields the table64 bound.
+            // Runtime can't actually hold that many entries — that
+            // ceiling is enforced separately by Constants.MaxTableSize
+            // at instantiation/grow time.
+            public static readonly Limits.Validator Limits = new(0x1_0000_0000L);
+            private static readonly Limits.Validator Limits64 = new(unchecked((long)ulong.MaxValue));
 
             public Validator()
             {
                 // @Spec 3.2.4.1. limits reftype
-                RuleFor(tt => tt.Limits).SetValidator(Limits);
+                RuleFor(tt => tt.Limits)
+                    .Custom((limits, ctx) =>
+                    {
+                        var v = limits.AddressType == AddrType.I64 ? Limits64 : Limits;
+                        var result = v.Validate(limits);
+                        foreach (var failure in result.Errors)
+                            ctx.AddFailure(failure);
+                    });
                 RuleFor(tt => tt.ElementType)
                     .Must((_, type, ctx) => type.Validate(ctx.GetValidationContext().Types))
                     .WithMessage(tt => $"TableType had invalid ElementType {tt.ElementType}");

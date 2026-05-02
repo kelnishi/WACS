@@ -362,20 +362,21 @@ namespace Wacs.Core.Runtime
             Assert( Store.Contains(addr),
                 $"Failure in Function Invocation. Address does not exist {addr}");
             var funcInst = Store[addr];
-            
+
             switch (funcInst)
             {
                 case FunctionInstance wasmFunc:
                     wasmFunc.TailInvoke(this);
                     return;
-                // case HostFunction hostFunc:
-                // {
-                //     if (funcInst.IsAsync)
-                //         throw new WasmRuntimeException("Cannot call asynchronous function synchronously");
-                //     
-                //     hostFunc.TailInvoke(this);
-                //     return;
-                // }
+                case HostFunction hostFunc:
+                    if (hostFunc.IsAsync)
+                        throw new WasmRuntimeException("Cannot tail-call asynchronous host function synchronously");
+                    // Spec tail-call to host: equivalent to a plain host
+                    // call followed by a return — host functions don't have
+                    // a wasm frame to grow, so frame reuse is unnecessary.
+                    hostFunc.Invoke(this);
+                    FunctionReturn();
+                    return;
             }
             throw new WasmRuntimeException($"Unexpected function {funcInst} at address {addr}");
         }

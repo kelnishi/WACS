@@ -50,6 +50,13 @@ namespace Wacs.Core.Text
         public ScriptModuleKind Kind;
 
         /// <summary>
+        /// Set when the source used <c>(module definition …)</c> — the module
+        /// is parsed and validated but not instantiated. A subsequent
+        /// <c>(module instance $alias $id)</c> creates the runtime instance.
+        /// </summary>
+        public bool IsDefinition;
+
+        /// <summary>
         /// Populated for <see cref="ScriptModuleKind.Text"/>. For Quote kind
         /// the module is also parsed (from the quoted text) — this lets the
         /// runner access the parsed module uniformly.

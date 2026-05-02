@@ -168,16 +168,20 @@ namespace Wacs.Core.Text
         private static ScriptModule ParseModuleCommand(SExpr node)
         {
             int i = 1;
-            // Component-model `(module definition $id sections…)` —
-            // the `definition` keyword precedes the optional id. Strip
-            // it; the rest is just a normal text module that gets
-            // registered for later `(module instance $alias $id)`
-            // lookups via the standard $id flow below.
+            // `(module definition …)` — declares a module that is parsed
+            // and validated but not instantiated. With an $id (component-
+            // model use), a later `(module instance $alias $id)` creates
+            // the runtime instance. Without an $id (WebAssembly 3.0
+            // memory.wast / table.wast), the form is purely validate-only,
+            // used for limit-validation tests where instantiation would
+            // exceed host allocation budgets.
+            bool isDefinition = false;
             if (i < node.Children.Count
                 && node.Children[i].Kind == SExprKind.Atom
                 && node.Children[i].Token.Kind == TokenKind.Keyword
                 && node.Children[i].AtomText() == "definition")
             {
+                isDefinition = true;
                 i++;
             }
             string? id = TryReadId(node, ref i);
@@ -261,6 +265,7 @@ namespace Wacs.Core.Text
             {
                 Line = node.Token.Line, Column = node.Token.Column,
                 Id = id, Kind = ScriptModuleKind.Text, Module = mod,
+                IsDefinition = isDefinition,
             };
         }
 

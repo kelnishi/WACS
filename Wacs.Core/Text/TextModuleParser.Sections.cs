@@ -1290,28 +1290,31 @@ namespace Wacs.Core.Text
         /// <summary>
         /// Parse an unsigned integer atom. Accepts decimal or 0x-prefixed
         /// hex. Allows underscores as digit separators per the WAT spec.
+        /// Values up to <see cref="ulong.MaxValue"/> (e.g. table64
+        /// limit of 0xffff_ffff_ffff_ffff) are accepted; the result is
+        /// returned as <see cref="long"/> via unchecked cast — callers
+        /// that compare against an upper bound should treat values
+        /// above <see cref="long.MaxValue"/> as their unsigned equivalents.
         /// </summary>
         private static long ParseUnsignedInt(SExpr atom)
         {
             if (atom.Kind != SExprKind.Atom)
                 throw new FormatException($"line {atom.Token.Line}: expected integer literal");
             var raw = atom.AtomText().Replace("_", "");
-            long value;
+            ulong value;
             if (raw.StartsWith("0x") || raw.StartsWith("0X"))
             {
-                if (!long.TryParse(raw.Substring(2), System.Globalization.NumberStyles.HexNumber,
+                if (!ulong.TryParse(raw.Substring(2), System.Globalization.NumberStyles.HexNumber,
                     System.Globalization.CultureInfo.InvariantCulture, out value))
                     throw new FormatException($"line {atom.Token.Line}: bad hex literal '{atom.AtomText()}'");
             }
             else
             {
-                if (!long.TryParse(raw, System.Globalization.NumberStyles.Integer,
+                if (!ulong.TryParse(raw, System.Globalization.NumberStyles.Integer,
                     System.Globalization.CultureInfo.InvariantCulture, out value))
                     throw new FormatException($"line {atom.Token.Line}: bad integer '{atom.AtomText()}'");
             }
-            if (value < 0)
-                throw new FormatException($"line {atom.Token.Line}: expected unsigned, got {atom.AtomText()}");
-            return value;
+            return unchecked((long)value);
         }
 
         /// <summary>

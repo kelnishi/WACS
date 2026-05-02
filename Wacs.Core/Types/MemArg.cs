@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+using System;
 using System.IO;
 using Wacs.Core.Utilities;
 
@@ -33,9 +34,14 @@ namespace Wacs.Core.Types
         public static MemArg Parse(BinaryReader reader)
         {
             uint bits = reader.ReadLeb128_u32();
+            // Per spec § 5.4.7 (and PRs #1886 / #1936), only bits 0-5
+            // (align exponent) and bit 6 (multi-memory MemIdxSet) are
+            // meaningful. Any reserved bit set ⇒ malformed memop flags.
+            if ((bits & ~0x7Fu) != 0)
+                throw new InvalidDataException("malformed memop flags");
             if ((bits & (uint)Alignment.LogBits) > 16)
                 throw new InvalidDataException($"Invalid memory alignment");
-            
+
             Alignment align = (Alignment)bits;
             if (align.ExpSize() > Constants.PageSize)
                 throw new InvalidDataException($"Memory alignment exceeds page size");
