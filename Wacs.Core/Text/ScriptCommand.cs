@@ -62,6 +62,17 @@ namespace Wacs.Core.Text
         /// Quote: the concatenated quoted-source bytes (UTF-8).
         /// </summary>
         public byte[]? Bytes;
+
+        /// <summary>
+        /// Populated when the script parser encountered an exception while
+        /// parsing the inner module of an enclosing assert_invalid /
+        /// assert_malformed / assert_unlinkable assertion (the inner module
+        /// is *expected* to fail — see
+        /// <c>TextScriptParser.ParseAssertModuleFailure</c>). The runner
+        /// uses this to short-circuit the assertion as satisfied without
+        /// re-parsing.
+        /// </summary>
+        public System.Exception? ParseError;
     }
 
     public sealed class ScriptRegister : ScriptCommand

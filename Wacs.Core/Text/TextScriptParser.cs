@@ -417,14 +417,22 @@ namespace Wacs.Core.Text
             {
                 module = ParseModuleCommand(node.Children[1]);
             }
-            catch (System.FormatException)
+            catch (System.Exception e) when (
+                e is System.FormatException
+                || e is System.IO.InvalidDataException
+                || e is System.InvalidCastException
+                || e is System.NotSupportedException)
             {
+                // Capture the rejection so the adapter can surface it
+                // as PreParseError (the assertion is trivially satisfied
+                // — the parser already rejected the inner module).
                 module = new ScriptModule
                 {
                     Line = node.Children[1].Token.Line,
                     Column = node.Children[1].Token.Column,
                     Kind = ScriptModuleKind.Text,
                     Module = null,
+                    ParseError = e,
                 };
             }
             var msg = DecodeString(node, node.Children[2].Token);

@@ -625,16 +625,40 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("filename")] public string? Filename { get; set; }
         [JsonPropertyName("module_type")] public string? ModuleType { get; set; }
         [JsonPropertyName("text")] public string? Text { get; set; }
+
+        /// <summary>WAST-direct: pre-parsed Module to attempt instantiation.</summary>
+        [JsonIgnore] public Module? PreParsedModule { get; set; }
+
+        /// <summary>WAST-direct: parse error captured at script-parse time.</summary>
+        [JsonIgnore] public Exception? PreParseError { get; set; }
+
         public CommandType Type => CommandType.AssertUninstantiable;
         [JsonPropertyName("line")] public int Line { get; set; }
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             List<Exception> errors = new();
-            
+
+            // WAST-direct path
+            if (PreParseError != null)
+                return errors;
+
+            if (PreParsedModule != null)
+            {
+                try
+                {
+                    runtime.InstantiateModule(PreParsedModule);
+                }
+                catch (ValidationException)  { return errors; }
+                catch (InvalidDataException) { return errors; }
+                catch (FormatException)      { return errors; }
+                catch (TrapException)        { return errors; }
+                throw new TestException($"Test failed {this}");
+            }
+
             if (Filename == null)
                 throw new ArgumentException("Json missing `filename` field");
-            
+
             var filepath = Path.Combine(testDefinition.Path, Filename);
             bool didAssert = false;
             try
@@ -660,7 +684,7 @@ namespace Spec.Test.WastJson
             {
                 didAssert = true;
             }
-            
+
             if (!didAssert)
             {
                 throw new TestException($"Test failed {this}");
