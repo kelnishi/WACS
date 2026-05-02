@@ -61,7 +61,7 @@ namespace Spec.Test
         [Theory]
         [InlineData("Spec.Test/spec/test/core/linking.wast")]
         [InlineData("Spec.Test/spec/test/core/table.wast")]
-        [InlineData("Spec.Test/spec/test/core/try_table.wast")]
+        [InlineData("Spec.Test/spec/test/core/exceptions/try_table.wast")]
         [InlineData("Spec.Test/spec/test/core/multi-memory/linking0.wast")]
         [InlineData("Spec.Test/spec/test/core/multi-memory/linking3.wast")]
         public void WatDirectRunsThroughPreviouslyFailingWasts(string relPath)
@@ -132,7 +132,7 @@ namespace Spec.Test
         [Fact(Skip = "Diagnostic probe; run on demand by removing Skip and pointing at any wast.")]
         public void LinkingWastRuntimeTrace()
         {
-            var wastPath = "/Users/kelvinnishikawa/wasm/WACS/Spec.Test/spec/test/core/try_table.wast";
+            var wastPath = "/Users/kelvinnishikawa/wasm/WACS/Spec.Test/spec/test/core/exceptions/try_table.wast";
             var jsonPath = "/Users/kelvinnishikawa/wasm/WACS/Spec.Test/generated-json/try_table.wast/try_table.json";
 
             var watTrace = RunAndTrace(WastScriptAdapter.FromWastFile(wastPath));

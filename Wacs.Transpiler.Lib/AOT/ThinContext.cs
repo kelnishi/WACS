@@ -383,6 +383,11 @@ namespace Wacs.Transpiler.AOT
 
         /// <summary>
         /// Build CLR delegate type for a WASM function type (without ThinContext param).
+        /// Returns null for multi-result functions: a single Func&lt;...,TR&gt; can't
+        /// represent extra results, and tail-call sites that expect a single
+        /// CLR return value would emit invalid IL against the underlying
+        /// MethodInfo. Multi-result paths fall back to the array-based
+        /// CallHelpers.InvokeIndirectMulti dispatch instead.
         /// </summary>
         public static Type? BuildDelegateTypeForFunc(FunctionType funcType)
         {
@@ -401,6 +406,8 @@ namespace Wacs.Transpiler.AOT
                     _ => null
                 };
             }
+
+            if (resultTypes.Length > 1) return null;
 
             var returnType = MapValType(resultTypes[0]);
             var allTypes = paramClrTypes.Append(returnType).ToArray();

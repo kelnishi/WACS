@@ -86,10 +86,23 @@ namespace Wacs.Core.Types
         /// </summary>
         public class Validator : AbstractValidator<MemoryType>
         {
+            private static readonly Limits.Validator Mem32Limits =
+                new Limits.Validator(Constants.WasmMaxPages);
+            private static readonly Limits.Validator Mem64Limits =
+                new Limits.Validator(Constants.WasmMaxPages64);
+
             public Validator()
             {
                 // @Spec 3.2.5.1. limits
-                RuleFor(mt => mt.Limits).SetValidator(new Limits.Validator(Constants.WasmMaxPages));
+                // memory32: K = 2^16 pages (4 GiB); memory64: K = 2^48 pages
+                RuleFor(mt => mt.Limits)
+                    .Custom((limits, ctx) =>
+                    {
+                        var v = limits.AddressType == AddrType.I64 ? Mem64Limits : Mem32Limits;
+                        var result = v.Validate(limits);
+                        foreach (var failure in result.Errors)
+                            ctx.AddFailure(failure);
+                    });
             }
         }
     }

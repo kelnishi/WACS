@@ -4,8 +4,5 @@
   "RunTranspilerTests": true,
   "TraceExecution": false,
   "Single": null,
-  "SkipWasts": [
-    "comments.wast",
-    "annotations.wast"
-  ]
+  "SkipWasts": []
 }
