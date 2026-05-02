@@ -91,14 +91,23 @@ namespace Wacs.Core.Types
         /// </summary>
         public class Validator : AbstractValidator<Limits>
         {
+            // Limits semantics are unsigned per spec § 3.2.1 — both
+            // bounds are u32/u64. The text parser may yield a negative
+            // long (unchecked cast of a u64 with bit 63 set, e.g.
+            // 0xffff_ffff_ffff_ffff in table64 limits), so all bound
+            // checks compare as ulong rather than long.
             public Validator(long rangeK) {
+                ulong rangeKU = unchecked((ulong)rangeK);
                 RuleFor(limits => limits.Minimum)
-                    .LessThanOrEqualTo(rangeK);
+                    .Must(min => unchecked((ulong)min) <= rangeKU)
+                    .WithMessage(l => $"Minimum {(ulong)l.Minimum} exceeds bound {rangeKU}");
                 When(l => l.Maximum.HasValue, () => {
                     RuleFor(l => l.Maximum)
-                        .LessThanOrEqualTo(rangeK);
+                        .Must(max => unchecked((ulong)max!.Value) <= rangeKU)
+                        .WithMessage(l => $"Maximum {(ulong)l.Maximum!.Value} exceeds bound {rangeKU}");
                     RuleFor(l => l.Maximum)
-                        .GreaterThanOrEqualTo(limits => limits.Minimum);
+                        .Must((l, max) => unchecked((ulong)max!.Value) >= unchecked((ulong)l.Minimum))
+                        .WithMessage(l => $"Maximum {(ulong)l.Maximum!.Value} less than minimum {(ulong)l.Minimum}");
                 });
             }
         }
