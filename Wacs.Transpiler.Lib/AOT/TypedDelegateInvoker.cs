@@ -8,37 +8,29 @@
 
 using System;
 using System.Collections.Concurrent;
-using System.Reflection;
-using System.Reflection.Emit;
-using System.Runtime.CompilerServices;
 
 namespace Wacs.Transpiler.AOT
 {
     /// <summary>
-    /// Caches a JIT-compiled wrapper per delegate type that invokes the
-    /// delegate without going through <see cref="Delegate.DynamicInvoke"/>.
+    /// Lookup table for per-delegate-type call_indirect / call_ref
+    /// dispatch shims. Every shim is a static method emitted at
+    /// transpile time by
+    /// <c>ModuleClassGenerator.EmitTypedDelegateShimsAndRegister</c>:
+    /// it casts the Delegate to the concrete Func/Action type, unboxes
+    /// each <c>object?</c> arg, calls Invoke directly, and boxes the
+    /// return value.
     ///
-    /// <c>DynamicInvoke</c> is reflection-heavy per call (arg-type check,
-    /// internal <see cref="MethodBase.Invoke(object, object[])"/>) and made
-    /// call_indirect-heavy tests (fib/fac/runaway) run ~100x slower than a
-    /// direct delegate invocation. The wrapper emitted here:
-    ///
-    ///   1. Casts the Delegate parameter to the concrete Func/Action type.
-    ///   2. Unboxes each object? arg to the delegate's parameter type.
-    ///   3. Calls Invoke directly (the JIT inlines this).
-    ///   4. Boxes the return value (or returns null for Action).
-    ///
-    /// Keyed by delegate Type, so one wrapper serves every instance of
-    /// <c>Func&lt;int,int&gt;</c>, etc.
-    ///
-    /// <para>Under NativeAOT, <see cref="System.Reflection.Emit"/> is
-    /// unavailable (<c>PlatformNotSupportedException</c> on
-    /// <c>DynamicMethod.GetILGenerator</c>), so we fall back to
-    /// <see cref="Delegate.DynamicInvoke"/>. That's the slow path the
-    /// emitted wrapper was designed to avoid, but call_indirect-using
-    /// modules would otherwise fail to run at all under AOT — correctness
-    /// over speed when codegen isn't an option. Long-term fix is to emit
-    /// per-signature direct-call shims at transpile time.</para>
+    /// <para>Older revisions of this class also emitted shims at runtime
+    /// via <see cref="System.Reflection.Emit.DynamicMethod"/> (with a
+    /// reflection-based fallback under PublishAot where Reflection.Emit
+    /// is unavailable). Both fallback paths were proven dead by the
+    /// instrumented test pass that landed in the same commit set as the
+    /// transpile-time emission — every transpiled-module dispatch path
+    /// in Wacs.Transpiler.Test (730/730), Spec.Test (782/784), the
+    /// Wacs.WASI.Preview1.Test suite, and the AOT smoke + coremark
+    /// scenarios goes through a registered shim. The fallback bodies
+    /// were removed; <see cref="GetOrBuild"/> now throws if asked for
+    /// an unregistered type so any future coverage gap surfaces loudly.</para>
     /// </summary>
     public static class TypedDelegateInvoker
     {
@@ -49,14 +41,10 @@ namespace Wacs.Transpiler.AOT
         /// <summary>
         /// Register a precompiled shim for <paramref name="delegateType"/>.
         /// Called from a transpiled module's ctor IL with a static method
-        /// emitted by <c>ModuleClassGenerator</c> at transpile time, so
-        /// <see cref="GetOrBuild"/> never has to invoke
-        /// <see cref="Reflection.Emit"/> at runtime under PublishAot.
-        ///
-        /// <para>Idempotent: re-registering the same delegate type from a
-        /// second module overwrites the first registration with an
-        /// equivalent shim (the IL is determined entirely by the delegate
-        /// signature). No harm; the call site never observes the swap.</para>
+        /// emitted by <c>ModuleClassGenerator</c> at transpile time.
+        /// Idempotent — re-registration from a second module overwrites
+        /// the first with an equivalent shim (the IL is determined
+        /// entirely by the delegate signature).
         /// </summary>
         public static void RegisterShim(Type delegateType, Invoker shim)
         {
@@ -65,69 +53,24 @@ namespace Wacs.Transpiler.AOT
             _cache[delegateType] = shim;
         }
 
+        /// <summary>
+        /// Look up the shim registered for <paramref name="delegateType"/>.
+        /// Throws if no shim was registered — every dispatch site
+        /// reachable from a transpiled module is covered by
+        /// <c>ModuleClassGenerator</c>'s shim emission, so a miss here
+        /// is a transpiler bug or an out-of-band caller.
+        /// </summary>
         public static Invoker GetOrBuild(Type delegateType)
-            => _cache.GetOrAdd(delegateType, Build);
-
-        private static Invoker Build(Type delegateType)
         {
-            // NativeAOT path — no Reflection.Emit, fall back to DynamicInvoke.
-            // Defense-in-depth: a transpiled module's ctor pre-registers a
-            // precompiled shim per delegate signature via RegisterShim
-            // (see ModuleClassGenerator.EmitTypedDelegateShimsAndRegister),
-            // so this path is normally cold under PublishAot. It only
-            // fires for delegate types the transpiler didn't see — e.g.,
-            // a host-side delegate handed to a third-party embedder
-            // calling GetOrBuild manually, or signatures where
-            // BuildDelegateType returned null (>16 params).
-            if (!RuntimeFeature.IsDynamicCodeSupported)
-                return (del, args) => del.DynamicInvoke(args);
-
-            var invokeMethod = delegateType.GetMethod("Invoke")
-                ?? throw new InvalidOperationException(
-                    $"Delegate type {delegateType} has no Invoke method");
-            var parameters = invokeMethod.GetParameters();
-
-            var dyn = new DynamicMethod(
-                $"Inv_{delegateType.Name}",
-                typeof(object),
-                new[] { typeof(Delegate), typeof(object?[]) },
-                typeof(TypedDelegateInvoker).Module,
-                skipVisibility: true);
-
-            var il = dyn.GetILGenerator();
-
-            // Cast the Delegate to the concrete type so we can call its typed Invoke.
-            il.Emit(OpCodes.Ldarg_0);
-            il.Emit(OpCodes.Castclass, delegateType);
-
-            // Unbox each arg to the declared parameter type.
-            for (int i = 0; i < parameters.Length; i++)
-            {
-                il.Emit(OpCodes.Ldarg_1);
-                il.Emit(OpCodes.Ldc_I4, i);
-                il.Emit(OpCodes.Ldelem_Ref);
-                var pt = parameters[i].ParameterType;
-                if (pt.IsValueType)
-                    il.Emit(OpCodes.Unbox_Any, pt);
-                else
-                    il.Emit(OpCodes.Castclass, pt);
-            }
-
-            il.Emit(OpCodes.Callvirt, invokeMethod);
-
-            // Box the return value (or push null for Action).
-            if (invokeMethod.ReturnType == typeof(void))
-            {
-                il.Emit(OpCodes.Ldnull);
-            }
-            else if (invokeMethod.ReturnType.IsValueType)
-            {
-                il.Emit(OpCodes.Box, invokeMethod.ReturnType);
-            }
-
-            il.Emit(OpCodes.Ret);
-
-            return (Invoker)dyn.CreateDelegate(typeof(Invoker));
+            if (_cache.TryGetValue(delegateType, out var invoker))
+                return invoker;
+            throw new InvalidOperationException(
+                $"No call_indirect dispatch shim registered for {delegateType.FullName}. "
+                + "Every signature reachable from a transpiled module is registered by "
+                + "ModuleClassGenerator.EmitTypedDelegateShimsAndRegister at module-construction "
+                + "time. A miss here means either the wasm has a function signature with >16 "
+                + "parameters (unsupported — BuildDelegateType returns null), or this "
+                + "GetOrBuild is being called from outside the transpiler path.");
         }
     }
 }

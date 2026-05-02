@@ -224,19 +224,24 @@ namespace Wacs.Transpiler.AOT
     public delegate object?[] MultiReturnInvoker(ThinContext ctx, object?[] args);
 
     /// <summary>
-    /// Parallel registry for multi-return functions whose static methods use
-    /// byref out-params — those don't fit Action/Func delegates, so their
-    /// FuncTable slot stays null. call_indirect / call_ref to a multi-return
-    /// target falls through to the cached <see cref="MultiReturnInvoker"/>
-    /// here, which is a DynamicMethod-compiled adapter that unpacks the
-    /// boxed args, calls the target's static method directly, and repacks
-    /// the return + out-params into a result array. Keyed by
-    /// (initDataId, funcIdx-in-module-index-space).
+    /// Lookup table for multi-return wasm functions. Their static
+    /// methods use byref out-params and don't fit Action/Func delegates,
+    /// so the FuncTable slot stays null and call_indirect / call_ref
+    /// dispatch goes through a registered <see cref="MultiReturnInvoker"/>
+    /// here. Keyed by (initDataId, funcIdx-in-module-index-space).
     ///
-    /// Building the adapter once per MethodInfo avoids the per-call reflection
-    /// overhead of <see cref="MethodBase.Invoke(object, object[])"/> — the
-    /// difference is a factor of ~100x on tight call_indirect loops (46
-    /// minutes → seconds on call_indirect.wast).
+    /// <para>Every invoker is a static IL shim emitted at transpile time
+    /// by <c>ModuleClassGenerator.EmitMultiReturnShimAndRegister</c>:
+    /// it declares out-locals, pushes ctx + unboxed args + ldloca for
+    /// each out, calls the target method directly, and repacks the
+    /// return + out-params into a boxed object[]. Older revisions also
+    /// built shims at runtime via Reflection.Emit (with a
+    /// MethodInfo.Invoke-based fallback under PublishAot); both paths
+    /// were proven dead by the instrumented test pass that landed in
+    /// the same commit set, and were removed. <see cref="Get"/> now
+    /// returns null if no shim was registered, and the caller (see
+    /// <c>CallEmitter.InvokeIndirectMulti</c>) traps loudly so any
+    /// future coverage gap surfaces.</para>
     /// </summary>
     public static class MultiReturnMethodRegistry
     {
@@ -245,70 +250,17 @@ namespace Wacs.Transpiler.AOT
         private static readonly object _lock = new();
 
         /// <summary>
-        /// Register a multi-return MethodInfo. Builds the
-        /// <see cref="MultiReturnInvoker"/> adapter once and caches it.
-        /// Under NativeAOT, where Reflection.Emit is unavailable, falls
-        /// back to a <see cref="System.Reflection.MethodInfo.Invoke(object?,object?[])"/>
-        /// based invoker — slower but functionally correct, and the only
-        /// option short of pre-generating per-signature shims at
-        /// transpile time.
-        /// </summary>
-        public static void Register(int initDataId, int funcIdx, System.Reflection.MethodInfo mi)
-        {
-            var invoker = System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported
-                ? BuildInvoker(mi)
-                : BuildInvokerReflective(mi);
-            lock (_lock) { _invokers[(initDataId, funcIdx)] = invoker; }
-        }
-
-        /// <summary>
         /// Register a precompiled <see cref="MultiReturnInvoker"/> shim
         /// for a multi-return wasm function. Called from the transpiled
         /// module's ctor IL with a static method emitted at transpile
-        /// time by <c>ModuleClassGenerator.EmitMultiReturnShimAndRegister</c>,
-        /// so the AOT-published binary's multi-return call_indirect path
-        /// is codegen-free (no PlatformNotSupportedException under
-        /// PublishAot, no reflection per call). Idempotent —
-        /// re-registration overwrites a prior entry with an equivalent
-        /// shim.
+        /// time by <c>ModuleClassGenerator.EmitMultiReturnShimAndRegister</c>.
+        /// Idempotent — re-registration overwrites a prior entry with
+        /// an equivalent shim.
         /// </summary>
         public static void RegisterShim(int initDataId, int funcIdx, MultiReturnInvoker shim)
         {
             if (shim == null) throw new ArgumentNullException(nameof(shim));
             lock (_lock) { _invokers[(initDataId, funcIdx)] = shim; }
-        }
-
-        // NativeAOT-safe fallback. Mirrors BuildInvoker's contract: take
-        // (ctx, args[]) where args[] is the wasm-typed input row, return
-        // an object[] of [r0, out1, ..., outK-1] all boxed.
-        // MethodInfo.Invoke handles the by-ref out-params for us — passing
-        // a single object?[] long enough to cover (ctx, args..., outs...)
-        // and reading the post-call slots gives the same boxed values.
-        private static MultiReturnInvoker BuildInvokerReflective(System.Reflection.MethodInfo mi)
-        {
-            var parameters = mi.GetParameters();
-            int argCount = 0;
-            int outCount = 0;
-            for (int i = 1; i < parameters.Length; i++)
-            {
-                if (parameters[i].ParameterType.IsByRef) outCount++;
-                else argCount++;
-            }
-            return (ctx, args) =>
-            {
-                var invokeArgs = new object?[parameters.Length];
-                invokeArgs[0] = ctx;
-                for (int i = 0; i < argCount; i++)
-                    invokeArgs[i + 1] = args[i];
-                // Out params start null — MethodInfo.Invoke will populate
-                // them via the by-ref ABI when the call returns.
-                var r0 = mi.Invoke(null, invokeArgs);
-                var result = new object?[1 + outCount];
-                result[0] = r0;
-                for (int i = 0; i < outCount; i++)
-                    result[i + 1] = invokeArgs[1 + argCount + i];
-                return result;
-            };
         }
 
         public static MultiReturnInvoker? Get(int initDataId, int funcIdx)
@@ -322,107 +274,6 @@ namespace Wacs.Transpiler.AOT
         public static void Reset()
         {
             lock (_lock) { _invokers.Clear(); }
-        }
-
-        /// <summary>
-        /// Emit a DynamicMethod that calls the target MethodInfo directly,
-        /// avoiding reflection's per-call overhead. The target's signature is
-        /// <c>(ThinContext ctx, p0..pN-1, out r1, …, out r_{K-1}) -&gt; r0</c>.
-        /// The adapter:
-        ///   1. Declares locals for each out-param.
-        ///   2. Pushes ctx, each unboxed arg (args[i] → target's CLR type),
-        ///      and ldloca for each out-param.
-        ///   3. Calls the target.
-        ///   4. Boxes r0 into an object and stores at result[0].
-        ///   5. Boxes each out-param local and stores at result[i+1].
-        ///   6. Returns the result array.
-        /// </summary>
-        private static MultiReturnInvoker BuildInvoker(System.Reflection.MethodInfo mi)
-        {
-            var parameters = mi.GetParameters();
-            // parameters[0] is ThinContext; [1..] include wasm params then out-params.
-            var outStart = 0;
-            var argCount = 0;
-            var clrParamTypes = new List<Type>();
-            var outParamTypes = new List<Type>();
-            for (int i = 1; i < parameters.Length; i++)
-            {
-                if (parameters[i].ParameterType.IsByRef)
-                {
-                    if (outStart == 0) outStart = i;
-                    outParamTypes.Add(parameters[i].ParameterType.GetElementType()!);
-                }
-                else
-                {
-                    clrParamTypes.Add(parameters[i].ParameterType);
-                    argCount++;
-                }
-            }
-
-            var dyn = new System.Reflection.Emit.DynamicMethod(
-                $"MultiReturnInvoker_{mi.DeclaringType?.Name}_{mi.Name}",
-                typeof(object?[]),
-                new[] { typeof(ThinContext), typeof(object?[]) },
-                typeof(MultiReturnMethodRegistry).Module,
-                skipVisibility: true);
-
-            var il = dyn.GetILGenerator();
-
-            // Declare out-param locals.
-            var outLocals = new System.Reflection.Emit.LocalBuilder[outParamTypes.Count];
-            for (int i = 0; i < outParamTypes.Count; i++)
-                outLocals[i] = il.DeclareLocal(outParamTypes[i]);
-
-            // Push ctx.
-            il.Emit(System.Reflection.Emit.OpCodes.Ldarg_0);
-
-            // Push args[i] unboxed to the target param type.
-            for (int i = 0; i < argCount; i++)
-            {
-                il.Emit(System.Reflection.Emit.OpCodes.Ldarg_1);            // args
-                il.Emit(System.Reflection.Emit.OpCodes.Ldc_I4, i);
-                il.Emit(System.Reflection.Emit.OpCodes.Ldelem_Ref);         // args[i]
-                il.Emit(System.Reflection.Emit.OpCodes.Unbox_Any, clrParamTypes[i]);
-            }
-
-            // Push ldloca for each out-param.
-            for (int i = 0; i < outLocals.Length; i++)
-                il.Emit(System.Reflection.Emit.OpCodes.Ldloca, outLocals[i]);
-
-            il.EmitCall(System.Reflection.Emit.OpCodes.Call, mi, null);
-
-            // Build result array: [r0, out1, ..., outK-1].
-            int resultCount = 1 + outLocals.Length;
-            var resultLocal = il.DeclareLocal(typeof(object?[]));
-            il.Emit(System.Reflection.Emit.OpCodes.Ldc_I4, resultCount);
-            il.Emit(System.Reflection.Emit.OpCodes.Newarr, typeof(object));
-            il.Emit(System.Reflection.Emit.OpCodes.Stloc, resultLocal);
-
-            // result[0] = box(r0)  (r0 is on stack from the call).
-            var r0Local = il.DeclareLocal(mi.ReturnType);
-            il.Emit(System.Reflection.Emit.OpCodes.Stloc, r0Local);
-            il.Emit(System.Reflection.Emit.OpCodes.Ldloc, resultLocal);
-            il.Emit(System.Reflection.Emit.OpCodes.Ldc_I4_0);
-            il.Emit(System.Reflection.Emit.OpCodes.Ldloc, r0Local);
-            if (mi.ReturnType.IsValueType)
-                il.Emit(System.Reflection.Emit.OpCodes.Box, mi.ReturnType);
-            il.Emit(System.Reflection.Emit.OpCodes.Stelem_Ref);
-
-            // result[i+1] = box(outLocal[i]) for each out-param.
-            for (int i = 0; i < outLocals.Length; i++)
-            {
-                il.Emit(System.Reflection.Emit.OpCodes.Ldloc, resultLocal);
-                il.Emit(System.Reflection.Emit.OpCodes.Ldc_I4, i + 1);
-                il.Emit(System.Reflection.Emit.OpCodes.Ldloc, outLocals[i]);
-                if (outParamTypes[i].IsValueType)
-                    il.Emit(System.Reflection.Emit.OpCodes.Box, outParamTypes[i]);
-                il.Emit(System.Reflection.Emit.OpCodes.Stelem_Ref);
-            }
-
-            il.Emit(System.Reflection.Emit.OpCodes.Ldloc, resultLocal);
-            il.Emit(System.Reflection.Emit.OpCodes.Ret);
-
-            return (MultiReturnInvoker)dyn.CreateDelegate(typeof(MultiReturnInvoker));
         }
     }
 
