@@ -165,6 +165,8 @@ namespace Wacs.Core.Text
         RefFunc,
         /// <summary>(ref.array) / (ref.struct) / (ref.any) / (ref.i31) / (ref.eq) — generic reftype patterns.</summary>
         RefGeneric,
+        /// <summary>(either v1 v2 …) — assertion form for results that may legitimately be any of several values.</summary>
+        Either,
     }
 
     public enum ScriptFloatPattern
@@ -203,6 +205,28 @@ namespace Wacs.Core.Text
         public ulong F64Bits;
 
         public byte[]? V128;
+
+        /// <summary>
+        /// Lane shape for a parsed (v128.const …) literal — one of
+        /// "i8", "i16", "i32", "i64", "f32", "f64". Used by the
+        /// runner adapter to emit the correct lane_type.
+        /// </summary>
+        public string? V128LaneType;
+
+        /// <summary>
+        /// String-encoded lane values for a parsed (v128.const …)
+        /// literal, in the same form the JSON pipeline emits
+        /// (decimal integers; floats as raw bit-pattern decimals;
+        /// "nan:canonical"/"nan:arithmetic" for NaN patterns).
+        /// </summary>
+        public List<string>? V128Lanes;
+
+        /// <summary>
+        /// Alternatives for an <see cref="ScriptValueKind.Either"/>
+        /// expected-value form. Each alternative is itself a fully
+        /// typed ScriptValue.
+        /// </summary>
+        public List<ScriptValue>? EitherAlternatives;
 
         /// <summary>Heap-type token for <see cref="ScriptValueKind.RefNull"/> and <see cref="ScriptValueKind.RefGeneric"/>.</summary>
         public string? RefHeapType;

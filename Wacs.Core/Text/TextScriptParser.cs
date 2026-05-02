@@ -523,17 +523,135 @@ namespace Wacs.Core.Text
                     v.RefHeapType = kw.Substring(4);
                     return v;
                 case "v128.const":
-                    // (v128.const i32x4 a b c d) and friends. For phase 1.5
-                    // we capture the raw sub-tokens as a string and leave
-                    // bit-level decoding to the runner. Storing as encoded
-                    // bytes is a later follow-up.
-                    v.Kind = ScriptValueKind.V128;
-                    v.V128 = Array.Empty<byte>();   // placeholder
+                    return ParseV128Const(node, expectPattern, v);
+                case "either":
+                    // (either expectedA expectedB ...) — assertion form for
+                    // results that may legitimately be one of several values
+                    // (e.g. SIMD float ops where the spec permits multiple
+                    // valid bit-level outcomes). Modelled as a typed value
+                    // whose alternatives are the inner ParseValue results.
+                    v.Kind = ScriptValueKind.Either;
+                    v.EitherAlternatives = new List<ScriptValue>();
+                    for (int k = 1; k < node.Children.Count; k++)
+                        v.EitherAlternatives.Add(ParseValue(node.Children[k], expectPattern));
                     return v;
                 default:
                     throw new FormatException(
                         $"line {node.Token.Line}: unknown value form '{kw}' in script context");
             }
+        }
+
+        /// <summary>
+        /// (v128.const shape lane0 lane1 …) — typed-lane v128 literal.
+        /// Returns the raw 16-byte encoding (little-endian) plus the
+        /// shape and lane strings, mirroring the JSON pipeline's
+        /// {"type":"v128","lane_type":"…","value":[…]} shape so the
+        /// runner sees identical Argument data regardless of pipeline.
+        /// </summary>
+        private static ScriptValue ParseV128Const(SExpr node, bool expectPattern, ScriptValue v)
+        {
+            v.Kind = ScriptValueKind.V128;
+            if (node.Children.Count < 2 || node.Children[1].Kind != SExprKind.Atom)
+                throw new FormatException(
+                    $"line {node.Token.Line}: v128.const expects a shape keyword");
+            var shape = node.Children[1].AtomText();
+
+            int laneCount;
+            string laneType;
+            switch (shape)
+            {
+                case "i8x16": laneCount = 16; laneType = "i8"; break;
+                case "i16x8": laneCount = 8;  laneType = "i16"; break;
+                case "i32x4": laneCount = 4;  laneType = "i32"; break;
+                case "i64x2": laneCount = 2;  laneType = "i64"; break;
+                case "f32x4": laneCount = 4;  laneType = "f32"; break;
+                case "f64x2": laneCount = 2;  laneType = "f64"; break;
+                default:
+                    throw new FormatException(
+                        $"line {node.Token.Line}: v128.const unknown shape '{shape}'");
+            }
+            v.V128LaneType = laneType;
+            v.V128Lanes = new List<string>(laneCount);
+
+            using var ms = new MemoryStream(16);
+            using var bw = new BinaryWriter(ms);
+            for (int k = 0; k < laneCount; k++)
+            {
+                if (2 + k >= node.Children.Count)
+                    throw new FormatException(
+                        $"line {node.Token.Line}: v128.const {shape} expects {laneCount} lanes, got {k}");
+                var atom = node.Children[2 + k];
+                switch (laneType)
+                {
+                    case "i8":
+                    {
+                        var s = ParseI64Literal(atom);
+                        if (s < -128 || s > 255)
+                            throw new FormatException(
+                                $"line {atom.Token.Line}: i8 lane {s} out of range");
+                        bw.Write(unchecked((byte)s));
+                        // JSON pipeline emits each i8 lane as the unsigned
+                        // byte value as a decimal string (Argument.BitBashInt
+                        // happily parses signed/unsigned).
+                        v.V128Lanes.Add(unchecked((byte)s).ToString());
+                        break;
+                    }
+                    case "i16":
+                    {
+                        var s = ParseI64Literal(atom);
+                        if (s < short.MinValue || s > ushort.MaxValue)
+                            throw new FormatException(
+                                $"line {atom.Token.Line}: i16 lane {s} out of range");
+                        bw.Write(unchecked((ushort)s));
+                        v.V128Lanes.Add(unchecked((ushort)s).ToString());
+                        break;
+                    }
+                    case "i32":
+                    {
+                        var s = ParseI64Literal(atom);
+                        if (s < int.MinValue || s > uint.MaxValue)
+                            throw new FormatException(
+                                $"line {atom.Token.Line}: i32 lane {s} out of range");
+                        bw.Write(unchecked((int)s));
+                        v.V128Lanes.Add(unchecked((uint)s).ToString());
+                        break;
+                    }
+                    case "i64":
+                    {
+                        var s = ParseI64Literal(atom);
+                        bw.Write(s);
+                        v.V128Lanes.Add(unchecked((ulong)s).ToString());
+                        break;
+                    }
+                    case "f32":
+                    {
+                        ParseFloatLiteral(atom, expectPattern, out var pat, out var f32Bits, out _);
+                        bw.Write(f32Bits);
+                        v.V128Lanes.Add(pat switch
+                        {
+                            ScriptFloatPattern.NanCanonical => "nan:canonical",
+                            ScriptFloatPattern.NanArithmetic => "nan:arithmetic",
+                            _ => f32Bits.ToString(),
+                        });
+                        break;
+                    }
+                    case "f64":
+                    {
+                        ParseFloatLiteral(atom, expectPattern, out var pat, out _, out var f64Bits);
+                        bw.Write(f64Bits);
+                        v.V128Lanes.Add(pat switch
+                        {
+                            ScriptFloatPattern.NanCanonical => "nan:canonical",
+                            ScriptFloatPattern.NanArithmetic => "nan:arithmetic",
+                            _ => f64Bits.ToString(),
+                        });
+                        break;
+                    }
+                }
+            }
+            bw.Flush();
+            v.V128 = ms.ToArray();
+            return v;
         }
 
         private static int ParseI32Literal(SExpr atom) =>
