@@ -211,23 +211,27 @@ namespace Wacs.WASI.Preview1
             if ((f & (FstFlags.MTim | FstFlags.MTimNow)) == (FstFlags.MTim | FstFlags.MTimNow))
                 return (int)ErrNo.Inval;
 
-            DateTime newAtime = DateTime.UtcNow, newMtime = DateTime.UtcNow;
-            if ((f & FstFlags.ATim) != 0)         newAtime = Clock.ToDateTimeUtc(atim);
-            else if ((f & FstFlags.ATimNow) != 0) newAtime = DateTime.UtcNow;
-            if ((f & FstFlags.MTim) != 0)         newMtime = Clock.ToDateTimeUtc(mtim);
-            else if ((f & FstFlags.MTimNow) != 0) newMtime = DateTime.UtcNow;
+            // Only touch a timestamp when the corresponding flag is set —
+            // rust/fd_filestat_set verifies atim is preserved when only
+            // FSTFLAGS_MTIM is passed.
+            bool setA = (f & (FstFlags.ATim | FstFlags.ATimNow)) != 0;
+            bool setM = (f & (FstFlags.MTim | FstFlags.MTimNow)) != 0;
+            DateTime newAtime = (f & FstFlags.ATim) != 0
+                ? Clock.ToDateTimeUtc(atim) : DateTime.UtcNow;
+            DateTime newMtime = (f & FstFlags.MTim) != 0
+                ? Clock.ToDateTimeUtc(mtim) : DateTime.UtcNow;
 
             try
             {
                 if (isDir)
                 {
-                    Directory.SetLastWriteTimeUtc(hostPath, newMtime);
-                    Directory.SetLastAccessTimeUtc(hostPath, newAtime);
+                    if (setM) Directory.SetLastWriteTimeUtc(hostPath, newMtime);
+                    if (setA) Directory.SetLastAccessTimeUtc(hostPath, newAtime);
                 }
                 else
                 {
-                    File.SetLastWriteTimeUtc(hostPath, newMtime);
-                    File.SetLastAccessTimeUtc(hostPath, newAtime);
+                    if (setM) File.SetLastWriteTimeUtc(hostPath, newMtime);
+                    if (setA) File.SetLastAccessTimeUtc(hostPath, newAtime);
                 }
             }
             catch (IOException)                { return (int)ErrNo.IO; }

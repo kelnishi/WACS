@@ -621,7 +621,11 @@ namespace Wacs.WASI.Preview1
                     return File.Exists(hostPath) ? (int)ErrNo.NotDir : (int)ErrNo.NoEnt;
                 if (!isSymlink && Directory.Exists(hostPath)) return (int)ErrNo.IsDir;
                 File.Delete(hostPath);
-                WasiFsHelpers.UnbindFile(state, guestPath);
+                // POSIX: existing open fds against an unlinked file
+                // remain valid (the inode persists until last close).
+                // Don't UnbindFile here — let fd_close finalize the
+                // descriptor (rust/path_link line 102 closes a link_fd
+                // after path_unlink_file).
             }
             catch (FileNotFoundException) { return (int)ErrNo.NoEnt; }
             catch (UnauthorizedAccessException) { return (int)ErrNo.Acces; }
