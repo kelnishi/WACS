@@ -56,6 +56,20 @@ namespace Wacs.Core
         public static bool AnnotateWhileParsing = true;
         public static bool SkipFinalization = false;
         public static bool ParseCustomNames = false;
+
+        /// <summary>
+        /// Opt-in for the `metadata.code.branch_hint` custom section
+        /// (and WAT-level `(@metadata.code.branch_hint …)` annotations).
+        /// Off by default — interpreter / switch-runtime consumers
+        /// don't read the hints, so parsing them is dead work. The
+        /// transpiler is the only consumer today; CLI commands that
+        /// transpile (`wacs build`, `wacs aot`) set this true before
+        /// parsing. Programmatic embedders should do the same when
+        /// they intend to feed the parsed Module into
+        /// <c>ModuleTranspiler</c>.
+        /// </summary>
+        public static bool ParseBranchHints = false;
+
         public static uint MaximumFunctionLocals = 2048;
 
         public static int InstructionsParsed = 0;
@@ -279,12 +293,11 @@ namespace Wacs.Core
                             module.Names = ParseNameSection(subreader);
                         }
                         break;
-                    case "metadata.code.branch_hint":
-                        // Capture every hint in the section even if no
-                        // downstream consumer reads it today; the data
-                        // is cheap to retain and gives future passes
-                        // (e.g. block ordering, inlining) something to
-                        // key on. Validation against the actual
+                    case "metadata.code.branch_hint" when ParseBranchHints:
+                        // Capture every hint in the section. Gated
+                        // behind the opt-in flag because interpreter
+                        // consumers don't use it and parsing is dead
+                        // work for them. Validation against the actual
                         // instruction stream happens later, after the
                         // code section is fully resolved.
                         using (var subreader = reader.GetSubsectionTo((int)payloadEnd))
@@ -420,6 +433,13 @@ namespace Wacs.Core
                             $"branch_hint: funcidx {funcIdx} out of range " +
                             $"(module has {funcCount} functions)");
                 }
+                // Bridge the offset-keyed parse data to the
+                // ref-keyed transpile data. After this, both binary
+                // and WAT inputs have a uniform `TryGet(inst)` lookup.
+                module.BranchHints.JoinByInstruction(
+                    module.Funcs.Select(f =>
+                        (f.Index.Value, (System.Collections.Generic.IEnumerable<InstructionBase>)
+                            f.Body.Instructions)));
             }
         }
     }

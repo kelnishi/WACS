@@ -123,6 +123,10 @@ namespace Wacs.Console.Verbs
             Wacs.Core.Module module;
             try
             {
+                // Opt the parser into Branch Hinting metadata. The
+                // transpiler is the only consumer today; `wacs build`
+                // always transpiles, so always parse the hints.
+                Wacs.Core.BinaryModuleParser.ParseBranchHints = true;
                 using var fs = new FileStream(input, FileMode.Open, FileAccess.Read);
                 module = BinaryModuleParser.ParseWasm(fs);
 
@@ -192,6 +196,10 @@ namespace Wacs.Console.Verbs
 
             var runtime = new WasmRuntime();
             var disposables = new List<IDisposable>();
+
+            // Opt the parser into Branch Hinting metadata for the
+            // whole batch — every parsed input goes to the transpiler.
+            Wacs.Core.BinaryModuleParser.ParseBranchHints = true;
 
             // --wasi / --bind apply to the SHARED runtime.
             try

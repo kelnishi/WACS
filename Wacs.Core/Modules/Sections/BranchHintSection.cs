@@ -15,6 +15,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Wacs.Core.Instructions;
+using Wacs.Core.Types;
 using Wacs.Core.Utilities;
 
 namespace Wacs.Core
@@ -79,10 +81,37 @@ namespace Wacs.Core
             /// hint. The outer key is funcidx; the inner key is the
             /// instruction's offset within its function body
             /// (i.e. relative to the byte after the locals decl,
-            /// matching the spec's "code body" coordinate).
+            /// matching the spec's "code body" coordinate). Populated
+            /// by the binary parser. The WAT parser populates
+            /// <see cref="ByInstruction"/> directly since WAT
+            /// instructions don't have meaningful byte offsets.
             /// </summary>
             public Dictionary<uint, Dictionary<uint, BranchHint>> ByFuncIndex { get; }
                 = new Dictionary<uint, Dictionary<uint, BranchHint>>();
+
+            /// <summary>
+            /// Direct hint-by-instruction-reference map. The
+            /// authoritative lookup at use site (transpiler /
+            /// interpreter), since it's populated for both binary
+            /// (post-parse join via <see cref="JoinByInstruction"/>)
+            /// and WAT (during parse) inputs. Reference equality on
+            /// <see cref="InstructionBase"/> — safe because
+            /// instructions are never duplicated within a module.
+            /// </summary>
+            public Dictionary<InstructionBase, BranchHint> ByInstruction { get; }
+                = new Dictionary<InstructionBase, BranchHint>(InstRefEquality.Instance);
+
+            // .NET 5+ ships System.Collections.Generic.ReferenceEqualityComparer,
+            // but netstandard2.1 (one of our build targets) doesn't.
+            // Hand-roll the trivial comparer; safe to share across maps.
+            private sealed class InstRefEquality : IEqualityComparer<InstructionBase>
+            {
+                public static readonly InstRefEquality Instance = new InstRefEquality();
+                public bool Equals(InstructionBase? x, InstructionBase? y) =>
+                    ReferenceEquals(x, y);
+                public int GetHashCode(InstructionBase obj) =>
+                    System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj);
+            }
 
             /// <summary>Returns the hint for an instruction, or null.</summary>
             public BranchHint? TryGet(uint funcIdx, uint instrByteOffset)
@@ -93,6 +122,51 @@ namespace Wacs.Core
                     return hint;
                 }
                 return null;
+            }
+
+            /// <summary>
+            /// Returns the hint attached to a given instruction, or
+            /// null. The transpiler's preferred lookup — uniform for
+            /// binary and WAT inputs.
+            /// </summary>
+            public BranchHint? TryGet(InstructionBase inst) =>
+                ByInstruction.TryGetValue(inst, out var h) ? h : (BranchHint?)null;
+
+            /// <summary>
+            /// Walk every instruction body in <paramref name="funcs"/>
+            /// and, for each instruction whose
+            /// <see cref="InstructionBase.ByteOffsetInFunc"/> matches a
+            /// hint in <see cref="ByFuncIndex"/>, populate the
+            /// instruction-keyed lookup. Idempotent — safe to call
+            /// twice. Used by the binary parser's finalize step to
+            /// bridge offset-keyed parse data to ref-keyed transpile
+            /// data.
+            /// </summary>
+            public void JoinByInstruction(
+                IEnumerable<(uint funcIdx, IEnumerable<InstructionBase> body)> funcs)
+            {
+                foreach (var (funcIdx, body) in funcs)
+                {
+                    if (!ByFuncIndex.TryGetValue(funcIdx, out var fnMap))
+                        continue;
+                    JoinFunctionInstructions(fnMap, body);
+                }
+            }
+
+            private void JoinFunctionInstructions(
+                Dictionary<uint, BranchHint> fnMap,
+                IEnumerable<InstructionBase> body)
+            {
+                foreach (var inst in body)
+                {
+                    if (fnMap.TryGetValue(inst.ByteOffsetInFunc, out var h))
+                        ByInstruction[inst] = h;
+                    if (inst is IBlockInstruction block)
+                    {
+                        for (int i = 0; i < block.Count; i++)
+                            JoinFunctionInstructions(fnMap, block.GetBlock(i).Instructions);
+                    }
+                }
             }
         }
     }

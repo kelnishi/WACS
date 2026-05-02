@@ -196,6 +196,10 @@ namespace Wacs.Compilation.Test
 
         private static Module ParseModule(byte[] bytes)
         {
+            // Branch-hint parsing is opt-in — interpreter consumers
+            // skip the section. Tests in this file always exercise
+            // the hint path, so flip the static flag once here.
+            BinaryModuleParser.ParseBranchHints = true;
             using var ms = new MemoryStream(bytes);
             return BinaryModuleParser.ParseWasm(ms);
         }
