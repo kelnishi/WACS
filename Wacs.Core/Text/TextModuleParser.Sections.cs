@@ -425,17 +425,39 @@ namespace Wacs.Core.Text
                 (elementType, limits) = ParseTableTypeInlineWithAddr(ctx, form, ref i, tblAddr);
             }
 
-            // Some spec tests use `(table N reftype initexpr)` where the
-            // trailing expression is a default initializer for all slots
-            // (e.g. `(ref.null func)` or `(ref.func $f)`). Phase 1.8
-            // tolerates but doesn't model this — consume + ignore so the
-            // parse gets past the form.
+            // `(table N reftype initexpr)` — trailing folded
+            // expression is a default initializer for every slot
+            // (used by tables of non-nullable ref types and by some
+            // assert_invalid tests targeting init-type mismatch).
+            // Capture the first such form as the TableType's Init
+            // so the validator can check it; remaining forms are
+            // silently consumed (they'd be malformed but the test
+            // setup only ever has one).
+            Expression? tableInit = null;
+            if (i < form.Children.Count && form.Children[i].Kind == SExprKind.List)
+            {
+                tableInit = ParseSingleInstrExpression(ctx, form.Children[i]);
+                i++;
+            }
             while (i < form.Children.Count && form.Children[i].Kind == SExprKind.List)
                 i++;
             ExpectConsumed(form, i, "table");
 
+            // Spec / wabt parity: a non-nullable-ref table without an
+            // explicit init expression is malformed — there's no valid
+            // default value for a slot of a non-nullable reference
+            // type, so the binary form can't be encoded. Match wabt's
+            // wast2json reject behavior at parse time so
+            // `assert_invalid (module (table 0 (ref func)))` surfaces
+            // a FormatException the assert handler catches, instead
+            // of letting the InstRefNull-in-default-init throw an
+            // InvalidCastException downstream.
+            if (tableInit == null && elementType.IsRefType() && !elementType.IsNullable())
+                throw new FormatException(
+                    $"line {form.Token.Line}: type mismatch — non-nullable table type {elementType} requires explicit init expression");
+
             int idx = ctx.Tables.Declare(name);
-            ctx.Module.Tables.Add(new TableType(elementType, limits));
+            ctx.Module.Tables.Add(new TableType(elementType, limits, tableInit));
             FlushExports(ctx, pendingExports, ExternalKind.Table, idx);
 
             // If this was the (table reftype (elem …)) abbreviation,
@@ -444,14 +466,26 @@ namespace Wacs.Core.Text
             if (inlineElemForm != null)
             {
                 var inits = new List<Expression>();
+                bool allFuncIdxAtoms = elementType == ValType.FuncRef;
                 for (int k = 1; k < inlineElemForm.Children.Count; k++)
                 {
                     var child = inlineElemForm.Children[k];
+                    if (child.Kind != SExprKind.Atom) allFuncIdxAtoms = false;
                     inits.Add(ParseElemInit(ctx, child, elementType));
                 }
-                var offset = BuildConstOffset(0);
+                var offset = BuildConstOffset(0, limits.AddressType);
                 var mode = new Module.ElementMode.ActiveMode((TableIdx)idx, offset);
-                var segment = Module.ElementSegment.Create(elementType, inits.ToArray(), mode);
+                // wabt parity: when the inline shape is `(table funcref
+                // (elem $f $g …))` with all funcidx-atom inits, wast2json
+                // encodes the synthesized segment as kind 0 (active,
+                // table 0, elemkind 0x00, funcidxs) — which our binary
+                // parser decodes as ValType.Func (non-nullable). Use
+                // Func instead of elementType (FuncRef) here so the
+                // segment Type matches what the binary pipeline produces.
+                // For other shapes (mixed inits, non-funcref tables),
+                // fall back to elementType.
+                var segmentType = allFuncIdxAtoms ? ValType.Func : elementType;
+                var segment = Module.ElementSegment.Create(segmentType, inits.ToArray(), mode);
                 var existingE = ctx.Module.Elements;
                 var nextE = new Module.ElementSegment[existingE.Length + 1];
                 Array.Copy(existingE, nextE, existingE.Length);
@@ -563,8 +597,9 @@ namespace Wacs.Core.Text
                 int idx = ctx.Mems.Declare(name);
                 ctx.Module.Memories.Add(new MemoryType(limits));
                 FlushExports(ctx, pendingExports, ExternalKind.Memory, idx);
-                // Synthesize the active data segment at offset 0.
-                var offsetExpr = BuildConstOffset(0);
+                // Synthesize the active data segment at offset 0,
+                // typed to match the memory's address space (i32 vs i64).
+                var offsetExpr = BuildConstOffset(0, addrT);
                 var seg = Module.Data.Create(
                     new Module.DataMode.ActiveMode((MemIdx)idx, offsetExpr),
                     bytes);
@@ -820,6 +855,13 @@ namespace Wacs.Core.Text
         {
             if (form.Children.Count != 2)
                 throw new FormatException($"line {form.Token.Line}: (start …) expects one function reference");
+            // The spec allows at most one start section per module.
+            // Match what the binary parser would reject ("multiple
+            // start sections") at the WAT layer so assert_malformed
+            // tests with two `(start …)` forms surface the error.
+            if (ctx.Module.StartIndex != FuncIdx.Default)
+                throw new FormatException(
+                    $"line {form.Token.Line}: multiple start sections");
             int idx = ResolveIndex(ctx.Funcs, form.Children[1], "func");
             ctx.Module.StartIndex = (FuncIdx)idx;
         }
@@ -860,7 +902,12 @@ namespace Wacs.Core.Text
 
             // Mode detection: look at the first child.
             Module.ElementMode mode;
-            ValType reftype = ValType.FuncRef;
+            // Default reftype matches the binary parser's elemkind 0x00
+            // (ValType.Func, non-nullable). Necessary for active
+            // elements like `(elem (i32.const N) $f)` to match
+            // non-nullable `(ref func)` tables — see ParseElementKind
+            // in ElementSection.cs for the matching binary side.
+            ValType reftype = ValType.Func;
             int restStart = i;
 
             if (i < form.Children.Count
@@ -927,29 +974,40 @@ namespace Wacs.Core.Text
                 && form.Children[i].AtomText() == "func")
             {
                 // Legacy: (elem (i32.const N) func $f0 $f1 …) — handled earlier path
+                // Use Func (non-nullable) to match what the binary
+                // parser's ParseElementKind produces for elemkind 0x00.
+                // Both representations are spec-equivalent for the
+                // funcidx-list shape; aligning them keeps the WAT and
+                // binary pipelines in lockstep so the validator's
+                // table-vs-element type check sees the same type
+                // either way.
                 i++;
-                reftype = ValType.FuncRef;
+                reftype = ValType.Func;
                 mode = new Module.ElementMode.PassiveMode();
             }
             else
             {
                 // Empty passive or legacy shortcut
-                reftype = ValType.FuncRef;
+                reftype = ValType.Func;
                 mode = new Module.ElementMode.PassiveMode();
             }
 
             // Optional `func` keyword between mode and inits (legacy /
             // sugar for funcidx lists):
             //   (elem (offset …) func $f1 $f2 …)
-            // Skip it — the reftype is funcref and the following atoms are
-            // funcidx references.
+            // Skip it; reftype was already set to ValType.Func above
+            // and matches the binary parser's elemkind 0x00 decoding.
+            // Setting FuncRef (nullable) here was the source of the
+            // "Active ElementMode (funcref) is not valid for table
+            // type (ref func)" failures on elem.wast modules using
+            // legacy `func` shorthand against non-nullable tables.
             if (i < form.Children.Count
                 && form.Children[i].Kind == SExprKind.Atom
                 && form.Children[i].Token.Kind == TokenKind.Keyword
                 && form.Children[i].AtomText() == "func")
             {
                 i++;
-                reftype = ValType.FuncRef;
+                reftype = ValType.Func;
             }
 
             // Parse remaining children as init expressions.
@@ -980,16 +1038,25 @@ namespace Wacs.Core.Text
         {
             if (node.Kind == SExprKind.Atom)
             {
-                // Treat as funcidx → ref.func $f
+                // Treat as funcidx → ref.func $f. The binary parser
+                // produces a 2-instruction sequence (RefFunc + End)
+                // for each initializer; mirror that shape here so
+                // FinalizeModule's flat-instructions walk and the
+                // validator's End-terminator check both find what
+                // they expect.
                 uint funcIdx = ResolveNamespaceIdx(ctx.Funcs, node, "func");
                 var inst = Wacs.Core.Instructions.SpecFactory.Factory.CreateInstruction((ByteCode)OpCode.RefFunc);
                 var reader = WatBinaryEncoder.BuildReader(w => w.WriteLeb128U32(funcIdx));
                 var configured = inst.Parse(reader);
-                return new Expression(1, configured);
+                var seq = new InstructionSequence(
+                    new List<InstructionBase> { configured!, new InstEnd() });
+                return new Expression(1, seq, isStatic: true);
             }
             if (node.IsForm("item"))
             {
-                // (item expr) — parse the inner expr.
+                // (item expr) — parse the inner expr. The inner
+                // expression may be folded `(item (ref.func $f))` OR
+                // unfolded `(item ref.func $f)`; both must work.
                 if (node.Children.Count < 2) return Expression.Empty;
                 return ParseInitExpressionForm(ctx, node, startIndex: 1);
             }
@@ -1036,14 +1103,14 @@ namespace Wacs.Core.Text
                 && form.Children[i].Head!.Token.Kind == TokenKind.Keyword
                 && !IsStringListStart(form, i))
             {
-                // Bare (i32.const N) / (i64.const N) or similar init expr.
-                var head = form.Children[i].Head!.AtomText();
-                if (head == "i32.const" || head == "i64.const" || head == "global.get"
-                    || head.StartsWith("ref."))
-                {
-                    offset = ParseSingleInstrExpression(ctx, form.Children[i]);
-                    i++;
-                }
+                // Bare offset init expr — any folded instruction
+                // form. Whether the expression is const-eligible is
+                // the validator's job (`assert_invalid` with text
+                // "constant expression required" for things like
+                // `(data (i32.ctz (i32.const 0)))`); the parser must
+                // pass the AST through so that check can fire.
+                offset = ParseSingleInstrExpression(ctx, form.Children[i]);
+                i++;
             }
             mode = offset != null
                 ? new Module.DataMode.ActiveMode((MemIdx)memIdx, offset)
@@ -1106,6 +1173,30 @@ namespace Wacs.Core.Text
         }
 
         /// <summary>
+        /// Build a constant offset expression matching a memory or
+        /// table's address type. The spec's inline-data and inline-elem
+        /// abbreviations expand to an active segment whose offset is
+        /// `(memory64.AddrType.const 0)` — i32.const for an i32-indexed
+        /// container, i64.const for an i64-indexed one. Picking the
+        /// wrong type triggers the validator's
+        /// "Wrong operand type I32 at top of stack. Expected: I64"
+        /// across memory64 / call_indirect / float_memory64 wasts.
+        /// </summary>
+        private static Expression BuildConstOffset(int value, AddrType addrType)
+        {
+            if (addrType == AddrType.I64)
+            {
+                var i64 = new Wacs.Core.Instructions.Numeric.InstI64Const();
+                // InstI64Const has no public Immediate(long) — assign the
+                // internal Value field directly. Visible from this assembly.
+                i64.Value = value;
+                var seq64 = new InstructionSequence(new List<InstructionBase> { i64, new InstEnd() });
+                return new Expression(1, seq64, isStatic: true);
+            }
+            return BuildConstOffset(value);
+        }
+
+        /// <summary>
         /// Heuristic: does this list look like an instruction form (const,
         /// global.get, ref.func, ref.null) rather than a structural form
         /// like (elem), (func), etc.?
@@ -1157,14 +1248,17 @@ namespace Wacs.Core.Text
         /// </summary>
         private static Expression ParseInitExpressionForm(TextParseContext ctx, SExpr form, int startIndex)
         {
+            // Route through ParseInstrList so we accept both the
+            // folded form `(ref.func $f)` and the unfolded form
+            // `ref.func $f` (atoms-and-immediates) inside the wrapping
+            // form. Skipping atoms — as the previous loop did — drops
+            // unfolded `(item ref.func $f)` instructions on the floor,
+            // which is how elem.wast's `(item ref.func $f)` lost the
+            // RefFunc and ended up with a pure End-only initializer.
             var fctx = new TextFunctionContext(ctx);
-            var output = new List<InstructionBase>();
-            for (int k = startIndex; k < form.Children.Count; k++)
-            {
-                var child = form.Children[k];
-                if (child.Kind != SExprKind.List) continue;
-                ParseFoldedInstruction(fctx, child, output);
-            }
+            int idx = startIndex;
+            var insts = ParseInstrList(fctx, form, ref idx, InstrStop.None, out _);
+            var output = new List<InstructionBase>(insts);
             output.Add(new InstEnd());
             return new Expression(1, new InstructionSequence(output), isStatic: true);
         }

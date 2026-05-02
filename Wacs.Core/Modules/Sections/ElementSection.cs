@@ -132,6 +132,15 @@ namespace Wacs.Core
 
             private static ValType ParseElementKind(BinaryReader reader) =>
                 reader.ReadByte() switch {
+                    // elemkind 0x00 — spec says "funcref" (nullable),
+                    // but the existing validator's element-vs-table
+                    // matching logic assumes Func (non-nullable) here
+                    // because the legacy wast2json encoding for
+                    // `(elem (table $t) func $f)` against a `(ref func)`
+                    // table was always non-nullable in WACS. Switching
+                    // this to FuncRef breaks elem.wast against
+                    // non-nullable ref tables. Aligning the WAT parser
+                    // to emit Func instead is the more conservative fix.
                     0x00 => ValType.Func,
                     var b =>
                         throw new FormatException($"Invalid ElementKind {b} at {reader.BaseStream.Position - 1:x}")
@@ -148,10 +157,13 @@ namespace Wacs.Core
             /// <exception cref="FormatException"></exception>
             public static ElementSegment Parse(BinaryReader reader) =>
                 (ElementType)reader.ReadLeb128_u32() switch {
-                    ElementType.ActiveNoIndexWithElemKind => 
+                    ElementType.ActiveNoIndexWithElemKind =>
                         new ElementSegment(
                             (TableIdx)0,
                             Expression.ParseInitializer(reader),
+                            // Type stays at ValType.Func to match the
+                            // existing JSON-pipeline expectations; see
+                            // ParseElementKind comment above.
                             ValType.Func,
                             reader.ParseVector(ParseFuncIdxInstructions)),
                     ElementType.PassiveWithElemKind =>

@@ -87,8 +87,10 @@ namespace Wacs.Core.Types.Defs
         [WatToken("ref any")]      AnyNN      = (int)((uint)HeapType.Any | Ref | SignBit),     
         [WatToken("ref eq")]       EqNN       = (int)((uint)HeapType.Eq | Ref | SignBit),      
         [WatToken("ref i31")]      I31NN      = (int)((uint)HeapType.I31 | Ref | SignBit),     
-        [WatToken("ref struct")]   StructNN   = (int)((uint)HeapType.Struct | Ref | SignBit),  
+        [WatToken("ref struct")]   StructNN   = (int)((uint)HeapType.Struct | Ref | SignBit),
         [WatToken("ref array")]    ArrayNN    = (int)((uint)HeapType.Array | Ref | SignBit),
+        [WatToken("ref exn")]      ExnNN      = (int)((uint)HeapType.Exn | Ref | SignBit),
+        [WatToken("ref noexn")]    NoExnNN    = (int)((uint)HeapType.NoExn | Ref | SignBit),
         
         //for validation
         [WatToken("Bot")] Bot         = (int)((uint)HeapType.Bot | Ref | SignBit), 
@@ -189,7 +191,9 @@ namespace Wacs.Core.Types.Defs
                 ValType.StructNN => HeapType.Struct,
                 ValType.ArrayNN => HeapType.Array,
                 ValType.Exn => HeapType.Exn,
+                ValType.ExnNN => HeapType.Exn,
                 ValType.NoExn => HeapType.NoExn,
+                ValType.NoExnNN => HeapType.NoExn,
                 _ => (HeapType)0
             };
         }
@@ -208,8 +212,10 @@ namespace Wacs.Core.Types.Defs
                     ValType.FuncRef,
                 ValType.ExternRef or ValType.NoExtern =>
                     ValType.ExternRef,
-                ValType.Exn =>
+                ValType.Exn or ValType.NoExn =>
                     ValType.Exn,
+                ValType.ExnNN or ValType.NoExnNN =>
+                    ValType.ExnNN,
                 ValType.AnyNN or ValType.EqNN or ValType.I31NN or ValType.StructNN or ValType.ArrayNN or ValType.NoneNN =>
                     ValType.AnyNN,
                 _ when heapType.Index().Value >= 0 => types[heapType.Index()].Expansion switch {
@@ -240,16 +246,18 @@ namespace Wacs.Core.Types.Defs
                     ValType.Exn or
                     ValType.NoExn or
                     ValType.Array => true,
-                ValType.NoFuncNN or  
+                ValType.NoFuncNN or
                     ValType.NoExternNN or
-                    ValType.NoneNN or    
-                    ValType.Func or    
-                    ValType.Extern or  
-                    ValType.AnyNN or     
-                    ValType.EqNN or      
-                    ValType.I31NN or     
-                    ValType.StructNN or  
-                    ValType.ArrayNN => true, 
+                    ValType.NoneNN or
+                    ValType.Func or
+                    ValType.Extern or
+                    ValType.AnyNN or
+                    ValType.EqNN or
+                    ValType.I31NN or
+                    ValType.StructNN or
+                    ValType.ArrayNN or
+                    ValType.ExnNN or
+                    ValType.NoExnNN => true,
                 _ when type.IsDefType() => types.Contains(type.Index()),
                 _ => false
             };
@@ -442,12 +450,9 @@ namespace Wacs.Core.Types.Defs
                 (byte)HeapType.Exn => ValType.Exn,
                 (byte)HeapType.NoExn => ValType.NoExn,
                 //Index
-                _ => (ValType)reader.ContinueReading_s33(token), 
+                _ => (ValType)reader.ContinueReading_s33(token),
             };
-            //Exceptions are always nullable
-            if (type == ValType.Exn)
-                return ValType.Exn;
-            
+
             return nullable
                 ? type | ValType.Ref | ValType.Nullable
                 : (type | ValType.Ref) & ~ValType.Nullable;

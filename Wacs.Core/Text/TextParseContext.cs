@@ -88,6 +88,14 @@ namespace Wacs.Core.Text
         public NameTable Datas    { get; } = new NameTable();
         public NameTable Tags     { get; } = new NameTable();
 
+        /// <summary>
+        /// Per-struct field-name tables, keyed by the flattened type
+        /// index. Populated as <c>(type $t (struct (field $name T) …))</c>
+        /// is parsed; consumed by GC instructions like <c>struct.get $t $name</c>
+        /// to resolve named field references.
+        /// </summary>
+        public Dictionary<int, NameTable> StructFieldNames { get; } = new Dictionary<int, NameTable>();
+
         // Synthetic function types generated from inline typeuse abbreviations
         // — Phase 1.4 may push into this as it walks func signatures with no
         // explicit (type $x) reference. Keeps the list on hand so TypeSection

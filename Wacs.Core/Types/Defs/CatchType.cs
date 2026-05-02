@@ -142,7 +142,9 @@ namespace Wacs.Core.Types.Defs
                         }
 
                         var controlFrame = vContext.ControlStack.PeekAt((int)labelIdx.Value);
-                        var pType = functionType.ParameterTypes.Append(ValType.Exn);
+                        // Spec: catch_ref appends a NON-NULLABLE (ref exn) to
+                        // the tag's params; the captured exn is always present.
+                        var pType = functionType.ParameterTypes.Append(ValType.ExnNN);
                         if (!pType.Matches(controlFrame.EndTypes, vContext.Types))
                         {
                             ctx.AddFailure($"Catch Label {controlFrame.EndTypes.ToNotation()} did not match Catch Tag {functionType.ParameterTypes.ToNotation()}");
@@ -181,7 +183,10 @@ namespace Wacs.Core.Types.Defs
                             return;
                         }
                         var controlFrame = vContext.ControlStack.PeekAt((int)labelIdx.Value);
-                        var resultType = new ResultType(ValType.Exn);
+                        // Spec: catch_all_ref puts a NON-NULLABLE (ref exn) on
+                        // the label's stack — the captured exn ref is always
+                        // present in the catch handler.
+                        var resultType = new ResultType(ValType.ExnNN);
                         if (controlFrame.StartTypes.Matches(resultType, vContext.Types))
                         {
                             ctx.AddFailure($"Catch Label {labelIdx.Value} had non-exnref start type");

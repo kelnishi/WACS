@@ -72,22 +72,48 @@ namespace Wacs.Core
 
         public static uint MaximumFunctionLocals = 2048;
 
-        public static int InstructionsParsed = 0;
-
         /// <summary>
-        /// Absolute byte position (within the binary stream) of the
-        /// start of the function body currently being parsed. Set by
-        /// <see cref="Module.FuncLocalsBody.Parse"/> before reading
-        /// instructions, restored on exit. Read by
-        /// <see cref="ParseInstruction"/> to compute each
-        /// instruction's body-relative offset (the lookup key for
-        /// branch-hint metadata). A negative sentinel means "not in
-        /// a function body" — instructions parsed in that state
-        /// (constant expressions, etc.) leave their
-        /// <see cref="InstructionBase.ByteOffsetInFunc"/> at zero.
-        /// Single-threaded parser; static field is safe.
+        /// Per-parse mutable state for the binary parser. Holds the
+        /// transient bookkeeping (currently: the body-start offset
+        /// used by branch-hint byte-offset stamping) that earlier
+        /// lived as plain static fields. Stored in a
+        /// <c>ThreadStatic</c> slot and reset at the start of each
+        /// <see cref="ParseWasm"/> call so cross-parse leakage can't
+        /// contaminate later modules.
+        ///
+        /// Design rationale: the parser is single-threaded within a
+        /// single <c>ParseWasm</c> call, but the test runner (and
+        /// the <see cref="Wacs.Core.Text.TextScriptParser"/> eager-
+        /// parse path) invokes <c>ParseWasm</c> many times in
+        /// sequence on the same thread. Plain static state survived
+        /// across those invocations, occasionally leaking partially-
+        /// initialized values from one module's parse into the next.
+        /// A fresh context per parse closes that bug class without
+        /// requiring an API-breaking parameter on every recursive
+        /// <c>InstructionBase.Parse(BinaryReader)</c> override.
         /// </summary>
-        internal static long CurrentFunctionBodyStart = -1;
+        internal sealed class BinaryParseContext
+        {
+            /// <summary>
+            /// Absolute byte position (within the binary stream) of
+            /// the start of the function body currently being parsed.
+            /// Set by <see cref="Module.FuncLocalsBody.Parse"/> before
+            /// reading instructions, restored on exit. Read by
+            /// <see cref="ParseInstruction"/> to compute each
+            /// instruction's body-relative offset (the lookup key for
+            /// branch-hint metadata). Negative ⇒ "not in a function
+            /// body" — instructions parsed in that state (constant
+            /// expressions, etc.) leave their
+            /// <see cref="InstructionBase.ByteOffsetInFunc"/> at zero.
+            /// </summary>
+            public long FunctionBodyStart = -1;
+        }
+
+        [System.ThreadStatic]
+        private static BinaryParseContext? _binaryParseContextSlot;
+
+        internal static BinaryParseContext BinaryParseScope =>
+            _binaryParseContextSlot ??= new BinaryParseContext();
 
         public static readonly SectionId[] SectionOrder = new[]
         {
@@ -121,7 +147,13 @@ namespace Wacs.Core
             var module = new Module();
             var reader = new BinaryReader(stream);
 
-            InstructionsParsed = 0;
+            // Fresh per-parse state. Replaces the prior pattern of
+            // mutating plain static fields, which was vulnerable to
+            // cross-parse leakage when ParseWasm was called many
+            // times in sequence on the same thread (notably from
+            // TextScriptParser's eager-parse path inside
+            // assert_invalid / assert_malformed handling).
+            _binaryParseContextSlot = new BinaryParseContext();
             
             // Read and validate the magic number and version
             try
@@ -352,12 +384,12 @@ namespace Wacs.Core
                 OpCode.FE => new ByteCode((AtomCode)reader.ReadLeb128_u32()),
                 var b => new ByteCode(b)
             };
-            int traceIdx = InstructionsParsed;
             try
             {
                 var inst = InstructionFactory.CreateInstruction(opcode)?.Parse(reader);
-                if (inst != null && CurrentFunctionBodyStart >= 0)
-                    inst.ByteOffsetInFunc = (uint)(instAbsPos - CurrentFunctionBodyStart);
+                long bodyStart = BinaryParseScope.FunctionBodyStart;
+                if (inst != null && bodyStart >= 0)
+                    inst.ByteOffsetInFunc = (uint)(instAbsPos - bodyStart);
                 return inst;
             }
             catch (InvalidDataException exc)
@@ -366,10 +398,27 @@ namespace Wacs.Core
             }
         }
 
-        private static void FinalizeModule(Module module)
+        /// <summary>
+        /// Walk every place a function index can become "fully
+        /// declared" (exports, FuncRef-typed element initializers,
+        /// declarative element segments, FuncRef-typed global
+        /// initializers) and set <see cref="Module.Function.ElementDeclared"/>
+        /// on each matching defined function.
+        ///
+        /// Without this pass, <c>ref.func $x</c> instructions inside
+        /// function bodies fail validation with "func N is not fully
+        /// declared" — even when the surrounding module has an
+        /// <c>(elem declare func $x)</c> segment specifically intended
+        /// to declare it. Both the binary parser and the WAT parser
+        /// must run this; previously only the binary path did.
+        ///
+        /// Also enforces "memory.init requires DataCount section"
+        /// (the binary spec rule); for WAT inputs the DataCount field
+        /// always reflects the actual data section, so the check is
+        /// effectively skipped.
+        /// </summary>
+        public static void PropagateRefFuncDeclarations(Module module)
         {
-            PatchFuncSection(module);
-            
             HashSet<FuncIdx> fullyDeclared = new();
             var funcDescs = module.Exports
                 .Select(export => export.Desc)
@@ -388,9 +437,8 @@ namespace Wacs.Core
                 .SelectMany(elem => elem.Initializers)
                 .SelectMany(ini => ini.Instructions)
                 .OfType<InstRefFunc>();
-            
             foreach (var refFunc in elementDecl) fullyDeclared.Add(refFunc.FunctionIndex);
-            
+
             var globalIni = module.Globals
                 .Where(global => global.Type.ContentType == ValType.FuncRef)
                 .SelectMany(global => global.Initializer.Instructions)
@@ -403,10 +451,16 @@ namespace Wacs.Core
                 if (lacksMemoryInit)
                     if (func.Body.ContainsInstructions(MemoryInstructions))
                         throw new FormatException($"memory.init instruction requires Data Count section");
-                
+
                 if (fullyDeclared.Contains(func.Index))
                     func.ElementDeclared = true;
             }
+        }
+
+        private static void FinalizeModule(Module module)
+        {
+            PatchFuncSection(module);
+            PropagateRefFuncDeclarations(module);
             
             if (module.DataCount == uint.MaxValue)
                 module.DataCount = (uint)module.Datas.Length;

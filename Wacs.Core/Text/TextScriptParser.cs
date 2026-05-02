@@ -168,6 +168,18 @@ namespace Wacs.Core.Text
         private static ScriptModule ParseModuleCommand(SExpr node)
         {
             int i = 1;
+            // Component-model `(module definition $id sections…)` —
+            // the `definition` keyword precedes the optional id. Strip
+            // it; the rest is just a normal text module that gets
+            // registered for later `(module instance $alias $id)`
+            // lookups via the standard $id flow below.
+            if (i < node.Children.Count
+                && node.Children[i].Kind == SExprKind.Atom
+                && node.Children[i].Token.Kind == TokenKind.Keyword
+                && node.Children[i].AtomText() == "definition")
+            {
+                i++;
+            }
             string? id = TryReadId(node, ref i);
 
             // Distinguish the three shapes by the token right after the id.
@@ -405,14 +417,22 @@ namespace Wacs.Core.Text
             {
                 module = ParseModuleCommand(node.Children[1]);
             }
-            catch (System.FormatException)
+            catch (System.Exception e) when (
+                e is System.FormatException
+                || e is System.IO.InvalidDataException
+                || e is System.InvalidCastException
+                || e is System.NotSupportedException)
             {
+                // Capture the rejection so the adapter can surface it
+                // as PreParseError (the assertion is trivially satisfied
+                // — the parser already rejected the inner module).
                 module = new ScriptModule
                 {
                     Line = node.Children[1].Token.Line,
                     Column = node.Children[1].Token.Column,
                     Kind = ScriptModuleKind.Text,
                     Module = null,
+                    ParseError = e,
                 };
             }
             var msg = DecodeString(node, node.Children[2].Token);
@@ -467,13 +487,17 @@ namespace Wacs.Core.Text
                     return v;
                 case "f32.const":
                     v.Kind = ScriptValueKind.F32;
-                    ParseFloatLiteral(node.Children[1], expectPattern, out v.FloatPattern, out var f32, out _);
-                    v.F32 = (float)f32;
+                    ParseFloatLiteral(node.Children[1], expectPattern,
+                        out v.FloatPattern, out v.F32Bits, out v.F64Bits);
+                    v.F32 = BitConverter.Int32BitsToSingle(unchecked((int)v.F32Bits));
+                    v.F64 = BitConverter.Int64BitsToDouble(unchecked((long)v.F64Bits));
                     return v;
                 case "f64.const":
                     v.Kind = ScriptValueKind.F64;
-                    ParseFloatLiteral(node.Children[1], expectPattern, out v.FloatPattern, out _, out var f64);
-                    v.F64 = f64;
+                    ParseFloatLiteral(node.Children[1], expectPattern,
+                        out v.FloatPattern, out v.F32Bits, out v.F64Bits);
+                    v.F32 = BitConverter.Int32BitsToSingle(unchecked((int)v.F32Bits));
+                    v.F64 = BitConverter.Int64BitsToDouble(unchecked((long)v.F64Bits));
                     return v;
                 case "ref.null":
                     v.Kind = ScriptValueKind.RefNull;
@@ -482,6 +506,16 @@ namespace Wacs.Core.Text
                     return v;
                 case "ref.extern":
                     v.Kind = ScriptValueKind.RefExtern;
+                    if (node.Children.Count >= 2)
+                        v.RefId = node.Children[1].AtomText();
+                    return v;
+                case "ref.host":
+                    // ref.host N is the GC test form for a host-supplied
+                    // *internalized* any-ref. wast2json renders it as an
+                    // {"type":"anyref","value":"N"} expected; mirror that
+                    // by using RefGeneric with heap-type "any".
+                    v.Kind = ScriptValueKind.RefGeneric;
+                    v.RefHeapType = "any";
                     if (node.Children.Count >= 2)
                         v.RefId = node.Children[1].AtomText();
                     return v;
@@ -499,17 +533,135 @@ namespace Wacs.Core.Text
                     v.RefHeapType = kw.Substring(4);
                     return v;
                 case "v128.const":
-                    // (v128.const i32x4 a b c d) and friends. For phase 1.5
-                    // we capture the raw sub-tokens as a string and leave
-                    // bit-level decoding to the runner. Storing as encoded
-                    // bytes is a later follow-up.
-                    v.Kind = ScriptValueKind.V128;
-                    v.V128 = Array.Empty<byte>();   // placeholder
+                    return ParseV128Const(node, expectPattern, v);
+                case "either":
+                    // (either expectedA expectedB ...) — assertion form for
+                    // results that may legitimately be one of several values
+                    // (e.g. SIMD float ops where the spec permits multiple
+                    // valid bit-level outcomes). Modelled as a typed value
+                    // whose alternatives are the inner ParseValue results.
+                    v.Kind = ScriptValueKind.Either;
+                    v.EitherAlternatives = new List<ScriptValue>();
+                    for (int k = 1; k < node.Children.Count; k++)
+                        v.EitherAlternatives.Add(ParseValue(node.Children[k], expectPattern));
                     return v;
                 default:
                     throw new FormatException(
                         $"line {node.Token.Line}: unknown value form '{kw}' in script context");
             }
+        }
+
+        /// <summary>
+        /// (v128.const shape lane0 lane1 …) — typed-lane v128 literal.
+        /// Returns the raw 16-byte encoding (little-endian) plus the
+        /// shape and lane strings, mirroring the JSON pipeline's
+        /// {"type":"v128","lane_type":"…","value":[…]} shape so the
+        /// runner sees identical Argument data regardless of pipeline.
+        /// </summary>
+        private static ScriptValue ParseV128Const(SExpr node, bool expectPattern, ScriptValue v)
+        {
+            v.Kind = ScriptValueKind.V128;
+            if (node.Children.Count < 2 || node.Children[1].Kind != SExprKind.Atom)
+                throw new FormatException(
+                    $"line {node.Token.Line}: v128.const expects a shape keyword");
+            var shape = node.Children[1].AtomText();
+
+            int laneCount;
+            string laneType;
+            switch (shape)
+            {
+                case "i8x16": laneCount = 16; laneType = "i8"; break;
+                case "i16x8": laneCount = 8;  laneType = "i16"; break;
+                case "i32x4": laneCount = 4;  laneType = "i32"; break;
+                case "i64x2": laneCount = 2;  laneType = "i64"; break;
+                case "f32x4": laneCount = 4;  laneType = "f32"; break;
+                case "f64x2": laneCount = 2;  laneType = "f64"; break;
+                default:
+                    throw new FormatException(
+                        $"line {node.Token.Line}: v128.const unknown shape '{shape}'");
+            }
+            v.V128LaneType = laneType;
+            v.V128Lanes = new List<string>(laneCount);
+
+            using var ms = new MemoryStream(16);
+            using var bw = new BinaryWriter(ms);
+            for (int k = 0; k < laneCount; k++)
+            {
+                if (2 + k >= node.Children.Count)
+                    throw new FormatException(
+                        $"line {node.Token.Line}: v128.const {shape} expects {laneCount} lanes, got {k}");
+                var atom = node.Children[2 + k];
+                switch (laneType)
+                {
+                    case "i8":
+                    {
+                        var s = ParseI64Literal(atom);
+                        if (s < -128 || s > 255)
+                            throw new FormatException(
+                                $"line {atom.Token.Line}: i8 lane {s} out of range");
+                        bw.Write(unchecked((byte)s));
+                        // JSON pipeline emits each i8 lane as the unsigned
+                        // byte value as a decimal string (Argument.BitBashInt
+                        // happily parses signed/unsigned).
+                        v.V128Lanes.Add(unchecked((byte)s).ToString());
+                        break;
+                    }
+                    case "i16":
+                    {
+                        var s = ParseI64Literal(atom);
+                        if (s < short.MinValue || s > ushort.MaxValue)
+                            throw new FormatException(
+                                $"line {atom.Token.Line}: i16 lane {s} out of range");
+                        bw.Write(unchecked((ushort)s));
+                        v.V128Lanes.Add(unchecked((ushort)s).ToString());
+                        break;
+                    }
+                    case "i32":
+                    {
+                        var s = ParseI64Literal(atom);
+                        if (s < int.MinValue || s > uint.MaxValue)
+                            throw new FormatException(
+                                $"line {atom.Token.Line}: i32 lane {s} out of range");
+                        bw.Write(unchecked((int)s));
+                        v.V128Lanes.Add(unchecked((uint)s).ToString());
+                        break;
+                    }
+                    case "i64":
+                    {
+                        var s = ParseI64Literal(atom);
+                        bw.Write(s);
+                        v.V128Lanes.Add(unchecked((ulong)s).ToString());
+                        break;
+                    }
+                    case "f32":
+                    {
+                        ParseFloatLiteral(atom, expectPattern, out var pat, out var f32Bits, out _);
+                        bw.Write(f32Bits);
+                        v.V128Lanes.Add(pat switch
+                        {
+                            ScriptFloatPattern.NanCanonical => "nan:canonical",
+                            ScriptFloatPattern.NanArithmetic => "nan:arithmetic",
+                            _ => f32Bits.ToString(),
+                        });
+                        break;
+                    }
+                    case "f64":
+                    {
+                        ParseFloatLiteral(atom, expectPattern, out var pat, out _, out var f64Bits);
+                        bw.Write(f64Bits);
+                        v.V128Lanes.Add(pat switch
+                        {
+                            ScriptFloatPattern.NanCanonical => "nan:canonical",
+                            ScriptFloatPattern.NanArithmetic => "nan:arithmetic",
+                            _ => f64Bits.ToString(),
+                        });
+                        break;
+                    }
+                }
+            }
+            bw.Flush();
+            v.V128 = ms.ToArray();
+            return v;
         }
 
         private static int ParseI32Literal(SExpr atom) =>
@@ -539,48 +691,66 @@ namespace Wacs.Core.Text
             return sign == -1 ? -unchecked((long)value) : unchecked((long)value);
         }
 
+        /// <summary>
+        /// Parse a wasm spec float literal into its exact IEEE-754
+        /// bit pattern (both f32 and f64). Handles every shape the
+        /// spec admits:
+        /// <list type="bullet">
+        ///   <item>Decimal: <c>1.0</c>, <c>1.5e10</c></item>
+        ///   <item>Hex floats: <c>0x1.Ap+3</c>, <c>0x1.fffffep+127</c></item>
+        ///   <item>Special: <c>inf</c>, <c>nan</c> (canonical NaN bit pattern)</item>
+        ///   <item>NaN-with-payload: <c>nan:0x400001</c> — payload bits
+        ///     packed into the NaN mantissa (low bits)</item>
+        ///   <item>Assertion patterns: <c>nan:canonical</c>,
+        ///     <c>nan:arithmetic</c> — produce <see cref="ScriptFloatPattern"/>
+        ///     entries instead of a value, gated on
+        ///     <paramref name="allowPattern"/></item>
+        /// </list>
+        /// Outputs both <paramref name="f32Bits"/> and
+        /// <paramref name="f64Bits"/> so the caller can pick whichever
+        /// matches its const type. They're computed independently so
+        /// f32 NaN payloads fit in 23 mantissa bits and f64 in 52.
+        /// </summary>
         private static void ParseFloatLiteral(
             SExpr atom, bool allowPattern, out ScriptFloatPattern pattern,
-            out double f64NaNs, out double f64)
+            out uint f32Bits, out ulong f64Bits)
         {
             pattern = ScriptFloatPattern.None;
-            f64NaNs = 0;
-            f64 = 0;
+            f32Bits = 0;
+            f64Bits = 0;
             if (atom.Kind != SExprKind.Atom)
                 throw new FormatException($"line {atom.Token.Line}: expected float literal");
             var text = atom.AtomText().Replace("_", "");
-            // NaN patterns only valid in assertion expected lists.
-            if (text == "nan:canonical" || text == "+nan:canonical" || text == "-nan:canonical")
+
+            // Sign extraction (apply at end via bit-OR with sign bit).
+            bool negative = false;
+            if (text.StartsWith("+")) text = text.Substring(1);
+            else if (text.StartsWith("-")) { negative = true; text = text.Substring(1); }
+
+            if (text == "nan:canonical")
             {
                 if (!allowPattern)
                     throw new FormatException($"line {atom.Token.Line}: nan:canonical only valid in assertion context");
                 pattern = ScriptFloatPattern.NanCanonical;
                 return;
             }
-            if (text == "nan:arithmetic" || text == "+nan:arithmetic" || text == "-nan:arithmetic")
+            if (text == "nan:arithmetic")
             {
                 if (!allowPattern)
                     throw new FormatException($"line {atom.Token.Line}: nan:arithmetic only valid in assertion context");
                 pattern = ScriptFloatPattern.NanArithmetic;
                 return;
             }
-            // Plain floats, nan, inf, hex floats.
-            // The spec's NaN-payload literal (e.g. nan:0x400000) and
-            // hex-float representations (e.g. 0x1.Ap+3) are not handled in
-            // phase 1.5 — they trip the parser below. Mark them as pattern
-            // "None" and leave the value zero; Phase 3 will teach this
-            // parser the full float grammar when it wires spec tests.
-            if (text == "nan" || text == "+nan" || text == "-nan"
-                || text.StartsWith("nan:") || text.StartsWith("+nan:") || text.StartsWith("-nan:")
-                || text.StartsWith("0x") || text.StartsWith("+0x") || text.StartsWith("-0x"))
+
+            try
             {
-                // Leave at 0; callers tolerant of approximate parsing.
-                return;
+                FloatLiteralBits.Parse(negative ? "-" + text : text, out f32Bits, out f64Bits);
             }
-            if (text == "inf" || text == "+inf") { f64 = double.PositiveInfinity; return; }
-            if (text == "-inf") { f64 = double.NegativeInfinity; return; }
-            if (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out f64))
-                throw new FormatException($"line {atom.Token.Line}: bad float literal '{atom.AtomText()}'");
+            catch (FormatException e)
+            {
+                throw new FormatException(
+                    $"line {atom.Token.Line}: {e.Message} (literal '{atom.AtomText()}')");
+            }
         }
 
         // ---- Helpers ------------------------------------------------------
