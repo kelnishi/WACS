@@ -15,16 +15,12 @@
     { "test": "rust/overwrite_preopen",                   "reason": "Phase 4: needs investigation" },
     { "test": "rust/path_filestat",                       "reason": "Phase 4: path_filestat_get edge cases" },
     { "test": "rust/path_open_dirfd_not_dir",             "reason": "Phase 4: path_open errno when dirfd isn't a directory" },
-    { "test": "rust/path_link",                           "reason": "Phase 4.2: path_link with trailing slash on dest must fail" },
     { "test": "rust/path_open_preopen",                   "reason": "Phase 4: path_open quirk with preopens" },
     { "test": "rust/path_open_read_write",                "reason": "Phase 4: needs investigation" },
     { "test": "rust/path_rename",                         "reason": "Phase 4: needs investigation" },
-    { "test": "rust/path_symlink_trailing_slashes",       "reason": "Phase 4: trailing-slash semantics" },
     { "test": "rust/poll_oneoff_stdio",                   "reason": "Phase 4: write-readiness on stdio quirk" },
-    { "test": "rust/remove_directory_trailing_slashes",   "reason": "Phase 4: trailing-slash semantics" },
     { "test": "rust/symlink_filestat",                    "reason": "Phase 4.5: path_filestat_set_times nanosecond precision" },
     { "test": "rust/renumber",                            "reason": "Phase 4: fd_renumber edge cases" },
-    { "test": "rust/truncation_rights",                   "reason": "Phase 4: rights enforcement on path_open OFLAGS_TRUNC" },
-    { "test": "rust/unlink_file_trailing_slashes",        "reason": "Phase 4: trailing-slash semantics" }
+    { "test": "rust/truncation_rights",                   "reason": "Phase 4: rights enforcement on path_open OFLAGS_TRUNC" }
   ]
 }

@@ -150,10 +150,26 @@ namespace Wacs.WASI.Preview1
                 var oldRel = mem.ReadString(oldPathPtr, oldPathLen);
                 var newRel = mem.ReadString(newPathPtr, newPathLen);
 
-                var oldGuest = Path.Combine(oldDir.Path, oldRel);
-                var newGuest = Path.Combine(newDir.Path, newRel);
-                var oldHost = state.PathMapper.MapToHostPath(oldGuest);
-                var newHost = state.PathMapper.MapToHostPath(newGuest);
+                // Trailing slash on dest (newRel) is malformed for a hard
+                // link target — POSIX rule: the entry must not exist, but
+                // a trailing slash implies it must be a directory, which
+                // a fresh entry can't be. rust/path_link verifies NOENT.
+                bool destTrailingSlash = newRel.Length > 0
+                    && (newRel[newRel.Length - 1] == '/'
+                        || newRel[newRel.Length - 1] == '\\');
+                if (destTrailingSlash) return (int)ErrNo.NoEnt;
+
+                // Resolve the parent dirs (which may legitimately be
+                // symlinks) but append the final component raw — POSIX
+                // link(2) operates on the link itself (rust/path_link
+                // covers this with a dangling-symlink and a self-loop
+                // source). MapToHostPath would chase the source link,
+                // hand link(2) the resolved (possibly missing) target,
+                // and break the test.
+                var oldHostDir = state.PathMapper.MapToHostPath(oldDir.Path);
+                var newHostDir = state.PathMapper.MapToHostPath(newDir.Path);
+                var oldHost = Path.Combine(oldHostDir, oldRel);
+                var newHost = Path.Combine(newHostDir, newRel);
 
                 if (System.Runtime.InteropServices.RuntimeInformation
                         .IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
@@ -166,7 +182,25 @@ namespace Wacs.WASI.Preview1
                 }
                 else
                 {
-                    int rc = link(oldHost, newHost);
+                    // wasi-libc / wasmtime reject path_link with
+                    // LOOKUPFLAGS_SYMLINK_FOLLOW set — hardlinks operate
+                    // on inodes, the follow bit is meaningless and the
+                    // testsuite (rust/path_link line 185) requires INVAL.
+                    if (((LookupFlags)oldFlags & LookupFlags.SymlinkFollow) != 0)
+                        return (int)ErrNo.Inval;
+                    bool follow = false;
+                    int atFdCwd = System.Runtime.InteropServices.RuntimeInformation
+                        .IsOSPlatform(System.Runtime.InteropServices.OSPlatform.OSX)
+                        ? -2 : -100;
+                    int atFlags = follow ? 0x400 /* AT_SYMLINK_FOLLOW */ : 0;
+                    int rc;
+                    try { rc = linkat(atFdCwd, oldHost, atFdCwd, newHost, atFlags); }
+                    catch (EntryPointNotFoundException)
+                    {
+                        // Older libc — fall back to plain link(). Loses
+                        // the no-follow guarantee but covers the common case.
+                        rc = link(oldHost, newHost);
+                    }
                     if (rc != 0)
                     {
                         int errno = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
@@ -197,6 +231,18 @@ namespace Wacs.WASI.Preview1
 
         [System.Runtime.InteropServices.DllImport("libc", SetLastError = true)]
         private static extern int link(string oldpath, string newpath);
+
+        // POSIX linkat with AT_SYMLINK_NOFOLLOW (= 0x100 on Linux/macOS)
+        // creates a hard link to the symlink itself rather than its target.
+        // wasi path_link with LOOKUPFLAGS_SYMLINK_FOLLOW unset requires
+        // this behavior — bare link(2) on Linux follows the source link
+        // by default.
+        // AT_FDCWD is -100 on Linux, -2 on macOS; we always pass full
+        // host paths so the dirfd is irrelevant — pick AT_FDCWD per
+        // platform to keep things explicit.
+        [System.Runtime.InteropServices.DllImport("libc", EntryPoint = "linkat", SetLastError = true)]
+        private static extern int linkat(int olddirfd, string oldpath,
+            int newdirfd, string newpath, int flags);
 
         [WacsImport("wasi_snapshot_preview1", "path_open")]
         public static int PathOpenCore(WacsHostMemory mem, State state, WasiConfiguration config,
@@ -402,6 +448,12 @@ namespace Wacs.WASI.Preview1
                 var guestPath = Path.Combine(guestDirPath, pathToRemove);
                 var hostPath = Path.Combine(hostDirPath, pathToRemove);
 
+                // Trailing-slash semantics (rust/remove_directory_trailing_slashes):
+                // remove_directory on "file" or "file/" must trap a non-
+                // directory target with ENOTDIR before Directory.Delete
+                // surfaces a more generic IO error.
+                if (!Directory.Exists(hostPath))
+                    return File.Exists(hostPath) ? (int)ErrNo.NotDir : (int)ErrNo.NoEnt;
                 Directory.Delete(hostPath, false);
                 WasiFsHelpers.UnbindDir(state, guestPath);
             }
@@ -489,8 +541,31 @@ namespace Wacs.WASI.Preview1
                 // create_symlink_to_root pins this.)
                 if (oldPath.Length > 0 && (oldPath[0] == '/' || oldPath[0] == '\\'))
                     return (int)ErrNo.Perm;
+                // Trailing slash on the link destination (newPath) follows
+                // the rust/path_symlink_trailing_slashes matrix:
+                //   - target doesn't exist ⇒ ENOENT (slash implies dir but
+                //     dir doesn't exist there)
+                //   - target is a file     ⇒ ENOTDIR
+                //   - target is a directory ⇒ EEXIST (handled by the
+                //     existing IOException 0x80070050 branch below).
+                bool destTrailingSlash = newPath.Length > 0
+                    && (newPath[newPath.Length - 1] == '/'
+                        || newPath[newPath.Length - 1] == '\\');
                 var guestPath = Path.Combine(dirFileDescriptor.Path, newPath);
                 var newHostPath = state.PathMapper.MapToHostPath(guestPath);
+                if (destTrailingSlash)
+                {
+                    if (Directory.Exists(newHostPath)) return (int)ErrNo.Exist;
+                    if (File.Exists(newHostPath))     return (int)ErrNo.NotDir;
+                    return (int)ErrNo.NoEnt;
+                }
+                // Pre-check existence: File.CreateSymbolicLink throws an
+                // IOException whose HResult is platform-specific (0x80070050
+                // on Windows, EEXIST on Unix). Surfacing EEXIST uniformly
+                // here is simpler than chasing the HResult per-platform.
+                if (Directory.Exists(newHostPath) || File.Exists(newHostPath)
+                    || VirtualPathMapper.IsSymlink(newHostPath))
+                    return (int)ErrNo.Exist;
                 File.CreateSymbolicLink(newHostPath, oldPath);
                 return (int)ErrNo.Success;
             }
@@ -530,6 +605,16 @@ namespace Wacs.WASI.Preview1
                 // check has to skip the symlink case explicitly because
                 // Directory.Exists follows links.
                 bool isSymlink = VirtualPathMapper.IsSymlink(hostPath);
+                bool hasTrailingSlash = pathToUnlink.Length > 0
+                    && (pathToUnlink[pathToUnlink.Length - 1] == '/'
+                        || pathToUnlink[pathToUnlink.Length - 1] == '\\');
+                // POSIX trailing-slash semantics: "file/" implies file
+                // must be a directory. unlink_file on a non-directory
+                // with trailing slash ⇒ ENOTDIR. (rust/unlink_file_
+                // trailing_slashes verifies this; macOS in particular
+                // wouldn't surface it without an explicit check.)
+                if (hasTrailingSlash && !isSymlink && !Directory.Exists(hostPath))
+                    return File.Exists(hostPath) ? (int)ErrNo.NotDir : (int)ErrNo.NoEnt;
                 if (!isSymlink && Directory.Exists(hostPath)) return (int)ErrNo.IsDir;
                 File.Delete(hostPath);
                 WasiFsHelpers.UnbindFile(state, guestPath);
