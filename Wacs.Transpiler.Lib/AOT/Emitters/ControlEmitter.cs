@@ -360,7 +360,8 @@ namespace Wacs.Transpiler.AOT.Emitters
             ModuleInstance? moduleInst = null,
             int tryDepth = 0,
             bool forceShuttle = false,
-            BranchHint? branchHint = null)
+            BranchHint? branchHint = null,
+            Action<Action>? registerColdEmission = null)
         {
             var (paramArity, resultArity, _, resultClrTypes) =
                 moduleInst != null
@@ -480,21 +481,67 @@ namespace Wacs.Transpiler.AOT.Emitters
             }
             else
             {
-                // condition is on stack — no results possible on false path (void if)
-                il.Emit(OpCodes.Brfalse, endLabel);
+                // if-without-else. The proposal allows hint=unlikely
+                // here too. The "ideal" emission for unlikely is to
+                // lift the cold then-body OUT of the linear flow so
+                // the hot path (cond=false → skip body) doesn't pay
+                // any I-cache for the dead body. We use the cold-tail
+                // mechanism on FunctionCodegen for exactly this.
+                bool moveToColdTail = branchHint.HasValue
+                                      && !branchHint.Value.IsLikely
+                                      && registerColdEmission != null;
 
-                // if-true body only
-                var ifBlock = inst.GetBlock(0);
-                foreach (var child in ifBlock.Instructions)
-                    emitInstruction(il, child);
-                bool ifEndReachable = BodyEndIsReachable(ifBlock.Instructions);
-
-                // End of if-true body: shuttle to locals if reachable
-                if (resultLocals != null && ifEndReachable)
+                if (moveToColdTail)
                 {
-                    for (int i = resultArity - 1; i >= 0; i--)
-                        il.Emit(OpCodes.Stloc, resultLocals[i]);
-                    il.Emit(OpCodes.Br, endLabel);
+                    // Define the cold entry; brtrue jumps there on the
+                    // cold (cond=true) path, otherwise hot fall-through
+                    // reaches endLabel directly.
+                    var coldThenLabel = il.DefineLabel();
+                    il.Emit(OpCodes.Brtrue, coldThenLabel);
+
+                    var ifBlock = inst.GetBlock(0);
+                    var capturedResultLocals = resultLocals;
+                    int capturedResultArity = resultArity;
+                    var capturedEndLabel = endLabel;
+                    registerColdEmission!(() =>
+                    {
+                        il.MarkLabel(coldThenLabel);
+                        foreach (var child in ifBlock.Instructions)
+                            emitInstruction(il, child);
+                        bool coldEndReachable = BodyEndIsReachable(ifBlock.Instructions);
+                        if (coldEndReachable)
+                        {
+                            if (capturedResultLocals != null)
+                            {
+                                for (int i = capturedResultArity - 1; i >= 0; i--)
+                                    il.Emit(OpCodes.Stloc, capturedResultLocals[i]);
+                            }
+                            // Back-jump into the main body at endLabel.
+                            // Non-reducible CFG, but RyuJIT and ILC
+                            // handle it; the win is that hot fall-through
+                            // never touches the cold body bytes.
+                            il.Emit(OpCodes.Br, capturedEndLabel);
+                        }
+                    });
+                }
+                else
+                {
+                    // condition is on stack — no results possible on false path (void if)
+                    il.Emit(OpCodes.Brfalse, endLabel);
+
+                    // if-true body only
+                    var ifBlock = inst.GetBlock(0);
+                    foreach (var child in ifBlock.Instructions)
+                        emitInstruction(il, child);
+                    bool ifEndReachable = BodyEndIsReachable(ifBlock.Instructions);
+
+                    // End of if-true body: shuttle to locals if reachable
+                    if (resultLocals != null && ifEndReachable)
+                    {
+                        for (int i = resultArity - 1; i >= 0; i--)
+                            il.Emit(OpCodes.Stloc, resultLocals[i]);
+                        il.Emit(OpCodes.Br, endLabel);
+                    }
                 }
             }
 
