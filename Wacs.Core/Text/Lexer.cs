@@ -287,9 +287,14 @@ namespace Wacs.Core.Text
                 // `;;` line comment. Per the annotations proposal,
                 // comments still apply inside annotations — single `;`
                 // becomes an idchar there, but `;;` is always a comment.
+                // The WAT lexer terminates line comments at any line
+                // terminator (LF, CR, or CRLF) per spec § 6.2.4.
                 if (c == ';' && _pos + 1 < _source.Length && _source[_pos + 1] == ';')
                 {
-                    while (_pos < _source.Length && _source[_pos] != '\n') Advance();
+                    while (_pos < _source.Length
+                           && _source[_pos] != '\n'
+                           && _source[_pos] != '\r')
+                        Advance();
                     continue;
                 }
                 if (c == '(' && _pos + 1 < _source.Length && _source[_pos + 1] == ';')
