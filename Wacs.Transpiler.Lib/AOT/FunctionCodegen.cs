@@ -680,8 +680,9 @@ namespace Wacs.Transpiler.AOT
                 case WasmOpCode.If:
                 {
                     int sh = (_currentInfo?.StackHeightBefore ?? 1) - 1;
-                    var hint = _moduleInst.Repr.BranchHints?.TryGet(
-                        _funcInst.Index.Value, inst.ByteOffsetInFunc);
+                    // Reference-keyed lookup works for both binary
+                    // (joined by FinalizeModule) and WAT-parsed inputs.
+                    var hint = _moduleInst.Repr.BranchHints?.TryGet(inst);
                     ControlEmitter.EmitIf(il, (InstIf)inst, _blockStack, EmitInstruction,
                         sh, _moduleInst, _tryDepth, _functionHasTryTable, hint,
                         _coldTailEmissions.Add);

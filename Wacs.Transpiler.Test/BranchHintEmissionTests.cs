@@ -102,6 +102,9 @@ namespace Wacs.Transpiler.Test
 
         private static (TranspilationResult Result, ModuleInstance ModInst) Transpile(byte[] wasm, string asmName)
         {
+            // Branch-hint parsing is opt-in. The transpiler tests
+            // always want it on.
+            BinaryModuleParser.ParseBranchHints = true;
             using var ms = new MemoryStream(wasm);
             var module = BinaryModuleParser.ParseWasm(ms);
             var runtime = new WasmRuntime();
