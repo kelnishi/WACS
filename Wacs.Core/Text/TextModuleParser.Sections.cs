@@ -821,6 +821,13 @@ namespace Wacs.Core.Text
         {
             if (form.Children.Count != 2)
                 throw new FormatException($"line {form.Token.Line}: (start …) expects one function reference");
+            // The spec allows at most one start section per module.
+            // Match what the binary parser would reject ("multiple
+            // start sections") at the WAT layer so assert_malformed
+            // tests with two `(start …)` forms surface the error.
+            if (ctx.Module.StartIndex != FuncIdx.Default)
+                throw new FormatException(
+                    $"line {form.Token.Line}: multiple start sections");
             int idx = ResolveIndex(ctx.Funcs, form.Children[1], "func");
             ctx.Module.StartIndex = (FuncIdx)idx;
         }
@@ -1046,14 +1053,14 @@ namespace Wacs.Core.Text
                 && form.Children[i].Head!.Token.Kind == TokenKind.Keyword
                 && !IsStringListStart(form, i))
             {
-                // Bare (i32.const N) / (i64.const N) or similar init expr.
-                var head = form.Children[i].Head!.AtomText();
-                if (head == "i32.const" || head == "i64.const" || head == "global.get"
-                    || head.StartsWith("ref."))
-                {
-                    offset = ParseSingleInstrExpression(ctx, form.Children[i]);
-                    i++;
-                }
+                // Bare offset init expr — any folded instruction
+                // form. Whether the expression is const-eligible is
+                // the validator's job (`assert_invalid` with text
+                // "constant expression required" for things like
+                // `(data (i32.ctz (i32.const 0)))`); the parser must
+                // pass the AST through so that check can fire.
+                offset = ParseSingleInstrExpression(ctx, form.Children[i]);
+                i++;
             }
             mode = offset != null
                 ? new Module.DataMode.ActiveMode((MemIdx)memIdx, offset)

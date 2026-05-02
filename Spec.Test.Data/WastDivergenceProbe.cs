@@ -159,16 +159,33 @@ namespace Spec.Test
         {
             return ResultOf(() =>
             {
-                if (sm.Module == null)
+                Module module;
+                if (sm.Module != null)
                 {
-                    // The script parser eagerly tries to parse Quote
-                    // and Binary forms — Module=null means the parse
-                    // failed (assertion is satisfied for malformed-style
-                    // tests). For text-form modules with Module=null
-                    // the script parser would have thrown already.
+                    module = sm.Module;
+                }
+                else if (sm.Kind == ScriptModuleKind.Binary && sm.Bytes != null)
+                {
+                    // Binary modules aren't eagerly parsed by
+                    // TextScriptParser (Module stays null). Parse here
+                    // so the probe can compare against wabt's
+                    // already-binary input.
+                    using var ms = new MemoryStream(sm.Bytes);
+                    module = BinaryModuleParser.ParseWasm(ms);
+                }
+                else if (sm.Kind == ScriptModuleKind.Quote && sm.Bytes != null)
+                {
+                    // Quote modules: TextScriptParser eagerly parses
+                    // them but swallows errors. Re-parse here to
+                    // surface the error in the probe's verdict.
+                    var text = System.Text.Encoding.UTF8.GetString(sm.Bytes);
+                    module = TextModuleParser.ParseWat(text);
+                }
+                else
+                {
                     return "rejected: parse failed";
                 }
-                var v = sm.Module.Validate();
+                var v = module.Validate();
                 return v.IsValid ? "valid" : "invalid: " + Trunc(string.Join("|",
                     v.Errors.Take(2).Select(e => e.ErrorMessage)));
             });

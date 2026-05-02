@@ -168,6 +168,18 @@ namespace Wacs.Core.Text
         private static ScriptModule ParseModuleCommand(SExpr node)
         {
             int i = 1;
+            // Component-model `(module definition $id sections…)` —
+            // the `definition` keyword precedes the optional id. Strip
+            // it; the rest is just a normal text module that gets
+            // registered for later `(module instance $alias $id)`
+            // lookups via the standard $id flow below.
+            if (i < node.Children.Count
+                && node.Children[i].Kind == SExprKind.Atom
+                && node.Children[i].Token.Kind == TokenKind.Keyword
+                && node.Children[i].AtomText() == "definition")
+            {
+                i++;
+            }
             string? id = TryReadId(node, ref i);
 
             // Distinguish the three shapes by the token right after the id.
