@@ -1,5 +1,6 @@
 {
   "JsonDirectory": "../../../generated-json",
+  "WastDirectory": "../../../spec/test/core",
   "RunTranspilerTests": true,
   "TraceExecution": false,
   "Single": null,

@@ -203,9 +203,6 @@ namespace Spec.Test
             _ => -1,
         };
 
-        private static string Truncate(string s, int n) =>
-            s.Length <= n ? s : s.Substring(0, n) + "...";
-
         private static IEnumerable<string> SummarizeCommands(IEnumerable<ICommand> cmds)
         {
             foreach (var c in cmds)

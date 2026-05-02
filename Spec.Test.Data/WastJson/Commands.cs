@@ -41,6 +41,31 @@ namespace Spec.Test.WastJson
             return new();
         }
     }
+
+    /// <summary>
+    /// Stand-in command yielded by the WAT-direct adapter when
+    /// <c>WastScriptAdapter.FromWastFile</c> threw before producing any
+    /// real commands — typically because the WAT/WAST parser does not
+    /// yet support some construct in the file (e.g. a SIMD or GC
+    /// instruction). The runner reaches this command, throws a
+    /// <see cref="TestException"/>, and the wast surfaces as a single
+    /// visible failure rather than vanishing through a silent
+    /// <c>try/catch</c>.
+    /// </summary>
+    public class ScriptParseFailureCommand : ICommand
+    {
+        public string ParseError { get; set; } = "";
+        public CommandType Type => CommandType.Module;
+        public int Line { get; set; }
+
+        public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
+        {
+            throw new TestException(
+                $"WAT script parse failed for {testDefinition.TestName}: {ParseError}");
+        }
+
+        public override string ToString() => $"Script Parse Failure: {ParseError}";
+    }
     
     public class ModuleCommand : ICommand
     {
