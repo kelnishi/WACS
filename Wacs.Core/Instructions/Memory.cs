@@ -52,6 +52,14 @@ namespace Wacs.Core.Instructions
                  "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(), M.M.Value);
             context.Assert(M.Align.LinearSize() <= WidthTByteSize,
                     "Instruction {0} failed with invalid alignment {1} <= {2}/8",Op.GetMnemonic(),M.Align.LinearSize(),WidthT);
+            // @Spec 3.3.7: for a 32-bit memory the offset must be a u32.
+            // The text/binary parser stores it as a u64 (via long); reject
+            // values that exceed u32 range when the target memory is i32.
+            var memType = context.Mems[M.M];
+            if (memType.Limits.AddressType == AddrType.I32)
+                context.Assert(unchecked((ulong)M.Offset) <= uint.MaxValue,
+                    "Instruction {0} failed: offset out of range for memory32 ({1})",
+                    Op.GetMnemonic(), unchecked((ulong)M.Offset));
 
             context.OpStack.PopInt();           // -1
             context.OpStack.PushType(Type);     // +0
@@ -114,6 +122,12 @@ namespace Wacs.Core.Instructions
                  "Instruction {0} failed with invalid context memory {1}.",Op.GetMnemonic(), M.M.Value);
             context.Assert(M.Align.LinearSize() <= WidthT.ByteSize(),
                     "Instruction {0} failed with invalid alignment {1} <= {2}/8",Op.GetMnemonic(),M.Align.LinearSize(),WidthT);
+            // @Spec 3.3.7: u32 offset for 32-bit memories. See InstMemoryLoad.Validate.
+            var memType = context.Mems[M.M];
+            if (memType.Limits.AddressType == AddrType.I32)
+                context.Assert(unchecked((ulong)M.Offset) <= uint.MaxValue,
+                    "Instruction {0} failed: offset out of range for memory32 ({1})",
+                    Op.GetMnemonic(), unchecked((ulong)M.Offset));
 
             //Pop parameters from right to left
             context.OpStack.PopType(Type);      // -1
