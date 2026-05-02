@@ -64,22 +64,15 @@ namespace Wacs.Core.Instructions.GC
             var da = ctx.Frame.Module.DataAddrs[(DataIdx)dataIdx];
             var datainst = ctx.Store[da];
             int z = arrayType.ElementType.BitWidth().ByteSize();
-            int end = s + n * z;
-            int span = end;
-            if (z != 4) { span -= z; span += 1; }
-            if (span > datainst.Data.Length)
-                throw new Wacs.Core.Runtime.Types.TrapException("array.new_data: array size exceeds data length");
-            // HACK (from polymorphic path): unaligned read shim.
-            if (end > datainst.Data.Length)
-            {
-                end = datainst.Data.Length;
-                s = end - n * z;
-            }
-            if (s < 0)
-                throw new Wacs.Core.Runtime.Types.TrapException("array.new_data: out of bounds source start");
-            if (end > datainst.Data.Length)
-                throw new Wacs.Core.Runtime.Types.TrapException("array.new_data: out of bounds end index");
-            var b = datainst.Data.AsSpan()[s..end];
+            // @Spec 4.5.3.5: trap if s + n*|t| > |data.Data|. s and n
+            // are u32 on the stack; size math in 64-bit avoids overflow.
+            long sU = (uint)s;
+            long nU = (uint)n;
+            long endLong = sU + nU * z;
+            if (endLong > datainst.Data.Length)
+                throw new Wacs.Core.Runtime.Types.TrapException("array.new_data: out of bounds memory access");
+            int end = (int)endLong;
+            var b = datainst.Data.AsSpan()[(int)sU..end];
             var a = ctx.Store.AddArray();
             var ai = new StoreArray(a, arrayType, b, n, z);
             return new Value(ValType.Ref | (ValType)typeIdx, ai);
