@@ -254,6 +254,10 @@ namespace Wacs.WASI.Preview1
             if (!WasiFsHelpers.TryGetFd(state, (uint)dirFd, out var dirFileDescriptor))
                 return (int)ErrNo.Badf;
             if ((dirFileDescriptor.Access & FileAccess.Read) == 0) return (int)ErrNo.Acces;
+            // path_open requires dirFd to actually be a directory — opening
+            // through a regular file fd is rejected with NOTDIR (per
+            // rust/path_open_dirfd_not_dir).
+            if (dirFileDescriptor.Type != Filetype.Directory) return (int)ErrNo.NotDir;
 
             try
             {
@@ -382,7 +386,7 @@ namespace Wacs.WASI.Preview1
             if (!mem.Contains(pathPtr, pathLen) || !mem.Contains(bufPtr, bufLen))
                 return (int)ErrNo.Inval;
             if (!WasiFsHelpers.TryGetFd(state, (uint)dirFd, out var dirFileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
             if ((dirFileDescriptor.Access & FileAccess.Read) == 0) return (int)ErrNo.Acces;
 
             try
@@ -435,7 +439,7 @@ namespace Wacs.WASI.Preview1
         {
             if (!mem.Contains(pathPtr, pathLen)) return (int)ErrNo.Inval;
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var dirFileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
             if ((dirFileDescriptor.Access & FileAccess.Read) == 0 ||
                 (dirFileDescriptor.Access & FileAccess.Write) == 0)
                 return (int)ErrNo.Acces;
@@ -474,9 +478,9 @@ namespace Wacs.WASI.Preview1
             try
             {
                 if (!WasiFsHelpers.TryGetFd(state, (uint)oldFd, out var oldDirFileDescriptor))
-                    return (int)ErrNo.NoEnt;
+                    return (int)ErrNo.Badf;
                 if (!WasiFsHelpers.TryGetFd(state, (uint)newFd, out var newDirFileDescriptor))
-                    return (int)ErrNo.NoEnt;
+                    return (int)ErrNo.Badf;
 
                 var oldPathToRename = mem.ReadString(oldPathPtr, oldPathLen);
                 var newPathForRename = mem.ReadString(newPathPtr, newPathLen);
@@ -526,7 +530,7 @@ namespace Wacs.WASI.Preview1
             if (!mem.Contains(oldPathPtr, oldPathLen) || !mem.Contains(newPathPtr, newPathLen))
                 return (int)ErrNo.Inval;
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var dirFileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
             if ((dirFileDescriptor.Access & FileAccess.Write) == 0) return (int)ErrNo.Acces;
             if (dirFileDescriptor.Type != Filetype.Directory) return (int)ErrNo.NotDir;
 
@@ -585,7 +589,7 @@ namespace Wacs.WASI.Preview1
         {
             if (!mem.Contains(pathPtr, pathLen)) return (int)ErrNo.Inval;
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var dirFileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
             if ((dirFileDescriptor.Access & FileAccess.Read) == 0 ||
                 (dirFileDescriptor.Access & FileAccess.Write) == 0)
                 return (int)ErrNo.Acces;

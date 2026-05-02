@@ -138,6 +138,8 @@ namespace Wacs.WASI.Preview1.Types
             {
                 rights |= Rights.FD_WRITE;
                 rights |= Rights.FD_FILESTAT_SET_SIZE;
+                rights |= Rights.FD_FILESTAT_SET_TIMES;
+                rights |= Rights.FD_ALLOCATE;
             }
             // If explicitly ReadWrite, set both read + write bits
             // Note: (access & FileAccess.ReadWrite) means bitwise combination is present.
@@ -184,11 +186,25 @@ namespace Wacs.WASI.Preview1.Types
                 rights |= Rights.PATH_RENAME_SOURCE;
                 rights |= Rights.PATH_RENAME_TARGET;
                 rights |= Rights.PATH_SYMLINK;
+                // NOTE: rust/directory_seek asserts the dir has no FD_SEEK
+                // right, but we keep FD_SEEK / FD_WRITE on directories
+                // here because PathOpen propagates the parent dir's rights
+                // as the inherited cap when opening child files; stripping
+                // them here would strip the child file's seek/write too.
+                // The right fix is a per-fd "own rights" vs "inherited
+                // rights" split — deferred (skip.json keeps directory_seek).
             }
 
             // Optionally always allow data syncing
             rights |= Rights.FD_SYNC;
             rights |= Rights.FD_DATASYNC;
+            // Other commonly-required rights covered by the wasi-testsuite
+            // directory_inheriting_rights / directory_base_rights checks.
+            // Granting them on the preopen lets PathOpen pass them through
+            // as the inherited cap for child files.
+            rights |= Rights.FD_FDSTAT_SET_FLAGS;
+            rights |= Rights.FD_ADVISE;
+            rights |= Rights.POLL_FD_READWRITE;
 
             return rights;
         }

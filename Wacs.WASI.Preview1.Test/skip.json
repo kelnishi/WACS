@@ -5,16 +5,12 @@
 
     { "test": "c/pwrite-with-access",        "reason": "Phase 4: pwrite to an existing file traps — likely fd_pwrite stream interaction" },
 
-    { "test": "rust/close_preopen",                       "reason": "Phase 4: fd_close on a preopen FD" },
-    { "test": "rust/dir_fd_op_failures",                  "reason": "Phase 4: directory-fd error edge cases" },
-    { "test": "rust/directory_seek",                      "reason": "Phase 4: fd_seek on a directory should ESPIPE" },
+    { "test": "rust/directory_seek",                      "reason": "Phase 4.x: directory FD rights need own-vs-inherited split — currently dir grants FD_SEEK so PathOpen can pass it down to files" },
+    { "test": "rust/path_open_preopen",                   "reason": "Phase 4.x: OFLAGS_DIRECTORY + FD_WRITE-only rights should ISDIR; pre-check conflicts with the open_scratch_directory pattern that passes a preopen's full rights including FD_WRITE — needs the own/inherited rights split too" },
     { "test": "rust/fd_filestat_set",                     "reason": "Phase 4: fd_filestat_set_times edge cases" },
     { "test": "rust/file_unbuffered_write",               "reason": "Phase 4: needs investigation" },
     { "test": "rust/interesting_paths",                   "reason": "Phase 4: special-character path handling" },
-    { "test": "rust/overwrite_preopen",                   "reason": "Phase 4: needs investigation" },
     { "test": "rust/path_filestat",                       "reason": "Phase 4: path_filestat_get edge cases" },
-    { "test": "rust/path_open_dirfd_not_dir",             "reason": "Phase 4: path_open errno when dirfd isn't a directory" },
-    { "test": "rust/path_open_preopen",                   "reason": "Phase 4: path_open quirk with preopens" },
     { "test": "rust/path_open_read_write",                "reason": "Phase 4: needs investigation" },
     { "test": "rust/path_rename",                         "reason": "Phase 4: needs investigation" },
     { "test": "rust/poll_oneoff_stdio",                   "reason": "Phase 4: write-readiness on stdio quirk" },

@@ -81,7 +81,7 @@ namespace Wacs.WASI.Preview1
         {
             if (!mem.Contains(bufPtr, FdStatSize)) return (int)ErrNo.Inval;
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
 
             var hostPath = state.PathMapper.MapToHostPath(fileDescriptor.Path);
             try { File.GetAttributes(hostPath); }
@@ -110,7 +110,7 @@ namespace Wacs.WASI.Preview1
         public static int FdFdstatSetFlagsCore(State state, int fd, int flags)
         {
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
 
             const FdFlags known = FdFlags.Append | FdFlags.DSync |
                                   FdFlags.NonBlock | FdFlags.RSync | FdFlags.Sync;
@@ -126,7 +126,7 @@ namespace Wacs.WASI.Preview1
             long fs_rights_base, long fs_rights_inheriting)
         {
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
 
             var newBase = (Rights)fs_rights_base;
             var newInherit = (Rights)fs_rights_inheriting;
@@ -146,7 +146,7 @@ namespace Wacs.WASI.Preview1
         {
             if (!mem.Contains(bufPtr, FileStatSize)) return (int)ErrNo.Inval;
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
 
             // For stdio (fd < 3), provide dummy stats.
             if (fd < 3)
@@ -180,7 +180,7 @@ namespace Wacs.WASI.Preview1
         public static int FdFilestatSetSizeCore(State state, int fd, long stSize)
         {
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
             if (fileDescriptor.Type == Filetype.Directory) return (int)ErrNo.IsDir;
 
             try { fileDescriptor.Stream.SetLength(stSize); }
@@ -194,7 +194,7 @@ namespace Wacs.WASI.Preview1
             long atim, long mtim, int flags)
         {
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
 
             var hostPath = state.PathMapper.MapToHostPath(fileDescriptor.Path);
             FileAttributes attr;
@@ -273,13 +273,17 @@ namespace Wacs.WASI.Preview1
         {
             if (!mem.Contains(pathPtr, pathLen)) return (int)ErrNo.Inval;
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
             if (fileDescriptor.Type != Filetype.Directory) return (int)ErrNo.NotDir;
 
             var name = fileDescriptor.Path;
             if (name.Length > 1 && name[0] == '/') name = name.Substring(1);
             var utf8Name = Encoding.UTF8.GetBytes(name);
-            if (utf8Name.Length > pathLen) return (int)ErrNo.TooBig;
+            // wasi-libc and wasmtime return ENAMETOOLONG (or EINVAL) for
+            // a too-small buffer here; the wasi-testsuite (rust/dir_fd_op
+            // _failures) accepts either. E2BIG is the "argument list too
+            // long" code, semantically wrong.
+            if (utf8Name.Length > pathLen) return (int)ErrNo.NameTooLong;
 
             mem.WriteUtf8String(pathPtr, name, nullTerminate: false);
             return (int)ErrNo.Success;
@@ -292,7 +296,7 @@ namespace Wacs.WASI.Preview1
             if (!mem.Contains(buf, FileStatSize)) return (int)ErrNo.Inval;
             if (!mem.Contains(pathPtr, pathLen)) return (int)ErrNo.Inval;
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var dirFileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
             if (dirFileDescriptor.Type != Filetype.Directory && fd >= 3)
                 return (int)ErrNo.NotDir;
 
@@ -396,7 +400,7 @@ namespace Wacs.WASI.Preview1
         {
             if (!mem.Contains(pathPtr, pathLen)) return (int)ErrNo.Inval;
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var dirFileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
             if (dirFileDescriptor.Type != Filetype.Directory && fd >= 3)
                 return (int)ErrNo.NotDir;
 
