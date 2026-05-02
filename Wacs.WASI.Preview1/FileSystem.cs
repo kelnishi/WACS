@@ -322,24 +322,20 @@ namespace Wacs.WASI.Preview1
             };
 
             var dirInfo = new DirectoryInfo(hostDir);
-            var rights = FileDescriptor.ComputeFileRights(
-                dirInfo,
-                Filetype.Directory,
-                perm,
-                Stream.Null,
-                _config.AllowFileCreation,
-                _config.AllowFileDeletion) & restrictedRights;
-
-            if (inheritedRights == Rights.None)
-            {
-                fileDescriptor.Rights = rights;
-                fileDescriptor.InheritedRights = rights;
-            }
-            else
-            {
-                fileDescriptor.Rights = inheritedRights & rights;
-                fileDescriptor.InheritedRights = inheritedRights;
-            }
+            // Same own-vs-inherited rights split as WasiFsHelpers.BindDir
+            // — keep both methods in lockstep so preopens (which go through
+            // here) match runtime-created dirs.
+            var maxRights = FileDescriptor.ComputeFileRights(
+                dirInfo, Filetype.Directory, perm, Stream.Null,
+                _config.AllowFileCreation, _config.AllowFileDeletion);
+            var baseRights = restrictedRights == Rights.All
+                ? maxRights
+                : (restrictedRights & maxRights);
+            var inhRights  = inheritedRights == Rights.None
+                ? maxRights
+                : (inheritedRights & maxRights);
+            fileDescriptor.Rights          = baseRights & ~FileDescriptor.DirInapplicableRights;
+            fileDescriptor.InheritedRights = inhRights;
 
             _state.FileDescriptors[newFd] = fileDescriptor;
             return newFd;

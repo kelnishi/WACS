@@ -81,7 +81,7 @@ namespace Wacs.WASI.Preview1
         {
             if (!mem.Contains(bufPtr, FdStatSize)) return (int)ErrNo.Inval;
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
 
             var hostPath = state.PathMapper.MapToHostPath(fileDescriptor.Path);
             try { File.GetAttributes(hostPath); }
@@ -110,7 +110,7 @@ namespace Wacs.WASI.Preview1
         public static int FdFdstatSetFlagsCore(State state, int fd, int flags)
         {
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
 
             const FdFlags known = FdFlags.Append | FdFlags.DSync |
                                   FdFlags.NonBlock | FdFlags.RSync | FdFlags.Sync;
@@ -126,7 +126,7 @@ namespace Wacs.WASI.Preview1
             long fs_rights_base, long fs_rights_inheriting)
         {
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
 
             var newBase = (Rights)fs_rights_base;
             var newInherit = (Rights)fs_rights_inheriting;
@@ -146,7 +146,7 @@ namespace Wacs.WASI.Preview1
         {
             if (!mem.Contains(bufPtr, FileStatSize)) return (int)ErrNo.Inval;
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
 
             // For stdio (fd < 3), provide dummy stats.
             if (fd < 3)
@@ -172,6 +172,13 @@ namespace Wacs.WASI.Preview1
             FileStat fileStat = isDir
                 ? WasiFsHelpers.BuildFileStatForDirectory(new DirectoryInfo(hostPath))
                 : WasiFsHelpers.BuildFileStatForFile(new FileInfo(hostPath));
+            // FileInfo.Length reflects the on-disk size, which lags any
+            // not-yet-flushed FileStream writes (rust/path_open_read_write
+            // line 109 catches this — second fd_write extended the stream
+            // but the stat showed the pre-flush size). Prefer the live
+            // stream length when we have one.
+            if (!isDir && fileDescriptor.Stream is FileStream fs && fs.CanSeek)
+                fileStat.Size = (ulong)fs.Length;
             mem.WriteStruct(bufPtr, fileStat);
             return (int)ErrNo.Success;
         }
@@ -180,7 +187,7 @@ namespace Wacs.WASI.Preview1
         public static int FdFilestatSetSizeCore(State state, int fd, long stSize)
         {
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
             if (fileDescriptor.Type == Filetype.Directory) return (int)ErrNo.IsDir;
 
             try { fileDescriptor.Stream.SetLength(stSize); }
@@ -194,7 +201,7 @@ namespace Wacs.WASI.Preview1
             long atim, long mtim, int flags)
         {
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
 
             var hostPath = state.PathMapper.MapToHostPath(fileDescriptor.Path);
             FileAttributes attr;
@@ -211,23 +218,27 @@ namespace Wacs.WASI.Preview1
             if ((f & (FstFlags.MTim | FstFlags.MTimNow)) == (FstFlags.MTim | FstFlags.MTimNow))
                 return (int)ErrNo.Inval;
 
-            DateTime newAtime = DateTime.UtcNow, newMtime = DateTime.UtcNow;
-            if ((f & FstFlags.ATim) != 0)         newAtime = Clock.ToDateTimeUtc(atim);
-            else if ((f & FstFlags.ATimNow) != 0) newAtime = DateTime.UtcNow;
-            if ((f & FstFlags.MTim) != 0)         newMtime = Clock.ToDateTimeUtc(mtim);
-            else if ((f & FstFlags.MTimNow) != 0) newMtime = DateTime.UtcNow;
+            // Only touch a timestamp when the corresponding flag is set —
+            // rust/fd_filestat_set verifies atim is preserved when only
+            // FSTFLAGS_MTIM is passed.
+            bool setA = (f & (FstFlags.ATim | FstFlags.ATimNow)) != 0;
+            bool setM = (f & (FstFlags.MTim | FstFlags.MTimNow)) != 0;
+            DateTime newAtime = (f & FstFlags.ATim) != 0
+                ? Clock.ToDateTimeUtc(atim) : DateTime.UtcNow;
+            DateTime newMtime = (f & FstFlags.MTim) != 0
+                ? Clock.ToDateTimeUtc(mtim) : DateTime.UtcNow;
 
             try
             {
                 if (isDir)
                 {
-                    Directory.SetLastWriteTimeUtc(hostPath, newMtime);
-                    Directory.SetLastAccessTimeUtc(hostPath, newAtime);
+                    if (setM) Directory.SetLastWriteTimeUtc(hostPath, newMtime);
+                    if (setA) Directory.SetLastAccessTimeUtc(hostPath, newAtime);
                 }
                 else
                 {
-                    File.SetLastWriteTimeUtc(hostPath, newMtime);
-                    File.SetLastAccessTimeUtc(hostPath, newAtime);
+                    if (setM) File.SetLastWriteTimeUtc(hostPath, newMtime);
+                    if (setA) File.SetLastAccessTimeUtc(hostPath, newAtime);
                 }
             }
             catch (IOException)                { return (int)ErrNo.IO; }
@@ -273,13 +284,17 @@ namespace Wacs.WASI.Preview1
         {
             if (!mem.Contains(pathPtr, pathLen)) return (int)ErrNo.Inval;
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
             if (fileDescriptor.Type != Filetype.Directory) return (int)ErrNo.NotDir;
 
             var name = fileDescriptor.Path;
             if (name.Length > 1 && name[0] == '/') name = name.Substring(1);
             var utf8Name = Encoding.UTF8.GetBytes(name);
-            if (utf8Name.Length > pathLen) return (int)ErrNo.TooBig;
+            // wasi-libc and wasmtime return ENAMETOOLONG (or EINVAL) for
+            // a too-small buffer here; the wasi-testsuite (rust/dir_fd_op
+            // _failures) accepts either. E2BIG is the "argument list too
+            // long" code, semantically wrong.
+            if (utf8Name.Length > pathLen) return (int)ErrNo.NameTooLong;
 
             mem.WriteUtf8String(pathPtr, name, nullTerminate: false);
             return (int)ErrNo.Success;
@@ -292,7 +307,7 @@ namespace Wacs.WASI.Preview1
             if (!mem.Contains(buf, FileStatSize)) return (int)ErrNo.Inval;
             if (!mem.Contains(pathPtr, pathLen)) return (int)ErrNo.Inval;
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var dirFileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
             if (dirFileDescriptor.Type != Filetype.Directory && fd >= 3)
                 return (int)ErrNo.NotDir;
 
@@ -321,11 +336,53 @@ namespace Wacs.WASI.Preview1
                 catch (UnauthorizedAccessException) { return (int)ErrNo.Acces; }
                 catch (IOException)                 { return (int)ErrNo.IO; }
 
-                if (linkInfo == null) return (int)ErrNo.NoEnt;
-                if (!string.IsNullOrEmpty(linkInfo.LinkTarget))
+                // Dangling symlinks: parent enumeration can find them
+                // even when File.Exists/Directory.Exists return false (the
+                // target is missing but the link entry is on disk).
+                bool linkInfoIsSymlink = linkInfo != null
+                    && !string.IsNullOrEmpty(linkInfo.LinkTarget);
+                string? danglingLinkTarget = null;
+                if (linkInfo == null)
                 {
-                    var symStat = WasiFsHelpers.BuildFileStatForFile(new FileInfo(hostPath));
-                    symStat.Mode = Filetype.SymbolicLink;
+                    var parent = Path.GetDirectoryName(hostPath);
+                    var name = Path.GetFileName(hostPath);
+                    if (!string.IsNullOrEmpty(parent) && Directory.Exists(parent))
+                    {
+                        foreach (var e in new DirectoryInfo(parent).EnumerateFileSystemInfos(name))
+                        {
+                            if ((e.Attributes & FileAttributes.ReparsePoint) != 0)
+                            {
+                                danglingLinkTarget = e.LinkTarget ?? "";
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (linkInfo == null && danglingLinkTarget == null) return (int)ErrNo.NoEnt;
+
+                if (linkInfoIsSymlink || danglingLinkTarget != null)
+                {
+                    // POSIX lstat on a symlink: Size is the length of the
+                    // link's target-path bytes, not the size of the target.
+                    // FileInfo.Length would throw for symlink-to-directory
+                    // / dangling symlink because the file isn't there.
+                    var target = (linkInfoIsSymlink ? linkInfo!.LinkTarget : danglingLinkTarget) ?? "";
+                    // Pseudo-inode: stable per-host-path hash, doesn't need
+                    // to read the (possibly missing) target.
+                    using var sha = System.Security.Cryptography.SHA256.Create();
+                    var hashBytes = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(hostPath));
+                    var inode = BitConverter.ToUInt64(hashBytes, 0);
+                    var symStat = new FileStat
+                    {
+                        Device = 0,
+                        Ino = inode,
+                        Mode = Filetype.SymbolicLink,
+                        NLink = 1,
+                        Size = (ulong)System.Text.Encoding.UTF8.GetByteCount(target),
+                        ATim = linkInfo != null ? Clock.ToTimestamp(linkInfo.LastAccessTimeUtc) : 0,
+                        MTim = linkInfo != null ? Clock.ToTimestamp(linkInfo.LastWriteTimeUtc) : 0,
+                        CTim = linkInfo != null ? Clock.ToTimestamp(linkInfo.CreationTimeUtc) : 0,
+                    };
                     mem.WriteStruct(buf, symStat);
                     return (int)ErrNo.Success;
                 }
@@ -354,7 +411,7 @@ namespace Wacs.WASI.Preview1
         {
             if (!mem.Contains(pathPtr, pathLen)) return (int)ErrNo.Inval;
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var dirFileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
             if (dirFileDescriptor.Type != Filetype.Directory && fd >= 3)
                 return (int)ErrNo.NotDir;
 

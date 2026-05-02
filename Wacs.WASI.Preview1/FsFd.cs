@@ -91,7 +91,7 @@ namespace Wacs.WASI.Preview1
         public static int FdAdviseCore(State state, int fd, long offset, long len, int advice)
         {
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
             if ((ulong)offset + (ulong)len > (ulong)fileDescriptor.Stream.Length)
                 return (int)ErrNo.Inval;
             // All advice values are no-ops in our backend; reject only unknown bits.
@@ -114,7 +114,10 @@ namespace Wacs.WASI.Preview1
             int fd, long offset, long len)
         {
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
+            // fd_allocate is a regular-file operation; directories return
+            // ISDIR (rust/dir_fd_op_failures line 107).
+            if (fileDescriptor.Type == Filetype.Directory) return (int)ErrNo.IsDir;
 
             long newLen = offset + len;
             if (newLen > config.MaxFileSize) return (int)ErrNo.Inval;
@@ -126,7 +129,14 @@ namespace Wacs.WASI.Preview1
         [WacsImport("wasi_snapshot_preview1", "fd_close")]
         public static int FdCloseCore(State state, int fd)
         {
-            try { WasiFsHelpers.TryRemoveFd(state, (uint)fd); }
+            // WASI close on an unknown fd returns BADF (rust/renumber pins
+            // this — close after fd_renumber must surface that fd_from is
+            // gone). Previous code silently returned Success.
+            try
+            {
+                if (!WasiFsHelpers.TryRemoveFd(state, (uint)fd))
+                    return (int)ErrNo.Badf;
+            }
             catch (Exception) { return (int)ErrNo.IO; }
             return (int)ErrNo.Success;
         }
@@ -135,7 +145,7 @@ namespace Wacs.WASI.Preview1
         public static int FdDatasyncCore(State state, int fd)
         {
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
             fileDescriptor.Stream.Flush();
             return (int)ErrNo.Success;
         }
@@ -145,7 +155,7 @@ namespace Wacs.WASI.Preview1
             int fd, int iovsPtr, int iovsLen, long offset, int nreadPtr)
         {
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
             if ((fileDescriptor.Rights & Rights.FD_READ) == 0) return (int)ErrNo.NotCapable;
             if (fileDescriptor.Type == Filetype.Directory) return (int)ErrNo.IsDir;
             if (!fileDescriptor.Stream.CanRead) return (int)ErrNo.IO;
@@ -187,7 +197,7 @@ namespace Wacs.WASI.Preview1
             int fd, int iovsPtr, int iovsLen, long offset, int nwrittenPtr)
         {
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
             if ((fileDescriptor.Rights & Rights.FD_WRITE) == 0) return (int)ErrNo.NotCapable;
             if (fileDescriptor.Type == Filetype.Directory) return (int)ErrNo.IsDir;
             if (!fileDescriptor.Stream.CanWrite) return (int)ErrNo.IO;
@@ -220,7 +230,7 @@ namespace Wacs.WASI.Preview1
             int fd, int iovsPtr, int iovsLen, int nreadPtr)
         {
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
             if ((fileDescriptor.Rights & Rights.FD_READ) == 0) return (int)ErrNo.NotCapable;
             if (fileDescriptor.Type == Filetype.Directory) return (int)ErrNo.IsDir;
             if (!fileDescriptor.Stream.CanRead) return (int)ErrNo.IO;
@@ -255,14 +265,48 @@ namespace Wacs.WASI.Preview1
             int fd, int bufPtr, int bufLen, long cookie, int bufUsedPtr)
         {
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
             if (fileDescriptor.Type != Filetype.Directory) return (int)ErrNo.NotDir;
 
             var hostPath = state.PathMapper.MapToHostPath(fileDescriptor.Path);
             var entries = DirectoryExtensions.EnumerateFileSystemEntriesSafely(hostPath);
 
+            // Synthesize "." and ".." — Directory.EnumerateFileSystemEntries
+            // omits them on .NET, but rust/fd_readdir asserts both are
+            // present in any non-error readdir. Inode for "." matches the
+            // dir itself; ".." reaches for the parent (falls back to self
+            // for the root preopen with no parent).
+            ulong selfInode = 0;
+            try { selfInode = FileUtil.GenerateInode(new DirectoryInfo(hostPath)); } catch { }
+            ulong parentInode = selfInode;
+            try
+            {
+                var parent = Path.GetDirectoryName(hostPath);
+                if (!string.IsNullOrEmpty(parent))
+                    parentInode = FileUtil.GenerateInode(new DirectoryInfo(parent));
+            }
+            catch { }
+
             var array = new List<(long, DirEnt, byte[])>();
             long runningCookie = 0;
+            void AddEntry(string name, Filetype fileType, ulong inode)
+            {
+                byte[] nameBytes = Encoding.UTF8.GetBytes(name);
+                long nameLen = nameBytes.Length;
+                long mycookie = runningCookie;
+                runningCookie += DirEntSize + nameLen;
+                array.Add((mycookie, new DirEnt
+                {
+                    DNext = runningCookie,
+                    DIno = inode,
+                    DNamlen = (uint)nameLen,
+                    DType = fileType,
+                }, nameBytes));
+            }
+
+            AddEntry(".",  Filetype.Directory, selfInode);
+            AddEntry("..", Filetype.Directory, parentInode);
+
             foreach (var entry in entries)
             {
                 if (entry == "." || entry == "..") continue;
@@ -277,20 +321,7 @@ namespace Wacs.WASI.Preview1
 
                 var name = Path.GetFileName(entry);
                 if (string.IsNullOrEmpty(name)) continue;
-
-                byte[] nameBytes = Encoding.UTF8.GetBytes(name);
-                long nameLen = nameBytes.Length;
-                long mycookie = runningCookie;
-                runningCookie += DirEntSize + nameLen;
-
-                var dirent = new DirEnt
-                {
-                    DNext = runningCookie,
-                    DIno = inode,
-                    DNamlen = (uint)nameLen,
-                    DType = fileType,
-                };
-                array.Add((mycookie, dirent, nameBytes));
+                AddEntry(name, fileType, inode);
             }
 
             byte[] allDirEnts = new byte[runningCookie];
@@ -326,8 +357,8 @@ namespace Wacs.WASI.Preview1
         [WacsImport("wasi_snapshot_preview1", "fd_renumber")]
         public static int FdRenumberCore(State state, int from, int to)
         {
-            if (!WasiFsHelpers.TryGetFd(state, (uint)from, out _)) return (int)ErrNo.NoEnt;
-            if (!WasiFsHelpers.TryGetFd(state, (uint)to,   out _)) return (int)ErrNo.NoEnt;
+            if (!WasiFsHelpers.TryGetFd(state, (uint)from, out _)) return (int)ErrNo.Badf;
+            if (!WasiFsHelpers.TryGetFd(state, (uint)to,   out _)) return (int)ErrNo.Badf;
             try
             {
                 WasiFsHelpers.TryRemoveFd(state, (uint)to);
@@ -342,7 +373,7 @@ namespace Wacs.WASI.Preview1
             int fd, long offset, int whence, int newoffsetPtr)
         {
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
             if (fileDescriptor.Type == Filetype.Directory) return (int)ErrNo.IsDir;
 
             long newPosition;
@@ -364,7 +395,7 @@ namespace Wacs.WASI.Preview1
         public static int FdSyncCore(State state, int fd)
         {
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
             if (fileDescriptor.Type == Filetype.Directory) return (int)ErrNo.IsDir;
             fileDescriptor.Stream.Flush();
             return (int)ErrNo.Success;
@@ -374,7 +405,7 @@ namespace Wacs.WASI.Preview1
         public static int FdTellCore(WacsHostMemory mem, State state, int fd, int offsetPtr)
         {
             if (!WasiFsHelpers.TryGetFd(state, (uint)fd, out var fileDescriptor))
-                return (int)ErrNo.NoEnt;
+                return (int)ErrNo.Badf;
             try
             {
                 if (fileDescriptor.Type == Filetype.Directory) return (int)ErrNo.IsDir;
