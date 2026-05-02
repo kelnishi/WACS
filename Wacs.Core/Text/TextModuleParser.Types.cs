@@ -261,10 +261,19 @@ namespace Wacs.Core.Text
             i++;
             ExpectConsumed(form, i, "type");
 
-            var sub = ParseSubType(ctx, body);
+            int flatIdx = CountFlattenedTypes(ctx);
+            var sub = ParseSubType(ctx, body, fieldIdxForStruct: flatIdx);
             ctx.Types.Declare(name);
             ctx.Module.Types.Add(new RecursiveType(sub));
             ctx.TypesFromRec.Add(false);
+        }
+
+        private static int CountFlattenedTypes(TextParseContext ctx)
+        {
+            int n = 0;
+            for (int t = 0; t < ctx.Module.Types.Count; t++)
+                n += ctx.Module.Types[t].SubTypes.Length;
+            return n;
         }
 
         /// <summary>
@@ -277,6 +286,8 @@ namespace Wacs.Core.Text
         private static void ParseRecTypeForm(TextParseContext ctx, SExpr form)
         {
             var subs = new List<SubType>();
+            int baseFlatIdx = CountFlattenedTypes(ctx);
+            int recOffset = 0;
             for (int i = 1; i < form.Children.Count; i++)
             {
                 var inner = form.Children[i];
@@ -289,10 +300,11 @@ namespace Wacs.Core.Text
                 if (bi >= inner.Children.Count)
                     throw new FormatException($"line {inner.Token.Line}: (type …) missing body");
                 var body = inner.Children[bi];
-                var sub = ParseSubType(ctx, body);
+                var sub = ParseSubType(ctx, body, fieldIdxForStruct: baseFlatIdx + recOffset);
 
                 ctx.Types.Declare(subName);
                 subs.Add(sub);
+                recOffset++;
             }
             ctx.Module.Types.Add(new RecursiveType(subs.ToArray()));
             ctx.TypesFromRec.Add(true);
@@ -303,7 +315,7 @@ namespace Wacs.Core.Text
         /// <c>struct</c>, <c>array</c>) or a <c>(sub final? super* body)</c>
         /// wrapper.
         /// </summary>
-        private static SubType ParseSubType(TextParseContext ctx, SExpr body)
+        private static SubType ParseSubType(TextParseContext ctx, SExpr body, int fieldIdxForStruct)
         {
             if (body.IsForm("sub"))
             {
@@ -334,14 +346,14 @@ namespace Wacs.Core.Text
                     throw new FormatException($"line {body.Token.Line}: (sub …) missing composite body");
                 var inner = body.Children[si++];
                 ExpectConsumed(body, si, "sub");
-                var comp = ParseCompositeType(ctx, inner);
+                var comp = ParseCompositeType(ctx, inner, fieldIdxForStruct);
                 return new SubType(supers.ToArray(), comp, final);
             }
-            var composite = ParseCompositeType(ctx, body);
+            var composite = ParseCompositeType(ctx, body, fieldIdxForStruct);
             return new SubType(composite, final: true);
         }
 
-        private static CompositeType ParseCompositeType(TextParseContext ctx, SExpr body)
+        private static CompositeType ParseCompositeType(TextParseContext ctx, SExpr body, int fieldIdxForStruct)
         {
             if (body.IsForm("func"))
             {
@@ -353,13 +365,31 @@ namespace Wacs.Core.Text
             if (body.IsForm("struct"))
             {
                 var fields = new List<FieldType>();
+                NameTable? names = null;
                 for (int k = 1; k < body.Children.Count; k++)
                 {
                     var f = body.Children[k];
                     if (f.Kind != SExprKind.List || !f.IsForm("field"))
                         throw new FormatException($"line {f.Token.Line}: (struct …) expects (field …) children");
-                    foreach (var ft in ParseFieldForm(ctx, f))
+                    foreach (var (ft, name) in ParseFieldFormWithName(ctx, f))
+                    {
+                        if (name != null)
+                        {
+                            names ??= new NameTable();
+                            // Pad with anonymous declarations so the named
+                            // field lands at its actual index.
+                            while (names.Count < fields.Count)
+                                names.Declare(null);
+                            names.Declare(name);
+                        }
                         fields.Add(ft);
+                    }
+                }
+                if (names != null)
+                {
+                    while (names.Count < fields.Count)
+                        names.Declare(null);
+                    ctx.StructFieldNames[fieldIdxForStruct] = names;
                 }
                 return new StructType(fields.ToArray());
             }
@@ -396,16 +426,30 @@ namespace Wacs.Core.Text
         private static List<FieldType> ParseFieldForm(TextParseContext ctx, SExpr form)
         {
             var list = new List<FieldType>();
+            foreach (var (ft, _) in ParseFieldFormWithName(ctx, form))
+                list.Add(ft);
+            return list;
+        }
+
+        /// <summary>
+        /// Variant that returns each field paired with an optional id token
+        /// (the <c>$name</c>) so the caller can register a struct's
+        /// field-name table for later <c>struct.get $t $name</c> resolution.
+        /// </summary>
+        private static List<(FieldType, string?)> ParseFieldFormWithName(TextParseContext ctx, SExpr form)
+        {
+            var list = new List<(FieldType, string?)>();
             int i = 1;
             // Named field: (field $name storage)
             if (i < form.Children.Count
                 && form.Children[i].Kind == SExprKind.Atom
                 && form.Children[i].Token.Kind == TokenKind.Id)
             {
+                var fieldName = form.Children[i].AtomText();
                 i++;
                 if (i >= form.Children.Count)
                     throw new FormatException($"line {form.Token.Line}: (field $name …) missing type");
-                list.Add(ParseFieldNoWrapper(ctx, form.Children[i]));
+                list.Add((ParseFieldNoWrapper(ctx, form.Children[i]), fieldName));
                 i++;
                 if (i != form.Children.Count)
                     throw new FormatException($"line {form.Token.Line}: named (field $name …) expects exactly one type");
@@ -413,7 +457,7 @@ namespace Wacs.Core.Text
             }
             // Anonymous: one or more types, each becomes a field.
             for (; i < form.Children.Count; i++)
-                list.Add(ParseFieldNoWrapper(ctx, form.Children[i]));
+                list.Add((ParseFieldNoWrapper(ctx, form.Children[i]), null));
             return list;
         }
 

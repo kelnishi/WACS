@@ -62,6 +62,17 @@ namespace Wacs.Core.Text
         /// Quote: the concatenated quoted-source bytes (UTF-8).
         /// </summary>
         public byte[]? Bytes;
+
+        /// <summary>
+        /// Populated when the script parser encountered an exception while
+        /// parsing the inner module of an enclosing assert_invalid /
+        /// assert_malformed / assert_unlinkable assertion (the inner module
+        /// is *expected* to fail — see
+        /// <c>TextScriptParser.ParseAssertModuleFailure</c>). The runner
+        /// uses this to short-circuit the assertion as satisfied without
+        /// re-parsing.
+        /// </summary>
+        public System.Exception? ParseError;
     }
 
     public sealed class ScriptRegister : ScriptCommand
@@ -154,6 +165,8 @@ namespace Wacs.Core.Text
         RefFunc,
         /// <summary>(ref.array) / (ref.struct) / (ref.any) / (ref.i31) / (ref.eq) — generic reftype patterns.</summary>
         RefGeneric,
+        /// <summary>(either v1 v2 …) — assertion form for results that may legitimately be any of several values.</summary>
+        Either,
     }
 
     public enum ScriptFloatPattern
@@ -175,7 +188,45 @@ namespace Wacs.Core.Text
         public long   I64;
         public float  F32;
         public double F64;
+
+        /// <summary>
+        /// Exact IEEE-754 bit pattern for a parsed f32 literal. Always
+        /// populated alongside <see cref="F32"/>; the bits are
+        /// authoritative when the literal carries information that
+        /// can't survive a round-trip through <see cref="float"/>
+        /// (NaN payloads, hex-float precision edges).
+        /// </summary>
+        public uint F32Bits;
+
+        /// <summary>
+        /// Exact IEEE-754 bit pattern for a parsed f64 literal. Same
+        /// role as <see cref="F32Bits"/> for double precision.
+        /// </summary>
+        public ulong F64Bits;
+
         public byte[]? V128;
+
+        /// <summary>
+        /// Lane shape for a parsed (v128.const …) literal — one of
+        /// "i8", "i16", "i32", "i64", "f32", "f64". Used by the
+        /// runner adapter to emit the correct lane_type.
+        /// </summary>
+        public string? V128LaneType;
+
+        /// <summary>
+        /// String-encoded lane values for a parsed (v128.const …)
+        /// literal, in the same form the JSON pipeline emits
+        /// (decimal integers; floats as raw bit-pattern decimals;
+        /// "nan:canonical"/"nan:arithmetic" for NaN patterns).
+        /// </summary>
+        public List<string>? V128Lanes;
+
+        /// <summary>
+        /// Alternatives for an <see cref="ScriptValueKind.Either"/>
+        /// expected-value form. Each alternative is itself a fully
+        /// typed ScriptValue.
+        /// </summary>
+        public List<ScriptValue>? EitherAlternatives;
 
         /// <summary>Heap-type token for <see cref="ScriptValueKind.RefNull"/> and <see cref="ScriptValueKind.RefGeneric"/>.</summary>
         public string? RefHeapType;

@@ -71,17 +71,20 @@ namespace Wacs.Core.Instructions
                         } break;
                         case CatchFlags.CatchRef: //catch_ref x
                         {
+                            // Spec: catch_ref/catch_all_ref capture the exception
+                            // as a NON-NULLABLE (ref exn) — the value is always
+                            // present in the catch handler.
                             var tag = context.Tags[handler.X];
                             var tagType = context.Types[tag.TypeIndex];
                             var compType = tagType.Expansion;
                             var functionType = compType as FunctionType;
                             context.OpStack.PushResult(functionType!.ParameterTypes);
-                            context.OpStack.PushType(ValType.Exn);
+                            context.OpStack.PushType(ValType.ExnNN);
                         } break;
                         case CatchFlags.CatchAll: //catch_all
                             break;
                         case CatchFlags.CatchAllRef: //catch_all_ref
-                            context.OpStack.PushType(ValType.Exn);
+                            context.OpStack.PushType(ValType.ExnNN);
                             break;
                     }
                     context.PopControlFrame();

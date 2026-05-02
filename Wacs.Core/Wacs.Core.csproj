@@ -4,10 +4,10 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>9</LangVersion>
-    <AssemblyVersion>0.11.0</AssemblyVersion>
-    <Version>0.11.0</Version>
+    <AssemblyVersion>0.12.0</AssemblyVersion>
+    <Version>0.12.0</Version>
     <Authors>Kelvin Nishikawa</Authors>
-    <Description>A Pure C# WebAssembly Interpreter. v0.11 captures the WebAssembly Branch Hinting proposal's `metadata.code.branch_hint` custom section into Module.BranchHints and stamps every parsed instruction with its function-body-relative byte offset.</Description>
+    <Description>A Pure C# WebAssembly Interpreter. v0.12 brings the in-process WAT/WAST parser to full parity with the binary parser — every wast in the WebAssembly spec testsuite (SIMD, GC, relaxed-SIMD, hex-float edge cases) round-trips identically through both pipelines, dropping the wasm-tools / wast2json CI dependency.</Description>
     <TrimUnusedDependencies>true</TrimUnusedDependencies>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
