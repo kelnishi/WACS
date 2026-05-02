@@ -11,11 +11,11 @@
         <!-- Package identity -->
         <PackageId>WACS.Transpiler.Lib</PackageId>
         <Title>WACS Transpiler (Library)</Title>
-        <Version>0.5.0</Version>
-        <AssemblyVersion>0.5.0</AssemblyVersion>
+        <Version>0.6.0</Version>
+        <AssemblyVersion>0.6.0</AssemblyVersion>
         <Authors>Kelvin Nishikawa</Authors>
         <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
-        <Description>Library API for WACS.Transpiler — programmatic ahead-of-time WebAssembly-to-.NET IL transpilation, plus seamless loading of saved transpiled assemblies. v0.5 adds the AotLinked emission target (skips the codec wrapper for ~22% binary-size reduction; covers memory / data / globals / tables / element segments) and a stable AssemblyName option for static-reference / NativeAOT-linked workflows. The transpiler now emits `[assembly: WacsTranspiledImports]` + `[assembly: WacsImportNames]` so the new WACS.HostBindings.SourceGen Roslyn generator can wire imports straight to `[WacsImport]`-annotated host statics — no reflection, no DispatchProxy. Together these enable the one-shot `wacs aot` CLI.</Description>
+        <Description>Library API for WACS.Transpiler — programmatic ahead-of-time WebAssembly-to-.NET IL transpilation, plus seamless loading of saved transpiled assemblies. v0.6 consumes the WebAssembly Branch Hinting proposal's `metadata.code.branch_hint` custom section: `if`-with-`else` arms swap to put the likely arm on the hot fall-through, and `if`-without-`else` with an unlikely hint lifts its body to a function-tail cold block via the new `_coldTailEmissions` mechanism. Optimistic — the IL expresses the hint, downstream JIT/AOT layout passes are welcome to refine. v0.5 added the AotLinked emission target, stable AssemblyName, and the [WacsTranspiledImports] / [WacsImportNames] emission used by WACS.HostBindings.SourceGen.</Description>
         <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <RepositoryType>git</RepositoryType>

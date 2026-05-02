@@ -4,10 +4,10 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>9</LangVersion>
-    <AssemblyVersion>0.10.0</AssemblyVersion>
-    <Version>0.10.0</Version>
+    <AssemblyVersion>0.11.0</AssemblyVersion>
+    <Version>0.11.0</Version>
     <Authors>Kelvin Nishikawa</Authors>
-    <Description>A Pure C# WebAssembly Interpreter</Description>
+    <Description>A Pure C# WebAssembly Interpreter. v0.11 captures the WebAssembly Branch Hinting proposal's `metadata.code.branch_hint` custom section into Module.BranchHints and stamps every parsed instruction with its function-body-relative byte offset.</Description>
     <TrimUnusedDependencies>true</TrimUnusedDependencies>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
