@@ -175,6 +175,22 @@ namespace Wacs.Core.Text
         public long   I64;
         public float  F32;
         public double F64;
+
+        /// <summary>
+        /// Exact IEEE-754 bit pattern for a parsed f32 literal. Always
+        /// populated alongside <see cref="F32"/>; the bits are
+        /// authoritative when the literal carries information that
+        /// can't survive a round-trip through <see cref="float"/>
+        /// (NaN payloads, hex-float precision edges).
+        /// </summary>
+        public uint F32Bits;
+
+        /// <summary>
+        /// Exact IEEE-754 bit pattern for a parsed f64 literal. Same
+        /// role as <see cref="F32Bits"/> for double precision.
+        /// </summary>
+        public ulong F64Bits;
+
         public byte[]? V128;
 
         /// <summary>Heap-type token for <see cref="ScriptValueKind.RefNull"/> and <see cref="ScriptValueKind.RefGeneric"/>.</summary>

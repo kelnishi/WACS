@@ -467,13 +467,17 @@ namespace Wacs.Core.Text
                     return v;
                 case "f32.const":
                     v.Kind = ScriptValueKind.F32;
-                    ParseFloatLiteral(node.Children[1], expectPattern, out v.FloatPattern, out var f32, out _);
-                    v.F32 = (float)f32;
+                    ParseFloatLiteral(node.Children[1], expectPattern,
+                        out v.FloatPattern, out v.F32Bits, out v.F64Bits);
+                    v.F32 = BitConverter.Int32BitsToSingle(unchecked((int)v.F32Bits));
+                    v.F64 = BitConverter.Int64BitsToDouble(unchecked((long)v.F64Bits));
                     return v;
                 case "f64.const":
                     v.Kind = ScriptValueKind.F64;
-                    ParseFloatLiteral(node.Children[1], expectPattern, out v.FloatPattern, out _, out var f64);
-                    v.F64 = f64;
+                    ParseFloatLiteral(node.Children[1], expectPattern,
+                        out v.FloatPattern, out v.F32Bits, out v.F64Bits);
+                    v.F32 = BitConverter.Int32BitsToSingle(unchecked((int)v.F32Bits));
+                    v.F64 = BitConverter.Int64BitsToDouble(unchecked((long)v.F64Bits));
                     return v;
                 case "ref.null":
                     v.Kind = ScriptValueKind.RefNull;
@@ -539,48 +543,66 @@ namespace Wacs.Core.Text
             return sign == -1 ? -unchecked((long)value) : unchecked((long)value);
         }
 
+        /// <summary>
+        /// Parse a wasm spec float literal into its exact IEEE-754
+        /// bit pattern (both f32 and f64). Handles every shape the
+        /// spec admits:
+        /// <list type="bullet">
+        ///   <item>Decimal: <c>1.0</c>, <c>1.5e10</c></item>
+        ///   <item>Hex floats: <c>0x1.Ap+3</c>, <c>0x1.fffffep+127</c></item>
+        ///   <item>Special: <c>inf</c>, <c>nan</c> (canonical NaN bit pattern)</item>
+        ///   <item>NaN-with-payload: <c>nan:0x400001</c> — payload bits
+        ///     packed into the NaN mantissa (low bits)</item>
+        ///   <item>Assertion patterns: <c>nan:canonical</c>,
+        ///     <c>nan:arithmetic</c> — produce <see cref="ScriptFloatPattern"/>
+        ///     entries instead of a value, gated on
+        ///     <paramref name="allowPattern"/></item>
+        /// </list>
+        /// Outputs both <paramref name="f32Bits"/> and
+        /// <paramref name="f64Bits"/> so the caller can pick whichever
+        /// matches its const type. They're computed independently so
+        /// f32 NaN payloads fit in 23 mantissa bits and f64 in 52.
+        /// </summary>
         private static void ParseFloatLiteral(
             SExpr atom, bool allowPattern, out ScriptFloatPattern pattern,
-            out double f64NaNs, out double f64)
+            out uint f32Bits, out ulong f64Bits)
         {
             pattern = ScriptFloatPattern.None;
-            f64NaNs = 0;
-            f64 = 0;
+            f32Bits = 0;
+            f64Bits = 0;
             if (atom.Kind != SExprKind.Atom)
                 throw new FormatException($"line {atom.Token.Line}: expected float literal");
             var text = atom.AtomText().Replace("_", "");
-            // NaN patterns only valid in assertion expected lists.
-            if (text == "nan:canonical" || text == "+nan:canonical" || text == "-nan:canonical")
+
+            // Sign extraction (apply at end via bit-OR with sign bit).
+            bool negative = false;
+            if (text.StartsWith("+")) text = text.Substring(1);
+            else if (text.StartsWith("-")) { negative = true; text = text.Substring(1); }
+
+            if (text == "nan:canonical")
             {
                 if (!allowPattern)
                     throw new FormatException($"line {atom.Token.Line}: nan:canonical only valid in assertion context");
                 pattern = ScriptFloatPattern.NanCanonical;
                 return;
             }
-            if (text == "nan:arithmetic" || text == "+nan:arithmetic" || text == "-nan:arithmetic")
+            if (text == "nan:arithmetic")
             {
                 if (!allowPattern)
                     throw new FormatException($"line {atom.Token.Line}: nan:arithmetic only valid in assertion context");
                 pattern = ScriptFloatPattern.NanArithmetic;
                 return;
             }
-            // Plain floats, nan, inf, hex floats.
-            // The spec's NaN-payload literal (e.g. nan:0x400000) and
-            // hex-float representations (e.g. 0x1.Ap+3) are not handled in
-            // phase 1.5 — they trip the parser below. Mark them as pattern
-            // "None" and leave the value zero; Phase 3 will teach this
-            // parser the full float grammar when it wires spec tests.
-            if (text == "nan" || text == "+nan" || text == "-nan"
-                || text.StartsWith("nan:") || text.StartsWith("+nan:") || text.StartsWith("-nan:")
-                || text.StartsWith("0x") || text.StartsWith("+0x") || text.StartsWith("-0x"))
+
+            try
             {
-                // Leave at 0; callers tolerant of approximate parsing.
-                return;
+                FloatLiteralBits.Parse(negative ? "-" + text : text, out f32Bits, out f64Bits);
             }
-            if (text == "inf" || text == "+inf") { f64 = double.PositiveInfinity; return; }
-            if (text == "-inf") { f64 = double.NegativeInfinity; return; }
-            if (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out f64))
-                throw new FormatException($"line {atom.Token.Line}: bad float literal '{atom.AtomText()}'");
+            catch (FormatException e)
+            {
+                throw new FormatException(
+                    $"line {atom.Token.Line}: {e.Message} (literal '{atom.AtomText()}')");
+            }
         }
 
         // ---- Helpers ------------------------------------------------------
