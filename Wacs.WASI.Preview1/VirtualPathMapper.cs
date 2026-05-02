@@ -291,6 +291,48 @@ namespace Wacs.WASI.Preview1
         }
 
         /// <summary>
+        /// Returns true when <paramref name="hostPath"/> names a symlink (the
+        /// link itself, regardless of whether its target exists or resolves).
+        /// Used by callers that need lstat-style semantics — e.g.
+        /// <c>path_open</c> with <c>LOOKUPFLAGS_SYMLINK_FOLLOW</c> bit clear
+        /// must return ELOOP rather than chase the link.
+        /// </summary>
+        public static bool IsSymlink(string hostPath)
+        {
+#if NET6_0_OR_GREATER
+            try
+            {
+                // FileSystemInfo.LinkTarget is non-null for any reparse point /
+                // symlink — file or directory, dangling or live. File.Exists /
+                // Directory.Exists follow links, so they're useless for this.
+                var fi = new FileInfo(hostPath);
+                if (fi.Exists && fi.LinkTarget != null) return true;
+                var di = new DirectoryInfo(hostPath);
+                if (di.Exists && di.LinkTarget != null) return true;
+                // Dangling symlinks: neither FileInfo.Exists nor
+                // DirectoryInfo.Exists are true, but the entry is on disk.
+                // Probe the parent's enumeration to find the entry as a
+                // ReparsePoint without resolving its target.
+                var parent = Path.GetDirectoryName(hostPath);
+                var name = Path.GetFileName(hostPath);
+                if (string.IsNullOrEmpty(parent) || string.IsNullOrEmpty(name)) return false;
+                if (!Directory.Exists(parent)) return false;
+                foreach (var entry in new DirectoryInfo(parent).EnumerateFileSystemInfos(name))
+                {
+                    if ((entry.Attributes & FileAttributes.ReparsePoint) != 0) return true;
+                }
+                return false;
+            }
+            catch
+            {
+                return false;
+            }
+#else
+            return false;
+#endif
+        }
+
+        /// <summary>
         /// Checks whether <paramref name="fullPath"/> is inside <paramref name="baseDir"/> (case-insensitive).
         /// </summary>
         /// <param name="fullPath">The path to check.</param>
