@@ -45,3 +45,32 @@ jobs:
 
       - name: Run WASI Preview 1 Tests
         run: dotnet test --configuration Release --no-build --verbosity normal Wacs.WASI.Preview1.Test/Wacs.WASI.Preview1.Test.csproj
+
+      # End-to-end smoke for `wacs aot --wasi`. The flow chains the
+      # transpiler, WACS.HostBindings.SourceGen adapter generation,
+      # `dotnet publish` with PublishAot, and runtime execution under
+      # NativeAOT — none of which the unit suites cover together. A
+      # regression in any one of those layers (e.g. enum/int bridging
+      # in the source generator, or a Reflection.Emit call sneaking
+      # back into the call_indirect path) breaks `wacs aot --wasi`
+      # silently for downstream embedders.
+      #
+      # The fixture is the smallest WASI fixture in the testsuite
+      # submodule (4.8 KB) and exercises args/clock/fd_write/proc_exit
+      # — enough to catch the bindings most likely to regress.
+      - name: AOT smoke test (wacs aot --wasi)
+        run: |
+          set -euo pipefail
+          fixture=Spec.Test/wasi/tests/assemblyscript/testsuite/wasm32-wasip1/fd_write-to-stdout.wasm
+          if [ ! -f "$fixture" ]; then
+            echo "FAIL: fixture missing — submodule probably not initialized"
+            exit 1
+          fi
+          dotnet run --project Wacs.Console -c Release --no-build -- \
+            aot "$fixture" --wasi -o /tmp/wasi-aot-smoke
+          actual=$(/tmp/wasi-aot-smoke)
+          if [ "$actual" != "hello" ]; then
+            echo "FAIL: expected 'hello', got '$actual'"
+            exit 1
+          fi
+          echo "OK: wacs aot --wasi smoke produced expected stdout"

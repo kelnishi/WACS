@@ -388,7 +388,15 @@ config.StandardError  = Console.OpenStandardError();
 {preopenLines}var state = new State();
 _ = new Wacs.WASI.Preview1.FileSystem(config, state);
 
-var imports = new GeneratedHostImports(state);
+// Source-gen emits a parameterless ctor + a public property per state
+// type (named after the type's short name). We assign every state
+// object we have on hand; if this wasm's bindings don't pull on one of
+// them the property simply stays unread. This avoids coupling the
+// scaffold to whichever ctor arity the source-gen happens to emit for
+// the particular set of bindings the consumer's wasm needs.
+var imports = new GeneratedHostImports();
+imports.State = state;
+imports.WasiConfiguration = config;
 Module module = null!;
 imports.MemoryProvider = () => new WacsHostMemory(module.Memory, module.Memory.Length);
 module = new Module(imports);
