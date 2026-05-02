@@ -9,6 +9,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using Spec.Test.WastJson;
 using Wacs.Core;
@@ -323,9 +324,22 @@ namespace Spec.Test
                     return RefGenericKindToArgument(sv);
                 case ScriptValueKind.V128:
                     return V128ToArgument(sv);
+                case ScriptValueKind.Either:
+                    return EitherToArgument(sv);
                 default:
                     throw new NotSupportedException($"ScriptValue kind {sv.Kind}");
             }
+        }
+
+        private static Argument EitherToArgument(ScriptValue sv)
+        {
+            // The runner inspects Argument.Type == "either" and ranges over
+            // Argument.Values to find a match. Each alternative is a fully
+            // typed Argument produced by the same converter.
+            var alts = (sv.EitherAlternatives ?? new List<ScriptValue>())
+                .Select(ScriptValueToArgument)
+                .ToList();
+            return new Argument { Type = "either", Values = alts };
         }
 
         private static Argument F32ToArgument(ScriptValue sv)
@@ -377,16 +391,24 @@ namespace Spec.Test
 
         private static Argument V128ToArgument(ScriptValue sv)
         {
-            // The downstream runner expects v128 as a JSON array of
-            // lane string values. We don't have a JsonElement here;
-            // synthesize one by serializing then re-deserializing.
-            // Cheap, runs once per spec command at load time.
-            if (sv.V128 == null)
-                throw new InvalidDataException("ScriptValue.V128 missing payload");
-            // Encode the 16 bytes as 16 i8 lane strings.
-            var lanes = new List<string>(16);
-            foreach (var b in sv.V128)
-                lanes.Add(b.ToString());
+            // The runner expects {"type":"v128","lane_type":"…","value":[…]}
+            // — same shape wast2json emits. Use the typed lanes captured by
+            // ParseV128Const; fall back to raw-byte i8 lanes if (legacy)
+            // V128Lanes wasn't populated.
+            var laneType = sv.V128LaneType ?? "i8";
+            List<string> lanes;
+            if (sv.V128Lanes != null)
+            {
+                lanes = sv.V128Lanes;
+            }
+            else
+            {
+                if (sv.V128 == null)
+                    throw new InvalidDataException("ScriptValue.V128 missing payload");
+                lanes = new List<string>(sv.V128.Length);
+                foreach (var b in sv.V128)
+                    lanes.Add(b.ToString());
+            }
             using var ms = new MemoryStream();
             using (var w = new System.Text.Json.Utf8JsonWriter(ms))
             {
@@ -399,7 +421,7 @@ namespace Spec.Test
             return new Argument
             {
                 Type = "v128",
-                LaneType = "i8",
+                LaneType = laneType,
                 Value = doc.RootElement.Clone(),
             };
         }

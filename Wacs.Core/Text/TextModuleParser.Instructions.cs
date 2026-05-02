@@ -1002,8 +1002,385 @@ namespace Wacs.Core.Text
                 }
             }
 
+            // SIMD (FD prefix). The factory has every SimdCode wired; the
+            // text parser distinguishes immediate shapes here:
+            //   - memarg-only   : v128.load/store/load_splat/load_extend/load_zero
+            //   - memarg + lane : v128.load*_lane, v128.store*_lane
+            //   - 16 lane bytes : i8x16.shuffle
+            //   - V128 literal  : v128.const
+            //   - lane index    : {i,f}{8x16,16x8,32x4,64x2}.{extract,replace}_lane
+            //   - zero-immediate: everything else (arithmetic/comparison/etc.)
+            if (Mnemonics.TryLookup(kw, out var bcSimd) && bcSimd.x00 == OpCode.FD)
+                return ParseSimdInstruction(bcSimd, parent, ref i, fctx);
+
             throw new NotSupportedException(
                 $"line {parent.Token.Line}: instruction '{kw}' not yet supported by the text parser (phase 1.4 scope)");
+        }
+
+        // ---- SIMD ---------------------------------------------------------
+
+        private static InstructionBase ParseSimdInstruction(
+            ByteCode bc, SExpr parent, ref int i, TextFunctionContext fctx)
+        {
+            var sc = bc.xFD;
+
+            // memarg-only memory ops
+            if (TryGetSimdMemoryNaturalAlign(sc, out var memAlign))
+                return BuildMemoryInstructionWithContext(bc, memAlign, parent, ref i, fctx);
+
+            // memarg + 1-byte lane index (load*_lane / store*_lane)
+            if (TryGetSimdLaneMemoryNaturalAlign(sc, out var laneMemAlign))
+                return BuildSimdLaneMemoryInstruction(bc, laneMemAlign, parent, ref i, fctx);
+
+            // v128.const — typed lane literals → 16-byte vector
+            if (sc == SimdCode.V128Const)
+                return BuildV128ConstInstruction(bc, parent, ref i);
+
+            // i8x16.shuffle — 16 lane indices (each 0..31)
+            if (sc == SimdCode.I8x16Shuffle)
+                return BuildShuffleInstruction(bc, parent, ref i);
+
+            // {i,f}{shape}.{extract,replace}_lane — single lane-index byte
+            if (TryGetSimdLaneOpMaxLane(sc, out var maxLane))
+                return BuildSimdLaneInstruction(bc, maxLane, parent, ref i);
+
+            // Everything else: zero-immediate; factory has the instance ready.
+            return SpecFactory.Factory.CreateInstruction(bc);
+        }
+
+        private static bool TryGetSimdMemoryNaturalAlign(SimdCode sc, out int naturalAlignLog2)
+        {
+            // Natural alignment matches the binary parser's MemArg conventions.
+            switch (sc)
+            {
+                case SimdCode.V128Load:        naturalAlignLog2 = 4; return true; // 16-byte
+                case SimdCode.V128Store:       naturalAlignLog2 = 4; return true;
+                case SimdCode.V128Load8x8S:
+                case SimdCode.V128Load8x8U:
+                case SimdCode.V128Load16x4S:
+                case SimdCode.V128Load16x4U:
+                case SimdCode.V128Load32x2S:
+                case SimdCode.V128Load32x2U:   naturalAlignLog2 = 3; return true; // 8-byte
+                case SimdCode.V128Load8Splat:  naturalAlignLog2 = 0; return true;
+                case SimdCode.V128Load16Splat: naturalAlignLog2 = 1; return true;
+                case SimdCode.V128Load32Splat: naturalAlignLog2 = 2; return true;
+                case SimdCode.V128Load64Splat: naturalAlignLog2 = 3; return true;
+                case SimdCode.V128Load32Zero:  naturalAlignLog2 = 2; return true;
+                case SimdCode.V128Load64Zero:  naturalAlignLog2 = 3; return true;
+                default:                       naturalAlignLog2 = 0; return false;
+            }
+        }
+
+        private static bool TryGetSimdLaneMemoryNaturalAlign(SimdCode sc, out int naturalAlignLog2)
+        {
+            switch (sc)
+            {
+                case SimdCode.V128Load8Lane:
+                case SimdCode.V128Store8Lane:  naturalAlignLog2 = 0; return true;
+                case SimdCode.V128Load16Lane:
+                case SimdCode.V128Store16Lane: naturalAlignLog2 = 1; return true;
+                case SimdCode.V128Load32Lane:
+                case SimdCode.V128Store32Lane: naturalAlignLog2 = 2; return true;
+                case SimdCode.V128Load64Lane:
+                case SimdCode.V128Store64Lane: naturalAlignLog2 = 3; return true;
+                default:                       naturalAlignLog2 = 0; return false;
+            }
+        }
+
+        private static bool TryGetSimdLaneOpMaxLane(SimdCode sc, out int maxLane)
+        {
+            // Lane count = 128 / shape-bit-width. The validator also enforces
+            // this; we duplicate it here to give a clean parse-time error.
+            switch (sc)
+            {
+                case SimdCode.I8x16ExtractLaneS:
+                case SimdCode.I8x16ExtractLaneU:
+                case SimdCode.I8x16ReplaceLane:  maxLane = 16; return true;
+                case SimdCode.I16x8ExtractLaneS:
+                case SimdCode.I16x8ExtractLaneU:
+                case SimdCode.I16x8ReplaceLane:  maxLane = 8;  return true;
+                case SimdCode.I32x4ExtractLane:
+                case SimdCode.I32x4ReplaceLane:
+                case SimdCode.F32x4ExtractLane:
+                case SimdCode.F32x4ReplaceLane:  maxLane = 4;  return true;
+                case SimdCode.I64x2ExtractLane:
+                case SimdCode.I64x2ReplaceLane:
+                case SimdCode.F64x2ExtractLane:
+                case SimdCode.F64x2ReplaceLane:  maxLane = 2;  return true;
+                default:                         maxLane = 0;  return false;
+            }
+        }
+
+        private static InstructionBase BuildSimdLaneMemoryInstruction(
+            ByteCode bc, int naturalAlignLog2, SExpr parent, ref int i, TextFunctionContext fctx)
+        {
+            // Syntax: <memidx>? offset=N? align=N? <laneidx> [folded operand…]
+            //
+            // The lane index is ALWAYS the last bare integer before any
+            // folded sub-form. Earlier bare integers are the optional
+            // multi-memory memidx (the natural-alignment memory is index 0).
+            // Wabt also accepts a leading lane index when no memidx is
+            // present — handled by inspecting how many bare integers
+            // appear before the next non-bare-int token.
+            uint memIdx = 0;
+            bool haveMemIdx = false;
+            ulong offset = 0;
+            int alignLog2 = naturalAlignLog2;
+            byte? laneIndex = null;
+
+            // Walk forward over the immediate atoms (memidx + kw-args + lane),
+            // stopping at any List (folded operand) or unrelated keyword.
+            // Collect bare-int atoms in order; the LAST is the lane index,
+            // anything earlier is memidx.
+            var bareInts = new List<SExpr>();
+            while (i < parent.Children.Count
+                && parent.Children[i].Kind == SExprKind.Atom)
+            {
+                var tok = parent.Children[i];
+                // kw-arg?
+                if (tok.Token.Kind == TokenKind.Keyword || tok.Token.Kind == TokenKind.Reserved)
+                {
+                    var text = tok.AtomText();
+                    if (text.StartsWith("offset="))
+                    {
+                        offset = (ulong)ParseUnsignedLongField(text.Substring("offset=".Length), tok.Token.Line);
+                        i++;
+                        continue;
+                    }
+                    if (text.StartsWith("align="))
+                    {
+                        var align = ParseUnsignedLongField(text.Substring("align=".Length), tok.Token.Line);
+                        alignLog2 = Log2OfPowerOfTwo((ulong)align, tok.Token.Line);
+                        i++;
+                        continue;
+                    }
+                }
+                // bare unsigned integer (decimal or hex)?
+                if (IsBareUnsignedIntAtom(tok))
+                {
+                    bareInts.Add(tok);
+                    i++;
+                    continue;
+                }
+                // memidx as $name (Id token)?
+                if (tok.Token.Kind == TokenKind.Id && !haveMemIdx && bareInts.Count == 0)
+                {
+                    memIdx = ResolveNamespaceIdx(fctx.Module.Mems, tok, "memory");
+                    haveMemIdx = true;
+                    i++;
+                    continue;
+                }
+                break;
+            }
+
+            // The last bare-int is the lane; anything earlier is memidx.
+            if (bareInts.Count == 0)
+                throw new FormatException(
+                    $"line {parent.Token.Line}: {bc.GetMnemonic()} missing lane index");
+            var laneAtom = bareInts[bareInts.Count - 1];
+            var laneVal = ParseUnsignedLongField(laneAtom.AtomText(), laneAtom.Token.Line);
+            if (laneVal > 255)
+                throw new FormatException(
+                    $"line {laneAtom.Token.Line}: lane index {laneVal} out of range");
+            laneIndex = (byte)laneVal;
+            if (bareInts.Count > 1)
+            {
+                if (haveMemIdx)
+                    throw new FormatException(
+                        $"line {parent.Token.Line}: {bc.GetMnemonic()} has duplicate memory index");
+                if (bareInts.Count > 2)
+                    throw new FormatException(
+                        $"line {parent.Token.Line}: {bc.GetMnemonic()} too many bare integer operands");
+                var memAtom = bareInts[0];
+                memIdx = ResolveNamespaceIdx(fctx.Module.Mems, memAtom, "memory");
+                haveMemIdx = true;
+            }
+
+            int ai = alignLog2;
+            uint memIdxCap = memIdx;
+            bool haveMemIdxCap = haveMemIdx;
+            byte lane = laneIndex.Value;
+            return DecodeViaBinary(bc, w =>
+            {
+                uint alignBits = (uint)ai;
+                if (haveMemIdxCap)
+                {
+                    alignBits |= 0x40u;
+                    w.WriteLeb128U32(alignBits);
+                    w.WriteLeb128U32(memIdxCap);
+                }
+                else
+                {
+                    w.WriteLeb128U32(alignBits);
+                }
+                WriteLeb128U64(w, offset);
+                w.Write(lane);
+            });
+        }
+
+        private static InstructionBase BuildSimdLaneInstruction(
+            ByteCode bc, int maxLane, SExpr parent, ref int i)
+        {
+            if (i >= parent.Children.Count
+                || parent.Children[i].Kind != SExprKind.Atom
+                || !IsBareUnsignedIntAtom(parent.Children[i]))
+                throw new FormatException(
+                    $"line {parent.Token.Line}: {bc.GetMnemonic()} expects a lane index");
+            var laneAtom = parent.Children[i];
+            var idx = ParseUnsignedLongField(laneAtom.AtomText(), laneAtom.Token.Line);
+            if (idx >= (uint)maxLane)
+                throw new FormatException(
+                    $"line {laneAtom.Token.Line}: lane index {idx} out of range (max {maxLane - 1})");
+            i++;
+            byte lane = (byte)idx;
+            return DecodeViaBinary(bc, w => w.Write(lane));
+        }
+
+        private static InstructionBase BuildShuffleInstruction(ByteCode bc, SExpr parent, ref int i)
+        {
+            // 16 lane indices, each 0..31.
+            var lanes = new byte[16];
+            for (int k = 0; k < 16; k++)
+            {
+                if (i >= parent.Children.Count
+                    || parent.Children[i].Kind != SExprKind.Atom
+                    || !IsBareUnsignedIntAtom(parent.Children[i]))
+                    throw new FormatException(
+                        $"line {parent.Token.Line}: i8x16.shuffle expects 16 lane indices, got {k}");
+                var atom = parent.Children[i];
+                var idx = ParseUnsignedLongField(atom.AtomText(), atom.Token.Line);
+                if (idx >= 32)
+                    throw new FormatException(
+                        $"line {atom.Token.Line}: shuffle lane index {idx} out of range (max 31)");
+                lanes[k] = (byte)idx;
+                i++;
+            }
+            return DecodeViaBinary(bc, w => w.Write(lanes));
+        }
+
+        private static InstructionBase BuildV128ConstInstruction(ByteCode bc, SExpr parent, ref int i)
+        {
+            // (v128.const shape lane0 lane1 ...) where shape ∈ {i8x16, i16x8,
+            // i32x4, i64x2, f32x4, f64x2}. Each lane is a numeric literal in
+            // the shape's lane type. Encoded as 16 little-endian bytes.
+            if (i >= parent.Children.Count
+                || parent.Children[i].Kind != SExprKind.Atom
+                || parent.Children[i].Token.Kind != TokenKind.Keyword)
+                throw new FormatException(
+                    $"line {parent.Token.Line}: v128.const expects a shape keyword");
+            var shape = parent.Children[i].AtomText();
+            i++;
+
+            using var ms = new MemoryStream(16);
+            using var w = new BinaryWriter(ms);
+            switch (shape)
+            {
+                case "i8x16":
+                    for (int k = 0; k < 16; k++)
+                    {
+                        var atom = ConsumeLaneAtom(parent, ref i, shape, k);
+                        w.Write((byte)ParseSignedLaneByte(atom));
+                    }
+                    break;
+                case "i16x8":
+                    for (int k = 0; k < 8; k++)
+                    {
+                        var atom = ConsumeLaneAtom(parent, ref i, shape, k);
+                        w.Write((ushort)ParseSignedLaneShort(atom));
+                    }
+                    break;
+                case "i32x4":
+                    for (int k = 0; k < 4; k++)
+                    {
+                        var atom = ConsumeLaneAtom(parent, ref i, shape, k);
+                        w.Write((int)ParseSignedLaneInt(atom));
+                    }
+                    break;
+                case "i64x2":
+                    for (int k = 0; k < 2; k++)
+                    {
+                        var atom = ConsumeLaneAtom(parent, ref i, shape, k);
+                        w.Write((long)ParseSignedLaneLong(atom));
+                    }
+                    break;
+                case "f32x4":
+                    for (int k = 0; k < 4; k++)
+                    {
+                        var atom = ConsumeLaneAtom(parent, ref i, shape, k);
+                        var bits = ParseFloatLaneBits32(atom);
+                        w.Write(bits);
+                    }
+                    break;
+                case "f64x2":
+                    for (int k = 0; k < 2; k++)
+                    {
+                        var atom = ConsumeLaneAtom(parent, ref i, shape, k);
+                        var bits = ParseFloatLaneBits64(atom);
+                        w.Write(bits);
+                    }
+                    break;
+                default:
+                    throw new FormatException(
+                        $"line {parent.Token.Line}: v128.const unknown shape '{shape}'");
+            }
+            w.Flush();
+            var bytes = ms.ToArray();
+            if (bytes.Length != 16)
+                throw new FormatException(
+                    $"line {parent.Token.Line}: v128.const internal error: encoded {bytes.Length} bytes");
+            return DecodeViaBinary(bc, bw => bw.Write(bytes));
+        }
+
+        private static SExpr ConsumeLaneAtom(SExpr parent, ref int i, string shape, int k)
+        {
+            if (i >= parent.Children.Count || parent.Children[i].Kind != SExprKind.Atom)
+                throw new FormatException(
+                    $"line {parent.Token.Line}: v128.const {shape} expected lane {k} literal");
+            var atom = parent.Children[i];
+            i++;
+            return atom;
+        }
+
+        private static long ParseSignedLaneByte(SExpr atom)
+        {
+            var s = ParseSignedInt64(atom);
+            if (s >= -128 && s <= 255) return s;
+            throw new FormatException($"line {atom.Token.Line}: i8 lane literal {s} out of range");
+        }
+
+        private static long ParseSignedLaneShort(SExpr atom)
+        {
+            var s = ParseSignedInt64(atom);
+            if (s >= short.MinValue && s <= ushort.MaxValue) return s;
+            throw new FormatException($"line {atom.Token.Line}: i16 lane literal {s} out of range");
+        }
+
+        private static long ParseSignedLaneInt(SExpr atom)
+        {
+            var s = ParseSignedInt64(atom);
+            if (s >= int.MinValue && s <= uint.MaxValue) return s;
+            throw new FormatException($"line {atom.Token.Line}: i32 lane literal {s} out of range");
+        }
+
+        private static long ParseSignedLaneLong(SExpr atom) => ParseSignedInt64(atom);
+
+        private static uint ParseFloatLaneBits32(SExpr atom)
+        {
+            FloatLiteralBits.Parse(atom.AtomText().Replace("_", ""), out var f32Bits, out _);
+            return f32Bits;
+        }
+
+        private static ulong ParseFloatLaneBits64(SExpr atom)
+        {
+            FloatLiteralBits.Parse(atom.AtomText().Replace("_", ""), out _, out var f64Bits);
+            return f64Bits;
+        }
+
+        private static bool IsBareUnsignedIntAtom(SExpr atom)
+        {
+            if (atom.Kind != SExprKind.Atom) return false;
+            if (atom.Token.Kind != TokenKind.Reserved) return false;
+            return IsDecimalOrHexInt(atom.AtomText());
         }
 
         /// <summary>
