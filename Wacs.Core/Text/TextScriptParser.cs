@@ -90,10 +90,24 @@ namespace Wacs.Core.Text
                         result.Add(ParseAssertExhaustion(node));
                         break;
                     case "assert_invalid":
-                        result.Add(ParseAssertModuleFailure<ScriptAssertInvalid>(node, "assert_invalid"));
+                    // The Branch Hinting proposal introduces
+                    // `assert_invalid_custom` to call out failures that
+                    // originate in custom-section validation (where
+                    // standard spec runners would normally accept the
+                    // module). Lower it to the same script command —
+                    // the WACS parser validates `metadata.code.branch_hint`
+                    // when its feature flag is on and reports failures
+                    // through the same path.
+                    case "assert_invalid_custom":
+                        result.Add(ParseAssertModuleFailure<ScriptAssertInvalid>(node, kw));
                         break;
                     case "assert_malformed":
-                        result.Add(ParseAssertModuleFailure<ScriptAssertMalformed>(node, "assert_malformed"));
+                    // Same reasoning for `assert_malformed_custom` —
+                    // a malformed custom-section payload triggers the
+                    // same FormatException path as a malformed core
+                    // section.
+                    case "assert_malformed_custom":
+                        result.Add(ParseAssertModuleFailure<ScriptAssertMalformed>(node, kw));
                         break;
                     case "assert_unlinkable":
                         result.Add(ParseAssertModuleFailure<ScriptAssertUnlinkable>(node, "assert_unlinkable"));
@@ -381,7 +395,26 @@ namespace Wacs.Core.Text
                 throw new FormatException(
                     $"line {node.Token.Line}: ({name}) expects (module …) and message");
             var cmd = new T { Line = node.Token.Line, Column = node.Token.Column };
-            var module = ParseModuleCommand(node.Children[1]);
+            // The inner (module …) is EXPECTED to fail (that's the whole
+            // point of the enclosing assertion). Quote modules already
+            // swallow parse errors at ParseModuleCommand; do the same
+            // for text modules so the runner reaches the assertion
+            // verdict rather than aborting the whole script.
+            ScriptModule module;
+            try
+            {
+                module = ParseModuleCommand(node.Children[1]);
+            }
+            catch (System.FormatException)
+            {
+                module = new ScriptModule
+                {
+                    Line = node.Children[1].Token.Line,
+                    Column = node.Children[1].Token.Column,
+                    Kind = ScriptModuleKind.Text,
+                    Module = null,
+                };
+            }
             var msg = DecodeString(node, node.Children[2].Token);
             // Set via reflection-lite: each concrete type has Module and
             // ExpectedMessage fields. Rather than branching on T, use a
