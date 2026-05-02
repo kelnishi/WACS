@@ -86,6 +86,21 @@ namespace Wacs.WASI.Preview1.Types
         }
 
         /// <summary>
+        /// File-only rights that have no meaning when held on a directory FD.
+        /// Stripping these from a dir's *own* rights set lets the wasi-testsuite
+        /// (rust/directory_seek, rust/truncation_rights) verify the dir doesn't
+        /// claim them, while we keep them in the *inherited* set so PathOpen
+        /// can hand them down to child files.
+        /// </summary>
+        public static readonly Rights DirInapplicableRights =
+            Rights.FD_SEEK
+            | Rights.FD_TELL
+            | Rights.FD_WRITE
+            | Rights.FD_READ
+            | Rights.FD_FILESTAT_SET_SIZE
+            | Rights.FD_ALLOCATE;
+
+        /// <summary>
         /// Computes the WASI <see cref="Rights"/> for a regular file.
         /// </summary>
         public static Rights ComputeFileRights(
@@ -186,13 +201,6 @@ namespace Wacs.WASI.Preview1.Types
                 rights |= Rights.PATH_RENAME_SOURCE;
                 rights |= Rights.PATH_RENAME_TARGET;
                 rights |= Rights.PATH_SYMLINK;
-                // NOTE: rust/directory_seek asserts the dir has no FD_SEEK
-                // right, but we keep FD_SEEK / FD_WRITE on directories
-                // here because PathOpen propagates the parent dir's rights
-                // as the inherited cap when opening child files; stripping
-                // them here would strip the child file's seek/write too.
-                // The right fix is a per-fd "own rights" vs "inherited
-                // rights" split — deferred (skip.json keeps directory_seek).
             }
 
             // Optionally always allow data syncing

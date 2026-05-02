@@ -95,19 +95,26 @@ namespace Wacs.WASI.Preview1.Internal
                 Access = perm, IsPreopened = isPreopened, Type = Filetype.Directory,
             };
             var dirInfo = new DirectoryInfo(hostDir);
-            var rights = FileDescriptor.ComputeFileRights(
+            // What this directory could grant if uncapped — driven by
+            // FileAccess + the AllowFileCreation/Deletion config flags.
+            var maxRights = FileDescriptor.ComputeFileRights(
                 dirInfo, Filetype.Directory, perm, Stream.Null,
-                config.AllowFileCreation, config.AllowFileDeletion) & restrictedRights;
-            if (inheritedRights == Rights.None)
-            {
-                fileDescriptor.Rights = rights;
-                fileDescriptor.InheritedRights = rights;
-            }
-            else
-            {
-                fileDescriptor.Rights = inheritedRights & rights;
-                fileDescriptor.InheritedRights = inheritedRights;
-            }
+                config.AllowFileCreation, config.AllowFileDeletion);
+            // Per WASI spec, path_open's rules cap base/inheriting separately:
+            //   base       = restrictedRights (= fsRightsBase ∩ parent.inheriting)
+            //   inheriting = inheritedRights  (= fsRightsInheriting ∩ parent.inheriting)
+            // Both still bounded by what this dir could possibly grant.
+            // The dir's *own* base further drops file-only rights so
+            // rust/directory_seek and rust/truncation_rights don't see
+            // FD_SEEK/FD_FILESTAT_SET_SIZE on a directory FD.
+            var baseRights = restrictedRights == Rights.All
+                ? maxRights
+                : (restrictedRights & maxRights);
+            var inhRights  = inheritedRights == Rights.None
+                ? maxRights
+                : (inheritedRights & maxRights);
+            fileDescriptor.Rights          = baseRights & ~FileDescriptor.DirInapplicableRights;
+            fileDescriptor.InheritedRights = inhRights;
             state.FileDescriptors[newFd] = fileDescriptor;
             return newFd;
         }

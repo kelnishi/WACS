@@ -1,17 +1,12 @@
 {
   "_comment": "Tests deliberately skipped per remaining-Phase-4 work. Each `reason` names what lifts the skip.",
   "skip": [
-    { "test": "rust/directory_seek",                      "reason": "Phase 4.x: directory FD needs own-vs-inherited rights split — dir keeps FD_SEEK so PathOpen can pass it down to files" },
-    { "test": "rust/path_open_preopen",                   "reason": "Phase 4.x: OFLAGS_DIRECTORY + FD_WRITE-only rights should ISDIR; pre-check conflicts with the open_scratch_directory pattern that passes a preopen's full rights — needs the same rights split" },
-    { "test": "rust/truncation_rights",                   "reason": "Phase 4.x: directory rights split — dir grants FD_FILESTAT_SET_SIZE so child files inherit it" },
-    { "test": "rust/path_open_read_write",                "reason": "Phase 4.x: write right on a read-only file via PathOpen rights inheritance" },
     { "test": "rust/file_unbuffered_write",               "reason": "Phase 4.x: FdFlag.Sync semantics — fd_write+fd_read mismatch on stream buffering" },
     { "test": "rust/symlink_filestat",                    "reason": "Phase 4.x: lutimes/AT_SYMLINK_NOFOLLOW to set times on the link itself rather than its target" },
     { "test": "assemblyscript/fd_write-to-invalid-fd",    "reason": "Phase 4.x: assemblyscript abort propagation on fd_write errno" },
     { "test": "c/pwrite-with-access",                     "reason": "Phase 4.x: fd_pwrite stream interaction with existing file" },
-    { "test": "rust/interesting_paths",                   "reason": "Phase 4.6: special-character path handling" },
-    { "test": "rust/path_filestat",                       "reason": "Phase 4.6: additional lstat edge cases" },
-    { "test": "rust/path_rename",                         "reason": "Phase 4.6: cross-mount rename + trailing-slash interaction" },
-    { "test": "rust/poll_oneoff_stdio",                   "reason": "Phase 4.5: write-readiness on stdio quirk" }
+    { "test": "rust/interesting_paths",                   "reason": "Phase 4.x: detect path .. escapes from the dirfd boundary — needs guest-side normalization in path_open" },
+    { "test": "rust/poll_oneoff_stdio",                   "reason": "Phase 4.5: write-readiness on stdio quirk" },
+    { "test": "rust/path_rename",                         "reason": "Phase 4.x: rename-dir-onto-empty-dir needs POSIX rename(2) P/Invoke (Directory.Move throws on existing target on macOS/Linux)" }
   ]
 }
