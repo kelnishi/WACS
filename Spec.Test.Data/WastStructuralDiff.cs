@@ -154,6 +154,7 @@ namespace Spec.Test
                     out_.Add($"Funcs[{i}].TypeIndex: WACS={a.Funcs[i].TypeIndex.Value} wabt={b.Funcs[i].TypeIndex.Value}");
                 if (a.Funcs[i].Locals.Length != b.Funcs[i].Locals.Length)
                     out_.Add($"Funcs[{i}].Locals.Length: WACS={a.Funcs[i].Locals.Length} wabt={b.Funcs[i].Locals.Length}");
+                CompareInitExpr(out_, $"Funcs[{i}].Body", a.Funcs[i].Body, b.Funcs[i].Body);
             }
 
             n = Math.Min(a.Globals.Count, b.Globals.Count);
@@ -208,7 +209,16 @@ namespace Spec.Test
                 if (a.Exports[i].Name != b.Exports[i].Name)
                     out_.Add($"Exports[{i}].Name: WACS={a.Exports[i].Name} wabt={b.Exports[i].Name}");
                 if (a.Exports[i].Desc.GetType() != b.Exports[i].Desc.GetType())
+                {
                     out_.Add($"Exports[{i}].Kind: WACS={a.Exports[i].Desc.GetType().Name} wabt={b.Exports[i].Desc.GetType().Name}");
+                    continue;
+                }
+                // Also compare the target index (which func / table /
+                // memory / global the export points at).
+                var rA = a.Exports[i].Desc.ToString();
+                var rB = b.Exports[i].Desc.ToString();
+                if (rA != rB)
+                    out_.Add($"Exports[{i}].Desc: WACS={rA} wabt={rB}");
             }
 
             n = Math.Min(a.Imports.Length, b.Imports.Length);
@@ -219,7 +229,14 @@ namespace Spec.Test
                 if (a.Imports[i].Name != b.Imports[i].Name)
                     out_.Add($"Imports[{i}].Name: WACS={a.Imports[i].Name} wabt={b.Imports[i].Name}");
                 if (a.Imports[i].Desc.GetType() != b.Imports[i].Desc.GetType())
+                {
                     out_.Add($"Imports[{i}].Kind: WACS={a.Imports[i].Desc.GetType().Name} wabt={b.Imports[i].Desc.GetType().Name}");
+                    continue;
+                }
+                var rA = a.Imports[i].Desc.ToString();
+                var rB = b.Imports[i].Desc.ToString();
+                if (rA != rB)
+                    out_.Add($"Imports[{i}].Desc: WACS={rA} wabt={rB}");
             }
 
             // StartIndex
@@ -277,7 +294,24 @@ namespace Spec.Test
             {
                 if (instsA[i].GetType() != instsB[i].GetType())
                     out_.Add($"{label}[{i}]: WACS={instsA[i].GetType().Name} wabt={instsB[i].GetType().Name}");
+                // Operand-level checks for the few common instruction
+                // types where field divergence has practical impact
+                // (function references, locals, type indices). String
+                // comparison via RenderText avoids per-type plumbing.
+                else
+                {
+                    var rA = TryRender(instsA[i]);
+                    var rB = TryRender(instsB[i]);
+                    if (rA != rB)
+                        out_.Add($"{label}[{i}].text: WACS={rA} wabt={rB}");
+                }
             }
+        }
+
+        private static string TryRender(InstructionBase inst)
+        {
+            try { return inst.RenderText(null); }
+            catch { return inst.GetType().Name; }
         }
 
         private static string Render(List<InstructionBase> insts) =>
