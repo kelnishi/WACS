@@ -129,7 +129,14 @@ namespace Wacs.WASI.Preview1
         [WacsImport("wasi_snapshot_preview1", "fd_close")]
         public static int FdCloseCore(State state, int fd)
         {
-            try { WasiFsHelpers.TryRemoveFd(state, (uint)fd); }
+            // WASI close on an unknown fd returns BADF (rust/renumber pins
+            // this — close after fd_renumber must surface that fd_from is
+            // gone). Previous code silently returned Success.
+            try
+            {
+                if (!WasiFsHelpers.TryRemoveFd(state, (uint)fd))
+                    return (int)ErrNo.Badf;
+            }
             catch (Exception) { return (int)ErrNo.IO; }
             return (int)ErrNo.Success;
         }
@@ -350,8 +357,8 @@ namespace Wacs.WASI.Preview1
         [WacsImport("wasi_snapshot_preview1", "fd_renumber")]
         public static int FdRenumberCore(State state, int from, int to)
         {
-            if (!WasiFsHelpers.TryGetFd(state, (uint)from, out _)) return (int)ErrNo.NoEnt;
-            if (!WasiFsHelpers.TryGetFd(state, (uint)to,   out _)) return (int)ErrNo.NoEnt;
+            if (!WasiFsHelpers.TryGetFd(state, (uint)from, out _)) return (int)ErrNo.Badf;
+            if (!WasiFsHelpers.TryGetFd(state, (uint)to,   out _)) return (int)ErrNo.Badf;
             try
             {
                 WasiFsHelpers.TryRemoveFd(state, (uint)to);

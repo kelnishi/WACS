@@ -158,8 +158,15 @@ namespace Wacs.WASI.Preview1
 
         public static DateTime ToDateTimeUtc(timestamp atim)
         {
-            long milliseconds = (long)(atim / 1_000_000); // Convert nanoseconds to milliseconds.
-            return new DateTime(milliseconds, DateTimeKind.Utc);
+            // WASI timestamps are nanoseconds since the Unix epoch.
+            // DateTime tick is 100ns, so atim/100 = ticks-from-epoch
+            // (added onto the Unix epoch to land in the right century).
+            // Previous code mistakenly used `atim/1_000_000` as DateTime
+            // *ticks* — produced a year-0001 timestamp that
+            // File.SetLastWriteTimeUtc rounded to whatever the underlying
+            // filesystem allowed, breaking fd_filestat_set's mtim check.
+            long ticks = (long)(atim / 100);
+            return DateTime.UnixEpoch.AddTicks(ticks);
         }
     }
 }
