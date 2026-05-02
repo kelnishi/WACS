@@ -9,7 +9,6 @@
     { "test": "rust/dir_fd_op_failures",                  "reason": "Phase 4: directory-fd error edge cases" },
     { "test": "rust/directory_seek",                      "reason": "Phase 4: fd_seek on a directory should ESPIPE" },
     { "test": "rust/fd_filestat_set",                     "reason": "Phase 4: fd_filestat_set_times edge cases" },
-    { "test": "rust/fd_readdir",                          "reason": "Phase 4: fd_readdir cookie/dirent layout" },
     { "test": "rust/file_unbuffered_write",               "reason": "Phase 4: needs investigation" },
     { "test": "rust/interesting_paths",                   "reason": "Phase 4: special-character path handling" },
     { "test": "rust/overwrite_preopen",                   "reason": "Phase 4: needs investigation" },
