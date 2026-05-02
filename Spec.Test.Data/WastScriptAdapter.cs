@@ -96,6 +96,32 @@ namespace Spec.Test
                 using var ms = new MemoryStream(sm.Bytes);
                 parsed = BinaryModuleParser.ParseWasm(ms);
             }
+            // Quote modules whose eager parse in TextScriptParser
+            // failed end up with Module == null but Bytes set. Most
+            // such cases come from `assert_malformed (module quote …)`,
+            // where the wrapper assertion command (AssertMalformedCommand)
+            // captures the parse error itself — a ModuleCommand path
+            // shouldn't reach a null Module unless the script used a
+            // bare `(module quote …)` whose content is the body of an
+            // implicit module (per WAT spec § 6.6.2). Try wrapping; on
+            // any failure, surface a visible test failure rather than
+            // crash ModuleCommand.RunTest with a null Filename.
+            if (parsed == null && sm.Kind == ScriptModuleKind.Quote && sm.Bytes != null)
+            {
+                try
+                {
+                    var quoted = Encoding.UTF8.GetString(sm.Bytes);
+                    parsed = TextModuleParser.ParseWat("(module\n" + quoted + "\n)");
+                }
+                catch (Exception e)
+                {
+                    return new ScriptParseFailureCommand
+                    {
+                        Line = sm.Line,
+                        ParseError = $"(module quote) at line {sm.Line}: {e.GetType().Name}: {e.Message}",
+                    };
+                }
+            }
             // `(module definition …)` validates without instantiating; a
             // later `(module instance $alias $id)` creates the runtime
             // instance via ModuleInstanceCommand.
