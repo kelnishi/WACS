@@ -56,9 +56,38 @@ namespace Wacs.Core
         public static bool AnnotateWhileParsing = true;
         public static bool SkipFinalization = false;
         public static bool ParseCustomNames = false;
+
+        /// <summary>
+        /// Opt-in for the `metadata.code.branch_hint` custom section
+        /// (and WAT-level `(@metadata.code.branch_hint …)` annotations).
+        /// Off by default — interpreter / switch-runtime consumers
+        /// don't read the hints, so parsing them is dead work. The
+        /// transpiler is the only consumer today; CLI commands that
+        /// transpile (`wacs build`, `wacs aot`) set this true before
+        /// parsing. Programmatic embedders should do the same when
+        /// they intend to feed the parsed Module into
+        /// <c>ModuleTranspiler</c>.
+        /// </summary>
+        public static bool ParseBranchHints = false;
+
         public static uint MaximumFunctionLocals = 2048;
 
         public static int InstructionsParsed = 0;
+
+        /// <summary>
+        /// Absolute byte position (within the binary stream) of the
+        /// start of the function body currently being parsed. Set by
+        /// <see cref="Module.FuncLocalsBody.Parse"/> before reading
+        /// instructions, restored on exit. Read by
+        /// <see cref="ParseInstruction"/> to compute each
+        /// instruction's body-relative offset (the lookup key for
+        /// branch-hint metadata). A negative sentinel means "not in
+        /// a function body" — instructions parsed in that state
+        /// (constant expressions, etc.) leave their
+        /// <see cref="InstructionBase.ByteOffsetInFunc"/> at zero.
+        /// Single-threaded parser; static field is safe.
+        /// </summary>
+        internal static long CurrentFunctionBodyStart = -1;
 
         public static readonly SectionId[] SectionOrder = new[]
         {
@@ -264,6 +293,18 @@ namespace Wacs.Core
                             module.Names = ParseNameSection(subreader);
                         }
                         break;
+                    case "metadata.code.branch_hint" when ParseBranchHints:
+                        // Capture every hint in the section. Gated
+                        // behind the opt-in flag because interpreter
+                        // consumers don't use it and parsing is dead
+                        // work for them. Validation against the actual
+                        // instruction stream happens later, after the
+                        // code section is fully resolved.
+                        using (var subreader = reader.GetSubsectionTo((int)payloadEnd))
+                        {
+                            module.BranchHints = ParseBranchHintSection(subreader);
+                        }
+                        break;
                     default:
                         //Skip others
                         // Console.WriteLine($"   name: {customSectionName}");
@@ -298,10 +339,14 @@ namespace Wacs.Core
         /// </summary>
         public static InstructionBase? ParseInstruction(BinaryReader reader)
         {
-            
+            // Capture the absolute position before consuming the
+            // opcode so we can compute this instruction's
+            // body-relative byte offset (the branch-hint coordinate).
+            long instAbsPos = reader.BaseStream.Position;
+
             //Splice another byte if the first byte is a prefix
             var opcode = (OpCode)reader.ReadByte() switch {
-                OpCode.FB => new ByteCode((GcCode)reader.ReadLeb128_u32()), 
+                OpCode.FB => new ByteCode((GcCode)reader.ReadLeb128_u32()),
                 OpCode.FC => new ByteCode((ExtCode)reader.ReadLeb128_u32()),
                 OpCode.FD => new ByteCode((SimdCode)reader.ReadLeb128_u32()),
                 OpCode.FE => new ByteCode((AtomCode)reader.ReadLeb128_u32()),
@@ -310,7 +355,10 @@ namespace Wacs.Core
             int traceIdx = InstructionsParsed;
             try
             {
-                return InstructionFactory.CreateInstruction(opcode)?.Parse(reader);
+                var inst = InstructionFactory.CreateInstruction(opcode)?.Parse(reader);
+                if (inst != null && CurrentFunctionBodyStart >= 0)
+                    inst.ByteOffsetInFunc = (uint)(instAbsPos - CurrentFunctionBodyStart);
+                return inst;
             }
             catch (InvalidDataException exc)
             {
@@ -362,11 +410,37 @@ namespace Wacs.Core
             
             if (module.DataCount == uint.MaxValue)
                 module.DataCount = (uint)module.Datas.Length;
-            
+
             if (module.DataCount != module.Datas.Length)
                 throw new FormatException($"Data count and data section have inconsistent lengths.");
-            
+
             PatchNames(module);
+
+            // Branch-hint funcidx range check: a module-level
+            // assertion that's cheap and catches obvious corruption.
+            // Per-instruction target validation (hint must land on an
+            // `if`/`br_if`) is intentionally not enforced here — the
+            // proposal classifies bad targets as advisory and we
+            // prefer to surface the data verbatim. Consumers of
+            // BranchHints can re-check at use-site.
+            if (module.BranchHints != null)
+            {
+                int funcCount = module.Funcs.Count + module.ImportedFunctions.Count;
+                foreach (var funcIdx in module.BranchHints.ByFuncIndex.Keys)
+                {
+                    if (funcIdx >= funcCount)
+                        throw new FormatException(
+                            $"branch_hint: funcidx {funcIdx} out of range " +
+                            $"(module has {funcCount} functions)");
+                }
+                // Bridge the offset-keyed parse data to the
+                // ref-keyed transpile data. After this, both binary
+                // and WAT inputs have a uniform `TryGet(inst)` lookup.
+                module.BranchHints.JoinByInstruction(
+                    module.Funcs.Select(f =>
+                        (f.Index.Value, (System.Collections.Generic.IEnumerable<InstructionBase>)
+                            f.Body.Instructions)));
+            }
         }
     }
 }

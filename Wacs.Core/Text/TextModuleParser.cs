@@ -112,9 +112,20 @@ namespace Wacs.Core.Text
 
                 // Module-level WAT annotations `(@name …)` — round-trip
                 // metadata is deferred; for now we just skip them so the
-                // module still parses.
+                // module still parses. Branch_hint specifically: per
+                // spec the annotation must appear inside a function
+                // body; module-level use is malformed. Reject when
+                // branch-hint parsing is on so embedders see the
+                // diagnostic instead of silently mis-emitting; tolerate
+                // when off so existing inputs don't regress.
                 if (head.Token.Kind == TokenKind.Reserved && head.AtomText().StartsWith("@"))
+                {
+                    if (BinaryModuleParser.ParseBranchHints
+                        && head.AtomText() == "@metadata.code.branch_hint")
+                        throw new FormatException(
+                            $"line {head.Token.Line}: @metadata.code.branch_hint annotation: not in a function");
                     continue;
+                }
                 if (head.Token.Kind != TokenKind.Keyword)
                     throw new FormatException($"line {form.Token.Line}: section form must start with a keyword");
 

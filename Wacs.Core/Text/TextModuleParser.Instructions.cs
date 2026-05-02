@@ -53,9 +53,35 @@ namespace Wacs.Core.Text
         {
             stopKeyword = null;
             var result = new List<InstructionBase>();
+
+            // Pending hint from a `(@metadata.code.branch_hint "\xx")`
+            // annotation on the previous sibling. Attached to the
+            // next-emitted `if` / `br_if` instruction. Per the
+            // proposal, "duplicate annotation" (two in a row) and
+            // "invalid target" (next instruction isn't if/br_if) are
+            // both errors. Only collected when Module.ParseBranchHints
+            // is on; otherwise annotations are silently skipped to
+            // save parse work for interpreter consumers.
+            BranchHint? pendingHint = null;
+            int pendingHintLine = 0;
+
             while (i < parent.Children.Count)
             {
                 var node = parent.Children[i];
+
+                // Annotation: `(@name args…)` — folded form whose head
+                // is a Reserved token starting with '@'. Recognized
+                // shapes are intercepted here; unrecognized shapes
+                // silently skipped (forward-compat with future
+                // annotations the parser doesn't yet know about).
+                if (node.Kind == SExprKind.List && IsAnnotationNode(node))
+                {
+                    HandleAnnotation(node, ref pendingHint, ref pendingHintLine);
+                    i++;
+                    continue;
+                }
+
+                int beforeCount = result.Count;
                 if (node.Kind == SExprKind.Atom)
                 {
                     if (node.Token.Kind == TokenKind.Keyword)
@@ -65,6 +91,9 @@ namespace Wacs.Core.Text
                         {
                             if (kw == "end" && (stop & InstrStop.End) != 0)
                             {
+                                if (pendingHint.HasValue)
+                                    throw new FormatException(
+                                        $"line {pendingHintLine}: @metadata.code.branch_hint annotation: invalid target (no following if/br_if before 'end')");
                                 stopKeyword = "end";
                                 i++;
                                 // Optional trailing label id — ignored (but consumed).
@@ -76,21 +105,118 @@ namespace Wacs.Core.Text
                             }
                             if (kw == "else" && (stop & InstrStop.Else) != 0)
                             {
+                                if (pendingHint.HasValue)
+                                    throw new FormatException(
+                                        $"line {pendingHintLine}: @metadata.code.branch_hint annotation: invalid target (no following if/br_if before 'else')");
                                 stopKeyword = "else";
                                 return result;   // leave 'else' for caller
                             }
                         }
                         ParsePlainInstruction(fctx, parent, ref i, kw, result);
-                        continue;
                     }
-                    throw new FormatException(
-                        $"line {node.Token.Line}: unexpected {node.Token.Kind} '{node.AtomText()}' in instruction list");
+                    else
+                    {
+                        throw new FormatException(
+                            $"line {node.Token.Line}: unexpected {node.Token.Kind} '{node.AtomText()}' in instruction list");
+                    }
                 }
-                // Folded form
-                ParseFoldedInstruction(fctx, node, result);
-                i++;
+                else
+                {
+                    // Folded form
+                    ParseFoldedInstruction(fctx, node, result);
+                    i++;
+                }
+
+                // If a hint is pending, attach it to the if/br_if among
+                // the newly-added instructions. Folded forms (e.g.
+                // (if (cond) (then ...) (else ...))) emit the operand
+                // sub-instructions first, then the if itself; we walk
+                // forward and attach to the first hint-eligible match.
+                if (pendingHint.HasValue)
+                {
+                    InstructionBase? target = null;
+                    for (int k = beforeCount; k < result.Count; k++)
+                    {
+                        if (result[k] is InstIf || result[k] is InstBranchIf)
+                        {
+                            target = result[k];
+                            break;
+                        }
+                    }
+                    if (target == null)
+                        throw new FormatException(
+                            $"line {pendingHintLine}: @metadata.code.branch_hint annotation: invalid target (preceding instruction not if/br_if)");
+
+                    var hints = EnsureBranchHints(fctx);
+                    hints.ByInstruction[target] = pendingHint.Value;
+                    pendingHint = null;
+                }
             }
+
+            if (pendingHint.HasValue)
+                throw new FormatException(
+                    $"line {pendingHintLine}: @metadata.code.branch_hint annotation: invalid target (end of instruction list)");
+
             return result;
+        }
+
+        // ---- Annotation helpers --------------------------------------------
+
+        private static bool IsAnnotationNode(SExpr node)
+        {
+            if (node.Kind != SExprKind.List) return false;
+            var head = node.Head;
+            return head != null
+                && head.Kind == SExprKind.Atom
+                && head.Token.Kind == TokenKind.Reserved
+                && head.AtomText().StartsWith("@");
+        }
+
+        private static void HandleAnnotation(
+            SExpr node, ref BranchHint? pendingHint, ref int pendingHintLine)
+        {
+            var head = node.Head!;
+            var name = head.AtomText();
+
+            // Other annotation shapes (round-trip metadata, custom
+            // tooling) are silently passed through — they don't
+            // affect IL emission.
+            if (name != "@metadata.code.branch_hint") return;
+
+            // Gate on the parser feature flag. When off, drop the
+            // annotation on the floor — interpreter consumers don't
+            // need branch hints, no point spending parse work.
+            if (!BinaryModuleParser.ParseBranchHints) return;
+
+            if (pendingHint.HasValue)
+                throw new FormatException(
+                    $"line {node.Token.Line}: @metadata.code.branch_hint annotation: duplicate annotation");
+
+            // Payload: a single string atom whose decoded bytes are
+            // the hint data. Spec pins length = 1 today, but the
+            // proposal encodes it as vec(byte) so future revisions
+            // can extend.
+            if (node.Children.Count != 2)
+                throw new FormatException(
+                    $"line {node.Token.Line}: @metadata.code.branch_hint annotation: expected exactly one string payload");
+            var payloadNode = node.Children[1];
+            if (payloadNode.Kind != SExprKind.Atom || payloadNode.Token.Kind != TokenKind.String)
+                throw new FormatException(
+                    $"line {payloadNode.Token.Line}: @metadata.code.branch_hint annotation: payload must be a string literal");
+
+            var data = node.Lexer.DecodeString(payloadNode.Token);
+            // Synthetic ByteOffset = 0; the WAT path uses ByInstruction
+            // for lookup, the offset is unused.
+            pendingHint = new BranchHint(0, data);
+            pendingHintLine = node.Token.Line;
+        }
+
+        private static Module.BranchHintMap EnsureBranchHints(TextFunctionContext fctx)
+        {
+            var module = fctx.Module.Module;
+            if (module.BranchHints == null)
+                module.BranchHints = new Module.BranchHintMap();
+            return module.BranchHints;
         }
 
         // ---- Folded forms -------------------------------------------------

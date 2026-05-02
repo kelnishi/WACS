@@ -134,6 +134,12 @@ namespace Wacs.Console.Verbs
             var parseTimer = new Stopwatch();
             if (opts.Verbose) parseTimer.Start();
 
+            // Branch-hint metadata only matters when we go through the
+            // transpiler. Interpreter / switch runtime ignore it, so
+            // skip the parse work for those engines.
+            Wacs.Core.BinaryModuleParser.ParseBranchHints = string.Equals(
+                opts.Engine, "transpiler", StringComparison.OrdinalIgnoreCase);
+
             Wacs.Core.Module module;
             using (var fileStream = new FileStream(wasmPath, FileMode.Open))
             {

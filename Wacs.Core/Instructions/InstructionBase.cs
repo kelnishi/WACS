@@ -44,6 +44,18 @@ namespace Wacs.Core.Instructions
 
         public int Size = 1;
 
+        /// <summary>
+        /// Byte offset of this instruction within its enclosing
+        /// function body (i.e. relative to the byte after the locals
+        /// declaration). Populated by the binary parser for
+        /// instructions parsed from a function body; remains zero
+        /// for instructions parsed from constant expressions
+        /// (global initializers, element offsets, etc.) where
+        /// branch-hint metadata cannot apply. Used as the lookup key
+        /// against <see cref="Wacs.Core.Module.BranchHintMap"/>.
+        /// </summary>
+        public uint ByteOffsetInFunc;
+
         public InstructionBase(ByteCode op, int stack) =>
             (Op, StackDiff) = (op, stack);
 
