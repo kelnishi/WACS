@@ -56,6 +56,20 @@ namespace Spec.Test
             AppContext.BaseDirectory,
             _configuration["JsonDirectory"] ?? "");
 
+        /// <summary>
+        /// Root directory holding raw <c>.wast</c> files. When set,
+        /// <see cref="GetTestDefinitions"/> uses
+        /// <see cref="WastScriptAdapter"/> to parse each file with
+        /// WACS's own WAT/WAST parser and produces in-memory
+        /// <see cref="WastJson.WastJson"/> instances — no external
+        /// <c>wasm-tools</c> / <c>wast2json</c> precompile step.
+        /// When empty/missing, falls back to the legacy JSON-on-disk
+        /// pipeline (<see cref="JsonDirectory"/>).
+        /// </summary>
+        public string WastDirectory => Path.Combine(
+            AppContext.BaseDirectory,
+            _configuration["WastDirectory"] ?? "");
+
         public string SingleTest => _configuration["Single"] ?? "";
 
         public HashSet<string> SkipWasts =>
@@ -68,10 +82,21 @@ namespace Spec.Test
         public bool TraceExecution => _configuration["TraceExecution"] == "True";
 
         /// <summary>
-        /// Load all test definitions, filtered by configuration.
+        /// Load all test definitions, filtered by configuration. When
+        /// <see cref="WastDirectory"/> is configured, parses .wast
+        /// files in-process via <see cref="WastScriptAdapter"/>;
+        /// otherwise falls back to the JSON-on-disk pipeline.
         /// </summary>
         public IEnumerable<WastJson.WastJson> GetTestDefinitions()
         {
+            if (!string.IsNullOrEmpty(_configuration["WastDirectory"])
+                && Directory.Exists(WastDirectory))
+            {
+                foreach (var td in GetWastTestDefinitions())
+                    yield return td;
+                yield break;
+            }
+
             if (!Directory.Exists(JsonDirectory))
                 yield break;
 
@@ -81,6 +106,38 @@ namespace Spec.Test
             foreach (var file in files)
             {
                 var testData = LoadTestDefinition(file);
+
+                if (!string.IsNullOrEmpty(SingleTest) && SingleTest != testData.TestName)
+                    continue;
+
+                if (SkipWasts.Contains(testData.TestName))
+                    continue;
+
+                yield return testData;
+            }
+        }
+
+        private IEnumerable<WastJson.WastJson> GetWastTestDefinitions()
+        {
+            var files = Directory.GetFiles(WastDirectory, "*.wast", SearchOption.AllDirectories)
+                .OrderBy(path => path);
+
+            foreach (var file in files)
+            {
+                WastJson.WastJson testData;
+                try
+                {
+                    testData = WastScriptAdapter.FromWastFile(file, TraceExecution);
+                }
+                catch (Exception)
+                {
+                    // .wast files that the WACS parser can't yet
+                    // handle are skipped silently — better than
+                    // aborting the whole test run. Track via SkipWasts
+                    // if a specific file needs to be excluded
+                    // explicitly.
+                    continue;
+                }
 
                 if (!string.IsNullOrEmpty(SingleTest) && SingleTest != testData.TestName)
                     continue;

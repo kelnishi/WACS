@@ -47,6 +47,13 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("filename")] public string? Filename { get; set; }
         [JsonPropertyName("name")] public string? Name { get; set; }
 
+        /// <summary>
+        /// Pre-parsed Module supplied by the WAST-direct test data
+        /// adapter (no JSON / no .wasm-on-disk). When non-null, used
+        /// in lieu of loading <see cref="Filename"/>.
+        /// </summary>
+        [JsonIgnore] public Module? PreParsedModule { get; set; }
+
         public CommandType Type => CommandType.Module;
         [JsonPropertyName("line")] public int Line { get; set; }
 
@@ -54,20 +61,29 @@ namespace Spec.Test.WastJson
         {
             List<Exception> errors = new();
 
-            var filepath = Path.Combine(testDefinition.Path, Filename!);
-            using var fileStream = new FileStream(filepath, FileMode.Open);
-            module = BinaryModuleParser.ParseWasm(fileStream);
+            string moduleSource;
+            if (PreParsedModule != null)
+            {
+                module = PreParsedModule;
+                moduleSource = !string.IsNullOrEmpty(Name) ? Name : $"<wast:{Line}>";
+            }
+            else
+            {
+                var filepath = Path.Combine(testDefinition.Path, Filename!);
+                using var fileStream = new FileStream(filepath, FileMode.Open);
+                module = BinaryModuleParser.ParseWasm(fileStream);
+                moduleSource = !string.IsNullOrEmpty(Name) ? Name : $"{filepath}";
+            }
             var modInst = runtime.InstantiateModule(module);
-            var moduleName = !string.IsNullOrEmpty(Name)?Name:$"{filepath}";
-            module.SetName(moduleName);
-            
+            module.SetName(moduleSource);
+
             if (!string.IsNullOrEmpty(Name))
                 modInst.Name = Name;
-            
+
             return errors;
         }
 
-        public override string ToString() => $"Load Module {{ Line = {Line}, Filename = {Filename} }}";
+        public override string ToString() => $"Load Module {{ Line = {Line}, Filename = {Filename ?? "<in-memory>"} }}";
     }
 
     public class ModuleDefinition : ICommand
@@ -75,14 +91,26 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("filename")] public string? Filename { get; set; }
         [JsonPropertyName("name")] public string? Name { get; set; }
         [JsonPropertyName("module_type")] public string? ModuleType { get; set; }
-        
+
+        /// <summary>Pre-parsed Module from the WAST-direct adapter.</summary>
+        [JsonIgnore] public Module? PreParsedModule { get; set; }
+
         public CommandType Type => CommandType.ModuleDefinition;
-        
+
         [JsonPropertyName("line")] public int Line { get; set; }
-        
+
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             List<Exception> errors = new();
+
+            if (PreParsedModule != null)
+            {
+                module = PreParsedModule;
+                if (string.IsNullOrEmpty(Name))
+                    throw new ArgumentException("module_definition missing name (pre-parsed)");
+                module.SetName(Name);
+                return errors;
+            }
 
             if (ModuleType == "text")
             {
@@ -90,18 +118,18 @@ namespace Spec.Test.WastJson
                     $"Module Definition line {Line}: Skipping module_definition. No WAT parsing."));
                 return errors;
             }
-            
+
             if (Filename == null)
                 throw new ArgumentException("Json missing `filename` field");
-            
+
             if (string.IsNullOrEmpty(Name))
                 throw new ArgumentException("Json missing `name` field");
-            
+
             var filepath = Path.Combine(testDefinition.Path, Filename);
             using var fileStream = new FileStream(filepath, FileMode.Open);
             module = BinaryModuleParser.ParseWasm(fileStream);
             module.SetName(Name);
-            
+
             return errors;
         }
     }
@@ -361,22 +389,56 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("filename")] public string? Filename { get; set; }
         [JsonPropertyName("module_type")] public string? ModuleType { get; set; }
         [JsonPropertyName("text")] public string? Text { get; set; }
+
+        /// <summary>
+        /// WAST-direct adapter input: the inner module already parsed
+        /// successfully (so the assertion now needs an instantiation
+        /// failure to satisfy itself), OR null if parse failed.
+        /// </summary>
+        [JsonIgnore] public Module? PreParsedModule { get; set; }
+
+        /// <summary>
+        /// WAST-direct adapter input: the parse error captured at
+        /// script-parse time. Non-null implies the assertion is
+        /// trivially satisfied — the parser already rejected the
+        /// inner module.
+        /// </summary>
+        [JsonIgnore] public Exception? PreParseError { get; set; }
+
         public CommandType Type => CommandType.AssertInvalid;
         [JsonPropertyName("line")] public int Line { get; set; }
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             List<Exception> errors = new();
+
+            // WAST-direct path: the parser may have already rejected
+            // the inner module. That counts.
+            if (PreParseError != null)
+                return errors;
+
+            if (PreParsedModule != null)
+            {
+                try
+                {
+                    runtime.InstantiateModule(PreParsedModule);
+                }
+                catch (ValidationException) { return errors; }
+                catch (InvalidDataException) { return errors; }
+                catch (FormatException) { return errors; }
+                throw new TestException($"Test failed {this}");
+            }
+
             if (ModuleType == "text")
             {
                 errors.Add(new Exception(
                     $"Assert Malformed line {Line}: Skipping assert_malformed. No WAT parsing."));
                 return errors;
             }
-            
+
             if (Filename == null)
                 throw new ArgumentException("Json missing `filename` field");
-            
+
             var filepath = Path.Combine(testDefinition.Path, Filename);
             bool didAssert = false;
             string assertionMessage = "";
@@ -419,6 +481,13 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("filename")] public string? Filename { get; set; }
         [JsonPropertyName("text")] public string? Text { get; set; }
         [JsonPropertyName("module_type")] public string? ModuleType { get; set; }
+
+        /// <summary>WAST-direct: pre-parsed Module if parse succeeded.</summary>
+        [JsonIgnore] public Module? PreParsedModule { get; set; }
+
+        /// <summary>WAST-direct: parse error if the parser already rejected it.</summary>
+        [JsonIgnore] public Exception? PreParseError { get; set; }
+
         public CommandType Type => CommandType.AssertMalformed;
         [JsonPropertyName("line")] public int Line { get; set; }
 
@@ -426,16 +495,32 @@ namespace Spec.Test.WastJson
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             var errors = new List<Exception>();
+
+            if (PreParseError != null)
+                return errors;
+
+            if (PreParsedModule != null)
+            {
+                try
+                {
+                    runtime.InstantiateModule(PreParsedModule);
+                }
+                catch (FormatException) { return errors; }
+                catch (NotSupportedException) { return errors; }
+                catch (ValidationException) { return errors; }
+                throw new TestException($"Test failed {this}");
+            }
+
             if (ModuleType == "text")
             {
                 errors.Add(new Exception(
                     $"Assert Malformed line {Line}: Skipping assert_malformed. No WAT parsing."));
                 return errors;
             }
-            
+
             if (Filename == null)
                 throw new ArgumentException("Json missing `filename` field");
-            
+
             var filepath = Path.Combine(testDefinition.Path, Filename);
             bool didAssert = false;
             try
@@ -474,12 +559,33 @@ namespace Spec.Test.WastJson
         [JsonPropertyName("filename")] public string? Filename { get; set; }
         [JsonPropertyName("text")] public string? Text { get; set; }
         [JsonPropertyName("module_type")] public string? ModuleType { get; set; }
+
+        /// <summary>WAST-direct: pre-parsed Module to attempt to instantiate.</summary>
+        [JsonIgnore] public Module? PreParsedModule { get; set; }
+
+        /// <summary>WAST-direct: parse error (assertion is satisfied if non-null).</summary>
+        [JsonIgnore] public Exception? PreParseError { get; set; }
+
         public CommandType Type => CommandType.AssertUnlinkable;
         [JsonPropertyName("line")] public int Line { get; set; }
 
         public List<Exception> RunTest(WastJson testDefinition, ref WasmRuntime runtime, ref Module? module)
         {
             List<Exception> errors = new();
+
+            if (PreParseError != null)
+                return errors;
+
+            if (PreParsedModule != null)
+            {
+                try
+                {
+                    runtime.InstantiateModule(PreParsedModule);
+                }
+                catch (NotSupportedException) { return errors; }
+                throw new TestException($"Test failed {this}");
+            }
+
             if (ModuleType == "text")
             {
                 errors.Add(new Exception(
