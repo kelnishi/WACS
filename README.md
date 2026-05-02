@@ -75,7 +75,7 @@ Harnessed results from [wasm-feature-detect](https://github.com/GoogleChromeLabs
 |Proposal |Features|    |
 |------|-------|----|
 |**Phase 5 – Standardized**|
-|[Branch Hinting](https://github.com/WebAssembly/branch-hinting)||<span title="Custom section ignored; no behavior impact">✅</span>|
+|[Branch Hinting](https://github.com/WebAssembly/branch-hinting)||<span title="metadata.code.branch_hint custom section parsed; transpiler reorders `if`/`else` arms based on hints">✅</span>|
 |[Bulk memory operations](https://github.com/webassembly/bulk-memory-operations)||✅|
 |[Custom Annotation Syntax in the Text Format](https://github.com/WebAssembly/annotations)||✅|
 |[Exception handling](https://github.com/WebAssembly/exception-handling)|exceptions|✅|
