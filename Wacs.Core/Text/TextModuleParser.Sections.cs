@@ -466,14 +466,26 @@ namespace Wacs.Core.Text
             if (inlineElemForm != null)
             {
                 var inits = new List<Expression>();
+                bool allFuncIdxAtoms = elementType == ValType.FuncRef;
                 for (int k = 1; k < inlineElemForm.Children.Count; k++)
                 {
                     var child = inlineElemForm.Children[k];
+                    if (child.Kind != SExprKind.Atom) allFuncIdxAtoms = false;
                     inits.Add(ParseElemInit(ctx, child, elementType));
                 }
                 var offset = BuildConstOffset(0, limits.AddressType);
                 var mode = new Module.ElementMode.ActiveMode((TableIdx)idx, offset);
-                var segment = Module.ElementSegment.Create(elementType, inits.ToArray(), mode);
+                // wabt parity: when the inline shape is `(table funcref
+                // (elem $f $g …))` with all funcidx-atom inits, wast2json
+                // encodes the synthesized segment as kind 0 (active,
+                // table 0, elemkind 0x00, funcidxs) — which our binary
+                // parser decodes as ValType.Func (non-nullable). Use
+                // Func instead of elementType (FuncRef) here so the
+                // segment Type matches what the binary pipeline produces.
+                // For other shapes (mixed inits, non-funcref tables),
+                // fall back to elementType.
+                var segmentType = allFuncIdxAtoms ? ValType.Func : elementType;
+                var segment = Module.ElementSegment.Create(segmentType, inits.ToArray(), mode);
                 var existingE = ctx.Module.Elements;
                 var nextE = new Module.ElementSegment[existingE.Length + 1];
                 Array.Copy(existingE, nextE, existingE.Length);
