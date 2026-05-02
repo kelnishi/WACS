@@ -417,7 +417,8 @@ namespace Wacs.Core.Text
                 var thenInnerList = ParseInstrList(fctx, thenForm, ref tj, InstrStop.None, out _);
                 thenInner.AddRange(thenInnerList);
 
-                InstructionSequence ifSeq, elseSeq;
+                InstructionSequence ifSeq;
+                InstIf ifInst;
                 if (elseForm != null)
                 {
                     thenInner.Add(new InstElse());
@@ -431,15 +432,19 @@ namespace Wacs.Core.Text
                     // NOTE: elseBody intentionally does not start with
                     // InstElse — the InstElse divider sits at the end of
                     // thenInner, per the binary parser's shape.
-                    elseSeq = new InstructionSequence(elseBody);
+                    var elseSeq = new InstructionSequence(elseBody);
+                    ifInst = (InstIf)new InstIf().Immediate(blockType, ifSeq, elseSeq);
                 }
                 else
                 {
                     thenInner.Add(new InstEnd());
                     ifSeq = new InstructionSequence(thenInner);
-                    elseSeq = InstructionSequence.Empty;
+                    // No-else path: route through the dedicated overload
+                    // so ElseBlock stays at Block.Empty (type Empty),
+                    // matching the binary parser. Crucial for the
+                    // validator to catch missing-else type-mismatch errors.
+                    ifInst = (InstIf)new InstIf().Immediate(blockType, ifSeq);
                 }
-                var ifInst = new InstIf().Immediate(blockType, ifSeq, elseSeq);
                 output.Add(ifInst);
             }
             finally
@@ -552,20 +557,23 @@ namespace Wacs.Core.Text
                     // source had an `else` keyword — an empty else body
                     // (`if ... else end`) still counts as an else arm.
                     var ifSeq = new List<InstructionBase>(thenBody);
-                    InstructionSequence elseSeq;
+                    InstIf ifInst;
                     if (hasElse)
                     {
                         ifSeq.Add(new InstElse());
                         elseBody.Add(new InstEnd());
-                        elseSeq = new InstructionSequence(elseBody);
+                        var elseSeq = new InstructionSequence(elseBody);
+                        ifInst = (InstIf)new InstIf().Immediate(blockType,
+                            new InstructionSequence(ifSeq), elseSeq);
                     }
                     else
                     {
                         ifSeq.Add(new InstEnd());
-                        elseSeq = InstructionSequence.Empty;
+                        // No-else: leave ElseBlock at Block.Empty so the
+                        // validator catches missing-else type mismatches.
+                        ifInst = (InstIf)new InstIf().Immediate(blockType,
+                            new InstructionSequence(ifSeq));
                     }
-                    var ifInst = new InstIf().Immediate(blockType,
-                        new InstructionSequence(ifSeq), elseSeq);
                     output.Add(ifInst);
                     return;
                 }
@@ -1461,48 +1469,32 @@ namespace Wacs.Core.Text
             return unchecked((long)value);
         }
 
-        private static float ParseFloat32(SExpr atom) => (float)ParseFloatGeneric(atom, is64: false);
-        private static double ParseFloat64(SExpr atom) => ParseFloatGeneric(atom, is64: true);
-
-        /// <summary>
-        /// Float literal parser accepting decimal floats, inf, nan,
-        /// nan:0xPAYLOAD, and hex integers / hex floats. The hex-float
-        /// grammar (0x1.Ap+3 etc.) is handled via a best-effort
-        /// manual decoder; unrecognized forms fall back to zero with a
-        /// comment in diagnostics rather than hard-failing spec coverage.
-        /// </summary>
-        private static double ParseFloatGeneric(SExpr atom, bool is64)
+        private static float ParseFloat32(SExpr atom)
         {
-            var text = atom.AtomText().Replace("_", "");
-            int sign = 1;
-            if (text.StartsWith("+")) text = text.Substring(1);
-            else if (text.StartsWith("-")) { sign = -1; text = text.Substring(1); }
-
-            // inf / nan family
-            if (text == "inf") return sign * double.PositiveInfinity;
-            if (text == "nan") return double.NaN;
-            if (text.StartsWith("nan:"))
+            try
             {
-                // nan:canonical / nan:arithmetic / nan:0xPAYLOAD — treat as
-                // NaN for execution value (payload matters only for
-                // assert_return pattern matching, which is handled in the
-                // WAST parser).
-                return double.NaN;
+                FloatLiteralBits.Parse(atom.AtomText(), out var f32Bits, out _);
+                return BitConverter.Int32BitsToSingle(unchecked((int)f32Bits));
             }
-
-            // Hex literals (may be float with '.' or 'p' exponent, or plain integer)
-            if (text.StartsWith("0x") || text.StartsWith("0X"))
+            catch (FormatException e)
             {
-                if (TryParseHexFloat(text.Substring(2), out var hv))
-                    return sign * hv;
-                // Not a hex float — ignore (return 0) rather than failing
-                // the smoke parse. Precise decoding belongs to phase 3.
-                return 0;
+                throw new FormatException(
+                    $"line {atom.Token.Line}: {e.Message} (literal '{atom.AtomText()}')");
             }
+        }
 
-            if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var d))
-                return sign * d;
-            throw new FormatException($"line {atom.Token.Line}: bad float literal '{atom.AtomText()}'");
+        private static double ParseFloat64(SExpr atom)
+        {
+            try
+            {
+                FloatLiteralBits.Parse(atom.AtomText(), out _, out var f64Bits);
+                return BitConverter.Int64BitsToDouble(unchecked((long)f64Bits));
+            }
+            catch (FormatException e)
+            {
+                throw new FormatException(
+                    $"line {atom.Token.Line}: {e.Message} (literal '{atom.AtomText()}')");
+            }
         }
 
         /// <summary>

@@ -333,6 +333,28 @@ namespace Wacs.Core.Instructions
             );
             return this;
         }
+
+        /// <summary>
+        /// Construct an <c>if</c>-without-<c>else</c>. ElseBlock stays
+        /// at <see cref="Block.Empty"/> (type <see cref="ValType.Empty"/>),
+        /// matching the binary parser's representation: when the body
+        /// has no <c>else</c> opcode, the else-block is left default
+        /// rather than aliased to the if-block's type. Calling
+        /// <see cref="Immediate(ValType,InstructionSequence,InstructionSequence)"/>
+        /// with <c>InstructionSequence.Empty</c> would inherit the if's
+        /// blockType onto the empty else and silently pass validation
+        /// for cases like <c>(if (result i32) (then (i32.const 1)))</c>
+        /// — the spec wants those rejected as type mismatches.
+        /// </summary>
+        public BlockTarget Immediate(ValType blockType, InstructionSequence ifSeq)
+        {
+            IfBlock = new Block(
+                blockType: blockType,
+                seq: ifSeq
+            );
+            // ElseBlock left at the field default (Block.Empty).
+            return this;
+        }
     }
 
     //0x05

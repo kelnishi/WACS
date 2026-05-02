@@ -299,8 +299,9 @@ namespace Spec.Test
                 return new Argument { Type = "f32", Value = "nan:canonical" };
             if (sv.FloatPattern == ScriptFloatPattern.NanArithmetic)
                 return new Argument { Type = "f32", Value = "nan:arithmetic" };
-            uint bits = BitConverter.SingleToUInt32Bits(sv.F32);
-            return new Argument { Type = "f32", Value = bits.ToString() };
+            // Use the raw bits captured by ParseFloatLiteral so NaN
+            // payloads and hex-float precision survive.
+            return new Argument { Type = "f32", Value = sv.F32Bits.ToString() };
         }
 
         private static Argument F64ToArgument(ScriptValue sv)
@@ -309,8 +310,7 @@ namespace Spec.Test
                 return new Argument { Type = "f64", Value = "nan:canonical" };
             if (sv.FloatPattern == ScriptFloatPattern.NanArithmetic)
                 return new Argument { Type = "f64", Value = "nan:arithmetic" };
-            ulong bits = BitConverter.DoubleToUInt64Bits(sv.F64);
-            return new Argument { Type = "f64", Value = bits.ToString() };
+            return new Argument { Type = "f64", Value = sv.F64Bits.ToString() };
         }
 
         private static Argument RefNullKindToArgument(ScriptValue sv)
