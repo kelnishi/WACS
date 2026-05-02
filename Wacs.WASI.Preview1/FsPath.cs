@@ -115,17 +115,13 @@ namespace Wacs.WASI.Preview1
 
                 Directory.CreateDirectory(newHostPath);
 
-                var rights = FileDescriptor.ComputeFileRights(
-                    new DirectoryInfo(newHostPath),
-                    Filetype.Directory,
-                    dirFd.Rights.ToFileAccess(),
-                    Stream.Null,
-                    dirFd.Rights.HasFlag(Rights.PATH_CREATE_FILE),
-                    dirFd.Rights.HasFlag(Rights.PATH_UNLINK_FILE)
-                ) & dirFd.Rights;
-
+                // Carry the parent's INHERITED rights (not its own base
+                // rights) into the new dir so child files opened through
+                // it can reach FD_WRITE / FD_SEEK / etc. (Phase 4.7
+                // own-vs-inherited split).
                 WasiFsHelpers.BindDir(state, config, newHostPath, newGuestPath,
-                    dirFd.Access, isPreopened: true, rights, dirFd.Rights);
+                    dirFd.Access, isPreopened: true,
+                    dirFd.InheritedRights, dirFd.InheritedRights);
             }
             catch (DirectoryNotFoundException) { return (int)ErrNo.NoSys; }
             catch (IOException) { return (int)ErrNo.Exist; }
@@ -262,6 +258,18 @@ namespace Wacs.WASI.Preview1
             try
             {
                 var pathToOpen = mem.ReadString(pathPtr, pathLen);
+                // Absolute paths in path_open would let the guest escape
+                // the sandbox by reaching outside the dirfd. wasi-libc /
+                // wasmtime treat this as PERM (rust/interesting_paths
+                // line 16 verifies this with "/dir/nested/file").
+                if (pathToOpen.Length > 0
+                    && (pathToOpen[0] == '/' || pathToOpen[0] == '\\'))
+                    return (int)ErrNo.Perm;
+                // Embedded NUL byte ⇒ INVAL (rust/interesting_paths line
+                // 41). Real filesystems reject the syscall before any
+                // resolution, since their string layer is NUL-terminated.
+                if (pathToOpen.IndexOf('\0') >= 0)
+                    return (int)ErrNo.Inval;
                 var guestDirPath = dirFileDescriptor.Path;
                 var hostDirPath = state.PathMapper.MapToHostPath(guestDirPath);
                 var guestPath = Path.Combine(guestDirPath, pathToOpen);
@@ -269,7 +277,24 @@ namespace Wacs.WASI.Preview1
 
                 var oFlagsTyped = (OFlags)oFlags;
                 var fsFlagsTyped = (FdFlags)fsFlags;
+                var fsRightsBaseTyped = (Rights)fsRightsBase;
                 var fsRightsInheritingTyped = (Rights)fsRightsInheriting;
+                // Per WASI spec: result fd's base rights = fsRightsBase ∩
+                // parent's inheriting rights. Strict intersection; the
+                // wasi-testsuite (rust/truncation_rights) requires that
+                // passing fsRightsBase=0 yields zero rights so subsequent
+                // OFLAGS_TRUNC fails with NOTCAPABLE — not "fall back to
+                // the parent's full inheritable cap".
+                var requestedBase = fsRightsBaseTyped & dirFileDescriptor.InheritedRights;
+
+                // OFLAGS_TRUNC requires PATH_FILESTAT_SET_SIZE on the
+                // parent directory (rust/truncation_rights line 67). The
+                // base-rights intersection above caps requestedBase, but
+                // dropping the right from the parent should reject the
+                // open before any file is opened.
+                if (oFlagsTyped.HasFlag(OFlags.Trunc)
+                    && (dirFileDescriptor.Rights & Rights.PATH_FILESTAT_SET_SIZE) == 0)
+                    return (int)ErrNo.Perm;
 
                 // @Spec wasi: path_open with LOOKUPFLAGS_SYMLINK_FOLLOW
                 // unset must not chase the final-component symlink. Per the
@@ -300,7 +325,9 @@ namespace Wacs.WASI.Preview1
                             var fileStream = new FileStream(hostPath, FileMode.CreateNew,
                                 dirFileDescriptor.Access, FileShare.Read);
                             uint newFd = WasiFsHelpers.BindFile(state, guestPath, fileStream,
-                                dirFileDescriptor.Access, dirFileDescriptor.Rights, fsRightsInheritingTyped);
+                                dirFileDescriptor.Access,
+                                requestedBase,
+                                fsRightsInheritingTyped);
                             if (state.FileDescriptors.TryGetValue(newFd, out var openedFd))
                                 openedFd.Flags = fsFlagsTyped;
                             mem.WriteInt32(fdPtr, (int)newFd);
@@ -322,9 +349,25 @@ namespace Wacs.WASI.Preview1
 
                 // OFLAGS_DIRECTORY against a non-directory target ⇒ ENOTDIR
                 // (per spec; rust/nofollow_errors verifies this after replacing
-                // the symlink target with a file).
-                if (oFlagsTyped.HasFlag(OFlags.Directory) && !isDirectory)
+                // the symlink target with a file). Same rule for trailing-slash
+                // path targets (rust/interesting_paths line 49) — the slash
+                // implicitly demands a directory.
+                bool pathHasTrailingSlash = pathToOpen.Length > 0
+                    && (pathToOpen[pathToOpen.Length - 1] == '/'
+                        || pathToOpen[pathToOpen.Length - 1] == '\\');
+                if ((oFlagsTyped.HasFlag(OFlags.Directory) || pathHasTrailingSlash)
+                    && !isDirectory)
                     return (int)ErrNo.NotDir;
+
+                // OFLAGS_DIRECTORY + explicit FD_WRITE base right ⇒ ISDIR
+                // (rust/path_open_preopen line 106). Now that preopen Rights
+                // omit FD_WRITE (Phase 4.7 own/inherited split), the
+                // open_scratch_directory pattern doesn't trigger this — only
+                // an explicit RIGHTS_FD_WRITE in fsRightsBase does.
+                if (oFlagsTyped.HasFlag(OFlags.Directory) && isDirectory
+                    && (fsRightsBaseTyped & Rights.FD_WRITE) != 0)
+                    return (int)ErrNo.IsDir;
+
 
                 if (isDirectory)
                 {
@@ -339,7 +382,7 @@ namespace Wacs.WASI.Preview1
                     }
                     uint newFd = WasiFsHelpers.BindDir(state, config, hostPath, guestPath,
                         dirFileDescriptor.Access, false,
-                        dirFileDescriptor.Rights, fsRightsInheritingTyped);
+                        requestedBase, fsRightsInheritingTyped);
                     mem.WriteInt32(fdPtr, (int)newFd);
                 }
                 else
@@ -364,7 +407,9 @@ namespace Wacs.WASI.Preview1
                             : FileMode.Open;
                         var fileStream = new FileStream(hostPath, fileMode, fileAccess, FileShare.Read);
                         uint newFd = WasiFsHelpers.BindFile(state, guestPath, fileStream,
-                            fileAccess, dirFileDescriptor.Rights, fsRightsInheritingTyped);
+                            fileAccess,
+                            requestedBase,
+                            fsRightsInheritingTyped);
                         if (state.FileDescriptors.TryGetValue(newFd, out var openedFd2))
                             openedFd2.Flags = fsFlagsTyped;
                         mem.WriteInt32(fdPtr, (int)newFd);

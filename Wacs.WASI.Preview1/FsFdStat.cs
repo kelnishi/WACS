@@ -172,6 +172,13 @@ namespace Wacs.WASI.Preview1
             FileStat fileStat = isDir
                 ? WasiFsHelpers.BuildFileStatForDirectory(new DirectoryInfo(hostPath))
                 : WasiFsHelpers.BuildFileStatForFile(new FileInfo(hostPath));
+            // FileInfo.Length reflects the on-disk size, which lags any
+            // not-yet-flushed FileStream writes (rust/path_open_read_write
+            // line 109 catches this — second fd_write extended the stream
+            // but the stat showed the pre-flush size). Prefer the live
+            // stream length when we have one.
+            if (!isDir && fileDescriptor.Stream is FileStream fs && fs.CanSeek)
+                fileStat.Size = (ulong)fs.Length;
             mem.WriteStruct(bufPtr, fileStat);
             return (int)ErrNo.Success;
         }
