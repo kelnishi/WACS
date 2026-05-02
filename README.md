@@ -15,7 +15,7 @@
 ## Overview
 
 **Latest releases** (see the [CHANGELOG](CHANGELOG.md) for details):
-WACS `0.10.0` · WACS.Cli `1.2.0` · WACS.WASI.Preview1 `0.11.0` · WACS.HostBindings.Abstractions `0.1.0` · WACS.HostBindings.SourceGen `0.1.0` · WACS.Transpiler.Lib `0.5.0` · WACS.ComponentModel `0.1.0` · WACS.WASI.Preview2 `0.1.0` · WACS.WASI.Preview2.DependencyInjection `0.1.0` · WACS.ComponentModel.Bindgen.Lib `0.1.0` · WACS.WASI.Threads `0.1.0`
+WACS `0.11.0` · WACS.Cli `1.2.0` · WACS.WASI.Preview1 `0.11.0` · WACS.HostBindings.Abstractions `0.1.0` · WACS.HostBindings.SourceGen `0.1.0` · WACS.Transpiler.Lib `0.6.0` · WACS.ComponentModel `0.1.0` · WACS.WASI.Preview2 `0.1.0` · WACS.WASI.Preview2.DependencyInjection `0.1.0` · WACS.ComponentModel.Bindgen.Lib `0.1.0` · WACS.WASI.Threads `0.1.0`
 
 > **Renaming notice (0.11.0):** the `WACS.WASIp1` package has been renamed to `WACS.WASI.Preview1` to make room for `WACS.WASI.Preview2` / `.Preview3` under one prefix. The old id still restores (it's now a metapackage) but emits a build-time warning. See [docs/MIGRATION_WASIp1_to_WASI.md](docs/MIGRATION_WASIp1_to_WASI.md) for the one-shot sed.
 
