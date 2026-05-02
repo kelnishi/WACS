@@ -247,11 +247,51 @@ namespace Wacs.Transpiler.AOT
         /// <summary>
         /// Register a multi-return MethodInfo. Builds the
         /// <see cref="MultiReturnInvoker"/> adapter once and caches it.
+        /// Under NativeAOT, where Reflection.Emit is unavailable, falls
+        /// back to a <see cref="System.Reflection.MethodInfo.Invoke(object?,object?[])"/>
+        /// based invoker — slower but functionally correct, and the only
+        /// option short of pre-generating per-signature shims at
+        /// transpile time.
         /// </summary>
         public static void Register(int initDataId, int funcIdx, System.Reflection.MethodInfo mi)
         {
-            var invoker = BuildInvoker(mi);
+            var invoker = System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported
+                ? BuildInvoker(mi)
+                : BuildInvokerReflective(mi);
             lock (_lock) { _invokers[(initDataId, funcIdx)] = invoker; }
+        }
+
+        // NativeAOT-safe fallback. Mirrors BuildInvoker's contract: take
+        // (ctx, args[]) where args[] is the wasm-typed input row, return
+        // an object[] of [r0, out1, ..., outK-1] all boxed.
+        // MethodInfo.Invoke handles the by-ref out-params for us — passing
+        // a single object?[] long enough to cover (ctx, args..., outs...)
+        // and reading the post-call slots gives the same boxed values.
+        private static MultiReturnInvoker BuildInvokerReflective(System.Reflection.MethodInfo mi)
+        {
+            var parameters = mi.GetParameters();
+            int argCount = 0;
+            int outCount = 0;
+            for (int i = 1; i < parameters.Length; i++)
+            {
+                if (parameters[i].ParameterType.IsByRef) outCount++;
+                else argCount++;
+            }
+            return (ctx, args) =>
+            {
+                var invokeArgs = new object?[parameters.Length];
+                invokeArgs[0] = ctx;
+                for (int i = 0; i < argCount; i++)
+                    invokeArgs[i + 1] = args[i];
+                // Out params start null — MethodInfo.Invoke will populate
+                // them via the by-ref ABI when the call returns.
+                var r0 = mi.Invoke(null, invokeArgs);
+                var result = new object?[1 + outCount];
+                result[0] = r0;
+                for (int i = 0; i < outCount; i++)
+                    result[i + 1] = invokeArgs[1 + argCount + i];
+                return result;
+            };
         }
 
         public static MultiReturnInvoker? Get(int initDataId, int funcIdx)

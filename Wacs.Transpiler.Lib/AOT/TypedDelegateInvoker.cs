@@ -10,6 +10,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Runtime.CompilerServices;
 
 namespace Wacs.Transpiler.AOT
 {
@@ -29,6 +30,15 @@ namespace Wacs.Transpiler.AOT
     ///
     /// Keyed by delegate Type, so one wrapper serves every instance of
     /// <c>Func&lt;int,int&gt;</c>, etc.
+    ///
+    /// <para>Under NativeAOT, <see cref="System.Reflection.Emit"/> is
+    /// unavailable (<c>PlatformNotSupportedException</c> on
+    /// <c>DynamicMethod.GetILGenerator</c>), so we fall back to
+    /// <see cref="Delegate.DynamicInvoke"/>. That's the slow path the
+    /// emitted wrapper was designed to avoid, but call_indirect-using
+    /// modules would otherwise fail to run at all under AOT — correctness
+    /// over speed when codegen isn't an option. Long-term fix is to emit
+    /// per-signature direct-call shims at transpile time.</para>
     /// </summary>
     internal static class TypedDelegateInvoker
     {
@@ -41,6 +51,10 @@ namespace Wacs.Transpiler.AOT
 
         private static Invoker Build(Type delegateType)
         {
+            // NativeAOT path — no Reflection.Emit, fall back to DynamicInvoke.
+            if (!RuntimeFeature.IsDynamicCodeSupported)
+                return (del, args) => del.DynamicInvoke(args);
+
             var invokeMethod = delegateType.GetMethod("Invoke")
                 ?? throw new InvalidOperationException(
                     $"Delegate type {delegateType} has no Invoke method");
