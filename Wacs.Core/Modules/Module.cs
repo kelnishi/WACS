@@ -366,10 +366,27 @@ namespace Wacs.Core
             }
         }
 
-        private static void FinalizeModule(Module module)
+        /// <summary>
+        /// Walk every place a function index can become "fully
+        /// declared" (exports, FuncRef-typed element initializers,
+        /// declarative element segments, FuncRef-typed global
+        /// initializers) and set <see cref="Module.Function.ElementDeclared"/>
+        /// on each matching defined function.
+        ///
+        /// Without this pass, <c>ref.func $x</c> instructions inside
+        /// function bodies fail validation with "func N is not fully
+        /// declared" — even when the surrounding module has an
+        /// <c>(elem declare func $x)</c> segment specifically intended
+        /// to declare it. Both the binary parser and the WAT parser
+        /// must run this; previously only the binary path did.
+        ///
+        /// Also enforces "memory.init requires DataCount section"
+        /// (the binary spec rule); for WAT inputs the DataCount field
+        /// always reflects the actual data section, so the check is
+        /// effectively skipped.
+        /// </summary>
+        public static void PropagateRefFuncDeclarations(Module module)
         {
-            PatchFuncSection(module);
-            
             HashSet<FuncIdx> fullyDeclared = new();
             var funcDescs = module.Exports
                 .Select(export => export.Desc)
@@ -388,9 +405,8 @@ namespace Wacs.Core
                 .SelectMany(elem => elem.Initializers)
                 .SelectMany(ini => ini.Instructions)
                 .OfType<InstRefFunc>();
-            
             foreach (var refFunc in elementDecl) fullyDeclared.Add(refFunc.FunctionIndex);
-            
+
             var globalIni = module.Globals
                 .Where(global => global.Type.ContentType == ValType.FuncRef)
                 .SelectMany(global => global.Initializer.Instructions)
@@ -403,10 +419,16 @@ namespace Wacs.Core
                 if (lacksMemoryInit)
                     if (func.Body.ContainsInstructions(MemoryInstructions))
                         throw new FormatException($"memory.init instruction requires Data Count section");
-                
+
                 if (fullyDeclared.Contains(func.Index))
                     func.ElementDeclared = true;
             }
+        }
+
+        private static void FinalizeModule(Module module)
+        {
+            PatchFuncSection(module);
+            PropagateRefFuncDeclarations(module);
             
             if (module.DataCount == uint.MaxValue)
                 module.DataCount = (uint)module.Datas.Length;

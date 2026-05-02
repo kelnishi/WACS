@@ -50,26 +50,41 @@ namespace Spec.Test
             BinaryModuleParser.ParseBranchHints = true;
 
             // ---- WACS path ----
+            // Each entry collects modules in order — those declared at
+            // top level AND those embedded in assert_invalid /
+            // assert_malformed / assert_unlinkable. Both pipelines
+            // visit them in source order, so ordinal pairing aligns
+            // results across the two. A WACS "valid" against a wabt
+            // "invalid" means the WAT parser produced an AST the
+            // validator missed something on; the reverse means we're
+            // over-rejecting.
             var script = TextScriptParser.ParseWast(File.ReadAllText(wastPath));
-            var wacsResults = new List<(int Line, string Result)>();
-            int wacsModIdx = 0;
+            var wacsResults = new List<(int Line, string Tag, string Result)>();
             foreach (var cmd in script)
             {
-                if (cmd is ScriptModule sm)
+                switch (cmd)
                 {
-                    wacsResults.Add((sm.Line, ResultOf(() =>
-                    {
-                        if (sm.Module == null) throw new FormatException("WAT parse failed");
-                        var v = sm.Module.Validate();
-                        return v.IsValid ? "valid" : "invalid: " + Trunc(string.Join("|",
-                            v.Errors.Take(2).Select(e => e.ErrorMessage)));
-                    })));
-                    wacsModIdx++;
+                    case ScriptModule sm:
+                        wacsResults.Add((sm.Line, "module",
+                            EvalScriptModule(sm)));
+                        break;
+                    case ScriptAssertInvalid ai:
+                        wacsResults.Add((ai.Line, "assert_invalid",
+                            EvalScriptModule(ai.Module)));
+                        break;
+                    case ScriptAssertMalformed am:
+                        wacsResults.Add((am.Line, "assert_malformed",
+                            EvalScriptModule(am.Module)));
+                        break;
+                    case ScriptAssertUnlinkable au:
+                        wacsResults.Add((au.Line, "assert_unlinkable",
+                            EvalScriptModule(au.Module)));
+                        break;
                 }
             }
 
             // ---- wabt baseline ----
-            var wabtResults = new List<(int Line, string Result)>();
+            var wabtResults = new List<(int Line, string Tag, string Result)>();
             if (Directory.Exists(wabtJsonDir))
             {
                 var jsonFiles = Directory.GetFiles(wabtJsonDir, "*.json");
@@ -79,11 +94,14 @@ namespace Spec.Test
                     foreach (var elem in doc.RootElement.GetProperty("commands").EnumerateArray())
                     {
                         var type = elem.GetProperty("type").GetString();
-                        if (type != "module" && type != "module_definition") continue;
+                        if (type != "module" && type != "module_definition"
+                            && type != "assert_invalid" && type != "assert_malformed"
+                            && type != "assert_unlinkable")
+                            continue;
                         var line = elem.GetProperty("line").GetInt32();
                         if (!elem.TryGetProperty("filename", out var fnEl)) continue;
                         var wasmFile = Path.Combine(wabtJsonDir, fnEl.GetString()!);
-                        wabtResults.Add((line, ResultOf(() =>
+                        wabtResults.Add((line, type, ResultOf(() =>
                         {
                             using var fs = File.OpenRead(wasmFile);
                             var module = BinaryModuleParser.ParseWasm(fs);
@@ -96,17 +114,19 @@ namespace Spec.Test
             }
 
             // ---- Pair by ordinal index ----
+            // For divergence, we only care about (in)validity changing
+            // direction, not the specific error message text.
             int n = Math.Min(wacsResults.Count, wabtResults.Count);
             for (int i = 0; i < n; i++)
             {
-                if (wacsResults[i].Result != wabtResults[i].Result)
+                if (Verdict(wacsResults[i].Result) != Verdict(wabtResults[i].Result))
                 {
                     divs.Add(new Divergence
                     {
                         ModuleIndex = i,
                         Line = wacsResults[i].Line,
-                        WacsResult = wacsResults[i].Result,
-                        WabtResult = wabtResults[i].Result,
+                        WacsResult = $"[{wacsResults[i].Tag}] {wacsResults[i].Result}",
+                        WabtResult = $"[{wabtResults[i].Tag}] {wabtResults[i].Result}",
                     });
                 }
             }
@@ -121,6 +141,37 @@ namespace Spec.Test
                 });
             }
             return divs;
+        }
+
+        /// <summary>
+        /// Reduce a free-form result string ("valid" / "invalid: …" /
+        /// "format-exception: …" / etc.) to a coarse verdict so the
+        /// probe doesn't report false positives on differently-phrased
+        /// equivalent errors.
+        /// </summary>
+        private static string Verdict(string raw)
+        {
+            if (raw == "valid") return "valid";
+            return "rejected";
+        }
+
+        private static string EvalScriptModule(ScriptModule sm)
+        {
+            return ResultOf(() =>
+            {
+                if (sm.Module == null)
+                {
+                    // The script parser eagerly tries to parse Quote
+                    // and Binary forms — Module=null means the parse
+                    // failed (assertion is satisfied for malformed-style
+                    // tests). For text-form modules with Module=null
+                    // the script parser would have thrown already.
+                    return "rejected: parse failed";
+                }
+                var v = sm.Module.Validate();
+                return v.IsValid ? "valid" : "invalid: " + Trunc(string.Join("|",
+                    v.Errors.Take(2).Select(e => e.ErrorMessage)));
+            });
         }
 
         private static string ResultOf(Func<string> action)
