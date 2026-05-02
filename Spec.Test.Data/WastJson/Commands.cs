@@ -131,9 +131,15 @@ namespace Spec.Test.WastJson
             if (PreParsedModule != null)
             {
                 module = PreParsedModule;
-                if (string.IsNullOrEmpty(Name))
-                    throw new ArgumentException("module_definition missing name (pre-parsed)");
-                module.SetName(Name);
+                // Run validation eagerly so a bare `(module definition …)`
+                // surfaces validator errors as a test failure (the form is
+                // never instantiated otherwise, which is where validation
+                // would normally fire). Name is optional in the WAT-direct
+                // path: spec uses anonymous `(module definition …)` purely
+                // for limit-validation tests with no later instance.
+                module.ValidateAndThrow(runtime.ExecContext.Attributes);
+                if (!string.IsNullOrEmpty(Name))
+                    module.SetName(Name);
                 return errors;
             }
 

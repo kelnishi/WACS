@@ -91,16 +91,15 @@ namespace Wacs.Core.Types
         /// </summary>
         public class Validator : AbstractValidator<Limits>
         {
-            public Validator(uint rangeK) {
+            public Validator(long rangeK) {
                 RuleFor(limits => limits.Minimum)
-                    .LessThan(rangeK);
+                    .LessThanOrEqualTo(rangeK);
                 When(l => l.Maximum.HasValue, () => {
                     RuleFor(l => l.Maximum)
                         .LessThanOrEqualTo(rangeK);
                     RuleFor(l => l.Maximum)
                         .GreaterThanOrEqualTo(limits => limits.Minimum);
                 });
-                
             }
         }
     }

@@ -96,6 +96,18 @@ namespace Spec.Test
                 using var ms = new MemoryStream(sm.Bytes);
                 parsed = BinaryModuleParser.ParseWasm(ms);
             }
+            // `(module definition …)` validates without instantiating; a
+            // later `(module instance $alias $id)` creates the runtime
+            // instance via ModuleInstanceCommand.
+            if (sm.IsDefinition)
+            {
+                return new ModuleDefinition
+                {
+                    Line = sm.Line,
+                    Name = sm.Id,
+                    PreParsedModule = parsed,
+                };
+            }
             return new ModuleCommand
             {
                 Line = sm.Line,
