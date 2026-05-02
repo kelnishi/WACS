@@ -16,6 +16,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection.Emit;
+using Wacs.Core;
 using Wacs.Core.Instructions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
@@ -325,6 +326,30 @@ namespace Wacs.Transpiler.AOT.Emitters
 
         /// <summary>
         /// Emit an if instruction. Pops condition from stack, branches.
+        ///
+        /// <paramref name="branchHint"/> carries the
+        /// <c>metadata.code.branch_hint</c> annotation for this
+        /// instruction when present:
+        /// <list type="bullet">
+        ///   <item><c>null</c> or <c>IsLikely==true</c>: the existing
+        ///     emission is already ideal for "then is hot" — we emit
+        ///     <c>brfalse else_label</c> and let the then-body fall
+        ///     through (no jump on the predicted path).</item>
+        ///   <item><c>IsLikely==false</c> on an <c>if</c>-with-<c>else</c>:
+        ///     swap the test (<c>brtrue then_label</c>) and emit the
+        ///     else-body inline so the hot path falls through. Then-body
+        ///     becomes the side-jump. Pure local CIL transformation —
+        ///     same labels, same blockStack semantics, identical
+        ///     observable behavior.</item>
+        ///   <item><c>IsLikely==false</c> on an <c>if</c>-without-<c>else</c>:
+        ///     no inversion. The optimal layout (skip the then-body
+        ///     on the fall-through) requires moving the then-body
+        ///     out-of-line, which is Phase 3's cold-block ordering
+        ///     work. We emit the default for now so behavior is
+        ///     identical; Phase 3 will pick up these cases.</item>
+        /// </list>
+        /// "Optimistic" per the scoping pact: we don't claim the JIT
+        /// will respect our intent. We promise our IL expresses it.
         /// </summary>
         public static void EmitIf(
             ILGenerator il,
@@ -334,7 +359,8 @@ namespace Wacs.Transpiler.AOT.Emitters
             int stackHeight = 0,
             ModuleInstance? moduleInst = null,
             int tryDepth = 0,
-            bool forceShuttle = false)
+            bool forceShuttle = false,
+            BranchHint? branchHint = null)
         {
             var (paramArity, resultArity, _, resultClrTypes) =
                 moduleInst != null
@@ -367,8 +393,53 @@ namespace Wacs.Transpiler.AOT.Emitters
             });
 
             bool hasElse = inst.Count == 2;
+            // Hint=unlikely on an if-with-else: swap the test sense so
+            // the else-body is the fall-through (hot) and the then-body
+            // is the side-jump (cold). No-op when no hint or hint=likely.
+            bool invertForUnlikelyElse = hasElse
+                && branchHint.HasValue
+                && !branchHint.Value.IsLikely;
 
-            if (hasElse)
+            if (hasElse && invertForUnlikelyElse)
+            {
+                // SWAPPED layout: else-body is the hot fall-through,
+                // then-body is the side-jump.
+                var thenLabel = il.DefineLabel();
+
+                // condition is on stack — jump TO the then-body when true
+                il.Emit(OpCodes.Brtrue, thenLabel);
+
+                // else-body inline (hot path)
+                var elseBlockSwap = inst.GetBlock(1);
+                foreach (var child in elseBlockSwap.Instructions)
+                    emitInstruction(il, child);
+                bool elseEndReachableSwap = BodyEndIsReachable(elseBlockSwap.Instructions);
+
+                if (elseEndReachableSwap)
+                {
+                    if (resultLocals != null)
+                    {
+                        for (int i = resultArity - 1; i >= 0; i--)
+                            il.Emit(OpCodes.Stloc, resultLocals[i]);
+                    }
+                    il.Emit(OpCodes.Br, endLabel);
+                }
+
+                // then-body out-of-line (cold path)
+                il.MarkLabel(thenLabel);
+                var thenBlockSwap = inst.GetBlock(0);
+                foreach (var child in thenBlockSwap.Instructions)
+                    emitInstruction(il, child);
+                bool thenEndReachableSwap = BodyEndIsReachable(thenBlockSwap.Instructions);
+
+                if (resultLocals != null && thenEndReachableSwap)
+                {
+                    for (int i = resultArity - 1; i >= 0; i--)
+                        il.Emit(OpCodes.Stloc, resultLocals[i]);
+                    il.Emit(OpCodes.Br, endLabel);
+                }
+            }
+            else if (hasElse)
             {
                 var elseLabel = il.DefineLabel();
 
