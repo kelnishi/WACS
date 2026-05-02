@@ -6,16 +6,16 @@
         <Title>Wacs WASI Preview 1</Title>
         <PackageId>WACS.WASI.Preview1</PackageId>
         <Authors>Kelvin Nishikawa</Authors>
-        <Description>WASI Preview 1 implementation for WACS. Successor to the deprecated WACS.WASIp1 package; identical API under the new Wacs.WASI.Preview1 namespace. C# `TypeForwardedTo` cannot bridge a namespace rename, so the deprecated WACS.WASIp1 package is now a metapackage that pulls this assembly in transitively while consumers update their `using Wacs.WASIp1;` lines to `using Wacs.WASI.Preview1;` (one-shot sed in docs/MIGRATION_WASIp1_to_WASI.md).</Description>
+        <Description>WASI Preview 1 implementation for WACS. Successor to the deprecated WACS.WASIp1 package; identical API under the new Wacs.WASI.Preview1 namespace. C# `TypeForwardedTo` cannot bridge a namespace rename, so the deprecated WACS.WASIp1 package is now a metapackage that pulls this assembly in transitively while consumers update their `using Wacs.WASIp1;` lines to `using Wacs.WASI.Preview1;` (one-shot sed in docs/MIGRATION_WASIp1_to_WASI.md). v0.12.0 lifts 23 wasi-testsuite fixtures (Phase 4): symlink behavior modes (no-follow lstat, dangling-target unlink, ELOOP on path_open), trailing-slash semantics, fd_readdir . / .., directory FD own-vs-inherited rights split, real Unix st_ino via stat(2), Clock.ToDateTimeUtc nanosecond fix, plus errno tightening (BADF for invalid fds, ENOTDIR / ISDIR / PERM in path_open). 67/72 fixtures pass; remaining 5 are OS-API-specific (lutimes, rename(2)) or runtime-quirk.</Description>
         <Copyright>(c) 2024 Kelvin Nishikawa</Copyright>
         <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.WASI.Preview1</AssemblyName>
         <RootNamespace>Wacs.WASI.Preview1</RootNamespace>
-        <AssemblyVersion>0.11.0</AssemblyVersion>
+        <AssemblyVersion>0.12.0</AssemblyVersion>
         <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-        <Version>0.11.0</Version>
+        <Version>0.12.0</Version>
         <RepositoryType>git</RepositoryType>
         <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
         <IsAotCompatible>true</IsAotCompatible>
