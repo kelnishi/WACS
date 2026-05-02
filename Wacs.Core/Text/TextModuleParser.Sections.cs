@@ -425,17 +425,26 @@ namespace Wacs.Core.Text
                 (elementType, limits) = ParseTableTypeInlineWithAddr(ctx, form, ref i, tblAddr);
             }
 
-            // Some spec tests use `(table N reftype initexpr)` where the
-            // trailing expression is a default initializer for all slots
-            // (e.g. `(ref.null func)` or `(ref.func $f)`). Phase 1.8
-            // tolerates but doesn't model this — consume + ignore so the
-            // parse gets past the form.
+            // `(table N reftype initexpr)` — trailing folded
+            // expression is a default initializer for every slot
+            // (used by tables of non-nullable ref types and by some
+            // assert_invalid tests targeting init-type mismatch).
+            // Capture the first such form as the TableType's Init
+            // so the validator can check it; remaining forms are
+            // silently consumed (they'd be malformed but the test
+            // setup only ever has one).
+            Expression? tableInit = null;
+            if (i < form.Children.Count && form.Children[i].Kind == SExprKind.List)
+            {
+                tableInit = ParseSingleInstrExpression(ctx, form.Children[i]);
+                i++;
+            }
             while (i < form.Children.Count && form.Children[i].Kind == SExprKind.List)
                 i++;
             ExpectConsumed(form, i, "table");
 
             int idx = ctx.Tables.Declare(name);
-            ctx.Module.Tables.Add(new TableType(elementType, limits));
+            ctx.Module.Tables.Add(new TableType(elementType, limits, tableInit));
             FlushExports(ctx, pendingExports, ExternalKind.Table, idx);
 
             // If this was the (table reftype (elem …)) abbreviation,
