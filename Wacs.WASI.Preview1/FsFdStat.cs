@@ -321,11 +321,53 @@ namespace Wacs.WASI.Preview1
                 catch (UnauthorizedAccessException) { return (int)ErrNo.Acces; }
                 catch (IOException)                 { return (int)ErrNo.IO; }
 
-                if (linkInfo == null) return (int)ErrNo.NoEnt;
-                if (!string.IsNullOrEmpty(linkInfo.LinkTarget))
+                // Dangling symlinks: parent enumeration can find them
+                // even when File.Exists/Directory.Exists return false (the
+                // target is missing but the link entry is on disk).
+                bool linkInfoIsSymlink = linkInfo != null
+                    && !string.IsNullOrEmpty(linkInfo.LinkTarget);
+                string? danglingLinkTarget = null;
+                if (linkInfo == null)
                 {
-                    var symStat = WasiFsHelpers.BuildFileStatForFile(new FileInfo(hostPath));
-                    symStat.Mode = Filetype.SymbolicLink;
+                    var parent = Path.GetDirectoryName(hostPath);
+                    var name = Path.GetFileName(hostPath);
+                    if (!string.IsNullOrEmpty(parent) && Directory.Exists(parent))
+                    {
+                        foreach (var e in new DirectoryInfo(parent).EnumerateFileSystemInfos(name))
+                        {
+                            if ((e.Attributes & FileAttributes.ReparsePoint) != 0)
+                            {
+                                danglingLinkTarget = e.LinkTarget ?? "";
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (linkInfo == null && danglingLinkTarget == null) return (int)ErrNo.NoEnt;
+
+                if (linkInfoIsSymlink || danglingLinkTarget != null)
+                {
+                    // POSIX lstat on a symlink: Size is the length of the
+                    // link's target-path bytes, not the size of the target.
+                    // FileInfo.Length would throw for symlink-to-directory
+                    // / dangling symlink because the file isn't there.
+                    var target = (linkInfoIsSymlink ? linkInfo!.LinkTarget : danglingLinkTarget) ?? "";
+                    // Pseudo-inode: stable per-host-path hash, doesn't need
+                    // to read the (possibly missing) target.
+                    using var sha = System.Security.Cryptography.SHA256.Create();
+                    var hashBytes = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(hostPath));
+                    var inode = BitConverter.ToUInt64(hashBytes, 0);
+                    var symStat = new FileStat
+                    {
+                        Device = 0,
+                        Ino = inode,
+                        Mode = Filetype.SymbolicLink,
+                        NLink = 1,
+                        Size = (ulong)System.Text.Encoding.UTF8.GetByteCount(target),
+                        ATim = linkInfo != null ? Clock.ToTimestamp(linkInfo.LastAccessTimeUtc) : 0,
+                        MTim = linkInfo != null ? Clock.ToTimestamp(linkInfo.LastWriteTimeUtc) : 0,
+                        CTim = linkInfo != null ? Clock.ToTimestamp(linkInfo.CreationTimeUtc) : 0,
+                    };
                     mem.WriteStruct(buf, symStat);
                     return (int)ErrNo.Success;
                 }

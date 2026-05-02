@@ -176,6 +176,14 @@ namespace Wacs.WASI.Preview1.Types
 
                 rights |= Rights.PATH_OPEN;     // Opening files within the directory
                 rights |= Rights.FD_READDIR;    // Reading directory entries
+                rights |= Rights.PATH_FILESTAT_GET;
+                rights |= Rights.PATH_FILESTAT_SET_TIMES;
+                rights |= Rights.PATH_FILESTAT_SET_SIZE;
+                rights |= Rights.PATH_LINK_SOURCE;
+                rights |= Rights.PATH_LINK_TARGET;
+                rights |= Rights.PATH_RENAME_SOURCE;
+                rights |= Rights.PATH_RENAME_TARGET;
+                rights |= Rights.PATH_SYMLINK;
             }
 
             // Optionally always allow data syncing

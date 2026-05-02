@@ -172,9 +172,10 @@ namespace Wacs.WASI.Preview1
                         int errno = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
                         return (int)(errno switch
                         {
-                            17 => ErrNo.Exist,
-                            2  => ErrNo.NoEnt,
-                            13 => ErrNo.Acces,
+                            1  => ErrNo.Perm,   // EPERM — directory hard-link, etc.
+                            2  => ErrNo.NoEnt,  // ENOENT
+                            13 => ErrNo.Acces,  // EACCES
+                            17 => ErrNo.Exist,  // EEXIST
                             _  => ErrNo.IO,
                         });
                     }
@@ -220,6 +221,24 @@ namespace Wacs.WASI.Preview1
                 var fsFlagsTyped = (FdFlags)fsFlags;
                 var fsRightsInheritingTyped = (Rights)fsRightsInheriting;
 
+                // @Spec wasi: path_open with LOOKUPFLAGS_SYMLINK_FOLLOW
+                // unset must not chase the final-component symlink. Per the
+                // wasi-testsuite (rust/dangling_symlink, nofollow_errors,
+                // symlink_loop), the rejection is ERRNO_LOOP — even when the
+                // symlink dangles or self-loops. The check happens before
+                // GetAttributes so a dangling target doesn't surface as
+                // FileNotFoundException → NoEnt. "." / ".." are directory
+                // traversals, never symlinks themselves; skip them so a
+                // scratch dir under a symlinked tree (e.g. /tmp on macOS)
+                // doesn't trip the check.
+                var dirFlagsTyped = (LookupFlags)dirFlags;
+                if ((dirFlagsTyped & LookupFlags.SymlinkFollow) == 0
+                    && pathToOpen != "." && pathToOpen != ".."
+                    && VirtualPathMapper.IsSymlink(hostPath))
+                {
+                    return (int)ErrNo.Loop;
+                }
+
                 FileAttributes attr;
                 try { attr = File.GetAttributes(hostPath); }
                 catch (FileNotFoundException)
@@ -250,6 +269,12 @@ namespace Wacs.WASI.Preview1
 
                 bool isDirectory = attr.HasFlag(FileAttributes.Directory);
                 bool isReadOnly = attr.HasFlag(FileAttributes.ReadOnly);
+
+                // OFLAGS_DIRECTORY against a non-directory target ⇒ ENOTDIR
+                // (per spec; rust/nofollow_errors verifies this after replacing
+                // the symlink target with a file).
+                if (oFlagsTyped.HasFlag(OFlags.Directory) && !isDirectory)
+                    return (int)ErrNo.NotDir;
 
                 if (isDirectory)
                 {
@@ -333,8 +358,18 @@ namespace Wacs.WASI.Preview1
                     var dirPart = Path.GetDirectoryName(hostPath) ?? throw new IOException("Invalid path");
                     var newPath = Path.Combine(dirPart, linkTarget);
                     VirtualPathMapper.ResolveSymbolicLinks(newPath, hostDirPath);
-                    if (linkTarget.Length > bufLen) return (int)ErrNo.MsgSize;
-                    int strLen = mem.WriteUtf8String(bufPtr, linkTarget, true);
+                    // path_readlink: bufused is the byte length of the link
+                    // target itself, no NUL terminator (per spec § path_readlink
+                    // and rust/readlink test). Cap by bufLen — caller may pass
+                    // a buffer smaller than the target, in which case we
+                    // truncate and return the truncated length (caller can
+                    // detect by comparing returned length to bufLen).
+                    int byteCount = System.Text.Encoding.UTF8.GetByteCount(linkTarget);
+                    int writeLen = System.Math.Min(byteCount, bufLen);
+                    var truncated = byteCount > bufLen
+                        ? System.Text.Encoding.UTF8.GetString(System.Text.Encoding.UTF8.GetBytes(linkTarget), 0, writeLen)
+                        : linkTarget;
+                    int strLen = mem.WriteUtf8String(bufPtr, truncated, false);
                     mem.WriteInt32(bufUsedPtr, strLen);
                 }
                 catch (SandboxError sandboxError) { return (int)sandboxError.ErrorNumber; }
@@ -447,6 +482,13 @@ namespace Wacs.WASI.Preview1
             {
                 var oldPath = mem.ReadString(oldPathPtr, oldPathLen);
                 var newPath = mem.ReadString(newPathPtr, newPathLen);
+                // WASI sandboxes reject absolute symlink targets — they
+                // would let the guest escape the sandbox by linking to
+                // arbitrary host paths. Mirror wasmtime/wasi-libc which
+                // return EPERM for an absolute target. (rust/symlink_create
+                // create_symlink_to_root pins this.)
+                if (oldPath.Length > 0 && (oldPath[0] == '/' || oldPath[0] == '\\'))
+                    return (int)ErrNo.Perm;
                 var guestPath = Path.Combine(dirFileDescriptor.Path, newPath);
                 var newHostPath = state.PathMapper.MapToHostPath(guestPath);
                 File.CreateSymbolicLink(newHostPath, oldPath);
@@ -481,7 +523,14 @@ namespace Wacs.WASI.Preview1
                 var guestPath = Path.Combine(guestDirPath, pathToUnlink);
                 var hostPath = Path.Combine(hostDirPath, pathToUnlink);
 
-                if (Directory.Exists(hostPath)) return (int)ErrNo.IsDir;
+                // path_unlink_file removes the entry, never the target.
+                // If hostPath is a symlink — even one pointing at a
+                // directory or a dangling target — File.Delete unlinks
+                // the link itself (matching POSIX unlink(2)). The IsDir
+                // check has to skip the symlink case explicitly because
+                // Directory.Exists follows links.
+                bool isSymlink = VirtualPathMapper.IsSymlink(hostPath);
+                if (!isSymlink && Directory.Exists(hostPath)) return (int)ErrNo.IsDir;
                 File.Delete(hostPath);
                 WasiFsHelpers.UnbindFile(state, guestPath);
             }
