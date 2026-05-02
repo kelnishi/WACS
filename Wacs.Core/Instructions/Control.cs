@@ -1137,7 +1137,7 @@ namespace Wacs.Core.Instructions
             if (!funcInst.Type.Matches(ftExpect.Unroll.Body, context.Frame.Module.Types))
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Expected FunctionType differed.");
             //19.
-            context.Invoke(a);
+            context.InvokeResolved(funcInst);
         }
 
         public override async ValueTask ExecuteAsync(ExecContext context)

@@ -488,10 +488,21 @@ namespace Wacs.Core.Runtime
             //1.
             Assert( Store.Contains(addr),
                 $"Failure in Function Invocation. Address does not exist {addr}");
-            
+
             //2.
-            var funcInst = Store[addr];
-            
+            InvokeResolved(Store[addr]);
+        }
+
+        /// <summary>
+        /// Hot-path overload for callers that have already resolved the
+        /// <see cref="IFunctionInstance"/> from the Store. Skips the
+        /// per-call Store[addr] lookup that <see cref="Invoke(FuncAddr)"/>
+        /// would otherwise repeat — call_indirect and call_ref both
+        /// already fetched the funcInst for their type-check, so they
+        /// shouldn't pay the lookup again on dispatch.
+        /// </summary>
+        public void InvokeResolved(IFunctionInstance funcInst)
+        {
             switch (funcInst)
             {
                 case FunctionInstance wasmFunc:
