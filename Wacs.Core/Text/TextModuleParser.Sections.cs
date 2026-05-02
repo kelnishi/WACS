@@ -935,14 +935,21 @@ namespace Wacs.Core.Text
                 && form.Children[i].AtomText() == "func")
             {
                 // Legacy: (elem (i32.const N) func $f0 $f1 …) — handled earlier path
+                // Use Func (non-nullable) to match what the binary
+                // parser's ParseElementKind produces for elemkind 0x00.
+                // Both representations are spec-equivalent for the
+                // funcidx-list shape; aligning them keeps the WAT and
+                // binary pipelines in lockstep so the validator's
+                // table-vs-element type check sees the same type
+                // either way.
                 i++;
-                reftype = ValType.FuncRef;
+                reftype = ValType.Func;
                 mode = new Module.ElementMode.PassiveMode();
             }
             else
             {
                 // Empty passive or legacy shortcut
-                reftype = ValType.FuncRef;
+                reftype = ValType.Func;
                 mode = new Module.ElementMode.PassiveMode();
             }
 
