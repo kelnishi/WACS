@@ -196,8 +196,8 @@ namespace Wacs.Core.Instructions.Reference
             var ftActual = funcInst.Type;
             if (!cachedFunctionType.Matches(ftActual, context.Frame.Module.Types))
                 throw new TrapException($"Instruction call_ref failed. Expected FunctionType differed.");
-            
-            context.Invoke(a);
+
+            context.InvokeResolved(funcInst);
         }
 
         public override async ValueTask ExecuteAsync(ExecContext context)
