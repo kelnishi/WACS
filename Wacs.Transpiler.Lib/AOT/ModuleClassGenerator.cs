@@ -1234,6 +1234,20 @@ namespace Wacs.Transpiler.AOT
             // === Populate FuncTable ===
             EmitFuncTablePopulation(il, ctxLocal);
 
+            // === Register precompiled call_indirect dispatch shims ===
+            // For every distinct CLR delegate signature any function in
+            // this module declares, emit a static Shim_<n> on the
+            // Functions class that does the unbox/invoke/box dance the
+            // runtime path used to build at call time via
+            // Reflection.Emit.DynamicMethod. Registering them here makes
+            // the AOT-published binary's call_indirect path codegen-free
+            // (no PlatformNotSupportedException under PublishAot, and
+            // ~18% faster than the DynamicInvoke fallback PR #103
+            // shipped). Multi-result and >16-param funcs aren't covered
+            // — those return null from BuildDelegateType and route
+            // through MultiReturnMethodRegistry / DynamicInvoke fallback.
+            EmitTypedDelegateShimsAndRegister(il);
+
             // === Cache cabi_realloc delegate, if exported ===
             // Aggregate-RETURN emit (string / list<T>) needs a
             // typed Func<int,int,int,int,int> reference to the
@@ -1413,15 +1427,14 @@ namespace Wacs.Transpiler.AOT
                 // directly and remains unaffected.
                 if (funcType.ResultType.Types.Length > 1)
                 {
-                    // MultiReturnMethodRegistry.Register(initDataId, funcIdx, mb)
-                    il.Emit(OpCodes.Ldc_I4, _initDataId);
-                    il.Emit(OpCodes.Ldc_I4, _importCount + i);
-                    il.Emit(OpCodes.Ldtoken, mb);
-                    il.Emit(OpCodes.Call, typeof(MethodBase).GetMethod(
-                        nameof(MethodBase.GetMethodFromHandle), new[] { typeof(RuntimeMethodHandle) })!);
-                    il.Emit(OpCodes.Castclass, typeof(MethodInfo));
-                    il.Emit(OpCodes.Call, typeof(MultiReturnMethodRegistry).GetMethod(
-                        nameof(MultiReturnMethodRegistry.Register))!);
+                    // Emit a MultiShim_<funcIdx> static on _functionsType
+                    // and register it directly — the precompiled IL path
+                    // doesn't need MethodInfo at runtime, so the AOT
+                    // binary's multi-return call_indirect path is
+                    // codegen-free. (The legacy
+                    // MultiReturnMethodRegistry.Register path stays as
+                    // public API for non-transpiler callers.)
+                    EmitMultiReturnShimAndRegister(il, mb, funcType, _importCount + i);
                     continue;
                 }
 
@@ -1454,6 +1467,216 @@ namespace Wacs.Transpiler.AOT
 
                 il.Emit(OpCodes.Stelem_Ref);
             }
+        }
+
+        /// <summary>
+        /// Emit one static <c>Shim_&lt;n&gt;</c> per distinct CLR delegate
+        /// signature this module declares (deduped across imports + locals)
+        /// and a corresponding <c>TypedDelegateInvoker.RegisterShim</c>
+        /// call into the ctor IL. The shim's body mirrors
+        /// <c>TypedDelegateInvoker.Build</c> exactly — cast Delegate to
+        /// concrete, unbox each arg, callvirt Invoke, box return — but
+        /// emitted at transpile time so the AOT path doesn't need
+        /// Reflection.Emit at runtime.
+        /// </summary>
+        private void EmitTypedDelegateShimsAndRegister(ILGenerator ctorIl)
+        {
+            // De-duplicate by delegate Type. BuildDelegateType returns the
+            // same BCL Func/Action instantiation for any two wasm types
+            // that lower to the same CLR signature, so this keys cleanly
+            // even when the wasm has many functions sharing a signature.
+            var unique = new List<Type>();
+            var seen = new HashSet<Type>();
+            foreach (var ft in _allFunctionTypes)
+            {
+                var dt = Emitters.CallEmitter.BuildDelegateType(ft);
+                if (dt != null && seen.Add(dt))
+                    unique.Add(dt);
+            }
+            if (unique.Count == 0) return;
+
+            var invokerDelegateType = typeof(TypedDelegateInvoker.Invoker);
+            var invokerCtor = invokerDelegateType.GetConstructor(
+                new[] { typeof(object), typeof(IntPtr) })
+                ?? throw new InvalidOperationException(
+                    "Invoker delegate ctor not found");
+            var registerShim = typeof(TypedDelegateInvoker).GetMethod(
+                nameof(TypedDelegateInvoker.RegisterShim))!;
+            var getTypeFromHandle = typeof(Type).GetMethod(
+                nameof(Type.GetTypeFromHandle), new[] { typeof(RuntimeTypeHandle) })!;
+
+            for (int idx = 0; idx < unique.Count; idx++)
+            {
+                var delegateType = unique[idx];
+                var shim = EmitTypedDelegateShim(delegateType, idx);
+
+                // TypedDelegateInvoker.RegisterShim(
+                //     typeof(<delegateType>),
+                //     new Invoker(null, &Functions.Shim_<idx>));
+                ctorIl.Emit(OpCodes.Ldtoken, delegateType);
+                ctorIl.Emit(OpCodes.Call, getTypeFromHandle);
+                ctorIl.Emit(OpCodes.Ldnull);                  // static — no target
+                ctorIl.Emit(OpCodes.Ldftn, shim);
+                ctorIl.Emit(OpCodes.Newobj, invokerCtor);
+                ctorIl.Emit(OpCodes.Call, registerShim);
+            }
+        }
+
+        private MethodBuilder EmitTypedDelegateShim(Type delegateType, int idx)
+        {
+            var invokeMethod = delegateType.GetMethod("Invoke")
+                ?? throw new InvalidOperationException(
+                    $"Delegate type {delegateType} has no Invoke method");
+            var parameters = invokeMethod.GetParameters();
+
+            var shim = _functionsType.DefineMethod(
+                $"Shim_{idx}",
+                MethodAttributes.Public | MethodAttributes.Static,
+                typeof(object),
+                new[] { typeof(Delegate), typeof(object[]) });
+
+            var il = shim.GetILGenerator();
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Castclass, delegateType);
+
+            for (int i = 0; i < parameters.Length; i++)
+            {
+                il.Emit(OpCodes.Ldarg_1);
+                il.Emit(OpCodes.Ldc_I4, i);
+                il.Emit(OpCodes.Ldelem_Ref);
+                var pt = parameters[i].ParameterType;
+                if (pt.IsValueType)
+                    il.Emit(OpCodes.Unbox_Any, pt);
+                else
+                    il.Emit(OpCodes.Castclass, pt);
+            }
+
+            il.Emit(OpCodes.Callvirt, invokeMethod);
+
+            if (invokeMethod.ReturnType == typeof(void))
+                il.Emit(OpCodes.Ldnull);
+            else if (invokeMethod.ReturnType.IsValueType)
+                il.Emit(OpCodes.Box, invokeMethod.ReturnType);
+
+            il.Emit(OpCodes.Ret);
+            return shim;
+        }
+
+        /// <summary>
+        /// Emit a per-function MultiShim_&lt;funcIdx&gt; static on the
+        /// Functions class for a multi-return wasm function and register
+        /// it with <see cref="MultiReturnMethodRegistry.RegisterShim"/>
+        /// from the Module ctor IL. Mirrors
+        /// <c>InitializationHelper.MultiReturnMethodRegistry.BuildInvoker</c>
+        /// — declare out-locals, push ctx + unboxed args + ldloca for
+        /// each out, call the target, build object[] of [r0, out1, ...
+        /// outK-1] all boxed — but at transpile time so the AOT binary
+        /// has no Reflection.Emit dependency on the multi-return path.
+        /// </summary>
+        private void EmitMultiReturnShimAndRegister(
+            ILGenerator ctorIl, MethodBuilder target, Wacs.Core.Types.FunctionType funcType, int globalFuncIdx)
+        {
+            // The shim signature is (ThinContext, object[]) → object[].
+            // Body: declare out-locals for each result beyond the first,
+            // push ctx, unbox each input arg, ldloca for each out, call
+            // target, capture the return + each out into a boxed object[].
+            var paramTypes = funcType.ParameterTypes.Types;
+            var resultTypes = funcType.ResultType.Types;
+            int outCount = resultTypes.Length - 1;
+
+            var shim = _functionsType.DefineMethod(
+                $"MultiShim_{globalFuncIdx}",
+                MethodAttributes.Public | MethodAttributes.Static,
+                typeof(object[]),
+                new[] { typeof(ThinContext), typeof(object[]) });
+
+            var il = shim.GetILGenerator();
+
+            // Map wasm types → CLR types using the same mapper the rest
+            // of the transpiler uses, so the unbox/box ops match the
+            // target method's actual ABI.
+            var clrParamTypes = paramTypes.Select(t => ModuleTranspiler.MapValType(t)).ToArray();
+            var clrR0Type = ModuleTranspiler.MapValType(resultTypes[0]);
+            var clrOutTypes = new Type[outCount];
+            for (int k = 0; k < outCount; k++)
+                clrOutTypes[k] = ModuleTranspiler.MapValType(resultTypes[k + 1]);
+
+            // Declare out-locals.
+            var outLocals = new LocalBuilder[outCount];
+            for (int k = 0; k < outCount; k++)
+                outLocals[k] = il.DeclareLocal(clrOutTypes[k]);
+
+            // Push ctx.
+            il.Emit(OpCodes.Ldarg_0);
+
+            // Push each unboxed arg (args[i] → CLR param type).
+            for (int k = 0; k < paramTypes.Length; k++)
+            {
+                il.Emit(OpCodes.Ldarg_1);
+                il.Emit(OpCodes.Ldc_I4, k);
+                il.Emit(OpCodes.Ldelem_Ref);
+                if (clrParamTypes[k].IsValueType)
+                    il.Emit(OpCodes.Unbox_Any, clrParamTypes[k]);
+                else
+                    il.Emit(OpCodes.Castclass, clrParamTypes[k]);
+            }
+
+            // Push ldloca for each out-param.
+            for (int k = 0; k < outCount; k++)
+                il.Emit(OpCodes.Ldloca, outLocals[k]);
+
+            // Call the target.
+            il.EmitCall(OpCodes.Call, target, null);
+
+            // Build result array: [r0, out1, ..., outK-1].
+            var r0Local = il.DeclareLocal(clrR0Type);
+            il.Emit(OpCodes.Stloc, r0Local);
+
+            var resultLocal = il.DeclareLocal(typeof(object[]));
+            il.Emit(OpCodes.Ldc_I4, 1 + outCount);
+            il.Emit(OpCodes.Newarr, typeof(object));
+            il.Emit(OpCodes.Stloc, resultLocal);
+
+            // result[0] = box(r0)
+            il.Emit(OpCodes.Ldloc, resultLocal);
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Ldloc, r0Local);
+            if (clrR0Type.IsValueType)
+                il.Emit(OpCodes.Box, clrR0Type);
+            il.Emit(OpCodes.Stelem_Ref);
+
+            // result[k+1] = box(outLocal[k])
+            for (int k = 0; k < outCount; k++)
+            {
+                il.Emit(OpCodes.Ldloc, resultLocal);
+                il.Emit(OpCodes.Ldc_I4, k + 1);
+                il.Emit(OpCodes.Ldloc, outLocals[k]);
+                if (clrOutTypes[k].IsValueType)
+                    il.Emit(OpCodes.Box, clrOutTypes[k]);
+                il.Emit(OpCodes.Stelem_Ref);
+            }
+
+            il.Emit(OpCodes.Ldloc, resultLocal);
+            il.Emit(OpCodes.Ret);
+
+            // Now emit the registration IL into the ctor:
+            //   MultiReturnMethodRegistry.RegisterShim(
+            //       _initDataId, globalFuncIdx,
+            //       new MultiReturnInvoker(null, &MultiShim_<idx>));
+            var invokerDelType = typeof(MultiReturnInvoker);
+            var invokerCtor = invokerDelType.GetConstructor(
+                new[] { typeof(object), typeof(IntPtr) })
+                ?? throw new InvalidOperationException(
+                    "MultiReturnInvoker delegate ctor not found");
+            var registerShim = typeof(MultiReturnMethodRegistry).GetMethod(
+                nameof(MultiReturnMethodRegistry.RegisterShim))!;
+
+            ctorIl.Emit(OpCodes.Ldc_I4, _initDataId);
+            ctorIl.Emit(OpCodes.Ldc_I4, globalFuncIdx);
+            ctorIl.Emit(OpCodes.Ldnull);
+            ctorIl.Emit(OpCodes.Ldftn, shim);
+            ctorIl.Emit(OpCodes.Newobj, invokerCtor);
+            ctorIl.Emit(OpCodes.Call, registerShim);
         }
 
         private void EmitExportMethods(FieldBuilder ctxField)

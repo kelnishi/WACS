@@ -40,11 +40,30 @@ namespace Wacs.Transpiler.AOT
     /// over speed when codegen isn't an option. Long-term fix is to emit
     /// per-signature direct-call shims at transpile time.</para>
     /// </summary>
-    internal static class TypedDelegateInvoker
+    public static class TypedDelegateInvoker
     {
         public delegate object? Invoker(Delegate del, object?[] args);
 
         private static readonly ConcurrentDictionary<Type, Invoker> _cache = new();
+
+        /// <summary>
+        /// Register a precompiled shim for <paramref name="delegateType"/>.
+        /// Called from a transpiled module's ctor IL with a static method
+        /// emitted by <c>ModuleClassGenerator</c> at transpile time, so
+        /// <see cref="GetOrBuild"/> never has to invoke
+        /// <see cref="Reflection.Emit"/> at runtime under PublishAot.
+        ///
+        /// <para>Idempotent: re-registering the same delegate type from a
+        /// second module overwrites the first registration with an
+        /// equivalent shim (the IL is determined entirely by the delegate
+        /// signature). No harm; the call site never observes the swap.</para>
+        /// </summary>
+        public static void RegisterShim(Type delegateType, Invoker shim)
+        {
+            if (delegateType == null) throw new ArgumentNullException(nameof(delegateType));
+            if (shim == null) throw new ArgumentNullException(nameof(shim));
+            _cache[delegateType] = shim;
+        }
 
         public static Invoker GetOrBuild(Type delegateType)
             => _cache.GetOrAdd(delegateType, Build);
@@ -52,6 +71,14 @@ namespace Wacs.Transpiler.AOT
         private static Invoker Build(Type delegateType)
         {
             // NativeAOT path — no Reflection.Emit, fall back to DynamicInvoke.
+            // Defense-in-depth: a transpiled module's ctor pre-registers a
+            // precompiled shim per delegate signature via RegisterShim
+            // (see ModuleClassGenerator.EmitTypedDelegateShimsAndRegister),
+            // so this path is normally cold under PublishAot. It only
+            // fires for delegate types the transpiler didn't see — e.g.,
+            // a host-side delegate handed to a third-party embedder
+            // calling GetOrBuild manually, or signatures where
+            // BuildDelegateType returned null (>16 params).
             if (!RuntimeFeature.IsDynamicCodeSupported)
                 return (del, args) => del.DynamicInvoke(args);
 

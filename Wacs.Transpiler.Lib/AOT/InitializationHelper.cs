@@ -261,6 +261,23 @@ namespace Wacs.Transpiler.AOT
             lock (_lock) { _invokers[(initDataId, funcIdx)] = invoker; }
         }
 
+        /// <summary>
+        /// Register a precompiled <see cref="MultiReturnInvoker"/> shim
+        /// for a multi-return wasm function. Called from the transpiled
+        /// module's ctor IL with a static method emitted at transpile
+        /// time by <c>ModuleClassGenerator.EmitMultiReturnShimAndRegister</c>,
+        /// so the AOT-published binary's multi-return call_indirect path
+        /// is codegen-free (no PlatformNotSupportedException under
+        /// PublishAot, no reflection per call). Idempotent —
+        /// re-registration overwrites a prior entry with an equivalent
+        /// shim.
+        /// </summary>
+        public static void RegisterShim(int initDataId, int funcIdx, MultiReturnInvoker shim)
+        {
+            if (shim == null) throw new ArgumentNullException(nameof(shim));
+            lock (_lock) { _invokers[(initDataId, funcIdx)] = shim; }
+        }
+
         // NativeAOT-safe fallback. Mirrors BuildInvoker's contract: take
         // (ctx, args[]) where args[] is the wasm-typed input row, return
         // an object[] of [r0, out1, ..., outK-1] all boxed.
