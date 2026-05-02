@@ -127,12 +127,39 @@ namespace Spec.Test
             Expected = ScriptValuesToArguments(ar.Expected),
         };
 
-        private static ICommand ConvertAssertTrap(ScriptAssertTrap at) => new AssertTrapCommand
+        private static ICommand ConvertAssertTrap(ScriptAssertTrap at)
         {
-            Line = at.Line,
-            Action = at.Action != null ? ScriptActionToIAction(at.Action) : null,
-            Text = at.ExpectedMessage,
-        };
+            // Two shapes share the same keyword:
+            //   (assert_trap (action …) "msg")  — invoke/get traps   → AssertTrapCommand
+            //   (assert_trap (module …) "msg")  — module fails to    → AssertUninstantiableCommand
+            //                                     instantiate (start
+            //                                     fn or active segment
+            //                                     trap). wast2json
+            //                                     surfaces this as
+            //                                     `assert_uninstantiable`.
+            // Prior to this fix the adapter built an AssertTrapCommand
+            // with a null Action when at.Module was set; the runner
+            // then silently passed without ever instantiating the module,
+            // leaving the runtime store in a state that diverged from
+            // the JSON pipeline.
+            if (at.Action == null && at.Module != null)
+            {
+                var (mod, err) = ParseInnerOrCaptureError(at.Module);
+                return new AssertUninstantiableCommand
+                {
+                    Line = at.Line,
+                    Text = at.ExpectedMessage,
+                    PreParsedModule = mod,
+                    PreParseError = err,
+                };
+            }
+            return new AssertTrapCommand
+            {
+                Line = at.Line,
+                Action = at.Action != null ? ScriptActionToIAction(at.Action) : null,
+                Text = at.ExpectedMessage,
+            };
+        }
 
         private static ICommand ConvertAssertExhaustion(ScriptAssertExhaustion ae) => new AssertExhaustionCommand
         {
@@ -199,6 +226,12 @@ namespace Spec.Test
         {
             if (sm.Module != null)
                 return (sm.Module, null);
+
+            // Text module whose parse threw upstream — the script parser
+            // captured the exception on ScriptModule.ParseError so the
+            // assertion can short-circuit as satisfied here.
+            if (sm.ParseError != null)
+                return (null, sm.ParseError);
 
             // Quote module that failed eager parse — re-run to capture
             // the FormatException for assertion verdicts.
