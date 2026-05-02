@@ -1002,6 +1002,14 @@ namespace Wacs.Core.Text
                 }
             }
 
+            // GC (FB prefix). Dispatch by immediate shape: typeidx, typeidx
+            // + dataidx/elemidx/fieldidx/count, heaptype (with nullable
+            // bit), heaptype-pair-with-flags-byte (br_on_cast variants), or
+            // zero-immediate (ref.i31 / i31.get_* / array.len /
+            // any.convert_extern / extern.convert_any).
+            if (Mnemonics.TryLookup(kw, out var bcGc) && bcGc.x00 == OpCode.FB)
+                return ParseGcInstruction(bcGc, parent, ref i, fctx);
+
             // SIMD (FD prefix). The factory has every SimdCode wired; the
             // text parser distinguishes immediate shapes here:
             //   - memarg-only   : v128.load/store/load_splat/load_extend/load_zero
@@ -1015,6 +1023,235 @@ namespace Wacs.Core.Text
 
             throw new NotSupportedException(
                 $"line {parent.Token.Line}: instruction '{kw}' not yet supported by the text parser (phase 1.4 scope)");
+        }
+
+        // ---- GC -----------------------------------------------------------
+
+        private static InstructionBase ParseGcInstruction(
+            ByteCode bc, SExpr parent, ref int i, TextFunctionContext fctx)
+        {
+            var gc = bc.xFB;
+            switch (gc)
+            {
+                // Zero-immediate
+                case GcCode.RefI31:
+                case GcCode.I31GetS:
+                case GcCode.I31GetU:
+                case GcCode.AnyConvertExtern:
+                case GcCode.ExternConvertAny:
+                case GcCode.ArrayLen:
+                    return SpecFactory.Factory.CreateInstruction(bc);
+
+                // typeidx
+                case GcCode.StructNew:
+                case GcCode.StructNewDefault:
+                case GcCode.ArrayNew:
+                case GcCode.ArrayNewDefault:
+                case GcCode.ArrayGet:
+                case GcCode.ArrayGetS:
+                case GcCode.ArrayGetU:
+                case GcCode.ArraySet:
+                case GcCode.ArrayFill:
+                {
+                    uint t = ResolveNamespaceIdx(fctx.Module.Types,
+                        ReadImmIdxAtom(parent, ref i, gc.GetMnemonic()), "type");
+                    return DecodeViaBinary(bc, w => w.WriteLeb128U32(t));
+                }
+
+                // typeidx + count
+                case GcCode.ArrayNewFixed:
+                {
+                    uint t = ResolveNamespaceIdx(fctx.Module.Types,
+                        ReadImmIdxAtom(parent, ref i, "array.new_fixed"), "type");
+                    long n = ParseUnsignedInt(ReadImmIdxAtom(parent, ref i, "array.new_fixed"));
+                    uint nC = (uint)n;
+                    return DecodeViaBinary(bc, w => { w.WriteLeb128U32(t); w.WriteLeb128U32(nC); });
+                }
+
+                // typeidx + dataidx
+                case GcCode.ArrayNewData:
+                case GcCode.ArrayInitData:
+                {
+                    uint t = ResolveNamespaceIdx(fctx.Module.Types,
+                        ReadImmIdxAtom(parent, ref i, gc.GetMnemonic()), "type");
+                    uint d = ResolveNamespaceIdx(fctx.Module.Datas,
+                        ReadImmIdxAtom(parent, ref i, gc.GetMnemonic()), "data");
+                    return DecodeViaBinary(bc, w => { w.WriteLeb128U32(t); w.WriteLeb128U32(d); });
+                }
+
+                // typeidx + elemidx
+                case GcCode.ArrayNewElem:
+                case GcCode.ArrayInitElem:
+                {
+                    uint t = ResolveNamespaceIdx(fctx.Module.Types,
+                        ReadImmIdxAtom(parent, ref i, gc.GetMnemonic()), "type");
+                    uint e = ResolveNamespaceIdx(fctx.Module.Elems,
+                        ReadImmIdxAtom(parent, ref i, gc.GetMnemonic()), "elem");
+                    return DecodeViaBinary(bc, w => { w.WriteLeb128U32(t); w.WriteLeb128U32(e); });
+                }
+
+                // typeidx + typeidx (array.copy dst src)
+                case GcCode.ArrayCopy:
+                {
+                    uint dt = ResolveNamespaceIdx(fctx.Module.Types,
+                        ReadImmIdxAtom(parent, ref i, "array.copy"), "type");
+                    uint st = ResolveNamespaceIdx(fctx.Module.Types,
+                        ReadImmIdxAtom(parent, ref i, "array.copy"), "type");
+                    return DecodeViaBinary(bc, w => { w.WriteLeb128U32(dt); w.WriteLeb128U32(st); });
+                }
+
+                // typeidx + fieldidx (struct.get / struct.set)
+                case GcCode.StructGet:
+                case GcCode.StructGetS:
+                case GcCode.StructGetU:
+                case GcCode.StructSet:
+                {
+                    var tAtom = ReadImmIdxAtom(parent, ref i, gc.GetMnemonic());
+                    uint t = ResolveNamespaceIdx(fctx.Module.Types, tAtom, "type");
+                    var fAtom = ReadImmIdxAtom(parent, ref i, gc.GetMnemonic());
+                    uint f;
+                    if (fAtom.Token.Kind == TokenKind.Id)
+                    {
+                        if (!fctx.Module.StructFieldNames.TryGetValue((int)t, out var ftab)
+                            || !ftab.TryResolve(fAtom.AtomText(), out var fIdx))
+                            throw new FormatException(
+                                $"line {fAtom.Token.Line}: unknown field {fAtom.AtomText()} in struct type {t}");
+                        f = (uint)fIdx;
+                    }
+                    else
+                    {
+                        f = (uint)ParseUnsignedInt(fAtom);
+                    }
+                    return DecodeViaBinary(bc, w => { w.WriteLeb128U32(t); w.WriteLeb128U32(f); });
+                }
+
+                // ref.test / ref.cast — single reftype
+                case GcCode.RefTest:
+                case GcCode.RefTestNull:
+                case GcCode.RefCast:
+                case GcCode.RefCastNull:
+                {
+                    var (heapByte, nullable) = ParseRefTypeForCast(fctx.Module, parent, ref i, gc.GetMnemonic());
+                    // Pick the right opcode variant based on parsed nullability.
+                    var actualBc = nullable
+                        ? (gc == GcCode.RefTest || gc == GcCode.RefTestNull
+                            ? (ByteCode)GcCode.RefTestNull : (ByteCode)GcCode.RefCastNull)
+                        : (gc == GcCode.RefTest || gc == GcCode.RefTestNull
+                            ? (ByteCode)GcCode.RefTest : (ByteCode)GcCode.RefCast);
+                    return DecodeViaBinary(actualBc, w => WriteHeapTypeBytes(w, heapByte));
+                }
+
+                // br_on_cast / br_on_cast_fail — flags byte + label + 2 reftypes
+                case GcCode.BrOnCast:
+                case GcCode.BrOnCastFail:
+                {
+                    uint label = (uint)ResolveLabel(fctx,
+                        ReadImmIdxAtom(parent, ref i, gc.GetMnemonic()));
+                    var (h1, n1) = ParseRefTypeForCast(fctx.Module, parent, ref i, gc.GetMnemonic());
+                    var (h2, n2) = ParseRefTypeForCast(fctx.Module, parent, ref i, gc.GetMnemonic());
+                    byte flags = 0;
+                    if (n1) flags |= 0b01; // CastFlags.NullEmpty
+                    if (n2) flags |= 0b10; // CastFlags.EmptyNull
+                    return DecodeViaBinary(bc, w =>
+                    {
+                        w.Write(flags);
+                        w.WriteLeb128U32(label);
+                        WriteHeapTypeBytes(w, h1);
+                        WriteHeapTypeBytes(w, h2);
+                    });
+                }
+            }
+            throw new NotSupportedException(
+                $"line {parent.Token.Line}: GC instruction '{bc.GetMnemonic()}' has no WAT dispatch yet");
+        }
+
+        /// <summary>
+        /// Parse a (ref null? heaptype) form OR a bare abstract-heaptype
+        /// keyword (e.g. <c>funcref</c>) used as a reftype shorthand. Returns
+        /// the heaptype (as a value to be written via
+        /// <see cref="WriteHeapTypeBytes"/>) plus its nullability bit.
+        /// </summary>
+        private static (ValType heapType, bool nullable) ParseRefTypeForCast(
+            TextParseContext ctx, SExpr parent, ref int i, string opName)
+        {
+            if (i >= parent.Children.Count)
+                throw new FormatException(
+                    $"line {parent.Token.Line}: {opName} expects a reftype operand");
+            var child = parent.Children[i];
+            i++;
+
+            // List form: (ref null? <heap>)
+            if (child.Kind == SExprKind.List && child.IsForm("ref"))
+            {
+                int j = 1;
+                bool nullable = false;
+                if (j < child.Children.Count
+                    && child.Children[j].Kind == SExprKind.Atom
+                    && child.Children[j].Token.Kind == TokenKind.Keyword
+                    && child.Children[j].AtomText() == "null")
+                {
+                    nullable = true;
+                    j++;
+                }
+                if (j >= child.Children.Count)
+                    throw new FormatException(
+                        $"line {child.Token.Line}: (ref …) missing heap type");
+                var ht = ParseHeapType(ctx, child.Children[j]);
+                return (ht, nullable);
+            }
+
+            // Atom form: bare reftype keyword (funcref/externref/anyref/etc.)
+            if (child.Kind == SExprKind.Atom)
+            {
+                if (TryParseRefShorthand(child.AtomText(), out var rt))
+                {
+                    bool nullable = (rt & ValType.Nullable) != 0;
+                    // The shorthand ValType already encodes the abstract
+                    // heaptype; WriteHeapTypeBytes pulls the heap byte via
+                    // GetHeapType().
+                    return (rt, nullable);
+                }
+            }
+            throw new FormatException(
+                $"line {child.Token.Line}: {opName} expects a reftype operand");
+        }
+
+        /// <summary>
+        /// Encode a heaptype as the binary parser expects: either a single
+        /// negative byte (abstract heap types) or a non-negative LEB128 s33
+        /// (typeidx).
+        /// </summary>
+        private static void WriteHeapTypeBytes(BinaryWriter w, ValType heapType)
+        {
+            // For abstract heap types the low byte of the ValType IS the
+            // SLEB128 negative byte the binary parser expects.
+            if (heapType.IsDefType())
+            {
+                int idx = heapType.Index().Value;
+                WriteLeb128S33(w, idx);
+                return;
+            }
+            // Encode the abstract heaptype byte directly.
+            byte b = (byte)((uint)heapType.GetHeapType());
+            w.Write(b);
+        }
+
+        private static void WriteLeb128S33(BinaryWriter w, int value)
+        {
+            // Signed LEB128, fits in 33 bits.
+            bool more = true;
+            int v = value;
+            while (more)
+            {
+                byte b = (byte)(v & 0x7F);
+                v >>= 7;
+                bool signBit = (b & 0x40) != 0;
+                if ((v == 0 && !signBit) || (v == -1 && signBit))
+                    more = false;
+                else
+                    b |= 0x80;
+                w.Write(b);
+            }
         }
 
         // ---- SIMD ---------------------------------------------------------

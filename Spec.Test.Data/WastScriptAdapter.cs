@@ -377,15 +377,19 @@ namespace Spec.Test
 
         private static Argument RefGenericKindToArgument(ScriptValue sv)
         {
+            // RefId is set when the generic ref carries a host index (ref.host N
+            // surfaces as an anyref with value N). Other forms default to "null"
+            // — they're spec patterns matching any null reference of that kind.
+            var value = sv.RefId ?? "null";
             return sv.RefHeapType switch
             {
-                "any"    => new Argument { Type = "anyref",    Value = "null" },
-                "struct" => new Argument { Type = "structref", Value = "null" },
-                "array"  => new Argument { Type = "arrayref",  Value = "null" },
-                "eq"     => new Argument { Type = "eqref",     Value = "null" },
-                "i31"    => new Argument { Type = "i31ref",    Value = "null" },
-                "exn"    => new Argument { Type = "exnref",    Value = "null" },
-                _        => new Argument { Type = "ref",       Value = "null" },
+                "any"    => new Argument { Type = "anyref",    Value = value },
+                "struct" => new Argument { Type = "structref", Value = value },
+                "array"  => new Argument { Type = "arrayref",  Value = value },
+                "eq"     => new Argument { Type = "eqref",     Value = value },
+                "i31"    => new Argument { Type = "i31ref",    Value = value },
+                "exn"    => new Argument { Type = "exnref",    Value = value },
+                _        => new Argument { Type = "ref",       Value = value },
             };
         }
 

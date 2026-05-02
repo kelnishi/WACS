@@ -509,6 +509,16 @@ namespace Wacs.Core.Text
                     if (node.Children.Count >= 2)
                         v.RefId = node.Children[1].AtomText();
                     return v;
+                case "ref.host":
+                    // ref.host N is the GC test form for a host-supplied
+                    // *internalized* any-ref. wast2json renders it as an
+                    // {"type":"anyref","value":"N"} expected; mirror that
+                    // by using RefGeneric with heap-type "any".
+                    v.Kind = ScriptValueKind.RefGeneric;
+                    v.RefHeapType = "any";
+                    if (node.Children.Count >= 2)
+                        v.RefId = node.Children[1].AtomText();
+                    return v;
                 case "ref.func":
                     v.Kind = ScriptValueKind.RefFunc;
                     if (node.Children.Count >= 2)
