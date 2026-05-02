@@ -443,6 +443,19 @@ namespace Wacs.Core.Text
                 i++;
             ExpectConsumed(form, i, "table");
 
+            // Spec / wabt parity: a non-nullable-ref table without an
+            // explicit init expression is malformed — there's no valid
+            // default value for a slot of a non-nullable reference
+            // type, so the binary form can't be encoded. Match wabt's
+            // wast2json reject behavior at parse time so
+            // `assert_invalid (module (table 0 (ref func)))` surfaces
+            // a FormatException the assert handler catches, instead
+            // of letting the InstRefNull-in-default-init throw an
+            // InvalidCastException downstream.
+            if (tableInit == null && elementType.IsRefType() && !elementType.IsNullable())
+                throw new FormatException(
+                    $"line {form.Token.Line}: type mismatch — non-nullable table type {elementType} requires explicit init expression");
+
             int idx = ctx.Tables.Declare(name);
             ctx.Module.Tables.Add(new TableType(elementType, limits, tableInit));
             FlushExports(ctx, pendingExports, ExternalKind.Table, idx);
