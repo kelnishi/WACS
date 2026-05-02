@@ -22,8 +22,8 @@
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.WASIp1</AssemblyName>
         <RootNamespace>Wacs.WASIp1</RootNamespace>
-        <AssemblyVersion>0.11.0</AssemblyVersion>
-        <Version>0.11.0</Version>
+        <AssemblyVersion>0.12.0</AssemblyVersion>
+        <Version>0.12.0</Version>
         <RepositoryType>git</RepositoryType>
         <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
         <IsAotCompatible>true</IsAotCompatible>
