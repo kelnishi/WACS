@@ -16,6 +16,7 @@
          netstandard2.0 build, both of which trip NETSDK1207 even though
          neither ships at runtime in this configuration. -->
     <ProjectReference Include="..\Wacs.Core\Wacs.Core.csproj"
+                      SetTargetFramework="TargetFramework=net8.0"
                       UndefineProperties="PublishAot;PublishTrimmed;PublishReadyToRun;SelfContained;RuntimeIdentifier" />
   </ItemGroup>
   <ItemGroup>

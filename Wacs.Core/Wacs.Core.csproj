@@ -21,7 +21,11 @@
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <RepositoryType>git</RepositoryType>
     <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
-    <IsAotCompatible>true</IsAotCompatible>
+    <!-- Only the net8.0 leg participates in NativeAOT publishes. Setting
+         IsAotCompatible unconditionally trips NETSDK1207 on the netstandard2.1
+         leg during a downstream PublishAot, even if that leg never ships in
+         the AOT image. -->
+    <IsAotCompatible Condition="'$(TargetFramework)' == 'net8.0'">true</IsAotCompatible>
     <!-- SkipLocalsInit on GeneratedDispatcher.Run requires the project to permit unsafe
          code (the C# compiler gates the attribute to prevent accidental use). We don't
          emit unsafe blocks — the hot-path uses only Unsafe.Add / Unsafe.ReadUnaligned,
@@ -34,7 +38,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Wacs.Compilation\Wacs.Compilation.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\Wacs.Compilation\Wacs.Compilation.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false"
+                      UndefineProperties="PublishAot;PublishTrimmed;PublishReadyToRun;SelfContained;RuntimeIdentifier" />
   </ItemGroup>
 
   <ItemGroup>
