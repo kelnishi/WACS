@@ -199,7 +199,12 @@ namespace Wacs.Transpiler.Test
             var asm = LoadIsolated(dllPath);
             var initType = asm.GetType("Wacs.Xp.DirectTest.WasmModule.__WACSInit", throwOnError: true)!;
             var dataField = initType.GetField("Data", BindingFlags.Public | BindingFlags.Static)!;
-            var embedded = (byte[])dataField.GetValue(null)!;
+            // Data is RVA-mapped (DefineInitializedData), not a byte[].
+            // The field's runtime type is a private fixed-size struct with
+            // HasFieldRVA; reach the bytes via RuntimeHelpers.CreateSpan.
+            var embeddedSpan = System.Runtime.CompilerServices.RuntimeHelpers
+                .CreateSpan<byte>(dataField.FieldHandle);
+            var embedded = embeddedSpan.ToArray();
             Assert.NotEmpty(embedded);
 
             var decoded = InitDataCodec.Decode(embedded);
