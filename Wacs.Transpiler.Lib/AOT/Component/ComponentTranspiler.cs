@@ -273,12 +273,24 @@ namespace Wacs.Transpiler.AOT.Component
             // When DecodedWit is available, named types
             // (enum / record / variant / resource) emit with their
             // wit-bindgen-csharp-shaped C# names.
-            if (result.ExportsInterface != null && result.ModuleClass != null)
+            // Pre-bake metadata accessors: this composition step adds more
+            // types to the still-open builder before SaveAssembly. Touching
+            // the public type accessors would prematurely freeze it.
+            Dictionary<string, System.Type> componentNamedTypes = new();
+            if (result.ExportsInterfaceBuilder != null && result.ModuleClassBuilder != null)
             {
                 ComponentExportsEmit.EmitComponentExportsClass(
                     result.ModuleBuilder, assemblyNamespace,
-                    parsed.Component, result.ExportsInterface,
-                    result.ModuleClass, decodedWit);
+                    parsed.Component, result.ExportsInterfaceBuilder,
+                    result.ModuleClassBuilder, out componentNamedTypes,
+                    decodedWit);
+                // Prime ExportInterfaceEmit's per-module type registry
+                // so its TypeRef → Type lookups don't fall back to
+                // ModuleBuilder.GetType (unimplemented on PAB).
+                ExportInterfaceEmit.RegisterNamedTypes(
+                    result.ModuleBuilder,
+                    componentNamedTypes,
+                    assemblyNamespace);
             }
 
             // Phase B chain mode: emit [WitSource]-tagged

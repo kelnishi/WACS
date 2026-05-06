@@ -14,8 +14,11 @@
 
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Runtime.Loader;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
@@ -25,21 +28,59 @@ using Wacs.Transpiler.AOT.Emitters;
 namespace Wacs.Transpiler.AOT
 {
     /// <summary>
-    /// Result of transpiling a module, containing the generated assembly
-    /// and metadata needed to wire it into the WACS runtime.
+    /// Result of transpiling a module. Lifecycle: built into a
+    /// <see cref="PersistedAssemblyBuilder"/>, then "baked" (saved to a
+    /// <see cref="MemoryStream"/> and reloaded via
+    /// <see cref="AssemblyLoadContext"/>) before runtime invocation.
+    /// <para>
+    /// <b>Pre-bake</b>: types are <see cref="PersistedAssemblyBuilder"/>
+    /// metadata-only. Safe for emit-time inspection (Namespace, GetMethod,
+    /// GetField, IL-emit Ldtoken) and for adding more types via
+    /// <see cref="ModuleBuilder"/>. NOT safe for <see cref="Activator.CreateInstance"/>
+    /// or any code path that needs a runtime-loaded type.
+    /// </para>
+    /// <para>
+    /// <b>Post-bake</b>: <see cref="Assembly"/>, <see cref="ModuleClass"/>,
+    /// <see cref="ExportsInterface"/>, <see cref="ImportsInterface"/>,
+    /// <see cref="FunctionsType"/>, <see cref="Methods"/>, and
+    /// <see cref="FunctionMethodMap"/> are remapped to the loaded assembly's
+    /// equivalents. <see cref="ModuleBuilder"/> is then frozen — adding new
+    /// types post-bake is not supported.
+    /// </para>
+    /// <para>
+    /// Public type/method accessors auto-bake on first access. Emitters that
+    /// run between <c>Transpile()</c> and <c>SaveAssembly()</c> (e.g.
+    /// <see cref="MainEntryEmitter"/>) read pre-bake metadata via the
+    /// <c>*Builder</c>-suffixed accessors to avoid prematurely freezing the
+    /// builder.
+    /// </para>
     /// </summary>
     public class TranspilationResult
     {
-        public Assembly Assembly { get; }
-        public Type FunctionsType { get; }
-        public MethodInfo[] Methods { get; }
+        // Backing state. Replaced in-place by Bake(); _baked guards.
+        private bool _baked;
+        private byte[]? _bakedBytes;
+        private Assembly _assembly;
+        private Type _functionsType;
+        private Type? _exportsInterface;
+        private Type? _importsInterface;
+        private Type? _moduleClass;
+        private MethodInfo[] _methods;
+        private Dictionary<int, MethodInfo> _functionMethodMap;
+
+        public Assembly Assembly { get { Bake(); return _assembly; } }
+        public Type FunctionsType { get { Bake(); return _functionsType; } }
+        public MethodInfo[] Methods { get { Bake(); return _methods; } }
         public ModuleMetadata.Manifest Manifest { get; }
 
         /// <summary>
         /// Maps wasm function index (within the module's locally-defined functions)
         /// to the corresponding MethodInfo in the transpiled assembly.
         /// </summary>
-        public IReadOnlyDictionary<int, MethodInfo> FunctionMethodMap { get; }
+        public IReadOnlyDictionary<int, MethodInfo> FunctionMethodMap
+        {
+            get { Bake(); return _functionMethodMap; }
+        }
 
         public int TranspiledCount => Manifest.TranspiledCount;
         public int FallbackCount => Manifest.FallbackCount;
@@ -48,13 +89,25 @@ namespace Wacs.Transpiler.AOT
         public IReadOnlyList<TranspilerDiagnostic> Diagnostics { get; }
 
         /// <summary>Generated interface for module exports. Null if no exports.</summary>
-        public Type? ExportsInterface { get; }
+        public Type? ExportsInterface { get { Bake(); return _exportsInterface; } }
 
         /// <summary>Generated interface for module imports. Null if no imports.</summary>
-        public Type? ImportsInterface { get; }
+        public Type? ImportsInterface { get { Bake(); return _importsInterface; } }
 
         /// <summary>Generated Module class (implements IExports, accepts IImports).</summary>
-        public Type? ModuleClass { get; }
+        public Type? ModuleClass { get { Bake(); return _moduleClass; } }
+
+        // === Pre-bake (build-time) accessors for in-Lib emitters ===
+        // These return the metadata-only PersistedTypeBuilder.CreateType()
+        // results without triggering a Save+Load. Safe to use for IL emit
+        // and reflective metadata reads (Namespace, GetMethod, GetField).
+        // Accessing these does NOT freeze ModuleBuilder, so emitters can
+        // continue calling DefineType.
+
+        internal Type FunctionsTypeBuilder => _functionsType;
+        internal Type? ModuleClassBuilder => _moduleClass;
+        internal Type? ExportsInterfaceBuilder => _exportsInterface;
+        internal Type? ImportsInterfaceBuilder => _importsInterface;
 
         /// <summary>Export method metadata (name, type, index).</summary>
         public IReadOnlyList<InterfaceMethod> ExportMethods { get; }
@@ -72,7 +125,7 @@ namespace Wacs.Transpiler.AOT
         /// The still-open <see cref="ModuleBuilder"/> the transpiler wrote into,
         /// kept live so callers can define additional types (e.g.
         /// <see cref="MainEntryEmitter"/> for <c>--emit-main</c>) before the
-        /// assembly is persisted to disk.
+        /// assembly is persisted to disk. Frozen once <see cref="Bake"/> runs.
         /// </summary>
         public ModuleBuilder ModuleBuilder { get; }
 
@@ -91,33 +144,104 @@ namespace Wacs.Transpiler.AOT
             IReadOnlyList<InterfaceMethod> importMethods,
             FunctionType[]? allFunctionTypes = null)
         {
-            Assembly = assembly;
+            _assembly = assembly;
             ModuleBuilder = moduleBuilder;
-            FunctionsType = functionsType;
-            Methods = methods;
+            _functionsType = functionsType;
+            _methods = methods;
             Manifest = manifest;
-            FunctionMethodMap = functionMethodMap;
+            _functionMethodMap = functionMethodMap;
             Diagnostics = diagnostics;
-            ExportsInterface = exportsInterface;
-            ImportsInterface = importsInterface;
-            ModuleClass = moduleClass;
+            _exportsInterface = exportsInterface;
+            _importsInterface = importsInterface;
+            _moduleClass = moduleClass;
             ExportMethods = exportMethods;
             ImportMethods = importMethods;
             AllFunctionTypes = allFunctionTypes ?? Array.Empty<FunctionType>();
         }
 
         /// <summary>
-        /// Persist the in-memory dynamic assembly to disk as a portable .NET
-        /// assembly file. Uses Lokad.ILPack to serialize the dynamic
-        /// <see cref="System.Reflection.Emit.AssemblyBuilder"/>'s metadata and
-        /// IL into a standalone PE image that can be loaded with
-        /// <c>Assembly.LoadFrom</c>.
+        /// Save the in-memory <see cref="PersistedAssemblyBuilder"/> to a
+        /// <see cref="MemoryStream"/>, load that stream into the default
+        /// <see cref="AssemblyLoadContext"/>, and remap public type/method
+        /// accessors onto the loaded assembly. Idempotent.
+        /// <para>
+        /// Triggered automatically on first access to public type accessors
+        /// (Assembly, ModuleClass, FunctionsType, Methods,
+        /// FunctionMethodMap, ExportsInterface, ImportsInterface) and by
+        /// <see cref="SaveAssembly"/>. Callers that need to add more types
+        /// to <see cref="ModuleBuilder"/> must do so before triggering a bake.
+        /// </para>
+        /// </summary>
+        public void Bake()
+        {
+            if (_baked) return;
+
+            if (_assembly is PersistedAssemblyBuilder pab)
+            {
+                using var ms = new MemoryStream();
+                pab.Save(ms);
+                _bakedBytes = ms.ToArray();
+                using var loadStream = new MemoryStream(_bakedBytes, writable: false);
+                _assembly = AssemblyLoadContext.Default.LoadFromStream(loadStream);
+            }
+            // else: already a runtime-loaded Assembly (e.g. test harness
+            // injected one). Skip the round-trip but still remap.
+
+            _functionsType = ResolveType(_functionsType)!;
+            _moduleClass = ResolveType(_moduleClass);
+            _exportsInterface = ResolveType(_exportsInterface);
+            _importsInterface = ResolveType(_importsInterface);
+
+            for (int i = 0; i < _methods.Length; i++)
+                _methods[i] = ResolveMethod(_methods[i])!;
+
+            var remappedMap = new Dictionary<int, MethodInfo>(_functionMethodMap.Count);
+            foreach (var kv in _functionMethodMap)
+                remappedMap[kv.Key] = ResolveMethod(kv.Value)!;
+            _functionMethodMap = remappedMap;
+
+            _baked = true;
+        }
+
+        private Type? ResolveType(Type? metadataType)
+        {
+            if (metadataType == null) return null;
+            return _assembly.GetType(metadataType.FullName!) ?? metadataType;
+        }
+
+        private MethodInfo? ResolveMethod(MethodInfo? metadataMethod)
+        {
+            if (metadataMethod == null) return null;
+            var dt = ResolveType(metadataMethod.DeclaringType);
+            if (dt == null) return metadataMethod;
+            // Match by name + parameter signature; transpiled functions
+            // typically have unique names, but the type may also expose
+            // overloads (e.g. ctors), so be precise.
+            var paramTypes = metadataMethod.GetParameters()
+                .Select(p => p.ParameterType.FullName!)
+                .ToArray();
+            return dt.GetMethods(BindingFlags.Public | BindingFlags.NonPublic |
+                                 BindingFlags.Static | BindingFlags.Instance |
+                                 BindingFlags.DeclaredOnly)
+                .FirstOrDefault(m => m.Name == metadataMethod.Name
+                    && m.GetParameters().Length == paramTypes.Length
+                    && m.GetParameters()
+                        .Select(p => p.ParameterType.FullName)
+                        .SequenceEqual(paramTypes))
+                ?? dt.GetMethod(metadataMethod.Name) ?? metadataMethod;
+        }
+
+        /// <summary>
+        /// Persist the transpiled assembly to disk as a standalone PE image.
+        /// Uses <see cref="PersistedAssemblyBuilder.Save(Stream)"/> via
+        /// <see cref="Bake"/>; the saved bytes are valid for
+        /// <c>Assembly.LoadFrom</c> in any consumer process.
         /// </summary>
         /// <param name="path">Output path (typically ending in <c>.dll</c>).</param>
         public void SaveAssembly(string path)
         {
-            var gen = new Lokad.ILPack.AssemblyGenerator();
-            gen.GenerateAssembly(Assembly, path);
+            Bake();
+            File.WriteAllBytes(path, _bakedBytes!);
         }
     }
 
@@ -163,9 +287,17 @@ namespace Wacs.Transpiler.AOT
                 var uniqueId = System.Threading.Interlocked.Increment(ref _assemblyCounter);
                 assemblyName = new AssemblyName($"{_namespace}.{moduleName}_{uniqueId}");
             }
-            var assemblyBuilder = AssemblyBuilder.DefineDynamicAssembly(
+            // PersistedAssemblyBuilder is the .NET 9+ replacement for the
+            // legacy `AssemblyBuilderAccess.Save` mode (removed in .NET Core).
+            // Built types are metadata-only until the assembly is saved and
+            // loaded back; TranspilationResult.Bake() handles that round-trip
+            // before runtime invocation. Critical: PersistedAssemblyBuilder
+            // supports DefineInitializedData (RVA-mapped fields) end-to-end
+            // through Save, which is what unblocks zero-copy WASM data
+            // segments — Lokad.ILPack 0.3.1 used to NRE on that path.
+            var assemblyBuilder = new PersistedAssemblyBuilder(
                 assemblyName,
-                AssemblyBuilderAccess.Run);
+                typeof(object).Assembly);
             var moduleBuilder = assemblyBuilder.DefineDynamicModule(assemblyName.Name!);
 
             var typeBuilder = moduleBuilder.DefineType(
