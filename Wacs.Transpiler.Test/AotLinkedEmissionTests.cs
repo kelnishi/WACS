@@ -195,6 +195,72 @@ namespace Wacs.Transpiler.Test
               0x07, 0x00, 0x41, 0x00, 0x11, 0x00, 0x00, 0x0B,
         };
 
+        [Fact]
+        public void AotLinkedSupportsNonNullFuncrefGlobal()
+        {
+            // (module
+            //   (func $f (result i32) i32.const 42)
+            //   (global $g funcref (ref.func $f))
+            //   (export "f" (func 0)))
+            //
+            // The global's init `(ref.func 0)` lands as Value{Type=FuncRef,
+            // Data.Ptr = 0}; pre-fix AssertAotLinkedFeasible rejected it
+            // because IsNullRef = false. After: EmitPrimitiveValue routes
+            // non-null FuncRef/ExternRef through the (ValType, int) ctor.
+            // Verifies: (a) Standard and AotLinked both transpile; (b) the
+            // emitted Module's _ctx.Globals[0] carries the matching
+            // (FuncRef, 0) Value under both paths.
+            var (m1, r1) = ParseAndInstantiate(BuildFuncRefGlobalWasm());
+            var stdResult = new ModuleTranspiler("Wacs.AotLink.FRefStd",
+                new TranspilerOptions { Emission = EmissionTarget.Standard })
+                .Transpile(m1, r1, "FRefMod");
+            AssertFuncRefGlobal(stdResult, expectedFuncIdx: 0);
+
+            var (m2, r2) = ParseAndInstantiate(BuildFuncRefGlobalWasm());
+            var aotResult = new ModuleTranspiler("Wacs.AotLink.FRefAot",
+                new TranspilerOptions { Emission = EmissionTarget.AotLinked })
+                .Transpile(m2, r2, "FRefMod");
+            AssertFuncRefGlobal(aotResult, expectedFuncIdx: 0);
+        }
+
+        private static void AssertFuncRefGlobal(TranspilationResult result, int expectedFuncIdx)
+        {
+            var instance = Activator.CreateInstance(result.ModuleClass!)
+                ?? throw new Exception("Activator returned null");
+            var ctxField = result.ModuleClass!.GetField("_ctx",
+                BindingFlags.NonPublic | BindingFlags.Instance)
+                ?? throw new Exception("_ctx field missing");
+            var ctx = (Wacs.Transpiler.AOT.ThinContext)ctxField.GetValue(instance)!;
+            Assert.NotNull(ctx.Globals);
+            Assert.True(ctx.Globals.Length >= 1, "Module ctx should expose at least 1 global.");
+            var g0 = ctx.Globals[0].Value;
+            Assert.Equal(Wacs.Core.Types.Defs.ValType.FuncRef, g0.Type);
+            Assert.False(g0.IsNullRef,
+                $"Global 0 should be a non-null funcref; saw IsNullRef=true.");
+            Assert.Equal((long)expectedFuncIdx, g0.Data.Ptr);
+        }
+
+        // (module
+        //   (func $f (result i32) i32.const 42)
+        //   (global $g funcref (ref.func $f))
+        //   (export "f" (func 0)))
+        // ref.func encoding: 0xD2 <leb128 funcidx>.
+        private static byte[] BuildFuncRefGlobalWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // type: () -> i32
+            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F,
+            // function: 1 func, type 0
+            0x03, 0x02, 0x01, 0x00,
+            // global: 1 global, valtype=funcref(0x70), mut=const(0x00),
+            //         init = ref.func 0 (0xD2 0x00); end (0x0B)
+            0x06, 0x06, 0x01, 0x70, 0x00, 0xD2, 0x00, 0x0B,
+            // export: "f" -> func 0
+            0x07, 0x05, 0x01, 0x01, 0x66, 0x00, 0x00,
+            // code: 1 body, size=4, locals=0, i32.const 42 (0x41 0x2A), end (0x0B)
+            0x0A, 0x06, 0x01, 0x04, 0x00, 0x41, 0x2A, 0x0B,
+        };
+
         // (module
         //   (global $g i32 (i32.const 99))
         //   (func (export "read") (result i32) global.get $g))
