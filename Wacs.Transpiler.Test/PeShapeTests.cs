@@ -213,8 +213,21 @@ namespace Wacs.Transpiler.Test
             Bytes(new byte[] { 0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F });
             // Function section: 1 function of type 0
             Bytes(new byte[] { 0x03, 0x02, 0x01, 0x00 });
-            // Memory section: 1 memory, min=1
-            Bytes(new byte[] { 0x05, 0x03, 0x01, 0x00, 0x01 });
+            // Memory section: 1 memory, min = ceil(dataLen / 64KB) pages.
+            int minPages = (dataLen + 65535) / 65536;
+            if (minPages < 1) minPages = 1;
+            U8(0x05);                        // memory section id
+            using var memSec = new MemoryStream();
+            memSec.WriteByte(0x01);          // 1 memory
+            memSec.WriteByte(0x00);          // limits flag = no max
+            uint mp = (uint)minPages;
+            while (mp >= 0x80) { memSec.WriteByte((byte)(mp | 0x80)); mp >>= 7; }
+            memSec.WriteByte((byte)mp);
+            var memBytes = memSec.ToArray();
+            uint memLen = (uint)memBytes.Length;
+            while (memLen >= 0x80) { U8((byte)(memLen | 0x80)); memLen >>= 7; }
+            U8((byte)memLen);
+            Bytes(memBytes);
             // Export section: "read" func 0
             Bytes(new byte[] { 0x07, 0x08, 0x01, 0x04, 0x72, 0x65, 0x61, 0x64, 0x00, 0x00 });
             // Code section: 1 body, no locals, i32.const 0; i32.load8_u; end
@@ -366,6 +379,118 @@ namespace Wacs.Transpiler.Test
             _output.WriteLine($"cold first call (us):       {firstUs,12:F1}");
             _output.WriteLine($"total cold (us):            {(loadUs + ctorUs + firstUs),12:F1}");
         }
+
+        /// <summary>
+        /// Module-ctor phase breakdown: read RVA span / codec decode /
+        /// InitializeFromData / full ctor (Activator.CreateInstance) for a
+        /// matrix of data-segment sizes. The residual = full-ctor minus the
+        /// sum of phases is what the ctor's tail work (FuncTable population,
+        /// typed-delegate-shim registration, BindTableDelegates,
+        /// cabi_realloc cache, start-function call, etc.) costs.
+        /// <para>
+        /// Manual phases are measured by replicating what
+        /// <c>InitializationHelper.InitializeFromEmbedded</c>'s cross-process
+        /// branch does: <c>RuntimeHelpers.CreateSpan&lt;byte&gt;</c> over the
+        /// PE-mapped <c>__WACSInit.Data</c> field, then
+        /// <c>InitDataCodec.Decode(span)</c>, then
+        /// <c>InitializeFromData(data, -1)</c>. Each invocation runs against
+        /// a freshly-wiped registry + new <see cref="AssemblyLoadContext"/>
+        /// so the in-process fast path doesn't contaminate timings.
+        /// </para>
+        /// </summary>
+        [Theory]
+        [InlineData(4 * 1024)]
+        [InlineData(64 * 1024)]
+        [InlineData(256 * 1024)]
+        public void Diagnostic_ProfileModuleCtor(int dataLen)
+        {
+            var dllPath = Path.Combine(_tempDir, $"rva-profile-{dataLen}.dll");
+            TranspileAndSave(BuildLargeMemoryWasm(dataLen), dllPath,
+                @namespace: "Wacs.Pe.Profile");
+
+            // Warmup pass: prime the JIT for InitDataCodec.Decode +
+            // InitializeFromData on this module. Without this the first
+            // measured pass swallows tier-0 JIT cost and produces a negative
+            // residual on small fixtures.
+            ResetRegistries();
+            {
+                var alc0 = new AssemblyLoadContext("profile-warm-" + Guid.NewGuid(), isCollectible: true);
+                var asm0 = alc0.LoadFromAssemblyPath(dllPath);
+                var moduleType0 = asm0.GetType("Wacs.Pe.Profile.WasmModule.Module", throwOnError: true)!;
+                _ = Activator.CreateInstance(moduleType0)!;
+            }
+
+            // ----- Phase-by-phase pass: load + manually call each step ----
+            ResetRegistries();
+            var sw = new Stopwatch();
+
+            sw.Restart();
+            var alcA = new AssemblyLoadContext("profile-A-" + Guid.NewGuid(), isCollectible: true);
+            var asmA = alcA.LoadFromAssemblyPath(dllPath);
+            sw.Stop();
+            var loadUs = ToUs(sw);
+
+            // The Bake-time __WACSInit type lives on the loaded assembly;
+            // the Data field is RVA-mapped. RuntimeHelpers.CreateSpan walks
+            // the FieldHandle's metadata to reach the .sdata section.
+            var initType = asmA.GetType("Wacs.Pe.Profile.WasmModule.__WACSInit", throwOnError: true)!;
+            var dataField = initType.GetField("Data", BindingFlags.Public | BindingFlags.Static)!;
+
+            sw.Restart();
+            var span = System.Runtime.CompilerServices.RuntimeHelpers
+                .CreateSpan<byte>(dataField.FieldHandle);
+            sw.Stop();
+            var spanUs = ToUs(sw);
+
+            sw.Restart();
+            var initData = InitDataCodec.Decode(span);
+            sw.Stop();
+            var decodeUs = ToUs(sw);
+
+            sw.Restart();
+            // -1 = no transpile-time InitDataId hint (cross-process path).
+            // Allocates memories/tables/globals, copies active data segments,
+            // registers passive data segments — same work the Module ctor
+            // would do on first instantiation.
+            InitializationHelper.InitializeFromData(initData, transpileTimeInitDataId: -1);
+            sw.Stop();
+            var initFromDataUs = ToUs(sw);
+
+            // ----- Full-ctor pass: rerun in a clean ALC + clean registry ---
+            ResetRegistries();
+            var alcB = new AssemblyLoadContext("profile-B-" + Guid.NewGuid(), isCollectible: true);
+            var asmB = alcB.LoadFromAssemblyPath(dllPath);
+
+            var moduleType = asmB.GetType("Wacs.Pe.Profile.WasmModule.Module", throwOnError: true)!;
+
+            sw.Restart();
+            _ = Activator.CreateInstance(moduleType)!;
+            sw.Stop();
+            var ctorUs = ToUs(sw);
+
+            // Sum-of-phases vs full ctor; residual = ctor tail work.
+            var phasesSumUs = spanUs + decodeUs + initFromDataUs;
+            var residualUs = ctorUs - phasesSumUs;
+
+            _output.WriteLine($"=== data segment {dataLen:N0} bytes ===");
+            _output.WriteLine($"  load .dll (us):                  {loadUs,12:F1}");
+            _output.WriteLine($"  RuntimeHelpers.CreateSpan (us):  {spanUs,12:F2}");
+            _output.WriteLine($"  InitDataCodec.Decode (us):       {decodeUs,12:F1}");
+            _output.WriteLine($"  InitializeFromData (us):         {initFromDataUs,12:F1}");
+            _output.WriteLine($"  --- sum of phases:              {phasesSumUs,12:F1}");
+            _output.WriteLine($"  Activator.CreateInstance (us):   {ctorUs,12:F1}");
+            _output.WriteLine($"  residual (ctor tail work, us):   {residualUs,12:F1}");
+        }
+
+        private static void ResetRegistries()
+        {
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+        }
+
+        private static double ToUs(Stopwatch sw)
+            => sw.ElapsedTicks * 1_000_000.0 / Stopwatch.Frequency;
 
         private static void TranspileAndSave(byte[] wasmBytes, string dllPath, string @namespace)
         {
