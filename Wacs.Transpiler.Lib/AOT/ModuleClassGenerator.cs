@@ -661,6 +661,166 @@ namespace Wacs.Transpiler.AOT
 
             // (3) Copy each active element segment into its table at offset.
             EmitElementSegmentCopies(il, ctxLocal, data);
+
+            // (4) Populate type-identity arrays consumed by call_indirect
+            // subtype checks and ref.test / ref.cast on funcref. Standard's
+            // InitializeFromData copies these from the decoded codec data
+            // (InitializationHelper.cs:576-579); under AotLinked we inline
+            // them as IL constants.
+            EmitTypeHashArrays(il, ctxLocal, data);
+
+            // (5) Drop active data + element segments. WASM 3.0 §4.5.4:
+            // active segments are implicitly dropped at the end of
+            // instantiation, so subsequent `memory.init` / `table.init`
+            // referencing them must trap "uninitialized element /
+            // segment". Standard's InitializeFromData does this via
+            // ModuleInit.DropDataSegment / DropElemSegment; under
+            // AotLinked we inline the calls here. Only meaningful for
+            // in-process — cross-process AotLinked never repopulates
+            // ModuleInit so the drops are no-ops.
+            EmitActiveSegmentDrops(il, data);
+
+            // (6) Stash the segment base IDs onto ctx so post-Bake
+            // memory.init / table.init helpers can index correctly.
+            EmitSegmentBaseIds(il, ctxLocal, data);
+        }
+
+        /// <summary>
+        /// Inline IL for <c>ModuleInit.DropDataSegment</c> /
+        /// <c>DropElemSegment</c> calls covering every active segment
+        /// the module declared. Mirrors the loop
+        /// <see cref="InitializationHelper.InitializeFromData"/> runs
+        /// after the codec round-trip.
+        /// </summary>
+        private void EmitActiveSegmentDrops(ILGenerator il, ModuleInitData data)
+        {
+            var dropDataMethod = typeof(ModuleInit).GetMethod(
+                nameof(ModuleInit.DropDataSegment),
+                BindingFlags.Public | BindingFlags.Static)!;
+            var dropElemMethod = typeof(ModuleInit).GetMethod(
+                nameof(ModuleInit.DropElemSegment),
+                BindingFlags.Public | BindingFlags.Static)!;
+
+            int dataBase = data.DataSegmentBaseId;
+            foreach (var localDataIdx in data.ActiveDataIndices)
+            {
+                il.Emit(OpCodes.Ldc_I4, dataBase + localDataIdx);
+                il.Emit(OpCodes.Call, dropDataMethod);
+            }
+
+            int elemBase = data.ElemSegmentBaseId;
+            foreach (var localElemIdx in data.ActiveElemIndices)
+            {
+                il.Emit(OpCodes.Ldc_I4, elemBase + localElemIdx);
+                il.Emit(OpCodes.Call, dropElemMethod);
+            }
+        }
+
+        /// <summary>
+        /// Set <c>ctx.DataSegmentBaseId</c> and <c>ctx.ElemSegmentBaseId</c>
+        /// to the transpile-time base IDs. Standard's <c>InitializeFromData</c>
+        /// derives these from the (possibly-remapped) cross-process registry;
+        /// AotLinked uses the static transpile-time values since segments
+        /// don't get re-registered.
+        /// </summary>
+        private void EmitSegmentBaseIds(ILGenerator il, LocalBuilder ctxLocal, ModuleInitData data)
+        {
+            var dataBaseField = typeof(ThinContext).GetField(nameof(ThinContext.DataSegmentBaseId));
+            var elemBaseField = typeof(ThinContext).GetField(nameof(ThinContext.ElemSegmentBaseId));
+            if (dataBaseField != null)
+            {
+                il.Emit(OpCodes.Ldloc, ctxLocal);
+                il.Emit(OpCodes.Ldc_I4, data.DataSegmentBaseId);
+                il.Emit(OpCodes.Stfld, dataBaseField);
+            }
+            if (elemBaseField != null)
+            {
+                il.Emit(OpCodes.Ldloc, ctxLocal);
+                il.Emit(OpCodes.Ldc_I4, data.ElemSegmentBaseId);
+                il.Emit(OpCodes.Stfld, elemBaseField);
+            }
+        }
+
+        /// <summary>
+        /// Inline FuncTypeHashes / FuncTypeSuperHashes / TypeHashes /
+        /// TypeIsFunc as IL-constructed constant arrays assigned onto
+        /// <c>ctx</c>. Each array is sized by the source-module's type +
+        /// function counts and populated with values computed by
+        /// <see cref="ModuleTranspiler"/>'s subtype-chain walk
+        /// (<c>BuildSuperTypeHashChain</c>) at transpile time.
+        /// </summary>
+        private void EmitTypeHashArrays(ILGenerator il, LocalBuilder ctxLocal, ModuleInitData data)
+        {
+            EmitInt32Array(il, ctxLocal, data.FuncTypeHashes,
+                typeof(ThinContext).GetField(nameof(ThinContext.FuncTypeHashes))!);
+            EmitInt32Array(il, ctxLocal, data.TypeHashes,
+                typeof(ThinContext).GetField(nameof(ThinContext.TypeHashes))!);
+            EmitBoolArray(il, ctxLocal, data.TypeIsFunc,
+                typeof(ThinContext).GetField(nameof(ThinContext.TypeIsFunc))!);
+            EmitInt32JaggedArray(il, ctxLocal, data.FuncTypeSuperHashes,
+                typeof(ThinContext).GetField(nameof(ThinContext.FuncTypeSuperHashes))!);
+        }
+
+        private static void EmitInt32Array(ILGenerator il, LocalBuilder ctxLocal,
+            int[]? values, FieldInfo target)
+        {
+            if (values == null) return;
+            il.Emit(OpCodes.Ldloc, ctxLocal);
+            il.Emit(OpCodes.Ldc_I4, values.Length);
+            il.Emit(OpCodes.Newarr, typeof(int));
+            for (int i = 0; i < values.Length; i++)
+            {
+                il.Emit(OpCodes.Dup);
+                il.Emit(OpCodes.Ldc_I4, i);
+                il.Emit(OpCodes.Ldc_I4, values[i]);
+                il.Emit(OpCodes.Stelem_I4);
+            }
+            il.Emit(OpCodes.Stfld, target);
+        }
+
+        private static void EmitBoolArray(ILGenerator il, LocalBuilder ctxLocal,
+            bool[]? values, FieldInfo target)
+        {
+            if (values == null) return;
+            il.Emit(OpCodes.Ldloc, ctxLocal);
+            il.Emit(OpCodes.Ldc_I4, values.Length);
+            il.Emit(OpCodes.Newarr, typeof(bool));
+            for (int i = 0; i < values.Length; i++)
+            {
+                if (!values[i]) continue;       // newarr zero-inits
+                il.Emit(OpCodes.Dup);
+                il.Emit(OpCodes.Ldc_I4, i);
+                il.Emit(OpCodes.Ldc_I4_1);
+                il.Emit(OpCodes.Stelem_I1);
+            }
+            il.Emit(OpCodes.Stfld, target);
+        }
+
+        private static void EmitInt32JaggedArray(ILGenerator il, LocalBuilder ctxLocal,
+            int[][]? values, FieldInfo target)
+        {
+            if (values == null) return;
+            il.Emit(OpCodes.Ldloc, ctxLocal);
+            il.Emit(OpCodes.Ldc_I4, values.Length);
+            il.Emit(OpCodes.Newarr, typeof(int[]));
+            for (int i = 0; i < values.Length; i++)
+            {
+                var inner = values[i];
+                if (inner == null) continue;
+                il.Emit(OpCodes.Dup);
+                il.Emit(OpCodes.Ldc_I4, i);
+                il.Emit(OpCodes.Ldc_I4, inner.Length);
+                il.Emit(OpCodes.Newarr, typeof(int));
+                for (int j = 0; j < inner.Length; j++)
+                {
+                    il.Emit(OpCodes.Dup);
+                    il.Emit(OpCodes.Ldc_I4, j);
+                    il.Emit(OpCodes.Ldc_I4, inner[j]);
+                    il.Emit(OpCodes.Stelem_I4);
+                }
+                il.Emit(OpCodes.Stelem_Ref);
+            }
+            il.Emit(OpCodes.Stfld, target);
         }
 
         private static bool IsPrimitiveValType(Wacs.Core.Types.Defs.ValType t)
@@ -1133,18 +1293,22 @@ namespace Wacs.Transpiler.AOT
             // Exception tags need TagInstance ctor IL we don't emit yet.
             if (data.ImportedTagCount > 0 || data.LocalTagTypes.Length > 0) return false;
 
-            // Tables + element segments together expose AotLinked emission
-            // gaps the spec-conformance suite hits (passive segments,
-            // segment-drop semantics, recursive type tables). Reject any
-            // module with tables or any element segments — that's the
-            // safe subset proven by the existing AotLinked test suite
-            // (compute-only and memory-only fixtures). Future work can
-            // expand this once each emission gap is closed and
-            // regression-tested.
+            // Tables + element segments: AotLinked-explicit (CallIndirect
+            // round-trip test) works for simple shapes, but the spec
+            // corpus's call_indirect / ref.test / br_on_cast exercise
+            // gaps — multi-result funcs in tables don't get a delegate
+            // wired, GC ref.test/br_on_cast paths need extra runtime
+            // data we don't yet inline. Until those gaps close, Auto
+            // skips these shapes; the EmitTypeHashArrays + segment-
+            // drop IL we just added means each gap can be enabled
+            // independently. Explicit Emission = AotLinked still
+            // works on simple shapes — that path is the user-pinned
+            // contract.
             if (data.Tables.Length > 0) return false;
             if (_wasmModule.Elements.Length > 0) return false;
 
-            // Same passive-segment rationale for data segments.
+            // Passive data segments need ModuleInit registration that
+            // the AotLinked path doesn't reproduce post-Bake.
             if (_dataEmitter != null
                 && _dataEmitter.Segments.Length > data.ActiveDataIndices.Length)
                 return false;
