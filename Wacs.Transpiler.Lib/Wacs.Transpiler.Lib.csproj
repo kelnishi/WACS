@@ -5,6 +5,10 @@
         <Nullable>enable</Nullable>
         <LangVersion>9</LangVersion>
         <TargetFramework>net9.0</TargetFramework>
+        <!-- InitDataCodec.Decode(ReadOnlySpan<byte>) wraps the span in
+             UnmanagedMemoryStream via fixed (byte* p = …). The codec is
+             the only consumer; no other unsafe blocks live in this lib. -->
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
         <RootNamespace>Wacs.Transpiler</RootNamespace>
         <AssemblyName>Wacs.Transpiler.Lib</AssemblyName>
 
