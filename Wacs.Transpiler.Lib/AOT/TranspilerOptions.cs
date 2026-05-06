@@ -70,14 +70,23 @@ namespace Wacs.Transpiler.AOT
         /// </summary>
         public int MaxFunctionSize { get; set; } = 0;
 
-        /// <summary>How data segments are stored in the transpiled assembly.</summary>
+        /// <summary>
+        /// Historic selector for the data-segment storage shape. <b>Advisory
+        /// only since the RVA migration</b> — every value now produces the
+        /// same on-disk shape (bytes ride RVA-mapped through
+        /// <c>__WACSAotData.Segment_*</c> and <c>__WACSInit.Data</c>, surfaced
+        /// zero-copy via <c>RuntimeHelpers.CreateSpan&lt;byte&gt;</c>).
+        /// Preserved so existing <c>--data-storage</c> CLI invocations keep
+        /// parsing; future releases may drop the option.
+        /// </summary>
         public DataSegmentStorage DataStorage { get; set; } = DataSegmentStorage.CompressedResource;
 
         /// <summary>
         /// Selects the Module ctor emission shape. Default <see cref="EmissionTarget.Standard"/>
         /// emits a ctor that calls <see cref="InitializationHelper.InitializeFromEmbedded"/>
-        /// against a base64-encoded blob (works for in-process and cross-process load
-        /// equally). <see cref="EmissionTarget.AotLinked"/> emits a leaner ctor that
+        /// against an RVA-mapped <c>ReadOnlySpan&lt;byte&gt;</c> over the codec blob
+        /// (works for in-process and cross-process load equally).
+        /// <see cref="EmissionTarget.AotLinked"/> emits a leaner ctor that
         /// constructs the <see cref="ThinContext"/> directly from inlined IL constants,
         /// targeting whole-program NativeAOT consumers where the codec machinery is
         /// pure overhead and would just bloat the native binary.
@@ -186,26 +195,34 @@ namespace Wacs.Transpiler.AOT
     }
 
     /// <summary>
-    /// Strategy for storing WASM data segments in the transpiled assembly.
+    /// Historic strategy selector for storing WASM data segments. <b>Advisory
+    /// only as of the RVA migration</b> — every value resolves to the same
+    /// shape today: bytes ride RVA-mapped through <c>__WACSAotData.Segment_*</c>
+    /// (active segments under AotLinked emission) and <c>__WACSInit.Data</c>
+    /// (the codec blob), and reach the runtime zero-copy via
+    /// <c>RuntimeHelpers.CreateSpan&lt;byte&gt;</c>. The enum is preserved so
+    /// existing CLI flags (<c>--data-storage compressed|raw|static</c>) and
+    /// <see cref="TranspilerOptions.DataStorage"/> defaults continue to
+    /// parse; the runtime / on-disk shape no longer varies by selection.
     /// </summary>
     public enum DataSegmentStorage
     {
         /// <summary>
-        /// Data segments embedded as Brotli-compressed assembly resources.
-        /// Decompressed at module instantiation. Smallest assembly size.
+        /// Historic Brotli-compressed-resource selector. <b>Advisory only —</b>
+        /// see <see cref="DataSegmentStorage"/> for the unified RVA path.
         /// </summary>
         CompressedResource,
 
         /// <summary>
-        /// Data segments embedded as uncompressed assembly resources.
-        /// Fastest instantiation (no decompression). Moderate assembly size.
+        /// Historic uncompressed-resource selector. <b>Advisory only —</b>
+        /// see <see cref="DataSegmentStorage"/> for the unified RVA path.
         /// </summary>
         RawResource,
 
         /// <summary>
-        /// Data segments emitted as static readonly byte[] fields on the Functions class.
-        /// Loaded into managed heap at first access. Largest assembly size.
-        /// No resource API needed — simplest for debugging.
+        /// Historic <c>static readonly byte[]</c>-fields selector.
+        /// <b>Advisory only —</b> see <see cref="DataSegmentStorage"/> for
+        /// the unified RVA path.
         /// </summary>
         StaticArrays,
     }

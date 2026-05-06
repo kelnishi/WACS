@@ -13,10 +13,6 @@
 // limitations under the License.
 
 using System;
-using System.IO;
-using System.IO.Compression;
-using System.Reflection;
-using System.Reflection.Emit;
 using Wacs.Core;
 using Wacs.Core.Types;
 using WasmModule = Wacs.Core.Module;
@@ -45,38 +41,45 @@ namespace Wacs.Transpiler.AOT
         public Wacs.Core.Types.Expression? OffsetExpression { get; set; }
 
         /// <summary>
-        /// Resource name when stored as embedded resource.
+        /// Historic resource name from the legacy embedded-resource storage
+        /// strategy. The RVA migration unified all storage strategies to a
+        /// single shape (RVA-mapped fields under <c>__WACSAotData</c> and
+        /// <c>__WACSInit.Data</c>); this name is no longer used by the
+        /// emitter pipeline but is retained for diagnostics.
         /// </summary>
         public string ResourceName => $"data_segment_{Index}";
     }
 
     /// <summary>
-    /// Emits data segment storage and memory initialization logic for the transpiled assembly.
-    ///
-    /// Strategies:
-    /// - CompressedResource: Brotli-compressed embedded resources. Smallest assembly.
-    /// - RawResource: uncompressed embedded resources. Fastest instantiation.
-    /// - StaticArrays: static readonly byte[] fields. Simplest, largest.
-    ///
-    /// Also emits the memory allocation logic (byte[] per memory, sized from memory section).
+    /// Walks the WASM module's memory + data sections and exposes the
+    /// extracted metadata to the rest of the transpile pipeline. Storage
+    /// emission itself is owned by <c>ModuleClassGenerator</c>
+    /// (active segments → RVA-mapped <c>__WACSAotData.Segment_*</c>) and
+    /// the codec blob (<c>__WACSInit.Data</c>); the historic per-strategy
+    /// branches (CompressedResource / RawResource / StaticArrays) all
+    /// converged on the same RVA shape and have been retired here.
     /// </summary>
     public class DataSegmentEmitter
     {
-        private readonly DataSegmentStorage _strategy;
         private readonly WasmModule _wasmModule;
         private readonly DiagnosticCollector _diagnostics;
 
         public MemoryDecl[] Memories { get; private set; } = Array.Empty<MemoryDecl>();
         public DataSegmentInfo[] Segments { get; private set; } = Array.Empty<DataSegmentInfo>();
-        public FieldBuilder[] StaticFields { get; private set; } = Array.Empty<FieldBuilder>();
 
+        /// <summary>
+        /// Construct an emitter. <paramref name="strategy"/> is preserved
+        /// for source compatibility with callers that still pass a
+        /// <see cref="DataSegmentStorage"/> selection; the value is
+        /// advisory and does not affect emission.
+        /// </summary>
         public DataSegmentEmitter(
             WasmModule wasmModule,
             DataSegmentStorage strategy,
             DiagnosticCollector diagnostics)
         {
+            _ = strategy;
             _wasmModule = wasmModule;
-            _strategy = strategy;
             _diagnostics = diagnostics;
         }
 
@@ -125,83 +128,6 @@ namespace Wacs.Transpiler.AOT
         }
 
         /// <summary>
-        /// Emit the data segment storage into the assembly.
-        /// Call this before the Module class constructor is emitted.
-        /// </summary>
-        public void Emit(TypeBuilder functionsType, ModuleBuilder moduleBuilder)
-        {
-            switch (_strategy)
-            {
-                case DataSegmentStorage.StaticArrays:
-                    EmitStaticArrays(functionsType);
-                    break;
-                case DataSegmentStorage.RawResource:
-                    EmitResources(moduleBuilder, compress: false);
-                    break;
-                case DataSegmentStorage.CompressedResource:
-                    EmitResources(moduleBuilder, compress: true);
-                    break;
-            }
-        }
-
-        private void EmitStaticArrays(TypeBuilder functionsType)
-        {
-            StaticFields = new FieldBuilder[Segments.Length];
-            for (int i = 0; i < Segments.Length; i++)
-            {
-                var seg = Segments[i];
-                if (seg.Data.Length == 0) continue;
-
-                var field = functionsType.DefineField(
-                    $"_dataSegment{i}",
-                    typeof(byte[]),
-                    FieldAttributes.Assembly | FieldAttributes.Static | FieldAttributes.InitOnly);
-                StaticFields[i] = field;
-
-                _diagnostics.Info($"Data segment {i}: {seg.Data.Length} bytes as static array",
-                    opcode: "data.static");
-            }
-        }
-
-        private void EmitResources(ModuleBuilder moduleBuilder, bool compress)
-        {
-            for (int i = 0; i < Segments.Length; i++)
-            {
-                var seg = Segments[i];
-                if (seg.Data.Length == 0) continue;
-
-                string suffix = compress ? ".br" : ".raw";
-                string name = $"{seg.ResourceName}{suffix}";
-
-                // Note: dynamic assemblies (AssemblyBuilderAccess.Run) don't support
-                // DefineManifestResource. Resources require PersistedAssemblyBuilder (.NET 9+)
-                // or saving to disk. For now, store the data in the DataSegmentInfo
-                // and the Module constructor will access it from there.
-                // When persisting assemblies, resources can be properly embedded.
-
-                if (compress)
-                {
-                    using var ms = new MemoryStream();
-                    using (var brotli = new BrotliStream(ms, CompressionLevel.Optimal))
-                    {
-                        brotli.Write(seg.Data, 0, seg.Data.Length);
-                    }
-                    var compressed = ms.ToArray();
-                    double ratio = seg.Data.Length > 0
-                        ? (double)compressed.Length / seg.Data.Length * 100 : 0;
-                    _diagnostics.Info(
-                        $"Data segment {i}: {seg.Data.Length} bytes ��� {compressed.Length} bytes " +
-                        $"({ratio:F1}% compressed)", opcode: "data.brotli");
-                }
-                else
-                {
-                    _diagnostics.Info($"Data segment {i}: {seg.Data.Length} bytes as raw resource",
-                        opcode: "data.raw");
-                }
-            }
-        }
-
-        /// <summary>
         /// Evaluate a constant expression (typically i32.const N) to get the offset.
         /// Handles the common case of a single constant instruction.
         /// </summary>
@@ -219,9 +145,7 @@ namespace Wacs.Transpiler.AOT
 
         /// <summary>
         /// Get the initialization data for the Module constructor.
-        /// Returns the raw bytes per segment (decompressed if needed).
-        /// For dynamic assemblies, the data is kept in-memory in DataSegmentInfo.
-        /// For persisted assemblies, this would read from resources.
+        /// Returns the raw bytes per segment.
         /// </summary>
         public byte[] GetSegmentData(int index)
         {
