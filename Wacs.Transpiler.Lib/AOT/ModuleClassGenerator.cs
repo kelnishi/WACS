@@ -1064,19 +1064,19 @@ namespace Wacs.Transpiler.AOT
         /// <summary>
         /// Encode the prepared <see cref="ModuleInitData"/> via
         /// <see cref="InitDataCodec.Encode"/> and persist the bytes into a
-        /// static <c>byte[]</c> field on a generated <c>__WACSInit</c> type
-        /// in the same namespace as the Module class.
+        /// static RVA-mapped data field <c>Data</c> on a generated
+        /// <c>__WACSInit</c> type in the same namespace as the Module
+        /// class.
         ///
-        /// <para>Implementation: Base64-encode the bytes into a string
-        /// literal, decode in the holder's static constructor. Chosen over
-        /// <c>ModuleBuilder.DefineInitializedData</c> because
-        /// <c>Lokad.ILPack</c> — our dynamic-assembly → PE serializer —
-        /// NREs on <c>IsReferencedType</c> when a method body takes
-        /// <c>Ldtoken</c> on a DefineInitializedData-originated field.
-        /// Base64 adds ~33% size overhead; for typical init data (a few
-        /// KB) that's a non-issue, and the decoded byte[] is pinned once
-        /// at first-use and reused for the life of the loaded
-        /// assembly.</para>
+        /// <para>Bytes live in the PE's initialized-data section
+        /// (<c>.sdata</c>/<c>.rdata</c>) and are surfaced as
+        /// <see cref="ReadOnlySpan{Byte}"/> via
+        /// <c>RuntimeHelpers.CreateSpan&lt;byte&gt;</c> at the call site.
+        /// No cctor; no base64 decode; no per-load heap allocation for
+        /// the blob itself. Replaces the legacy base64-string-literal
+        /// path that the Lokad.ILPack writer required (PAB supports
+        /// <c>DefineInitializedData</c> end-to-end through
+        /// <c>Save</c>).</para>
         /// </summary>
         private FieldBuilder EmitEmbeddedInitData()
         {
@@ -1085,28 +1085,17 @@ namespace Wacs.Transpiler.AOT
 
             var data = InitRegistry.Get(_initDataId);
             var bytes = InitDataCodec.Encode(data);
-            string base64 = Convert.ToBase64String(bytes);
 
-            // Holder type + static byte[] field.
+            // Holder type + RVA-backed Data field. The synthesized field's
+            // runtime type is a private fixed-size value type whose
+            // metadata carries HasFieldRVA pointing into the PE's
+            // initialized-data section.
             _embeddedInitType = _moduleBuilder.DefineType(
                 $"{_namespace}.__WACSInit",
                 TypeAttributes.Public | TypeAttributes.Abstract | TypeAttributes.Sealed);
-            _embeddedInitField = _embeddedInitType.DefineField(
-                "Data", typeof(byte[]),
-                FieldAttributes.Public | FieldAttributes.Static | FieldAttributes.InitOnly);
-
-            // Static ctor: Data = Convert.FromBase64String(<literal>);
-            var cctor = _embeddedInitType.DefineTypeInitializer();
-            var il = cctor.GetILGenerator();
-            il.Emit(OpCodes.Ldstr, base64);
-            il.Emit(OpCodes.Call, typeof(Convert).GetMethod(
-                nameof(Convert.FromBase64String),
-                BindingFlags.Public | BindingFlags.Static,
-                binder: null,
-                types: new[] { typeof(string) },
-                modifiers: null)!);
-            il.Emit(OpCodes.Stsfld, _embeddedInitField);
-            il.Emit(OpCodes.Ret);
+            _embeddedInitField = _embeddedInitType.DefineInitializedData(
+                "Data", bytes,
+                FieldAttributes.Public | FieldAttributes.Static);
 
             return _embeddedInitField;
         }
@@ -1175,26 +1164,38 @@ namespace Wacs.Transpiler.AOT
             }
             else
             {
-                // The generator embeds a codec-encoded ModuleInitData as a static
-                // byte[] on a sibling type (__WACSInit.Data, built below). The
-                // ctor reads it, decodes into a ModuleInitData, and drives
-                // InitializeFromData — which handles both in-process (where
-                // ModuleInit registrations already exist) and cross-process
-                // (.dll loaded in a fresh process) via data-segment remapping.
+                // The generator embeds a codec-encoded ModuleInitData as
+                // RVA-mapped bytes on a sibling type (__WACSInit.Data, built
+                // below). The ctor materializes a ReadOnlySpan<byte> over
+                // the mapped pages via RuntimeHelpers.CreateSpan and hands
+                // that to InitializeFromEmbedded — which handles both
+                // in-process (ModuleInit registrations already exist) and
+                // cross-process (.dll loaded in a fresh process) via
+                // data-segment remapping.
                 var initDataField = EmitEmbeddedInitData();
 
-                // The helper's dual path: in-process (InitRegistry has the
-                // transpile-time entry, side-tables like GcTypeRegistry /
-                // MultiReturnMethodRegistry are populated under _initDataId)
-                // takes the fast Initialize(int) branch. Cross-process (fresh
-                // process — InitRegistry empty) falls through to a codec
-                // Decode of the embedded byte[] and an InitializeFromData
-                // with the transpile-time id as a hint.
-                il.Emit(OpCodes.Ldsfld, initDataField);
-                il.Emit(OpCodes.Ldc_I4, _initDataId);
-                il.Emit(OpCodes.Call, typeof(InitializationHelper).GetMethod(
+                // Build the closed-generic ReadOnlySpan<byte> CreateSpan
+                // MethodInfo and the matching ReadOnlySpan-overload of
+                // InitializeFromEmbedded. The span is consumed by the
+                // helper, which copies into a byte[] once for the codec
+                // call (codec is byte[]-based today; span codec is a
+                // follow-up). Net win over base64: no UTF-16 doubling on
+                // disk, no Convert.FromBase64String at startup.
+                var createSpanOpen = typeof(System.Runtime.CompilerServices.RuntimeHelpers).GetMethod(
+                    nameof(System.Runtime.CompilerServices.RuntimeHelpers.CreateSpan),
+                    BindingFlags.Public | BindingFlags.Static)!;
+                var createSpanByte = createSpanOpen.MakeGenericMethod(typeof(byte));
+                var initFromEmbedded = typeof(InitializationHelper).GetMethod(
                     nameof(InitializationHelper.InitializeFromEmbedded),
-                    BindingFlags.Public | BindingFlags.Static)!);
+                    BindingFlags.Public | BindingFlags.Static,
+                    binder: null,
+                    types: new[] { typeof(ReadOnlySpan<byte>), typeof(int) },
+                    modifiers: null)!;
+
+                il.Emit(OpCodes.Ldtoken, initDataField);
+                il.Emit(OpCodes.Call, createSpanByte);
+                il.Emit(OpCodes.Ldc_I4, _initDataId);
+                il.Emit(OpCodes.Call, initFromEmbedded);
                 il.Emit(OpCodes.Stloc, ctxLocal);
             }
 

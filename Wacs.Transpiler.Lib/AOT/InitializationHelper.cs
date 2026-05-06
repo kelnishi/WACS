@@ -367,6 +367,30 @@ namespace Wacs.Transpiler.AOT
         }
 
         /// <summary>
+        /// RVA-mapped overload of <see cref="InitializeFromEmbedded(byte[], int)"/>.
+        /// Module ctors emit
+        /// <c>Ldtoken __WACSInit.Data; call RuntimeHelpers.CreateSpan&lt;byte&gt;</c>
+        /// — the span points directly into the loaded PE's
+        /// <c>.sdata</c>/<c>.rdata</c> section. Fast in-process path
+        /// avoids touching the bytes; cross-process path materializes a
+        /// single byte[] copy for the legacy
+        /// <see cref="InitDataCodec.Decode"/> entry point (replacing
+        /// the prior base64-decode pipeline).
+        /// </summary>
+        public static ThinContext InitializeFromEmbedded(
+            ReadOnlySpan<byte> embeddedBytes, int transpileTimeInitDataId)
+        {
+            if (InitRegistry.Contains(transpileTimeInitDataId))
+                return Initialize(transpileTimeInitDataId);
+            // Codec is byte[]-based; one allocation here replaces the
+            // base64 cctor's allocation. Span-based codec is a follow-up
+            // for true zero-copy decode.
+            var copy = embeddedBytes.ToArray();
+            var data = InitDataCodec.Decode(copy);
+            return InitializeFromData(data, transpileTimeInitDataId);
+        }
+
+        /// <summary>
         /// Cross-process entry: call with a freshly-decoded <see cref="ModuleInitData"/>
         /// (e.g. from <see cref="InitDataCodec.Decode"/>). The method registers the
         /// embedded data segments into <see cref="ModuleInit"/> with fresh IDs (to
