@@ -822,8 +822,15 @@ namespace Wacs.Transpiler.AOT
         /// <summary>
         /// IL: <c>new Value(...)</c> for primitive-typed initial values.
         /// Reads the const literal from <paramref name="init"/> and emits
-        /// the appropriate typed Value ctor. For ref types, emits
-        /// <c>new Value(refType)</c> which produces the typed null.
+        /// the appropriate typed Value ctor.
+        /// <para>
+        /// Ref types: when <see cref="Value.IsNullRef"/> is true, emits the
+        /// single-arg <c>new Value(refType)</c> which yields the typed
+        /// null. For non-null funcref/externref, emits the two-arg
+        /// <c>new Value(refType, idx)</c> with the index pulled from
+        /// <c>init.Data.Ptr</c>. (i31 and GC-constructed ref inits are
+        /// gated out by <see cref="AssertAotLinkedFeasible"/>.)
+        /// </para>
         /// </summary>
         private static void EmitPrimitiveValue(ILGenerator il, Wacs.Core.Types.Defs.ValType vt, Value init)
         {
@@ -846,11 +853,22 @@ namespace Wacs.Transpiler.AOT
                     il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(double) })!);
                     break;
                 default:
-                    // Ref type — emit `new Value(refType)` which yields the
-                    // typed null. AssertAotLinkedFeasible has already
-                    // refused non-null ref inits.
-                    il.Emit(OpCodes.Ldc_I4, (int)vt);
-                    il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(Wacs.Core.Types.Defs.ValType) })!);
+                    if (init.IsNullRef)
+                    {
+                        // Typed null ref: `new Value(refType)`.
+                        il.Emit(OpCodes.Ldc_I4, (int)vt);
+                        il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(Wacs.Core.Types.Defs.ValType) })!);
+                    }
+                    else
+                    {
+                        // Non-null funcref / externref: `new Value(refType, idx)`
+                        // pulls the func / extern index out of init.Data.Ptr.
+                        // (Other non-null ref shapes are gated out earlier.)
+                        il.Emit(OpCodes.Ldc_I4, (int)vt);
+                        il.Emit(OpCodes.Ldc_I4, (int)init.Data.Ptr);
+                        il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(
+                            new[] { typeof(Wacs.Core.Types.Defs.ValType), typeof(int) })!);
+                    }
                     break;
             }
         }
@@ -1016,17 +1034,20 @@ namespace Wacs.Transpiler.AOT
             if (data.GcGlobalInits.Count > 0)       unsupported.Add($"{data.GcGlobalInits.Count} GC global inits");
             if (data.DeferredGlobalInits.Count > 0) unsupported.Add($"{data.DeferredGlobalInits.Count} deferred global inits");
             if (data.GcElementValues.Count > 0)     unsupported.Add("GC element values");
-            // Globals with non-primitive init (ref types other than null) need
-            // expression evaluation; reject for now. Primitive-init globals
-            // (i32/i64/f32/f64) are handled by EmitGlobalsArray.
+            // Globals: primitive types (i32/i64/f32/f64), null refs of any
+            // ref type, and non-null FuncRef/ExternRef inits are inlined by
+            // EmitGlobalsArray. Other non-null ref shapes (i31, struct.new,
+            // array.new, etc.) need GC-construction IL we don't emit yet.
             for (int gi = 0; gi < data.Globals.Length; gi++)
             {
                 var (gtype, _, init) = data.Globals[gi];
-                if (!IsPrimitiveValType(gtype) && !init.IsNullRef)
-                {
-                    unsupported.Add($"global {gi} with non-null ref init");
-                    break;
-                }
+                if (IsPrimitiveValType(gtype)) continue;
+                if (init.IsNullRef) continue;
+                if (gtype == Wacs.Core.Types.Defs.ValType.FuncRef
+                    || gtype == Wacs.Core.Types.Defs.ValType.ExternRef)
+                    continue;
+                unsupported.Add($"global {gi} with non-null {gtype} init");
+                break;
             }
             // Tables with a non-trivial init expression (one that evaluates
             // to a non-null reference, potentially against globals) need
