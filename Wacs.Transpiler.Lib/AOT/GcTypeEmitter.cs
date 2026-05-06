@@ -299,6 +299,26 @@ namespace Wacs.Transpiler.AOT
         }
 
         /// <summary>
+        /// Replace each emitted Type with the runtime-loaded equivalent
+        /// resolved by FullName on <paramref name="loaded"/>. Called from
+        /// <see cref="TranspilationResult.Bake"/> after the assembly has
+        /// roundtripped through Save+LoadFromStream so the host-side helpers
+        /// (e.g. element-segment <c>array.new</c> evaluation) instantiate
+        /// runtime types instead of metadata-only PersistedTypeBuilder
+        /// products.
+        /// </summary>
+        public void RemapEmittedToLoadedTypes(System.Reflection.Assembly loaded)
+        {
+            foreach (var kv in _emittedTypes)
+            {
+                var stale = kv.Value.ClrType;
+                if (stale == null || stale.Assembly == loaded) continue;
+                var runtime = loaded.GetType(stale.FullName!);
+                if (runtime != null) kv.Value.ClrType = runtime;
+            }
+        }
+
+        /// <summary>
         /// Get the EmittedGcType info for a type index.
         /// </summary>
         public EmittedGcType? GetGcType(int typeIndex)

@@ -159,6 +159,20 @@ namespace Wacs.Transpiler.AOT
             AllFunctionTypes = allFunctionTypes ?? Array.Empty<FunctionType>();
         }
 
+        // Captured at end of Transpile so Bake can re-evaluate element
+        // segments whose initializers depend on emitted GC types being
+        // runtime-instantiable (only true after Save+Load).
+        private GcTypeEmitter? _gcTypeEmitterForReeval;
+        private List<(int segId, Wacs.Core.Types.Expression[] inits)>? _pendingElemReeval;
+
+        internal void SetPendingElemReeval(
+            GcTypeEmitter gcTypeEmitter,
+            List<(int segId, Wacs.Core.Types.Expression[] inits)> pending)
+        {
+            _gcTypeEmitterForReeval = gcTypeEmitter;
+            _pendingElemReeval = pending;
+        }
+
         /// <summary>
         /// Save the in-memory <see cref="PersistedAssemblyBuilder"/> to a
         /// <see cref="MemoryStream"/>, load that stream into the default
@@ -207,6 +221,27 @@ namespace Wacs.Transpiler.AOT
             // need a runtime, not a metadata-only, Type.
             if (InitDataId >= 0)
                 GcTypeRegistry.RemapToLoadedTypes(InitDataId, _assembly);
+
+            // Element segments whose initializers materialize GC objects
+            // could not be evaluated at transpile time (the emitted CLR
+            // class was metadata-only). With the loaded assembly online,
+            // remap the GcTypeEmitter's emitted types and replay the
+            // captured initializers.
+            if (_pendingElemReeval != null && _gcTypeEmitterForReeval != null
+                && _pendingElemReeval.Count > 0)
+            {
+                _gcTypeEmitterForReeval.RemapEmittedToLoadedTypes(_assembly);
+                foreach (var (segId, inits) in _pendingElemReeval)
+                {
+                    var values = new Value[inits.Length];
+                    for (int i = 0; i < inits.Length; i++)
+                        values[i] = ModuleTranspiler.EvaluateElemExprForBake(
+                            inits[i], _gcTypeEmitterForReeval);
+                    ModuleInit.UpdateElemSegment(segId, values);
+                }
+                _pendingElemReeval = null;
+                _gcTypeEmitterForReeval = null;
+            }
 
             _baked = true;
         }
@@ -435,18 +470,28 @@ namespace Wacs.Transpiler.AOT
             // Deferred until AFTER gcTypeEmitter.EmitTypes so the evaluator can
             // look up emitted CLR types when an initializer constructs GC
             // objects (array.new / array.new_fixed / array.new_default).
+            // Under PersistedAssemblyBuilder the emitted CLR types are
+            // metadata-only at this point — array.new evaluation can't yet
+            // call Activator.CreateInstance on them. Capture (segId,
+            // initializers) for any segment whose evaluation depends on
+            // emitted types so TranspilationResult.Bake can re-evaluate
+            // post-Save+Load against the runtime types.
             int elemSegmentBaseId = -1;
+            var pendingElemReeval = new List<(int segId, Wacs.Core.Types.Expression[] inits)>();
             for (int e = 0; e < moduleInst.Repr.Elements.Length; e++)
             {
                 var elem = moduleInst.Repr.Elements[e];
                 var values = new Value[elem.Initializers.Length];
+                bool needsReeval = false;
                 for (int i = 0; i < elem.Initializers.Length; i++)
                 {
                     var expr = elem.Initializers[i];
                     values[i] = EvaluateElemExpr(expr, gcTypeEmitter);
+                    if (HasGcConstructor(expr)) needsReeval = true;
                 }
                 int id = ModuleInit.RegisterElemSegment(values);
                 if (e == 0) elemSegmentBaseId = id;
+                if (needsReeval) pendingElemReeval.Add((id, elem.Initializers));
             }
 
             // === Pass 1: Create method stubs ===
@@ -617,6 +662,12 @@ namespace Wacs.Transpiler.AOT
                 interfaceGen.ExportMethods,
                 interfaceGen.ImportMethods,
                 allFunctionTypes);
+            // Stash post-bake re-evaluation work for element segments whose
+            // initializers materialize GC objects (array.new / array.new_fixed
+            // / array.new_default). Pre-bake those instantiations have no
+            // runtime type to target; Bake replays them once the assembly
+            // round-trips.
+            result.SetPendingElemReeval(gcTypeEmitter, pendingElemReeval);
             result.InitDataId = moduleClassGen.InitDataId;
             return result;
         }
@@ -779,6 +830,35 @@ namespace Wacs.Transpiler.AOT
         /// instance of the emitted CLR type, so <see cref="Emitters.GcRuntimeHelpers.ExtractElemValue"/>
         /// can unwrap it at runtime without re-running the expression.
         /// </summary>
+        /// <summary>
+        /// Bake-time entry point for re-evaluating element-segment
+        /// initializers once the assembly has been saved+loaded.
+        /// <see cref="GcTypeEmitter.RemapEmittedToLoadedTypes"/> must
+        /// have been called first so <c>BuildArrayInstance</c>'s
+        /// <c>Activator.CreateInstance</c> sees runtime types.
+        /// </summary>
+        internal static Value EvaluateElemExprForBake(
+            Wacs.Core.Types.Expression expr,
+            GcTypeEmitter gcTypeEmitter)
+            => EvaluateElemExpr(expr, gcTypeEmitter);
+
+        /// <summary>
+        /// Whether <paramref name="expr"/> contains any GC constructor
+        /// (<c>array.new</c>, <c>array.new_default</c>, <c>array.new_fixed</c>)
+        /// that needs the emitted CLR type to be runtime-instantiable.
+        /// </summary>
+        private static bool HasGcConstructor(Wacs.Core.Types.Expression expr)
+        {
+            foreach (var inst in expr.Instructions)
+            {
+                if (inst is Wacs.Core.Instructions.GC.InstArrayNew
+                    || inst is Wacs.Core.Instructions.GC.InstArrayNewDefault
+                    || inst is Wacs.Core.Instructions.GC.InstArrayNewFixed)
+                    return true;
+            }
+            return false;
+        }
+
         private static Value EvaluateElemExpr(
             Wacs.Core.Types.Expression expr,
             GcTypeEmitter? gcTypeEmitter)
