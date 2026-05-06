@@ -239,17 +239,26 @@ namespace Wacs.Transpiler.AOT.Component
         private static Type? LookupNamedType(ModuleBuilder module,
             string @namespace, string witName)
         {
-            // Read from the per-module registry primed by
-            // ComponentTranspiler before EmitInterfaces. Falling back
-            // to module.GetType is unsafe — PersistedModuleBuilder
-            // throws NotImplementedException for it.
+            // Prefer the per-module registry primed by ComponentTranspiler
+            // before EmitInterfaces — that's the PersistedAssemblyBuilder-
+            // safe path. Fall back to module.GetType for tests that drive
+            // EmitInterfaces directly against a legacy AssemblyBuilder
+            // (Run/RunAndCollect), where GetType is implemented.
+            // PersistedModuleBuilder throws NotImplementedException; swallow.
             var key = @namespace + "." + ToPascal(witName);
             if (NamedTypeRegistry.TryGetValue(module, out var dict)
                 && dict.TryGetValue(key, out var t))
             {
                 return t;
             }
-            return null;
+            try
+            {
+                return module.GetType(key);
+            }
+            catch (NotImplementedException)
+            {
+                return null;
+            }
         }
 
         private static Type? MapTupleType(CtTupleType tup,
