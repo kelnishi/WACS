@@ -53,7 +53,28 @@ namespace Wacs.Transpiler.AOT.Component
             Type coreIExports,
             Type coreModuleClass,
             CtPackage? decodedWit = null)
+            => EmitComponentExportsClass(module, @namespace, component,
+                coreIExports, coreModuleClass, out _, decodedWit);
+
+        /// <summary>
+        /// As <see cref="EmitComponentExportsClass(ModuleBuilder,string,ComponentModule,Type,Type,CtPackage?)"/>
+        /// but exposes the dictionary of pre-emitted named WIT types
+        /// (record / variant / enum / flags / resource) so the
+        /// downstream <see cref="ExportInterfaceEmit"/> can resolve
+        /// by-name references without falling back to
+        /// <c>ModuleBuilder.GetType</c> — which is unimplemented on
+        /// .NET 9's <c>PersistedAssemblyBuilder</c>.
+        /// </summary>
+        public static Type? EmitComponentExportsClass(
+            ModuleBuilder module,
+            string @namespace,
+            ComponentModule component,
+            Type coreIExports,
+            Type coreModuleClass,
+            out Dictionary<string, Type> emittedTypes,
+            CtPackage? decodedWit = null)
         {
+            emittedTypes = new Dictionary<string, Type>();
             var emittable = FindEmittableExports(component);
             if (emittable.Count == 0) return null;
 
@@ -85,8 +106,10 @@ namespace Wacs.Transpiler.AOT.Component
 
             // Pre-emit named C# types from the decoded WIT so
             // `ComponentExports` methods can reference them as
-            // return / param types. Cache by WIT type name.
-            var emittedTypes = new Dictionary<string, Type>();
+            // return / param types. Cache by WIT type name —
+            // exposed via the out param so ExportInterfaceEmit
+            // can resolve TypeRefs without ModuleBuilder.GetType
+            // (unimplemented on PersistedAssemblyBuilder).
             if (decodedWit != null)
                 EmitNamedTypes(module, @namespace, decodedWit,
                                coreIExports, coreModuleClass,
@@ -1816,8 +1839,8 @@ namespace Wacs.Transpiler.AOT.Component
                 throw new InvalidOperationException(
                     "Aggregate-param component requires the core module to "
                     + "export `cabi_realloc` — not found on the core IExports.");
-            var memoryProp = instanceField.FieldType.GetProperty("Memory");
-            if (memoryProp == null)
+            var memoryGetter = instanceField.FieldType.GetMethod("get_Memory");
+            if (memoryGetter == null)
                 throw new InvalidOperationException(
                     "Aggregate-param component requires Module.Memory.");
 
@@ -1827,7 +1850,7 @@ namespace Wacs.Transpiler.AOT.Component
                 if (pt.IsPrimitive && pt.Prim == ComponentPrim.String)
                 {
                     EmitLowerStringParamToLocals(
-                        il, instanceField, reallocMethod, memoryProp,
+                        il, instanceField, reallocMethod, memoryGetter,
                         i, export.StringEncoding,
                         out ptrLocals[i], out countLocals[i]);
                 }
@@ -1835,7 +1858,7 @@ namespace Wacs.Transpiler.AOT.Component
                          && TryResolveListOfPrim(pt, types, out var elemPrim))
                 {
                     EmitLowerListParamToLocals(
-                        il, instanceField, reallocMethod, memoryProp,
+                        il, instanceField, reallocMethod, memoryGetter,
                         i, elemPrim,
                         out ptrLocals[i], out countLocals[i]);
                 }
@@ -1850,7 +1873,7 @@ namespace Wacs.Transpiler.AOT.Component
         /// </summary>
         private static void EmitLowerStringParamToLocals(
             ILGenerator il, FieldBuilder instanceField,
-            MethodInfo reallocMethod, PropertyInfo memoryProp,
+            MethodInfo reallocMethod, MethodInfo memoryGetter,
             int argIdx, CanonOption.Kind encoding,
             out LocalBuilder ptrLocal,
             out LocalBuilder countLocal)
@@ -1919,7 +1942,7 @@ namespace Wacs.Transpiler.AOT.Component
 
             il.Emit(OpCodes.Ldloc, bytesLocal);
             il.Emit(OpCodes.Ldsfld, instanceField);
-            il.EmitCall(OpCodes.Callvirt, memoryProp.GetGetMethod()!, null);
+            il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Ldloc, ptrLocal);
             il.EmitCall(OpCodes.Call, copy, null);
         }
@@ -1935,7 +1958,7 @@ namespace Wacs.Transpiler.AOT.Component
         /// </summary>
         private static void EmitLowerListParamToLocals(
             ILGenerator il, FieldBuilder instanceField,
-            MethodInfo reallocMethod, PropertyInfo memoryProp,
+            MethodInfo reallocMethod, MethodInfo memoryGetter,
             int argIdx, ComponentPrim elemPrim,
             out LocalBuilder ptrLocal, out LocalBuilder countLocal)
         {
@@ -1978,7 +2001,7 @@ namespace Wacs.Transpiler.AOT.Component
             // ListMarshal.CopyArrayToGuest<T>(values, instance.Memory, ptr)
             il.Emit(OpCodes.Ldarg, argIdx);
             il.Emit(OpCodes.Ldsfld, instanceField);
-            il.EmitCall(OpCodes.Callvirt, memoryProp.GetGetMethod()!, null);
+            il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Ldloc, ptrLocal);
             il.EmitCall(OpCodes.Call, copyClosed, null);
 
@@ -2043,8 +2066,8 @@ namespace Wacs.Transpiler.AOT.Component
             MethodInfo coreMethod, EmittableExport export,
             IReadOnlyList<DefTypeEntry> types)
         {
-            var memoryProp = instanceField.FieldType.GetProperty("Memory");
-            if (memoryProp == null)
+            var memoryGetter = instanceField.FieldType.GetMethod("get_Memory");
+            if (memoryGetter == null)
                 throw new InvalidOperationException(
                     "String-returning component requires the core module to "
                     + "declare a memory — Module.Memory accessor is missing.");
@@ -2058,7 +2081,7 @@ namespace Wacs.Transpiler.AOT.Component
 
             // byte[] memory = instance.Memory;
             il.Emit(OpCodes.Ldsfld, instanceField);
-            il.EmitCall(OpCodes.Callvirt, memoryProp.GetGetMethod()!, null);
+            il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 
             // StringMarshal.LiftXxx(memory, strPtr, strLen)
@@ -2098,8 +2121,8 @@ namespace Wacs.Transpiler.AOT.Component
             MethodInfo coreMethod, EmittableExport export,
             IReadOnlyList<DefTypeEntry> types, ComponentPrim elemPrim)
         {
-            var memoryProp = instanceField.FieldType.GetProperty("Memory");
-            if (memoryProp == null)
+            var memoryGetter = instanceField.FieldType.GetMethod("get_Memory");
+            if (memoryGetter == null)
                 throw new InvalidOperationException(
                     "List-returning component requires the core module to "
                     + "declare a memory — Module.Memory accessor is missing.");
@@ -2113,7 +2136,7 @@ namespace Wacs.Transpiler.AOT.Component
 
             // byte[] memory = instance.Memory;
             il.Emit(OpCodes.Ldsfld, instanceField);
-            il.EmitCall(OpCodes.Callvirt, memoryProp.GetGetMethod()!, null);
+            il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 
             // var elemCs = PrimToCs(elemPrim);
@@ -2156,8 +2179,8 @@ namespace Wacs.Transpiler.AOT.Component
             MethodInfo coreMethod, EmittableExport export,
             IReadOnlyList<DefTypeEntry> types)
         {
-            var memoryProp = instanceField.FieldType.GetProperty("Memory");
-            if (memoryProp == null)
+            var memoryGetter = instanceField.FieldType.GetMethod("get_Memory");
+            if (memoryGetter == null)
                 throw new InvalidOperationException(
                     "list<string>-returning component requires Module.Memory.");
 
@@ -2168,7 +2191,7 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
             il.Emit(OpCodes.Ldsfld, instanceField);
-            il.EmitCall(OpCodes.Callvirt, memoryProp.GetGetMethod()!, null);
+            il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 
             var bitCToInt32 = typeof(BitConverter).GetMethod(
@@ -2211,8 +2234,8 @@ namespace Wacs.Transpiler.AOT.Component
             MethodInfo coreMethod, EmittableExport export,
             IReadOnlyList<DefTypeEntry> types, ComponentPrim innerPrim)
         {
-            var memoryProp = instanceField.FieldType.GetProperty("Memory");
-            if (memoryProp == null)
+            var memoryGetter = instanceField.FieldType.GetMethod("get_Memory");
+            if (memoryGetter == null)
                 throw new InvalidOperationException(
                     "Option-returning component requires Module.Memory.");
 
@@ -2231,7 +2254,7 @@ namespace Wacs.Transpiler.AOT.Component
 
             // byte[] memory = instance.Memory;
             il.Emit(OpCodes.Ldsfld, instanceField);
-            il.EmitCall(OpCodes.Callvirt, memoryProp.GetGetMethod()!, null);
+            il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 
             // if (!OptionMarshal.IsSome(memory.AsSpan(), P)) goto noneLabel;
@@ -2302,8 +2325,8 @@ namespace Wacs.Transpiler.AOT.Component
             MethodInfo coreMethod, EmittableExport export,
             IReadOnlyList<DefTypeEntry> types)
         {
-            var memoryProp = instanceField.FieldType.GetProperty("Memory");
-            if (memoryProp == null)
+            var memoryGetter = instanceField.FieldType.GetMethod("get_Memory");
+            if (memoryGetter == null)
                 throw new InvalidOperationException(
                     "option<string>-returning component requires Module.Memory.");
 
@@ -2317,7 +2340,7 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
             il.Emit(OpCodes.Ldsfld, instanceField);
-            il.EmitCall(OpCodes.Callvirt, memoryProp.GetGetMethod()!, null);
+            il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 
             // disc = memory[retArea];  if disc == 0 goto none
@@ -2376,20 +2399,22 @@ namespace Wacs.Transpiler.AOT.Component
             ResultSide okSide, ResultSide errSide,
             Type tupleType)
         {
-            var memoryProp = instanceField.FieldType.GetProperty("Memory");
-            if (memoryProp == null)
+            var memoryGetter = instanceField.FieldType.GetMethod("get_Memory");
+            if (memoryGetter == null)
                 throw new InvalidOperationException(
                     "Result-returning component requires Module.Memory.");
 
-            var tupleFields = new[] {
-                tupleType.GetField("Item1")!,
-                tupleType.GetField("Item2")!,
-                tupleType.GetField("Item3")!,
-            };
+            // PersistedAssemblyBuilder mis-encodes Stfld against generic
+            // instance fields (ValueTuple`3.ItemN). Switch the
+            // assembly strategy to "push all 3 elements, then Newobj
+            // ValueTuple<bool,Ok,Err>(bool, Ok, Err)".
+            var genArgs = tupleType.GetGenericArguments();   // [bool, Ok, Err]
+            var ctor = tupleType.GetConstructor(genArgs)
+                ?? throw new InvalidOperationException(
+                    "ValueTuple<bool,Ok,Err> constructor not found.");
 
             var retAreaLocal = il.DeclareLocal(typeof(int));
             var memoryLocal = il.DeclareLocal(typeof(byte[]));
-            var resultLocal = il.DeclareLocal(tupleType);
             var errLabel = il.DefineLabel();
             var endLabel = il.DefineLabel();
 
@@ -2397,7 +2422,7 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
             il.Emit(OpCodes.Ldsfld, instanceField);
-            il.EmitCall(OpCodes.Callvirt, memoryProp.GetGetMethod()!, null);
+            il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 
             // if (memory[P] != 0) goto errLabel;
@@ -2406,38 +2431,66 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Ldelem_U1);
             il.Emit(OpCodes.Brtrue, errLabel);
 
-            // Ok branch: tuple = (true, okPayload, default(Err))
-            il.Emit(OpCodes.Ldloca, resultLocal);
-            il.Emit(OpCodes.Initobj, tupleType);           // zero-init → default
-            il.Emit(OpCodes.Ldloca, resultLocal);
-            il.Emit(OpCodes.Ldc_I4_1);
-            il.Emit(OpCodes.Stfld, tupleFields[0]);        // ok = true
+            // Ok branch: stack = (true, okPayload, default(Err)) → Newobj
+            il.Emit(OpCodes.Ldc_I4_1);                       // ok = true
             if (okSide.Kind != ResultSide.SideKind.Absent)
             {
-                il.Emit(OpCodes.Ldloca, resultLocal);
                 EmitLoadResultPayload(il, memoryLocal, retAreaLocal,
                                       /*offset*/ 4, okSide,
                                       export.StringEncoding);
-                il.Emit(OpCodes.Stfld, tupleFields[1]);    // Item2 = ok payload
             }
+            else
+            {
+                EmitLoadDefault(il, genArgs[1]);             // default(Ok)
+            }
+            EmitLoadDefault(il, genArgs[2]);                 // default(Err)
+            il.Emit(OpCodes.Newobj, ctor);
             il.Emit(OpCodes.Br, endLabel);
 
-            // Err branch: tuple = (false, default(Ok), errPayload)
+            // Err branch: stack = (false, default(Ok), errPayload) → Newobj
             il.MarkLabel(errLabel);
-            il.Emit(OpCodes.Ldloca, resultLocal);
-            il.Emit(OpCodes.Initobj, tupleType);           // ok = false default
+            il.Emit(OpCodes.Ldc_I4_0);                       // ok = false
+            EmitLoadDefault(il, genArgs[1]);                 // default(Ok)
             if (errSide.Kind != ResultSide.SideKind.Absent)
             {
-                il.Emit(OpCodes.Ldloca, resultLocal);
                 EmitLoadResultPayload(il, memoryLocal, retAreaLocal,
                                       /*offset*/ 4, errSide,
                                       export.StringEncoding);
-                il.Emit(OpCodes.Stfld, tupleFields[2]);    // Item3 = err payload
             }
+            else
+            {
+                EmitLoadDefault(il, genArgs[2]);             // default(Err)
+            }
+            il.Emit(OpCodes.Newobj, ctor);
 
             il.MarkLabel(endLabel);
-            il.Emit(OpCodes.Ldloc, resultLocal);
             il.Emit(OpCodes.Ret);
+        }
+
+        /// <summary>
+        /// Push <c>default(<paramref name="t"/>)</c> onto the eval
+        /// stack. Reference types: <c>ldnull</c>. Primitive value
+        /// types: their zero literal. Other value types: zero-init
+        /// a temp and load it. Used by the result/option emit paths
+        /// to pre-populate inactive tuple slots before the Newobj.
+        /// </summary>
+        private static void EmitLoadDefault(ILGenerator il, Type t)
+        {
+            if (!t.IsValueType) { il.Emit(OpCodes.Ldnull); return; }
+            if (t == typeof(bool) || t == typeof(byte) || t == typeof(sbyte)
+                || t == typeof(short) || t == typeof(ushort)
+                || t == typeof(int) || t == typeof(uint)
+                || t == typeof(char))
+            { il.Emit(OpCodes.Ldc_I4_0); return; }
+            if (t == typeof(long) || t == typeof(ulong))
+            { il.Emit(OpCodes.Ldc_I8, 0L); return; }
+            if (t == typeof(float)) { il.Emit(OpCodes.Ldc_R4, 0f); return; }
+            if (t == typeof(double)) { il.Emit(OpCodes.Ldc_R8, 0d); return; }
+            // Aggregate value type — zero-init a temp.
+            var loc = il.DeclareLocal(t);
+            il.Emit(OpCodes.Ldloca, loc);
+            il.Emit(OpCodes.Initobj, t);
+            il.Emit(OpCodes.Ldloc, loc);
         }
 
         /// <summary>Emit IL that pushes a result's payload onto
@@ -2592,8 +2645,8 @@ namespace Wacs.Transpiler.AOT.Component
             IReadOnlyList<DefTypeEntry> types, Type recordType,
             ComponentPrim[] fieldPrims)
         {
-            var memoryProp = instanceField.FieldType.GetProperty("Memory");
-            if (memoryProp == null)
+            var memoryGetter = instanceField.FieldType.GetMethod("get_Memory");
+            if (memoryGetter == null)
                 throw new InvalidOperationException(
                     "Record-returning component requires Module.Memory.");
 
@@ -2604,7 +2657,7 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
             il.Emit(OpCodes.Ldsfld, instanceField);
-            il.EmitCall(OpCodes.Callvirt, memoryProp.GetGetMethod()!, null);
+            il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 
             // Field offsets follow canonical-ABI alignment: each
@@ -2678,8 +2731,8 @@ namespace Wacs.Transpiler.AOT.Component
             IReadOnlyList<DefTypeEntry> types, Type variantType,
             VariantShape shape)
         {
-            var memoryProp = instanceField.FieldType.GetProperty("Memory");
-            if (memoryProp == null)
+            var memoryGetter = instanceField.FieldType.GetMethod("get_Memory");
+            if (memoryGetter == null)
                 throw new InvalidOperationException(
                     "Variant-returning component requires Module.Memory.");
 
@@ -2690,7 +2743,7 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
             il.Emit(OpCodes.Ldsfld, instanceField);
-            il.EmitCall(OpCodes.Callvirt, memoryProp.GetGetMethod()!, null);
+            il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 
             // Discriminant width tracks case count.
@@ -3003,40 +3056,48 @@ namespace Wacs.Transpiler.AOT.Component
             IReadOnlyList<DefTypeEntry> types,
             ComponentPrim[] elementPrims, Type tupleType)
         {
-            var memoryProp = instanceField.FieldType.GetProperty("Memory");
-            if (memoryProp == null)
+            // PersistedTypeBuilder doesn't implement GetProperty; reach for
+            // the auto-generated getter MethodInfo directly. Same shape
+            // both builders converge on (`get_Memory`).
+            var memoryGetter = instanceField.FieldType.GetMethod("get_Memory");
+            if (memoryGetter == null)
                 throw new InvalidOperationException(
                     "Tuple-returning component requires Module.Memory.");
 
             var retAreaLocal = il.DeclareLocal(typeof(int));
             var memoryLocal = il.DeclareLocal(typeof(byte[]));
-            var resultLocal = il.DeclareLocal(tupleType);
 
             EmitCoreCall(il, instanceField, coreMethod, export, types);
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
             il.Emit(OpCodes.Ldsfld, instanceField);
-            il.EmitCall(OpCodes.Callvirt, memoryProp.GetGetMethod()!, null);
+            il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 
-            il.Emit(OpCodes.Ldloca, resultLocal);
-            il.Emit(OpCodes.Initobj, tupleType);
-
-            // Emit one field-store per tuple element. Offsets are
-            // cumulative based on each element's width — for all-
-            // 32-bit primitive v0 that's 4-byte stride.
+            // Push each element onto the eval stack, then construct the
+            // ValueTuple via Newobj. We avoid per-field Stfld because
+            // PersistedAssemblyBuilder mis-encodes Stfld against generic
+            // instance fields of all-runtime-typed generic instances
+            // (System.MissingFieldException at JIT time on
+            // ValueTuple`N.ItemX). Newobj on the canonical
+            // (T1, T2, …) constructor encodes correctly.
             int offset = 0;
             for (int i = 0; i < elementPrims.Length; i++)
             {
-                var fld = tupleType.GetField("Item" + (i + 1))!;
-                il.Emit(OpCodes.Ldloca, resultLocal);
                 EmitReadPayloadAtOffset(il, memoryLocal, retAreaLocal,
                                         offset, elementPrims[i]);
-                il.Emit(OpCodes.Stfld, fld);
                 offset += 4;   // v0: all small-prim → 4-byte stride
             }
 
-            il.Emit(OpCodes.Ldloc, resultLocal);
+            // The constructor's parameter types match the tuple's generic
+            // arguments exactly (ValueTuple<T1,T2,…>.ctor(T1, T2, …));
+            // EmitReadPayloadAtOffset's stack output is already i4-on-the-
+            // stack which the JIT widens implicitly to whichever signed
+            // / unsigned 32-bit (or narrower) parameter the ctor expects.
+            var ctor = tupleType.GetConstructor(tupleType.GetGenericArguments())
+                ?? throw new InvalidOperationException(
+                    "ValueTuple constructor not found for tuple-returning export.");
+            il.Emit(OpCodes.Newobj, ctor);
             il.Emit(OpCodes.Ret);
         }
 

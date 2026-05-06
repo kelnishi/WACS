@@ -52,10 +52,14 @@ namespace Wacs.Transpiler.AOT
 
         public static Type Emit(TranspilationResult result, string programClassName, string exportName)
         {
-            if (result.ModuleClass == null)
-                throw new ConstraintException("module has no generated Module class; nothing to invoke");
+            // Use the pre-bake metadata accessors: Emit() runs between
+            // Transpile() and SaveAssembly() and adds Program.Main to the
+            // still-open builder. Touching the public type accessors would
+            // trigger an early Bake and freeze the builder.
+            var moduleClassMeta = result.ModuleClassBuilder
+                ?? throw new ConstraintException("module has no generated Module class; nothing to invoke");
 
-            if (result.ImportsInterface != null && result.ImportMethods.Count > 0)
+            if (result.ImportsInterfaceBuilder != null && result.ImportMethods.Count > 0)
                 throw new ConstraintException(
                     $"module declares {result.ImportMethods.Count} import(s); v0.1 --emit-main only supports zero-import modules");
 
@@ -87,7 +91,7 @@ namespace Wacs.Transpiler.AOT
                     "accepts scalar i32 / i64 / f32 / f64 only");
 
             // Locate the IExports interface method that Main will call.
-            var exportsInterface = result.ExportsInterface
+            var exportsInterface = result.ExportsInterfaceBuilder
                 ?? throw new ConstraintException("module has no exports interface");
             var exportMethod = exportsInterface.GetMethod(export.Name)
                 ?? throw new ConstraintException(
@@ -98,7 +102,7 @@ namespace Wacs.Transpiler.AOT
             // modules remain open until the assembly is persisted.
             var moduleBuilder = result.ModuleBuilder;
 
-            var ns = result.ModuleClass.Namespace;
+            var ns = moduleClassMeta.Namespace;
             var fullName = string.IsNullOrEmpty(ns)
                 ? programClassName
                 : $"{ns}.{programClassName}";
@@ -137,10 +141,10 @@ namespace Wacs.Transpiler.AOT
             }
 
             // var module = new ModuleClass();
-            var ctor = result.ModuleClass.GetConstructor(Type.EmptyTypes)
+            var ctor = moduleClassMeta.GetConstructor(Type.EmptyTypes)
                 ?? throw new ConstraintException(
                     "module class has no parameterless constructor (imports required?)");
-            var moduleLocal = il.DeclareLocal(result.ModuleClass);
+            var moduleLocal = il.DeclareLocal(moduleClassMeta);
             il.Emit(OpCodes.Newobj, ctor);
             il.Emit(OpCodes.Stloc, moduleLocal);
 

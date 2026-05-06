@@ -683,9 +683,14 @@ namespace Wacs.Transpiler.AOT.Emitters
                     trampolines[i] = il.DefineLabel();
                 var defTrampoline = il.DefineLabel();
 
-                // Emit the switch on the saved index
-                il.Emit(OpCodes.Ldloc, indexLocal);
-                il.Emit(OpCodes.Switch, trampolines);
+                // Emit the switch on the saved index. PersistedILGenerator
+                // rejects an empty label array; when br_table has only a
+                // default target, fall straight through to defTrampoline.
+                if (trampolines.Length > 0)
+                {
+                    il.Emit(OpCodes.Ldloc, indexLocal);
+                    il.Emit(OpCodes.Switch, trampolines);
+                }
                 il.Emit(OpCodes.Br, defTrampoline);
 
                 // Emit each trampoline: pop excess, restore carried, br real target
@@ -741,7 +746,17 @@ namespace Wacs.Transpiler.AOT.Emitters
 
             var defaultTarget = PeekLabel(blockStack, inst.DefaultLabel).BranchTarget;
 
-            il.Emit(OpCodes.Switch, labels);
+            // PersistedILGenerator rejects empty label arrays; when br_table
+            // declares no entries the index on the stack is unused and the
+            // dispatch always lands on the default.
+            if (labels.Length == 0)
+            {
+                il.Emit(OpCodes.Pop);
+            }
+            else
+            {
+                il.Emit(OpCodes.Switch, labels);
+            }
             il.Emit(OpCodes.Br, defaultTarget);
         }
 
@@ -775,8 +790,13 @@ namespace Wacs.Transpiler.AOT.Emitters
                 trampolines[i] = il.DefineLabel();
             var defTrampoline = il.DefineLabel();
 
-            il.Emit(OpCodes.Ldloc, indexLocal);
-            il.Emit(OpCodes.Switch, trampolines);
+            // PersistedILGenerator rejects empty label arrays; when br_table
+            // has only a default target, fall straight through to defTrampoline.
+            if (trampolines.Length > 0)
+            {
+                il.Emit(OpCodes.Ldloc, indexLocal);
+                il.Emit(OpCodes.Switch, trampolines);
+            }
             il.Emit(OpCodes.Br, defTrampoline);
 
             // Each trampoline: pop excess, route carried values to target's locals or stack, br

@@ -156,6 +156,19 @@ namespace Wacs.Transpiler.AOT.Emitters
     /// </summary>
     public static class BulkHelpers
     {
+        /// <summary>
+        /// Zero-copy active-segment install: copy <paramref name="len"/> bytes
+        /// from an RVA-mapped <see cref="ReadOnlySpan{Byte}"/> (typically
+        /// produced by <c>RuntimeHelpers.CreateSpan&lt;byte&gt;</c> over a
+        /// <c>DefineInitializedData</c> field) into the wasm linear-memory
+        /// backing array at <paramref name="dstOffset"/>. Bounds are
+        /// transpile-time constants; no defensive checks here.
+        /// </summary>
+        public static void CopySegmentToMemory(ReadOnlySpan<byte> src, byte[] dst, int dstOffset, int len)
+        {
+            src.Slice(0, len).CopyTo(dst.AsSpan(dstOffset, len));
+        }
+
         public static void MemoryCopy(ThinContext ctx, int dstMemIdx, int srcMemIdx,
             int dst, int src, int len)
         {

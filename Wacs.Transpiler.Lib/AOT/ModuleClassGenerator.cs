@@ -901,9 +901,12 @@ namespace Wacs.Transpiler.AOT
 
         /// <summary>
         /// IL: for each active data segment, copy the segment's bytes
-        /// (loaded from a static <c>__WACSAotData.Segment_N</c> field) into
-        /// the right memory's <c>Data</c> array at the right offset via
-        /// <see cref="Buffer.BlockCopy"/>.
+        /// (held in an RVA-mapped <c>__WACSAotData.Segment_N</c> field,
+        /// materialized via <c>RuntimeHelpers.CreateSpan&lt;byte&gt;</c>)
+        /// into the right memory's <c>Data</c> array at the right offset
+        /// via <see cref="BulkHelpers.CopySegmentToMemory"/>. Zero-copy at
+        /// the source: bytes are demand-paged from the PE's initialized-
+        /// data section and never materialize a heap <c>byte[]</c>.
         /// </summary>
         private void EmitDataSegmentCopies(ILGenerator il, LocalBuilder ctxLocal, ModuleInitData data)
         {
@@ -911,8 +914,13 @@ namespace Wacs.Transpiler.AOT
 
             var memoriesField = typeof(ThinContext).GetField(nameof(ThinContext.Memories))!;
             var memoryDataField = typeof(MemoryInstance).GetField(nameof(MemoryInstance.Data))!;
-            var blockCopyMethod = typeof(Buffer).GetMethod(nameof(Buffer.BlockCopy),
-                new[] { typeof(Array), typeof(int), typeof(Array), typeof(int), typeof(int) })!;
+            var createSpanOpen = typeof(System.Runtime.CompilerServices.RuntimeHelpers).GetMethod(
+                nameof(System.Runtime.CompilerServices.RuntimeHelpers.CreateSpan),
+                BindingFlags.Public | BindingFlags.Static)!;
+            var createSpanByte = createSpanOpen.MakeGenericMethod(typeof(byte));
+            var copyHelper = typeof(BulkHelpers).GetMethod(
+                nameof(BulkHelpers.CopySegmentToMemory),
+                BindingFlags.Public | BindingFlags.Static)!;
 
             foreach (var (memIdx, offset, segId) in data.ActiveDataSegments)
             {
@@ -920,11 +928,12 @@ namespace Wacs.Transpiler.AOT
                 if (bytes.Length == 0) continue;
                 var segField = GetAotDataSegmentField(segId, bytes);
 
-                // Buffer.BlockCopy(__WACSAotData.Segment_N, 0,
-                //                  ctx.Memories[memIdx].Data, (int)offset,
-                //                  bytes.Length);
-                il.Emit(OpCodes.Ldsfld, segField);
-                il.Emit(OpCodes.Ldc_I4_0);
+                // BulkHelpers.CopySegmentToMemory(
+                //     RuntimeHelpers.CreateSpan<byte>(__ldtoken __WACSAotData.Segment_N__),
+                //     ctx.Memories[memIdx].Data,
+                //     (int)offset, bytes.Length);
+                il.Emit(OpCodes.Ldtoken, segField);
+                il.Emit(OpCodes.Call, createSpanByte);
 
                 il.Emit(OpCodes.Ldloc, ctxLocal);
                 il.Emit(OpCodes.Ldfld, memoriesField);
@@ -934,17 +943,19 @@ namespace Wacs.Transpiler.AOT
 
                 il.Emit(OpCodes.Ldc_I4, (int)offset);
                 il.Emit(OpCodes.Ldc_I4, bytes.Length);
-                il.Emit(OpCodes.Call, blockCopyMethod);
+                il.Emit(OpCodes.Call, copyHelper);
             }
         }
 
         /// <summary>
-        /// Get-or-create a static <c>byte[]</c> field on the
-        /// <c>__WACSAotData</c> holder type, populated from
-        /// <paramref name="bytes"/> via a base64-decode in the holder's
-        /// static ctor. Same workaround as <see cref="EmitEmbeddedInitData"/>:
-        /// <c>DefineInitializedData</c> trips a Lokad.ILPack NRE, so we
-        /// stash a base64 string literal that decodes once at first access.
+        /// Get-or-create a static RVA-mapped data field on the
+        /// <c>__WACSAotData</c> holder type, backed by
+        /// <paramref name="bytes"/>. The returned <see cref="FieldBuilder"/>'s
+        /// runtime type is a synthesized fixed-size value-type with
+        /// <c>HasFieldRVA</c> pointing into the PE's initialized-data
+        /// section — bytes are demand-paged by the OS loader and consumed
+        /// zero-copy via <c>RuntimeHelpers.CreateSpan&lt;byte&gt;</c> at the
+        /// call site. No cctor; no decode; no GC heap allocation.
         /// </summary>
         private FieldBuilder GetAotDataSegmentField(int segId, byte[] bytes)
         {
@@ -968,44 +979,26 @@ namespace Wacs.Transpiler.AOT
                 _aotDataFields = grown;
             }
 
-            var field = _aotDataType.DefineField(
-                $"Segment_{segId}", typeof(byte[]),
-                FieldAttributes.Public | FieldAttributes.Static | FieldAttributes.InitOnly);
+            // DefineInitializedData synthesizes a private nested struct
+            // typed __StaticArrayInitTypeSize=N and emits a static field of
+            // that type with HasFieldRVA. Field attribute set: Public|Static
+            // (InitOnly is implicit for RVA fields and not accepted here).
+            var field = _aotDataType.DefineInitializedData(
+                $"Segment_{segId}", bytes,
+                FieldAttributes.Public | FieldAttributes.Static);
             _aotDataFields[segId] = field;
             return field;
         }
 
         /// <summary>
-        /// Once all data-segment fields have been declared, emit the
-        /// <c>__WACSAotData</c> static ctor that base64-decodes the bytes
-        /// for each. Called from <see cref="Generate"/> after the Module
-        /// class has fully wired its references to these fields, so the
-        /// holder's metadata is final before <c>CreateType()</c>.
+        /// No-op now that data-segment fields are RVA-backed: the bytes
+        /// live in the PE's initialized-data section and are loaded by the
+        /// runtime at type-load time. Kept as a hook in case future
+        /// strategies (compressed RVA, lazy decode) need a finalize step.
         /// </summary>
         private void FinalizeAotDataHolder()
         {
-            if (_aotDataType == null || _aotDataFields == null) return;
-            var data = InitRegistry.Get(_initDataId);
-            var fromBase64 = typeof(Convert).GetMethod(
-                nameof(Convert.FromBase64String),
-                BindingFlags.Public | BindingFlags.Static,
-                binder: null,
-                types: new[] { typeof(string) },
-                modifiers: null)!;
-
-            var cctor = _aotDataType.DefineTypeInitializer();
-            var il = cctor.GetILGenerator();
-            for (int segId = 0; segId < _aotDataFields.Length; segId++)
-            {
-                var field = _aotDataFields[segId];
-                if (field == null) continue;
-                if (!data.SavedDataSegments.TryGetValue(segId, out var bytes) || bytes == null)
-                    continue;
-                il.Emit(OpCodes.Ldstr, Convert.ToBase64String(bytes));
-                il.Emit(OpCodes.Call, fromBase64);
-                il.Emit(OpCodes.Stsfld, field);
-            }
-            il.Emit(OpCodes.Ret);
+            // intentionally empty
         }
 
         private void AssertAotLinkedFeasible()
