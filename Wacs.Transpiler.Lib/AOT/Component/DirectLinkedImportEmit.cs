@@ -1526,12 +1526,17 @@ namespace Wacs.Transpiler.AOT.Component
                     int fieldAlign = AlignOfFlatField(et);
                     int fieldOffset = Align(offsetSoFar, fieldAlign);
 
+                    // PersistedAssemblyBuilder mis-encodes Ldfld against
+                    // closed-generic ValueTuple.ItemN (MissingFieldException
+                    // at JIT). Route reads through a Roslyn-compiled
+                    // TupleFieldAccess.ItemPofN<…> helper so the field
+                    // reference is baked by the C# compiler, not by PAB.
+                    var itemReader = TupleFieldAccess.ResolveItemReader(type, i + 1);
                     EmitTupleOrRecordFieldStore(il, et, fieldOffset,
                         pushBaseAddress,
                         push => {
-                            push.Emit(OpCodes.Ldloca, valueLocal);
-                            push.Emit(OpCodes.Ldfld,
-                                type.GetField("Item" + (i + 1))!);
+                            push.Emit(OpCodes.Ldloc, valueLocal);
+                            push.Emit(OpCodes.Call, itemReader);
                         },
                         stringEncoding);
 

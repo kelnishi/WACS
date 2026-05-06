@@ -200,6 +200,14 @@ namespace Wacs.Transpiler.AOT
                 remappedMap[kv.Key] = ResolveMethod(kv.Value)!;
             _functionMethodMap = remappedMap;
 
+            // Remap GcTypeRegistry entries owned by this transpilation
+            // to the loaded assembly's runtime types — runtime helpers
+            // (ConvertStoreArray / ConvertStoreStruct) call
+            // Activator.CreateInstance against the registered Type and
+            // need a runtime, not a metadata-only, Type.
+            if (InitDataId >= 0)
+                GcTypeRegistry.RemapToLoadedTypes(InitDataId, _assembly);
+
             _baked = true;
         }
 
@@ -845,7 +853,21 @@ namespace Wacs.Transpiler.AOT
             var clrType = gcTypeEmitter.GetEmittedType(typeIdx);
             if (clrType == null) return new Value(ValType.Any);
 
-            var instance = Activator.CreateInstance(clrType);
+            // Under PersistedAssemblyBuilder the emitted class is metadata-
+            // only at this point — Activator.CreateInstance throws
+            // "Type must be a type provided by the runtime." Element-segment
+            // array.new evaluation needs a deferred-instantiation rewire
+            // (tracked as follow-up); for now, fall back to a typed-null
+            // Value so transpile completes.
+            object? instance;
+            try
+            {
+                instance = Activator.CreateInstance(clrType);
+            }
+            catch (ArgumentException)
+            {
+                return new Value(ValType.Any);
+            }
             var elemField = clrType.GetField("elements");
             var lenField = clrType.GetField("length");
             if (instance == null || elemField == null) return new Value(ValType.Any);
@@ -869,7 +891,16 @@ namespace Wacs.Transpiler.AOT
             var clrType = gcTypeEmitter.GetEmittedType(typeIdx);
             if (clrType == null) return new Value(ValType.Any);
 
-            var instance = Activator.CreateInstance(clrType);
+            // See BuildArrayInstance for the metadata-only fallback rationale.
+            object? instance;
+            try
+            {
+                instance = Activator.CreateInstance(clrType);
+            }
+            catch (ArgumentException)
+            {
+                return new Value(ValType.Any);
+            }
             var elemField = clrType.GetField("elements");
             var lenField = clrType.GetField("length");
             if (instance == null || elemField == null) return new Value(ValType.Any);
