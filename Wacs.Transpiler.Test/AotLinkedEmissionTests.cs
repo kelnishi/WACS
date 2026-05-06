@@ -82,6 +82,74 @@ namespace Wacs.Transpiler.Test
         }
 
         [Fact]
+        public void AutoEmissionPromotesFeasibleModuleToAotLinked()
+        {
+            // BuildAddWasm is compute-only (no memory, table, global,
+            // element, segment, import) → in the safe Auto-promotable
+            // subset. Default-constructed TranspilerOptions has
+            // Emission = Auto; the saved .dll should have AotLinked's
+            // codec-free shape (no __WACSInit, no InitializeFromEmbedded).
+            var (modInst, runtime) = ParseAndInstantiate(BuildAddWasm());
+            var opts = new TranspilerOptions { AssemblyName = "Wacs.Auto.Promote" };
+            Assert.Equal(EmissionTarget.Auto, opts.Emission);
+
+            var result = new ModuleTranspiler("ignored", opts)
+                .Transpile(modInst, runtime, "AddMod");
+
+            var dllPath = Path.Combine(Path.GetTempPath(), $"{result.Assembly.GetName().Name}.dll");
+            try
+            {
+                result.SaveAssembly(dllPath);
+                var bytes = File.ReadAllBytes(dllPath);
+                var asUtf8 = System.Text.Encoding.UTF8.GetString(bytes);
+                Assert.DoesNotContain("__WACSInit", asUtf8);
+                Assert.DoesNotContain("InitializeFromEmbedded", asUtf8);
+                Assert.Equal(42, (int)Invoke(result, "add", 7, 35));
+            }
+            finally
+            {
+                if (File.Exists(dllPath)) File.Delete(dllPath);
+            }
+        }
+
+        [Fact]
+        public void AutoEmissionFallsBackToStandardForUnsupportedShape()
+        {
+            // The Memory+ActiveDataSegment fixture has an active data
+            // segment but no element segments / tables / imports — IS
+            // Auto-promotable per IsAotLinkedAutoPromotable. Confirm the
+            // promotion happens (saved .dll has no __WACSInit) and
+            // then load a fixture that DOES exit the safe subset (a
+            // table+element-segment module) and verify it falls back
+            // to Standard (saved .dll has __WACSInit).
+            //
+            // Standard-emission fallback proof: BuildCallIndirectWasm
+            // has tables + element segments → fails
+            // IsAotLinkedAutoPromotable's table/element gate even though
+            // it would survive AotLinkedFeasible (the standalone
+            // AotLinked test of the same fixture works in-process).
+            var (modInst, runtime) = ParseAndInstantiate(BuildCallIndirectWasm());
+            var opts = new TranspilerOptions { AssemblyName = "Wacs.Auto.Fallback" };
+            var result = new ModuleTranspiler("ignored", opts)
+                .Transpile(modInst, runtime, "CallIndMod");
+
+            var dllPath = Path.Combine(Path.GetTempPath(), $"{result.Assembly.GetName().Name}.dll");
+            try
+            {
+                result.SaveAssembly(dllPath);
+                var bytes = File.ReadAllBytes(dllPath);
+                var asUtf8 = System.Text.Encoding.UTF8.GetString(bytes);
+                // Standard emission landed: __WACSInit present.
+                Assert.Contains("__WACSInit", asUtf8);
+                Assert.Equal(42, (int)Invoke(result, "trampoline"));
+            }
+            finally
+            {
+                if (File.Exists(dllPath)) File.Delete(dllPath);
+            }
+        }
+
+        [Fact]
         public void AotLinkedSupportsMemoryAndActiveDataSegment()
         {
             // Module with (memory 1) + data segment "*" at offset 0,
