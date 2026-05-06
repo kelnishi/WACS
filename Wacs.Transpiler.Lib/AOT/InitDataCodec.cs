@@ -147,6 +147,35 @@ namespace Wacs.Transpiler.AOT
         {
             if (bytes == null) throw new ArgumentNullException(nameof(bytes));
             using var ms = new MemoryStream(bytes, writable: false);
+            return DecodeFromStream(ms);
+        }
+
+        /// <summary>
+        /// Span overload of <see cref="Decode(byte[])"/>. Built for the
+        /// RVA-mapped <c>__WACSInit.Data</c> path: the span points
+        /// directly into the loaded PE's <c>.sdata</c>/<c>.rdata</c>
+        /// section, and decoding pulls bytes through an
+        /// <see cref="UnmanagedMemoryStream"/> with no intermediate
+        /// allocation. <c>fixed</c> is safe here because RVA-mapped pages
+        /// are not GC-movable; for spans backed by other sources the
+        /// runtime pins them for the lifetime of the <c>fixed</c> block.
+        /// </summary>
+        public static unsafe ModuleInitData Decode(ReadOnlySpan<byte> bytes)
+        {
+            if (bytes.IsEmpty)
+                throw new InvalidDataException("InitData: empty");
+            fixed (byte* p = bytes)
+            {
+                // BinaryReader doesn't accept ReadOnlySpan; UnmanagedMemoryStream
+                // is the .NET-supplied bridge for "view a pinned byte sequence
+                // as a Stream".
+                using var ms = new UnmanagedMemoryStream(p, bytes.Length);
+                return DecodeFromStream(ms);
+            }
+        }
+
+        private static ModuleInitData DecodeFromStream(Stream ms)
+        {
             using var r = new BinaryReader(ms, Encoding.UTF8, leaveOpen: true);
 
             // ---- Header ----------------------------------------------------

@@ -372,21 +372,18 @@ namespace Wacs.Transpiler.AOT
         /// <c>Ldtoken __WACSInit.Data; call RuntimeHelpers.CreateSpan&lt;byte&gt;</c>
         /// — the span points directly into the loaded PE's
         /// <c>.sdata</c>/<c>.rdata</c> section. Fast in-process path
-        /// avoids touching the bytes; cross-process path materializes a
-        /// single byte[] copy for the legacy
-        /// <see cref="InitDataCodec.Decode"/> entry point (replacing
-        /// the prior base64-decode pipeline).
+        /// touches no bytes at all; cross-process path streams the
+        /// pinned span through
+        /// <see cref="InitDataCodec.Decode(ReadOnlySpan{byte})"/> with no
+        /// intermediate allocation — true zero-copy from PE pages to
+        /// <see cref="ModuleInitData"/>.
         /// </summary>
         public static ThinContext InitializeFromEmbedded(
             ReadOnlySpan<byte> embeddedBytes, int transpileTimeInitDataId)
         {
             if (InitRegistry.Contains(transpileTimeInitDataId))
                 return Initialize(transpileTimeInitDataId);
-            // Codec is byte[]-based; one allocation here replaces the
-            // base64 cctor's allocation. Span-based codec is a follow-up
-            // for true zero-copy decode.
-            var copy = embeddedBytes.ToArray();
-            var data = InitDataCodec.Decode(copy);
+            var data = InitDataCodec.Decode(embeddedBytes);
             return InitializeFromData(data, transpileTimeInitDataId);
         }
 
