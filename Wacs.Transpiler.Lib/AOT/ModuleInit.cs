@@ -152,5 +152,18 @@ namespace Wacs.Transpiler.AOT
                 _elemSegments[segId] = Array.Empty<Value>();
             }
         }
+
+        /// <summary>
+        /// Overwrite an element segment's values. Called from
+        /// <c>TranspilationResult.Bake</c> after re-evaluating GC-typed
+        /// initializers against the loaded assembly's runtime types.
+        /// </summary>
+        public static void UpdateElemSegment(int segId, Value[] values)
+        {
+            lock (_elemLock)
+            {
+                _elemSegments[segId] = values ?? Array.Empty<Value>();
+            }
+        }
     }
 }
