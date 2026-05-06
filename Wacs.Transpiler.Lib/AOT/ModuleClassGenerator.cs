@@ -1019,17 +1019,25 @@ namespace Wacs.Transpiler.AOT
             // intentionally empty
         }
 
-        private void AssertAotLinkedFeasible()
+        /// <summary>
+        /// Collect the list of module-init features that AotLinked emission
+        /// can't yet inline as IL. Empty list = the AotLinked ctor body is
+        /// safe to emit; non-empty = the codec stack
+        /// (<c>Standard</c> emission) is required.
+        /// <para>
+        /// Features currently inlinable: memories + primitive globals + null
+        /// refs + non-null funcref/externref globals + active data segments +
+        /// active element segments with funcref / null entries.
+        /// Features that still force <c>Standard</c>: GC-typed globals
+        /// (array.new / struct.new init), GC element segment entries, deferred
+        /// global inits with imported-global dependencies.
+        /// </para>
+        /// </summary>
+        private List<string> CollectAotLinkedUnsupported()
         {
             if (_initDataId < 0) PrepareInitData();
             var data = InitRegistry.Get(_initDataId);
 
-            // Only flag features that the AotLinked ctor still doesn't
-            // initialize. As of this commit:
-            //   • memories + active data segments     — supported
-            //   • everything else (tables, globals, element segments,
-            //     GC globals, deferred globals, GC element values) —
-            //     coverage will grow incrementally
             var unsupported = new List<string>();
             if (data.GcGlobalInits.Count > 0)       unsupported.Add($"{data.GcGlobalInits.Count} GC global inits");
             if (data.DeferredGlobalInits.Count > 0) unsupported.Add($"{data.DeferredGlobalInits.Count} deferred global inits");
@@ -1073,13 +1081,86 @@ namespace Wacs.Transpiler.AOT
                     break;
                 }
             }
+            return unsupported;
+        }
 
+        /// <summary>
+        /// True when <see cref="CollectAotLinkedUnsupported"/> returns empty —
+        /// i.e. the AotLinked ctor body can be safely emitted for this module.
+        /// </summary>
+        private bool IsAotLinkedFeasible() => CollectAotLinkedUnsupported().Count == 0;
+
+        /// <summary>
+        /// Stricter gate than <see cref="IsAotLinkedFeasible"/>: only true
+        /// for module shapes covered by an existing AotLinked emission test.
+        /// Used by <see cref="EmissionTarget.Auto"/> to decide whether to
+        /// silently promote the user's emission choice.
+        /// <para>
+        /// Conservative subset: no module imports (function / memory /
+        /// table / global / tag), no passive element segments, no
+        /// exception tags, single memory at most.
+        /// AotLinked emission's runtime correctness is broader than this
+        /// conservative subset, but the proof obligations (no
+        /// `memory.init` / `table.init` / `data.drop` / `elem.drop`
+        /// disagreement, no linker integration) only hold here.
+        /// Promote-then-fail-loudly is worse than don't-promote-then-
+        /// codec-decode, so this stays narrow.
+        /// </para>
+        /// </summary>
+        private bool IsAotLinkedAutoPromotable()
+        {
+            if (!IsAotLinkedFeasible()) return false;
+            if (_initDataId < 0) PrepareInitData();
+            var data = InitRegistry.Get(_initDataId);
+
+            // Imports of any kind disqualify — the AotLinked ctor doesn't
+            // wire imported memory / table / global slots, and import
+            // delegates depend on the IImports parameter being handed in
+            // by a Module-class ctor that AotLinked doesn't currently emit.
+            if (_wasmModule.ImportedFunctions.Count > 0) return false;
+            foreach (var import in _wasmModule.Imports)
+            {
+                if (import.Desc is WasmModule.ImportDesc.MemDesc) return false;
+                if (import.Desc is WasmModule.ImportDesc.TableDesc) return false;
+                if (import.Desc is WasmModule.ImportDesc.GlobalDesc) return false;
+                if (import.Desc is WasmModule.ImportDesc.TagDesc) return false;
+            }
+
+            // Multi-memory needs additional Newobj sequencing AotLinked
+            // doesn't yet emit.
+            if (data.Memories.Length > 1) return false;
+
+            // Exception tags need TagInstance ctor IL we don't emit yet.
+            if (data.ImportedTagCount > 0 || data.LocalTagTypes.Length > 0) return false;
+
+            // Tables + element segments together expose AotLinked emission
+            // gaps the spec-conformance suite hits (passive segments,
+            // segment-drop semantics, recursive type tables). Reject any
+            // module with tables or any element segments — that's the
+            // safe subset proven by the existing AotLinked test suite
+            // (compute-only and memory-only fixtures). Future work can
+            // expand this once each emission gap is closed and
+            // regression-tested.
+            if (data.Tables.Length > 0) return false;
+            if (_wasmModule.Elements.Length > 0) return false;
+
+            // Same passive-segment rationale for data segments.
+            if (_dataEmitter != null
+                && _dataEmitter.Segments.Length > data.ActiveDataIndices.Length)
+                return false;
+
+            return true;
+        }
+
+        private void AssertAotLinkedFeasible()
+        {
+            var unsupported = CollectAotLinkedUnsupported();
             if (unsupported.Count > 0)
                 throw new InvalidOperationException(
                     "TranspilerOptions.Emission = AotLinked is not yet supported for this module. " +
                     "Unsupported features: " + string.Join(", ", unsupported) +
-                    ". Use Emission = Standard for modules with non-trivial init data " +
-                    "(coverage will grow in subsequent transpiler releases).");
+                    ". Use Emission = Auto (the default) for automatic fallback to Standard, " +
+                    "or Emission = Standard explicitly.");
         }
 
         /// <summary>
@@ -1171,16 +1252,25 @@ namespace Wacs.Transpiler.AOT
             il.Emit(OpCodes.Call, typeof(object).GetConstructor(Type.EmptyTypes)!);
 
             // === Initialize ThinContext ===
-            // Two emission shapes:
-            //   Standard:  ThinContext ctx = InitializationHelper.InitializeFromEmbedded(
-            //                  __WACSInit.Data, _initDataId);
-            //   AotLinked: ThinContext ctx = new ThinContext();
-            //              (skips the codec roundtrip; only valid for modules with no
-            //               memories/tables/globals/data — fuller support pending.)
+            // Three emission shapes:
+            //   Auto:      AotLinked when feasible, else Standard. Default.
+            //   Standard:  InitializationHelper.InitializeFromEmbedded(
+            //                __WACSInit.Data, _initDataId).
+            //   AotLinked: ThinContext ctor body inlined as IL constants;
+            //              AssertAotLinkedFeasible throws if the module
+            //              shape needs the codec stack.
             var ctxLocal = il.DeclareLocal(typeof(ThinContext));
-            if (_options?.Emission == EmissionTarget.AotLinked)
+            var emission = _options?.Emission ?? EmissionTarget.Auto;
+            // Auto: pick AotLinked when feasible, fall back to Standard.
+            // The user's explicit choice (Standard / AotLinked) bypasses
+            // the auto-promotion so consumers that need codec semantics
+            // (cross-process registry hint, etc.) can force them.
+            bool useAotLinked = emission == EmissionTarget.AotLinked
+                || (emission == EmissionTarget.Auto && IsAotLinkedAutoPromotable());
+            if (useAotLinked)
             {
-                AssertAotLinkedFeasible();
+                if (emission == EmissionTarget.AotLinked)
+                    AssertAotLinkedFeasible();
                 EmitAotLinkedCtorBody(il, ctxLocal);
             }
             else

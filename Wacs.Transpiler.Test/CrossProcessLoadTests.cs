@@ -237,7 +237,12 @@ namespace Wacs.Transpiler.Test
             var module = BinaryModuleParser.ParseWasm(ms);
             var moduleInst = runtime.InstantiateModule(module);
 
-            var transpiler = new ModuleTranspiler(@namespace, new TranspilerOptions());
+            // Pin Standard emission: CrossProcessLoadTests verify the
+            // codec-decode rebuild path (InitDataCodec.Decode against a
+            // fresh-process registry). Auto would auto-promote feasible
+            // fixtures to AotLinked, which has no codec blob.
+            var transpiler = new ModuleTranspiler(@namespace,
+                new TranspilerOptions { Emission = EmissionTarget.Standard });
             var result = transpiler.Transpile(moduleInst, runtime, "WasmModule");
             result.SaveAssembly(dllPath);
             Assert.True(File.Exists(dllPath), $"Expected {dllPath} after SaveAssembly");

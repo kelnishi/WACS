@@ -499,7 +499,12 @@ namespace Wacs.Transpiler.Test
             var module = BinaryModuleParser.ParseWasm(ms);
             var moduleInst = runtime.InstantiateModule(module);
 
-            var transpiler = new ModuleTranspiler(@namespace, new TranspilerOptions());
+            // Pin Standard emission: PeShapeTests assert specifically on the
+            // codec-blob-bearing __WACSInit type and its decode pipeline.
+            // Auto would auto-promote a memory+active-data fixture to
+            // AotLinked, which has no such type.
+            var transpiler = new ModuleTranspiler(@namespace,
+                new TranspilerOptions { Emission = EmissionTarget.Standard });
             var result = transpiler.Transpile(moduleInst, runtime, "WasmModule");
             result.SaveAssembly(dllPath);
             Assert.True(File.Exists(dllPath),
