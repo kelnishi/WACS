@@ -1,72 +1,12 @@
-# WACS (C# WebAssembly Interpreter)
+# Wacs.Core
 
-## Overview
+The interpreter core + the source generator that builds the Switch
+Runtime's monolithic dispatcher. Everything in this folder is on the
+build / runtime path of every WACS consumer.
 
-**WACS** is a pure C# WebAssembly Interpreter designed for .NET environments, including Unity's IL2CPP. It allows seamless execution of WASM modules with minimal setup, offering compatibility and advanced interop features.
+## Contents
 
-## Features
-
-- **Pure C# Implementation**: Built with C# 9.0/.NET Standard 2.1 (no unsafe code).
-- **Unity Compatibility**: Supports **Unity 2021.3+** with IL2CPP/AOT compatibility.
-- **Godot Compatibility**: Compatible with **Godot Engine - [.NET](https://docs.godotengine.org/en/stable/tutorials/scripting/c_sharp/c_sharp_basics.html)**.
-- **Full WebAssembly MVP Compliance**: Passes the WebAssembly spec test suite.
-- **Interop Bindings**: Host bindings created through reflection, requiring no boilerplate.
-- **WASI Support**: WACS.WASI.Preview1 provides a wasi_snapshot_preview1 implementation.
-
-## Installation
-
-Install WACS from NuGet:
-```bash
-dotnet add package WACS
-```
-
-## Usage Example
-
-Here's a basic example demonstrating how to load and run a WebAssembly module:
-
-```csharp
-using System;
-using System.IO;
-using Wacs.Core;
-using Wacs.Core.Runtime;
-
-var runtime = new WasmRuntime();
-runtime.BindHostFunction<Action<char>>(("env", "sayc"), c => Console.Write(c));
-
-using var fileStream = new FileStream("HelloWorld.wasm", FileMode.Open);
-var module = BinaryModuleParser.ParseWasm(fileStream);
-
-var modInst = runtime.InstantiateModule(module);
-runtime.RegisterModule("hello", modInst);
-
-if (runtime.TryGetExportedFunction(("hello", "main"), out var mainAddr))
-{
-    var mainInvoker = runtime.CreateInvokerFunc<Value>(mainAddr);
-    int result = mainInvoker();
-    Console.Error.WriteLine($"hello.main() => {result}");
-}
-```
-
-## Switch Runtime (opt-in)
-
-An alternative interpreter backed by a source-generated monolithic switch over
-an annotated bytecode stream — typically 1.5–2× the polymorphic runtime on
-compute-heavy workloads, AOT-safe, same correctness (118/118 wast files pass).
-
-Set both flags **before** `InstantiateModule` — the switch runtime eagerly
-compiles every module-owned function at link time when enabled:
-
-```csharp
-var runtime = new WasmRuntime();
-runtime.UseSwitchRuntime = true;
-runtime.ExecContext.Attributes.UseSwitchSuperInstructions = true;  // optional stream-fuser
-
-var modInst = runtime.InstantiateModule(module);
-```
-
-See [`Compilation/SWITCH_RUNTIME.md`](Compilation/SWITCH_RUNTIME.md) for the
-full architecture. The polymorphic runtime stays the default path.
-
-## License
-
-WACS is distributed under the [Apache 2.0 License](https://github.com/kelnishi/WACS/blob/main/LICENSE), allowing usage in both open-source and commercial projects.
+- **[Wacs.Core/](Wacs.Core/)** — WebAssembly 3.0 interpreter (`WasmRuntime`, `BinaryModuleParser`, `TextModuleParser`, polymorphic + switch runtimes, full op set inc. SIMD / GC / threads / branch-hints). Authoritative spec layer; all other Wacs.* packages depend on this.
+- **[Wacs.Core.Test/](Wacs.Core.Test/)** — interpreter unit tests + WAT/WAST round-trip + non-spec integration tests (binding, tail-calls, atomics, threads). Sequential xunit (`xunit.runner.json`) for the pre-existing `WasmRuntime` static-state race.
+- **[Wacs.Compilation/](Wacs.Compilation/)** — Roslyn source generator that emits `GeneratedDispatcher.Run` from `[OpSource]` / `[OpHandler]`-tagged methods. `IsRoslynComponent=true`; referenced as `OutputItemType=Analyzer`; only the Switch Runtime consumes its output.
+- **[Wacs.Compilation.Test/](Wacs.Compilation.Test/)** — generator unit tests + Switch Runtime end-to-end smoke (BytecodeCompiler / SwitchRuntime / branch-hint emission).
