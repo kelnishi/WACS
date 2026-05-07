@@ -15,11 +15,11 @@
         <!-- Package identity -->
         <PackageId>WACS.Transpiler.Lib</PackageId>
         <Title>WACS Transpiler (Library)</Title>
-        <Version>0.6.0</Version>
-        <AssemblyVersion>0.6.0</AssemblyVersion>
+        <Version>0.7.0</Version>
+        <AssemblyVersion>0.7.0</AssemblyVersion>
         <Authors>Kelvin Nishikawa</Authors>
         <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
-        <Description>Library API for WACS.Transpiler — programmatic ahead-of-time WebAssembly-to-.NET IL transpilation, plus seamless loading of saved transpiled assemblies. v0.6 consumes the WebAssembly Branch Hinting proposal's `metadata.code.branch_hint` custom section: `if`-with-`else` arms swap to put the likely arm on the hot fall-through, and `if`-without-`else` with an unlikely hint lifts its body to a function-tail cold block via the new `_coldTailEmissions` mechanism. Optimistic — the IL expresses the hint, downstream JIT/AOT layout passes are welcome to refine. v0.5 added the AotLinked emission target, stable AssemblyName, and the [WacsTranspiledImports] / [WacsImportNames] emission used by WACS.HostBindings.SourceGen.</Description>
+        <Description>Library API for WACS.Transpiler — programmatic ahead-of-time WebAssembly-to-.NET IL transpilation, plus seamless loading of saved transpiled assemblies. v0.7 retires Lokad.ILPack for PersistedAssemblyBuilder (.NET 9), moves WASM data segments + the codec blob to RVA-mapped initialized data (62.5% smaller than the prior base64-in-#US path, true zero-copy from PE pages to ModuleInitData via UnmanagedMemoryStream), and introduces EmissionTarget.Auto as the new default — promotes to AotLinked when the module fits a conservative envelope (compute / memory / globals / tables + active+passive segments / multi-memory / local tags / imported functions), falling back to Standard otherwise. ~50% first-trial cold-start cut on promoted modules. ImportDispatcher now throws on missing handlers by default (lenient: true opts out). v0.6 consumed the Branch Hinting proposal's metadata.code.branch_hint custom section. v0.5 added the AotLinked emission target, stable AssemblyName, and the [WacsTranspiledImports] / [WacsImportNames] emission used by WACS.HostBindings.SourceGen.</Description>
         <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <RepositoryType>git</RepositoryType>
