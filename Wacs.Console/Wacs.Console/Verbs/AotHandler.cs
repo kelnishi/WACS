@@ -261,27 +261,54 @@ namespace Wacs.Console.Verbs
         // when shipped as a NuGet package (analyzers/dotnet/cs) but we're
         // not running from the package — when running from the source
         // checkout it sits next to the dotnet exec. Probe both.
+        //
+        // Source-checkout path under the new hierarchical layout:
+        //   <repo>/Wacs.HostBindings/Wacs.HostBindings.SourceGen/bin/Release/netstandard2.0/
+        // CLI's load location moved one folder deeper too
+        //   <repo>/Wacs.Console/Wacs.Console/bin/Release/netN.0/
+        // — so we walk up until we find WACS.sln rather than counting
+        // hardcoded `..` levels. Robust to future reorgs at any depth.
         private static string? LocateAnalyzerDll()
         {
-            // CLI dir first.
+            // CLI dir first (where the dll lands when packaged as an
+            // analyzer at compile time, or when an embedder explicitly
+            // copies it next to the apphost).
             var cliDir = Path.GetDirectoryName(typeof(AotHandler).Assembly.Location);
             if (!string.IsNullOrEmpty(cliDir))
             {
                 var p = Path.Combine(cliDir!, "Wacs.HostBindings.SourceGen.dll");
                 if (File.Exists(p)) return p;
             }
-            // Source-checkout path: .../Wacs.HostBindings.SourceGen/bin/Release/netstandard2.0/
-            // when the CLI is at .../Wacs.Console/bin/Release/net8.0/.
-            if (!string.IsNullOrEmpty(cliDir))
+            // Source-checkout fallback.
+            var repoRoot = WalkToRepoRoot(cliDir);
+            if (repoRoot != null)
             {
-                var repoRoot = new DirectoryInfo(cliDir!).Parent?.Parent?.Parent?.Parent;
-                if (repoRoot != null)
-                {
-                    var p = Path.Combine(repoRoot.FullName,
-                        "Wacs.HostBindings.SourceGen", "bin", "Release", "netstandard2.0",
-                        "Wacs.HostBindings.SourceGen.dll");
-                    if (File.Exists(p)) return p;
-                }
+                var p = Path.Combine(repoRoot.FullName,
+                    "Wacs.HostBindings", "Wacs.HostBindings.SourceGen",
+                    "bin", "Release", "netstandard2.0",
+                    "Wacs.HostBindings.SourceGen.dll");
+                if (File.Exists(p)) return p;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Walk up the directory tree from <paramref name="startDir"/>
+        /// until we find a folder containing <c>WACS.sln</c>; null if we
+        /// hit the filesystem root first. Used by the source-checkout
+        /// fallback for the analyzer dll — the CLI's bin path depth
+        /// changed when projects moved into family folders, and tying
+        /// to a repo-root marker is more robust than counting `..`.
+        /// </summary>
+        private static DirectoryInfo? WalkToRepoRoot(string? startDir)
+        {
+            if (string.IsNullOrEmpty(startDir)) return null;
+            var dir = new DirectoryInfo(startDir!);
+            while (dir != null)
+            {
+                if (File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                    return dir;
+                dir = dir.Parent;
             }
             return null;
         }
