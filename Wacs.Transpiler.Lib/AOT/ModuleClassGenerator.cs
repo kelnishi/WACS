@@ -692,6 +692,62 @@ namespace Wacs.Transpiler.AOT
             // via the int-overload of InitializeFromData; under
             // AotLinked we set the field directly.
             EmitInitDataIdStamp(il, ctxLocal);
+
+            // (8) Register passive data segments into ModuleInit so
+            // `memory.init` instructions resolve them in cross-process
+            // loads (the in-process pre-pass already populated the
+            // registry under the same ids; RegisterDataSegmentAt is
+            // idempotent). Active segments aren't registered — their
+            // bytes ride RVA-mapped on __WACSAotData.Segment_N and
+            // get copied into linear memory directly via
+            // EmitDataSegmentCopies above.
+            EmitPassiveDataSegmentRegistrations(il, data);
+        }
+
+        /// <summary>
+        /// For each passive data segment in the module, emit IL that
+        /// materializes the RVA-mapped bytes via
+        /// <c>RuntimeHelpers.CreateSpan&lt;byte&gt;</c> and calls
+        /// <c>BulkHelpers.RegisterPassiveDataSegment(id, span)</c>. The
+        /// helper does <c>span.ToArray()</c> + <c>ModuleInit.RegisterDataSegmentAt</c>;
+        /// the registry call is no-op when the id is already populated
+        /// (in-process pre-pass).
+        /// </summary>
+        private void EmitPassiveDataSegmentRegistrations(ILGenerator il, ModuleInitData data)
+        {
+            if (_dataEmitter == null) return;
+
+            // Active indices are the ones in data.ActiveDataIndices;
+            // any other segment index is passive.
+            var activeSet = new HashSet<int>(data.ActiveDataIndices);
+
+            var createSpanOpen = typeof(System.Runtime.CompilerServices.RuntimeHelpers)
+                .GetMethod(
+                    nameof(System.Runtime.CompilerServices.RuntimeHelpers.CreateSpan),
+                    BindingFlags.Public | BindingFlags.Static)!;
+            var createSpanByte = createSpanOpen.MakeGenericMethod(typeof(byte));
+            var registerHelper = typeof(BulkHelpers).GetMethod(
+                nameof(BulkHelpers.RegisterPassiveDataSegment),
+                BindingFlags.Public | BindingFlags.Static)!;
+
+            for (int localIdx = 0; localIdx < _dataEmitter.Segments.Length; localIdx++)
+            {
+                if (activeSet.Contains(localIdx)) continue;
+                var seg = _dataEmitter.Segments[localIdx];
+                if (seg.Data.Length == 0) continue;
+
+                int absoluteId = data.DataSegmentBaseId + localIdx;
+                // GetAotDataSegmentField is idempotent — the same RVA
+                // field is reused across active-copy and passive-register
+                // sites if a hypothetical segment is both, though in
+                // practice a segment is one or the other.
+                var segField = GetAotDataSegmentField(absoluteId, seg.Data);
+
+                il.Emit(OpCodes.Ldc_I4, absoluteId);
+                il.Emit(OpCodes.Ldtoken, segField);
+                il.Emit(OpCodes.Call, createSpanByte);
+                il.Emit(OpCodes.Call, registerHelper);
+            }
         }
 
         private void EmitInitDataIdStamp(ILGenerator il, LocalBuilder ctxLocal)
@@ -1311,20 +1367,17 @@ namespace Wacs.Transpiler.AOT
             // Exception tags need TagInstance ctor IL we don't emit yet.
             if (data.ImportedTagCount > 0 || data.LocalTagTypes.Length > 0) return false;
 
-            // Passive element segments need ModuleInit registration that
-            // the AotLinked path doesn't reproduce in fresh-process
-            // loads. Active-only is fine: AotLinked emission populates
-            // tables directly via EmitElementSegmentCopies + drops via
-            // EmitActiveSegmentDrops, multi-result-func table dispatch
-            // works through MultiReturnMethodRegistry now that
-            // EmitInitDataIdStamp populates ctx.InitDataId.
+            // Passive element segments still need a registration path
+            // (they hold Value[] not byte[]; the registration recipe is
+            // the same as data segments but the IL to construct the
+            // Value[] from a funcref/null mix is more involved). Reject
+            // for now.
             if (_wasmModule.Elements.Length > data.ActiveElemIndices.Length)
                 return false;
 
-            // Same passive-segment rationale for data segments.
-            if (_dataEmitter != null
-                && _dataEmitter.Segments.Length > data.ActiveDataIndices.Length)
-                return false;
+            // Passive data segments are now registered in ModuleInit
+            // by EmitPassiveDataSegmentRegistrations, so they're safe
+            // to auto-promote.
 
             return true;
         }
