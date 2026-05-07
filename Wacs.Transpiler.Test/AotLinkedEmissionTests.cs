@@ -152,6 +152,69 @@ namespace Wacs.Transpiler.Test
         }
 
         [Fact]
+        public void AotLinkedSupportsLocalExceptionTag()
+        {
+            // (module
+            //   (tag $t)              ;; one local tag, no params, no result
+            //   (func (export "noop") (result i32) i32.const 42))
+            //
+            // The tag's mere existence puts the module on the path that
+            // EmitTagsArray now handles. Verifies allocation + the export
+            // runs to completion. Throw/catch semantics test elsewhere.
+            var (m1, r1) = ParseAndInstantiate(BuildLocalTagWasm());
+            var stdResult = new ModuleTranspiler("Wacs.AotLink.Tag.Std",
+                new TranspilerOptions { Emission = EmissionTarget.Standard })
+                .Transpile(m1, r1, "TagMod");
+            Assert.Equal(42, (int)Invoke(stdResult, "noop"));
+            AssertTagSlotsAllocated(stdResult, expected: 1);
+
+            var (m2, r2) = ParseAndInstantiate(BuildLocalTagWasm());
+            var aotResult = new ModuleTranspiler("Wacs.AotLink.Tag",
+                new TranspilerOptions { Emission = EmissionTarget.AotLinked })
+                .Transpile(m2, r2, "TagMod");
+            Assert.Equal(42, (int)Invoke(aotResult, "noop"));
+            AssertTagSlotsAllocated(aotResult, expected: 1);
+        }
+
+        private static void AssertTagSlotsAllocated(TranspilationResult result, int expected)
+        {
+            var instance = Activator.CreateInstance(result.ModuleClass!)
+                ?? throw new Exception("Activator returned null");
+            var ctxField = result.ModuleClass!.GetField("_ctx",
+                BindingFlags.NonPublic | BindingFlags.Instance)
+                ?? throw new Exception("_ctx field missing");
+            var ctx = (Wacs.Transpiler.AOT.ThinContext)ctxField.GetValue(instance)!;
+            Assert.NotNull(ctx.Tags);
+            Assert.Equal(expected, ctx.Tags.Length);
+            for (int i = 0; i < ctx.Tags.Length; i++)
+                Assert.NotNull(ctx.Tags[i]);
+        }
+
+        // (module
+        //   (type $void (func))
+        //   (type $ret_i32 (func (result i32)))
+        //   (func (export "noop") (result i32) i32.const 42)
+        //   (tag $t (type $void)))
+        // Tag section (id 13): 1 entry, attribute=0, typeidx of tag's
+        // function-type signature.
+        private static byte[] BuildLocalTagWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // type: 2 types
+            //   type 0: () -> i32  (4 bytes: 0x60 0x00 0x01 0x7F)
+            //   type 1: () -> ()   (3 bytes: 0x60 0x00 0x00)
+            0x01, 0x08, 0x02, 0x60, 0x00, 0x01, 0x7F, 0x60, 0x00, 0x00,
+            // function: 1 func, type 0
+            0x03, 0x02, 0x01, 0x00,
+            // tag: id=13, 1 entry: attribute=0, typeidx=1
+            0x0D, 0x03, 0x01, 0x00, 0x01,
+            // export: "noop" -> func 0
+            0x07, 0x08, 0x01, 0x04, 0x6E, 0x6F, 0x6F, 0x70, 0x00, 0x00,
+            // code: 1 body, locals=0, i32.const 42, end
+            0x0A, 0x06, 0x01, 0x04, 0x00, 0x41, 0x2A, 0x0B,
+        };
+
+        [Fact]
         public void AotLinkedSupportsMultiMemory()
         {
             // (module

@@ -710,6 +710,43 @@ namespace Wacs.Transpiler.AOT
             // Value[] at runtime; transpile-time we only emit the
             // compact int[] inline.
             EmitPassiveElementSegmentRegistrations(il, data);
+
+            // (10) Allocate ctx.Tags. Each local tag becomes a fresh
+            // TagInstance (identity is reference-based, so DefType
+            // can be null in standalone mode — wasm spec only checks
+            // reference equality for throw/catch). Imported tags
+            // (slots 0..ImportedTagCount-1) stay null in AotLinked;
+            // the linker would fill them in mixed-mode but
+            // IsAotLinkedAutoPromotable rejects any imports today.
+            EmitTagsArray(il, ctxLocal, data);
+        }
+
+        private void EmitTagsArray(ILGenerator il, LocalBuilder ctxLocal, ModuleInitData data)
+        {
+            int totalTags = data.ImportedTagCount + data.LocalTagTypes.Length;
+            if (totalTags == 0) return;
+
+            var tagsField = typeof(ThinContext).GetField(nameof(ThinContext.Tags));
+            if (tagsField == null) return;
+
+            var tagInstanceCtor = typeof(Wacs.Core.Runtime.Types.TagInstance)
+                .GetConstructor(new[] { typeof(Wacs.Core.Types.DefType) });
+            if (tagInstanceCtor == null) return;
+
+            il.Emit(OpCodes.Ldloc, ctxLocal);
+            il.Emit(OpCodes.Ldc_I4, totalTags);
+            il.Emit(OpCodes.Newarr, typeof(Wacs.Core.Runtime.Types.TagInstance));
+            for (int i = 0; i < data.LocalTagTypes.Length; i++)
+            {
+                int slot = data.ImportedTagCount + i;
+                il.Emit(OpCodes.Dup);
+                il.Emit(OpCodes.Ldc_I4, slot);
+                // new TagInstance(null) — identity-only mode.
+                il.Emit(OpCodes.Ldnull);
+                il.Emit(OpCodes.Newobj, tagInstanceCtor);
+                il.Emit(OpCodes.Stelem_Ref);
+            }
+            il.Emit(OpCodes.Stfld, tagsField);
         }
 
         /// <summary>
@@ -1455,8 +1492,11 @@ namespace Wacs.Transpiler.AOT
             // EmitDataSegmentCopies uses each segment's memIdx, so
             // multi-memory just works under the existing IL.
 
-            // Exception tags need TagInstance ctor IL we don't emit yet.
-            if (data.ImportedTagCount > 0 || data.LocalTagTypes.Length > 0) return false;
+            // Imported tags need linker integration to receive the
+            // exporter's TagInstance, which AotLinked doesn't wire.
+            // Local-only tags are fine — EmitTagsArray allocates a
+            // fresh identity-only TagInstance per local tag.
+            if (data.ImportedTagCount > 0) return false;
 
             // Passive element segments now register via
             // EmitPassiveElementSegmentRegistrations. The encode helper
