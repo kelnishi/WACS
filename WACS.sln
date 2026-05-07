@@ -61,6 +61,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.NN.OnnxRuntime", 
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.NN.OnnxRuntime.Test", "Wacs.WASI.NN.OnnxRuntime.Test\Wacs.WASI.NN.OnnxRuntime.Test.csproj", "{6F807FE2-3EEC-4E25-B4AD-71CA40417166}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.NN.MLNet", "Wacs.WASI.NN.MLNet\Wacs.WASI.NN.MLNet.csproj", "{9E74AE86-CF65-483C-87DA-80C38088016A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.NN.MLNet.Test", "Wacs.WASI.NN.MLNet.Test\Wacs.WASI.NN.MLNet.Test.csproj", "{D4E7F0CB-3142-4A49-8595-AA1F2D473C3F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -187,5 +191,13 @@ Global
 		{6F807FE2-3EEC-4E25-B4AD-71CA40417166}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{6F807FE2-3EEC-4E25-B4AD-71CA40417166}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{6F807FE2-3EEC-4E25-B4AD-71CA40417166}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9E74AE86-CF65-483C-87DA-80C38088016A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9E74AE86-CF65-483C-87DA-80C38088016A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9E74AE86-CF65-483C-87DA-80C38088016A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9E74AE86-CF65-483C-87DA-80C38088016A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D4E7F0CB-3142-4A49-8595-AA1F2D473C3F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D4E7F0CB-3142-4A49-8595-AA1F2D473C3F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D4E7F0CB-3142-4A49-8595-AA1F2D473C3F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D4E7F0CB-3142-4A49-8595-AA1F2D473C3F}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
