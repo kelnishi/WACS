@@ -54,7 +54,7 @@ internal static class Coldstart
         var dotnet = Environment.ProcessPath ?? "dotnet";
         bool selfHosted = !string.Equals(Path.GetFileName(dotnet), "dotnet", StringComparison.OrdinalIgnoreCase);
 
-        foreach (var runtime in new[] { "interp-poly", "interp-switch", "transpiler", "transpiler-saved" })
+        foreach (var runtime in new[] { "interp-poly", "interp-switch", "transpiler", "transpiler-saved", "transpiler-saved-aotlinked" })
         {
             var psi = new ProcessStartInfo
             {
@@ -78,17 +78,20 @@ internal static class Coldstart
     {
         var bytes = File.ReadAllBytes(LocateFib());
 
-        // For the saved-DLL runtime, transpile + persist to a temp .dll once
+        // For the saved-DLL runtimes, transpile + persist to a temp .dll once
         // before the trial loop. This is the build-time cost — paid once per
         // module ever, not at startup. Print it as a separate one-time line
         // so it's not folded into the per-trial coldstart numbers.
         string? savedDllPath = null;
-        if (runtime == "transpiler-saved")
+        if (runtime == "transpiler-saved" || runtime == "transpiler-saved-aotlinked")
         {
+            var emission = runtime == "transpiler-saved-aotlinked"
+                ? EmissionTarget.AotLinked
+                : EmissionTarget.Standard;
             var sw = Stopwatch.StartNew();
-            savedDllPath = TranspileAndSave(bytes);
+            savedDllPath = TranspileAndSave(bytes, emission, ns: "BenchSaved");
             sw.Stop();
-            Console.WriteLine($"  one-time build-time cost: transpile + Lokad.ILPack save = {ToUs(sw):F1} us");
+            Console.WriteLine($"  one-time build cost (transpile + PAB save, {emission}): {ToUs(sw):F1} us");
             Console.WriteLine($"  saved .dll: {savedDllPath} ({new FileInfo(savedDllPath).Length} bytes)");
             Console.WriteLine();
         }
@@ -103,6 +106,7 @@ internal static class Coldstart
                 case "interp-switch":    Measure(runtime, bytes, arg, RunInterpreter,  useSwitch: true);  break;
                 case "transpiler":       Measure(runtime, bytes, arg, RunTranspiler,   useSwitch: false); break;
                 case "transpiler-saved": MeasureSaved(runtime, savedDllPath!, arg); break;
+                case "transpiler-saved-aotlinked": MeasureSaved(runtime, savedDllPath!, arg); break;
                 default: Console.Error.WriteLine($"unknown runtime: {runtime}"); return 2;
             }
             Console.WriteLine();
@@ -127,9 +131,13 @@ internal static class Coldstart
         Console.WriteLine();
 
         var savedSw = Stopwatch.StartNew();
-        var savedDll = TranspileAndSave(bytes);
+        var savedDll = TranspileAndSave(bytes, EmissionTarget.Standard, ns: "BenchStd");
         savedSw.Stop();
-        Console.WriteLine($"  one-time build cost (transpile + Lokad.ILPack save): {ToUs(savedSw):F1} us");
+        Console.WriteLine($"  one-time build cost (Standard emission, transpile + PAB save): {ToUs(savedSw):F1} us");
+        var aotSw = Stopwatch.StartNew();
+        var aotDll = TranspileAndSave(bytes, EmissionTarget.AotLinked, ns: "BenchAot");
+        aotSw.Stop();
+        Console.WriteLine($"  one-time build cost (AotLinked emission, transpile + PAB save): {ToUs(aotSw):F1} us");
         Console.WriteLine();
 
         foreach (var arg in new[] { 100, 5_000_000 })
@@ -140,10 +148,12 @@ internal static class Coldstart
             Measure("interp-switch",    bytes, arg, RunInterpreter, useSwitch: true);
             Measure("transpiler",       bytes, arg, RunTranspiler,  useSwitch: false);
             MeasureSaved("transpiler-saved", savedDll, arg);
+            MeasureSaved("transpiler-saved-aotlinked", aotDll, arg);
             Console.WriteLine();
         }
 
         try { File.Delete(savedDll); } catch { }
+        try { File.Delete(aotDll); } catch { }
         return 0;
     }
 
@@ -327,7 +337,9 @@ internal static class Coldstart
 
     // ---------- transpiler-saved (.dll) driver ----------
 
-    private static string TranspileAndSave(byte[] bytes)
+    private static string TranspileAndSave(byte[] bytes,
+        EmissionTarget emission = EmissionTarget.Standard,
+        string ns = "Bench")
     {
         Wacs.Core.Module module;
         using (var ms = new MemoryStream(bytes))
@@ -335,10 +347,11 @@ internal static class Coldstart
         var runtime = new WasmRuntime();
         var modInst = runtime.InstantiateModule(module,
             new RuntimeOptions { SkipModuleValidation = true });
-        var transpiler = new ModuleTranspiler();
-        var result = transpiler.Transpile(modInst, runtime, "Bench");
+        var transpiler = new ModuleTranspiler(ns,
+            new TranspilerOptions { Emission = emission });
+        var result = transpiler.Transpile(modInst, runtime, "BenchMod");
         var path = Path.Combine(Path.GetTempPath(),
-            $"wacs-bench-{Guid.NewGuid():N}.dll");
+            $"wacs-bench-{emission.ToString().ToLowerInvariant()}-{Guid.NewGuid():N}.dll");
         result.SaveAssembly(path);
         return path;
     }

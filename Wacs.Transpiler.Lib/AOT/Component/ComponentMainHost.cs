@@ -64,10 +64,13 @@ namespace Wacs.Transpiler.AOT.Component
                 // linked imports never call through this; unresolved
                 // ones return defaults from the dispatcher, which
                 // surfaces as a downstream failure rather than a
-                // crashy null-deref.
+                // crashy null-deref. lenient: true opts out of the
+                // dispatcher's default loud-throw behavior because we
+                // intentionally want fall-through here.
                 var importsType = ctorParams[0].ParameterType;
                 var importsStub = ImportDispatcher.Create(importsType,
-                    new Dictionary<string, Func<object?[], object?>>());
+                    new Dictionary<string, Func<object?[], object?>>(),
+                    lenient: true);
 
                 // Bundle (host functions) + resources (handle
                 // table bridge) both come from the same DI scope

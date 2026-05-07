@@ -44,6 +44,22 @@ namespace Wacs.Transpiler.AOT
         }
 
         /// <summary>
+        /// Register a data segment at a specific id if no entry already
+        /// exists. Used by AotLinked emission's static cctor to populate
+        /// passive segments on cross-process load — the in-process
+        /// transpile-time pre-pass already filled the entry under the
+        /// same id, so the call is a no-op there.
+        /// </summary>
+        public static void RegisterDataSegmentAt(int id, byte[] data)
+        {
+            lock (_lock)
+            {
+                if (!_dataSegments.ContainsKey(id))
+                    _dataSegments[id] = data ?? Array.Empty<byte>();
+            }
+        }
+
+        /// <summary>
         /// Cross-process load path: register every saved data segment and
         /// return the old-id → new-id remapping the caller applies to
         /// <see cref="ModuleInitData.ActiveDataSegments"/> (the
@@ -150,6 +166,37 @@ namespace Wacs.Transpiler.AOT
             lock (_elemLock)
             {
                 _elemSegments[segId] = Array.Empty<Value>();
+            }
+        }
+
+        /// <summary>
+        /// Overwrite an element segment's values. Called from
+        /// <c>TranspilationResult.Bake</c> after re-evaluating GC-typed
+        /// initializers against the loaded assembly's runtime types.
+        /// </summary>
+        public static void UpdateElemSegment(int segId, Value[] values)
+        {
+            lock (_elemLock)
+            {
+                _elemSegments[segId] = values ?? Array.Empty<Value>();
+            }
+        }
+
+        /// <summary>
+        /// Register an element segment at a specific id if no entry
+        /// already exists. Mirror of
+        /// <see cref="RegisterDataSegmentAt"/> for AotLinked emission's
+        /// passive-element registration path. In-process the
+        /// transpile-time pre-pass already populated the entry under
+        /// the same id, so the call is a no-op there; cross-process
+        /// load needs the populate.
+        /// </summary>
+        public static void RegisterElemSegmentAt(int segId, Value[] values)
+        {
+            lock (_elemLock)
+            {
+                if (!_elemSegments.ContainsKey(segId))
+                    _elemSegments[segId] = values ?? Array.Empty<Value>();
             }
         }
     }
