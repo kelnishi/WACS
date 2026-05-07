@@ -32,7 +32,7 @@ rm -rf reference
 wit-bindgen c-sharp -r native-aot -w hello --out-dir reference wit/
 
 # 4. Bump EmitOptions.PinnedWitBindgenCSharpVersion in
-#    Wacs.ComponentModel/CSharpEmit/EmitOptions.cs to match.
+#    Wacs.ComponentModel/Wacs.ComponentModel/CSharpEmit/EmitOptions.cs to match.
 
 # 5. Clean up the dep tree (not committed).
 rm -rf wit/deps

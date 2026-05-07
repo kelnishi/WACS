@@ -8,7 +8,7 @@ expression-tree dispatch the interpreter (`Wacs.Core.Runtime`) uses.
 
 This README documents the *architecture* — pipeline stages, design choices,
 and a code map. For CLI usage and integration recipes, see the
-[`wacs aot` section](../Wacs.Console/README.md#wacs-aot--wasm--nativeaot-native-binary)
+[`wacs aot` section](../../Wacs.Console/Wacs.Console/README.md#wacs-aot--wasm--nativeaot-native-binary)
 of the Wacs.Console README.
 
 ## Where it sits

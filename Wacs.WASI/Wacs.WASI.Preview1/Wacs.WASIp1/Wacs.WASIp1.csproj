@@ -49,7 +49,7 @@
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\..\Wacs.WASI\Wacs.WASI.Preview1\Wacs.WASI.Preview1\Wacs.WASI.Preview1.csproj" />
+      <ProjectReference Include="..\Wacs.WASI.Preview1\Wacs.WASI.Preview1.csproj" />
     </ItemGroup>
 
 </Project>

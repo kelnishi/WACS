@@ -27,7 +27,13 @@
       <ProjectReference Include="..\..\Wacs.ComponentModel\Wacs.ComponentModel\Wacs.ComponentModel.csproj" />
       <ProjectReference Include="..\Wacs.Transpiler.Lib\Wacs.Transpiler.Lib.csproj" />
       <ProjectReference Include="..\Wacs.Transpiler\Wacs.Transpiler.csproj" />
-      <ProjectReference Include="..\..\Spec.Test.Data\Spec.Test.Data.csproj" />
+      <!-- Spec.Test (formerly Spec.Test.Data) holds the WastJson +
+           harness adapter types this project's data providers
+           consume. Spec.Test now bundles both the harness library
+           and its own test runner; cross-referencing it picks up
+           xunit/test-sdk transitively but those are fine because
+           this project is itself an xunit test runner. -->
+      <ProjectReference Include="..\..\Spec.Test\Spec.Test.csproj" />
       <!-- Reference the production WASI host package + its DI
            extensions so the resolver-compat tests probe the real
            bundle / typed interfaces a guest would target. -->
