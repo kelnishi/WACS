@@ -63,6 +63,23 @@ namespace Wacs.WASI.NN
         public bool AllowLoadByName { get; set; } = true;
 
         /// <summary>
+        /// Optional backend that handles <c>graph.load-by-name</c>
+        /// directly — skips <see cref="NamedModelResolver"/> and
+        /// invokes the backend's
+        /// <see cref="IBackend.LoadGraphByName(string, ExecutionTarget)"/>
+        /// with the guest-supplied name verbatim. Used by
+        /// backends with their own internal registries — most
+        /// notably the LlamaSharp / GGUF path, where models are
+        /// gigabyte-scale files referenced by name and the
+        /// byte-buffer flow through canonical-ABI lift would
+        /// be wasteful. When set, this takes precedence over
+        /// <see cref="NamedModelResolver"/>; ONNX-style
+        /// embedders that want byte-flow registry access leave
+        /// this null and configure the resolver instead.
+        /// </summary>
+        public IBackend? LoadByNameBackend { get; set; }
+
+        /// <summary>
         /// Standard-defaults factory. Returns a
         /// <see cref="WasiNNConfiguration"/> with no backends
         /// registered and no named-model resolver wired —

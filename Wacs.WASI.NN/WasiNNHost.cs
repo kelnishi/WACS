@@ -105,6 +105,37 @@ namespace Wacs.WASI.NN
             return resolver(name);
         }
 
+        /// <summary>
+        /// Dispatch <c>graph.load-by-name</c>. LoadByNameBackend
+        /// takes precedence — backends with internal registries
+        /// (LlamaSharp / GGUF) get the name directly without
+        /// the byte-flow indirection. Falls back to the
+        /// byte-flow path (NamedModelResolver →
+        /// <see cref="ResolveBackend"/> → LoadGraph) when no
+        /// LoadByNameBackend is configured.
+        /// </summary>
+        internal IBackendGraph LoadGraphByNameDispatch(string name)
+        {
+            if (!_config.AllowLoadByName)
+                throw new WasiNNException(
+                    ErrorCode.UnsupportedOperation,
+                    "load-by-name is disabled for this host");
+
+            // Direct path: backend with internal registry.
+            if (_config.LoadByNameBackend != null)
+                return _config.LoadByNameBackend.LoadGraphByName(
+                    name, ExecutionTarget.CPU);
+
+            // Byte-flow path: host registry returns bytes,
+            // routed through encoding-keyed Backends.
+            var model = ResolveNamedModel(name)
+                ?? throw new WasiNNException(
+                    ErrorCode.NotFound,
+                    $"named model '{name}' not registered");
+            var backend = ResolveBackend(model.Encoding);
+            return backend.LoadGraph(model.Builders, model.Target);
+        }
+
         public void Dispose()
         {
             // Disposing the tables drops all live handles and
