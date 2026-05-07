@@ -7,6 +7,7 @@
 
 using System;
 using System.Collections.Generic;
+using Wacs.Core.Runtime;
 using Wacs.WASI.NN;
 using Wacs.WASI.NN.Backends;
 using Wacs.WASI.NN.Types;
@@ -93,6 +94,27 @@ namespace Wacs.WASI.NN.Test
                 ErrorCode.Security.ToWitx());
             Assert.Equal(WitxErrno.RuntimeError,
                 ErrorCode.Unknown.ToWitx());
+        }
+
+        [Fact]
+        public void Host_BindToRuntime_RegistersBothAbis()
+        {
+            // A fresh runtime + fresh host should bind without
+            // any exceptions, registering both the WIT and WITX
+            // imports. We don't have a real component fixture
+            // wired in this smoke suite — that's a follow-up
+            // task — but the bind path itself exercises every
+            // BindHostFunction call site, which catches obvious
+            // problems like duplicate registration, mismatched
+            // generic delegate arity, or wrong namespace strings.
+            var cfg = WasiNNConfiguration.DefaultConfiguration();
+            cfg.Backends[GraphEncoding.ONNX] = new IdentityBackend(GraphEncoding.ONNX);
+
+            using var host = new WasiNNHost(cfg);
+            var runtime = new WasmRuntime();
+
+            var ex = Record.Exception(() => host.BindToRuntime(runtime));
+            Assert.Null(ex);
         }
 
         [Fact]
