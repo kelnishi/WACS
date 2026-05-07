@@ -64,16 +64,15 @@ namespace Wacs.WASI.NN
         public void BindToRuntime(WasmRuntime runtime)
         {
             if (runtime == null) throw new ArgumentNullException(nameof(runtime));
-            // WITX first — simpler shape, useful as a
-            // smoke-tester while the WIT canonical-ABI plumbing
-            // settles. Hand-rolled imports per
-            // RandomBindings.cs's pattern.
+            // Both ABIs unconditionally — guests compiled against
+            // either will find their imports satisfied. Handles
+            // minted by either binding share the same per-resource-
+            // type tables, so the host doesn't double-count
+            // identities (an embedder that knows their guest only
+            // uses one ABI doesn't pay for the other beyond the
+            // cost of registering the imports).
             WitxBindings.Bind(runtime, this);
-            // WIT bindings land alongside in a follow-up commit
-            // — the canonical-ABI shape (list<list<u8>>,
-            // list<named-tensor>, result<own<X>, error> nested
-            // resource returns) needs more lift/lower plumbing
-            // than the WITX core-module shape.
+            WitBindings.Bind(runtime, this);
         }
 
         /// <summary>
