@@ -20,7 +20,7 @@ using Wacs.Core;
 using Wacs.Core.Runtime;
 using Xunit;
 
-namespace Spec.Test
+namespace Wacs.Core.Test
 {
     public class ExtensionTests
     {
