@@ -359,14 +359,9 @@ namespace Wacs.Transpiler.Test
             // Two memories at distinct sizes (1 page and 2 pages) +
             // exports that ask each its size. Proves AotLinked's
             // EmitMemoryArray correctly allocates both memories and
-            // memory.size with non-zero memidx threads through.
-            //
-            // (Active-data-with-explicit-memidx is a separate test
-            // unrelated to this gap — the interpreter has a known
-            // gap there too. The shape AotLinked closes under this
-            // commit is multi-memory allocation + per-memory load /
-            // size / grow, all of which work via inst.MemIndex
-            // routing through ctx.Memories[memIdx].)
+            // memory.size with non-zero memidx threads through. The
+            // sibling AotLinkedSupportsActiveDataWithExplicitMemIdx
+            // test covers the active-data-with-explicit-memidx path.
             var (m1, r1) = ParseAndInstantiate(BuildMultiMemoryWasm());
             var stdResult = new ModuleTranspiler("Wacs.AotLink.MultiMem.Std",
                 new TranspilerOptions { Emission = EmissionTarget.Standard })
@@ -409,6 +404,81 @@ namespace Wacs.Transpiler.Test
             0x0A, 0x0B, 0x02,
                 0x04, 0x00, 0x3F, 0x00, 0x0B,
                 0x04, 0x00, 0x3F, 0x01, 0x0B,
+        };
+
+        [Fact]
+        public void AotLinkedSupportsActiveDataWithExplicitMemIdx()
+        {
+            // (module
+            //   (memory $m0 1) (memory $m1 1)
+            //   (data (memory $m0) (i32.const 0) "AAAA")
+            //   (data (memory $m1) (i32.const 0) "BBBB")
+            //   (func (export "load_m0") (result i32) i32.const 0 i32.load $m0)
+            //   (func (export "load_m1") (result i32) i32.const 0 i32.load $m1))
+            //
+            // Both Standard and AotLinked emission must initialize memory
+            // 1 from a data segment with the ActiveExplicit (DataFlags=2)
+            // encoding (memidx LEB128 between the flag byte and the
+            // offset expression). Loads also carry the multi-memory
+            // memarg encoding (align bit 6 set + memidx LEB128).
+            // Each Invoke creates a fresh Module instance, exercising the
+            // re-instantiation path: active data segments are dropped
+            // from the global ModuleInit registry after instance 1's
+            // ctor (per spec §4.5.4), so instance 2's ctor must restore
+            // from data.SavedDataSegments (see InitializationHelper
+            // step 4a) to re-init memory correctly.
+            var (m1, r1) = ParseAndInstantiate(BuildActiveDataExplicitMemIdxWasm());
+            var stdResult = new ModuleTranspiler("Wacs.AotLink.MultiMem.Data.Std",
+                new TranspilerOptions { Emission = EmissionTarget.Standard })
+                .Transpile(m1, r1, "DataMemMod");
+            Assert.Equal(0x41414141, (int)Invoke(stdResult, "load_m0"));
+            Assert.Equal(0x42424242, (int)Invoke(stdResult, "load_m1"));
+
+            var (m2, r2) = ParseAndInstantiate(BuildActiveDataExplicitMemIdxWasm());
+            var aotResult = new ModuleTranspiler("Wacs.AotLink.MultiMem.Data",
+                new TranspilerOptions { Emission = EmissionTarget.AotLinked })
+                .Transpile(m2, r2, "DataMemMod");
+            Assert.Equal(0x41414141, (int)Invoke(aotResult, "load_m0"));
+            Assert.Equal(0x42424242, (int)Invoke(aotResult, "load_m1"));
+        }
+
+        // Bytes produced by `wat2wasm --enable-multi-memory` against:
+        //   (module
+        //     (memory $m0 1) (memory $m1 1)
+        //     (data (memory $m0) (i32.const 0) "AAAA")
+        //     (data (memory $m1) (i32.const 0) "BBBB")
+        //     (func (export "load_m0") (result i32) i32.const 0 i32.load $m0)
+        //     (func (export "load_m1") (result i32) i32.const 0 i32.load $m1))
+        //
+        // Notable encodings: data segment 1 uses DataFlags=2
+        // (ActiveExplicit) with a memidx LEB128, and i32.load $m1 emits
+        // align byte 0x42 (bit 6 = "memidx follows" + log2 align 2)
+        // followed by the memidx LEB128 then the offset.
+        private static byte[] BuildActiveDataExplicitMemIdxWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // type: () -> i32
+            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F,
+            // function: 2 funcs, type 0
+            0x03, 0x03, 0x02, 0x00, 0x00,
+            // memory: 2 memories, min=1 each
+            0x05, 0x05, 0x02, 0x00, 0x01, 0x00, 0x01,
+            // export: load_m0 → func 0, load_m1 → func 1
+            0x07, 0x15, 0x02,
+                0x07, 0x6C, 0x6F, 0x61, 0x64, 0x5F, 0x6D, 0x30, 0x00, 0x00,
+                0x07, 0x6C, 0x6F, 0x61, 0x64, 0x5F, 0x6D, 0x31, 0x00, 0x01,
+            // code: 2 bodies.
+            // Body 0: locals=0 + i32.const 0 + i32.load (align=2, offset=0) + end (7 bytes)
+            // Body 1: locals=0 + i32.const 0 + i32.load (align=0x42, memidx=1, offset=0) + end (8 bytes)
+            0x0A, 0x12, 0x02,
+                0x07, 0x00, 0x41, 0x00, 0x28, 0x02, 0x00, 0x0B,
+                0x08, 0x00, 0x41, 0x00, 0x28, 0x42, 0x01, 0x00, 0x0B,
+            // data: 2 segments.
+            // Segment 0: flag=0 (ActiveDefault) + i32.const 0 + end + 4 bytes "AAAA"
+            // Segment 1: flag=2 (ActiveExplicit) + memidx=1 + i32.const 0 + end + 4 bytes "BBBB"
+            0x0B, 0x14, 0x02,
+                0x00, 0x41, 0x00, 0x0B, 0x04, 0x41, 0x41, 0x41, 0x41,
+                0x02, 0x01, 0x41, 0x00, 0x0B, 0x04, 0x42, 0x42, 0x42, 0x42,
         };
 
         [Fact]
@@ -656,6 +726,7 @@ namespace Wacs.Transpiler.Test
                 throw tie.InnerException;
             }
         }
+
 
         // (func (export "add") (param i32 i32) (result i32) local.get 0 local.get 1 i32.add)
         private static byte[] BuildAddWasm() => new byte[]
