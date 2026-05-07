@@ -97,7 +97,7 @@ static List<ModuleSpec> ParseSpecs(string[] args)
         // if a hot/cold split demotes f64 ops to a sub-method, this is the
         // workload that pays for it. Starts via a `(start $run)` wasm start
         // function, so no WASI wiring is needed.
-        new("f64-numeric", "Wacs.OpProfile/Wacs.OpProfile/Data/f64-numeric.wasm",  null, false, 120_000, null, false),
+        new("f64-numeric", "Wacs.Bench/Wacs.OpProfile/Data/f64-numeric.wasm",  null, false, 120_000, null, false),
         // spectra: an emscripten-compiled C++ eigenvalue-solver library (Spectra on
         // top of Eigen). Today this entry fails parsing — the binary was built
         // with emscripten's *old* exception-handling proposal (opcode 0x06 `try`
@@ -107,7 +107,7 @@ static List<ModuleSpec> ParseSpecs(string[] args)
         // entirely) produces a module WACS can parse, and the Emscripten=true
         // stubs below are ready to satisfy its env.* / embind imports for a
         // __wasm_call_ctors-only profile. Until then we accept the failure.
-        new("spectra",     "Wacs.OpProfile/Wacs.OpProfile/Data/spectra.wasm",
+        new("spectra",     "Wacs.Bench/Wacs.OpProfile/Data/spectra.wasm",
             "__wasm_call_ctors", false, 120_000, null, true),
     };
 
