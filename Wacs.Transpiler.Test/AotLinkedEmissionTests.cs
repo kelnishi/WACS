@@ -115,20 +115,34 @@ namespace Wacs.Transpiler.Test
         [Fact]
         public void AutoEmissionFallsBackToStandardForUnsupportedShape()
         {
-            // BuildImportFuncWasm has an imported function — out of
+            // BuildImportMemoryWasm imports a memory — out of
             // IsAotLinkedAutoPromotable's envelope (the AotLinked ctor
-            // doesn't wire IImports). Auto must fall back to Standard;
-            // the saved .dll therefore carries the __WACSInit codec blob.
-            // Build with a stub IImports so InstantiateModule resolves.
-            using var fs = new System.IO.MemoryStream(BuildImportFuncWasm());
+            // allocates fresh memory slots and has no linker hook for
+            // imported instances). Auto must fall back to Standard;
+            // the saved .dll therefore carries the __WACSInit codec
+            // blob.
+            using var fs = new System.IO.MemoryStream(BuildImportMemoryWasm());
             var module = BinaryModuleParser.ParseWasm(fs);
             var runtime = new WasmRuntime();
-            runtime.BindHostFunction<System.Func<int>>(("env", "ext"), () => 7);
+            // The host-side memory needs to be discoverable by name;
+            // the simplest path is to instantiate a tiny "env" module
+            // that exports a memory and let the linker resolve.
+            var envBytes = new byte[]
+            {
+                0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+                // memory: 1 memory, min=1 no max
+                0x05, 0x03, 0x01, 0x00, 0x01,
+                // export: "mem" -> memory 0
+                0x07, 0x07, 0x01, 0x03, 0x6D, 0x65, 0x6D, 0x02, 0x00,
+            };
+            using var envFs = new System.IO.MemoryStream(envBytes);
+            var envModule = BinaryModuleParser.ParseWasm(envFs);
+            runtime.RegisterModule("env", runtime.InstantiateModule(envModule));
             var modInst = runtime.InstantiateModule(module);
 
             var opts = new TranspilerOptions { AssemblyName = "Wacs.Auto.Fallback" };
             var result = new ModuleTranspiler("ignored", opts)
-                .Transpile(modInst, runtime, "ImportMod");
+                .Transpile(modInst, runtime, "ImportMemMod");
 
             var dllPath = Path.Combine(Path.GetTempPath(), $"{result.Assembly.GetName().Name}.dll");
             try
@@ -136,19 +150,72 @@ namespace Wacs.Transpiler.Test
                 result.SaveAssembly(dllPath);
                 var bytes = File.ReadAllBytes(dllPath);
                 var asUtf8 = System.Text.Encoding.UTF8.GetString(bytes);
-                // Standard emission landed: __WACSInit present.
+                // Standard emission landed: __WACSInit codec blob is
+                // present (AotLinked emission omits this type entirely
+                // — see AotLinkedSavedDllOmitsCodecHolderType).
                 Assert.Contains("__WACSInit", asUtf8);
-                // Standard emission also generates an IImports surface
-                // (the import is wired through ImportDelegates[]). The
-                // assertion above + IImports presence proves Auto did
-                // not silently take the AotLinked path that lacks
-                // IImports parameter wiring.
-                Assert.NotNull(result.ImportsInterface);
             }
             finally
             {
                 if (File.Exists(dllPath)) File.Delete(dllPath);
             }
+        }
+
+        [Fact]
+        public void AotLinkedSupportsImportedFunction()
+        {
+            // (module
+            //   (import "env" "ext" (func (result i32)))
+            //   (func (export "noop") (result i32) call 0))
+            //
+            // Imported function — wired through IImports / the
+            // ImportDelegates[] path that Standard and AotLinked share.
+            // Auto must promote (function imports are now in the safe
+            // subset). The Module class ctor takes an IImports arg
+            // and the export's `call 0` dispatches into the bound host
+            // delegate.
+            using var fs = new System.IO.MemoryStream(BuildImportFuncWasm());
+            var module = BinaryModuleParser.ParseWasm(fs);
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<System.Func<int>>(("env", "ext"), () => 7);
+            var modInst = runtime.InstantiateModule(module);
+
+            var aotResult = new ModuleTranspiler("Wacs.AotLink.ImportFn",
+                new TranspilerOptions { Emission = EmissionTarget.AotLinked })
+                .Transpile(modInst, runtime, "ImportFnMod");
+
+            // Trim-evidence: AotLinked saved .dll has no codec blob
+            // even with imports.
+            var dllPath = Path.Combine(Path.GetTempPath(),
+                $"{aotResult.Assembly.GetName().Name}.dll");
+            try
+            {
+                aotResult.SaveAssembly(dllPath);
+                var bytes = File.ReadAllBytes(dllPath);
+                var asUtf8 = System.Text.Encoding.UTF8.GetString(bytes);
+                Assert.DoesNotContain("__WACSInit", asUtf8);
+            }
+            finally
+            {
+                if (File.Exists(dllPath)) File.Delete(dllPath);
+            }
+
+            // Ctor takes IImports — build a DispatchProxy adapter that
+            // forwards method calls into a host-supplied delegate map.
+            var importsInterface = aotResult.ImportsInterface!;
+            var handlers = new System.Collections.Generic.Dictionary<
+                string, System.Func<object?[], object?>>
+            {
+                ["env_ext"] = _ => 7,
+            };
+            var importsProxy = Wacs.Transpiler.Cli.ImportDispatcher.Create(
+                importsInterface, handlers);
+
+            var instance = Activator.CreateInstance(aotResult.ModuleClass!, importsProxy)!;
+            var noopMethod = aotResult.ModuleClass!.GetMethod("noop",
+                BindingFlags.Public | BindingFlags.Instance)!;
+            int result = (int)noopMethod.Invoke(instance, Array.Empty<object>())!;
+            Assert.Equal(7, result);
         }
 
         [Fact]
@@ -414,11 +481,9 @@ namespace Wacs.Transpiler.Test
         // (module
         //   (import "env" "ext" (func (result i32)))
         //   (func (export "noop") (result i32) call 0))
-        // Imports of any kind are rejected by IsAotLinkedAutoPromotable
-        // (the AotLinked ctor doesn't wire imported memory / table /
-        // global slots, and import-function delegates depend on the
-        // IImports parameter that AotLinked's standalone ctor doesn't
-        // accept). Auto falls back to Standard.
+        // Imported function — Auto allows this (function imports go
+        // through the IImports / ImportDelegates path used by both
+        // emission targets), so this fixture is in-envelope.
         private static byte[] BuildImportFuncWasm() => new byte[]
         {
             0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
@@ -435,6 +500,33 @@ namespace Wacs.Transpiler.Test
             0x07, 0x08, 0x01, 0x04, 0x6E, 0x6F, 0x6F, 0x70, 0x00, 0x01,
             // code: 1 body, size=4, locals=0, call 0 (the import), end
             0x0A, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0B,
+        };
+
+        // (module
+        //   (import "env" "mem" (memory 1))
+        //   (func (export "noop") (result i32) i32.const 0))
+        // Imported memory rejects via IsAotLinkedAutoPromotable's
+        // ImportDesc.MemDesc check — AotLinked's standalone ctor
+        // allocates fresh memory slots and has no linker hook to
+        // overwrite slot 0 with the imported MemoryInstance.
+        private static byte[] BuildImportMemoryWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // type: () -> i32
+            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F,
+            // import: 1 entry — "env"."mem" memory limits min=1 no max
+            // entry: name_len(1)+"env"(3)+name_len(1)+"mem"(3)+kind(1)+limits(2) = 11
+            // section: count(1) + entry(11) = 12 = 0x0C
+            0x02, 0x0C, 0x01,
+                0x03, 0x65, 0x6E, 0x76,
+                0x03, 0x6D, 0x65, 0x6D,
+                0x02, 0x00, 0x01,
+            // function: 1 func, type 0
+            0x03, 0x02, 0x01, 0x00,
+            // export: "noop" -> func 0
+            0x07, 0x08, 0x01, 0x04, 0x6E, 0x6F, 0x6F, 0x70, 0x00, 0x00,
+            // code: 1 body, locals=0, i32.const 0, end
+            0x0A, 0x06, 0x01, 0x04, 0x00, 0x41, 0x00, 0x0B,
         };
 
         [Fact]
