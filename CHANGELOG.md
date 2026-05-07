@@ -1,5 +1,114 @@
 # Changelog
 
+## [WACS.Cli 1.3.0 + WACS.Transpiler.Lib 0.7.0] — PersistedAssemblyBuilder, RVA-mapped data, EmissionTarget.Auto
+
+The transpiler retires `Lokad.ILPack 0.3.1` for the .NET 9+
+[`PersistedAssemblyBuilder`](https://learn.microsoft.com/dotnet/fundamentals/runtime-libraries/system-reflection-emit-persistedassemblybuilder).
+Lokad NRE'd on `Ldtoken` of any field created via
+`DefineInitializedData`, which had been blocking RVA-mapped data
+segments end-to-end. With PAB, that path works.
+
+### RVA-mapped WASM data segments
+
+WASM data segment bytes are now stored as RVA-mapped initialized data
+in the emitted PE — bytes live in the `.sdata`/`.rdata` section,
+demand-paged from disk by the OS loader, surfaced zero-copy as
+`ReadOnlySpan<byte>` via `RuntimeHelpers.CreateSpan<byte>`. The
+serialized codec blob (`__WACSInit.Data`) that bridges
+saved-and-reloaded modules' empty registry state is RVA-mapped too.
+Net effect: the compressed-segment + base64-in-`#US` path the prior
+transpiler used is gone. Smaller PEs (~62.5% smaller blob storage on
+data-segment-heavy modules), cold start that doesn't pay for a
+`Convert.FromBase64String` over the whole codec.
+
+### `EmissionTarget.Auto` is the new default
+
+`AotLinked` emission inlines the `ThinContext` ctor as IL constants
+and skips the codec stack entirely. v0.5 introduced it as an opt-in;
+v0.7 widens its supported envelope (multi-result indirect dispatch,
+multi-memory, exception tags, passive data + element segments,
+imported functions) and turns on **`EmissionTarget.Auto`**, which
+promotes feasible modules to `AotLinked` and falls back to `Standard`
+for shapes outside the conservative envelope. Cuts first-trial cold
+start by ~50% on promoted modules. Consumers that need codec
+semantics (cross-process registry hint, etc.) can pin
+`EmissionTarget.Standard`; consumers willing to fail loudly on
+unsupported shapes can pin `EmissionTarget.AotLinked`.
+
+### `ImportDispatcher` throws on missing handlers
+
+Previously, `ImportDispatcher.Create` would silently default-return
+when a wasm import had no matching `IImports` member; v0.7 throws
+`InvalidOperationException` by default so missing wires fail at
+construction time. The lenient default-return behavior is still
+available via `ImportDispatcher.Create(..., lenient: true)`, which
+`ComponentMainHost` keeps using because component-mode imports often
+land via a different code path.
+
+### `wacs aot` cross-csproj fix
+
+`wacs aot` produces a host csproj that statically references the
+transpiled `.dll`. PAB stamps the saved DLL's corelib AssemblyRef as
+`System.Private.CoreLib` (the runtime-impl identity), but the C#
+compiler resolves base types from the ref-pack `System.Runtime` —
+without intervention, the host csproj trips CS0012 at compile time.
+A new
+[`CoreLibAssemblyRefRewriter`](Wacs.Transpiler.Lib/AOT/CoreLibAssemblyRefRewriter.cs)
+post-processes a copy of the baked bytes at `SaveAssembly` time,
+swapping the AssemblyRef name + PKT in place; type-forwards keep
+runtime semantics intact. The rewriter file documents the rationale,
+the byte-level edits, the one known limitation (generic-instantiation
+FieldRefs across the renamed boundary in isolated ALCs), and the
+two upstream conditions under which the hack can be deleted.
+
+`Wacs.Transpiler.Lib` and `Wacs.Console` move to `net9.0`. `Wacs.Core`
+remains `netstandard2.1` so embedders on Unity / Godot / older .NET
+keep working unchanged.
+
+## [WACS 0.12.1 + WACS.WASI.Preview1 0.12.0] — WAT parser parity, wasm-3.0 spec tip, wasi-testsuite Phase 4
+
+### Wacs.Core 0.12.0 — in-process WAT/WAST parser at full parity
+
+Every wast in the WebAssembly spec testsuite (SIMD, GC, relaxed-SIMD,
+hex-float edge cases) round-trips identically through both the binary
+and the in-process WAT/WAST pipelines. CI no longer shells out to
+`wasm-tools` / `wast2json` to convert .wast fixtures to binary before
+running them.
+
+Highlights:
+
+- WAT parser: full 237/237 instruction-dispatch coverage (GC + SIMD).
+- Hex-float precision matches the binary parser bit-for-bit.
+- Inline `(table funcref (elem $f …))` aligns with wabt.
+- WAST runner: `assert_trap (module …)` + the various `ExnNN` shapes
+  pass through the same module-instantiation hooks as binary fixtures.
+- `BinaryModuleParser` no longer carries cross-parse static state.
+
+### Wacs.Core 0.12.1 — wasm-3.0 spec submodule tip d7aada5
+
+Tracks the upstream `WebAssembly/spec` submodule to commit `d7aada5`,
+picking up:
+
+- Inclusive memory page-count limit (PRs #105/#106/#108).
+- Tail-call to imported (host) functions (#1872).
+- `array.new_data` bounds (#1881).
+- Malformed memop reserved bits (#1886/#1936).
+- table64 unsigned u64 literal parsing + K dispatch (#104).
+- `(module definition …)` validate-only support.
+- u32 offset enforcement on memory32 load/store.
+- `;;` line-comment CR termination.
+
+### WACS.WASI.Preview1 0.12.0 — wasi-testsuite Phase 4 (43 → 67 of 72)
+
+Lifts 23 fixtures across six subphases (PR #101):
+
+- Phase 4.1 — symlink behavior (lifts 6 fixtures).
+- Phase 4.2 — trailing-slash semantics + `path_link` no-follow.
+- Phase 4.3 — `fd_readdir` synthesizes `.` and `..`.
+- Phase 4.4 — fd-on-dir + preopen errno alignment (4 fixtures).
+- Phase 4.5 — rights / lifecycle / timestamp fixes (2 fixtures).
+- Phase 4.7 — directory rights split + `path_open` hardening.
+
 ## [WACS 0.11.0 + WACS.Transpiler.Lib 0.6.0] — Branch hinting
 
 Wires the WebAssembly [Branch Hinting](https://github.com/WebAssembly/branch-hinting)
