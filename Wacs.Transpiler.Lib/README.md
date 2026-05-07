@@ -315,25 +315,117 @@ registry post-Bake.
 
 ### Emission targets
 
-`TranspilerOptions.Emission` selects between:
+`TranspilerOptions.Emission` selects between three modes:
 
-- **`Standard`** (default) — Module ctor calls
+- **`Auto`** (default) — picks `AotLinked` when the module fits the
+  feasibility envelope (`IsAotLinkedAutoPromotable` in
+  `ModuleClassGenerator.cs`); falls back to `Standard` otherwise.
+  Saves ~50% on first-trial cold start and ~28% on warm cold start
+  for promoted modules — the codec stack
+  (`InitDataCodec.Decode`, `BinaryReader`, `InitializeFromData`)
+  never JITs and never runs.
+- **`Standard`** — Module ctor calls
   `InitializationHelper.InitializeFromEmbedded` against the RVA-mapped
-  codec blob. Cross-process safe; works for any module shape. The codec
-  machinery (`InitDataCodec`, `InitRegistry`, `ModuleInit`) ships in the
-  consumer's binary.
+  codec blob. Cross-process safe; works for any module shape. The
+  codec machinery (`InitDataCodec`, `InitRegistry`, `ModuleInit`)
+  ships in the consumer's binary.
 - **`AotLinked`** — Module ctor builds `ThinContext` directly from
   inlined IL constants. No `__WACSInit` holder, no codec call, no
   registry dependency. NativeAOT consumers can dead-strip the codec
-  machinery from the final native binary. Only handles the empty-module
-  / memories-+-active-data-segments shape today; richer modules
-  (tables, globals, element segments, GC inits) throw at transpile time
-  via `AssertAotLinkedFeasible`.
+  machinery from the final native binary. Throws at transpile time
+  via `AssertAotLinkedFeasible` if the module shape requires the
+  codec stack — use `Auto` for the "AotLinked when feasible,
+  Standard otherwise" semantics.
 
 The `AotLinkedSavedDllOmitsCodecHolderType` test
 (`Wacs.Transpiler.Test/AotLinkedEmissionTests.cs`) is the trim-evidence
 assertion: confirms the saved AotLinked `.dll` references neither the
 `__WACSInit` holder type nor `InitializeFromEmbedded`.
+
+#### Auto promotion envelope
+
+`IsAotLinkedAutoPromotable` is stricter than `IsAotLinkedFeasible` —
+it only promotes shapes already covered by an existing AotLinked
+emission test, so a configuration that's feasible-but-not-tested
+falls back to Standard rather than risking silent miscompilation.
+
+Currently auto-promoted:
+
+| Shape | Coverage |
+|---|---|
+| Compute-only modules | ✅ |
+| Single memory + active data segments | ✅ |
+| Primitive globals (i32/i64/f32/f64) + null/funcref/externref globals | ✅ |
+| Tables + funcref active element segments + `call_indirect` | ✅ |
+| `ref.test` / `br_on_cast` on funcref | ✅ |
+| Passive data segments + `memory.init` | ✅ |
+| Passive funcref element segments + `table.init` | ✅ |
+| Multi-memory | ✅ |
+| Local exception tags | ✅ |
+| Imported functions (wired through `IImports`) | ✅ |
+
+Still rejected — fall back to `Standard`:
+
+- Imported memory / table / global / tag (linker integration)
+- GC global inits (`array.new`, `struct.new` initializers)
+- GC element values (`ref.i31`, `array.new` in element segments)
+- Modules with non-encodable element segment initializers
+  (`global.get` references, etc.)
+
+The Auto-fallback path is silent: if a module isn't promotable, it
+just transpiles to Standard and the consumer sees the codec ctor.
+`Emission = AotLinked` explicitly throws if the user pinned the
+target but the module is out of envelope — useful for whole-program
+NativeAOT builds where you want a build-time error rather than a
+silent fallback.
+
+#### What AotLinked emission emits
+
+The AotLinked ctor body, in order (see
+`ModuleClassGenerator.EmitAotLinkedCtorBody`):
+
+1. **Memory / Table / Global arrays** — `EmitMemoryArray`,
+   `EmitTablesArray`, `EmitGlobalsArray` allocate per-instance
+   `MemoryInstance[]` / `TableInstance[]` / `GlobalInstance[]` from
+   constant counts + per-slot `Newobj` + `EmitPrimitiveValue` for
+   the initial value (handles primitives, null refs, non-null
+   funcref/externref).
+2. **`new ThinContext(memories, tables, globals, null, null)`** —
+   the `ImportDelegates` and `FuncTable` slots are populated later.
+3. **`EmitDataSegmentCopies`** — for each active data segment, copy
+   from `__WACSAotData.Segment_N` (RVA-mapped) into the right
+   memory slot via `BulkHelpers.CopySegmentToMemory`.
+4. **`EmitElementSegmentCopies`** — for each active funcref/null
+   element segment, write the resolved Value into
+   `ctx.Tables[i].Elements[slot]`.
+5. **`EmitTypeHashArrays`** — populate `ctx.FuncTypeHashes`,
+   `FuncTypeSuperHashes`, `TypeHashes`, `TypeIsFunc` as IL-baked
+   constant arrays (consumed by `call_indirect` subtype checks +
+   `ref.test`/`ref.cast`).
+6. **`EmitActiveSegmentDrops`** — `ModuleInit.DropDataSegment` /
+   `DropElemSegment` for each active segment (WASM 3.0 §4.5.4
+   step 16).
+7. **`EmitSegmentBaseIds`** — stamp `ctx.DataSegmentBaseId` /
+   `ElemSegmentBaseId` from transpile-time constants.
+8. **`EmitInitDataIdStamp`** — `ctx.InitDataId = _initDataId`. Keys
+   into `MultiReturnMethodRegistry` (call_indirect dispatch for
+   multi-result funcs) and `GcTypeRegistry` (runtime GC type
+   lookups).
+9. **`EmitPassiveDataSegmentRegistrations`** — for each passive
+   data segment, `ModuleInit.RegisterDataSegmentAt(absoluteId,
+   span.ToArray())` so cross-process `memory.init` resolves.
+10. **`EmitPassiveElementSegmentRegistrations`** — same recipe for
+    element segments, encoded as `int[]` (`-1` = null, `>=0` =
+    funcIdx).
+11. **`EmitTagsArray`** — `ctx.Tags = new TagInstance[totalTags]`
+    with one fresh `TagInstance(null)` per local tag (identity-
+    based equality only).
+
+After `EmitAotLinkedCtorBody`, the ctor falls through to the shared
+post-init steps used by `Standard`:
+`EmitImportDelegateWiring`, `EmitFuncTablePopulation`,
+`EmitTypedDelegateShimsAndRegister`, `EmitCabiReallocCacheIfPresent`,
+`BindTableDelegates`, `_ctx` field assignment, start-fn invocation.
 
 ### Direct-linked imports (component mode)
 
@@ -469,7 +561,7 @@ Wacs.Transpiler.Lib/
 └── Hosting/
     ├── TranspiledModuleLoader.cs  — public `Load(path|assembly, imports?, isolate?)` entry
     ├── HostedRunner.cs            — runs an export through a TranspilationResult (used by --run path)
-    ├── ImportDispatcher.cs        — DispatchProxy factory for IImports proxies
+    ├── ImportDispatcher.cs        — DispatchProxy factory for IImports proxies; throws on missing handler by default, lenient: true opts out
     └── BindingLoader.cs           — IBindable assembly discovery (for --bind)
 ```
 
@@ -514,6 +606,42 @@ In-process transpile cold start is dominated by IL emission (Pass 2). For
 larger modules (CoreMark scale) IL emission dominates over PAB
 `Save`+`Load`. AotLinked emission elides the codec decode; for compute-only
 fixtures the Module ctor drops to sub-100 µs.
+
+### Auto vs Standard on fib(100) cold start
+
+`Wacs.Bench.Coldstart` numbers (post-warmup median for steady-state,
+first-trial for cold), µs:
+
+| Phase | Standard | AotLinked (Auto-promoted) | Δ |
+|---|---|---|---|
+| Activate (first) | 1715 | 765 | **−55%** |
+| Activate (steady) | 289 | 198 | **−32%** |
+| TOTAL (first) | 1981 | 989 | **−50%** |
+| TOTAL (steady) | 417 | 300 | **−28%** |
+
+Saved `.dll` size on the same fixture: 4 608 → 4 096 bytes
+(**−11%**) — the `__WACSInit` codec blob is gone.
+
+### Phase breakdown of an AotLinked Module ctor (post-warmup, fib)
+
+`PeShapeTests.Diagnostic_ProfileModuleCtor` decomposes the ctor.
+For fib (1 export, no funcref tables) post-warmup:
+
+| Phase | Time |
+|---|---|
+| AssemblyLoadContext.LoadFromAssemblyPath | ~15 µs |
+| `RuntimeHelpers.CreateSpan<byte>` over `__WACSInit.Data` (Standard) | ~4 µs |
+| `InitDataCodec.Decode(span)` (Standard, cross-process) | ~6 µs |
+| `InitializeFromData` (Standard, cross-process) | ~5 µs |
+| Activator.CreateInstance (full ctor) | ~150-300 µs |
+| Residual (FuncTable + delegate shims + BindTableDelegates) | ~130 µs |
+
+The codec stack is sub-30 µs even on the cross-process path under
+Standard — what AotLinked saves is the **first-trial JIT** of those
+methods, plus skipping their work entirely. The structural ~130 µs
+residual is the same under both emissions (FuncTable population
+is amortizable via static-template work that's been analyzed but
+not landed).
 
 ## License
 
