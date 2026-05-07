@@ -115,15 +115,20 @@ namespace Wacs.Transpiler.Test
         [Fact]
         public void AutoEmissionFallsBackToStandardForUnsupportedShape()
         {
-            // BuildMultiMemoryWasm declares two memories — out of
-            // IsAotLinkedAutoPromotable's envelope (the AotLinked ctor's
-            // memory-allocation IL only handles memory[0]). Auto must fall
-            // back to Standard; the saved .dll therefore carries the
-            // __WACSInit codec blob.
-            var (modInst, runtime) = ParseAndInstantiate(BuildMultiMemoryWasm());
+            // BuildImportFuncWasm has an imported function — out of
+            // IsAotLinkedAutoPromotable's envelope (the AotLinked ctor
+            // doesn't wire IImports). Auto must fall back to Standard;
+            // the saved .dll therefore carries the __WACSInit codec blob.
+            // Build with a stub IImports so InstantiateModule resolves.
+            using var fs = new System.IO.MemoryStream(BuildImportFuncWasm());
+            var module = BinaryModuleParser.ParseWasm(fs);
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<System.Func<int>>(("env", "ext"), () => 7);
+            var modInst = runtime.InstantiateModule(module);
+
             var opts = new TranspilerOptions { AssemblyName = "Wacs.Auto.Fallback" };
             var result = new ModuleTranspiler("ignored", opts)
-                .Transpile(modInst, runtime, "MultiMemMod");
+                .Transpile(modInst, runtime, "ImportMod");
 
             var dllPath = Path.Combine(Path.GetTempPath(), $"{result.Assembly.GetName().Name}.dll");
             try
@@ -133,13 +138,81 @@ namespace Wacs.Transpiler.Test
                 var asUtf8 = System.Text.Encoding.UTF8.GetString(bytes);
                 // Standard emission landed: __WACSInit present.
                 Assert.Contains("__WACSInit", asUtf8);
-                Assert.Equal(0, (int)Invoke(result, "noop"));
+                // Standard emission also generates an IImports surface
+                // (the import is wired through ImportDelegates[]). The
+                // assertion above + IImports presence proves Auto did
+                // not silently take the AotLinked path that lacks
+                // IImports parameter wiring.
+                Assert.NotNull(result.ImportsInterface);
             }
             finally
             {
                 if (File.Exists(dllPath)) File.Delete(dllPath);
             }
         }
+
+        [Fact]
+        public void AotLinkedSupportsMultiMemory()
+        {
+            // (module
+            //   (memory 1) (memory 2)
+            //   (func (export "size0") (result i32) memory.size 0)
+            //   (func (export "size1") (result i32) memory.size 1))
+            //
+            // Two memories at distinct sizes (1 page and 2 pages) +
+            // exports that ask each its size. Proves AotLinked's
+            // EmitMemoryArray correctly allocates both memories and
+            // memory.size with non-zero memidx threads through.
+            //
+            // (Active-data-with-explicit-memidx is a separate test
+            // unrelated to this gap — the interpreter has a known
+            // gap there too. The shape AotLinked closes under this
+            // commit is multi-memory allocation + per-memory load /
+            // size / grow, all of which work via inst.MemIndex
+            // routing through ctx.Memories[memIdx].)
+            var (m1, r1) = ParseAndInstantiate(BuildMultiMemoryWasm());
+            var stdResult = new ModuleTranspiler("Wacs.AotLink.MultiMem.Std",
+                new TranspilerOptions { Emission = EmissionTarget.Standard })
+                .Transpile(m1, r1, "MultiMemMod");
+            Assert.Equal(1, (int)Invoke(stdResult, "size0"));
+            Assert.Equal(2, (int)Invoke(stdResult, "size1"));
+
+            var (m2, r2) = ParseAndInstantiate(BuildMultiMemoryWasm());
+            var aotResult = new ModuleTranspiler("Wacs.AotLink.MultiMem",
+                new TranspilerOptions { Emission = EmissionTarget.AotLinked })
+                .Transpile(m2, r2, "MultiMemMod");
+            Assert.Equal(1, (int)Invoke(aotResult, "size0"));
+            Assert.Equal(2, (int)Invoke(aotResult, "size1"));
+        }
+
+        // (module
+        //   (memory 1) (memory 2)
+        //   (func (export "size0") (result i32) memory.size 0)
+        //   (func (export "size1") (result i32) memory.size 1))
+        //
+        // memory.size opcode 0x3F takes a memidx leb128 (replaces the
+        // pre-multi-memory reserved-byte slot).
+        private static byte[] BuildMultiMemoryWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // type: () -> i32
+            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F,
+            // function: 2 funcs, type 0
+            0x03, 0x03, 0x02, 0x00, 0x00,
+            // memory: 2 memories — min=1 and min=2 (no max on either)
+            0x05, 0x05, 0x02, 0x00, 0x01, 0x00, 0x02,
+            // export: 2 exports
+            0x07, 0x11, 0x02,
+                0x05, 0x73, 0x69, 0x7A, 0x65, 0x30, 0x00, 0x00,
+                0x05, 0x73, 0x69, 0x7A, 0x65, 0x31, 0x00, 0x01,
+            // code: 2 bodies.
+            // Body 0: locals=0 + memory.size 0 (0x3F 0x00) + end = 4 bytes
+            // Body 1: locals=0 + memory.size 1 (0x3F 0x01) + end = 4 bytes
+            // Section: count(1) + size(1) + body0(4) + size(1) + body1(4) = 11 = 0x0B
+            0x0A, 0x0B, 0x02,
+                0x04, 0x00, 0x3F, 0x00, 0x0B,
+                0x04, 0x00, 0x3F, 0x01, 0x0B,
+        };
 
         [Fact]
         public void AotLinkedSupportsPassiveElementSegmentRoundTrip()
@@ -276,20 +349,29 @@ namespace Wacs.Transpiler.Test
         };
 
         // (module
-        //   (memory 1) (memory 1)   ;; multi-memory; rejected by Auto
-        //   (func (export "noop") (result i32) i32.const 0))
-        // Multi-memory is in the reject set of IsAotLinkedAutoPromotable
-        // (the AotLinked ctor only emits Newobj for memory[0]), so
-        // emission falls back to Standard.
-        private static byte[] BuildMultiMemoryWasm() => new byte[]
+        //   (import "env" "ext" (func (result i32)))
+        //   (func (export "noop") (result i32) call 0))
+        // Imports of any kind are rejected by IsAotLinkedAutoPromotable
+        // (the AotLinked ctor doesn't wire imported memory / table /
+        // global slots, and import-function delegates depend on the
+        // IImports parameter that AotLinked's standalone ctor doesn't
+        // accept). Auto falls back to Standard.
+        private static byte[] BuildImportFuncWasm() => new byte[]
         {
             0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // type: () -> i32
             0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F,
+            // import: 1 entry — "env"."ext" func type 0
+            0x02, 0x0B, 0x01,
+                0x03, 0x65, 0x6E, 0x76,
+                0x03, 0x65, 0x78, 0x74,
+                0x00, 0x00,
+            // function: 1 func, type 0
             0x03, 0x02, 0x01, 0x00,
-            // memory section: 2 memories, both min=1 no max
-            0x05, 0x05, 0x02, 0x00, 0x01, 0x00, 0x01,
-            0x07, 0x08, 0x01, 0x04, 0x6E, 0x6F, 0x6F, 0x70, 0x00, 0x00,
-            0x0A, 0x06, 0x01, 0x04, 0x00, 0x41, 0x00, 0x0B,
+            // export: "noop" -> func 1 (the import is func 0)
+            0x07, 0x08, 0x01, 0x04, 0x6E, 0x6F, 0x6F, 0x70, 0x00, 0x01,
+            // code: 1 body, size=4, locals=0, call 0 (the import), end
+            0x0A, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0B,
         };
 
         [Fact]
