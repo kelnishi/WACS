@@ -14,6 +14,13 @@
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
             <PrivateAssets>all</PrivateAssets>
         </PackageReference>
+        <!-- SkippableFact: lets the GGUF integration tests
+             cleanly skip with a user-facing reason when
+             WACS_GGUF_MODEL_PATH isn't set, instead of either
+             passing trivially or hard-failing on missing
+             models. CI sees the skips and reports them
+             distinctly from passes. -->
+        <PackageReference Include="Xunit.SkippableFact" Version="1.4.13" />
     </ItemGroup>
 
     <ItemGroup>
