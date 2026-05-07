@@ -60,6 +60,26 @@ namespace Wacs.Transpiler.AOT
         }
 
         /// <summary>
+        /// Restore (unconditionally overwrite) a data segment's bytes.
+        /// Used by InitializationHelper's re-instantiation path: when a
+        /// prior Module instance dropped its active segments via
+        /// <see cref="DropDataSegment"/>, the entry stays in the dict
+        /// with an empty array — so <see cref="RegisterDataSegmentAt"/>
+        /// (which is no-op-on-collision by design, for AotLinked
+        /// cross-process registration) won't re-fill it. This helper
+        /// always writes, restoring the original bytes from
+        /// <see cref="ModuleInitData.SavedDataSegments"/> so a fresh
+        /// Module instance sees its memory initialized again.
+        /// </summary>
+        public static void RestoreDataSegment(int id, byte[] data)
+        {
+            lock (_lock)
+            {
+                _dataSegments[id] = data ?? Array.Empty<byte>();
+            }
+        }
+
+        /// <summary>
         /// Cross-process load path: register every saved data segment and
         /// return the old-id → new-id remapping the caller applies to
         /// <see cref="ModuleInitData.ActiveDataSegments"/> (the
