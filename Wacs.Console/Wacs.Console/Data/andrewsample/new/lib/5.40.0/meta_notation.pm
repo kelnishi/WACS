@@ -1,0 +1,3 @@
+use strict;use warnings;sub _meta_notation ($) {my$string=shift;$string =~ s/([\0-\037])/
+               sprintf("^%c",utf8::unicode_to_native(ord($1)^64))/xeg;$string =~ s/\c?/^?/g;if (ord("A")==65){$string =~ s/([\200-\237])/sprintf("M-^%c",(ord($1)&0177)^64)/eg;$string =~ s/([\240-\377])/sprintf("M-%c"  ,ord($1)&0177)/eg}else {$string =~ s/( (?[ [\x00-\xFF] & [:^print:]])) /
+                  sprintf("\\x{%X}", ord($1))/xaeg}return$string}1

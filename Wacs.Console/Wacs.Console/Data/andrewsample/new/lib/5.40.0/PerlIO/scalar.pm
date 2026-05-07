@@ -1,0 +1,1 @@
+package PerlIO::scalar;our$VERSION='0.32';1;

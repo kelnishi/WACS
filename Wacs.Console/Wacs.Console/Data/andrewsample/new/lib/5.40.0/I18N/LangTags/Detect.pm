@@ -1,0 +1,12 @@
+require 5;package I18N::LangTags::Detect;use strict;our ($MATCH_SUPERS,$USING_LANGUAGE_TAGS,$USE_LITERALS,$MATCH_SUPERS_TIGHTLY);BEGIN {unless(defined&DEBUG){*DEBUG=sub () {0}}}our$VERSION="1.08";our@ISA=();use I18N::LangTags qw(alternate_language_tags locale2language_tag);sub _uniq {my%seen;return grep(!($seen{$_}++),@_)}sub _normalize {my(@languages)=map lc($_),grep $_,map {;$_,alternate_language_tags($_)}@_;return _uniq(@languages)if wantarray;return$languages[0]}sub detect () {return __PACKAGE__->ambient_langprefs}sub ambient_langprefs {my$base_class=$_[0];return$base_class->http_accept_langs if length($ENV{'REQUEST_METHOD'}|| '');my@languages;for my$envname (qw(LANGUAGE LC_ALL LC_MESSAGES LANG)){next unless$ENV{$envname};DEBUG and print "Noting \$$envname: $ENV{$envname}\n";push@languages,map locale2language_tag($_),split m/[,:]/,$ENV{$envname};last}if($ENV{'IGNORE_WIN32_LOCALE'}){}elsif(&_try_use('Win32::Locale')){push@languages,Win32::Locale::get_language()|| '' if defined&Win32::Locale::get_language}return _normalize@languages}sub http_accept_langs {no integer;my$in=(@_ > 1)? $_[1]: $ENV{'HTTP_ACCEPT_LANGUAGE'};return()unless defined$in and length$in;$in =~ s/\([^\)]*\)//g;if($in =~ m/^\s*([a-zA-Z][-a-zA-Z]+)\s*$/s){return _normalize $1}elsif($in =~ m/^\s*[a-zA-Z][-a-zA-Z]+(?:\s*,\s*[a-zA-Z][-a-zA-Z]+)*\s*$/s){return _normalize($in =~ m/([a-zA-Z][-a-zA-Z]+)/g)}$in =~ s/\s+//g;my@in=$in =~ m/([^,]+)/g;my%pref;my$q;for my$tag (@in){next unless$tag =~ m/^([a-zA-Z][-a-zA-Z]+)
+        (?:
+         ;q=
+         (
+          \d*   # a bit too broad of a RE, but so what.
+          (?:
+            \.\d+
+          )?
+         )
+        )?
+       $
+      /sx ;$q=(defined $2 and length $2)? $2 : 1;push @{$pref{$q}},lc $1}return _normalize(map @{$pref{$_}},sort {$b <=> $a}keys%pref)}my%tried=();sub _try_use {return$tried{$_[0]}if exists$tried{$_[0]};my$module=$_[0];{no strict 'refs';no warnings 'once';return($tried{$module}=1)if %{$module ."::Lexicon"}or @{$module ."::ISA"}}print " About to use $module ...\n" if DEBUG;{local$SIG{'__DIE__'};local@INC=@INC;pop@INC if$INC[-1]eq '.';eval "require $module"}if($@){print "Error using $module \: $@\n" if DEBUG > 1;return$tried{$module}=0}else {print " OK, $module is used\n" if DEBUG;return$tried{$module}=1}}1;

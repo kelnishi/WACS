@@ -1,0 +1,99 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <LangVersion>9</LangVersion>
+        <Nullable>enable</Nullable>
+        <Title>Wacs WASI Preview 2</Title>
+        <PackageId>WACS.WASI.Preview2</PackageId>
+        <Authors>Kelvin Nishikawa</Authors>
+        <Description>WASI Preview 2 (component-model) host implementations for WACS</Description>
+        <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
+        <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <AssemblyName>Wacs.WASI.Preview2</AssemblyName>
+        <AssemblyVersion>0.1.0</AssemblyVersion>
+        <Version>0.1.0</Version>
+        <RepositoryType>git</RepositoryType>
+        <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
+        <IsAotCompatible Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net7.0'))">true</IsAotCompatible>
+        <!-- Persist source-gen output under obj/Generated for IDE
+             navigation + debugging. Doesn't affect compilation. -->
+        <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+        <CompilerGeneratedFilesOutputPath>obj/Generated</CompilerGeneratedFilesOutputPath>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\..\Wacs.ComponentModel\Wacs.ComponentModel\Wacs.ComponentModel.csproj" />
+
+        <!-- WIT host-interface source generator. The Analyzer
+             form attaches the SourceGen DLL to the Roslyn
+             pipeline at compile time. ReferenceOutputAssembly=
+             false skips emitting a runtime reference (the
+             generator only runs at build). -->
+        <ProjectReference Include="..\..\..\Wacs.ComponentModel\Wacs.ComponentModel.Bindgen.SourceGen\Wacs.ComponentModel.Bindgen.SourceGen.csproj"
+                          OutputItemType="Analyzer"
+                          ReferenceOutputAssembly="false" />
+    </ItemGroup>
+
+    <!-- WIT files fed to the source generator.
+         WitForHost=true is the metadata flag the SourceGen
+         filters on. Per-subsystem migration (Phase B): only
+         the WIT files for already-migrated packages are
+         flagged WitForHost=true; the rest are kept as plain
+         AdditionalFiles so the WitLoader can still resolve
+         cross-package `use` chains, but no host interface is
+         emitted for them (the hand-written interfaces still
+         own those subsystems' API surface). -->
+    <ItemGroup>
+        <!-- Phase B1+: migrated subsystems flagged WitForHost=
+             true drive interface emission. Other packages stay
+             visible to the WIT resolver (so cross-package `use`
+             chains resolve) but their hand-written interfaces
+             remain authoritative until migrated.
+             Clocks needs poll+error emitted too — its WIT
+             returns pollable from monotonic-clock.subscribe-*. -->
+        <AdditionalFiles Include="wit\deps\random\**\*.wit"
+                         WitForHost="true" />
+        <AdditionalFiles Include="wit\deps\clocks\**\*.wit"
+                         WitForHost="true" />
+        <AdditionalFiles Include="wit\deps\io\**\*.wit"
+                         WitForHost="true" />
+        <AdditionalFiles Include="wit\deps\filesystem\**\*.wit"
+                         WitForHost="true" />
+        <AdditionalFiles Include="wit\deps\sockets\**\*.wit"
+                         WitForHost="true" />
+        <AdditionalFiles Include="wit\deps\http\**\*.wit"
+                         WitForHost="true" />
+        <AdditionalFiles Include="wit\*.wit"
+                         WitForHost="true" />
+
+        <AdditionalFiles Include="wit\**\*.wit"
+                         Exclude="wit\deps\random\**\*.wit;wit\deps\clocks\**\*.wit;wit\deps\io\**\*.wit;wit\deps\filesystem\**\*.wit;wit\deps\sockets\**\*.wit;wit\deps\http\**\*.wit;wit\*.wit"
+                         WitForHost="false" />
+
+        <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="WitForHost" />
+        <CompilerVisibleProperty Include="WitHostNamespaceOverride" />
+    </ItemGroup>
+
+    <!-- Land generated interfaces under Wacs.WASI.Preview2.{Pkg}
+         to match the hand-written tree — e.g. wasi:cli →
+         Wacs.WASI.Preview2.Cli. Lets the bindings reference
+         generated and hand-written types interchangeably during
+         per-subsystem migration. -->
+    <PropertyGroup>
+        <WitHostNamespaceOverride>Wacs.WASI.Preview2</WitHostNamespaceOverride>
+    </PropertyGroup>
+
+    <!-- Embed every vendored WIT file in the assembly so
+         downstream consumers (and Linker.Validate callers) can
+         build a WitContract from this DLL alone — no need to
+         ship wit/ source-tree alongside. Resource keys preserve
+         the relative path under wit/ so WitContract can replay
+         WitLoader's directory-tree merging from in-memory. -->
+    <ItemGroup>
+        <EmbeddedResource Include="wit\**\*.wit"
+                          LogicalName="wit/%(RecursiveDir)%(Filename)%(Extension)" />
+    </ItemGroup>
+
+</Project>

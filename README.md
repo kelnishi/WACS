@@ -19,7 +19,7 @@
 > **CLI:** install the unified `wacs` global tool with
 > `dotnet tool install -g WACS.Cli`. The legacy `WACS.Transpiler`
 > (`wasm-transpile`) is deprecated and superseded — see
-> [`Wacs.Console/README.md`](Wacs.Console/README.md) for the
+> [`Wacs.Console/Wacs.Console/README.md`](Wacs.Console/Wacs.Console/README.md) for the
 > verb-based subcommand reference.
 
 **WACS** is a pure C# WebAssembly Interpreter for running WASM modules in .NET environments, including Godot and AOT environments like Unity's IL2CPP.
@@ -149,7 +149,7 @@ var runtime = linker.Runtime;
 ```
 
 Selective overrides use DI's normal `TryAdd` semantics — see
-[`Wacs.WASI.Preview2/README.md`](Wacs.WASI.Preview2/README.md) for
+[`Wacs.WASI/Wacs.WASI.Preview2/Wacs.WASI.Preview2/README.md`](Wacs.WASI/Wacs.WASI.Preview2/Wacs.WASI.Preview2/README.md) for
 manual wiring (no DI), per-subsystem impl hooks, and validation
 patterns.
 
@@ -180,7 +180,7 @@ can do network IO.
 Conformance is verified continuously against the official
 [WebAssembly/wasi-testsuite](https://github.com/WebAssembly/wasi-testsuite)
 fixtures (Rust + C + AssemblyScript). The runner lives at
-`Wacs.WASI.Preview1.Test/` and runs as part of `dotnet test` in CI;
+`Wacs.WASI/Wacs.WASI.Preview1/Wacs.WASI.Preview1.Test/` and runs as part of `dotnet test` in CI;
 the test project's `skip.json` documents which conformance fixtures
 are deliberately not yet asserting (each entry carries a reason).
 
@@ -253,7 +253,7 @@ programmatic embedding — reference
 and use `BindHostFunction` + the built-in `TranspiledModuleLoader`
 or a custom `ImportDispatcher` proxy.
 
-See [`Wacs.Console/README.md`](Wacs.Console/README.md) for the full
+See [`Wacs.Console/Wacs.Console/README.md`](Wacs.Console/Wacs.Console/README.md) for the full
 verb reference (`run` / `build` / `inspect`), the direct-run
 shortcut, the engine-choice trade-off, and concrete migrations
 from the deprecated `wasm-transpile`.
@@ -483,7 +483,7 @@ combinations across the polymorphic, super-instruction, switch, and
 AOT paths, plus benchmark numbers.
 
 Architectural details live in
-[`Wacs.Core/Compilation/SWITCH_RUNTIME.md`](Wacs.Core/Compilation/SWITCH_RUNTIME.md).
+[`Wacs.Core/Wacs.Core/Compilation/SWITCH_RUNTIME.md`](Wacs.Core/Wacs.Core/Compilation/SWITCH_RUNTIME.md).
 The polymorphic runtime remains the canonical path; the switch runtime is
 a parallel back-end on top of the same parse/validate/link pipeline.
 
@@ -515,7 +515,7 @@ ahead-of-time, producing native CLR methods the JIT can optimize like any other 
   host. The library also includes `TranspiledModuleLoader` for
   seamless dynamic loading of saved `.dll`s without
   `Reflection.Emit`. See
-  [`Wacs.Console/README.md`](Wacs.Console/README.md) for the full
+  [`Wacs.Console/Wacs.Console/README.md`](Wacs.Console/Wacs.Console/README.md) for the full
   CLI verb reference. The legacy `WACS.Transpiler` /
   `wasm-transpile` package is deprecated in favor of `WACS.Cli` but
   remains installable for migration purposes.
@@ -528,7 +528,7 @@ Measured CoreMark throughput on a MacBook Pro M3 Max, .NET 8. The
 native baseline is the EEMBC CoreMark C source built with
 `clang -O3` and run directly on the CPU (single-core, 600 000
 iterations, three runs within 0.2% of each other). WACS numbers come
-from running `Wacs.Console/Data/coremark.wasm` — the same C source,
+from running `Wacs.Console/Wacs.Console/Data/coremark.wasm` — the same C source,
 compiled to WASM with `clang -O3` via emscripten — through each mode.
 
 | Mode | CoreMark iter/s | % of native |
@@ -565,7 +565,7 @@ positioning, not apples-to-apples):
   within ~2× of native C speed.
 - **AOT-only target?** (Unity IL2CPP, `PublishAot`, iOS, full-AOT
   Mono) — pre-compile the `.wasm → .dll` on a JIT host with
-  [`wacs build`](Wacs.Console/README.md#wacs-build--transpile-to-dll),
+  [`wacs build`](Wacs.Console/Wacs.Console/README.md#wacs-build--transpile-to-dll),
   ship the `.dll`, load it at runtime with `WACS.Transpiler.Lib`'s
   `TranspiledModuleLoader`. Same AOT speed, no `Reflection.Emit`
   dependency at runtime.
@@ -616,29 +616,29 @@ form works identically when running from a checkout.
 
 ```bash
 # Default (polymorphic interpreter)
-wacs run Wacs.Console/Data/coremark.wasm
+wacs run Wacs.Console/Wacs.Console/Data/coremark.wasm
 
 # Polymorphic + super-instruction rewriter
-wacs run --super Wacs.Console/Data/coremark.wasm
+wacs run --super Wacs.Console/Wacs.Console/Data/coremark.wasm
 
 # Source-generated switch runtime
-wacs run --switch Wacs.Console/Data/coremark.wasm
+wacs run --switch Wacs.Console/Wacs.Console/Data/coremark.wasm
 
 # Switch runtime + bytecode-stream super-instruction fuser
-wacs run --switch --super Wacs.Console/Data/coremark.wasm
+wacs run --switch --super Wacs.Console/Wacs.Console/Data/coremark.wasm
 
 # AOT transpile in-process and run through the JITted code
-wacs run --engine transpiler Wacs.Console/Data/coremark.wasm
+wacs run --engine transpiler Wacs.Console/Wacs.Console/Data/coremark.wasm
 
 # AOT with hardware SIMD intrinsics + persist the .dll for re-loading
-wacs build --simd intrinsics -o out.dll Wacs.Console/Data/coremark.wasm
-wacs run --engine transpiler --simd intrinsics Wacs.Console/Data/coremark.wasm
+wacs build --simd intrinsics -o out.dll Wacs.Console/Wacs.Console/Data/coremark.wasm
+wacs run --engine transpiler --simd intrinsics Wacs.Console/Wacs.Console/Data/coremark.wasm
 ```
 
 Invoking a specific export with arguments (applies across every mode):
 
 ```bash
-wacs run --call fib Wacs.Bench/fib.wasm -- 10
+wacs run --call fib Wacs.Bench/Wacs.Bench/fib.wasm -- 10
 # Args after `--` are parsed per the function's wasm signature.
 ```
 
@@ -679,7 +679,7 @@ wacs inspect module.wasm --dump-wat     # round-trip WAT to stdout
 wacs inspect app.component.wasm         # component metadata
 ```
 
-**Sampled CoreMark performance** (M3 Max, .NET 8, `Wacs.Console/Data/coremark.wasm`, default 6000 iterations; single run each):
+**Sampled CoreMark performance** (M3 Max, .NET 8, `Wacs.Console/Wacs.Console/Data/coremark.wasm`, default 6000 iterations; single run each):
 
 | Mode | CoreMark (iter/s) | Relative |
 |---|---:|---:|
@@ -707,7 +707,7 @@ interpreter's host-function machinery.
 > `--switch` runtime) are fully AOT-compatible. If you need
 > native-class speed in an IL2CPP target, pre-compile the `.wasm →
 > .dll` on a JIT-capable host with
-> [`wacs build`](Wacs.Console/README.md#wacs-build--transpile-to-dll)
+> [`wacs build`](Wacs.Console/Wacs.Console/README.md#wacs-build--transpile-to-dll)
 > and ship the resulting assembly — the saved `.dll` runs without
 > `Reflection.Emit` via `WACS.Transpiler.Lib`'s `TranspiledModuleLoader`.
 

@@ -14,7 +14,7 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\Wacs.Core\Wacs.Core.csproj" />
+      <ProjectReference Include="..\Wacs.Core\Wacs.Core\Wacs.Core.csproj" />
     </ItemGroup>
 
     <ItemGroup>

@@ -1,0 +1,1 @@
+package Sub::Util;use strict;use warnings;require Exporter;our@ISA=qw(Exporter);our@EXPORT_OK=qw(prototype set_prototype subname set_subname);our$VERSION="1.63";$VERSION =~ tr/_//d;require List::Util;List::Util->VERSION($VERSION);sub prototype {my ($code)=@_;return CORE::prototype($code)}1;

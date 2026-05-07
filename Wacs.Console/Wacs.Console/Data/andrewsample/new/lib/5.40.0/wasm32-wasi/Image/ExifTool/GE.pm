@@ -1,0 +1,4 @@
+package Image::ExifTool::GE;use strict;use vars qw($VERSION);use Image::ExifTool qw(:DataAccess :Utils);use Image::ExifTool::Exif;$VERSION='1.00';sub ProcessGE2($$$);%Image::ExifTool::GE::Main=(WRITE_PROC=>\&Image::ExifTool::Exif::WriteExif,CHECK_PROC=>\&Image::ExifTool::Exif::CheckExif,WRITABLE=>1,GROUPS=>{0=>'MakerNotes',2=>'Camera' },NOTES=>q{
+        This table lists tags found in the maker notes of some General Imaging
+        camera models.
+    },0x0202=>{Name=>'Macro',Writable=>'int16u',PrintConv=>{0=>'Off',1=>'On' },},0x0207=>{Name=>'GEModel',Format=>'string',},0x0300=>{Name=>'GEMake',Format=>'string',},);

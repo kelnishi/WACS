@@ -1,0 +1,1 @@
+use strict;use warnings;package Memoize::NDBM_File;our$VERSION='1.16';use NDBM_File;our@ISA=qw(NDBM_File);sub EXISTS {defined shift->FETCH(@_)}delete$Memoize::NDBM_File::{'EXISTS'}if eval {NDBM_File->VERSION('1.16')};1;
