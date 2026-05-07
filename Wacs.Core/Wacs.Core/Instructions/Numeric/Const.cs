@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -52,22 +53,21 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(Value);
         }
 
-        private static readonly Dictionary<int, InstI32Const> LookupCache = new();
-        
+        // ConcurrentDictionary because multiple parses can run
+        // concurrently across xunit test collections — the
+        // prior plain-Dictionary impl race-tore on contention.
+        // See InstLocalGet.LookupCache for the same pattern
+        // and full failure-mode notes.
+        private static readonly ConcurrentDictionary<int, InstI32Const> LookupCache = new();
+
         public override InstructionBase Parse(BinaryReader reader) {
             return Immediate(reader.ReadLeb128_s32());
         }
 
         public InstructionBase Immediate(int value)
         {
-            if (LookupCache.TryGetValue(value, out var get))
-                return get;
-
-            var inst = new InstI32Const {
-                Value = value
-            };
-            LookupCache.Add(value, inst);
-            return inst;
+            return LookupCache.GetOrAdd(value, static v =>
+                new InstI32Const { Value = v });
         }
 
         public int FetchImmediate(ExecContext _) => Value;
