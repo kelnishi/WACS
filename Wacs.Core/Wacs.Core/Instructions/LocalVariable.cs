@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using Wacs.Core.Instructions.SuperInstruction;
@@ -40,8 +41,23 @@ namespace Wacs.Core.Instructions
 
         public int GetIndex() => Index;
 
-        private static readonly Dictionary<int, InstLocalGet> LookupCache = new();
-        
+        // Process-wide intern table for InstLocalGet by index.
+        // local.get is by far the most common opcode in real
+        // wasm bodies, so reusing one boxed instance per index
+        // keeps the parser allocation rate down on every
+        // module load.
+        //
+        // ConcurrentDictionary (not plain Dictionary) because
+        // multiple parses may run concurrently across xunit
+        // collections — the prior plain-Dictionary impl
+        // race-tore its internal array under contention,
+        // surfacing as IndexOutOfRangeException in
+        // Dictionary.TryInsert and downstream "Sequence
+        // contains no elements" once a torn-cache miss caused
+        // ParseInstruction to return null and ParseUntil to
+        // bail with an empty list.
+        private static readonly ConcurrentDictionary<int, InstLocalGet> LookupCache = new();
+
         public override InstructionBase Parse(BinaryReader reader)
         {
             return Immediate((int)reader.ReadLeb128_u32());
@@ -49,14 +65,8 @@ namespace Wacs.Core.Instructions
 
         public InstructionBase Immediate(int index)
         {
-            if (LookupCache.TryGetValue(index, out var get))
-                return get;
-
-            var inst = new InstLocalGet {
-                Index = index
-            };
-            LookupCache.Add(index, inst);
-            return inst;
+            return LookupCache.GetOrAdd(index, static i =>
+                new InstLocalGet { Index = i });
         }
 
         //0x20
