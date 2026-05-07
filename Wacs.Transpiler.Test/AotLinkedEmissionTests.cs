@@ -162,6 +162,73 @@ namespace Wacs.Transpiler.Test
         }
 
         [Fact]
+        public void ImportDispatcherThrowsOnMissingHandlerByDefault()
+        {
+            // (module
+            //   (import "env" "ext" (func (result i32)))
+            //   (func (export "noop") (result i32) call 0))
+            // Build the proxy with an EMPTY handler dict, instantiate
+            // the Module, then call noop — the import is invoked, the
+            // dispatcher has no handler for it, and the default loud
+            // behavior should throw an InvalidOperationException
+            // naming the missing import.
+            using var fs = new System.IO.MemoryStream(BuildImportFuncWasm());
+            var module = BinaryModuleParser.ParseWasm(fs);
+            var runtime = new WasmRuntime();
+            // Bind a host fn so InstantiateModule resolves the import,
+            // even though we'll *replace* the dispatcher at the
+            // Activator.CreateInstance step with an empty-handler one.
+            runtime.BindHostFunction<System.Func<int>>(("env", "ext"), () => 0);
+            var modInst = runtime.InstantiateModule(module);
+            var result = new ModuleTranspiler("Wacs.AotLink.LoudMissing",
+                new TranspilerOptions { Emission = EmissionTarget.AotLinked })
+                .Transpile(modInst, runtime, "LoudMod");
+
+            var importsProxy = Wacs.Transpiler.Cli.ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new System.Collections.Generic.Dictionary<
+                    string, System.Func<object?[], object?>>());
+            var instance = Activator.CreateInstance(result.ModuleClass!, importsProxy)!;
+            var noopMethod = result.ModuleClass!.GetMethod("noop",
+                BindingFlags.Public | BindingFlags.Instance)!;
+
+            var tie = Assert.Throws<TargetInvocationException>(() =>
+                noopMethod.Invoke(instance, Array.Empty<object>()));
+            var inner = Assert.IsType<InvalidOperationException>(tie.InnerException);
+            Assert.Contains("env_ext", inner.Message);
+            Assert.Contains("No handler registered", inner.Message);
+        }
+
+        [Fact]
+        public void ImportDispatcherLenientFallsBackToDefault()
+        {
+            // Same fixture, but with lenient: true — missing handler
+            // should return default(int) = 0 instead of throwing. The
+            // export's `call 0` returns whatever the import returned, so
+            // we get 0.
+            using var fs = new System.IO.MemoryStream(BuildImportFuncWasm());
+            var module = BinaryModuleParser.ParseWasm(fs);
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<System.Func<int>>(("env", "ext"), () => 0);
+            var modInst = runtime.InstantiateModule(module);
+            var result = new ModuleTranspiler("Wacs.AotLink.Lenient",
+                new TranspilerOptions { Emission = EmissionTarget.AotLinked })
+                .Transpile(modInst, runtime, "LenientMod");
+
+            var importsProxy = Wacs.Transpiler.Cli.ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new System.Collections.Generic.Dictionary<
+                    string, System.Func<object?[], object?>>(),
+                lenient: true);
+            var instance = Activator.CreateInstance(result.ModuleClass!, importsProxy)!;
+            var noopMethod = result.ModuleClass!.GetMethod("noop",
+                BindingFlags.Public | BindingFlags.Instance)!;
+
+            int n = (int)noopMethod.Invoke(instance, Array.Empty<object>())!;
+            Assert.Equal(0, n);
+        }
+
+        [Fact]
         public void AotLinkedSupportsImportedFunction()
         {
             // (module
