@@ -41,10 +41,10 @@ jobs:
         run: dotnet test --configuration Release --no-build --verbosity normal Spec.Test/Spec.Test.csproj
 
       - name: Run Transpiler Tests
-        run: dotnet test --configuration Release --no-build --verbosity normal Wacs.Transpiler.Test/Wacs.Transpiler.Test.csproj
+        run: dotnet test --configuration Release --no-build --verbosity normal Wacs.Transpiler/Wacs.Transpiler.Test/Wacs.Transpiler.Test.csproj
 
       - name: Run WASI Preview 1 Tests
-        run: dotnet test --configuration Release --no-build --verbosity normal Wacs.WASI.Preview1.Test/Wacs.WASI.Preview1.Test.csproj
+        run: dotnet test --configuration Release --no-build --verbosity normal Wacs.WASI/Wacs.WASI.Preview1/Wacs.WASI.Preview1.Test/Wacs.WASI.Preview1.Test.csproj
 
       # End-to-end smoke for `wacs aot --wasi`. The flow chains the
       # transpiler, WACS.HostBindings.SourceGen adapter generation,
@@ -66,7 +66,7 @@ jobs:
             echo "FAIL: fixture missing — submodule probably not initialized"
             exit 1
           fi
-          dotnet run --project Wacs.Console -c Release --no-build -- \
+          dotnet run --project Wacs.Console/Wacs.Console -c Release --no-build -- \
             aot "$fixture" --wasi -o /tmp/wasi-aot-smoke
           actual=$(/tmp/wasi-aot-smoke)
           if [ "$actual" != "hello" ]; then

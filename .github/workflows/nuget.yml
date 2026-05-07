@@ -30,7 +30,7 @@ jobs:
       matrix:
         include:
           # Pre-v0.10.0 packages.
-          - path: Wacs.Core
+          - path: Wacs.Core/Wacs.Core
             package_name: WACS
             tag_prefix: WACS-v
           # `WASIp1-v*` publishes the deprecated WACS.WASIp1
@@ -40,44 +40,44 @@ jobs:
           # at restore time, so the two NuGet ids must publish at
           # the same version or the metapackage's transitive
           # restore breaks.
-          - path: Wacs.WASIp1
+          - path: Wacs.WASIp1/Wacs.WASIp1
             package_name: WACS.WASIp1
             tag_prefix: WASIp1-v
-          - path: Wacs.WASI.Preview1
+          - path: Wacs.WASI/Wacs.WASI.Preview1/Wacs.WASI.Preview1
             package_name: WACS.WASI.Preview1
             tag_prefix: WASIp1-v
-          - path: Wacs.Transpiler
+          - path: Wacs.Transpiler/Wacs.Transpiler
             package_name: WACS.Transpiler
             tag_prefix: WACS-Transpiler-v
-          - path: Wacs.Transpiler.Lib
+          - path: Wacs.Transpiler/Wacs.Transpiler.Lib
             package_name: WACS.Transpiler.Lib
             tag_prefix: WACS-Transpiler-v
-          - path: Wacs.WASI.Threads
+          - path: Wacs.WASI/Wacs.WASI.Threads/Wacs.WASI.Threads
             package_name: WACS.WASI.Threads
             tag_prefix: WACS-WASI-Threads-v
 
           # v0.10.0 release surface.
           # `WACS-Cli-v*` → wacs CLI apphost.
-          - path: Wacs.Console
+          - path: Wacs.Console/Wacs.Console
             package_name: WACS.Cli
             tag_prefix: WACS-Cli-v
 
           # `WACS-ComponentModel-v*` → component-model runtime +
           # bindgen library (versioned together; both 0.1.0 today).
-          - path: Wacs.ComponentModel
+          - path: Wacs.ComponentModel/Wacs.ComponentModel
             package_name: WACS.ComponentModel
             tag_prefix: WACS-ComponentModel-v
-          - path: Wacs.ComponentModel.Bindgen.Lib
+          - path: Wacs.ComponentModel/Wacs.ComponentModel.Bindgen.Lib
             package_name: WACS.ComponentModel.Bindgen.Lib
             tag_prefix: WACS-ComponentModel-v
 
           # `WACS-WASI-Preview2-v*` → typed WASI Preview 2 host
           # interfaces + the Microsoft.Extensions.DependencyInjection
           # extension (versioned together; both 0.1.0 today).
-          - path: Wacs.WASI.Preview2
+          - path: Wacs.WASI/Wacs.WASI.Preview2/Wacs.WASI.Preview2
             package_name: WACS.WASI.Preview2
             tag_prefix: WACS-WASI-Preview2-v
-          - path: Wacs.WASI.Preview2.DependencyInjection
+          - path: Wacs.WASI/Wacs.WASI.Preview2/Wacs.WASI.Preview2.DependencyInjection
             package_name: WACS.WASI.Preview2.DependencyInjection
             tag_prefix: WACS-WASI-Preview2-v
 
@@ -85,10 +85,10 @@ jobs:
           # Roslyn source generator that wires [WacsImport]-annotated
           # host statics to transpiled wasm imports (versioned
           # together; both 0.1.0 today).
-          - path: Wacs.HostBindings.Abstractions
+          - path: Wacs.HostBindings/Wacs.HostBindings.Abstractions
             package_name: WACS.HostBindings.Abstractions
             tag_prefix: WACS-HostBindings-v
-          - path: Wacs.HostBindings.SourceGen
+          - path: Wacs.HostBindings/Wacs.HostBindings.SourceGen
             package_name: WACS.HostBindings.SourceGen
             tag_prefix: WACS-HostBindings-v
 

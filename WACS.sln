@@ -1,73 +1,73 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # 
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Core", "Wacs.Core\Wacs.Core.csproj", "{7ABE1650-C85B-4175-A7A0-12B39287AD37}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Core", "Wacs.Core\Wacs.Core\Wacs.Core.csproj", "{7ABE1650-C85B-4175-A7A0-12B39287AD37}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Console", "Wacs.Console\Wacs.Console.csproj", "{E355AFC4-1C09-44AF-BF44-AFF1515AE359}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Console", "Wacs.Console\Wacs.Console\Wacs.Console.csproj", "{E355AFC4-1C09-44AF-BF44-AFF1515AE359}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.Preview1", "Wacs.WASI.Preview1\Wacs.WASI.Preview1.csproj", "{A7D87353-CC96-4718-8A86-454F27F5BB72}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.Preview1", "Wacs.WASI\Wacs.WASI.Preview1\Wacs.WASI.Preview1\Wacs.WASI.Preview1.csproj", "{A7D87353-CC96-4718-8A86-454F27F5BB72}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Spec.Test", "Spec.Test\Spec.Test.csproj", "{2200F588-3506-4A4B-BD86-1C8FABA5A19E}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Feature.Detect", "Feature.Detect\Feature.Detect.csproj", "{AE0D7913-8AA2-4054-B7BC-0C522584272C}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Transpiler", "Wacs.Transpiler\Wacs.Transpiler.csproj", "{047F4142-5620-4F5B-AFD9-344D398EBEB9}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Transpiler", "Wacs.Transpiler\Wacs.Transpiler\Wacs.Transpiler.csproj", "{047F4142-5620-4F5B-AFD9-344D398EBEB9}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Compilation", "Wacs.Compilation\Wacs.Compilation.csproj", "{3330F8C1-1F9B-438E-B10B-BB1B34493E29}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Compilation", "Wacs.Compilation\Wacs.Compilation\Wacs.Compilation.csproj", "{3330F8C1-1F9B-438E-B10B-BB1B34493E29}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Transpiler.Test", "Wacs.Transpiler.Test\Wacs.Transpiler.Test.csproj", "{86D77261-EBF7-4ED4-8958-57EDDC211E7F}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Transpiler.Test", "Wacs.Transpiler\Wacs.Transpiler.Test\Wacs.Transpiler.Test.csproj", "{86D77261-EBF7-4ED4-8958-57EDDC211E7F}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Spec.Test.Data", "Spec.Test.Data\Spec.Test.Data.csproj", "{3E47DB21-1F0F-4A1A-BF0F-C28A5C0F01BC}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Compilation.Test", "Wacs.Compilation.Test\Wacs.Compilation.Test.csproj", "{854DD165-D7CB-45AE-8413-EA81F6D2C5C3}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Compilation.Test", "Wacs.Compilation\Wacs.Compilation.Test\Wacs.Compilation.Test.csproj", "{854DD165-D7CB-45AE-8413-EA81F6D2C5C3}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Transpiler.Lib", "Wacs.Transpiler.Lib\Wacs.Transpiler.Lib.csproj", "{CC2BEAF6-76B7-449A-8D23-549025E6F120}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Transpiler.Lib", "Wacs.Transpiler\Wacs.Transpiler.Lib\Wacs.Transpiler.Lib.csproj", "{CC2BEAF6-76B7-449A-8D23-549025E6F120}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Core.Test", "Wacs.Core.Test\Wacs.Core.Test.csproj", "{6DB10230-B3B1-49CF-97E4-939A5DF4FF4B}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Core.Test", "Wacs.Core\Wacs.Core.Test\Wacs.Core.Test.csproj", "{6DB10230-B3B1-49CF-97E4-939A5DF4FF4B}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.Threads", "Wacs.WASI.Threads\Wacs.WASI.Threads.csproj", "{29E1FED0-1867-43DF-A473-EB7871C32EBB}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.Threads", "Wacs.WASI\Wacs.WASI.Threads\Wacs.WASI.Threads\Wacs.WASI.Threads.csproj", "{29E1FED0-1867-43DF-A473-EB7871C32EBB}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.ComponentModel", "Wacs.ComponentModel\Wacs.ComponentModel.csproj", "{5C50513B-BD3A-48D6-A196-9EC8FCB72AE7}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.ComponentModel", "Wacs.ComponentModel\Wacs.ComponentModel\Wacs.ComponentModel.csproj", "{5C50513B-BD3A-48D6-A196-9EC8FCB72AE7}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.ComponentModel.Test", "Wacs.ComponentModel.Test\Wacs.ComponentModel.Test.csproj", "{3A1F1B47-654C-436C-BE0E-158A923AACF3}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.ComponentModel.Test", "Wacs.ComponentModel\Wacs.ComponentModel.Test\Wacs.ComponentModel.Test.csproj", "{3A1F1B47-654C-436C-BE0E-158A923AACF3}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.ComponentModel.Bindgen.Lib", "Wacs.ComponentModel.Bindgen.Lib\Wacs.ComponentModel.Bindgen.Lib.csproj", "{4E155331-7FAC-4011-BFA6-F11704476918}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.ComponentModel.Bindgen.Lib", "Wacs.ComponentModel\Wacs.ComponentModel.Bindgen.Lib\Wacs.ComponentModel.Bindgen.Lib.csproj", "{4E155331-7FAC-4011-BFA6-F11704476918}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.ComponentModel.Bindgen.Test", "Wacs.ComponentModel.Bindgen.Test\Wacs.ComponentModel.Bindgen.Test.csproj", "{913854F9-ABD3-4E64-9029-802FCFE652C2}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.ComponentModel.Bindgen.Test", "Wacs.ComponentModel\Wacs.ComponentModel.Bindgen.Test\Wacs.ComponentModel.Bindgen.Test.csproj", "{913854F9-ABD3-4E64-9029-802FCFE652C2}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.Preview2", "Wacs.WASI.Preview2\Wacs.WASI.Preview2.csproj", "{426738E4-CB0D-4954-BB13-FF530B13158A}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.Preview2", "Wacs.WASI\Wacs.WASI.Preview2\Wacs.WASI.Preview2\Wacs.WASI.Preview2.csproj", "{426738E4-CB0D-4954-BB13-FF530B13158A}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.Preview2.Test", "Wacs.WASI.Preview2.Test\Wacs.WASI.Preview2.Test.csproj", "{26C8C659-7CC5-4A0B-8283-04DFEB070A0F}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.Preview2.Test", "Wacs.WASI\Wacs.WASI.Preview2\Wacs.WASI.Preview2.Test\Wacs.WASI.Preview2.Test.csproj", "{26C8C659-7CC5-4A0B-8283-04DFEB070A0F}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.Preview2.DependencyInjection", "Wacs.WASI.Preview2.DependencyInjection\Wacs.WASI.Preview2.DependencyInjection.csproj", "{57FEE854-BFFE-4F23-B9FA-6D3127C29A5B}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.Preview2.DependencyInjection", "Wacs.WASI\Wacs.WASI.Preview2\Wacs.WASI.Preview2.DependencyInjection\Wacs.WASI.Preview2.DependencyInjection.csproj", "{57FEE854-BFFE-4F23-B9FA-6D3127C29A5B}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.Preview1.Test", "Wacs.WASI.Preview1.Test\Wacs.WASI.Preview1.Test.csproj", "{BA061514-ADB0-44B7-ADFF-D2D637F14151}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.Preview1.Test", "Wacs.WASI\Wacs.WASI.Preview1\Wacs.WASI.Preview1.Test\Wacs.WASI.Preview1.Test.csproj", "{BA061514-ADB0-44B7-ADFF-D2D637F14151}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Bench.Aot", "Wacs.Bench.Aot\Wacs.Bench.Aot.csproj", "{6F7F8FF4-AA7F-41CA-8AFB-65C9A512D5E7}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Bench.Aot", "Wacs.Bench\Wacs.Bench.Aot\Wacs.Bench.Aot.csproj", "{6F7F8FF4-AA7F-41CA-8AFB-65C9A512D5E7}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASIp1", "Wacs.WASIp1\Wacs.WASIp1.csproj", "{BF832CCF-4865-4FCF-BA7F-A348239B1C2D}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASIp1", "Wacs.WASIp1\Wacs.WASIp1\Wacs.WASIp1.csproj", "{BF832CCF-4865-4FCF-BA7F-A348239B1C2D}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.HostBindings.Abstractions", "Wacs.HostBindings.Abstractions\Wacs.HostBindings.Abstractions.csproj", "{C62DF1E4-73F9-4E2C-8C7D-195007CA9F4D}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.HostBindings.Abstractions", "Wacs.HostBindings\Wacs.HostBindings.Abstractions\Wacs.HostBindings.Abstractions.csproj", "{C62DF1E4-73F9-4E2C-8C7D-195007CA9F4D}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.HostBindings.Test", "Wacs.HostBindings.Test\Wacs.HostBindings.Test.csproj", "{9C452F90-6D28-430D-8DCF-548BC485EF5E}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.HostBindings.Test", "Wacs.HostBindings\Wacs.HostBindings.Test\Wacs.HostBindings.Test.csproj", "{9C452F90-6D28-430D-8DCF-548BC485EF5E}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.HostBindings.SourceGen", "Wacs.HostBindings.SourceGen\Wacs.HostBindings.SourceGen.csproj", "{46A3C77F-120F-44E4-BB6A-C5A028C2DC49}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.HostBindings.SourceGen", "Wacs.HostBindings\Wacs.HostBindings.SourceGen\Wacs.HostBindings.SourceGen.csproj", "{46A3C77F-120F-44E4-BB6A-C5A028C2DC49}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.NN", "Wacs.WASI.NN\Wacs.WASI.NN.csproj", "{9E82F862-834D-4E94-A22E-8588F3689652}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.NN", "Wacs.WASI\Wacs.WASI.NN\Wacs.WASI.NN\Wacs.WASI.NN.csproj", "{9E82F862-834D-4E94-A22E-8588F3689652}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.NN.Test", "Wacs.WASI.NN.Test\Wacs.WASI.NN.Test.csproj", "{164D4335-423A-4042-A7B3-7515231A10C6}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.NN.Test", "Wacs.WASI\Wacs.WASI.NN\Wacs.WASI.NN.Test\Wacs.WASI.NN.Test.csproj", "{164D4335-423A-4042-A7B3-7515231A10C6}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.NN.OnnxRuntime", "Wacs.WASI.NN.OnnxRuntime\Wacs.WASI.NN.OnnxRuntime.csproj", "{8AD3C635-BF5B-4C3B-BBFB-873FAD08E5AE}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.NN.OnnxRuntime", "Wacs.WASI\Wacs.WASI.NN\Wacs.WASI.NN.OnnxRuntime\Wacs.WASI.NN.OnnxRuntime.csproj", "{8AD3C635-BF5B-4C3B-BBFB-873FAD08E5AE}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.NN.OnnxRuntime.Test", "Wacs.WASI.NN.OnnxRuntime.Test\Wacs.WASI.NN.OnnxRuntime.Test.csproj", "{6F807FE2-3EEC-4E25-B4AD-71CA40417166}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.NN.OnnxRuntime.Test", "Wacs.WASI\Wacs.WASI.NN\Wacs.WASI.NN.OnnxRuntime.Test\Wacs.WASI.NN.OnnxRuntime.Test.csproj", "{6F807FE2-3EEC-4E25-B4AD-71CA40417166}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.NN.MLNet", "Wacs.WASI.NN.MLNet\Wacs.WASI.NN.MLNet.csproj", "{9E74AE86-CF65-483C-87DA-80C38088016A}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.NN.MLNet", "Wacs.WASI\Wacs.WASI.NN\Wacs.WASI.NN.MLNet\Wacs.WASI.NN.MLNet.csproj", "{9E74AE86-CF65-483C-87DA-80C38088016A}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.NN.MLNet.Test", "Wacs.WASI.NN.MLNet.Test\Wacs.WASI.NN.MLNet.Test.csproj", "{D4E7F0CB-3142-4A49-8595-AA1F2D473C3F}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.NN.MLNet.Test", "Wacs.WASI\Wacs.WASI.NN\Wacs.WASI.NN.MLNet.Test\Wacs.WASI.NN.MLNet.Test.csproj", "{D4E7F0CB-3142-4A49-8595-AA1F2D473C3F}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.NN.LlamaSharp", "Wacs.WASI.NN.LlamaSharp\Wacs.WASI.NN.LlamaSharp.csproj", "{180ABE4F-4DAC-4E57-B1C6-2F261436224D}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.NN.LlamaSharp", "Wacs.WASI\Wacs.WASI.NN\Wacs.WASI.NN.LlamaSharp\Wacs.WASI.NN.LlamaSharp.csproj", "{180ABE4F-4DAC-4E57-B1C6-2F261436224D}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.NN.LlamaSharp.Test", "Wacs.WASI.NN.LlamaSharp.Test\Wacs.WASI.NN.LlamaSharp.Test.csproj", "{B9C080B5-09A0-4529-92A7-68D53ED45364}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.NN.LlamaSharp.Test", "Wacs.WASI\Wacs.WASI.NN\Wacs.WASI.NN.LlamaSharp.Test\Wacs.WASI.NN.LlamaSharp.Test.csproj", "{B9C080B5-09A0-4529-92A7-68D53ED45364}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

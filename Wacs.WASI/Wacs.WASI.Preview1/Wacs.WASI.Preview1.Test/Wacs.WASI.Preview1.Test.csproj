@@ -2,19 +2,20 @@
 
     <PropertyGroup>
         <OutputType>Library</OutputType>
-        <ImplicitUsings>disable</ImplicitUsings>
-        <Nullable>enable</Nullable>
         <LangVersion>9</LangVersion>
-        <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
+        <Nullable>enable</Nullable>
+        <Title>WACS WASIp1 Tests</Title>
+        <Authors>Kelvin Nishikawa</Authors>
+        <TargetFramework>net8.0</TargetFramework>
+        <IsPackable>false</IsPackable>
     </PropertyGroup>
 
     <ItemGroup>
-      <Folder Include="generated-wasm\" />
+      <ProjectReference Include="..\..\..\Wacs.Core\Wacs.Core\Wacs.Core.csproj" />
+      <ProjectReference Include="..\Wacs.WASI.Preview1\Wacs.WASI.Preview1.csproj" />
     </ItemGroup>
 
     <ItemGroup>
-      <PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
-      <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.1" />
       <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
       <PackageReference Include="xunit" Version="2.9.2" />
       <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
@@ -24,13 +25,9 @@
     </ItemGroup>
 
     <ItemGroup>
-      <None Update="testsettings.json">
-        <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <None Include="skip.json">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       </None>
-    </ItemGroup>
-
-    <ItemGroup>
-      <ProjectReference Include="..\Wacs.Core\Wacs.Core\Wacs.Core.csproj" />
     </ItemGroup>
 
 </Project>

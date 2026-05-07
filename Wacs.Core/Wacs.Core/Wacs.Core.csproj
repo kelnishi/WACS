@@ -1,0 +1,101 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>9</LangVersion>
+    <AssemblyVersion>0.12.1</AssemblyVersion>
+    <Version>0.12.1</Version>
+    <Authors>Kelvin Nishikawa</Authors>
+    <Description>A Pure C# WebAssembly Interpreter. v0.12 brings the in-process WAT/WAST parser to full parity with the binary parser — every wast in the WebAssembly spec testsuite (SIMD, GC, relaxed-SIMD, hex-float edge cases) round-trips identically through both pipelines, dropping the wasm-tools / wast2json CI dependency. v0.12.1 tracks the wasm-3.0 spec submodule to tip d7aada5: inclusive memory page-count limit (PRs #105/#106/#108), tail-call to imported host functions (PR #1872), `array.new_data` bounds (PR #1881), malformed memop reserved bits (PRs #1886/#1936), table64 u64 limits (PR #104), `(module definition …)` validate-only support, u32 offset enforcement on memory32, and `;;` line-comment CR termination.</Description>
+    <TrimUnusedDependencies>true</TrimUnusedDependencies>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <Title>Wacs</Title>
+    <AssemblyName>Wacs.Core</AssemblyName>
+    <PackageId>WACS</PackageId>
+    <Copyright>(c) 2025 Kelvin Nishikawa</Copyright>
+    <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <RepositoryType>git</RepositoryType>
+    <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
+    <!-- Only the net8.0 leg participates in NativeAOT publishes. Setting
+         IsAotCompatible unconditionally trips NETSDK1207 on the netstandard2.1
+         leg during a downstream PublishAot, even if that leg never ships in
+         the AOT image. -->
+    <IsAotCompatible Condition="'$(TargetFramework)' == 'net8.0'">true</IsAotCompatible>
+    <!-- SkipLocalsInit on GeneratedDispatcher.Run requires the project to permit unsafe
+         code (the C# compiler gates the attribute to prevent accidental use). We don't
+         emit unsafe blocks — the hot-path uses only Unsafe.Add / Unsafe.ReadUnaligned,
+         which are managed intrinsics. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Wacs.Compilation\Wacs.Compilation\Wacs.Compilation.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false"
+                      UndefineProperties="PublishAot;PublishTrimmed;PublishReadyToRun;SelfContained;RuntimeIdentifier" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Test project needs access to internals like BlockTarget, InstBranch.LinkedLabel etc.
+         for targeted white-box assertions on the compile pipeline. -->
+    <InternalsVisibleTo Include="Wacs.Compilation.Test" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Net.Compilers.Toolset" Version="4.3.1">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+  
+  <ItemGroup>
+    <None Include="README.md">
+      <Pack>true</Pack>
+      <PackagePath/>
+    </None>
+  </ItemGroup>
+  
+  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+    <DefineConstants>TRACE;</DefineConstants>
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DefineConstants>TRACE;</DefineConstants>
+  </PropertyGroup>
+
+  
+  <ItemGroup>
+    <PackageReference Include="FluentValidation" Version="11.10.0" />
+    <PackageReference Include="Microsoft.Extensions.ObjectPool" Version="9.0.0" />
+  </ItemGroup>
+
+  <!-- Unsafe.Add is in-box for net5.0+; netstandard2.1 needs the package.
+       Used by the generated dispatcher for bounds-check-free code fetch. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
+    <PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="6.0.0" />
+  </ItemGroup>
+
+  <!-- Phase 7: threaded dispatch. InlineIL.Fody lets the generator emit
+       IL.Emit.Switch(...) calls at handler tails; Fody rewrites those at build
+       time into raw IL switch instructions so each case becomes its own
+       indirect-branch site. Both Fody and InlineIL.Fody are build-only
+       dependencies (PrivateAssets="all"): the final DLL has no runtime
+       reference to either package. AOT-compatible. Gate the generator's
+       emission on the WACS_THREADED_DISPATCH MSBuild property (default off)
+       so a standard build still produces the switch-based dispatcher. -->
+  <ItemGroup>
+    <PackageReference Include="Fody" Version="6.8.1" PrivateAssets="all" />
+    <PackageReference Include="InlineIL.Fody" Version="1.9.0" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>
