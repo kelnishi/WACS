@@ -683,6 +683,24 @@ namespace Wacs.Transpiler.AOT
             // (6) Stash the segment base IDs onto ctx so post-Bake
             // memory.init / table.init helpers can index correctly.
             EmitSegmentBaseIds(il, ctxLocal, data);
+
+            // (7) Stamp ctx.InitDataId with the transpile-time id so
+            // MultiReturnMethodRegistry / GcTypeRegistry lookups —
+            // both keyed on (initDataId, funcIdx) / (initDataId,
+            // typeIdx) — find the entries the transpile-time IL
+            // registered. Standard's InitializeFromData does this
+            // via the int-overload of InitializeFromData; under
+            // AotLinked we set the field directly.
+            EmitInitDataIdStamp(il, ctxLocal);
+        }
+
+        private void EmitInitDataIdStamp(ILGenerator il, LocalBuilder ctxLocal)
+        {
+            var initDataIdField = typeof(ThinContext).GetField(nameof(ThinContext.InitDataId));
+            if (initDataIdField == null) return;
+            il.Emit(OpCodes.Ldloc, ctxLocal);
+            il.Emit(OpCodes.Ldc_I4, _initDataId);
+            il.Emit(OpCodes.Stfld, initDataIdField);
         }
 
         /// <summary>
@@ -1293,22 +1311,17 @@ namespace Wacs.Transpiler.AOT
             // Exception tags need TagInstance ctor IL we don't emit yet.
             if (data.ImportedTagCount > 0 || data.LocalTagTypes.Length > 0) return false;
 
-            // Tables + element segments: AotLinked-explicit (CallIndirect
-            // round-trip test) works for simple shapes, but the spec
-            // corpus's call_indirect / ref.test / br_on_cast exercise
-            // gaps — multi-result funcs in tables don't get a delegate
-            // wired, GC ref.test/br_on_cast paths need extra runtime
-            // data we don't yet inline. Until those gaps close, Auto
-            // skips these shapes; the EmitTypeHashArrays + segment-
-            // drop IL we just added means each gap can be enabled
-            // independently. Explicit Emission = AotLinked still
-            // works on simple shapes — that path is the user-pinned
-            // contract.
-            if (data.Tables.Length > 0) return false;
-            if (_wasmModule.Elements.Length > 0) return false;
+            // Passive element segments need ModuleInit registration that
+            // the AotLinked path doesn't reproduce in fresh-process
+            // loads. Active-only is fine: AotLinked emission populates
+            // tables directly via EmitElementSegmentCopies + drops via
+            // EmitActiveSegmentDrops, multi-result-func table dispatch
+            // works through MultiReturnMethodRegistry now that
+            // EmitInitDataIdStamp populates ctx.InitDataId.
+            if (_wasmModule.Elements.Length > data.ActiveElemIndices.Length)
+                return false;
 
-            // Passive data segments need ModuleInit registration that
-            // the AotLinked path doesn't reproduce post-Bake.
+            // Same passive-segment rationale for data segments.
             if (_dataEmitter != null
                 && _dataEmitter.Segments.Length > data.ActiveDataIndices.Length)
                 return false;
