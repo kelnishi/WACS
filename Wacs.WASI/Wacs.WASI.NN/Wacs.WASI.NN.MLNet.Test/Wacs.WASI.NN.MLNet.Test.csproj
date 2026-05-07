@@ -21,4 +21,11 @@
         <ProjectReference Include="..\Wacs.WASI.NN.MLNet\Wacs.WASI.NN.MLNet.csproj" />
     </ItemGroup>
 
+    <!-- See Wacs.WASI.NN.OnnxRuntime.Test.csproj — same shared
+         fixture, same rationale. -->
+    <ItemGroup>
+        <Compile Include="..\Wacs.WASI.NN.Test\TinyOnnxModel.cs"
+                 Link="TinyOnnxModel.cs" />
+    </ItemGroup>
+
 </Project>
