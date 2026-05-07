@@ -702,6 +702,97 @@ namespace Wacs.Transpiler.AOT
             // get copied into linear memory directly via
             // EmitDataSegmentCopies above.
             EmitPassiveDataSegmentRegistrations(il, data);
+
+            // (9) Register passive element segments — same idempotent
+            // ModuleInit registration recipe as passive data, but the
+            // values are funcref / typed-null mix encoded as int[]
+            // (−1 = null; >=0 = funcIdx). The helper materializes the
+            // Value[] at runtime; transpile-time we only emit the
+            // compact int[] inline.
+            EmitPassiveElementSegmentRegistrations(il, data);
+        }
+
+        /// <summary>
+        /// For each passive element segment, walk its Initializers
+        /// at transpile time, encode the entries as <c>int[]</c>
+        /// (-1 = null funcref; >=0 = funcIdx), and emit IL that builds
+        /// the array inline + calls
+        /// <see cref="BulkHelpers.RegisterPassiveElemSegment"/>.
+        /// </summary>
+        private void EmitPassiveElementSegmentRegistrations(ILGenerator il, ModuleInitData data)
+        {
+            // Active and declarative segments are in data.ActiveElemIndices
+            // (active = also in data.ActiveElementSegments; declarative =
+            // dropped immediately, no registration needed). Anything else
+            // is passive.
+            var droppedSet = new HashSet<int>(data.ActiveElemIndices);
+
+            var registerHelper = typeof(BulkHelpers).GetMethod(
+                nameof(BulkHelpers.RegisterPassiveElemSegment),
+                BindingFlags.Public | BindingFlags.Static)!;
+
+            for (int localIdx = 0; localIdx < _wasmModule.Elements.Length; localIdx++)
+            {
+                if (droppedSet.Contains(localIdx)) continue;
+                var elem = _wasmModule.Elements[localIdx];
+                int n = elem.Initializers.Length;
+                if (n == 0) continue;
+
+                var encoded = new int[n];
+                bool ok = true;
+                for (int j = 0; j < n; j++)
+                {
+                    if (!TryEncodeFuncRefInitializer(elem.Initializers[j], out encoded[j]))
+                    {
+                        ok = false;
+                        break;
+                    }
+                }
+                if (!ok) continue;     // gate would have rejected such modules
+
+                int absoluteId = data.ElemSegmentBaseId + localIdx;
+                il.Emit(OpCodes.Ldc_I4, absoluteId);
+                il.Emit(OpCodes.Ldc_I4, n);
+                il.Emit(OpCodes.Newarr, typeof(int));
+                for (int j = 0; j < n; j++)
+                {
+                    il.Emit(OpCodes.Dup);
+                    il.Emit(OpCodes.Ldc_I4, j);
+                    il.Emit(OpCodes.Ldc_I4, encoded[j]);
+                    il.Emit(OpCodes.Stelem_I4);
+                }
+                il.Emit(OpCodes.Call, registerHelper);
+            }
+        }
+
+        /// <summary>
+        /// Encode a single passive-element-segment initializer as the
+        /// compact <c>int</c> the runtime helper expects: <c>-1</c> for
+        /// <c>ref.null</c>, the function index for <c>ref.func</c>.
+        /// Returns false on GC-typed / global-dependent shapes (gated
+        /// out by IsAotLinkedFeasible).
+        /// </summary>
+        private static bool TryEncodeFuncRefInitializer(
+            Wacs.Core.Types.Expression expr, out int encoded)
+        {
+            encoded = 0;
+            foreach (var inst in expr.Instructions)
+            {
+                if (inst is Wacs.Core.Instructions.Reference.InstRefFunc rf)
+                {
+                    encoded = (int)rf.FunctionIndex.Value;
+                    return true;
+                }
+                if (inst is Wacs.Core.Instructions.Reference.InstRefNull)
+                {
+                    encoded = -1;
+                    return true;
+                }
+                // Unsupported instruction kind (global.get etc.) — let
+                // the caller fall back to skipping this segment.
+                return false;
+            }
+            return false;
         }
 
         /// <summary>
@@ -1367,13 +1458,23 @@ namespace Wacs.Transpiler.AOT
             // Exception tags need TagInstance ctor IL we don't emit yet.
             if (data.ImportedTagCount > 0 || data.LocalTagTypes.Length > 0) return false;
 
-            // Passive element segments still need a registration path
-            // (they hold Value[] not byte[]; the registration recipe is
-            // the same as data segments but the IL to construct the
-            // Value[] from a funcref/null mix is more involved). Reject
-            // for now.
-            if (_wasmModule.Elements.Length > data.ActiveElemIndices.Length)
-                return false;
+            // Passive element segments now register via
+            // EmitPassiveElementSegmentRegistrations. The encode helper
+            // only handles funcref / null entries — verify every passive
+            // segment's initializers are encodable, otherwise stay on
+            // Standard. (Modules with GC-typed entries are already
+            // gated by IsAotLinkedFeasible's GcElementValues check.)
+            var droppedSet = new HashSet<int>(data.ActiveElemIndices);
+            for (int localIdx = 0; localIdx < _wasmModule.Elements.Length; localIdx++)
+            {
+                if (droppedSet.Contains(localIdx)) continue;
+                var elem = _wasmModule.Elements[localIdx];
+                for (int j = 0; j < elem.Initializers.Length; j++)
+                {
+                    if (!TryEncodeFuncRefInitializer(elem.Initializers[j], out _))
+                        return false;
+                }
+            }
 
             // Passive data segments are now registered in ModuleInit
             // by EmitPassiveDataSegmentRegistrations, so they're safe

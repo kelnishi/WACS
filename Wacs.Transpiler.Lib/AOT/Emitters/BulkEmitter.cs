@@ -182,6 +182,27 @@ namespace Wacs.Transpiler.AOT.Emitters
             ModuleInit.RegisterDataSegmentAt(id, bytes.ToArray());
         }
 
+        /// <summary>
+        /// Register a passive element segment in <see cref="ModuleInit"/>
+        /// from a compact <c>int[]</c> encoding: <c>-1</c> = typed null
+        /// funcref; any other value is the function index. Called from
+        /// AotLinked ctor IL once per Module instance — the registry
+        /// call is idempotent. Funcref / null mix only; GC-typed
+        /// element values are gated out by the feasibility check.
+        /// </summary>
+        public static void RegisterPassiveElemSegment(int id, int[] encodedFuncIndices)
+        {
+            var values = new Value[encodedFuncIndices.Length];
+            for (int j = 0; j < encodedFuncIndices.Length; j++)
+            {
+                int idx = encodedFuncIndices[j];
+                values[j] = idx == -1
+                    ? new Value(Wacs.Core.Types.Defs.ValType.FuncRef)
+                    : new Value(Wacs.Core.Types.Defs.ValType.FuncRef, idx);
+            }
+            ModuleInit.RegisterElemSegmentAt(id, values);
+        }
+
         public static void MemoryCopy(ThinContext ctx, int dstMemIdx, int srcMemIdx,
             int dst, int src, int len)
         {
