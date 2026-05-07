@@ -1,0 +1,8 @@
+# Pinned upstream commit. Replay with:
+#   curl -fsSL https://raw.githubusercontent.com/WebAssembly/wasi-nn/71320d95b8c6d43f9af7f44e18b1839db85d89b4/wit/wasi-nn.wit -o wit/wasi-nn.wit
+#   curl -fsSL https://raw.githubusercontent.com/WebAssembly/wasi-nn/71320d95b8c6d43f9af7f44e18b1839db85d89b4/wasi-nn.witx -o wit/wasi-nn.witx
+[wasi-nn]
+url = "https://github.com/WebAssembly/wasi-nn"
+sha = "71320d95b8c6d43f9af7f44e18b1839db85d89b4"
+date = "2024-10-28"
+package = "wasi:nn@0.2.0-rc-2024-10-28"
