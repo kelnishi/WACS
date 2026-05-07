@@ -51,10 +51,7 @@ jobs:
         run: dotnet test --configuration Release --no-build --verbosity normal Wacs.Core/Wacs.Compilation.Test/Wacs.Compilation.Test.csproj --filter "FullyQualifiedName!~CallIndirect_dispatches_via_funcref_table"
 
       - name: Run ComponentModel Tests
-        # Sequential xunit execution — parallelism flake noted in
-        # project memory: ComponentInstanceTests can race other test
-        # classes on shared SpecFactory / WasmRuntime ctor state.
-        run: dotnet test --configuration Release --no-build --verbosity normal Wacs.ComponentModel/Wacs.ComponentModel.Test/Wacs.ComponentModel.Test.csproj -- xUnit.ParallelizeTestCollections=false xUnit.MaxParallelThreads=1
+        run: dotnet test --configuration Release --no-build --verbosity normal Wacs.ComponentModel/Wacs.ComponentModel.Test/Wacs.ComponentModel.Test.csproj
 
       - name: Run ComponentModel Bindgen Tests
         run: dotnet test --configuration Release --no-build --verbosity normal Wacs.ComponentModel/Wacs.ComponentModel.Bindgen.Test/Wacs.ComponentModel.Bindgen.Test.csproj
