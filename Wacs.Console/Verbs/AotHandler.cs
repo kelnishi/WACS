@@ -294,7 +294,7 @@ namespace Wacs.Console.Verbs
 $@"<Project Sdk=""Microsoft.NET.Sdk"">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net9.0</TargetFramework>
     <Nullable>disable</Nullable>
     <LangVersion>9</LangVersion>
     <ImplicitUsings>disable</ImplicitUsings>
@@ -327,7 +327,7 @@ return {mainTypeFqn}.Main(args);
 $@"<Project Sdk=""Microsoft.NET.Sdk"">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net9.0</TargetFramework>
     <Nullable>disable</Nullable>
     <LangVersion>10</LangVersion>
     <ImplicitUsings>disable</ImplicitUsings>
@@ -423,7 +423,7 @@ catch (Wacs.Core.WASIp1.SystemExitException ex)
 $@"<Project Sdk=""Microsoft.NET.Sdk"">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net9.0</TargetFramework>
     <Nullable>disable</Nullable>
     <LangVersion>10</LangVersion>
     <ImplicitUsings>disable</ImplicitUsings>

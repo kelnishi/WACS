@@ -284,7 +284,23 @@ namespace Wacs.Transpiler.AOT
         public void SaveAssembly(string path)
         {
             Bake();
-            File.WriteAllBytes(path, _bakedBytes!);
+            // PAB stamps the saved DLL's corelib AssemblyRef as
+            // `System.Private.CoreLib` (the runtime impl identity, not
+            // the contract `System.Runtime` that the C# compiler sees in
+            // the standard ref pack). Consumer csprojs that reference
+            // the saved .dll trip CS0012 at compile time without an
+            // intervention. Post-process a copy of the baked bytes
+            // (never the in-process `_bakedBytes`, so the loaded
+            // `_assembly` keeps the impl-corelib identity) to swap the
+            // corelib AssemblyRef from `System.Private.CoreLib` to
+            // `System.Runtime`. See CoreLibAssemblyRefRewriter for the
+            // full rationale, the byte-level edit details, the known
+            // limitation (generic-instantiation FieldRefs in isolated
+            // ALCs), and the conditions under which this hack can be
+            // removed.
+            var diskBytes = (byte[])_bakedBytes!.Clone();
+            CoreLibAssemblyRefRewriter.RewritePrivateCoreLibToSystemRuntime(diskBytes);
+            File.WriteAllBytes(path, diskBytes);
         }
     }
 
@@ -338,6 +354,19 @@ namespace Wacs.Transpiler.AOT
             // supports DefineInitializedData (RVA-mapped fields) end-to-end
             // through Save, which is what unblocks zero-copy WASM data
             // segments — Lokad.ILPack 0.3.1 used to NRE on that path.
+            //
+            // PAB stamps the saved DLL's corelib reference as
+            // `System.Private.CoreLib` because we hand it
+            // `typeof(object).Assembly`. The MLC-corelib alternative the
+            // PAB docs recommend requires every type passed to PAB to come
+            // from MLC (not impl `typeof(...)`), which would mean
+            // refactoring every IL-emit call site. Instead, we keep impl
+            // types here and post-process the saved DLL via
+            // CoreLibAssemblyRefRewriter at SaveAssembly time, swapping
+            // the AssemblyRef for `System.Private.CoreLib` to
+            // `System.Runtime`. The runtime treats them as equivalent
+            // through type forwards, so semantics are preserved — only
+            // the C# compiler's reference-pack lookup needs the rename.
             var assemblyBuilder = new PersistedAssemblyBuilder(
                 assemblyName,
                 typeof(object).Assembly);

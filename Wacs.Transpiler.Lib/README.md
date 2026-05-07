@@ -223,6 +223,46 @@ Internal `*Builder` accessors (`ModuleClassBuilder`, `ExportsInterfaceBuilder`,
 …) skip the bake so emitters that run after `Transpile` returns can keep
 adding types via `result.ModuleBuilder`.
 
+#### Corelib AssemblyRef rewrite at SaveAssembly
+
+PAB stamps the saved DLL's corelib AssemblyRef as `System.Private.CoreLib`
+(the runtime impl identity, taken from `typeof(object).Assembly`). The C#
+compiler resolves base types from the ref-pack contract `System.Runtime`
+instead, so consumer csprojs that statically reference our saved `.dll`
+trip CS0012: *"the type 'Object' is defined in an assembly that is not
+referenced. You must add a reference to assembly 'System.Private.CoreLib'"*.
+
+The official PAB workaround
+([dotnet/runtime#103357](https://github.com/dotnet/runtime/issues/103357))
+is to hand PAB a `MetadataLoadContext`-loaded `System.Runtime` from the
+ref pack instead of `typeof(object).Assembly` — but only if every type
+passed to PAB is also MLC-bound. Our IL emit uses impl `typeof(...)`
+everywhere; mixing the two produces saved DLLs whose memberrefs can't
+runtime-bind. Migrating the entire IL-emit pipeline to MLC-bound corelib
+types is a large refactor we punted.
+
+Instead, [`CoreLibAssemblyRefRewriter`](AOT/CoreLibAssemblyRefRewriter.cs)
+post-processes a copy of the baked bytes at
+`TranspilationResult.SaveAssembly` time, rewriting the corelib AssemblyRef
+in place: name `System.Private.CoreLib` → `System.Runtime`, public-key
+blob shrunk from a 160-byte full key to the 8-byte System.Runtime PKT,
+Flags bit cleared. The runtime treats both identities as type-equivalent
+through type-forwards, so semantics are preserved. The in-process
+Bake/Load round-trip skips the rewriter entirely so the loaded
+`_assembly` keeps its impl-corelib identity for callers that introspect
+metadata reflectively.
+
+**Known limitation.** Generic-instantiation FieldRefs that cross the
+renamed corelib boundary (e.g. `[System.Runtime]List<Wacs.Core.Value>`)
+fail to bind in isolated `AssemblyLoadContext`s. The
+`AotLinkedCallIndirectModule_CrossProcess_RoundTrip` test exercises this
+(Skip-marked with the same explanation in the test source). The
+`wacs aot --wasi` smoke test path works fine because it uses Standard
+emission and never triggers AOT-linked generic FieldRefs. The hack
+disappears whenever PAB upstream fixes the issue or the IL-emit pipeline
+is migrated to MLC-bound corelib types — see the long-form rationale in
+the rewriter source.
+
 ### RVA-mapped data segments
 
 Wasm data segment bytes are stored as RVA-mapped initialized data in the
