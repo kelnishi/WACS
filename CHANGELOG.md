@@ -1,5 +1,32 @@
 # Changelog
 
+## [WACS.Transpiler.Lib 0.7.1] — Re-instantiation restores dropped active data segments
+
+Each Module instance's ctor copies active data segments from the
+process-wide `ModuleInit` registry, then drops them per spec §4.5.4 so
+later `memory.init` calls observe an empty segment. The drop turns the
+dict entry into an empty array (not a removal) — fine for instance 1,
+broken for instance 2: `CopyDataSegment` reads the empty entry and
+memory comes up zeroed. Surfaces whenever a transpiled Module class
+gets multiple `Activator.CreateInstance` calls in the same process.
+
+`InitializationHelper.InitializeCore` step 4a now restores from
+`ModuleInitData.SavedDataSegments` (already populated in step 6 of the
+first init) when the live registry entry is empty. Adds a
+`ModuleInit.RestoreDataSegment` overwriting variant —
+`RegisterDataSegmentAt` is no-op-on-collision by design (cross-process
+AotLinked path) and would skip the empty-entry case otherwise.
+
+The "multi-memory bug" investigation that surfaced this: the
+interpreter's binary parser handles multi-memory + active-data-with
+-explicit-memidx (DataFlags=2) correctly — verified against
+hand-encoded bytes byte-identical to wat2wasm output, plus all 32
+multi-memory spec wast fixtures. The actual gap was on the transpiler
+side and not multi-memory-specific. The new
+`AotLinkedSupportsActiveDataWithExplicitMemIdx` test exercises both
+the per-memidx routing and the re-instantiation path; the stale
+"interpreter gap" comment in `AotLinkedSupportsMultiMemory` is gone.
+
 ## [WACS.Cli 1.3.0 + WACS.Transpiler.Lib 0.7.0] — PersistedAssemblyBuilder, RVA-mapped data, EmissionTarget.Auto
 
 The transpiler retires `Lokad.ILPack 0.3.1` for the .NET 9+
