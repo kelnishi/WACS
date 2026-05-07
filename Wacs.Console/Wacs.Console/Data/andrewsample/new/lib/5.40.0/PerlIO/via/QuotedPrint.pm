@@ -1,0 +1,1 @@
+package PerlIO::via::QuotedPrint;use 5.008001;use strict;our$VERSION='0.10';use MIME::QuotedPrint ();1;sub PUSHED {bless \*PUSHED,$_[0]}sub FILL {my$line=readline($_[1]);return (defined$line)? MIME::QuotedPrint::decode_qp($line): undef}sub WRITE {return (print {$_[2]}MIME::QuotedPrint::encode_qp($_[1]))? length($_[1]): -1}

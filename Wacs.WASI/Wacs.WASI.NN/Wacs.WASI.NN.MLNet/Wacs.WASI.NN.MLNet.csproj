@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <LangVersion>9</LangVersion>
+        <Nullable>enable</Nullable>
+        <Title>Wacs WASI-NN ML.NET backend</Title>
+        <PackageId>WACS.WASI.NN.MLNet</PackageId>
+        <Authors>Kelvin Nishikawa</Authors>
+        <Description>ML.NET backend for WACS.WASI.NN. Hosts ONNX inference under an MLContext lifecycle so embedders can compose wasi-nn inference with the rest of their ML.NET pipeline (preprocessing transformers, custom predictors, etc.). For raw tensor inference with no pipeline integration, prefer Wacs.WASI.NN.OnnxRuntime — it avoids the Microsoft.ML transitive surface.</Description>
+        <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
+        <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <AssemblyName>Wacs.WASI.NN.MLNet</AssemblyName>
+        <AssemblyVersion>0.1.0</AssemblyVersion>
+        <Version>0.1.0</Version>
+        <RepositoryType>git</RepositoryType>
+        <TargetFramework>net8.0</TargetFramework>
+        <PackageTags>wasm;wasi;nn;ml;mlnet;wacs</PackageTags>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Wacs.WASI.NN\Wacs.WASI.NN.csproj" />
+        <!-- Microsoft.ML carries the MLContext / IDataView /
+             OnnxTransformer surface. Microsoft.ML.OnnxTransformer
+             pulls Microsoft.ML.OnnxRuntime as a transitive dep —
+             same native binaries the OnnxRuntime backend uses,
+             so consumers wiring this package can also reach the
+             low-level ORT API if they want. -->
+        <PackageReference Include="Microsoft.ML" Version="3.0.1" />
+        <PackageReference Include="Microsoft.ML.OnnxTransformer" Version="3.0.1" />
+        <!-- Override the transitive Microsoft.ML.OnnxRuntime
+             pinned by Microsoft.ML.OnnxTransformer 3.0.1
+             (which carries 1.16.x) — we need 1.20+ for the
+             OrtValue-based Run overload. The newer ORT is
+             API-compatible with the OnnxTransformer surface
+             since the public OnnxTransformer types don't
+             change with ORT minor bumps. -->
+        <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.20.1" />
+    </ItemGroup>
+
+</Project>

@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Library</OutputType>
+        <LangVersion>9</LangVersion>
+        <Nullable>enable</Nullable>
+        <Title>WebAssembly AOT Transpiler Tests</Title>
+        <Authors>Kelvin Nishikawa</Authors>
+        <TargetFramework>net9.0</TargetFramework>
+    </PropertyGroup>
+
+    <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+      <DefineConstants>TRACE;STRICT_EXECUTION</DefineConstants>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="testsettings.json">
+            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
+        <Content Include="xunit.runner.json">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </Content>
+    </ItemGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\..\Wacs.Core\Wacs.Core\Wacs.Core.csproj" />
+      <ProjectReference Include="..\..\Wacs.ComponentModel\Wacs.ComponentModel\Wacs.ComponentModel.csproj" />
+      <ProjectReference Include="..\Wacs.Transpiler.Lib\Wacs.Transpiler.Lib.csproj" />
+      <ProjectReference Include="..\Wacs.Transpiler\Wacs.Transpiler.csproj" />
+      <!-- Spec.Test (formerly Spec.Test.Data) holds the WastJson +
+           harness adapter types this project's data providers
+           consume. Spec.Test now bundles both the harness library
+           and its own test runner; cross-referencing it picks up
+           xunit/test-sdk transitively but those are fine because
+           this project is itself an xunit test runner. -->
+      <ProjectReference Include="..\..\Spec.Test\Spec.Test.csproj" />
+      <!-- Reference the production WASI host package + its DI
+           extensions so the resolver-compat tests probe the real
+           bundle / typed interfaces a guest would target. -->
+      <ProjectReference Include="..\..\Wacs.WASI\Wacs.WASI.Preview2\Wacs.WASI.Preview2\Wacs.WASI.Preview2.csproj" />
+      <ProjectReference Include="..\..\Wacs.WASI\Wacs.WASI.Preview2\Wacs.WASI.Preview2.DependencyInjection\Wacs.WASI.Preview2.DependencyInjection.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
+      <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.1" />
+      <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+      <PackageReference Include="xunit" Version="2.9.2" />
+      <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+        <PrivateAssets>all</PrivateAssets>
+        <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      </PackageReference>
+    </ItemGroup>
+
+</Project>

@@ -11,7 +11,7 @@ trade-offs. The fifth — statically linking a transpiled module's
 .dll into a NativeAOT-published consumer — is now a one-shot CLI:
 `wacs aot input.wasm -o app`. See the `wacs aot` section below.
 
-The numbers below come from `Wacs.Bench/Coldstart.cs` (and a since-
+The numbers below come from `Wacs.Bench/Wacs.Bench/Coldstart.cs` (and a since-
 removed `Wacs.Bench.Aot.Saved` experiment for the AOT-linked row),
 running on macOS / arm64 / net8.0 Release, 2026-05-01. The
 [Methodology](#methodology) section shows exactly how to reproduce each
@@ -205,7 +205,7 @@ Per-phase, R2R changes:
 | `transpiler-saved` cold total        | ~1.7× faster  | loader code precompiled; the loaded .dll is still pure IL though |
 | any `subsequent` median              | unchanged     | already tier-1 in steady state |
 
-**NativeAOT** (`Wacs.Bench.Aot/`, demonstrating the path) works today
+**NativeAOT** (`Wacs.Bench/Wacs.Bench.Aot/`, demonstrating the path) works today
 for interpreter-only embedders and delivers the largest cold-start
 improvement of all: no JIT in the process, no .NET runtime startup, a
 single self-contained native binary (~10 MB on macOS arm64 vs ~30 MB
@@ -216,8 +216,8 @@ The blast radius of dynamic codegen is genuinely contained:
 - `Wacs.Compilation` is a Roslyn source generator
   (`OutputItemType="Analyzer"`, `ReferenceOutputAssembly="false"`).
   It runs at compile time inside csc.exe and is **not in the runtime
-  output** — confirm with `ls Wacs.Bench/bin/Release/net8.0/ | grep
-  Wacs.Compilation` (empty). Its netstandard2.0 target framework
+  output** — confirm with `ls Wacs.Bench/Wacs.Bench/bin/Release/net8.0/
+  | grep Wacs.Compilation` (empty). Its netstandard2.0 target framework
   doesn't matter for runtime AOT.
 - `Wacs.Core` itself is `IsAotCompatible=true` and uses dynamic APIs
   in exactly one place (`Activator.CreateInstance(hostType)` in
@@ -246,7 +246,7 @@ The MSBuild trick to make AOT publish work: put `<PublishAot>true
 every referenced project's MSBuild evaluation, which trips
 `NETSDK1207` on the source generator's netstandard2.0 leg. As a
 csproj-local property, MSBuild scopes it correctly. See
-`Wacs.Bench.Aot/Wacs.Bench.Aot.csproj` for the working incantation.
+`Wacs.Bench/Wacs.Bench.Aot/Wacs.Bench.Aot.csproj` for the working incantation.
 
 **IL trimming** (`-p:PublishTrimmed=true`) is automatically enabled by
 NativeAOT — the published interpreter-only binary above is also
@@ -295,7 +295,7 @@ var module = TranspiledModuleLoader.Load(asm);
 module.InvokeExport("_start", Array.Empty<Value>());
 ```
 
-`TranspiledModuleLoader` (in `Wacs.Transpiler.Lib/Hosting/`) handles
+`TranspiledModuleLoader` (in `Wacs.Transpiler/Wacs.Transpiler.Lib/Hosting/`) handles
 finding the `Module` type, wiring imports, and turning exports into
 typed delegates.
 
@@ -316,7 +316,7 @@ dotnet run -c Release --project Wacs.Bench -- coldstart
 Spawns one fresh child process per runtime via
 `Process.Start(Environment.ProcessPath)`. Each child runs 7 trials of
 its assigned runtime: trial 0 is reported as "first," the median of
-trials 1–6 as "subsequent." Workload is `Wacs.Bench/fib.wasm` (242
+trials 1–6 as "subsequent." Workload is `Wacs.Bench/Wacs.Bench/fib.wasm` (242
 bytes), called with `fib(100)` (startup-dominated) and
 `fib(5_000_000)` (execution-dominated).
 
@@ -344,7 +344,7 @@ dotnet publish Wacs.Bench.Aot -c Release -r osx-arm64 -o /tmp/wacs-aot
 /tmp/wacs-aot/Wacs.Bench.Aot
 ```
 
-`Wacs.Bench.Aot/` is a separate consumer that references only
+`Wacs.Bench/Wacs.Bench.Aot/` is a separate consumer that references only
 `Wacs.Core` (no transpiler, no component-model) and sets
 `<PublishAot>true</PublishAot>` inside its csproj. Output is a
 self-contained ~10 MB native binary. Measures the same fib(100) +
@@ -414,11 +414,11 @@ example).
 
 ### Bench code locations
 
-- Top-level dispatcher: `Wacs.Bench/Program.cs`
-- Coldstart logic and per-runtime drivers: `Wacs.Bench/Coldstart.cs`
-- AOT bench (interpreter-only): `Wacs.Bench.Aot/`
+- Top-level dispatcher: `Wacs.Bench/Wacs.Bench/Program.cs`
+- Coldstart logic and per-runtime drivers: `Wacs.Bench/Wacs.Bench/Coldstart.cs`
+- AOT bench (interpreter-only): `Wacs.Bench/Wacs.Bench.Aot/`
 - Steady-state dispatch microbench (orthogonal to coldstart):
-  `Wacs.Bench/BASELINE.md`
+  `Wacs.Bench/Wacs.Bench/BASELINE.md`
 
 ---
 
