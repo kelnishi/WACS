@@ -38,7 +38,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Wacs.Compilation\Wacs.Compilation\Wacs.Compilation.csproj"
+    <ProjectReference Include="..\Wacs.Compilation\Wacs.Compilation.csproj"
                       OutputItemType="Analyzer"
                       ReferenceOutputAssembly="false"
                       UndefineProperties="PublishAot;PublishTrimmed;PublishReadyToRun;SelfContained;RuntimeIdentifier" />

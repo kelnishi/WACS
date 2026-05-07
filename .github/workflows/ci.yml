@@ -48,7 +48,7 @@ jobs:
         # pre-reorg on main (NRE in GeneratedDispatcher); excluded here
         # so CI surfaces the rest of the suite. Re-include once the
         # underlying GeneratedDispatcher null-handling is fixed.
-        run: dotnet test --configuration Release --no-build --verbosity normal Wacs.Compilation/Wacs.Compilation.Test/Wacs.Compilation.Test.csproj --filter "FullyQualifiedName!~CallIndirect_dispatches_via_funcref_table"
+        run: dotnet test --configuration Release --no-build --verbosity normal Wacs.Core/Wacs.Compilation.Test/Wacs.Compilation.Test.csproj --filter "FullyQualifiedName!~CallIndirect_dispatches_via_funcref_table"
 
       - name: Run ComponentModel Tests
         # Sequential xunit execution — parallelism flake noted in

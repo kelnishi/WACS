@@ -13,11 +13,11 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Feature.Detect", "Feature.D
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Transpiler", "Wacs.Transpiler\Wacs.Transpiler\Wacs.Transpiler.csproj", "{047F4142-5620-4F5B-AFD9-344D398EBEB9}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Compilation", "Wacs.Compilation\Wacs.Compilation\Wacs.Compilation.csproj", "{3330F8C1-1F9B-438E-B10B-BB1B34493E29}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Compilation", "Wacs.Core\Wacs.Compilation\Wacs.Compilation.csproj", "{3330F8C1-1F9B-438E-B10B-BB1B34493E29}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Transpiler.Test", "Wacs.Transpiler\Wacs.Transpiler.Test\Wacs.Transpiler.Test.csproj", "{86D77261-EBF7-4ED4-8958-57EDDC211E7F}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Compilation.Test", "Wacs.Compilation\Wacs.Compilation.Test\Wacs.Compilation.Test.csproj", "{854DD165-D7CB-45AE-8413-EA81F6D2C5C3}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Compilation.Test", "Wacs.Core\Wacs.Compilation.Test\Wacs.Compilation.Test.csproj", "{854DD165-D7CB-45AE-8413-EA81F6D2C5C3}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Transpiler.Lib", "Wacs.Transpiler\Wacs.Transpiler.Lib\Wacs.Transpiler.Lib.csproj", "{CC2BEAF6-76B7-449A-8D23-549025E6F120}"
 EndProject
