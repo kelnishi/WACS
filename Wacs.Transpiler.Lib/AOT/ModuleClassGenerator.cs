@@ -1451,9 +1451,9 @@ namespace Wacs.Transpiler.AOT
                 if (import.Desc is WasmModule.ImportDesc.TagDesc) return false;
             }
 
-            // Multi-memory needs additional Newobj sequencing AotLinked
-            // doesn't yet emit.
-            if (data.Memories.Length > 1) return false;
+            // EmitMemoryArray already iterates every declared memory and
+            // EmitDataSegmentCopies uses each segment's memIdx, so
+            // multi-memory just works under the existing IL.
 
             // Exception tags need TagInstance ctor IL we don't emit yet.
             if (data.ImportedTagCount > 0 || data.LocalTagTypes.Length > 0) return false;
