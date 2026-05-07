@@ -17,6 +17,21 @@
       <ProjectReference Include="..\Wacs.WASI.Preview2.DependencyInjection\Wacs.WASI.Preview2.DependencyInjection.csproj" />
     </ItemGroup>
 
+    <!-- Component-instantiation tests share process-wide
+         BinaryModuleParser / SpecFactory / WasmRuntime static
+         state that's not parallel-safe — same flake the
+         Wacs.Core.Test and Wacs.ComponentModel.Test projects
+         document. Linux CI surfaced it as 105/189 sporadic
+         failures with empty instruction lists from
+         InstructionSequence.ctor; xunit.runner.json disables
+         collection parallelism, which Spec.Test + Core.Test
+         use for the same reason. -->
+    <ItemGroup>
+        <None Include="xunit.runner.json">
+            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
+    </ItemGroup>
+
     <ItemGroup>
       <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" />
     </ItemGroup>
