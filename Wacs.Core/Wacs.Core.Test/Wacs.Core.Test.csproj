@@ -15,6 +15,17 @@
       <ProjectReference Include="..\..\Wacs.WASI\Wacs.WASI.Threads\Wacs.WASI.Threads\Wacs.WASI.Threads.csproj" />
     </ItemGroup>
 
+    <!-- Tests share a process-wide WasmRuntime / SpecFactory
+         static cache that's not parallel-safe. Same flake the
+         ComponentModel tests document. xunit.runner.json
+         disables collection parallelism; this just hands it
+         to MSBuild so it gets copied next to the test dll. -->
+    <ItemGroup>
+        <None Include="xunit.runner.json">
+            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
+    </ItemGroup>
+
     <ItemGroup>
       <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
       <PackageReference Include="xunit" Version="2.9.2" />
