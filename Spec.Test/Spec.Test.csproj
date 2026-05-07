@@ -20,6 +20,21 @@
         <None Include="testsettings.json">
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
+        <!-- Spec.Test stays sequential. The InstLocalGet /
+             InstI32Const intern-cache race fix in this PR
+             stopped the parser-level tearing the other suites
+             hit, but Spec.Test exercises a much broader
+             surface — switch-runtime + GeneratedDispatcher +
+             thousands of wast fixtures — and at default
+             parallelism still surfaces a native testhost
+             crash on Linux CI (see
+             https://github.com/kelnishi/WACS/actions/runs/25525376634).
+             Audit the additional static state in a follow-up
+             before flipping this; the parser-level fix is
+             still independently valuable. -->
+        <None Include="xunit.runner.json">
+            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
     </ItemGroup>
 
     <!--
