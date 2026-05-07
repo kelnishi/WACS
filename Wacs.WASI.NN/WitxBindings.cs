@@ -273,22 +273,23 @@ namespace Wacs.WASI.NN
             var mem = ctx.Memory();
             var builders = new List<ReadOnlyMemory<byte>>(arrLen);
             // Each element is (ptr, len) — 8 bytes per element.
+            // Wrap guest memory directly; per IBackend.LoadGraph
+            // contract the backend consumes the bytes before
+            // returning, so the view is valid for the call's
+            // duration. Saves the host-side copy that earlier
+            // versions paid up-front — for multi-MB ONNX (the
+            // typical WITX case) that's measurable on cold
+            // load. WITX guests can't actually pass GB-scale
+            // GGUFs since the legacy ABI lacks ggml encoding,
+            // but the same shape applies to large ONNX/TF.
             for (int i = 0; i < arrLen; i++)
             {
                 int elemBase = arrPtr + i * 8;
                 int ptr = ReadI32LE(mem, elemBase);
                 int len = ReadI32LE(mem, elemBase + 4);
-                // Materialize into a host-owned buffer rather
-                // than returning a view over guest memory —
-                // guest memory.grow can relocate the linear
-                // memory page after this lift returns; the
-                // backend's downstream call into native code
-                // would then see invalidated bytes. Phase 4
-                // adds a pinning lift that holds the page open
-                // for the load duration.
-                var buf = new byte[len];
-                if (len > 0) Array.Copy(mem, ptr, buf, 0, len);
-                builders.Add(buf);
+                builders.Add(len == 0
+                    ? ReadOnlyMemory<byte>.Empty
+                    : new ReadOnlyMemory<byte>(mem, ptr, len));
             }
             return builders;
         }
