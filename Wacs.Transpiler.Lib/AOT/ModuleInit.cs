@@ -44,6 +44,22 @@ namespace Wacs.Transpiler.AOT
         }
 
         /// <summary>
+        /// Register a data segment at a specific id if no entry already
+        /// exists. Used by AotLinked emission's static cctor to populate
+        /// passive segments on cross-process load — the in-process
+        /// transpile-time pre-pass already filled the entry under the
+        /// same id, so the call is a no-op there.
+        /// </summary>
+        public static void RegisterDataSegmentAt(int id, byte[] data)
+        {
+            lock (_lock)
+            {
+                if (!_dataSegments.ContainsKey(id))
+                    _dataSegments[id] = data ?? Array.Empty<byte>();
+            }
+        }
+
+        /// <summary>
         /// Cross-process load path: register every saved data segment and
         /// return the old-id → new-id remapping the caller applies to
         /// <see cref="ModuleInitData.ActiveDataSegments"/> (the

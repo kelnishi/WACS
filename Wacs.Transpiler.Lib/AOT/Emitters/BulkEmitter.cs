@@ -169,6 +169,19 @@ namespace Wacs.Transpiler.AOT.Emitters
             src.Slice(0, len).CopyTo(dst.AsSpan(dstOffset, len));
         }
 
+        /// <summary>
+        /// Register a passive data segment in <see cref="ModuleInit"/> at
+        /// the given transpile-time id, materializing the RVA-mapped span
+        /// to a heap <see cref="byte"/> array. Called from AotLinked ctor
+        /// IL once per Module instance — the underlying registry call is
+        /// idempotent on repeat invocations (in-process pre-pass already
+        /// populated the id; cross-process load needs the populate).
+        /// </summary>
+        public static void RegisterPassiveDataSegment(int id, ReadOnlySpan<byte> bytes)
+        {
+            ModuleInit.RegisterDataSegmentAt(id, bytes.ToArray());
+        }
+
         public static void MemoryCopy(ThinContext ctx, int dstMemIdx, int srcMemIdx,
             int dst, int src, int len)
         {

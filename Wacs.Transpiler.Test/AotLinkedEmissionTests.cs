@@ -115,16 +115,15 @@ namespace Wacs.Transpiler.Test
         [Fact]
         public void AutoEmissionFallsBackToStandardForUnsupportedShape()
         {
-            // BuildPassiveDataWasm has a memory + a *passive* data segment
-            // (no instructions actually invoke memory.init on it; we only
-            // need the passive declaration to put the module out of
-            // IsAotLinkedAutoPromotable's safe subset). Auto must fall
-            // back to Standard for it; the saved .dll therefore carries
-            // the __WACSInit codec blob.
-            var (modInst, runtime) = ParseAndInstantiate(BuildPassiveDataWasm());
+            // BuildMultiMemoryWasm declares two memories — out of
+            // IsAotLinkedAutoPromotable's envelope (the AotLinked ctor's
+            // memory-allocation IL only handles memory[0]). Auto must fall
+            // back to Standard; the saved .dll therefore carries the
+            // __WACSInit codec blob.
+            var (modInst, runtime) = ParseAndInstantiate(BuildMultiMemoryWasm());
             var opts = new TranspilerOptions { AssemblyName = "Wacs.Auto.Fallback" };
             var result = new ModuleTranspiler("ignored", opts)
-                .Transpile(modInst, runtime, "PassiveMod");
+                .Transpile(modInst, runtime, "MultiMemMod");
 
             var dllPath = Path.Combine(Path.GetTempPath(), $"{result.Assembly.GetName().Name}.dll");
             try
@@ -142,36 +141,85 @@ namespace Wacs.Transpiler.Test
             }
         }
 
+        [Fact]
+        public void AotLinkedSupportsPassiveDataSegmentRoundTrip()
+        {
+            // (module
+            //   (memory 1)
+            //   (data "\2A")    ;; passive
+            //   (func (export "load_passive") (result i32)
+            //     i32.const 0    ;; dst
+            //     i32.const 0    ;; src offset in segment
+            //     i32.const 1    ;; len
+            //     memory.init 0  ;; copy passive segment 0 into memory
+            //     i32.const 0
+            //     i32.load8_u))
+            //
+            // Exercises the passive-data registration path:
+            // EmitPassiveDataSegmentRegistrations stamps the bytes into
+            // ModuleInit at ctor time, then memory.init resolves the
+            // segment by id and copies the byte 0x2A to memory[0]; load8_u
+            // reads it back.
+            var (modInst, runtime) = ParseAndInstantiate(BuildPassiveMemoryInitWasm());
+            var result = new ModuleTranspiler("Wacs.AotLink.Passive",
+                new TranspilerOptions { Emission = EmissionTarget.AotLinked })
+                .Transpile(modInst, runtime, "PassiveMod");
+            int read = (int)Invoke(result, "load_passive");
+            Assert.Equal(0x2A, read);
+        }
+
+        // Same shape as documented in AotLinkedSupportsPassiveDataSegmentRoundTrip.
+        // Includes a DataCount section (id 12) before code — required for
+        // any module declaring passive data segments per WASM 3.0 §5.5.18.
+        private static byte[] BuildPassiveMemoryInitWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // type: () -> i32
+            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F,
+            // function: 1 func, type 0
+            0x03, 0x02, 0x01, 0x00,
+            // memory: 1 memory, min=1
+            0x05, 0x03, 0x01, 0x00, 0x01,
+            // export: "load_passive" -> func 0
+            0x07, 0x10, 0x01, 0x0C,
+                0x6C, 0x6F, 0x61, 0x64, 0x5F, 0x70, 0x61, 0x73, 0x73, 0x69, 0x76, 0x65,
+                0x00, 0x00,
+            // data count: 1 (required when passive data segments present)
+            0x0C, 0x01, 0x01,
+            // code: i32.const 0; i32.const 0; i32.const 1;
+            //       memory.init 0 (0xFC 0x08 segidx=0 memidx=0);
+            //       i32.const 0; i32.load8_u align=0 offset=0; end
+            // body bytes: locals=0 + i32.const 0 + i32.const 0 + i32.const 1
+            //   + 0xFC 0x08 0x00 0x00 + i32.const 0 + i32.load8_u 0x00 0x00 + end
+            // = 1 + 2 + 2 + 2 + 4 + 2 + 3 + 1 = 17 bytes
+            0x0A, 0x13, 0x01, 0x11,
+                0x00,
+                0x41, 0x00,
+                0x41, 0x00,
+                0x41, 0x01,
+                0xFC, 0x08, 0x00, 0x00,
+                0x41, 0x00,
+                0x2D, 0x00, 0x00,
+                0x0B,
+            // data section: 1 segment, mode 0x01 (passive), 1 byte 0x2A
+            0x0B, 0x04, 0x01, 0x01, 0x01, 0x2A,
+        };
+
         // (module
-        //   (memory 1)
-        //   (data "\2A")            ;; passive (mode 0x01)
+        //   (memory 1) (memory 1)   ;; multi-memory; rejected by Auto
         //   (func (export "noop") (result i32) i32.const 0))
-        // The passive data segment forces Auto's gate to reject the
-        // module (passive segments need ModuleInit registration that
-        // AotLinked doesn't reproduce post-Bake), so emission falls back
-        // to Standard.
-        private static byte[] BuildPassiveDataWasm() => new byte[]
+        // Multi-memory is in the reject set of IsAotLinkedAutoPromotable
+        // (the AotLinked ctor only emits Newobj for memory[0]), so
+        // emission falls back to Standard.
+        private static byte[] BuildMultiMemoryWasm() => new byte[]
         {
             0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
             0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F,
             0x03, 0x02, 0x01, 0x00,
-            0x05, 0x03, 0x01, 0x00, 0x01,
+            // memory section: 2 memories, both min=1 no max
+            0x05, 0x05, 0x02, 0x00, 0x01, 0x00, 0x01,
             0x07, 0x08, 0x01, 0x04, 0x6E, 0x6F, 0x6F, 0x70, 0x00, 0x00,
             0x0A, 0x06, 0x01, 0x04, 0x00, 0x41, 0x00, 0x0B,
-            // Data section: 1 segment, mode 0x01 (passive), 1 byte 0x2A.
-            // DataCountSection (id 12) is required for any module that
-            // declares passive data segments (WASM 3.0 §5.5.18) — it
-            // sits before the code section. Layout:
-            //   0x0C 0x01 0x01     ;; section id, length=1, count=1
-            // Plus the data section itself:
-            //   0x0B 0x04 0x01 0x01 0x01 0x2A
-            //   ^id  ^len ^count ^mode ^len ^bytes
-            // Since the data-count section must precede code, we'd need
-            // to reshuffle the byte layout. Skip for this fixture: emit
-            // declaratively-passive via mode 0x01 right after the code
-            // section. The validator may flag missing data-count, but
-            // BinaryModuleParser.ParseWasm tolerates the older format.
-            0x0B, 0x04, 0x01, 0x01, 0x01, 0x2A,
         };
 
         [Fact]
