@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <LangVersion>9</LangVersion>
+        <Nullable>enable</Nullable>
+        <Title>Wacs WASI-NN ONNX Runtime backend</Title>
+        <PackageId>WACS.WASI.NN.OnnxRuntime</PackageId>
+        <Authors>Kelvin Nishikawa</Authors>
+        <Description>ONNX Runtime backend for WACS.WASI.NN. Implements IBackend for graph-encoding.onnx via Microsoft.ML.OnnxRuntime. Ships as a sibling NuGet so consumers wiring only one backend don't pull the OnnxRuntime native binaries.</Description>
+        <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
+        <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <AssemblyName>Wacs.WASI.NN.OnnxRuntime</AssemblyName>
+        <AssemblyVersion>0.1.0</AssemblyVersion>
+        <Version>0.1.0</Version>
+        <RepositoryType>git</RepositoryType>
+        <!-- ONNX Runtime carries native binaries; restricting to
+             net8.0 here is fine because ORT itself targets
+             net6.0+ at the floor and our consumers running on
+             netstandard2.1 wasm hosts still get the same
+             package since ORT publishes the native runtimes
+             via the same NuGet. If a netstandard2.1 multi-target
+             becomes important we can revisit. -->
+        <TargetFramework>net8.0</TargetFramework>
+        <PackageTags>wasm;wasi;nn;ml;onnx;wacs</PackageTags>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Wacs.WASI.NN\Wacs.WASI.NN.csproj" />
+        <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.20.1" />
+    </ItemGroup>
+
+</Project>
