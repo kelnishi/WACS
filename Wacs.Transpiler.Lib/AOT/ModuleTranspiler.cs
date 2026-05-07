@@ -14,8 +14,11 @@
 
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Runtime.Loader;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
@@ -25,21 +28,59 @@ using Wacs.Transpiler.AOT.Emitters;
 namespace Wacs.Transpiler.AOT
 {
     /// <summary>
-    /// Result of transpiling a module, containing the generated assembly
-    /// and metadata needed to wire it into the WACS runtime.
+    /// Result of transpiling a module. Lifecycle: built into a
+    /// <see cref="PersistedAssemblyBuilder"/>, then "baked" (saved to a
+    /// <see cref="MemoryStream"/> and reloaded via
+    /// <see cref="AssemblyLoadContext"/>) before runtime invocation.
+    /// <para>
+    /// <b>Pre-bake</b>: types are <see cref="PersistedAssemblyBuilder"/>
+    /// metadata-only. Safe for emit-time inspection (Namespace, GetMethod,
+    /// GetField, IL-emit Ldtoken) and for adding more types via
+    /// <see cref="ModuleBuilder"/>. NOT safe for <see cref="Activator.CreateInstance"/>
+    /// or any code path that needs a runtime-loaded type.
+    /// </para>
+    /// <para>
+    /// <b>Post-bake</b>: <see cref="Assembly"/>, <see cref="ModuleClass"/>,
+    /// <see cref="ExportsInterface"/>, <see cref="ImportsInterface"/>,
+    /// <see cref="FunctionsType"/>, <see cref="Methods"/>, and
+    /// <see cref="FunctionMethodMap"/> are remapped to the loaded assembly's
+    /// equivalents. <see cref="ModuleBuilder"/> is then frozen — adding new
+    /// types post-bake is not supported.
+    /// </para>
+    /// <para>
+    /// Public type/method accessors auto-bake on first access. Emitters that
+    /// run between <c>Transpile()</c> and <c>SaveAssembly()</c> (e.g.
+    /// <see cref="MainEntryEmitter"/>) read pre-bake metadata via the
+    /// <c>*Builder</c>-suffixed accessors to avoid prematurely freezing the
+    /// builder.
+    /// </para>
     /// </summary>
     public class TranspilationResult
     {
-        public Assembly Assembly { get; }
-        public Type FunctionsType { get; }
-        public MethodInfo[] Methods { get; }
+        // Backing state. Replaced in-place by Bake(); _baked guards.
+        private bool _baked;
+        private byte[]? _bakedBytes;
+        private Assembly _assembly;
+        private Type _functionsType;
+        private Type? _exportsInterface;
+        private Type? _importsInterface;
+        private Type? _moduleClass;
+        private MethodInfo[] _methods;
+        private Dictionary<int, MethodInfo> _functionMethodMap;
+
+        public Assembly Assembly { get { Bake(); return _assembly; } }
+        public Type FunctionsType { get { Bake(); return _functionsType; } }
+        public MethodInfo[] Methods { get { Bake(); return _methods; } }
         public ModuleMetadata.Manifest Manifest { get; }
 
         /// <summary>
         /// Maps wasm function index (within the module's locally-defined functions)
         /// to the corresponding MethodInfo in the transpiled assembly.
         /// </summary>
-        public IReadOnlyDictionary<int, MethodInfo> FunctionMethodMap { get; }
+        public IReadOnlyDictionary<int, MethodInfo> FunctionMethodMap
+        {
+            get { Bake(); return _functionMethodMap; }
+        }
 
         public int TranspiledCount => Manifest.TranspiledCount;
         public int FallbackCount => Manifest.FallbackCount;
@@ -48,13 +89,25 @@ namespace Wacs.Transpiler.AOT
         public IReadOnlyList<TranspilerDiagnostic> Diagnostics { get; }
 
         /// <summary>Generated interface for module exports. Null if no exports.</summary>
-        public Type? ExportsInterface { get; }
+        public Type? ExportsInterface { get { Bake(); return _exportsInterface; } }
 
         /// <summary>Generated interface for module imports. Null if no imports.</summary>
-        public Type? ImportsInterface { get; }
+        public Type? ImportsInterface { get { Bake(); return _importsInterface; } }
 
         /// <summary>Generated Module class (implements IExports, accepts IImports).</summary>
-        public Type? ModuleClass { get; }
+        public Type? ModuleClass { get { Bake(); return _moduleClass; } }
+
+        // === Pre-bake (build-time) accessors for in-Lib emitters ===
+        // These return the metadata-only PersistedTypeBuilder.CreateType()
+        // results without triggering a Save+Load. Safe to use for IL emit
+        // and reflective metadata reads (Namespace, GetMethod, GetField).
+        // Accessing these does NOT freeze ModuleBuilder, so emitters can
+        // continue calling DefineType.
+
+        internal Type FunctionsTypeBuilder => _functionsType;
+        internal Type? ModuleClassBuilder => _moduleClass;
+        internal Type? ExportsInterfaceBuilder => _exportsInterface;
+        internal Type? ImportsInterfaceBuilder => _importsInterface;
 
         /// <summary>Export method metadata (name, type, index).</summary>
         public IReadOnlyList<InterfaceMethod> ExportMethods { get; }
@@ -72,7 +125,7 @@ namespace Wacs.Transpiler.AOT
         /// The still-open <see cref="ModuleBuilder"/> the transpiler wrote into,
         /// kept live so callers can define additional types (e.g.
         /// <see cref="MainEntryEmitter"/> for <c>--emit-main</c>) before the
-        /// assembly is persisted to disk.
+        /// assembly is persisted to disk. Frozen once <see cref="Bake"/> runs.
         /// </summary>
         public ModuleBuilder ModuleBuilder { get; }
 
@@ -91,33 +144,163 @@ namespace Wacs.Transpiler.AOT
             IReadOnlyList<InterfaceMethod> importMethods,
             FunctionType[]? allFunctionTypes = null)
         {
-            Assembly = assembly;
+            _assembly = assembly;
             ModuleBuilder = moduleBuilder;
-            FunctionsType = functionsType;
-            Methods = methods;
+            _functionsType = functionsType;
+            _methods = methods;
             Manifest = manifest;
-            FunctionMethodMap = functionMethodMap;
+            _functionMethodMap = functionMethodMap;
             Diagnostics = diagnostics;
-            ExportsInterface = exportsInterface;
-            ImportsInterface = importsInterface;
-            ModuleClass = moduleClass;
+            _exportsInterface = exportsInterface;
+            _importsInterface = importsInterface;
+            _moduleClass = moduleClass;
             ExportMethods = exportMethods;
             ImportMethods = importMethods;
             AllFunctionTypes = allFunctionTypes ?? Array.Empty<FunctionType>();
         }
 
+        // Captured at end of Transpile so Bake can re-evaluate element
+        // segments whose initializers depend on emitted GC types being
+        // runtime-instantiable (only true after Save+Load).
+        private GcTypeEmitter? _gcTypeEmitterForReeval;
+        private List<(int segId, Wacs.Core.Types.Expression[] inits)>? _pendingElemReeval;
+
+        internal void SetPendingElemReeval(
+            GcTypeEmitter gcTypeEmitter,
+            List<(int segId, Wacs.Core.Types.Expression[] inits)> pending)
+        {
+            _gcTypeEmitterForReeval = gcTypeEmitter;
+            _pendingElemReeval = pending;
+        }
+
         /// <summary>
-        /// Persist the in-memory dynamic assembly to disk as a portable .NET
-        /// assembly file. Uses Lokad.ILPack to serialize the dynamic
-        /// <see cref="System.Reflection.Emit.AssemblyBuilder"/>'s metadata and
-        /// IL into a standalone PE image that can be loaded with
-        /// <c>Assembly.LoadFrom</c>.
+        /// Save the in-memory <see cref="PersistedAssemblyBuilder"/> to a
+        /// <see cref="MemoryStream"/>, load that stream into the default
+        /// <see cref="AssemblyLoadContext"/>, and remap public type/method
+        /// accessors onto the loaded assembly. Idempotent.
+        /// <para>
+        /// Triggered automatically on first access to public type accessors
+        /// (Assembly, ModuleClass, FunctionsType, Methods,
+        /// FunctionMethodMap, ExportsInterface, ImportsInterface) and by
+        /// <see cref="SaveAssembly"/>. Callers that need to add more types
+        /// to <see cref="ModuleBuilder"/> must do so before triggering a bake.
+        /// </para>
+        /// </summary>
+        public void Bake()
+        {
+            if (_baked) return;
+
+            if (_assembly is PersistedAssemblyBuilder pab)
+            {
+                using var ms = new MemoryStream();
+                pab.Save(ms);
+                _bakedBytes = ms.ToArray();
+                using var loadStream = new MemoryStream(_bakedBytes, writable: false);
+                _assembly = AssemblyLoadContext.Default.LoadFromStream(loadStream);
+            }
+            // else: already a runtime-loaded Assembly (e.g. test harness
+            // injected one). Skip the round-trip but still remap.
+
+            _functionsType = ResolveType(_functionsType)!;
+            _moduleClass = ResolveType(_moduleClass);
+            _exportsInterface = ResolveType(_exportsInterface);
+            _importsInterface = ResolveType(_importsInterface);
+
+            for (int i = 0; i < _methods.Length; i++)
+                _methods[i] = ResolveMethod(_methods[i])!;
+
+            var remappedMap = new Dictionary<int, MethodInfo>(_functionMethodMap.Count);
+            foreach (var kv in _functionMethodMap)
+                remappedMap[kv.Key] = ResolveMethod(kv.Value)!;
+            _functionMethodMap = remappedMap;
+
+            // Remap GcTypeRegistry entries owned by this transpilation
+            // to the loaded assembly's runtime types — runtime helpers
+            // (ConvertStoreArray / ConvertStoreStruct) call
+            // Activator.CreateInstance against the registered Type and
+            // need a runtime, not a metadata-only, Type.
+            if (InitDataId >= 0)
+                GcTypeRegistry.RemapToLoadedTypes(InitDataId, _assembly);
+
+            // Element segments whose initializers materialize GC objects
+            // could not be evaluated at transpile time (the emitted CLR
+            // class was metadata-only). With the loaded assembly online,
+            // remap the GcTypeEmitter's emitted types and replay the
+            // captured initializers.
+            if (_pendingElemReeval != null && _gcTypeEmitterForReeval != null
+                && _pendingElemReeval.Count > 0)
+            {
+                _gcTypeEmitterForReeval.RemapEmittedToLoadedTypes(_assembly);
+                foreach (var (segId, inits) in _pendingElemReeval)
+                {
+                    var values = new Value[inits.Length];
+                    for (int i = 0; i < inits.Length; i++)
+                        values[i] = ModuleTranspiler.EvaluateElemExprForBake(
+                            inits[i], _gcTypeEmitterForReeval);
+                    ModuleInit.UpdateElemSegment(segId, values);
+                }
+                _pendingElemReeval = null;
+                _gcTypeEmitterForReeval = null;
+            }
+
+            _baked = true;
+        }
+
+        private Type? ResolveType(Type? metadataType)
+        {
+            if (metadataType == null) return null;
+            return _assembly.GetType(metadataType.FullName!) ?? metadataType;
+        }
+
+        private MethodInfo? ResolveMethod(MethodInfo? metadataMethod)
+        {
+            if (metadataMethod == null) return null;
+            var dt = ResolveType(metadataMethod.DeclaringType);
+            if (dt == null) return metadataMethod;
+            // Match by name + parameter signature; transpiled functions
+            // typically have unique names, but the type may also expose
+            // overloads (e.g. ctors), so be precise.
+            var paramTypes = metadataMethod.GetParameters()
+                .Select(p => p.ParameterType.FullName!)
+                .ToArray();
+            return dt.GetMethods(BindingFlags.Public | BindingFlags.NonPublic |
+                                 BindingFlags.Static | BindingFlags.Instance |
+                                 BindingFlags.DeclaredOnly)
+                .FirstOrDefault(m => m.Name == metadataMethod.Name
+                    && m.GetParameters().Length == paramTypes.Length
+                    && m.GetParameters()
+                        .Select(p => p.ParameterType.FullName)
+                        .SequenceEqual(paramTypes))
+                ?? dt.GetMethod(metadataMethod.Name) ?? metadataMethod;
+        }
+
+        /// <summary>
+        /// Persist the transpiled assembly to disk as a standalone PE image.
+        /// Uses <see cref="PersistedAssemblyBuilder.Save(Stream)"/> via
+        /// <see cref="Bake"/>; the saved bytes are valid for
+        /// <c>Assembly.LoadFrom</c> in any consumer process.
         /// </summary>
         /// <param name="path">Output path (typically ending in <c>.dll</c>).</param>
         public void SaveAssembly(string path)
         {
-            var gen = new Lokad.ILPack.AssemblyGenerator();
-            gen.GenerateAssembly(Assembly, path);
+            Bake();
+            // PAB stamps the saved DLL's corelib AssemblyRef as
+            // `System.Private.CoreLib` (the runtime impl identity, not
+            // the contract `System.Runtime` that the C# compiler sees in
+            // the standard ref pack). Consumer csprojs that reference
+            // the saved .dll trip CS0012 at compile time without an
+            // intervention. Post-process a copy of the baked bytes
+            // (never the in-process `_bakedBytes`, so the loaded
+            // `_assembly` keeps the impl-corelib identity) to swap the
+            // corelib AssemblyRef from `System.Private.CoreLib` to
+            // `System.Runtime`. See CoreLibAssemblyRefRewriter for the
+            // full rationale, the byte-level edit details, the known
+            // limitation (generic-instantiation FieldRefs in isolated
+            // ALCs), and the conditions under which this hack can be
+            // removed.
+            var diskBytes = (byte[])_bakedBytes!.Clone();
+            CoreLibAssemblyRefRewriter.RewritePrivateCoreLibToSystemRuntime(diskBytes);
+            File.WriteAllBytes(path, diskBytes);
         }
     }
 
@@ -163,9 +346,30 @@ namespace Wacs.Transpiler.AOT
                 var uniqueId = System.Threading.Interlocked.Increment(ref _assemblyCounter);
                 assemblyName = new AssemblyName($"{_namespace}.{moduleName}_{uniqueId}");
             }
-            var assemblyBuilder = AssemblyBuilder.DefineDynamicAssembly(
+            // PersistedAssemblyBuilder is the .NET 9+ replacement for the
+            // legacy `AssemblyBuilderAccess.Save` mode (removed in .NET Core).
+            // Built types are metadata-only until the assembly is saved and
+            // loaded back; TranspilationResult.Bake() handles that round-trip
+            // before runtime invocation. Critical: PersistedAssemblyBuilder
+            // supports DefineInitializedData (RVA-mapped fields) end-to-end
+            // through Save, which is what unblocks zero-copy WASM data
+            // segments — Lokad.ILPack 0.3.1 used to NRE on that path.
+            //
+            // PAB stamps the saved DLL's corelib reference as
+            // `System.Private.CoreLib` because we hand it
+            // `typeof(object).Assembly`. The MLC-corelib alternative the
+            // PAB docs recommend requires every type passed to PAB to come
+            // from MLC (not impl `typeof(...)`), which would mean
+            // refactoring every IL-emit call site. Instead, we keep impl
+            // types here and post-process the saved DLL via
+            // CoreLibAssemblyRefRewriter at SaveAssembly time, swapping
+            // the AssemblyRef for `System.Private.CoreLib` to
+            // `System.Runtime`. The runtime treats them as equivalent
+            // through type forwards, so semantics are preserved — only
+            // the C# compiler's reference-pack lookup needs the rename.
+            var assemblyBuilder = new PersistedAssemblyBuilder(
                 assemblyName,
-                AssemblyBuilderAccess.Run);
+                typeof(object).Assembly);
             var moduleBuilder = assemblyBuilder.DefineDynamicModule(assemblyName.Name!);
 
             var typeBuilder = moduleBuilder.DefineType(
@@ -295,18 +499,28 @@ namespace Wacs.Transpiler.AOT
             // Deferred until AFTER gcTypeEmitter.EmitTypes so the evaluator can
             // look up emitted CLR types when an initializer constructs GC
             // objects (array.new / array.new_fixed / array.new_default).
+            // Under PersistedAssemblyBuilder the emitted CLR types are
+            // metadata-only at this point — array.new evaluation can't yet
+            // call Activator.CreateInstance on them. Capture (segId,
+            // initializers) for any segment whose evaluation depends on
+            // emitted types so TranspilationResult.Bake can re-evaluate
+            // post-Save+Load against the runtime types.
             int elemSegmentBaseId = -1;
+            var pendingElemReeval = new List<(int segId, Wacs.Core.Types.Expression[] inits)>();
             for (int e = 0; e < moduleInst.Repr.Elements.Length; e++)
             {
                 var elem = moduleInst.Repr.Elements[e];
                 var values = new Value[elem.Initializers.Length];
+                bool needsReeval = false;
                 for (int i = 0; i < elem.Initializers.Length; i++)
                 {
                     var expr = elem.Initializers[i];
                     values[i] = EvaluateElemExpr(expr, gcTypeEmitter);
+                    if (HasGcConstructor(expr)) needsReeval = true;
                 }
                 int id = ModuleInit.RegisterElemSegment(values);
                 if (e == 0) elemSegmentBaseId = id;
+                if (needsReeval) pendingElemReeval.Add((id, elem.Initializers));
             }
 
             // === Pass 1: Create method stubs ===
@@ -477,6 +691,12 @@ namespace Wacs.Transpiler.AOT
                 interfaceGen.ExportMethods,
                 interfaceGen.ImportMethods,
                 allFunctionTypes);
+            // Stash post-bake re-evaluation work for element segments whose
+            // initializers materialize GC objects (array.new / array.new_fixed
+            // / array.new_default). Pre-bake those instantiations have no
+            // runtime type to target; Bake replays them once the assembly
+            // round-trips.
+            result.SetPendingElemReeval(gcTypeEmitter, pendingElemReeval);
             result.InitDataId = moduleClassGen.InitDataId;
             return result;
         }
@@ -639,6 +859,35 @@ namespace Wacs.Transpiler.AOT
         /// instance of the emitted CLR type, so <see cref="Emitters.GcRuntimeHelpers.ExtractElemValue"/>
         /// can unwrap it at runtime without re-running the expression.
         /// </summary>
+        /// <summary>
+        /// Bake-time entry point for re-evaluating element-segment
+        /// initializers once the assembly has been saved+loaded.
+        /// <see cref="GcTypeEmitter.RemapEmittedToLoadedTypes"/> must
+        /// have been called first so <c>BuildArrayInstance</c>'s
+        /// <c>Activator.CreateInstance</c> sees runtime types.
+        /// </summary>
+        internal static Value EvaluateElemExprForBake(
+            Wacs.Core.Types.Expression expr,
+            GcTypeEmitter gcTypeEmitter)
+            => EvaluateElemExpr(expr, gcTypeEmitter);
+
+        /// <summary>
+        /// Whether <paramref name="expr"/> contains any GC constructor
+        /// (<c>array.new</c>, <c>array.new_default</c>, <c>array.new_fixed</c>)
+        /// that needs the emitted CLR type to be runtime-instantiable.
+        /// </summary>
+        private static bool HasGcConstructor(Wacs.Core.Types.Expression expr)
+        {
+            foreach (var inst in expr.Instructions)
+            {
+                if (inst is Wacs.Core.Instructions.GC.InstArrayNew
+                    || inst is Wacs.Core.Instructions.GC.InstArrayNewDefault
+                    || inst is Wacs.Core.Instructions.GC.InstArrayNewFixed)
+                    return true;
+            }
+            return false;
+        }
+
         private static Value EvaluateElemExpr(
             Wacs.Core.Types.Expression expr,
             GcTypeEmitter? gcTypeEmitter)
@@ -713,7 +962,21 @@ namespace Wacs.Transpiler.AOT
             var clrType = gcTypeEmitter.GetEmittedType(typeIdx);
             if (clrType == null) return new Value(ValType.Any);
 
-            var instance = Activator.CreateInstance(clrType);
+            // Under PersistedAssemblyBuilder the emitted class is metadata-
+            // only at this point — Activator.CreateInstance throws
+            // "Type must be a type provided by the runtime." Element-segment
+            // array.new evaluation needs a deferred-instantiation rewire
+            // (tracked as follow-up); for now, fall back to a typed-null
+            // Value so transpile completes.
+            object? instance;
+            try
+            {
+                instance = Activator.CreateInstance(clrType);
+            }
+            catch (ArgumentException)
+            {
+                return new Value(ValType.Any);
+            }
             var elemField = clrType.GetField("elements");
             var lenField = clrType.GetField("length");
             if (instance == null || elemField == null) return new Value(ValType.Any);
@@ -737,7 +1000,16 @@ namespace Wacs.Transpiler.AOT
             var clrType = gcTypeEmitter.GetEmittedType(typeIdx);
             if (clrType == null) return new Value(ValType.Any);
 
-            var instance = Activator.CreateInstance(clrType);
+            // See BuildArrayInstance for the metadata-only fallback rationale.
+            object? instance;
+            try
+            {
+                instance = Activator.CreateInstance(clrType);
+            }
+            catch (ArgumentException)
+            {
+                return new Value(ValType.Any);
+            }
             var elemField = clrType.GetField("elements");
             var lenField = clrType.GetField("length");
             if (instance == null || elemField == null) return new Value(ValType.Any);

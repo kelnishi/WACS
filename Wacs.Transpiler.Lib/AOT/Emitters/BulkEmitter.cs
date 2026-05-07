@@ -156,6 +156,53 @@ namespace Wacs.Transpiler.AOT.Emitters
     /// </summary>
     public static class BulkHelpers
     {
+        /// <summary>
+        /// Zero-copy active-segment install: copy <paramref name="len"/> bytes
+        /// from an RVA-mapped <see cref="ReadOnlySpan{Byte}"/> (typically
+        /// produced by <c>RuntimeHelpers.CreateSpan&lt;byte&gt;</c> over a
+        /// <c>DefineInitializedData</c> field) into the wasm linear-memory
+        /// backing array at <paramref name="dstOffset"/>. Bounds are
+        /// transpile-time constants; no defensive checks here.
+        /// </summary>
+        public static void CopySegmentToMemory(ReadOnlySpan<byte> src, byte[] dst, int dstOffset, int len)
+        {
+            src.Slice(0, len).CopyTo(dst.AsSpan(dstOffset, len));
+        }
+
+        /// <summary>
+        /// Register a passive data segment in <see cref="ModuleInit"/> at
+        /// the given transpile-time id, materializing the RVA-mapped span
+        /// to a heap <see cref="byte"/> array. Called from AotLinked ctor
+        /// IL once per Module instance — the underlying registry call is
+        /// idempotent on repeat invocations (in-process pre-pass already
+        /// populated the id; cross-process load needs the populate).
+        /// </summary>
+        public static void RegisterPassiveDataSegment(int id, ReadOnlySpan<byte> bytes)
+        {
+            ModuleInit.RegisterDataSegmentAt(id, bytes.ToArray());
+        }
+
+        /// <summary>
+        /// Register a passive element segment in <see cref="ModuleInit"/>
+        /// from a compact <c>int[]</c> encoding: <c>-1</c> = typed null
+        /// funcref; any other value is the function index. Called from
+        /// AotLinked ctor IL once per Module instance — the registry
+        /// call is idempotent. Funcref / null mix only; GC-typed
+        /// element values are gated out by the feasibility check.
+        /// </summary>
+        public static void RegisterPassiveElemSegment(int id, int[] encodedFuncIndices)
+        {
+            var values = new Value[encodedFuncIndices.Length];
+            for (int j = 0; j < encodedFuncIndices.Length; j++)
+            {
+                int idx = encodedFuncIndices[j];
+                values[j] = idx == -1
+                    ? new Value(Wacs.Core.Types.Defs.ValType.FuncRef)
+                    : new Value(Wacs.Core.Types.Defs.ValType.FuncRef, idx);
+            }
+            ModuleInit.RegisterElemSegmentAt(id, values);
+        }
+
         public static void MemoryCopy(ThinContext ctx, int dstMemIdx, int srcMemIdx,
             int dst, int src, int len)
         {

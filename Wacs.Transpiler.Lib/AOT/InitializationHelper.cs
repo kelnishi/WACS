@@ -14,6 +14,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
@@ -303,6 +304,29 @@ namespace Wacs.Transpiler.AOT
         {
             lock (_lock) { _types.Clear(); }
         }
+
+        /// <summary>
+        /// Replace each entry whose <c>initDataId</c> matches and whose
+        /// stored Type lives in <paramref name="rebuiltAssembly"/>'s
+        /// metadata-only assembly with the runtime-loaded equivalent
+        /// resolved by FullName. Called from <c>TranspilationResult.Bake</c>
+        /// so runtime helpers (ConvertStoreArray / ConvertStoreStruct etc.)
+        /// receive a runtime Type for <c>Activator.CreateInstance</c>.
+        /// </summary>
+        public static void RemapToLoadedTypes(int initDataId, Assembly rebuiltAssembly)
+        {
+            lock (_lock)
+            {
+                foreach (var key in new List<(int initId, int typeIdx)>(_types.Keys))
+                {
+                    if (key.initId != initDataId) continue;
+                    var stale = _types[key];
+                    if (stale.Assembly == rebuiltAssembly) continue;
+                    var loaded = rebuiltAssembly.GetType(stale.FullName!);
+                    if (loaded != null) _types[key] = loaded;
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -335,6 +359,27 @@ namespace Wacs.Transpiler.AOT
         /// in a fresh process.
         /// </summary>
         public static ThinContext InitializeFromEmbedded(byte[] embeddedBytes, int transpileTimeInitDataId)
+        {
+            if (InitRegistry.Contains(transpileTimeInitDataId))
+                return Initialize(transpileTimeInitDataId);
+            var data = InitDataCodec.Decode(embeddedBytes);
+            return InitializeFromData(data, transpileTimeInitDataId);
+        }
+
+        /// <summary>
+        /// RVA-mapped overload of <see cref="InitializeFromEmbedded(byte[], int)"/>.
+        /// Module ctors emit
+        /// <c>Ldtoken __WACSInit.Data; call RuntimeHelpers.CreateSpan&lt;byte&gt;</c>
+        /// — the span points directly into the loaded PE's
+        /// <c>.sdata</c>/<c>.rdata</c> section. Fast in-process path
+        /// touches no bytes at all; cross-process path streams the
+        /// pinned span through
+        /// <see cref="InitDataCodec.Decode(ReadOnlySpan{byte})"/> with no
+        /// intermediate allocation — true zero-copy from PE pages to
+        /// <see cref="ModuleInitData"/>.
+        /// </summary>
+        public static ThinContext InitializeFromEmbedded(
+            ReadOnlySpan<byte> embeddedBytes, int transpileTimeInitDataId)
         {
             if (InitRegistry.Contains(transpileTimeInitDataId))
                 return Initialize(transpileTimeInitDataId);

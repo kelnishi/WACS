@@ -46,6 +46,30 @@ namespace Wacs.Transpiler.AOT.Component
         /// decoder didn't produce a package (e.g., the component
         /// shipped no <c>component-type:*</c> custom section).
         /// </summary>
+        // Per-module name → Type registry, populated by
+        // ComponentExportsEmit (record / variant / enum / flags /
+        // resource emit sites) and consumed by LookupNamedType.
+        // Replaces a ModuleBuilder.GetType call that's unimplemented
+        // on .NET 9 PersistedAssemblyBuilder. ConditionalWeakTable so
+        // entries don't outlive the ModuleBuilder.
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<
+            ModuleBuilder, Dictionary<string, Type>> NamedTypeRegistry = new();
+
+        /// <summary>
+        /// Register pre-emitted named WIT types so subsequent
+        /// <see cref="EmitInterfaces"/> calls can resolve TypeRefs by
+        /// FullName. Idempotent additions; later entries overwrite.
+        /// </summary>
+        internal static void RegisterNamedTypes(
+            ModuleBuilder module,
+            IReadOnlyDictionary<string, Type> namedTypesByWitName,
+            string @namespace)
+        {
+            var dict = NamedTypeRegistry.GetOrCreateValue(module);
+            foreach (var kv in namedTypesByWitName)
+                dict[@namespace + "." + ToPascal(kv.Key)] = kv.Value;
+        }
+
         public static IReadOnlyList<Type> EmitInterfaces(
             ModuleBuilder module,
             string @namespace,
@@ -215,7 +239,26 @@ namespace Wacs.Transpiler.AOT.Component
         private static Type? LookupNamedType(ModuleBuilder module,
             string @namespace, string witName)
         {
-            return module.GetType(@namespace + "." + ToPascal(witName));
+            // Prefer the per-module registry primed by ComponentTranspiler
+            // before EmitInterfaces — that's the PersistedAssemblyBuilder-
+            // safe path. Fall back to module.GetType for tests that drive
+            // EmitInterfaces directly against a legacy AssemblyBuilder
+            // (Run/RunAndCollect), where GetType is implemented.
+            // PersistedModuleBuilder throws NotImplementedException; swallow.
+            var key = @namespace + "." + ToPascal(witName);
+            if (NamedTypeRegistry.TryGetValue(module, out var dict)
+                && dict.TryGetValue(key, out var t))
+            {
+                return t;
+            }
+            try
+            {
+                return module.GetType(key);
+            }
+            catch (NotImplementedException)
+            {
+                return null;
+            }
         }
 
         private static Type? MapTupleType(CtTupleType tup,

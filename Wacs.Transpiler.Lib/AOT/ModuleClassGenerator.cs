@@ -661,6 +661,368 @@ namespace Wacs.Transpiler.AOT
 
             // (3) Copy each active element segment into its table at offset.
             EmitElementSegmentCopies(il, ctxLocal, data);
+
+            // (4) Populate type-identity arrays consumed by call_indirect
+            // subtype checks and ref.test / ref.cast on funcref. Standard's
+            // InitializeFromData copies these from the decoded codec data
+            // (InitializationHelper.cs:576-579); under AotLinked we inline
+            // them as IL constants.
+            EmitTypeHashArrays(il, ctxLocal, data);
+
+            // (5) Drop active data + element segments. WASM 3.0 §4.5.4:
+            // active segments are implicitly dropped at the end of
+            // instantiation, so subsequent `memory.init` / `table.init`
+            // referencing them must trap "uninitialized element /
+            // segment". Standard's InitializeFromData does this via
+            // ModuleInit.DropDataSegment / DropElemSegment; under
+            // AotLinked we inline the calls here. Only meaningful for
+            // in-process — cross-process AotLinked never repopulates
+            // ModuleInit so the drops are no-ops.
+            EmitActiveSegmentDrops(il, data);
+
+            // (6) Stash the segment base IDs onto ctx so post-Bake
+            // memory.init / table.init helpers can index correctly.
+            EmitSegmentBaseIds(il, ctxLocal, data);
+
+            // (7) Stamp ctx.InitDataId with the transpile-time id so
+            // MultiReturnMethodRegistry / GcTypeRegistry lookups —
+            // both keyed on (initDataId, funcIdx) / (initDataId,
+            // typeIdx) — find the entries the transpile-time IL
+            // registered. Standard's InitializeFromData does this
+            // via the int-overload of InitializeFromData; under
+            // AotLinked we set the field directly.
+            EmitInitDataIdStamp(il, ctxLocal);
+
+            // (8) Register passive data segments into ModuleInit so
+            // `memory.init` instructions resolve them in cross-process
+            // loads (the in-process pre-pass already populated the
+            // registry under the same ids; RegisterDataSegmentAt is
+            // idempotent). Active segments aren't registered — their
+            // bytes ride RVA-mapped on __WACSAotData.Segment_N and
+            // get copied into linear memory directly via
+            // EmitDataSegmentCopies above.
+            EmitPassiveDataSegmentRegistrations(il, data);
+
+            // (9) Register passive element segments — same idempotent
+            // ModuleInit registration recipe as passive data, but the
+            // values are funcref / typed-null mix encoded as int[]
+            // (−1 = null; >=0 = funcIdx). The helper materializes the
+            // Value[] at runtime; transpile-time we only emit the
+            // compact int[] inline.
+            EmitPassiveElementSegmentRegistrations(il, data);
+
+            // (10) Allocate ctx.Tags. Each local tag becomes a fresh
+            // TagInstance (identity is reference-based, so DefType
+            // can be null in standalone mode — wasm spec only checks
+            // reference equality for throw/catch). Imported tags
+            // (slots 0..ImportedTagCount-1) stay null in AotLinked;
+            // the linker would fill them in mixed-mode but
+            // IsAotLinkedAutoPromotable rejects any imports today.
+            EmitTagsArray(il, ctxLocal, data);
+        }
+
+        private void EmitTagsArray(ILGenerator il, LocalBuilder ctxLocal, ModuleInitData data)
+        {
+            int totalTags = data.ImportedTagCount + data.LocalTagTypes.Length;
+            if (totalTags == 0) return;
+
+            var tagsField = typeof(ThinContext).GetField(nameof(ThinContext.Tags));
+            if (tagsField == null) return;
+
+            var tagInstanceCtor = typeof(Wacs.Core.Runtime.Types.TagInstance)
+                .GetConstructor(new[] { typeof(Wacs.Core.Types.DefType) });
+            if (tagInstanceCtor == null) return;
+
+            il.Emit(OpCodes.Ldloc, ctxLocal);
+            il.Emit(OpCodes.Ldc_I4, totalTags);
+            il.Emit(OpCodes.Newarr, typeof(Wacs.Core.Runtime.Types.TagInstance));
+            for (int i = 0; i < data.LocalTagTypes.Length; i++)
+            {
+                int slot = data.ImportedTagCount + i;
+                il.Emit(OpCodes.Dup);
+                il.Emit(OpCodes.Ldc_I4, slot);
+                // new TagInstance(null) — identity-only mode.
+                il.Emit(OpCodes.Ldnull);
+                il.Emit(OpCodes.Newobj, tagInstanceCtor);
+                il.Emit(OpCodes.Stelem_Ref);
+            }
+            il.Emit(OpCodes.Stfld, tagsField);
+        }
+
+        /// <summary>
+        /// For each passive element segment, walk its Initializers
+        /// at transpile time, encode the entries as <c>int[]</c>
+        /// (-1 = null funcref; >=0 = funcIdx), and emit IL that builds
+        /// the array inline + calls
+        /// <see cref="BulkHelpers.RegisterPassiveElemSegment"/>.
+        /// </summary>
+        private void EmitPassiveElementSegmentRegistrations(ILGenerator il, ModuleInitData data)
+        {
+            // Active and declarative segments are in data.ActiveElemIndices
+            // (active = also in data.ActiveElementSegments; declarative =
+            // dropped immediately, no registration needed). Anything else
+            // is passive.
+            var droppedSet = new HashSet<int>(data.ActiveElemIndices);
+
+            var registerHelper = typeof(BulkHelpers).GetMethod(
+                nameof(BulkHelpers.RegisterPassiveElemSegment),
+                BindingFlags.Public | BindingFlags.Static)!;
+
+            for (int localIdx = 0; localIdx < _wasmModule.Elements.Length; localIdx++)
+            {
+                if (droppedSet.Contains(localIdx)) continue;
+                var elem = _wasmModule.Elements[localIdx];
+                int n = elem.Initializers.Length;
+                if (n == 0) continue;
+
+                var encoded = new int[n];
+                bool ok = true;
+                for (int j = 0; j < n; j++)
+                {
+                    if (!TryEncodeFuncRefInitializer(elem.Initializers[j], out encoded[j]))
+                    {
+                        ok = false;
+                        break;
+                    }
+                }
+                if (!ok) continue;     // gate would have rejected such modules
+
+                int absoluteId = data.ElemSegmentBaseId + localIdx;
+                il.Emit(OpCodes.Ldc_I4, absoluteId);
+                il.Emit(OpCodes.Ldc_I4, n);
+                il.Emit(OpCodes.Newarr, typeof(int));
+                for (int j = 0; j < n; j++)
+                {
+                    il.Emit(OpCodes.Dup);
+                    il.Emit(OpCodes.Ldc_I4, j);
+                    il.Emit(OpCodes.Ldc_I4, encoded[j]);
+                    il.Emit(OpCodes.Stelem_I4);
+                }
+                il.Emit(OpCodes.Call, registerHelper);
+            }
+        }
+
+        /// <summary>
+        /// Encode a single passive-element-segment initializer as the
+        /// compact <c>int</c> the runtime helper expects: <c>-1</c> for
+        /// <c>ref.null</c>, the function index for <c>ref.func</c>.
+        /// Returns false on GC-typed / global-dependent shapes (gated
+        /// out by IsAotLinkedFeasible).
+        /// </summary>
+        private static bool TryEncodeFuncRefInitializer(
+            Wacs.Core.Types.Expression expr, out int encoded)
+        {
+            encoded = 0;
+            foreach (var inst in expr.Instructions)
+            {
+                if (inst is Wacs.Core.Instructions.Reference.InstRefFunc rf)
+                {
+                    encoded = (int)rf.FunctionIndex.Value;
+                    return true;
+                }
+                if (inst is Wacs.Core.Instructions.Reference.InstRefNull)
+                {
+                    encoded = -1;
+                    return true;
+                }
+                // Unsupported instruction kind (global.get etc.) — let
+                // the caller fall back to skipping this segment.
+                return false;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// For each passive data segment in the module, emit IL that
+        /// materializes the RVA-mapped bytes via
+        /// <c>RuntimeHelpers.CreateSpan&lt;byte&gt;</c> and calls
+        /// <c>BulkHelpers.RegisterPassiveDataSegment(id, span)</c>. The
+        /// helper does <c>span.ToArray()</c> + <c>ModuleInit.RegisterDataSegmentAt</c>;
+        /// the registry call is no-op when the id is already populated
+        /// (in-process pre-pass).
+        /// </summary>
+        private void EmitPassiveDataSegmentRegistrations(ILGenerator il, ModuleInitData data)
+        {
+            if (_dataEmitter == null) return;
+
+            // Active indices are the ones in data.ActiveDataIndices;
+            // any other segment index is passive.
+            var activeSet = new HashSet<int>(data.ActiveDataIndices);
+
+            var createSpanOpen = typeof(System.Runtime.CompilerServices.RuntimeHelpers)
+                .GetMethod(
+                    nameof(System.Runtime.CompilerServices.RuntimeHelpers.CreateSpan),
+                    BindingFlags.Public | BindingFlags.Static)!;
+            var createSpanByte = createSpanOpen.MakeGenericMethod(typeof(byte));
+            var registerHelper = typeof(BulkHelpers).GetMethod(
+                nameof(BulkHelpers.RegisterPassiveDataSegment),
+                BindingFlags.Public | BindingFlags.Static)!;
+
+            for (int localIdx = 0; localIdx < _dataEmitter.Segments.Length; localIdx++)
+            {
+                if (activeSet.Contains(localIdx)) continue;
+                var seg = _dataEmitter.Segments[localIdx];
+                if (seg.Data.Length == 0) continue;
+
+                int absoluteId = data.DataSegmentBaseId + localIdx;
+                // GetAotDataSegmentField is idempotent — the same RVA
+                // field is reused across active-copy and passive-register
+                // sites if a hypothetical segment is both, though in
+                // practice a segment is one or the other.
+                var segField = GetAotDataSegmentField(absoluteId, seg.Data);
+
+                il.Emit(OpCodes.Ldc_I4, absoluteId);
+                il.Emit(OpCodes.Ldtoken, segField);
+                il.Emit(OpCodes.Call, createSpanByte);
+                il.Emit(OpCodes.Call, registerHelper);
+            }
+        }
+
+        private void EmitInitDataIdStamp(ILGenerator il, LocalBuilder ctxLocal)
+        {
+            var initDataIdField = typeof(ThinContext).GetField(nameof(ThinContext.InitDataId));
+            if (initDataIdField == null) return;
+            il.Emit(OpCodes.Ldloc, ctxLocal);
+            il.Emit(OpCodes.Ldc_I4, _initDataId);
+            il.Emit(OpCodes.Stfld, initDataIdField);
+        }
+
+        /// <summary>
+        /// Inline IL for <c>ModuleInit.DropDataSegment</c> /
+        /// <c>DropElemSegment</c> calls covering every active segment
+        /// the module declared. Mirrors the loop
+        /// <see cref="InitializationHelper.InitializeFromData"/> runs
+        /// after the codec round-trip.
+        /// </summary>
+        private void EmitActiveSegmentDrops(ILGenerator il, ModuleInitData data)
+        {
+            var dropDataMethod = typeof(ModuleInit).GetMethod(
+                nameof(ModuleInit.DropDataSegment),
+                BindingFlags.Public | BindingFlags.Static)!;
+            var dropElemMethod = typeof(ModuleInit).GetMethod(
+                nameof(ModuleInit.DropElemSegment),
+                BindingFlags.Public | BindingFlags.Static)!;
+
+            int dataBase = data.DataSegmentBaseId;
+            foreach (var localDataIdx in data.ActiveDataIndices)
+            {
+                il.Emit(OpCodes.Ldc_I4, dataBase + localDataIdx);
+                il.Emit(OpCodes.Call, dropDataMethod);
+            }
+
+            int elemBase = data.ElemSegmentBaseId;
+            foreach (var localElemIdx in data.ActiveElemIndices)
+            {
+                il.Emit(OpCodes.Ldc_I4, elemBase + localElemIdx);
+                il.Emit(OpCodes.Call, dropElemMethod);
+            }
+        }
+
+        /// <summary>
+        /// Set <c>ctx.DataSegmentBaseId</c> and <c>ctx.ElemSegmentBaseId</c>
+        /// to the transpile-time base IDs. Standard's <c>InitializeFromData</c>
+        /// derives these from the (possibly-remapped) cross-process registry;
+        /// AotLinked uses the static transpile-time values since segments
+        /// don't get re-registered.
+        /// </summary>
+        private void EmitSegmentBaseIds(ILGenerator il, LocalBuilder ctxLocal, ModuleInitData data)
+        {
+            var dataBaseField = typeof(ThinContext).GetField(nameof(ThinContext.DataSegmentBaseId));
+            var elemBaseField = typeof(ThinContext).GetField(nameof(ThinContext.ElemSegmentBaseId));
+            if (dataBaseField != null)
+            {
+                il.Emit(OpCodes.Ldloc, ctxLocal);
+                il.Emit(OpCodes.Ldc_I4, data.DataSegmentBaseId);
+                il.Emit(OpCodes.Stfld, dataBaseField);
+            }
+            if (elemBaseField != null)
+            {
+                il.Emit(OpCodes.Ldloc, ctxLocal);
+                il.Emit(OpCodes.Ldc_I4, data.ElemSegmentBaseId);
+                il.Emit(OpCodes.Stfld, elemBaseField);
+            }
+        }
+
+        /// <summary>
+        /// Inline FuncTypeHashes / FuncTypeSuperHashes / TypeHashes /
+        /// TypeIsFunc as IL-constructed constant arrays assigned onto
+        /// <c>ctx</c>. Each array is sized by the source-module's type +
+        /// function counts and populated with values computed by
+        /// <see cref="ModuleTranspiler"/>'s subtype-chain walk
+        /// (<c>BuildSuperTypeHashChain</c>) at transpile time.
+        /// </summary>
+        private void EmitTypeHashArrays(ILGenerator il, LocalBuilder ctxLocal, ModuleInitData data)
+        {
+            EmitInt32Array(il, ctxLocal, data.FuncTypeHashes,
+                typeof(ThinContext).GetField(nameof(ThinContext.FuncTypeHashes))!);
+            EmitInt32Array(il, ctxLocal, data.TypeHashes,
+                typeof(ThinContext).GetField(nameof(ThinContext.TypeHashes))!);
+            EmitBoolArray(il, ctxLocal, data.TypeIsFunc,
+                typeof(ThinContext).GetField(nameof(ThinContext.TypeIsFunc))!);
+            EmitInt32JaggedArray(il, ctxLocal, data.FuncTypeSuperHashes,
+                typeof(ThinContext).GetField(nameof(ThinContext.FuncTypeSuperHashes))!);
+        }
+
+        private static void EmitInt32Array(ILGenerator il, LocalBuilder ctxLocal,
+            int[]? values, FieldInfo target)
+        {
+            if (values == null) return;
+            il.Emit(OpCodes.Ldloc, ctxLocal);
+            il.Emit(OpCodes.Ldc_I4, values.Length);
+            il.Emit(OpCodes.Newarr, typeof(int));
+            for (int i = 0; i < values.Length; i++)
+            {
+                il.Emit(OpCodes.Dup);
+                il.Emit(OpCodes.Ldc_I4, i);
+                il.Emit(OpCodes.Ldc_I4, values[i]);
+                il.Emit(OpCodes.Stelem_I4);
+            }
+            il.Emit(OpCodes.Stfld, target);
+        }
+
+        private static void EmitBoolArray(ILGenerator il, LocalBuilder ctxLocal,
+            bool[]? values, FieldInfo target)
+        {
+            if (values == null) return;
+            il.Emit(OpCodes.Ldloc, ctxLocal);
+            il.Emit(OpCodes.Ldc_I4, values.Length);
+            il.Emit(OpCodes.Newarr, typeof(bool));
+            for (int i = 0; i < values.Length; i++)
+            {
+                if (!values[i]) continue;       // newarr zero-inits
+                il.Emit(OpCodes.Dup);
+                il.Emit(OpCodes.Ldc_I4, i);
+                il.Emit(OpCodes.Ldc_I4_1);
+                il.Emit(OpCodes.Stelem_I1);
+            }
+            il.Emit(OpCodes.Stfld, target);
+        }
+
+        private static void EmitInt32JaggedArray(ILGenerator il, LocalBuilder ctxLocal,
+            int[][]? values, FieldInfo target)
+        {
+            if (values == null) return;
+            il.Emit(OpCodes.Ldloc, ctxLocal);
+            il.Emit(OpCodes.Ldc_I4, values.Length);
+            il.Emit(OpCodes.Newarr, typeof(int[]));
+            for (int i = 0; i < values.Length; i++)
+            {
+                var inner = values[i];
+                if (inner == null) continue;
+                il.Emit(OpCodes.Dup);
+                il.Emit(OpCodes.Ldc_I4, i);
+                il.Emit(OpCodes.Ldc_I4, inner.Length);
+                il.Emit(OpCodes.Newarr, typeof(int));
+                for (int j = 0; j < inner.Length; j++)
+                {
+                    il.Emit(OpCodes.Dup);
+                    il.Emit(OpCodes.Ldc_I4, j);
+                    il.Emit(OpCodes.Ldc_I4, inner[j]);
+                    il.Emit(OpCodes.Stelem_I4);
+                }
+                il.Emit(OpCodes.Stelem_Ref);
+            }
+            il.Emit(OpCodes.Stfld, target);
         }
 
         private static bool IsPrimitiveValType(Wacs.Core.Types.Defs.ValType t)
@@ -822,8 +1184,15 @@ namespace Wacs.Transpiler.AOT
         /// <summary>
         /// IL: <c>new Value(...)</c> for primitive-typed initial values.
         /// Reads the const literal from <paramref name="init"/> and emits
-        /// the appropriate typed Value ctor. For ref types, emits
-        /// <c>new Value(refType)</c> which produces the typed null.
+        /// the appropriate typed Value ctor.
+        /// <para>
+        /// Ref types: when <see cref="Value.IsNullRef"/> is true, emits the
+        /// single-arg <c>new Value(refType)</c> which yields the typed
+        /// null. For non-null funcref/externref, emits the two-arg
+        /// <c>new Value(refType, idx)</c> with the index pulled from
+        /// <c>init.Data.Ptr</c>. (i31 and GC-constructed ref inits are
+        /// gated out by <see cref="AssertAotLinkedFeasible"/>.)
+        /// </para>
         /// </summary>
         private static void EmitPrimitiveValue(ILGenerator il, Wacs.Core.Types.Defs.ValType vt, Value init)
         {
@@ -846,11 +1215,22 @@ namespace Wacs.Transpiler.AOT
                     il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(double) })!);
                     break;
                 default:
-                    // Ref type — emit `new Value(refType)` which yields the
-                    // typed null. AssertAotLinkedFeasible has already
-                    // refused non-null ref inits.
-                    il.Emit(OpCodes.Ldc_I4, (int)vt);
-                    il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(Wacs.Core.Types.Defs.ValType) })!);
+                    if (init.IsNullRef)
+                    {
+                        // Typed null ref: `new Value(refType)`.
+                        il.Emit(OpCodes.Ldc_I4, (int)vt);
+                        il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(new[] { typeof(Wacs.Core.Types.Defs.ValType) })!);
+                    }
+                    else
+                    {
+                        // Non-null funcref / externref: `new Value(refType, idx)`
+                        // pulls the func / extern index out of init.Data.Ptr.
+                        // (Other non-null ref shapes are gated out earlier.)
+                        il.Emit(OpCodes.Ldc_I4, (int)vt);
+                        il.Emit(OpCodes.Ldc_I4, (int)init.Data.Ptr);
+                        il.Emit(OpCodes.Newobj, typeof(Value).GetConstructor(
+                            new[] { typeof(Wacs.Core.Types.Defs.ValType), typeof(int) })!);
+                    }
                     break;
             }
         }
@@ -901,9 +1281,12 @@ namespace Wacs.Transpiler.AOT
 
         /// <summary>
         /// IL: for each active data segment, copy the segment's bytes
-        /// (loaded from a static <c>__WACSAotData.Segment_N</c> field) into
-        /// the right memory's <c>Data</c> array at the right offset via
-        /// <see cref="Buffer.BlockCopy"/>.
+        /// (held in an RVA-mapped <c>__WACSAotData.Segment_N</c> field,
+        /// materialized via <c>RuntimeHelpers.CreateSpan&lt;byte&gt;</c>)
+        /// into the right memory's <c>Data</c> array at the right offset
+        /// via <see cref="BulkHelpers.CopySegmentToMemory"/>. Zero-copy at
+        /// the source: bytes are demand-paged from the PE's initialized-
+        /// data section and never materialize a heap <c>byte[]</c>.
         /// </summary>
         private void EmitDataSegmentCopies(ILGenerator il, LocalBuilder ctxLocal, ModuleInitData data)
         {
@@ -911,8 +1294,13 @@ namespace Wacs.Transpiler.AOT
 
             var memoriesField = typeof(ThinContext).GetField(nameof(ThinContext.Memories))!;
             var memoryDataField = typeof(MemoryInstance).GetField(nameof(MemoryInstance.Data))!;
-            var blockCopyMethod = typeof(Buffer).GetMethod(nameof(Buffer.BlockCopy),
-                new[] { typeof(Array), typeof(int), typeof(Array), typeof(int), typeof(int) })!;
+            var createSpanOpen = typeof(System.Runtime.CompilerServices.RuntimeHelpers).GetMethod(
+                nameof(System.Runtime.CompilerServices.RuntimeHelpers.CreateSpan),
+                BindingFlags.Public | BindingFlags.Static)!;
+            var createSpanByte = createSpanOpen.MakeGenericMethod(typeof(byte));
+            var copyHelper = typeof(BulkHelpers).GetMethod(
+                nameof(BulkHelpers.CopySegmentToMemory),
+                BindingFlags.Public | BindingFlags.Static)!;
 
             foreach (var (memIdx, offset, segId) in data.ActiveDataSegments)
             {
@@ -920,11 +1308,12 @@ namespace Wacs.Transpiler.AOT
                 if (bytes.Length == 0) continue;
                 var segField = GetAotDataSegmentField(segId, bytes);
 
-                // Buffer.BlockCopy(__WACSAotData.Segment_N, 0,
-                //                  ctx.Memories[memIdx].Data, (int)offset,
-                //                  bytes.Length);
-                il.Emit(OpCodes.Ldsfld, segField);
-                il.Emit(OpCodes.Ldc_I4_0);
+                // BulkHelpers.CopySegmentToMemory(
+                //     RuntimeHelpers.CreateSpan<byte>(__ldtoken __WACSAotData.Segment_N__),
+                //     ctx.Memories[memIdx].Data,
+                //     (int)offset, bytes.Length);
+                il.Emit(OpCodes.Ldtoken, segField);
+                il.Emit(OpCodes.Call, createSpanByte);
 
                 il.Emit(OpCodes.Ldloc, ctxLocal);
                 il.Emit(OpCodes.Ldfld, memoriesField);
@@ -934,17 +1323,19 @@ namespace Wacs.Transpiler.AOT
 
                 il.Emit(OpCodes.Ldc_I4, (int)offset);
                 il.Emit(OpCodes.Ldc_I4, bytes.Length);
-                il.Emit(OpCodes.Call, blockCopyMethod);
+                il.Emit(OpCodes.Call, copyHelper);
             }
         }
 
         /// <summary>
-        /// Get-or-create a static <c>byte[]</c> field on the
-        /// <c>__WACSAotData</c> holder type, populated from
-        /// <paramref name="bytes"/> via a base64-decode in the holder's
-        /// static ctor. Same workaround as <see cref="EmitEmbeddedInitData"/>:
-        /// <c>DefineInitializedData</c> trips a Lokad.ILPack NRE, so we
-        /// stash a base64 string literal that decodes once at first access.
+        /// Get-or-create a static RVA-mapped data field on the
+        /// <c>__WACSAotData</c> holder type, backed by
+        /// <paramref name="bytes"/>. The returned <see cref="FieldBuilder"/>'s
+        /// runtime type is a synthesized fixed-size value-type with
+        /// <c>HasFieldRVA</c> pointing into the PE's initialized-data
+        /// section — bytes are demand-paged by the OS loader and consumed
+        /// zero-copy via <c>RuntimeHelpers.CreateSpan&lt;byte&gt;</c> at the
+        /// call site. No cctor; no decode; no GC heap allocation.
         /// </summary>
         private FieldBuilder GetAotDataSegmentField(int segId, byte[] bytes)
         {
@@ -968,72 +1359,65 @@ namespace Wacs.Transpiler.AOT
                 _aotDataFields = grown;
             }
 
-            var field = _aotDataType.DefineField(
-                $"Segment_{segId}", typeof(byte[]),
-                FieldAttributes.Public | FieldAttributes.Static | FieldAttributes.InitOnly);
+            // DefineInitializedData synthesizes a private nested struct
+            // typed __StaticArrayInitTypeSize=N and emits a static field of
+            // that type with HasFieldRVA. Field attribute set: Public|Static
+            // (InitOnly is implicit for RVA fields and not accepted here).
+            var field = _aotDataType.DefineInitializedData(
+                $"Segment_{segId}", bytes,
+                FieldAttributes.Public | FieldAttributes.Static);
             _aotDataFields[segId] = field;
             return field;
         }
 
         /// <summary>
-        /// Once all data-segment fields have been declared, emit the
-        /// <c>__WACSAotData</c> static ctor that base64-decodes the bytes
-        /// for each. Called from <see cref="Generate"/> after the Module
-        /// class has fully wired its references to these fields, so the
-        /// holder's metadata is final before <c>CreateType()</c>.
+        /// No-op now that data-segment fields are RVA-backed: the bytes
+        /// live in the PE's initialized-data section and are loaded by the
+        /// runtime at type-load time. Kept as a hook in case future
+        /// strategies (compressed RVA, lazy decode) need a finalize step.
         /// </summary>
         private void FinalizeAotDataHolder()
         {
-            if (_aotDataType == null || _aotDataFields == null) return;
-            var data = InitRegistry.Get(_initDataId);
-            var fromBase64 = typeof(Convert).GetMethod(
-                nameof(Convert.FromBase64String),
-                BindingFlags.Public | BindingFlags.Static,
-                binder: null,
-                types: new[] { typeof(string) },
-                modifiers: null)!;
-
-            var cctor = _aotDataType.DefineTypeInitializer();
-            var il = cctor.GetILGenerator();
-            for (int segId = 0; segId < _aotDataFields.Length; segId++)
-            {
-                var field = _aotDataFields[segId];
-                if (field == null) continue;
-                if (!data.SavedDataSegments.TryGetValue(segId, out var bytes) || bytes == null)
-                    continue;
-                il.Emit(OpCodes.Ldstr, Convert.ToBase64String(bytes));
-                il.Emit(OpCodes.Call, fromBase64);
-                il.Emit(OpCodes.Stsfld, field);
-            }
-            il.Emit(OpCodes.Ret);
+            // intentionally empty
         }
 
-        private void AssertAotLinkedFeasible()
+        /// <summary>
+        /// Collect the list of module-init features that AotLinked emission
+        /// can't yet inline as IL. Empty list = the AotLinked ctor body is
+        /// safe to emit; non-empty = the codec stack
+        /// (<c>Standard</c> emission) is required.
+        /// <para>
+        /// Features currently inlinable: memories + primitive globals + null
+        /// refs + non-null funcref/externref globals + active data segments +
+        /// active element segments with funcref / null entries.
+        /// Features that still force <c>Standard</c>: GC-typed globals
+        /// (array.new / struct.new init), GC element segment entries, deferred
+        /// global inits with imported-global dependencies.
+        /// </para>
+        /// </summary>
+        private List<string> CollectAotLinkedUnsupported()
         {
             if (_initDataId < 0) PrepareInitData();
             var data = InitRegistry.Get(_initDataId);
 
-            // Only flag features that the AotLinked ctor still doesn't
-            // initialize. As of this commit:
-            //   • memories + active data segments     — supported
-            //   • everything else (tables, globals, element segments,
-            //     GC globals, deferred globals, GC element values) —
-            //     coverage will grow incrementally
             var unsupported = new List<string>();
             if (data.GcGlobalInits.Count > 0)       unsupported.Add($"{data.GcGlobalInits.Count} GC global inits");
             if (data.DeferredGlobalInits.Count > 0) unsupported.Add($"{data.DeferredGlobalInits.Count} deferred global inits");
             if (data.GcElementValues.Count > 0)     unsupported.Add("GC element values");
-            // Globals with non-primitive init (ref types other than null) need
-            // expression evaluation; reject for now. Primitive-init globals
-            // (i32/i64/f32/f64) are handled by EmitGlobalsArray.
+            // Globals: primitive types (i32/i64/f32/f64), null refs of any
+            // ref type, and non-null FuncRef/ExternRef inits are inlined by
+            // EmitGlobalsArray. Other non-null ref shapes (i31, struct.new,
+            // array.new, etc.) need GC-construction IL we don't emit yet.
             for (int gi = 0; gi < data.Globals.Length; gi++)
             {
                 var (gtype, _, init) = data.Globals[gi];
-                if (!IsPrimitiveValType(gtype) && !init.IsNullRef)
-                {
-                    unsupported.Add($"global {gi} with non-null ref init");
-                    break;
-                }
+                if (IsPrimitiveValType(gtype)) continue;
+                if (init.IsNullRef) continue;
+                if (gtype == Wacs.Core.Types.Defs.ValType.FuncRef
+                    || gtype == Wacs.Core.Types.Defs.ValType.ExternRef)
+                    continue;
+                unsupported.Add($"global {gi} with non-null {gtype} init");
+                break;
             }
             // Tables with a non-trivial init expression (one that evaluates
             // to a non-null reference, potentially against globals) need
@@ -1059,31 +1443,121 @@ namespace Wacs.Transpiler.AOT
                     break;
                 }
             }
+            return unsupported;
+        }
 
+        /// <summary>
+        /// True when <see cref="CollectAotLinkedUnsupported"/> returns empty —
+        /// i.e. the AotLinked ctor body can be safely emitted for this module.
+        /// </summary>
+        private bool IsAotLinkedFeasible() => CollectAotLinkedUnsupported().Count == 0;
+
+        /// <summary>
+        /// Stricter gate than <see cref="IsAotLinkedFeasible"/>: only true
+        /// for module shapes covered by an existing AotLinked emission test.
+        /// Used by <see cref="EmissionTarget.Auto"/> to decide whether to
+        /// silently promote the user's emission choice.
+        /// <para>
+        /// Conservative subset: no module imports (function / memory /
+        /// table / global / tag), no passive element segments, no
+        /// exception tags, single memory at most.
+        /// AotLinked emission's runtime correctness is broader than this
+        /// conservative subset, but the proof obligations (no
+        /// `memory.init` / `table.init` / `data.drop` / `elem.drop`
+        /// disagreement, no linker integration) only hold here.
+        /// Promote-then-fail-loudly is worse than don't-promote-then-
+        /// codec-decode, so this stays narrow.
+        /// </para>
+        /// </summary>
+        private bool IsAotLinkedAutoPromotable()
+        {
+            if (!IsAotLinkedFeasible()) return false;
+            if (_initDataId < 0) PrepareInitData();
+            var data = InitRegistry.Get(_initDataId);
+
+            // Imported functions are fine under AotLinked: the Module-
+            // class ctor already accepts an IImports arg whenever
+            // _interfaces.ImportsInterface != null (regardless of
+            // emission target), and EmitImportDelegateWiring fills
+            // ctx.ImportDelegates from that arg using the same IL for
+            // Standard + AotLinked. EmitFuncTablePopulation then
+            // copies imports into FuncTable[0..ImportCount-1].
+            //
+            // Imported memory / table / global / tag still need linker
+            // integration that AotLinked's standalone ctor doesn't
+            // perform — those are slot-overwrites the linker does
+            // on Standard's instantiated ctx, and AotLinked has no
+            // equivalent yet.
+            foreach (var import in _wasmModule.Imports)
+            {
+                if (import.Desc is WasmModule.ImportDesc.MemDesc) return false;
+                if (import.Desc is WasmModule.ImportDesc.TableDesc) return false;
+                if (import.Desc is WasmModule.ImportDesc.GlobalDesc) return false;
+                if (import.Desc is WasmModule.ImportDesc.TagDesc) return false;
+            }
+
+            // EmitMemoryArray already iterates every declared memory and
+            // EmitDataSegmentCopies uses each segment's memIdx, so
+            // multi-memory just works under the existing IL.
+
+            // Imported tags need linker integration to receive the
+            // exporter's TagInstance, which AotLinked doesn't wire.
+            // Local-only tags are fine — EmitTagsArray allocates a
+            // fresh identity-only TagInstance per local tag.
+            if (data.ImportedTagCount > 0) return false;
+
+            // Passive element segments now register via
+            // EmitPassiveElementSegmentRegistrations. The encode helper
+            // only handles funcref / null entries — verify every passive
+            // segment's initializers are encodable, otherwise stay on
+            // Standard. (Modules with GC-typed entries are already
+            // gated by IsAotLinkedFeasible's GcElementValues check.)
+            var droppedSet = new HashSet<int>(data.ActiveElemIndices);
+            for (int localIdx = 0; localIdx < _wasmModule.Elements.Length; localIdx++)
+            {
+                if (droppedSet.Contains(localIdx)) continue;
+                var elem = _wasmModule.Elements[localIdx];
+                for (int j = 0; j < elem.Initializers.Length; j++)
+                {
+                    if (!TryEncodeFuncRefInitializer(elem.Initializers[j], out _))
+                        return false;
+                }
+            }
+
+            // Passive data segments are now registered in ModuleInit
+            // by EmitPassiveDataSegmentRegistrations, so they're safe
+            // to auto-promote.
+
+            return true;
+        }
+
+        private void AssertAotLinkedFeasible()
+        {
+            var unsupported = CollectAotLinkedUnsupported();
             if (unsupported.Count > 0)
                 throw new InvalidOperationException(
                     "TranspilerOptions.Emission = AotLinked is not yet supported for this module. " +
                     "Unsupported features: " + string.Join(", ", unsupported) +
-                    ". Use Emission = Standard for modules with non-trivial init data " +
-                    "(coverage will grow in subsequent transpiler releases).");
+                    ". Use Emission = Auto (the default) for automatic fallback to Standard, " +
+                    "or Emission = Standard explicitly.");
         }
 
         /// <summary>
         /// Encode the prepared <see cref="ModuleInitData"/> via
         /// <see cref="InitDataCodec.Encode"/> and persist the bytes into a
-        /// static <c>byte[]</c> field on a generated <c>__WACSInit</c> type
-        /// in the same namespace as the Module class.
+        /// static RVA-mapped data field <c>Data</c> on a generated
+        /// <c>__WACSInit</c> type in the same namespace as the Module
+        /// class.
         ///
-        /// <para>Implementation: Base64-encode the bytes into a string
-        /// literal, decode in the holder's static constructor. Chosen over
-        /// <c>ModuleBuilder.DefineInitializedData</c> because
-        /// <c>Lokad.ILPack</c> — our dynamic-assembly → PE serializer —
-        /// NREs on <c>IsReferencedType</c> when a method body takes
-        /// <c>Ldtoken</c> on a DefineInitializedData-originated field.
-        /// Base64 adds ~33% size overhead; for typical init data (a few
-        /// KB) that's a non-issue, and the decoded byte[] is pinned once
-        /// at first-use and reused for the life of the loaded
-        /// assembly.</para>
+        /// <para>Bytes live in the PE's initialized-data section
+        /// (<c>.sdata</c>/<c>.rdata</c>) and are surfaced as
+        /// <see cref="ReadOnlySpan{Byte}"/> via
+        /// <c>RuntimeHelpers.CreateSpan&lt;byte&gt;</c> at the call site.
+        /// No cctor; no base64 decode; no per-load heap allocation for
+        /// the blob itself. Replaces the legacy base64-string-literal
+        /// path that the Lokad.ILPack writer required (PAB supports
+        /// <c>DefineInitializedData</c> end-to-end through
+        /// <c>Save</c>).</para>
         /// </summary>
         private FieldBuilder EmitEmbeddedInitData()
         {
@@ -1092,28 +1566,17 @@ namespace Wacs.Transpiler.AOT
 
             var data = InitRegistry.Get(_initDataId);
             var bytes = InitDataCodec.Encode(data);
-            string base64 = Convert.ToBase64String(bytes);
 
-            // Holder type + static byte[] field.
+            // Holder type + RVA-backed Data field. The synthesized field's
+            // runtime type is a private fixed-size value type whose
+            // metadata carries HasFieldRVA pointing into the PE's
+            // initialized-data section.
             _embeddedInitType = _moduleBuilder.DefineType(
                 $"{_namespace}.__WACSInit",
                 TypeAttributes.Public | TypeAttributes.Abstract | TypeAttributes.Sealed);
-            _embeddedInitField = _embeddedInitType.DefineField(
-                "Data", typeof(byte[]),
-                FieldAttributes.Public | FieldAttributes.Static | FieldAttributes.InitOnly);
-
-            // Static ctor: Data = Convert.FromBase64String(<literal>);
-            var cctor = _embeddedInitType.DefineTypeInitializer();
-            var il = cctor.GetILGenerator();
-            il.Emit(OpCodes.Ldstr, base64);
-            il.Emit(OpCodes.Call, typeof(Convert).GetMethod(
-                nameof(Convert.FromBase64String),
-                BindingFlags.Public | BindingFlags.Static,
-                binder: null,
-                types: new[] { typeof(string) },
-                modifiers: null)!);
-            il.Emit(OpCodes.Stsfld, _embeddedInitField);
-            il.Emit(OpCodes.Ret);
+            _embeddedInitField = _embeddedInitType.DefineInitializedData(
+                "Data", bytes,
+                FieldAttributes.Public | FieldAttributes.Static);
 
             return _embeddedInitField;
         }
@@ -1168,40 +1631,61 @@ namespace Wacs.Transpiler.AOT
             il.Emit(OpCodes.Call, typeof(object).GetConstructor(Type.EmptyTypes)!);
 
             // === Initialize ThinContext ===
-            // Two emission shapes:
-            //   Standard:  ThinContext ctx = InitializationHelper.InitializeFromEmbedded(
-            //                  __WACSInit.Data, _initDataId);
-            //   AotLinked: ThinContext ctx = new ThinContext();
-            //              (skips the codec roundtrip; only valid for modules with no
-            //               memories/tables/globals/data — fuller support pending.)
+            // Three emission shapes:
+            //   Auto:      AotLinked when feasible, else Standard. Default.
+            //   Standard:  InitializationHelper.InitializeFromEmbedded(
+            //                __WACSInit.Data, _initDataId).
+            //   AotLinked: ThinContext ctor body inlined as IL constants;
+            //              AssertAotLinkedFeasible throws if the module
+            //              shape needs the codec stack.
             var ctxLocal = il.DeclareLocal(typeof(ThinContext));
-            if (_options?.Emission == EmissionTarget.AotLinked)
+            var emission = _options?.Emission ?? EmissionTarget.Auto;
+            // Auto: pick AotLinked when feasible, fall back to Standard.
+            // The user's explicit choice (Standard / AotLinked) bypasses
+            // the auto-promotion so consumers that need codec semantics
+            // (cross-process registry hint, etc.) can force them.
+            bool useAotLinked = emission == EmissionTarget.AotLinked
+                || (emission == EmissionTarget.Auto && IsAotLinkedAutoPromotable());
+            if (useAotLinked)
             {
-                AssertAotLinkedFeasible();
+                if (emission == EmissionTarget.AotLinked)
+                    AssertAotLinkedFeasible();
                 EmitAotLinkedCtorBody(il, ctxLocal);
             }
             else
             {
-                // The generator embeds a codec-encoded ModuleInitData as a static
-                // byte[] on a sibling type (__WACSInit.Data, built below). The
-                // ctor reads it, decodes into a ModuleInitData, and drives
-                // InitializeFromData — which handles both in-process (where
-                // ModuleInit registrations already exist) and cross-process
-                // (.dll loaded in a fresh process) via data-segment remapping.
+                // The generator embeds a codec-encoded ModuleInitData as
+                // RVA-mapped bytes on a sibling type (__WACSInit.Data, built
+                // below). The ctor materializes a ReadOnlySpan<byte> over
+                // the mapped pages via RuntimeHelpers.CreateSpan and hands
+                // that to InitializeFromEmbedded — which handles both
+                // in-process (ModuleInit registrations already exist) and
+                // cross-process (.dll loaded in a fresh process) via
+                // data-segment remapping.
                 var initDataField = EmitEmbeddedInitData();
 
-                // The helper's dual path: in-process (InitRegistry has the
-                // transpile-time entry, side-tables like GcTypeRegistry /
-                // MultiReturnMethodRegistry are populated under _initDataId)
-                // takes the fast Initialize(int) branch. Cross-process (fresh
-                // process — InitRegistry empty) falls through to a codec
-                // Decode of the embedded byte[] and an InitializeFromData
-                // with the transpile-time id as a hint.
-                il.Emit(OpCodes.Ldsfld, initDataField);
-                il.Emit(OpCodes.Ldc_I4, _initDataId);
-                il.Emit(OpCodes.Call, typeof(InitializationHelper).GetMethod(
+                // Build the closed-generic ReadOnlySpan<byte> CreateSpan
+                // MethodInfo and the matching ReadOnlySpan-overload of
+                // InitializeFromEmbedded. The span is consumed by the
+                // helper, which copies into a byte[] once for the codec
+                // call (codec is byte[]-based today; span codec is a
+                // follow-up). Net win over base64: no UTF-16 doubling on
+                // disk, no Convert.FromBase64String at startup.
+                var createSpanOpen = typeof(System.Runtime.CompilerServices.RuntimeHelpers).GetMethod(
+                    nameof(System.Runtime.CompilerServices.RuntimeHelpers.CreateSpan),
+                    BindingFlags.Public | BindingFlags.Static)!;
+                var createSpanByte = createSpanOpen.MakeGenericMethod(typeof(byte));
+                var initFromEmbedded = typeof(InitializationHelper).GetMethod(
                     nameof(InitializationHelper.InitializeFromEmbedded),
-                    BindingFlags.Public | BindingFlags.Static)!);
+                    BindingFlags.Public | BindingFlags.Static,
+                    binder: null,
+                    types: new[] { typeof(ReadOnlySpan<byte>), typeof(int) },
+                    modifiers: null)!;
+
+                il.Emit(OpCodes.Ldtoken, initDataField);
+                il.Emit(OpCodes.Call, createSpanByte);
+                il.Emit(OpCodes.Ldc_I4, _initDataId);
+                il.Emit(OpCodes.Call, initFromEmbedded);
                 il.Emit(OpCodes.Stloc, ctxLocal);
             }
 

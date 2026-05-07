@@ -1879,7 +1879,12 @@ namespace Wacs.Transpiler.Test
                         System.Array.Empty<System.Reflection.Assembly>());
 
             Assert.NotNull(programType);
-            var main = programType.GetMethod("Main",
+            // PersistedAssemblyBuilder yields metadata-only types until
+            // Bake roundtrips through Save+Load. Resolve through the
+            // loaded Assembly so Main is invokable.
+            result.Bake();
+            var loadedProgram = result.Assembly.GetType(programType.FullName!)!;
+            var main = loadedProgram.GetMethod("Main",
                 BindingFlags.Public | BindingFlags.Static);
             Assert.NotNull(main);
 
@@ -1927,7 +1932,11 @@ namespace Wacs.Transpiler.Test
                     .Emit(result, "Program", "add",
                         System.Array.Empty<System.Reflection.Assembly>());
 
-            var main = programType.GetMethod("Main",
+            // Bake to roundtrip through PersistedAssemblyBuilder.Save +
+            // AssemblyLoadContext.LoadFromStream so reflection-Invoke works.
+            result.Bake();
+            var loadedProgram = result.Assembly.GetType(programType.FullName!)!;
+            var main = loadedProgram.GetMethod("Main",
                 BindingFlags.Public | BindingFlags.Static);
             Assert.NotNull(main);
 
@@ -1954,7 +1963,11 @@ namespace Wacs.Transpiler.Test
                     .Emit(result, "Program", "add",
                         System.Array.Empty<System.Reflection.Assembly>());
 
-            var main = programType.GetMethod("Main",
+            // Bake to roundtrip through PersistedAssemblyBuilder.Save +
+            // AssemblyLoadContext.LoadFromStream so reflection-Invoke works.
+            result.Bake();
+            var loadedProgram = result.Assembly.GetType(programType.FullName!)!;
+            var main = loadedProgram.GetMethod("Main",
                 BindingFlags.Public | BindingFlags.Static)!;
             var tie = Assert.Throws<TargetInvocationException>(() =>
                 main.Invoke(null,

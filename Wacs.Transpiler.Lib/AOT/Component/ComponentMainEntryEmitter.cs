@@ -34,8 +34,11 @@ namespace Wacs.Transpiler.AOT.Component
             string exportName,
             IReadOnlyList<Assembly> hostPackages)
         {
-            if (result.ModuleClass == null)
-                throw new MainEntryEmitter.ConstraintException(
+            // Pre-bake metadata accessors: this Emit runs between Transpile
+            // and SaveAssembly; touching the public type accessors would
+            // freeze ModuleBuilder before we add Program.Main below.
+            var moduleClassMeta = result.ModuleClassBuilder
+                ?? throw new MainEntryEmitter.ConstraintException(
                     "module has no generated Module class; nothing to invoke");
 
             // v0 contract: components with imports need a bundle —
@@ -43,7 +46,7 @@ namespace Wacs.Transpiler.AOT.Component
             // No-import components fall through cleanly (the
             // emitted ctor takes a single IImports arg, which
             // ComponentMainHost stubs with a dispatcher).
-            bool hasImports = result.ImportsInterface != null
+            bool hasImports = result.ImportsInterfaceBuilder != null
                 && result.ImportMethods.Count > 0;
             bool hasWasip2 = hostPackages != null
                 && hostPackages.Any(a => string.Equals(
@@ -86,7 +89,7 @@ namespace Wacs.Transpiler.AOT.Component
             // ExportMethods metadata).
 
             var moduleBuilder = result.ModuleBuilder;
-            var ns = result.ModuleClass.Namespace;
+            var ns = moduleClassMeta.Namespace;
             var fullName = string.IsNullOrEmpty(ns)
                 ? programClassName
                 : ns + "." + programClassName;
@@ -107,7 +110,7 @@ namespace Wacs.Transpiler.AOT.Component
 
             // return ComponentMainHost.Run(typeof(<ModuleClass>),
             //                              args, "<exportName>");
-            il.Emit(OpCodes.Ldtoken, result.ModuleClass);
+            il.Emit(OpCodes.Ldtoken, moduleClassMeta);
             il.Emit(OpCodes.Call,
                 typeof(Type).GetMethod(
                     nameof(Type.GetTypeFromHandle),
