@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <LangVersion>9</LangVersion>
+        <Nullable>enable</Nullable>
+        <Title>Wacs WASI-NN LlamaSharp backend</Title>
+        <PackageId>WACS.WASI.NN.LlamaSharp</PackageId>
+        <Authors>Kelvin Nishikawa</Authors>
+        <Description>LlamaSharp / llama.cpp backend for WACS.WASI.NN. Implements GraphEncoding.ggml on the WasmEdge convention (load-by-name plus U8 tensors carrying UTF-8 prompt and response text). Models are resolved by name through an embedder-supplied registry — model files are GB-scale and not embedded in the wasm.</Description>
+        <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
+        <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <AssemblyName>Wacs.WASI.NN.LlamaSharp</AssemblyName>
+        <AssemblyVersion>0.1.0</AssemblyVersion>
+        <Version>0.1.0</Version>
+        <RepositoryType>git</RepositoryType>
+        <TargetFramework>net8.0</TargetFramework>
+        <PackageTags>wasm;wasi;nn;ml;llm;llama;gguf;wacs</PackageTags>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Wacs.WASI.NN\Wacs.WASI.NN.csproj" />
+        <!-- LlamaSharp wraps llama.cpp; the meta-package
+             pulls the CPU runtime by default. Embedders that
+             want CUDA/Vulkan/Metal swap the backend NuGet
+             (LLamaSharp.Backend.Cuda12 / .Vulkan / .MacMetal)
+             — no source change needed here. -->
+        <PackageReference Include="LLamaSharp" Version="0.20.0" />
+        <PackageReference Include="LLamaSharp.Backend.Cpu" Version="0.20.0" />
+    </ItemGroup>
+
+</Project>

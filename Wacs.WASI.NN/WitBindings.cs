@@ -207,12 +207,7 @@ namespace Wacs.WASI.NN
                     try
                     {
                         var name = ReadUtf8String(ctx, namePtr, nameLen);
-                        var model = host.ResolveNamedModel(name)
-                            ?? throw new WasiNNException(
-                                ErrorCode.NotFound,
-                                $"named model '{name}' not registered");
-                        var backend = host.ResolveBackend(model.Encoding);
-                        var graph = backend.LoadGraph(model.Builders, model.Target);
+                        var graph = host.LoadGraphByNameDispatch(name);
                         var handle = host.Graphs.Allocate(graph);
                         WriteResultHandleOk(ctx, retArea, handle);
                     }

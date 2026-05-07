@@ -65,6 +65,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.NN.MLNet", "Wacs.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.NN.MLNet.Test", "Wacs.WASI.NN.MLNet.Test\Wacs.WASI.NN.MLNet.Test.csproj", "{D4E7F0CB-3142-4A49-8595-AA1F2D473C3F}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.NN.LlamaSharp", "Wacs.WASI.NN.LlamaSharp\Wacs.WASI.NN.LlamaSharp.csproj", "{180ABE4F-4DAC-4E57-B1C6-2F261436224D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.NN.LlamaSharp.Test", "Wacs.WASI.NN.LlamaSharp.Test\Wacs.WASI.NN.LlamaSharp.Test.csproj", "{B9C080B5-09A0-4529-92A7-68D53ED45364}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -199,5 +203,13 @@ Global
 		{D4E7F0CB-3142-4A49-8595-AA1F2D473C3F}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D4E7F0CB-3142-4A49-8595-AA1F2D473C3F}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{D4E7F0CB-3142-4A49-8595-AA1F2D473C3F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{180ABE4F-4DAC-4E57-B1C6-2F261436224D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{180ABE4F-4DAC-4E57-B1C6-2F261436224D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{180ABE4F-4DAC-4E57-B1C6-2F261436224D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{180ABE4F-4DAC-4E57-B1C6-2F261436224D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B9C080B5-09A0-4529-92A7-68D53ED45364}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B9C080B5-09A0-4529-92A7-68D53ED45364}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B9C080B5-09A0-4529-92A7-68D53ED45364}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B9C080B5-09A0-4529-92A7-68D53ED45364}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
