@@ -17,7 +17,7 @@ Three layers:
    at compile time and emits one `public interface IXxx` per WIT
    resource or free-function group, with `[WitSource]` attributes
    carrying the source WIT text. See
-   [`../Wacs.ComponentModel.Bindgen.SourceGen/README.md`](../Wacs.ComponentModel.Bindgen.SourceGen/README.md).
+   [`../../../Wacs.ComponentModel/Wacs.ComponentModel.Bindgen.SourceGen/README.md`](../../../Wacs.ComponentModel/Wacs.ComponentModel.Bindgen.SourceGen/README.md).
 3. **`*Bindings.cs` orchestrators** — per-subsystem `IBindable`
    classes that wire host implementations of those interfaces to a
    `WasmRuntime` via `runtime.BindHostFunction<TDelegate>`. One
@@ -138,7 +138,7 @@ wasm execution). Pass `Transient` for per-call construction or
 
 Optional but recommended: catch contract drift at link time before
 the component runs. See the
-[validation docs](../Wacs.ComponentModel/Validation/README.md) for
+[validation docs](../../../Wacs.ComponentModel/Wacs.ComponentModel/Validation/README.md) for
 details.
 
 ```csharp

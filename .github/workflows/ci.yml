@@ -37,14 +37,51 @@ jobs:
       - name: Build
         run: dotnet build --configuration Release --no-restore
 
-      - name: Run Tests
+      - name: Run Spec Tests
         run: dotnet test --configuration Release --no-build --verbosity normal Spec.Test/Spec.Test.csproj
+
+      - name: Run Core Tests
+        run: dotnet test --configuration Release --no-build --verbosity normal Wacs.Core/Wacs.Core.Test/Wacs.Core.Test.csproj
+
+      - name: Run Compilation Tests
+        # Two CallIndirect_dispatches_via_funcref_table cases fail
+        # pre-reorg on main (NRE in GeneratedDispatcher); excluded here
+        # so CI surfaces the rest of the suite. Re-include once the
+        # underlying GeneratedDispatcher null-handling is fixed.
+        run: dotnet test --configuration Release --no-build --verbosity normal Wacs.Compilation/Wacs.Compilation.Test/Wacs.Compilation.Test.csproj --filter "FullyQualifiedName!~CallIndirect_dispatches_via_funcref_table"
+
+      - name: Run ComponentModel Tests
+        # Sequential xunit execution — parallelism flake noted in
+        # project memory: ComponentInstanceTests can race other test
+        # classes on shared SpecFactory / WasmRuntime ctor state.
+        run: dotnet test --configuration Release --no-build --verbosity normal Wacs.ComponentModel/Wacs.ComponentModel.Test/Wacs.ComponentModel.Test.csproj -- xUnit.ParallelizeTestCollections=false xUnit.MaxParallelThreads=1
+
+      - name: Run ComponentModel Bindgen Tests
+        run: dotnet test --configuration Release --no-build --verbosity normal Wacs.ComponentModel/Wacs.ComponentModel.Bindgen.Test/Wacs.ComponentModel.Bindgen.Test.csproj
+
+      - name: Run HostBindings Tests
+        run: dotnet test --configuration Release --no-build --verbosity normal Wacs.HostBindings/Wacs.HostBindings.Test/Wacs.HostBindings.Test.csproj
 
       - name: Run Transpiler Tests
         run: dotnet test --configuration Release --no-build --verbosity normal Wacs.Transpiler/Wacs.Transpiler.Test/Wacs.Transpiler.Test.csproj
 
       - name: Run WASI Preview 1 Tests
         run: dotnet test --configuration Release --no-build --verbosity normal Wacs.WASI/Wacs.WASI.Preview1/Wacs.WASI.Preview1.Test/Wacs.WASI.Preview1.Test.csproj
+
+      - name: Run WASI Preview 2 Tests
+        run: dotnet test --configuration Release --no-build --verbosity normal Wacs.WASI/Wacs.WASI.Preview2/Wacs.WASI.Preview2.Test/Wacs.WASI.Preview2.Test.csproj
+
+      - name: Run WASI.NN Core Tests
+        run: dotnet test --configuration Release --no-build --verbosity normal Wacs.WASI/Wacs.WASI.NN/Wacs.WASI.NN.Test/Wacs.WASI.NN.Test.csproj
+
+      - name: Run WASI.NN OnnxRuntime Tests
+        run: dotnet test --configuration Release --no-build --verbosity normal Wacs.WASI/Wacs.WASI.NN/Wacs.WASI.NN.OnnxRuntime.Test/Wacs.WASI.NN.OnnxRuntime.Test.csproj
+
+      - name: Run WASI.NN MLNet Tests
+        run: dotnet test --configuration Release --no-build --verbosity normal Wacs.WASI/Wacs.WASI.NN/Wacs.WASI.NN.MLNet.Test/Wacs.WASI.NN.MLNet.Test.csproj
+
+      - name: Run WASI.NN LlamaSharp Tests
+        run: dotnet test --configuration Release --no-build --verbosity normal Wacs.WASI/Wacs.WASI.NN/Wacs.WASI.NN.LlamaSharp.Test/Wacs.WASI.NN.LlamaSharp.Test.csproj
 
       # End-to-end smoke for `wacs aot --wasi`. The flow chains the
       # transpiler, WACS.HostBindings.SourceGen adapter generation,

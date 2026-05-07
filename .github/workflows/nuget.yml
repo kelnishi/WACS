@@ -40,7 +40,7 @@ jobs:
           # at restore time, so the two NuGet ids must publish at
           # the same version or the metapackage's transitive
           # restore breaks.
-          - path: Wacs.WASIp1/Wacs.WASIp1
+          - path: Wacs.WASI/Wacs.WASI.Preview1/Wacs.WASIp1
             package_name: WACS.WASIp1
             tag_prefix: WASIp1-v
           - path: Wacs.WASI/Wacs.WASI.Preview1/Wacs.WASI.Preview1

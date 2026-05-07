@@ -17,8 +17,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Compilation", "Wacs.Co
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Transpiler.Test", "Wacs.Transpiler\Wacs.Transpiler.Test\Wacs.Transpiler.Test.csproj", "{86D77261-EBF7-4ED4-8958-57EDDC211E7F}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Spec.Test.Data", "Spec.Test.Data\Spec.Test.Data.csproj", "{3E47DB21-1F0F-4A1A-BF0F-C28A5C0F01BC}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Compilation.Test", "Wacs.Compilation\Wacs.Compilation.Test\Wacs.Compilation.Test.csproj", "{854DD165-D7CB-45AE-8413-EA81F6D2C5C3}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Transpiler.Lib", "Wacs.Transpiler\Wacs.Transpiler.Lib\Wacs.Transpiler.Lib.csproj", "{CC2BEAF6-76B7-449A-8D23-549025E6F120}"
@@ -45,7 +43,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASI.Preview1.Test", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.Bench.Aot", "Wacs.Bench\Wacs.Bench.Aot\Wacs.Bench.Aot.csproj", "{6F7F8FF4-AA7F-41CA-8AFB-65C9A512D5E7}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASIp1", "Wacs.WASIp1\Wacs.WASIp1\Wacs.WASIp1.csproj", "{BF832CCF-4865-4FCF-BA7F-A348239B1C2D}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.WASIp1", "Wacs.WASI\Wacs.WASI.Preview1\Wacs.WASIp1\Wacs.WASIp1.csproj", "{BF832CCF-4865-4FCF-BA7F-A348239B1C2D}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.HostBindings.Abstractions", "Wacs.HostBindings\Wacs.HostBindings.Abstractions\Wacs.HostBindings.Abstractions.csproj", "{C62DF1E4-73F9-4E2C-8C7D-195007CA9F4D}"
 EndProject
@@ -107,10 +105,6 @@ Global
 		{86D77261-EBF7-4ED4-8958-57EDDC211E7F}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{86D77261-EBF7-4ED4-8958-57EDDC211E7F}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{86D77261-EBF7-4ED4-8958-57EDDC211E7F}.Release|Any CPU.Build.0 = Release|Any CPU
-		{3E47DB21-1F0F-4A1A-BF0F-C28A5C0F01BC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{3E47DB21-1F0F-4A1A-BF0F-C28A5C0F01BC}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{3E47DB21-1F0F-4A1A-BF0F-C28A5C0F01BC}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{3E47DB21-1F0F-4A1A-BF0F-C28A5C0F01BC}.Release|Any CPU.Build.0 = Release|Any CPU
 		{854DD165-D7CB-45AE-8413-EA81F6D2C5C3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{854DD165-D7CB-45AE-8413-EA81F6D2C5C3}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{854DD165-D7CB-45AE-8413-EA81F6D2C5C3}.Release|Any CPU.ActiveCfg = Release|Any CPU

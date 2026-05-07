@@ -44,7 +44,6 @@
     <ItemGroup>
       <ProjectReference Include="..\Wacs.Core\Wacs.Core\Wacs.Core.csproj" />
       <ProjectReference Include="..\Wacs.WASI\Wacs.WASI.Preview1\Wacs.WASI.Preview1\Wacs.WASI.Preview1.csproj" />
-      <ProjectReference Include="..\Spec.Test.Data\Spec.Test.Data.csproj" />
     </ItemGroup>
 
     <ItemGroup>
