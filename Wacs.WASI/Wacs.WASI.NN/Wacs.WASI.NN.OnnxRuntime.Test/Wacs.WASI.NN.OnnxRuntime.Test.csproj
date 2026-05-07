@@ -21,4 +21,14 @@
         <ProjectReference Include="..\Wacs.WASI.NN.OnnxRuntime\Wacs.WASI.NN.OnnxRuntime.csproj" />
     </ItemGroup>
 
+    <!-- Shared test fixture: hand-encoded minimal ONNX model.
+         Linked into every backend integration test from the
+         core NN test project so we don't ship a committed
+         binary blob, and so all backends round-trip through
+         the same canonical graph. -->
+    <ItemGroup>
+        <Compile Include="..\Wacs.WASI.NN.Test\TinyOnnxModel.cs"
+                 Link="TinyOnnxModel.cs" />
+    </ItemGroup>
+
 </Project>
