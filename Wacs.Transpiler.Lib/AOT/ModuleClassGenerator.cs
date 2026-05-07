@@ -1475,11 +1475,19 @@ namespace Wacs.Transpiler.AOT
             if (_initDataId < 0) PrepareInitData();
             var data = InitRegistry.Get(_initDataId);
 
-            // Imports of any kind disqualify — the AotLinked ctor doesn't
-            // wire imported memory / table / global slots, and import
-            // delegates depend on the IImports parameter being handed in
-            // by a Module-class ctor that AotLinked doesn't currently emit.
-            if (_wasmModule.ImportedFunctions.Count > 0) return false;
+            // Imported functions are fine under AotLinked: the Module-
+            // class ctor already accepts an IImports arg whenever
+            // _interfaces.ImportsInterface != null (regardless of
+            // emission target), and EmitImportDelegateWiring fills
+            // ctx.ImportDelegates from that arg using the same IL for
+            // Standard + AotLinked. EmitFuncTablePopulation then
+            // copies imports into FuncTable[0..ImportCount-1].
+            //
+            // Imported memory / table / global / tag still need linker
+            // integration that AotLinked's standalone ctor doesn't
+            // perform — those are slot-overwrites the linker does
+            // on Standard's instantiated ctx, and AotLinked has no
+            // equivalent yet.
             foreach (var import in _wasmModule.Imports)
             {
                 if (import.Desc is WasmModule.ImportDesc.MemDesc) return false;
