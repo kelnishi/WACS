@@ -142,6 +142,76 @@ namespace Wacs.Transpiler.Test
         }
 
         [Fact]
+        public void AotLinkedSupportsPassiveElementSegmentRoundTrip()
+        {
+            // (module
+            //   (type $ft (func (result i32)))
+            //   (func $forty_two (result i32) i32.const 42)
+            //   (table 1 funcref)
+            //   (elem funcref (ref.func $forty_two))     ;; passive segment
+            //   (func (export "init_then_call") (result i32)
+            //     i32.const 0     ;; dst slot
+            //     i32.const 0     ;; src offset in segment
+            //     i32.const 1     ;; len
+            //     table.init 0    ;; copy passive segment 0 into table
+            //     i32.const 0
+            //     call_indirect (type $ft)))
+            //
+            // Exercises the passive-element registration path:
+            // EmitPassiveElementSegmentRegistrations stamps the segment
+            // values into ModuleInit at ctor time, then table.init
+            // resolves the segment by id, copies into table[0]; the
+            // following call_indirect dispatches into $forty_two.
+            var (modInst, runtime) = ParseAndInstantiate(BuildPassiveTableInitWasm());
+            var result = new ModuleTranspiler("Wacs.AotLink.PassiveElem",
+                new TranspilerOptions { Emission = EmissionTarget.AotLinked })
+                .Transpile(modInst, runtime, "PassiveElemMod");
+            int n = (int)Invoke(result, "init_then_call");
+            Assert.Equal(42, n);
+        }
+
+        // Same shape as documented in
+        // AotLinkedSupportsPassiveElementSegmentRoundTrip. Element
+        // segment header byte 0x05 = passive, type funcref, vec of
+        // initializer expressions.
+        private static byte[] BuildPassiveTableInitWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // type: () -> i32
+            0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7F,
+            // function: 2 funcs, both type 0
+            0x03, 0x03, 0x02, 0x00, 0x00,
+            // table: 1 table, funcref limits min=1 (no max)
+            0x04, 0x04, 0x01, 0x70, 0x00, 0x01,
+            // export: "init_then_call" (14 chars) -> func 1
+            0x07, 0x12, 0x01, 0x0E,
+                0x69, 0x6E, 0x69, 0x74, 0x5F, 0x74, 0x68, 0x65, 0x6E,
+                0x5F, 0x63, 0x61, 0x6C, 0x6C,
+                0x00, 0x01,
+            // element: 1 segment, mode 0x05 (passive, vec of exprs),
+            //          elemtype = funcref (0x70), 1 init expr
+            //          (ref.func 0; end).
+            // Layout: count(1) + mode(1) + elemtype(1) + n(1)
+            //         + expr(0xD2 0x00 0x0B = 3 bytes) = 7 bytes
+            0x09, 0x07, 0x01, 0x05, 0x70, 0x01, 0xD2, 0x00, 0x0B,
+            // code: 2 bodies.
+            // Body 0: $forty_two — locals=0 + i32.const 42 + end = 4 bytes.
+            // Body 1 contents (after size prefix): locals=0 (1)
+            //   + i32.const 0 (2) + i32.const 0 (2) + i32.const 1 (2)
+            //   + table.init 0 0 (4) + i32.const 0 (2)
+            //   + call_indirect 0 0 (3) + end (1) = 17 bytes (0x11).
+            // Section: count(1) + body0_size(1) + body0(4)
+            //        + body1_size(1) + body1(17) = 24 bytes (0x18).
+            0x0A, 0x18, 0x02,
+                0x04, 0x00, 0x41, 0x2A, 0x0B,
+                0x11, 0x00,
+                    0x41, 0x00, 0x41, 0x00, 0x41, 0x01,
+                    0xFC, 0x0C, 0x00, 0x00,
+                    0x41, 0x00, 0x11, 0x00, 0x00,
+                    0x0B,
+        };
+
+        [Fact]
         public void AotLinkedSupportsPassiveDataSegmentRoundTrip()
         {
             // (module

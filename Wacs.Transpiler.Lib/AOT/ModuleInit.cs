@@ -181,5 +181,23 @@ namespace Wacs.Transpiler.AOT
                 _elemSegments[segId] = values ?? Array.Empty<Value>();
             }
         }
+
+        /// <summary>
+        /// Register an element segment at a specific id if no entry
+        /// already exists. Mirror of
+        /// <see cref="RegisterDataSegmentAt"/> for AotLinked emission's
+        /// passive-element registration path. In-process the
+        /// transpile-time pre-pass already populated the entry under
+        /// the same id, so the call is a no-op there; cross-process
+        /// load needs the populate.
+        /// </summary>
+        public static void RegisterElemSegmentAt(int segId, Value[] values)
+        {
+            lock (_elemLock)
+            {
+                if (!_elemSegments.ContainsKey(segId))
+                    _elemSegments[segId] = values ?? Array.Empty<Value>();
+            }
+        }
     }
 }
