@@ -84,7 +84,14 @@ output/
 riderModule.iml
 /_ReSharper.Caches/
 
-/Wacs.Console/Data/**
+# Sample wasm modules under the CLI's Data/ folder are
+# bench / smoke fixtures that ship via Microsoft.DataAcquired
+# (or a local fetch script), not via git. Pre-reorg the path
+# was /Wacs.Console/Data/**; the hierarchical move bumped it
+# one folder deeper and the old pattern stopped matching, so
+# 218 MB of fixtures slipped into commit 2f5ba22d. Pattern
+# updated to the post-reorg path.
+/Wacs.Console/Wacs.Console/Data/**
 
 .DS_Store
 Spec.Test/TestResults/**
