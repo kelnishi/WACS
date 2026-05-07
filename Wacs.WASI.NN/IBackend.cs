@@ -41,10 +41,21 @@ namespace Wacs.WASI.NN
         /// Load a graph from raw byte buffers. Multiple buffers
         /// support backends like OpenVINO that split IR + weights
         /// across files; most backends will use exactly one
-        /// element. <see cref="ReadOnlyMemory{T}"/> rather than
-        /// <c>byte[]</c> so the WIT lift can hand a pinned slice
-        /// of guest memory directly when available without a
-        /// host-side copy (see Phase 4 zero-copy work).
+        /// element.
+        ///
+        /// <para><b>Ownership contract:</b> the
+        /// <see cref="ReadOnlyMemory{T}"/> instances passed in
+        /// MAY be views over live guest linear memory and MUST
+        /// be consumed within this call. Backends that need the
+        /// bytes past <c>LoadGraph</c> return must copy them
+        /// (typically the load API of the underlying ML
+        /// framework already does — ORT, LlamaSharp, etc.
+        /// pin/copy the model bytes into native memory at
+        /// session/weights construction time, so the wrapper
+        /// can drop safely afterward). Retaining a reference
+        /// past return is undefined behavior — a guest
+        /// <c>memory.grow</c> after this call may relocate the
+        /// linear-memory page and invalidate the view.</para>
         /// </summary>
         IBackendGraph LoadGraph(
             IReadOnlyList<ReadOnlyMemory<byte>> builders,

@@ -314,27 +314,40 @@ namespace Wacs.WASI.NN
 
         // Read list<list<u8>> — outer (ptr, len) where each
         // element is itself an 8-byte (inner_ptr, inner_len)
-        // pair. Yields a host List<ReadOnlyMemory<byte>> sized
-        // for the IBackend.LoadGraph signature.
+        // pair. Yields ReadOnlyMemory<byte> views over the
+        // live guest linear-memory page. The host-owned
+        // intermediate byte[] copy that earlier versions of
+        // this lift did has been hoisted into the backend's
+        // own load path (where it's typically free, since
+        // ORT / LlamaSharp / Microsoft.ML all copy/pin the
+        // model bytes into native memory at session
+        // construction). Saves one full copy of the model on
+        // every graph.load — for multi-MB ONNX models or
+        // multi-GB GGUFs (when the byte path is exercised at
+        // all) that's the difference between two host-side
+        // allocations and one.
+        //
+        // Ownership: see IBackend.LoadGraph — the wrappers MUST
+        // be consumed before the call returns. Concretely the
+        // wasi-nn binding stack guarantees no memory.grow can
+        // happen between this lift and the backend's
+        // synchronous LoadGraph return, so the views are valid
+        // for the duration of that call.
         private static IReadOnlyList<ReadOnlyMemory<byte>> ReadListOfU8List(
             ExecContext ctx, int arrPtr, int arrLen)
         {
+            var mem = ctx.Memory();
             var list = new List<ReadOnlyMemory<byte>>(arrLen);
             for (int i = 0; i < arrLen; i++)
             {
                 int elemBase = arrPtr + i * 8;
                 int innerPtr = ctx.ReadI32LE(elemBase);
                 int innerLen = ctx.ReadI32LE(elemBase + 4);
-                // Materialize each builder buffer into a host
-                // array — same memory.grow safety reasoning as
-                // ReadU8List. Phase 4 introduces a pinning lift
-                // that hands out a ReadOnlyMemory<byte> view
-                // over the live page for the duration of the
-                // backend's LoadGraph call.
-                var buf = new byte[innerLen];
-                if (innerLen > 0)
-                    Array.Copy(ctx.Memory(), innerPtr, buf, 0, innerLen);
-                list.Add(buf);
+                // Wrap the guest's linear-memory array
+                // directly. No allocation, no copy.
+                list.Add(innerLen == 0
+                    ? ReadOnlyMemory<byte>.Empty
+                    : new ReadOnlyMemory<byte>(mem, innerPtr, innerLen));
             }
             return list;
         }
