@@ -1,1 +1,0 @@
-package PerlIO::via;our$VERSION='0.19';require XSLoader;XSLoader::load();1;

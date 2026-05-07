@@ -1,1 +1,0 @@
-package List::Util::XS;use strict;use warnings;use List::Util;our$VERSION="1.63";$VERSION =~ tr/_//d;1;

@@ -1,1 +1,0 @@
-package autodie::Scope::Guard;use strict;use warnings;our$VERSION='2.37';sub new {my ($class,$handler)=@_;return bless($handler,$class)}sub DESTROY {my ($self)=@_;$self->()}1;

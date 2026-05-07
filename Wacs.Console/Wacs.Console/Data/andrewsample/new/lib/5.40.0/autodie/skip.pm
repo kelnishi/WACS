@@ -1,1 +1,0 @@
-package autodie::skip;use strict;use warnings;our$VERSION='2.37';if ($] < 5.010){*DOES=sub {return shift->isa(@_)}}1;
