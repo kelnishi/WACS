@@ -196,13 +196,13 @@ Each folder has its own README explaining the projects underneath.
 
 | Family | Pillar |
 |---|---|
-| **[Wacs.Core/](Wacs.Core/)** | The interpreter — `WasmRuntime`, parsers, polymorphic + switch runtimes, full op set. Source generator for the switch dispatcher lives alongside. |
-| **[Wacs.Transpiler/](Wacs.Transpiler/)** | Ahead-of-time wasm → .NET IL transpiler. `WACS.Transpiler.Lib` is the programmatic API; the deprecated `wasm-transpile` CLI sits here too. |
-| **[Wacs.Console/](Wacs.Console/)** | The unified `wacs` CLI (NuGet `WACS.Cli`) — `wacs run / build / aot / inspect / bindgen`, with `--wasi` / `--wasip2` baking in host packages. |
-| **[Wacs.ComponentModel/](Wacs.ComponentModel/)** | Component-model runtime + WIT parser + canonical-ABI engine + `wit-bindgen-wacs` (forward & reverse C# bindgen). |
-| **[Wacs.HostBindings/](Wacs.HostBindings/)** | Attribute contract (`[WacsImport]`, `WacsHostMemory`) + Roslyn source generator that emits dispatch glue for the transpiler's NativeAOT path. |
-| **[Wacs.WASI/](Wacs.WASI/)** | All WASI host implementations, organized by sub-family — `Wacs.WASI.Preview1/`, `Wacs.WASI.Preview2/` (WASI 0.2.3), `Wacs.WASI.NN/` (wasi-nn + 3 backends), `Wacs.WASI.Threads/`. |
-| **[Wacs.Bench/](Wacs.Bench/)** | Developer-only perf harnesses — bench, AOT bench, opcode profiler. Not packaged. |
+| **[Wacs.Core/](Wacs.Core/README.md)** | The interpreter — `WasmRuntime`, parsers, polymorphic + switch runtimes, full op set. Source generator for the switch dispatcher lives alongside. |
+| **[Wacs.Transpiler/](Wacs.Transpiler/README.md)** | Ahead-of-time wasm → .NET IL transpiler. `WACS.Transpiler.Lib` is the programmatic API; the deprecated `wasm-transpile` CLI sits here too. |
+| **[Wacs.Console/](Wacs.Console/README.md)** | The unified `wacs` CLI (NuGet `WACS.Cli`) — `wacs run / build / aot / inspect / bindgen`, with `--wasi` / `--wasip2` baking in host packages. |
+| **[Wacs.ComponentModel/](Wacs.ComponentModel/README.md)** | Component-model runtime + WIT parser + canonical-ABI engine + `wit-bindgen-wacs` (forward & reverse C# bindgen). |
+| **[Wacs.HostBindings/](Wacs.HostBindings/README.md)** | Attribute contract (`[WacsImport]`, `WacsHostMemory`) + Roslyn source generator that emits dispatch glue for the transpiler's NativeAOT path. |
+| **[Wacs.WASI/](Wacs.WASI/README.md)** | All WASI host implementations, organized by sub-family — `Wacs.WASI.Preview1/`, `Wacs.WASI.Preview2/` (WASI 0.2.3), `Wacs.WASI.NN/` (wasi-nn + 3 backends), `Wacs.WASI.Threads/`. |
+| **[Wacs.Bench/](Wacs.Bench/README.md)** | Developer-only perf harnesses — bench, AOT bench, opcode profiler. Not packaged. |
 
 Top-level non-`Wacs.*` projects:
 
