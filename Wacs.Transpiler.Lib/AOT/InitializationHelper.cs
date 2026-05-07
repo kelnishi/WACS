@@ -520,6 +520,31 @@ namespace Wacs.Transpiler.AOT
                 }
             }
 
+            // 4a. Re-register segments from SavedDataSegments if a prior
+            //     instance of this Module class already ran and dropped
+            //     them from the global ModuleInit registry. Active data
+            //     segments are dropped after first init per spec §4.5.4
+            //     (so subsequent memory.init calls observe an empty
+            //     segment), but each Module instance still expects fresh
+            //     memory initialized from the original bytes — the saved
+            //     copies on `data` (populated in step 6 of the first
+            //     init) are the source of truth for that.
+            if (data.SavedDataSegments.Count > 0)
+            {
+                foreach (var (memIdx, offset, segId) in data.ActiveDataSegments)
+                {
+                    var live = ModuleInit.GetDataSegmentData(segId);
+                    if ((live == null || live.Length == 0)
+                        && data.SavedDataSegments.TryGetValue(segId, out var saved))
+                    {
+                        // RegisterDataSegmentAt is no-op-on-collision; the
+                        // dropped segment leaves an empty entry in the dict,
+                        // so we use the unconditional Restore variant.
+                        ModuleInit.RestoreDataSegment(segId, saved);
+                    }
+                }
+            }
+
             // 4. Copy active data segments to memories
             foreach (var (memIdx, offset, segId) in data.ActiveDataSegments)
             {
