@@ -145,7 +145,7 @@ namespace Wacs.Transpiler.AOT.Emitters
                     break;
 
                 case CallStrategy.TableIndirect:
-                    EmitIndirectCall(il, site, moduleInst);
+                    EmitIndirectCall(il, site, moduleInst, options);
                     break;
 
                 case CallStrategy.RefDispatch:
@@ -285,13 +285,37 @@ namespace Wacs.Transpiler.AOT.Emitters
         }
 
         /// <summary>
-        /// TableIndirect: pack params into object[], call InvokeIndirect, unbox result.
-        /// Uses DynamicInvoke for type-safe dispatch that properly traps on type mismatches.
-        /// Boundary wrap (doc 2 §3): GC-ref args spilled as object and wrapped
-        /// into Value before boxing, so the object[] slot holds a boxed Value
-        /// (matching the interpreter's DynamicInvoke type expectation).
+        /// TableIndirect: dispatch <c>call_indirect</c>.
+        /// <para>
+        /// When eligible (single-or-zero result, non-tail) and gated on
+        /// <see cref="TranspilerOptions.EmitCalliIndirect"/>, emits a
+        /// dual-path body:
+        /// </para>
+        /// <list type="number">
+        ///   <item>spill <c>elemIdx</c> + params to typed locals;</item>
+        ///   <item>call <see cref="CallHelpers.ResolveIndirectFnPtr"/> —
+        ///   throws TrapException on range / null-funcref / type-mismatch
+        ///   exactly like the legacy path; otherwise returns either a CIL
+        ///   function pointer or <c>IntPtr.Zero</c>;</item>
+        ///   <item>on non-zero, push <c>ctx + args + fnPtr</c> and
+        ///   <c>calli</c> directly to the local function — no allocation,
+        ///   no boxing;</item>
+        ///   <item>on zero (cross-module bound delegate, import slot,
+        ///   unpopulated entry), branch into the legacy <c>InvokeIndirect</c>
+        ///   path that builds an <c>object[]</c> + dispatches via the cached
+        ///   typed wrapper.</item>
+        /// </list>
+        /// <para>
+        /// Multi-return and tail-call paths skip the dispatcher and use the
+        /// legacy emit unchanged: multi-return needs byref out-args (a
+        /// future calli expansion), and the tail path already uses the
+        /// 0-allocation typed-delegate <c>tail. callvirt</c> via
+        /// <see cref="TryEmitTailInvoke"/>.
+        /// </para>
         /// </summary>
-        private static void EmitIndirectCall(ILGenerator il, CallSite site, ModuleInstance moduleInst)
+        private static void EmitIndirectCall(
+            ILGenerator il, CallSite site, ModuleInstance moduleInst,
+            TranspilerOptions? options)
         {
             int paramCount = site.FuncType.ParameterTypes.Arity;
             var resultTypes = site.FuncType.ResultType.Types;
@@ -319,6 +343,112 @@ namespace Wacs.Transpiler.AOT.Emitters
                 il.Emit(OpCodes.Stloc, temps[i]);
             }
 
+            bool multiReturn = resultTypes.Length > 1;
+            bool useCalliPath =
+                (options?.EmitCalliIndirect ?? false)
+                && !site.IsTailCall
+                && !multiReturn;
+
+            if (useCalliPath)
+            {
+                // call CallHelpers.ResolveIndirectFnPtr(ctx, tableIdx,
+                //   elemIdx, expectedTypeIdx) -> IntPtr. Throws on trap;
+                // returns IntPtr.Zero to signal "fall back to legacy."
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldc_I4, site.TableIdx);
+                il.Emit(OpCodes.Ldloc, elemIdxLocal);
+                il.Emit(OpCodes.Ldc_I4, site.TypeIdx);
+                il.Emit(OpCodes.Call, typeof(CallHelpers).GetMethod(
+                    nameof(CallHelpers.ResolveIndirectFnPtr),
+                    BindingFlags.Public | BindingFlags.Static)!);
+                var fnPtrLocal = il.DeclareLocal(typeof(IntPtr));
+                il.Emit(OpCodes.Stloc, fnPtrLocal);
+
+                // if (fnPtr == 0) goto slowPath
+                var slowPath = il.DefineLabel();
+                var endLabel = il.DefineLabel();
+                il.Emit(OpCodes.Ldloc, fnPtrLocal);
+                il.Emit(OpCodes.Ldc_I4_0);
+                il.Emit(OpCodes.Conv_I);
+                il.Emit(OpCodes.Beq, slowPath);
+
+                // --- fast path: ctx, args, fnPtr → calli ---
+                il.Emit(OpCodes.Ldarg_0);
+                for (int i = 0; i < paramCount; i++)
+                {
+                    il.Emit(OpCodes.Ldloc, temps[i]);
+                    if (ModuleTranspiler.IsGcRefType(paramTypes[i], moduleInst))
+                    {
+                        // Wrap object → Value at the signature boundary,
+                        // matching what direct/sibling calls do today.
+                        il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
+                            nameof(GcRuntimeHelpers.WrapRef),
+                            BindingFlags.Public | BindingFlags.Static)!);
+                    }
+                }
+                il.Emit(OpCodes.Ldloc, fnPtrLocal);
+
+                // PersistedAssemblyBuilder serializes the calli signature
+                // blob from EmitCalli's Type[] argument; the lower-level
+                // Emit(OpCodes.Calli, SignatureHelper) overload yields a
+                // BadImageFormatException at load. Build the param type
+                // array (ctx + WASM params) and use the typed convenience.
+                var calliParams = new Type[paramCount + 1];
+                calliParams[0] = typeof(ThinContext);
+                for (int i = 0; i < paramCount; i++)
+                    calliParams[i + 1] = ModuleTranspiler.MapValType(paramTypes[i]);
+                var calliReturn = resultTypes.Length == 1
+                    ? ModuleTranspiler.MapValType(resultTypes[0])
+                    : typeof(void);
+                il.EmitCalli(OpCodes.Calli, CallingConventions.Standard,
+                    calliReturn, calliParams, optionalParameterTypes: null);
+
+                // For GC-ref results, unwrap Value → object after the call.
+                if (resultTypes.Length == 1
+                    && ModuleTranspiler.IsGcRefType(resultTypes[0], moduleInst))
+                {
+                    il.Emit(OpCodes.Call, typeof(GcRuntimeHelpers).GetMethod(
+                        nameof(GcRuntimeHelpers.UnwrapRef),
+                        BindingFlags.Public | BindingFlags.Static)!);
+                }
+                il.Emit(OpCodes.Br, endLabel);
+
+                // --- slow path: legacy InvokeIndirect using the same temps ---
+                il.MarkLabel(slowPath);
+                EmitLegacyInvokeIndirect(il, site, moduleInst,
+                    temps, paramTypes, paramCount, elemIdxLocal,
+                    resultTypes, multiReturn: false);
+                il.MarkLabel(endLabel);
+                return;
+            }
+
+            // No calli — single legacy emit body, same as pre-phase 2.
+            EmitLegacyInvokeIndirect(il, site, moduleInst,
+                temps, paramTypes, paramCount, elemIdxLocal,
+                resultTypes, multiReturn);
+
+            // return_call_indirect terminates the caller. Legacy path
+            // can't use CLR `tail.` through the InvokeIndirect helper,
+            // but spec correctness only needs no fall-through; the
+            // unboxed result is on the stack ready for ret.
+            if (site.IsTailCall)
+                il.Emit(OpCodes.Ret);
+        }
+
+        /// <summary>
+        /// The pre-phase-2 InvokeIndirect emit body, factored out so the
+        /// dual-path emit can reuse it as its IntPtr.Zero fallback. Reads
+        /// from caller-supplied locals: <paramref name="temps"/> hold the
+        /// already-spilled params, <paramref name="elemIdxLocal"/> holds
+        /// the truncated table index. Builds the boxed <c>object[]</c>,
+        /// calls <see cref="CallHelpers.InvokeIndirect"/> or
+        /// <see cref="CallHelpers.InvokeIndirectMulti"/>, then unboxes.
+        /// </summary>
+        private static void EmitLegacyInvokeIndirect(
+            ILGenerator il, CallSite site, ModuleInstance moduleInst,
+            LocalBuilder[] temps, ValType[] paramTypes, int paramCount,
+            LocalBuilder elemIdxLocal, ValType[] resultTypes, bool multiReturn)
+        {
             // Build object[] args. Elements are boxed Value (for refs/v128) or
             // boxed primitives (for scalars). GC-ref temps are wrapped to Value
             // then boxed (not stored as raw CLR objects) so the consumer can
@@ -345,8 +475,6 @@ namespace Wacs.Transpiler.AOT.Emitters
             }
             var argsLocal = il.DeclareLocal(typeof(object[]));
             il.Emit(OpCodes.Stloc, argsLocal);
-
-            bool multiReturn = resultTypes.Length > 1;
 
             // Call InvokeIndirect(ctx, tableIdx, elemIdx, args, expectedReturn, expectedTypeIdx)
             // or InvokeIndirectMulti(ctx, tableIdx, elemIdx, args, resultCount, expectedTypeIdx)
@@ -388,20 +516,6 @@ namespace Wacs.Transpiler.AOT.Emitters
 
                 il.Emit(OpCodes.Call, typeof(CallHelpers).GetMethod(
                     nameof(CallHelpers.InvokeIndirect), BindingFlags.Public | BindingFlags.Static)!);
-            }
-
-            // return_call_indirect terminates the caller (doc 1 §6.2). We
-            // can't use the CLR `tail.` prefix through DynamicInvoke, but
-            // semantic correctness only requires that execution not fall
-            // through to subsequent IL: unbox the result and emit ret.
-            if (site.IsTailCall)
-            {
-                if (multiReturn)
-                    EmitUnboxResultArray(il, resultTypes, moduleInst);
-                else
-                    EmitUnboxResult(il, resultTypes, moduleInst);
-                il.Emit(OpCodes.Ret);
-                return;
             }
 
             // Unbox result
