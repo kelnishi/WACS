@@ -1718,6 +1718,14 @@ namespace Wacs.Transpiler.AOT
             // === Populate FuncTable ===
             EmitFuncTablePopulation(il, ctxLocal);
 
+            // === Populate LocalFnPtrs (calli fast path) ===
+            // Parallel IntPtr table the calli call_indirect path
+            // dispatches through. Gated on EmitCalliIndirect — when off,
+            // CallEmitter doesn't emit the calli branch, so allocating
+            // the array would just waste memory.
+            if (_options?.EmitCalliIndirect ?? true)
+                EmitLocalFnPtrTablePopulation(il, ctxLocal);
+
             // === Register precompiled call_indirect dispatch shims ===
             // For every distinct CLR delegate signature any function in
             // this module declares, emit a static Shim_<n> on the
@@ -1950,6 +1958,55 @@ namespace Wacs.Transpiler.AOT
                 il.Emit(OpCodes.Call, createDelegateMethod);
 
                 il.Emit(OpCodes.Stelem_Ref);
+            }
+        }
+
+        /// <summary>
+        /// Emit IL to populate <c>ctx.LocalFnPtrs</c> with raw CIL function
+        /// pointers for every local function. Mirrors the FuncTable layout —
+        /// indexed by module funcidx (imports first, then locals) — so
+        /// <see cref="CallHelpers.ResolveIndirectFnPtr"/> can read the slot
+        /// directly using the resolved funcaddr without a parallel index
+        /// translation.
+        /// <para>
+        /// Imports stay <c>IntPtr.Zero</c> (default). The resolver returns
+        /// zero for those slots, and the calli emit's runtime fallback
+        /// takes the legacy <see cref="CallHelpers.InvokeIndirect"/> path
+        /// that already handles imports correctly. Filling them would
+        /// require per-import IntPtr-yielding thunks — a future expansion
+        /// once the profile says imports show up on the hot indirect path.
+        /// </para>
+        /// <para>
+        /// Multi-return locals stay zero too: their static method signatures
+        /// have byref out-args that the calli emit's single-result path
+        /// can't dispatch. Same story — fallback handles them.
+        /// </para>
+        /// </summary>
+        private void EmitLocalFnPtrTablePopulation(ILGenerator il, LocalBuilder ctxLocal)
+        {
+            int totalFuncs = _importCount + _methodBuilders.Length;
+            if (totalFuncs == 0) return;
+
+            // ctx.LocalFnPtrs = new IntPtr[totalFuncs];
+            il.Emit(OpCodes.Ldloc, ctxLocal);
+            il.Emit(OpCodes.Ldc_I4, totalFuncs);
+            il.Emit(OpCodes.Newarr, typeof(IntPtr));
+            il.Emit(OpCodes.Stfld, typeof(ThinContext).GetField(
+                nameof(ThinContext.LocalFnPtrs))!);
+
+            // Local funcs (importCount..totalFuncs-1): ldftn the
+            // static method, store at slot importCount + i.
+            for (int i = 0; i < _methodBuilders.Length; i++)
+            {
+                var funcType = _allFunctionTypes[_importCount + i];
+                if (funcType.ResultType.Types.Length > 1) continue;
+
+                il.Emit(OpCodes.Ldloc, ctxLocal);
+                il.Emit(OpCodes.Ldfld, typeof(ThinContext).GetField(
+                    nameof(ThinContext.LocalFnPtrs))!);
+                il.Emit(OpCodes.Ldc_I4, _importCount + i);
+                il.Emit(OpCodes.Ldftn, _methodBuilders[i]);
+                il.Emit(OpCodes.Stelem_I);
             }
         }
 

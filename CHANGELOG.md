@@ -1,31 +1,53 @@
 # Changelog
 
-## [WACS.Transpiler.Lib 0.7.2] — Plumbing for `calli`-based call_indirect (dormant)
+## [WACS.Transpiler.Lib 0.7.2] — `calli` fast path for call_indirect
 
-Lays the groundwork for a `calli` fast path on `call_indirect`. No
-behavior change yet — every `call_indirect` still goes through
-`InvokeIndirect` because the IL-emit and the IntPtr-table population
-land in subsequent commits.
+`call_indirect` to a local function with ≤1 result, ≤16 params, and
+no GC-ref args/results now emits a CIL `calli` against a per-module
+`IntPtr` table populated at type-load via a generated cctor that
+`ldftn`s each local static method. Cross-module bound delegates,
+import slots, and any signature outside the eligibility envelope
+fall back at runtime to the existing `InvokeIndirect` path —
+`CallHelpers.ResolveIndirectFnPtr` returns `IntPtr.Zero` and the
+emitted IL takes a slow-path branch that builds an `object[]` and
+dispatches via the cached typed wrapper. Spec-correctness is
+independent of which path runs; trap behaviour and messages are
+unchanged.
 
-This commit:
+Microbench (10M iters, single-result int → int):
 
-- Adds `TranspilerOptions.EmitCalliIndirect` (default `true`). Will
-  gate the new emit when phase 2 lands; today it's read by nothing.
-- Adds `ThinContext.LocalFnPtrs` (and the `FnPtrSpan` accessor) — the
-  per-context IntPtr table the calli path will resolve against.
-- Adds `CallHelpers.ResolveIndirectFnPtr`. Performs the same range /
-  null-funcref / type-equivalence trap checks `InvokeIndirect` does,
-  then returns either a CIL function pointer or `IntPtr.Zero` to
-  signal "fall back to the legacy delegate path." Sharing the type
-  check moved the body of the doc 1 §6.2 test from `InvokeIndirect`
-  into a private `VerifyFuncTypeMatch` so both resolvers stay in
-  sync.
+| Path                                    | ns / call | vs. typed wrapper |
+| --------------------------------------- | --------: | ----------------: |
+| `Delegate.DynamicInvoke` (pre-fix)      |     129.8 |               6× slower |
+| typed wrapper, allocs+boxes args (PR #103) |     22.1 |                   1× |
+| **`calli` + IntPtr from span (this)**   |   **2.8** |          **7.9× faster** |
+| typed `Invoke` direct (lower bound)     |       2.1 |                       — |
 
-Background: a microbench against the current production path (cached
-typed wrapper, ~22 ns/indirect-call due to `object[]` alloc + per-arg
-boxing) shows calli at ~2.8 ns/call — within 0.7 ns of a direct typed
-delegate `Invoke`. The remaining commits (dual-path emit, IntPtr-table
-populator) are gated on equivalence-test green.
+Toggle via `TranspilerOptions.EmitCalliIndirect` (default `true`).
+Setting it `false` keeps the legacy emit for A/B comparison or
+regression isolation.
+
+Implementation lands in three commits:
+
+1. `ThinContext.LocalFnPtrs` + the `FnPtrSpan` accessor; flag plumbing;
+   `CallHelpers.ResolveIndirectFnPtr` (range / null-funcref /
+   type-equivalence trap surface factored into the shared
+   `VerifyFuncTypeMatch` helper so both resolvers stay in sync).
+2. Dual-path emit in `EmitIndirectCall`: spill args, resolve fn-ptr,
+   branch on `IntPtr.Zero` to legacy fallback, otherwise emit `calli`
+   with `EmitCalli(CallingConventions.Standard, returnType, paramTypes)`.
+   PersistedAssemblyBuilder serializes the typed-overload signature
+   correctly; the lower-level `Emit(OpCodes.Calli, SignatureHelper)`
+   path produced `BadImageFormatException` at module-load.
+3. `EmitLocalFnPtrTablePopulation` in the Module ctor — `ldftn` each
+   local method into the IntPtr array, leave imports + multi-return
+   slots at zero so the resolver routes them through the fallback.
+
+Tests: Spec.Test 770/772 + Wacs.Transpiler.Test 749/750 + Wacs.Core.Test
+355/355 + Wacs.ComponentModel.Test 347/347 + Wacs.WASI.Preview1.Test 72
++ Wacs.WASI.Preview2.Test 189 + Wacs.HostBindings.Test 8 + Wacs.Compi-
+lation.Test 60 (2 pre-existing Switch-Runtime failures unrelated to
+this work).
 
 ## [WACS.Transpiler.Lib 0.7.1] — Re-instantiation restores dropped active data segments
 
