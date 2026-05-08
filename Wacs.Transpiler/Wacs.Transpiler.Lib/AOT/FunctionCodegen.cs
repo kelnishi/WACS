@@ -379,6 +379,9 @@ namespace Wacs.Transpiler.AOT
             => _stackAnalysis.Get(inst);
         internal int ParamCount => _paramCount;
         internal LocalBuilder?[]? ParamShadowLocals => _paramShadowLocals;
+        internal Type[] ParamClrTypes => _paramClrTypes;
+        internal LocalBuilder[] Locals => _locals;
+        internal CilValidator CilValidator => _cilValidator;
 
         /// <summary>
         /// Emit a contiguous run of WASM instructions. Bound to

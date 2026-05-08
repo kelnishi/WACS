@@ -60,9 +60,9 @@ namespace Wacs.Transpiler.AOT
             var curr = instructions[i];
             var next = instructions[i + 1];
 
-            if (TryAlgebraicIdentity(il, curr, next, ref i)) return true;
+            if (TryAlgebraicIdentity(codegen, il, curr, next, ref i)) return true;
             if (TryLocalSimplification(codegen, il, curr, next, ref i)) return true;
-            if (TrySignExtendBeforeNarrowingStore(curr, next, ref i)) return true;
+            if (TrySignExtendBeforeNarrowingStore(codegen, curr, next, ref i)) return true;
 
             if (next.Op.x00 != WasmOpCode.BrIf || next is not InstBranchIf brIf)
                 return false;
@@ -70,8 +70,8 @@ namespace Wacs.Transpiler.AOT
             // Eligibility on the leading op first — Peek (not Get) the
             // br_if's analysis info so an early-return doesn't desync
             // the dequeueing FIFO. Only the fusion-commits path calls
-            // Get (and only on the brIf, since the cmp/eqz instruction
-            // will be skipped entirely by the i++ below).
+            // Get (and on BOTH the cmp/eqz and the brIf, since both
+            // are skipped past).
             bool eligibleCmp = TryGetCmpBranch(curr.Op.x00, out var branchOp);
             bool eligibleEqz = curr.Op.x00 == WasmOpCode.I32Eqz
                             || curr.Op.x00 == WasmOpCode.I64Eqz;
@@ -79,12 +79,16 @@ namespace Wacs.Transpiler.AOT
 
             if (!BrIfHasSimpleEmit(codegen, brIf, out var target)) return false;
 
-            // Commit: dequeue the brIf's analysis entry so the per-site
-            // FIFO stays aligned with the un-emitted instructions.
-            // (The cmp/eqz instruction has no analysis entry of its own
-            // in the standard cases — Get is keyed by reference, and
-            // these aren't shared singletons; if they were, the
-            // unconsumed entry would dangle harmlessly.)
+            // Commit: dequeue analysis entries for BOTH skipped
+            // instructions. WASM cmp / eqz / brIf instructions are
+            // shared singletons (one per opcode, cached across all
+            // call sites — see InstI32RelOp.I32Eq, InstI32TestOp.I32Eqz,
+            // etc.), so the per-instance FIFO holds N entries for N
+            // uses in the function. Skipping a use without dequeuing
+            // its entry leaves a stale entry that the next emit of
+            // the same singleton picks up — wrong stack height,
+            // invalid IL emission downstream.
+            codegen.ConsumeStackAnalysisInfo(curr);
             codegen.ConsumeStackAnalysisInfo(brIf);
 
             if (eligibleCmp)
@@ -177,13 +181,20 @@ namespace Wacs.Transpiler.AOT
         /// scope (integer ops with these constants don't trap).
         /// </summary>
         private static bool TryAlgebraicIdentity(
-            ILGenerator il, InstructionBase curr, InstructionBase next, ref int i)
+            FunctionCodegen codegen, ILGenerator il,
+            InstructionBase curr, InstructionBase next, ref int i)
         {
             // i32.const C ; <i32 binop>
             if (curr is InstI32Const i32c
                 && IsIntIdentity(next.Op.x00, i32c.Value, isI64: false))
             {
-                i++;   // consume both: const + binop
+                // InstI32Const is a per-value singleton, the binop is
+                // an opcode singleton — both have N FIFO entries for N
+                // uses. Drain both to keep the queue aligned with the
+                // un-emitted run.
+                codegen.ConsumeStackAnalysisInfo(curr);
+                codegen.ConsumeStackAnalysisInfo(next);
+                i++;
                 return true;
             }
 
@@ -192,6 +203,8 @@ namespace Wacs.Transpiler.AOT
                 && IsI64IdentityValue(next.Op.x00, i64c, out var matched)
                 && matched)
             {
+                codegen.ConsumeStackAnalysisInfo(curr);
+                codegen.ConsumeStackAnalysisInfo(next);
                 i++;
                 return true;
             }
@@ -276,6 +289,8 @@ namespace Wacs.Transpiler.AOT
         {
             if (curr is InstLocalTee tee && next.Op.x00 == WasmOpCode.Drop)
             {
+                codegen.ConsumeStackAnalysisInfo(curr);
+                codegen.ConsumeStackAnalysisInfo(next);
                 Emitters.VariableEmitter.EmitLocalSetInternal(
                     il, tee.GetIndex(),
                     codegen.ParamCount, codegen.ParamShadowLocals);
@@ -286,10 +301,29 @@ namespace Wacs.Transpiler.AOT
             if (curr is InstLocalGet g1 && next is InstLocalGet g2
                 && g1.GetIndex() == g2.GetIndex())
             {
+                // InstLocalGet is per-index singleton (LookupCache.GetOrAdd
+                // returns the same instance for repeated local.get of the
+                // same idx). Two consecutive local.get N share a FIFO
+                // entry queue — drain both before skipping.
+                codegen.ConsumeStackAnalysisInfo(curr);
+                codegen.ConsumeStackAnalysisInfo(next);
+                int idx = g1.GetIndex();
                 Emitters.VariableEmitter.EmitLocalGetInternal(
-                    il, g1.GetIndex(),
+                    il, idx,
                     codegen.ParamCount, codegen.ParamShadowLocals);
                 il.Emit(CilOpCodes.Dup);
+                // Tell the validator about both pushes. Without this the
+                // type-aware emitters downstream (notably Select, which
+                // dispatches between scalar / Value / GcRef paths from
+                // CilValidator.Peek()) reset to placeholder `object`
+                // and pick the wrong path. Use the same lookup
+                // VariableEmitter does for the regular local.get push.
+                var clrType = idx < codegen.ParamCount
+                    ? (idx < codegen.ParamClrTypes.Length
+                        ? codegen.ParamClrTypes[idx] : typeof(object))
+                    : codegen.Locals[idx - codegen.ParamCount].LocalType;
+                codegen.CilValidator.Push(clrType);
+                codegen.CilValidator.Push(clrType);
                 i++;
                 return true;
             }
@@ -305,6 +339,7 @@ namespace Wacs.Transpiler.AOT
         /// i64.store{8,16,32}.
         /// </summary>
         private static bool TrySignExtendBeforeNarrowingStore(
+            FunctionCodegen codegen,
             InstructionBase curr, InstructionBase next, ref int i)
         {
             var c = curr.Op.x00;
@@ -317,16 +352,13 @@ namespace Wacs.Transpiler.AOT
                 (c == WasmOpCode.I64Extend32S && n == WasmOpCode.I64Store32);
             if (!match) return false;
 
-            // The extend is dead; skip it but let the dispatcher emit
-            // the store unchanged. Rather than emitting any IL here,
-            // bump i by 0 (caller's i++ skips the extend instruction
-            // we're consuming). The next loop iteration emits the
-            // store via the regular path.
-            // Wait — we'd need to NOT skip: the caller's i++ would
-            // step past curr, but the store is at i+1; we want the
-            // loop to land on i+1. Returning true with no advance
-            // makes that work: caller's i++ advances from i (the
-            // extend) to i+1 (the store), exactly what we want.
+            // Drain the extend's analysis entry so the per-singleton
+            // FIFO doesn't desync; the store stays for the regular
+            // dispatcher to emit (its own EmitInstruction call will
+            // dequeue its entry normally). We return true with no i++
+            // so the caller's i++ advances from the extend to the
+            // store at i+1.
+            codegen.ConsumeStackAnalysisInfo(curr);
             return true;
         }
     }
