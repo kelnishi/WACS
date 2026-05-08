@@ -17,6 +17,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
+using Wacs.Core;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -232,11 +233,8 @@ namespace Wacs.Transpiler.AOT
                 OpeningTryDepth = 0
             });
 
-            // Emit instructions
-            foreach (var inst in _funcInst.Body.Instructions)
-            {
-                EmitInstruction(_il, inst);
-            }
+            // Emit instructions (top-level body — peephole pass runs inside).
+            EmitInstructions(_il, _funcInst.Body.Instructions);
 
             _blockStack.Pop();
 
@@ -367,6 +365,40 @@ namespace Wacs.Transpiler.AOT
         }
 
         /// <summary>
+        // Internal accessors so PeepholeOptimizer can read pre-pass
+        // analysis + the live block stack without copying. The peephole
+        // never mutates the live block stack — but StackAnalysis is a
+        // dequeueing FIFO (per-site info for singleton instructions),
+        // so eligibility checks call Peek and only Get when the fusion
+        // commits (so the consumed entry stays aligned with the
+        // skipped-EmitInstruction pair).
+        internal Stack<EmitBlock> BlockStack => _blockStack;
+        internal InstructionInfo? PeekStackAnalysisInfo(InstructionBase inst)
+            => _stackAnalysis.Peek(inst);
+        internal InstructionInfo? ConsumeStackAnalysisInfo(InstructionBase inst)
+            => _stackAnalysis.Get(inst);
+
+        /// <summary>
+        /// Emit a contiguous run of WASM instructions. Bound to
+        /// <see cref="ControlEmitter.EmitInstructionsDelegate"/> and called
+        /// by every block / loop / if / else / try-table emitter to walk
+        /// its body. The sequence-level form lets the peephole optimizer
+        /// fuse adjacent instructions (compare+branch, address+offset,
+        /// etc.) before the per-instruction dispatch below picks up
+        /// whatever survived.
+        /// </summary>
+        private void EmitInstructions(ILGenerator il, InstructionSequence instructions)
+        {
+            var list = instructions._instructions;
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (PeepholeOptimizer.TryFuse(this, il, list, ref i))
+                    continue;
+                EmitInstruction(il, list[i]);
+            }
+        }
+
+        /// <summary>
         /// Emit IL for a single instruction. This is the central dispatch that
         /// is also passed as a delegate to ControlEmitter for recursive emission.
         /// </summary>
@@ -446,7 +478,7 @@ namespace Wacs.Transpiler.AOT
                         break;
                     case WasmOpCode.TryTable:
                         ExceptionEmitter.EmitTryTable(il, (InstTryTable)inst, _blockStack,
-                            EmitInstruction, _moduleInst,
+                            EmitInstructions, _moduleInst,
                             inc => _tryDepth += inc,
                             dec => _tryDepth -= dec);
                         break;
@@ -664,7 +696,7 @@ namespace Wacs.Transpiler.AOT
                 case WasmOpCode.Block:
                 {
                     int sh = _currentInfo?.StackHeightBefore ?? 0;
-                    ControlEmitter.EmitBlock(il, (InstBlock)inst, _blockStack, EmitInstruction,
+                    ControlEmitter.EmitBlock(il, (InstBlock)inst, _blockStack, EmitInstructions,
                         sh, _moduleInst, _tryDepth, _functionHasTryTable);
                     break;
                 }
@@ -672,7 +704,7 @@ namespace Wacs.Transpiler.AOT
                 case WasmOpCode.Loop:
                 {
                     int sh = _currentInfo?.StackHeightBefore ?? 0;
-                    ControlEmitter.EmitLoop(il, (InstLoop)inst, _blockStack, EmitInstruction,
+                    ControlEmitter.EmitLoop(il, (InstLoop)inst, _blockStack, EmitInstructions,
                         sh, _moduleInst, _tryDepth);
                     break;
                 }
@@ -683,7 +715,7 @@ namespace Wacs.Transpiler.AOT
                     // Reference-keyed lookup works for both binary
                     // (joined by FinalizeModule) and WAT-parsed inputs.
                     var hint = _moduleInst.Repr.BranchHints?.TryGet(inst);
-                    ControlEmitter.EmitIf(il, (InstIf)inst, _blockStack, EmitInstruction,
+                    ControlEmitter.EmitIf(il, (InstIf)inst, _blockStack, EmitInstructions,
                         sh, _moduleInst, _tryDepth, _functionHasTryTable, hint,
                         _coldTailEmissions.Add);
                     break;

@@ -154,7 +154,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             ILGenerator il,
             InstTryTable inst,
             Stack<EmitBlock> blockStack,
-            EmitInstructionDelegate emitInstruction,
+            EmitInstructionsDelegate emitInstructions,
             ModuleInstance moduleInst,
             Action<int> incTryDepth,
             Action<int> decTryDepth)
@@ -227,8 +227,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             // the dispatch code); we bridge with a Br right after
             // EndExceptionBlock below.
             var block = inst.GetBlock(0);
-            foreach (var child in block.Instructions)
-                emitInstruction(il, child);
+            emitInstructions(il, block.Instructions);
 
             // If the body's natural end is reachable, shuttle its results to
             // locals so the auto-Leave can clear the eval stack. Skip when

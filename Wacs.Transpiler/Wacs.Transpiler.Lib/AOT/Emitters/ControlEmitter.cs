@@ -180,7 +180,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             ILGenerator il,
             InstBlock inst,
             Stack<EmitBlock> blockStack,
-            EmitInstructionDelegate emitInstruction,
+            EmitInstructionsDelegate emitInstructions,
             int stackHeight = 0,
             ModuleInstance? moduleInst = null,
             int tryDepth = 0,
@@ -220,10 +220,7 @@ namespace Wacs.Transpiler.AOT.Emitters
 
             // Emit block body
             var block = inst.GetBlock(0);
-            foreach (var child in block.Instructions)
-            {
-                emitInstruction(il, child);
-            }
+            emitInstructions(il, block.Instructions);
             bool bodyEndReachable = BodyEndIsReachable(block.Instructions);
 
             blockStack.Pop();
@@ -292,7 +289,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             ILGenerator il,
             InstLoop inst,
             Stack<EmitBlock> blockStack,
-            EmitInstructionDelegate emitInstruction,
+            EmitInstructionsDelegate emitInstructions,
             int stackHeight = 0,
             ModuleInstance? moduleInst = null,
             int tryDepth = 0)
@@ -316,10 +313,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             });
 
             var block = inst.GetBlock(0);
-            foreach (var child in block.Instructions)
-            {
-                emitInstruction(il, child);
-            }
+            emitInstructions(il, block.Instructions);
 
             blockStack.Pop();
         }
@@ -355,7 +349,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             ILGenerator il,
             InstIf inst,
             Stack<EmitBlock> blockStack,
-            EmitInstructionDelegate emitInstruction,
+            EmitInstructionsDelegate emitInstructions,
             int stackHeight = 0,
             ModuleInstance? moduleInst = null,
             int tryDepth = 0,
@@ -412,8 +406,7 @@ namespace Wacs.Transpiler.AOT.Emitters
 
                 // else-body inline (hot path)
                 var elseBlockSwap = inst.GetBlock(1);
-                foreach (var child in elseBlockSwap.Instructions)
-                    emitInstruction(il, child);
+                emitInstructions(il, elseBlockSwap.Instructions);
                 bool elseEndReachableSwap = BodyEndIsReachable(elseBlockSwap.Instructions);
 
                 if (elseEndReachableSwap)
@@ -429,8 +422,7 @@ namespace Wacs.Transpiler.AOT.Emitters
                 // then-body out-of-line (cold path)
                 il.MarkLabel(thenLabel);
                 var thenBlockSwap = inst.GetBlock(0);
-                foreach (var child in thenBlockSwap.Instructions)
-                    emitInstruction(il, child);
+                emitInstructions(il, thenBlockSwap.Instructions);
                 bool thenEndReachableSwap = BodyEndIsReachable(thenBlockSwap.Instructions);
 
                 if (resultLocals != null && thenEndReachableSwap)
@@ -449,8 +441,7 @@ namespace Wacs.Transpiler.AOT.Emitters
 
                 // if-true body
                 var ifBlock = inst.GetBlock(0);
-                foreach (var child in ifBlock.Instructions)
-                    emitInstruction(il, child);
+                emitInstructions(il, ifBlock.Instructions);
                 bool ifEndReachable = BodyEndIsReachable(ifBlock.Instructions);
 
                 // End of if-true body: shuttle to locals if reachable, then Br
@@ -467,8 +458,7 @@ namespace Wacs.Transpiler.AOT.Emitters
                 // else body
                 il.MarkLabel(elseLabel);
                 var elseBlock = inst.GetBlock(1);
-                foreach (var child in elseBlock.Instructions)
-                    emitInstruction(il, child);
+                emitInstructions(il, elseBlock.Instructions);
                 bool elseEndReachable = BodyEndIsReachable(elseBlock.Instructions);
 
                 // End of else body: shuttle to locals if reachable (fall-through to endLabel)
@@ -506,8 +496,7 @@ namespace Wacs.Transpiler.AOT.Emitters
                     registerColdEmission!(() =>
                     {
                         il.MarkLabel(coldThenLabel);
-                        foreach (var child in ifBlock.Instructions)
-                            emitInstruction(il, child);
+                        emitInstructions(il, ifBlock.Instructions);
                         bool coldEndReachable = BodyEndIsReachable(ifBlock.Instructions);
                         if (coldEndReachable)
                         {
@@ -531,8 +520,7 @@ namespace Wacs.Transpiler.AOT.Emitters
 
                     // if-true body only
                     var ifBlock = inst.GetBlock(0);
-                    foreach (var child in ifBlock.Instructions)
-                        emitInstruction(il, child);
+                    emitInstructions(il, ifBlock.Instructions);
                     bool ifEndReachable = BodyEndIsReachable(ifBlock.Instructions);
 
                     // End of if-true body: shuttle to locals if reachable
@@ -900,7 +888,13 @@ namespace Wacs.Transpiler.AOT.Emitters
     }
 
     /// <summary>
-    /// Delegate for recursive instruction emission from within control flow emitters.
+    /// Delegate for recursive instruction-sequence emission from within
+    /// control-flow / exception emitters. Sequence-level (vs. per-
+    /// instruction) so the implementation can run a peephole pass over
+    /// each block body — fusing compare+branch, folding address+offset,
+    /// dropping no-op locals, etc. — that needs lookahead across adjacent
+    /// instructions.
     /// </summary>
-    internal delegate void EmitInstructionDelegate(ILGenerator il, InstructionBase inst);
+    internal delegate void EmitInstructionsDelegate(
+        ILGenerator il, Wacs.Core.InstructionSequence instructions);
 }

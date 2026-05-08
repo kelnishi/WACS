@@ -113,6 +113,22 @@ namespace Wacs.Transpiler.AOT
         }
 
         /// <summary>
+        /// Non-destructive variant of <see cref="Get"/>. Returns the next
+        /// queued info without dequeuing. Used by the peephole pass during
+        /// eligibility checks — it can't consume the entry because the
+        /// fall-through emit may still need it. The fusion path calls
+        /// <see cref="Get"/> after deciding to fuse, which then dequeues
+        /// for both instructions in the fused pair (the next-instruction
+        /// EmitInstruction is skipped, so its Get is never reached).
+        /// </summary>
+        public InstructionInfo? Peek(InstructionBase inst)
+        {
+            if (_infoByInst.TryGetValue(inst, out var queue) && queue.Count > 0)
+                return queue.Peek();
+            return null;
+        }
+
+        /// <summary>
         /// Run the analysis on a function body.
         /// Call once before IL emission begins.
         /// </summary>
