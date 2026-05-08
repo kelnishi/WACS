@@ -16,6 +16,9 @@ if (args.Length > 0 && args[0] == "coldstart")
 if (args.Length > 0 && args[0] == "callindirect")
     return Wacs.Bench.CallIndirectBench.Run(args);
 
+if (args.Length > 0 && args[0] == "transpiler")
+    return Wacs.Bench.TranspilerBench.Run(args);
+
 static long RunOne(string wasmPath, bool useSwitch, bool superInst, bool useMinimal, bool switchSuper, Bench b)
 {
     var bytes = File.ReadAllBytes(wasmPath);

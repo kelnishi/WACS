@@ -13,5 +13,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="fib.wasm" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="dispatch.wasm" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="dispatch-bigbody.wasm" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

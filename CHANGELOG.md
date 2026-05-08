@@ -6,7 +6,7 @@ Two related transpiler optimizations land together. Both are gated
 or strictly-additive — the legacy emit paths still exist and remain
 tested via fall-throughs.
 
-### `calli` fast path for call_indirect
+### `calli` fast path for call_indirect — infrastructure, off by default
 
 `call_indirect` to a local function with ≤1 result, ≤16 params, and
 no GC-ref args/results now emits a CIL `calli` against a per-module
@@ -20,18 +20,25 @@ dispatches via the cached typed wrapper. Spec-correctness is
 independent of which path runs; trap behaviour and messages are
 unchanged.
 
-Microbench (10M iters, single-result int → int):
+**Default off** (`TranspilerOptions.EmitCalliIndirect = false`).
+Microbench shows the calli path is fundamentally faster — but a
+real-workload bench shows the opposite. Both are reproducible via
+`Wacs.Bench`:
 
-| Path                                    | ns / call | vs. typed wrapper |
-| --------------------------------------- | --------: | ----------------: |
-| `Delegate.DynamicInvoke` (pre-fix)      |     129.8 |               6× slower |
-| typed wrapper, allocs+boxes args (PR #103) |     22.1 |                   1× |
-| **`calli` + IntPtr from span (this)**   |   **2.8** |          **7.9× faster** |
-| typed `Invoke` direct (lower bound)     |       2.1 |                       — |
+| Workload                              | legacy  | calli   | Δ      |
+| ------------------------------------- | ------: | ------: | -----: |
+| Synthetic `callindirect` int → int    | 22.1 ns | 2.8 ns  | **7.9× faster** |
+| `transpiler dispatch` 4-way cyclic, tiny body | 2034 ms | 2407 ms | **18% slower** |
+| `transpiler dispatch-bb` 4-way cyclic, ~16-op body | 1028 ms | 1184 ms | **15% slower** |
 
-Toggle via `TranspilerOptions.EmitCalliIndirect` (default `true`).
-Setting it `false` keeps the legacy emit for A/B comparison or
-regression isolation.
+The synthetic isolates dispatch cost. The real workload puts the
+call site in a hot loop where the CLR JIT optimizes the legacy
+path's typed-delegate `_methodPtr` callvirt — likely guarded
+devirtualization or stub-based dispatch — that the calli path
+opaques out. Until profile-validated on a production-shape workload
+(perl, doom, codecs), the path stays opt-in. Enable via the flag
+when measuring or when you're confident your workload's dispatch
+profile favours raw calli over delegate Invoke.
 
 Implementation lands in three commits:
 

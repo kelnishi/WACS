@@ -80,13 +80,23 @@ namespace Wacs.Transpiler.AOT
         /// path handled is still handled, just behind one branch.
         /// </para>
         /// <para>
-        /// Microbench (10M iters, single-result int → int) shows ~7.9× over
-        /// the cached typed-wrapper path (22 ns → 2.8 ns / call). On by
-        /// default; flip off to A/B against the legacy emit or to isolate a
-        /// regression.
+        /// <b>Default off.</b> A synthetic dispatch microbench
+        /// (Wacs.Bench `callindirect`, 10M iters, int → int) shows the
+        /// calli path ~7.9× over the cached typed-wrapper path (22 ns →
+        /// 2.8 ns / call), but a real-workload bench (Wacs.Bench
+        /// `transpiler` with the dispatch / dispatch-bb shapes that
+        /// exercise call_indirect in a hot loop) shows a ~15-18%
+        /// <i>regression</i> against the legacy path — the synthetic's
+        /// 7.9× win doesn't carry to a 4-way cyclic dispatch site that
+        /// the CLR JIT optimizes for the legacy delegate-Invoke shape
+        /// (likely guarded-devirtualization on the typed-delegate
+        /// _methodPtr the calli path opaques out). The infrastructure
+        /// stays in place; flip the flag on to opt in for a workload
+        /// that profile-validates the win, or for AOT-published
+        /// binaries where steady-state JIT optimizations don't apply.
         /// </para>
         /// </summary>
-        public bool EmitCalliIndirect { get; set; } = true;
+        public bool EmitCalliIndirect { get; set; } = false;
 
         /// <summary>
         /// Maximum function body size (in instructions) to attempt transpilation.
