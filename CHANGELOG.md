@@ -1,6 +1,12 @@
 # Changelog
 
-## [WACS.Transpiler.Lib 0.7.2] — `calli` fast path for call_indirect
+## [WACS.Transpiler.Lib 0.7.2] — `calli` fast path for call_indirect + Tier 1 peephole pass
+
+Two related transpiler optimizations land together. Both are gated
+or strictly-additive — the legacy emit paths still exist and remain
+tested via fall-throughs.
+
+### `calli` fast path for call_indirect
 
 `call_indirect` to a local function with ≤1 result, ≤16 params, and
 no GC-ref args/results now emits a CIL `calli` against a per-module
@@ -48,6 +54,51 @@ Tests: Spec.Test 770/772 + Wacs.Transpiler.Test 749/750 + Wacs.Core.Test
 + Wacs.WASI.Preview2.Test 189 + Wacs.HostBindings.Test 8 + Wacs.Compi-
 lation.Test 60 (2 pre-existing Switch-Runtime failures unrelated to
 this work).
+
+### Tier 1 peephole pass
+
+A new `PeepholeOptimizer` runs a single-instruction lookahead over
+every block / loop / if / else / try-table body before per-
+instruction dispatch. Each fired pattern strictly shrinks the
+emitted IL — never grows. Misses fall through unchanged. The
+sequence-level `EmitInstructionsDelegate` (replacing the per-
+instruction one in `ControlEmitter` / `ExceptionEmitter`) is the
+only public API change.
+
+Patterns covered:
+
+- **Compare/branch fusion**: `<cmp>; br_if L` → `<typed branch> L`
+  for the 20 i32 / i64 cmp variants (eq/ne/lt/le/gt/ge × signed/
+  unsigned). Eliminates the intermediate 0/1 boolean materialization
+  the naive `Ceq/Clt/Cgt + Brtrue` produced. Only fires when the
+  br_if would have hit `EmitBrIf`'s short-form path (no excess, no
+  result-locals shuttle).
+- **Eqz/branch fusion**: `i32.eqz | i64.eqz; br_if L` → `brfalse L`.
+- **Algebraic identities**: `i{32,64}.const C; <binop>` where C is
+  the binop's identity (0 for add/sub/or/xor/shl/shr/rotl/rotr;
+  1 for mul/div_s/div_u; -1 for and). Drops both — the previous
+  iteration's `<value>` stays on the CIL stack as the result.
+- **Local simplifications**:
+  - `local.tee x; drop` → `local.set x` (saves the dup)
+  - `local.get x; local.get x` (same x) → `ldloc x; dup` (saves a
+    memory load)
+- **Sign-extend before narrowing store**: `i32.extend{8,16}_s;
+  i32.store{8,16}` and the i64 analogues drop the extend — the
+  store ignores the upper bits.
+
+Implementation note: `StackAnalysis.Get` is a destructive dequeue
+(per-site FIFO for singleton instructions). The peephole's
+eligibility check uses `StackAnalysis.Peek` (added) to avoid
+desyncing subsequent emits; the commit path calls `Get` exactly
+when fusion fires.
+
+What's intentionally out of scope: address+offset folding
+(`local.get x; i32.const A; i32.add; load offset=K` → `load
+offset=(A+K)`) is unsound in this runtime — without guard-page
+trapping or flow analysis, an i32-overflowing `x + A` would change
+the trapping behaviour. Const-address bounds elision is sound but
+needs additional design (import memory min size, overflow handling)
+and is deferred. Both are the natural Tier 2 work.
 
 ## [WACS.Transpiler.Lib 0.7.1] — Re-instantiation restores dropped active data segments
 

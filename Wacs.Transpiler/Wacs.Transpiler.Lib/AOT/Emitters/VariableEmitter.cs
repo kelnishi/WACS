@@ -166,6 +166,17 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// object-typed shadow locals per doc 2 §15).
         /// WASM local index paramCount..N → CIL local 0..N-paramCount.
         /// </summary>
+        // Internal aliases so PeepholeOptimizer can emit the same local-get /
+        // local-set IL the regular dispatch produces, without re-implementing
+        // the param/shadow-local routing.
+        internal static void EmitLocalGetInternal(ILGenerator il, int wasmIdx,
+            int paramCount, LocalBuilder?[]? paramShadowLocals)
+            => EmitLocalGet(il, wasmIdx, paramCount, paramShadowLocals);
+
+        internal static void EmitLocalSetInternal(ILGenerator il, int wasmIdx,
+            int paramCount, LocalBuilder?[]? paramShadowLocals)
+            => EmitLocalSet(il, wasmIdx, paramCount, paramShadowLocals);
+
         private static void EmitLocalGet(ILGenerator il, int wasmIdx, int paramCount,
             LocalBuilder?[]? paramShadowLocals)
         {

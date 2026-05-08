@@ -377,6 +377,8 @@ namespace Wacs.Transpiler.AOT
             => _stackAnalysis.Peek(inst);
         internal InstructionInfo? ConsumeStackAnalysisInfo(InstructionBase inst)
             => _stackAnalysis.Get(inst);
+        internal int ParamCount => _paramCount;
+        internal LocalBuilder?[]? ParamShadowLocals => _paramShadowLocals;
 
         /// <summary>
         /// Emit a contiguous run of WASM instructions. Bound to

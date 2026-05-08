@@ -60,6 +60,10 @@ namespace Wacs.Transpiler.AOT
             var curr = instructions[i];
             var next = instructions[i + 1];
 
+            if (TryAlgebraicIdentity(il, curr, next, ref i)) return true;
+            if (TryLocalSimplification(codegen, il, curr, next, ref i)) return true;
+            if (TrySignExtendBeforeNarrowingStore(curr, next, ref i)) return true;
+
             if (next.Op.x00 != WasmOpCode.BrIf || next is not InstBranchIf brIf)
                 return false;
 
@@ -156,6 +160,174 @@ namespace Wacs.Transpiler.AOT
             }
             branchOp = default;
             return false;
+        }
+
+        /// <summary>
+        /// Drop pairs of <c>i32.const C; &lt;binop&gt;</c> (and i64 analogues) where
+        /// C is the identity element for the binop. The previous-iteration's
+        /// <c>&lt;value&gt;</c> emit is already on the CIL stack — skipping the
+        /// const + binop leaves it there as the operation's result.
+        /// <list type="bullet">
+        ///   <item>add / sub / or / xor / shl / shr_s / shr_u / rotl / rotr with 0 → identity</item>
+        ///   <item>mul / div_s / div_u with 1 → identity</item>
+        ///   <item>and with -1 → identity (all bits set)</item>
+        /// </list>
+        /// Sound for all values: the binop's result is provably equal to
+        /// the left operand; no overflow, NaN, or trap concerns at this
+        /// scope (integer ops with these constants don't trap).
+        /// </summary>
+        private static bool TryAlgebraicIdentity(
+            ILGenerator il, InstructionBase curr, InstructionBase next, ref int i)
+        {
+            // i32.const C ; <i32 binop>
+            if (curr is InstI32Const i32c
+                && IsIntIdentity(next.Op.x00, i32c.Value, isI64: false))
+            {
+                i++;   // consume both: const + binop
+                return true;
+            }
+
+            // i64.const C ; <i64 binop>
+            if (curr is InstI64Const i64c
+                && IsI64IdentityValue(next.Op.x00, i64c, out var matched)
+                && matched)
+            {
+                i++;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool IsIntIdentity(WasmOpCode op, int constValue, bool isI64)
+        {
+            // identity-on-the-RIGHT only — left operand becomes the result.
+            switch (op)
+            {
+                case WasmOpCode.I32Add or WasmOpCode.I32Sub
+                    or WasmOpCode.I32Or  or WasmOpCode.I32Xor
+                    or WasmOpCode.I32Shl or WasmOpCode.I32ShrS or WasmOpCode.I32ShrU
+                    or WasmOpCode.I32Rotl or WasmOpCode.I32Rotr
+                    when !isI64:
+                    return constValue == 0;
+                case WasmOpCode.I32Mul or WasmOpCode.I32DivS or WasmOpCode.I32DivU
+                    when !isI64:
+                    return constValue == 1;
+                case WasmOpCode.I32And when !isI64:
+                    return constValue == -1;
+            }
+            return false;
+        }
+
+        private static bool IsI64IdentityValue(
+            WasmOpCode op, InstI64Const i64c, out bool matched)
+        {
+            // i64.const Value is internal — read via reflection-free
+            // accessor on the instruction type. Matches the same
+            // identity table as i32 above, with the constant compared
+            // as a 64-bit value.
+            // The Value field is internal; we can't access it directly
+            // here without exposing it. Instead, route via the public
+            // API: TryGetConstI64.
+            matched = false;
+            // Pull the constant from the i64.const instruction. The
+            // instruction's `Value` is internal; we use a cheap
+            // round-trip via its render text only as a fallback. A
+            // direct accessor is added below.
+            long v;
+            if (!TryReadI64Const(i64c, out v)) return false;
+            switch (op)
+            {
+                case WasmOpCode.I64Add or WasmOpCode.I64Sub
+                    or WasmOpCode.I64Or  or WasmOpCode.I64Xor
+                    or WasmOpCode.I64Shl or WasmOpCode.I64ShrS or WasmOpCode.I64ShrU
+                    or WasmOpCode.I64Rotl or WasmOpCode.I64Rotr:
+                    matched = v == 0; return true;
+                case WasmOpCode.I64Mul or WasmOpCode.I64DivS or WasmOpCode.I64DivU:
+                    matched = v == 1; return true;
+                case WasmOpCode.I64And:
+                    matched = v == -1L; return true;
+            }
+            return false;
+        }
+
+        // InstI64Const.Value is internal cross-assembly. FetchImmediate
+        // is the public reader and ignores its ExecContext argument
+        // (just returns the field), so passing null! is safe.
+        private static bool TryReadI64Const(InstI64Const c, out long value)
+        {
+            value = c.FetchImmediate(null!);
+            return true;
+        }
+
+        /// <summary>
+        /// Two local-instruction simplifications:
+        /// <list type="bullet">
+        ///   <item><c>local.tee x; drop</c> → <c>local.set x</c>.
+        ///   The naive <c>tee+drop</c> emits <c>dup; stloc x; pop</c> — the
+        ///   dup and pop cancel.</item>
+        ///   <item><c>local.get x; local.get x</c> (same x) →
+        ///   <c>ldloc x; dup</c>. Saves one memory read.</item>
+        /// </list>
+        /// </summary>
+        private static bool TryLocalSimplification(
+            FunctionCodegen codegen, ILGenerator il,
+            InstructionBase curr, InstructionBase next, ref int i)
+        {
+            if (curr is InstLocalTee tee && next.Op.x00 == WasmOpCode.Drop)
+            {
+                Emitters.VariableEmitter.EmitLocalSetInternal(
+                    il, tee.GetIndex(),
+                    codegen.ParamCount, codegen.ParamShadowLocals);
+                i++;
+                return true;
+            }
+
+            if (curr is InstLocalGet g1 && next is InstLocalGet g2
+                && g1.GetIndex() == g2.GetIndex())
+            {
+                Emitters.VariableEmitter.EmitLocalGetInternal(
+                    il, g1.GetIndex(),
+                    codegen.ParamCount, codegen.ParamShadowLocals);
+                il.Emit(CilOpCodes.Dup);
+                i++;
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// <c>i32.extend8_s; i32.store8</c> (and the other extend → narrowing
+        /// store pairs) drop the extend. The store ignores the upper bits
+        /// the extend wrote, so the extend is dead. Five widths covered:
+        /// i32.{8,16}_s before i32.store{8,16}, i64.{8,16,32}_s before
+        /// i64.store{8,16,32}.
+        /// </summary>
+        private static bool TrySignExtendBeforeNarrowingStore(
+            InstructionBase curr, InstructionBase next, ref int i)
+        {
+            var c = curr.Op.x00;
+            var n = next.Op.x00;
+            bool match =
+                (c == WasmOpCode.I32Extend8S  && n == WasmOpCode.I32Store8)  ||
+                (c == WasmOpCode.I32Extend16S && n == WasmOpCode.I32Store16) ||
+                (c == WasmOpCode.I64Extend8S  && n == WasmOpCode.I64Store8)  ||
+                (c == WasmOpCode.I64Extend16S && n == WasmOpCode.I64Store16) ||
+                (c == WasmOpCode.I64Extend32S && n == WasmOpCode.I64Store32);
+            if (!match) return false;
+
+            // The extend is dead; skip it but let the dispatcher emit
+            // the store unchanged. Rather than emitting any IL here,
+            // bump i by 0 (caller's i++ skips the extend instruction
+            // we're consuming). The next loop iteration emits the
+            // store via the regular path.
+            // Wait — we'd need to NOT skip: the caller's i++ would
+            // step past curr, but the store is at i+1; we want the
+            // loop to land on i+1. Returning true with no advance
+            // makes that work: caller's i++ advances from i (the
+            // extend) to i+1 (the store), exactly what we want.
+            return true;
         }
     }
 }
