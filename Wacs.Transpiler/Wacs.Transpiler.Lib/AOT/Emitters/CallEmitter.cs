@@ -862,6 +862,50 @@ namespace Wacs.Transpiler.AOT.Emitters
     public static class CallHelpers
     {
         /// <summary>
+        /// Doc 1 §6.2 type-equivalence check shared by every
+        /// call_indirect resolver path: declared type of the callee
+        /// must be a subtype of the call_indirect's type operand.
+        /// Throws TrapException("indirect call type mismatch") on
+        /// failure; returns silently when the runtime can't verify
+        /// (no type metadata for the call site or callee — falls back
+        /// to the CLR signature check at dispatch time).
+        /// </summary>
+        private static void VerifyFuncTypeMatch(
+            ThinContext ctx, int resolvedFuncIdx, int expectedTypeIdx)
+        {
+            int expectedHash;
+            if (ctx.Module?.Types != null && ctx.Module.Types.Contains((TypeIdx)expectedTypeIdx))
+                expectedHash = ctx.Module.Types[(TypeIdx)expectedTypeIdx].GetHashCode();
+            else if (ctx.TypeHashes != null && expectedTypeIdx < ctx.TypeHashes.Length)
+                expectedHash = ctx.TypeHashes[expectedTypeIdx];
+            else
+                return; // can't check — skip
+
+            if (expectedHash == 0) return;
+
+            bool ok;
+            if (ctx.FuncTypeSuperHashes != null
+                && resolvedFuncIdx >= 0 && resolvedFuncIdx < ctx.FuncTypeSuperHashes.Length
+                && ctx.FuncTypeSuperHashes[resolvedFuncIdx] != null)
+            {
+                var chain = ctx.FuncTypeSuperHashes[resolvedFuncIdx];
+                ok = false;
+                for (int i = 0; i < chain.Length; i++)
+                    if (chain[i] == expectedHash) { ok = true; break; }
+            }
+            else if (ctx.FuncTypeHashes != null
+                && resolvedFuncIdx >= 0 && resolvedFuncIdx < ctx.FuncTypeHashes.Length)
+            {
+                ok = ctx.FuncTypeHashes[resolvedFuncIdx] == expectedHash;
+            }
+            else
+            {
+                ok = true; // no metadata — defer to CLR signature check
+            }
+            if (!ok) throw new TrapException("indirect call type mismatch");
+        }
+
+        /// <summary>
         /// Resolve call_indirect: table lookup + null check → FuncTable index.
         /// Returns the FuncAddr value which is the index into FuncTable.
         /// </summary>
@@ -881,6 +925,53 @@ namespace Wacs.Transpiler.AOT.Emitters
 
             // Standalone fallback: FuncAddr is stored in Data.Ptr
             return (int)r.Data.Ptr;
+        }
+
+        /// <summary>
+        /// Fast-path resolver for the calli emit (gated by
+        /// <see cref="TranspilerOptions.EmitCalliIndirect"/>). Performs the
+        /// same range / null-funcref / type-equivalence checks as
+        /// <see cref="InvokeIndirect"/> — traps with identical messages —
+        /// and then either returns the local function's CIL function
+        /// pointer from <see cref="ThinContext.LocalFnPtrs"/> or
+        /// <c>IntPtr.Zero</c> when calli can't dispatch the call (cross-
+        /// module bound delegate, import slot, or unpopulated entry).
+        /// The emitted IL branches on zero and falls back to the legacy
+        /// <see cref="InvokeIndirect"/> path; spec-correctness is
+        /// independent of which path runs.
+        /// </summary>
+        public static IntPtr ResolveIndirectFnPtr(
+            ThinContext ctx, int tableIdx, int elemIdx, int expectedTypeIdx)
+        {
+            var table = ctx.Tables[tableIdx];
+            if ((uint)elemIdx >= (uint)table.Elements.Count)
+                throw new TrapException($"undefined element {elemIdx}");
+
+            var r = table.Elements[elemIdx];
+            if (r.IsNullRef)
+                throw new TrapException("uninitialized element");
+
+            int resolvedFuncIdx = ctx.Types != null
+                ? (int)r.GetFuncAddr(ctx.Types).Value
+                : (int)r.Data.Ptr;
+
+            if (expectedTypeIdx >= 0)
+                VerifyFuncTypeMatch(ctx, resolvedFuncIdx, expectedTypeIdx);
+
+            // Cross-module bound delegate: there's no local IntPtr
+            // because the target lives in another module's emit.
+            // Fall back to the delegate path.
+            if (r.GcRef is DelegateRef) return IntPtr.Zero;
+
+            var ptrs = ctx.LocalFnPtrs;
+            if (ptrs == null
+                || (uint)resolvedFuncIdx >= (uint)ptrs.Length)
+                return IntPtr.Zero;
+
+            // Zero entry = import slot or otherwise unpopulated. Fall
+            // back to the legacy delegate dispatch — InvokeIndirect
+            // will still trap on missing FuncTable entries.
+            return ptrs[resolvedFuncIdx];
         }
 
         /// <summary>
@@ -916,38 +1007,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             // Skip when the call site didn't carry a type idx (call_ref path
             // routes here without one).
             if (expectedTypeIdx >= 0)
-            {
-                int expectedHash;
-                if (ctx.Module?.Types != null && ctx.Module.Types.Contains((TypeIdx)expectedTypeIdx))
-                    expectedHash = ctx.Module.Types[(TypeIdx)expectedTypeIdx].GetHashCode();
-                else if (ctx.TypeHashes != null && expectedTypeIdx < ctx.TypeHashes.Length)
-                    expectedHash = ctx.TypeHashes[expectedTypeIdx];
-                else
-                    expectedHash = 0; // can't check — skip
-
-                if (expectedHash != 0)
-                {
-                    bool ok = false;
-                    if (ctx.FuncTypeSuperHashes != null
-                        && resolvedFuncIdx >= 0 && resolvedFuncIdx < ctx.FuncTypeSuperHashes.Length
-                        && ctx.FuncTypeSuperHashes[resolvedFuncIdx] != null)
-                    {
-                        var chain = ctx.FuncTypeSuperHashes[resolvedFuncIdx];
-                        for (int i = 0; i < chain.Length; i++)
-                            if (chain[i] == expectedHash) { ok = true; break; }
-                    }
-                    else if (ctx.FuncTypeHashes != null
-                        && resolvedFuncIdx >= 0 && resolvedFuncIdx < ctx.FuncTypeHashes.Length)
-                    {
-                        ok = ctx.FuncTypeHashes[resolvedFuncIdx] == expectedHash;
-                    }
-                    else
-                    {
-                        ok = true; // no metadata — defer to CLR signature check below
-                    }
-                    if (!ok) throw new TrapException("indirect call type mismatch");
-                }
-            }
+                VerifyFuncTypeMatch(ctx, resolvedFuncIdx, expectedTypeIdx);
 
             // Try to get delegate directly from the table element (cross-module path).
             // Bound delegates are stored as DelegateRef in GcRef on funcref Values.

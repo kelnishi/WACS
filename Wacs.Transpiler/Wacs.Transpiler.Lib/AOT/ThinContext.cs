@@ -102,6 +102,24 @@ namespace Wacs.Transpiler.AOT
         // Used by call_indirect/call_ref for dynamic dispatch.
         public Delegate[] FuncTable;
 
+        // LocalFnPtrs: parallel to FuncTable, holding raw CIL function
+        // pointers for local functions only (imports and cross-module
+        // funcrefs stay IntPtr.Zero). Populated at module-class type-load
+        // by a generated cctor that ldftn's each local static method.
+        // Read by CallHelpers.ResolveIndirectFnPtr — when the lookup
+        // returns a non-zero pointer, the calli fast path emitted by
+        // CallEmitter dispatches without allocation; on zero it falls
+        // back to InvokeIndirect's legacy delegate path.
+        // Null-or-empty when EmitCalliIndirect is false at transpile
+        // time, in which case every call_indirect goes via FuncTable.
+        public IntPtr[]? LocalFnPtrs;
+
+        // Read-only span over LocalFnPtrs for the calli emit path.
+        // Returns Empty when LocalFnPtrs is null so the resolver's
+        // bounds check folds into a single zero-length comparison.
+        public ReadOnlySpan<IntPtr> FnPtrSpan
+            => LocalFnPtrs ?? ReadOnlySpan<IntPtr>.Empty;
+
         // HostBundle: opaque reference to a host package's typed-interface
         // aggregate (e.g. WasiPreview2Bundle). Used by the transpiler's
         // direct-linked import path — for each guest call $import that

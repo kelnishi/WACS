@@ -1,5 +1,32 @@
 # Changelog
 
+## [WACS.Transpiler.Lib 0.7.2] — Plumbing for `calli`-based call_indirect (dormant)
+
+Lays the groundwork for a `calli` fast path on `call_indirect`. No
+behavior change yet — every `call_indirect` still goes through
+`InvokeIndirect` because the IL-emit and the IntPtr-table population
+land in subsequent commits.
+
+This commit:
+
+- Adds `TranspilerOptions.EmitCalliIndirect` (default `true`). Will
+  gate the new emit when phase 2 lands; today it's read by nothing.
+- Adds `ThinContext.LocalFnPtrs` (and the `FnPtrSpan` accessor) — the
+  per-context IntPtr table the calli path will resolve against.
+- Adds `CallHelpers.ResolveIndirectFnPtr`. Performs the same range /
+  null-funcref / type-equivalence trap checks `InvokeIndirect` does,
+  then returns either a CIL function pointer or `IntPtr.Zero` to
+  signal "fall back to the legacy delegate path." Sharing the type
+  check moved the body of the doc 1 §6.2 test from `InvokeIndirect`
+  into a private `VerifyFuncTypeMatch` so both resolvers stay in
+  sync.
+
+Background: a microbench against the current production path (cached
+typed wrapper, ~22 ns/indirect-call due to `object[]` alloc + per-arg
+boxing) shows calli at ~2.8 ns/call — within 0.7 ns of a direct typed
+delegate `Invoke`. The remaining commits (dual-path emit, IntPtr-table
+populator) are gated on equivalence-test green.
+
 ## [WACS.Transpiler.Lib 0.7.1] — Re-instantiation restores dropped active data segments
 
 Each Module instance's ctor copies active data segments from the

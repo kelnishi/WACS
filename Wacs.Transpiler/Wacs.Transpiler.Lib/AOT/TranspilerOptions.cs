@@ -64,6 +64,31 @@ namespace Wacs.Transpiler.AOT
         public bool EmitTailCallPrefix { get; set; } = true;
 
         /// <summary>
+        /// When true, emit CIL <c>calli</c> for <c>call_indirect</c> when the
+        /// site's signature fits the fast path (≤1 result, ≤16 params, no
+        /// GC-ref args/results). Reads the target's IntPtr from
+        /// <see cref="ThinContext.LocalFnPtrs"/> — a parallel function-
+        /// pointer table populated at module-class type-load via a generated
+        /// cctor that <c>ldftn</c>s each local method — and dispatches without
+        /// allocating an <c>object[]</c> or boxing scalar args.
+        /// <para>
+        /// Cross-module bound delegates and unpopulated import slots fall
+        /// back at runtime: <see cref="CallHelpers.ResolveIndirectFnPtr"/>
+        /// returns <c>IntPtr.Zero</c> and the emitted IL takes the legacy
+        /// <see cref="CallHelpers.InvokeIndirect"/> branch. So the flag is a
+        /// strict emission upgrade — every spec-correct dispatch the legacy
+        /// path handled is still handled, just behind one branch.
+        /// </para>
+        /// <para>
+        /// Microbench (10M iters, single-result int → int) shows ~7.9× over
+        /// the cached typed-wrapper path (22 ns → 2.8 ns / call). On by
+        /// default; flip off to A/B against the legacy emit or to isolate a
+        /// regression.
+        /// </para>
+        /// </summary>
+        public bool EmitCalliIndirect { get; set; } = true;
+
+        /// <summary>
         /// Maximum function body size (in instructions) to attempt transpilation.
         /// Very large functions can cause excessive IL emission time.
         /// 0 = no limit.
