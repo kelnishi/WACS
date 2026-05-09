@@ -82,7 +82,10 @@ namespace Wacs.Console.Verbs
         [Option("host-package", Separator = ',', HelpText =
             "Host package assembly name(s) or path(s) whose "
             + "[WitSource]-tagged interfaces resolve a component's "
-            + "imports at transpile time. Component-mode only.")]
+            + "imports at transpile time. Accepts an assembly name "
+            + "(resolved via Assembly.Load) or a file path "
+            + "(Assembly.LoadFrom) — same resolution rules as "
+            + "`--bind`. Component-mode only.")]
         public IEnumerable<string> HostPackage { get; set; } = new List<string>();
 
         [Option("wasip2", HelpText =

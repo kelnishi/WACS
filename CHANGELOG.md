@@ -129,6 +129,28 @@ extension method. Replaces the
 config → host → BindToRuntime sequence with the same shape we want
 across the WASI host family.
 
+## [WACS.WASI.NN.MLNet 0.2.0] — Parameterless WasiNNMLNetBindable for --bind
+
+Adapter exposing a parameterless ctor that pre-registers the
+ML.NET-flavored ONNX backend. `--bind Wacs.WASI.NN.MLNet` activates
+it via `BindingLoader`, identical shape to the OnnxRuntime adapter.
+Tagged `[assembly: WasiHostPackage]` for `AutoDiscoverHostPackages`.
+
+## [WACS.WASI.NN.LlamaSharp 0.2.0] — Parameterless WasiNNLlamaSharpBindable
+
+Adapter for the GGUF / LlamaSharp backend with environment-variable-
+driven name registry. Set `WACS_WASINN_GGUF_DIR=/path/to/models` and
+every `*.gguf` file in that directory is registered under its
+filename-sans-extension. Empty registry is fine — guests calling
+`load-by-name` get `NotFound` rather than a trap.
+
+`--bind Wacs.WASI.NN.LlamaSharp` activates it for guests using
+`graph-encoding.ggml`. For richer registries (HF cache scan,
+per-model `ModelParams`, custom paths), embedders should construct
+`LlamaSharpBackend` directly via `runtime.UseWasiNN(b => b.AddBackend(...))`.
+
+Tagged `[assembly: WasiHostPackage]`.
+
 ## [WACS.WASI.NN.OnnxRuntime 0.2.0] — Parameterless WasiNNOnnxBindable for --bind
 
 Adapter exposing a parameterless ctor that pre-registers the ONNX
