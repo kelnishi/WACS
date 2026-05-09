@@ -103,6 +103,119 @@ namespace Wacs.HostBindings.Test
             Assert.Throws<ArgumentNullException>(
                 () => new WacsHostMemory(null!, length: 0));
         }
+
+        // === NativePointer-mode coverage (gap 12 phase C.4) ===
+
+        [Fact]
+        public unsafe void NativePointer_ReadWriteByte_RoundTrips()
+        {
+            const int len = 16;
+            var ptr = (byte*)System.Runtime.InteropServices.NativeMemory
+                .AllocZeroed((nuint)len);
+            try
+            {
+                var mem = new WacsHostMemory((IntPtr)ptr, len);
+                Assert.True(mem.IsNative);
+                Assert.Equal(len, mem.Length);
+
+                mem.WriteByte(0, 0xAA);
+                mem.WriteByte(15, 0xBB);
+                Assert.Equal(0xAA, ptr[0]);
+                Assert.Equal(0xBB, ptr[15]);
+                Assert.Equal(0xAA, mem.ReadByte(0));
+                Assert.Equal(0xBB, mem.ReadByte(15));
+
+                Assert.Throws<WacsHostFault>(() => mem.ReadByte(16));
+                Assert.Throws<WacsHostFault>(() => mem.WriteByte(-1, 0));
+            }
+            finally
+            {
+                System.Runtime.InteropServices.NativeMemory.Free(ptr);
+            }
+        }
+
+        [Fact]
+        public unsafe void NativePointer_AsSpan_RoundTrips()
+        {
+            const int len = 32;
+            var ptr = (byte*)System.Runtime.InteropServices.NativeMemory
+                .AllocZeroed((nuint)len);
+            try
+            {
+                var mem = new WacsHostMemory((IntPtr)ptr, len);
+                var span = mem.AsSpan(8, 16);
+                for (int i = 0; i < span.Length; i++) span[i] = (byte)(i + 0xC0);
+
+                // Verify writes hit native memory directly.
+                for (int i = 0; i < 16; i++)
+                    Assert.Equal((byte)(i + 0xC0), ptr[8 + i]);
+            }
+            finally
+            {
+                System.Runtime.InteropServices.NativeMemory.Free(ptr);
+            }
+        }
+
+        [Fact]
+        public unsafe void NativePointer_Int32LERoundTrip()
+        {
+            const int len = 16;
+            var ptr = (byte*)System.Runtime.InteropServices.NativeMemory
+                .AllocZeroed((nuint)len);
+            try
+            {
+                var mem = new WacsHostMemory((IntPtr)ptr, len);
+                mem.WriteInt32LE(4, unchecked((int)0xCAFEBABE));
+                Assert.Equal(0xBE, ptr[4]);
+                Assert.Equal(0xBA, ptr[5]);
+                Assert.Equal(0xFE, ptr[6]);
+                Assert.Equal(0xCA, ptr[7]);
+                Assert.Equal(unchecked((int)0xCAFEBABE), mem.ReadInt32LE(4));
+            }
+            finally
+            {
+                System.Runtime.InteropServices.NativeMemory.Free(ptr);
+            }
+        }
+
+        [Fact]
+        public unsafe void NativePointer_Utf8String_RoundTrips()
+        {
+            const int len = 64;
+            var ptr = (byte*)System.Runtime.InteropServices.NativeMemory
+                .AllocZeroed((nuint)len);
+            try
+            {
+                var mem = new WacsHostMemory((IntPtr)ptr, len);
+                int written = mem.WriteUtf8String(8, "hello", nullTerminate: true);
+                Assert.Equal(6, written);  // 5 bytes + nul
+                Assert.Equal("hello", mem.ReadUtf8String(8, 5));
+                Assert.Equal((byte)'h', ptr[8]);
+                Assert.Equal((byte)0, ptr[13]);
+            }
+            finally
+            {
+                System.Runtime.InteropServices.NativeMemory.Free(ptr);
+            }
+        }
+
+        [Fact]
+        public void NativePointer_ZeroLength_AcceptsZeroPointer()
+        {
+            // Empty memory is a degenerate but valid case (no allocation).
+            var mem = new WacsHostMemory(IntPtr.Zero, 0);
+            Assert.True(mem.IsNative);
+            Assert.Equal(0, mem.Length);
+            Assert.Equal(0, mem.AsSpan(0, 0).Length);
+            Assert.Throws<WacsHostFault>(() => mem.ReadByte(0));
+        }
+
+        [Fact]
+        public void NativePointer_NonZeroLengthRequiresPointer()
+        {
+            Assert.Throws<ArgumentNullException>(
+                () => new WacsHostMemory(IntPtr.Zero, 8));
+        }
     }
 
     internal static class TestExt

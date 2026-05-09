@@ -1,5 +1,71 @@
 # Changelog
 
+## WACS.HostBindings.Abstractions 0.2.1 / WACS.WASI.Preview1 0.12.1 — gap 12 phase C.4a: WacsHostMemory mode-aware
+
+The host-binding ABI now carries a NativePointer-mode case alongside
+the historical byte[] mode. Wasip1 hosts running with
+`MemoryStorageMode.NativePointer` produce a `WacsHostMemory` that
+dispatches reads/writes against native memory instead of dereferencing
+an empty-array sentinel.
+
+### `Wacs.HostBindings.Abstractions.WacsHostMemory`
+
+- New `WacsHostMemory(IntPtr nativeBase, int length)` constructor.
+  The struct internally tracks both backings (byte[] _data nullable +
+  IntPtr _nativeBase) and dispatches every accessor through a
+  null-check on _data — JIT inlines to a single branch per access.
+- New `IsNative` property — true when the view is over native memory.
+- All accessors (`ReadByte`/`WriteByte`/`AsSpan`/`ReadInt32LE`/
+  `WriteInt32LE`/`ReadInt64LE`/`WriteInt64LE`/`Contains`/
+  `WriteUtf8String`/`ReadUtf8String`/`ReadStruct`/`ReadStructs`/
+  `WriteStruct`) work in either mode.
+- `Data` getter still returns a `byte[]` for back-compat — but in
+  NativePointer mode it returns `Array.Empty<byte>()`. Legacy
+  callers that reach for `.Data` directly to read memory fail loud
+  (AOOR on first index) instead of silently zero-reading; they must
+  migrate to `AsSpan` for mode-agnostic access.
+
+### `Wacs.WASI.Preview1.Clock.WacsHost`
+
+The Preview1 ExecContext → WacsHostMemory adapter now branches by
+`MemoryInstance.StorageMode`. NativePointer-backed memories take the
+`(IntPtr, int)` ctor with `(IntPtr)mem.NativeBase` and
+`min(NativeSize, int.MaxValue)` length. ManagedArray-backed memories
+keep using the historical `(byte[], int)` ctor.
+
+### Tests
+
+`Wacs.HostBindings.Test`: 14 tests (was 8) — six new cases cover
+`NativePointer_ReadWriteByte_RoundTrips`,
+`NativePointer_AsSpan_RoundTrips`,
+`NativePointer_Int32LERoundTrip`,
+`NativePointer_Utf8String_RoundTrips`,
+`NativePointer_ZeroLength_AcceptsZeroPointer`,
+`NativePointer_NonZeroLengthRequiresPointer`. Each allocates via
+`NativeMemory.AllocZeroed`, exercises the accessors, and frees the
+buffer — verifying writes hit native memory and reads come back
+untouched.
+
+### Still ahead in phase C.4
+
+- **C.4b: wasip2 host-binding migration** — `MemoryReader` /
+  `MemoryWriter` (~50 helpers) and `ExecContextExtensions.Memory()`
+  in `Wacs.WASI.Preview2/HostBinding/CanonicalAbi/` still take
+  `byte[] memory` directly. ~127 callsites use
+  `ctx.DefaultMemory.Data` or `ctx.Memory()` and fail in
+  NativePointer mode (sentinel empty array). Migrating them to
+  `MemoryInstance` (or to `Span<byte>` constructed via the
+  mode-aware `mem.AsSpan`) is the bulk of work before the SLM
+  use case runs end-to-end through wasip2 in NativePointer mode.
+- **C.4c: AOT emitted module surface** — the transpiler's
+  `ModuleClassGenerator` emits a `byte[] Memory` property on the
+  generated standalone module. AOT-published modules use the
+  `WacsHostMemory(byte[], int)` ctor from `wacs aot --wasi`'s
+  generated Program.cs. Lifting this to a mode-aware shape needs
+  a new `EmissionTarget` option or per-module flag.
+- **C.5: CLI flag** — `wacs run --native-memory` opts the run into
+  NativePointer storage end-to-end. Trivial after C.4b/c.
+
 ## WACS 0.12.3 / WACS.Transpiler.Lib 0.7.4 — gap 12 phases A → C.3: NativePointer storage mode through interpreter and transpiler
 
 Phases A → C.3 of the byte[]→native-pointer migration from gap 12
