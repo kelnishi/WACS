@@ -1,11 +1,16 @@
 # Changelog
 
-## WACS 0.12.3 — gap 12 phase A: NativePointer storage mode for MemoryInstance
+## WACS 0.12.3 — gap 12 phases A + B: NativePointer storage mode end-to-end through the interpreter
 
-Phase A of the byte[]→native-pointer migration from gap 12 of
-`wasi-nn/WACS-GAPS.md`. Lifts the type-system surface so subsequent
-phases can flip access sites; this phase ships no behavior change
-for default-mode callers.
+Phases A + B of the byte[]→native-pointer migration from gap 12 of
+`wasi-nn/WACS-GAPS.md`. Phase A added the type surface; Phase B
+threaded the runtime option through instantiation and migrated
+every interpreter memory access site to the mode-dispatching API.
+A wasm module instantiated with `RuntimeOptions.MemoryStorage =
+NativePointer` now executes load/store/narrow/bulk/grow/size
+through native-pointer storage end-to-end via the interpreter.
+
+### Phase A (type surface)
 
 `MemoryInstance` now has two backing storages selected via
 `MemoryStorageMode`:
@@ -42,6 +47,51 @@ Wacs.WASI.Preview2 189) passes unchanged. Eight new tests in
 `MemoryInstanceNativeStorageTests` cover allocation, grow
 preservation + zero-fill, indexer + AsSpan, dispose
 idempotency, and `HostMaxPages` rejection in native mode.
+
+### Phase B (interpreter wiring)
+
+`RuntimeOptions.MemoryStorage` now flows from
+`WasmRuntime.InstantiateModule` through `AllocateModule` →
+`AllocateMemory` → `new MemoryInstance(memType, mode)`. Embedders
+that pass `MemoryStorage = NativePointer` get native-pointer
+storage on every memory the runtime owns.
+
+Every interpreter memory access site has been migrated from raw
+`mem.Data[i]` / `mem.Data.AsSpan(...)` / `mem.Data.Length` to the
+mode-dispatching surface (`mem.AsSpan(int, int)`,
+`(long)mem.ByteLength`):
+
+- `MemoryHandlers.MemSlice` — the chokepoint for all 25+
+  `[OpHandler]` load/store/narrow/bulk/size/grow handlers on the
+  monolithic-switch path.
+- `Memory/I32MemoryLoad.cs`, `I64MemoryLoad.cs`, `FMemoryLoad.cs`
+  — full-width and narrow loads (i32.load, i32.load8_s/u,
+  i32.load16_s/u, i64.load, i64.load8/16/32_s/u, f32.load,
+  f64.load).
+- `Memory/InstI32Store.cs`, `InstI64Store.cs`, `FMemoryStore.cs`
+  — full-width and narrow stores.
+- `Instructions/MemoryBulk.cs` — `memory.init`, `memory.copy`
+  (overlap via `Span<byte>.CopyTo` → `Buffer.Memmove`),
+  `memory.fill` (`Span<byte>.Fill`).
+- `Instructions/SIMD/VMemory.cs` — every v128 load/store/lane op.
+
+Atomic instructions (`Instructions/Atomic/AtomicLoadStore.cs`,
+`AtomicHandlers.cs`) are deferred — they use `ref byte` semantics
+that need a slightly different mode-aware helper. They keep
+working in the default `ManagedArray` mode, and the spec test
+suite covers them there. NativePointer-mode atomic access is on
+the Phase C punch list alongside the byte[] retirement.
+
+Twelve new tests in `MemoryNativePointerEndToEndTests` exercise
+load/store/narrow/grow/fill/copy/init through the interpreter in
+both modes, including overlapping `memory.copy` and an
+out-of-bounds trap. Each [Theory] case runs once for
+`ManagedArray` and once for `NativePointer` so any divergence
+between the two paths surfaces immediately.
+
+Tests: Wacs.Core 383 (was 363), Wacs.Transpiler 751,
+Wacs.ComponentModel 350, Wacs.WASI.Preview2 189 — all green, no
+regressions.
 
 ## WACS.ComponentModel 0.2.1 / WACS.Transpiler.Lib 0.7.4 — gaps 10 + 11: descriptor-stat lifting and post-grow byte[] safety
 

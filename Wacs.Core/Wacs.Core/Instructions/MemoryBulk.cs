@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+using System;
 using System.IO;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
@@ -222,22 +223,14 @@ namespace Wacs.Core.Instructions
             if (s + n > data.Data.Length)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Data underflow.");
             
-            if (d + n > mem.Data.Length)
+            if (d + n > (long)mem.ByteLength)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory overflow.");
-                
-            //Tail recursive call alternative loop, inline direct memory set
-            while (true)
-            {
-                if (n == 0)
-                    return;
 
-                //Set memory direct
-                mem.Data[(int)d] = (byte)(0xFF & data.Data[s]);
-                
-                d += 1L;
-                s += 1L;
-                n -= 1L;
-            }
+            // Bulk Span.CopyTo (memmove); mode-aware via mem.AsSpan
+            // and zero-cost on byte[] (Span over the array's data).
+            if (n == 0) return;
+            new ReadOnlySpan<byte>(data.Data, (int)s, (int)n)
+                .CopyTo(mem.AsSpan((int)d, (int)n));
         }
 
         public override InstructionBase Parse(BinaryReader reader)
@@ -377,28 +370,15 @@ namespace Wacs.Core.Instructions
             //15.
             long d = context.OpStack.PopAddr();
             //16.
-            if (s+n > memSrc.Data.Length)
+            if (s+n > (long)memSrc.ByteLength)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Source memory overflow.");
-            if (d+n > memDst.Data.Length)
+            if (d+n > (long)memDst.ByteLength)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Destination memory overflow.");
-            
-            //Tail recursive call alternative loop, inline load/store
-            while (true)
-            {
-                if (n == 0)
-                    return;
-                if (d <= s)
-                {
-                    memDst.Data[(int)d] = memSrc.Data[(int)s];
-                    d += 1L;
-                    s += 1L;
-                }
-                else
-                {
-                    memDst.Data[(int)(d+n-1L)] = memSrc.Data[(int)(s+n-1L)];
-                }
-                n -= 1L;
-            }
+
+            // Span<byte>.CopyTo dispatches to Buffer.Memmove and
+            // handles overlap correctly across both modes.
+            if (n == 0) return;
+            memSrc.AsSpan((int)s, (int)n).CopyTo(memDst.AsSpan((int)d, (int)n));
         }
 
         public override InstructionBase Parse(BinaryReader reader)
@@ -462,19 +442,12 @@ namespace Wacs.Core.Instructions
             //11.
             long d = context.OpStack.PopAddr();
             //12.
-            if (d + n > mem.Data.Length)
+            if (d + n > (long)mem.ByteLength)
                 throw new TrapException("Instruction memory.fill failed. Buffer overflow");
-            
-            //Tail recursive call alternative loop, inline store
-            while (true)
-            {
-                if (n == 0)
-                    return;
-                
-                mem.Data[(int)d] = (byte)(0xFF & cU32);
-                d += 1L;
-                n -= 1L;
-            }
+
+            // Bulk Span.Fill — mode-aware via mem.AsSpan.
+            if (n == 0) return;
+            mem.AsSpan((int)d, (int)n).Fill((byte)(0xFF & cU32));
         }
 
         public override InstructionBase Parse(BinaryReader reader)

@@ -55,10 +55,10 @@ namespace Wacs.Core.Instructions.Memory
             long ea = offset + M.Offset;
             if (ea < 0)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea} out of bounds.");
-            if (ea + WidthTByteSize > mem.Data.Length)
+            if (ea + WidthTByteSize > (long)mem.ByteLength)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer out of bounds.");
             //13,14,15
-            Span<byte> bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
+            Span<byte> bs = mem.AsSpan((int)ea, WidthTByteSize);
             
 #if NET8_0_OR_GREATER
             MemoryMarshal.Write(bs, in cF32);
@@ -100,10 +100,10 @@ namespace Wacs.Core.Instructions.Memory
             long ea = offset + M.Offset;
             if (ea < 0)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea} out of bounds.");
-            if (ea + WidthTByteSize > mem.Data.Length)
+            if (ea + WidthTByteSize > (long)mem.ByteLength)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer out of bounds.");
             //13,14,15
-            Span<byte> bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
+            Span<byte> bs = mem.AsSpan((int)ea, WidthTByteSize);
             
 #if NET8_0_OR_GREATER
             MemoryMarshal.Write(bs, in cF64);
