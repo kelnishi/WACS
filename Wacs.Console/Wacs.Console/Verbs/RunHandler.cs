@@ -556,8 +556,11 @@ namespace Wacs.Console.Verbs
 
             // Dispatch through the same machinery `wacs build --emit-main`
             // would emit, so behavior matches the saved-and-loaded path.
-            string entry = !string.IsNullOrEmpty(opts.Call)
-                ? opts.Call : "_start";
+            // When `--call` is unset, ComponentMainHost auto-resolves
+            // the command-component entry (`wasi:cli/run@<version>#run`)
+            // before falling back to `_start`. Matches what wasmtime,
+            // jco, and wasmer do for stock command components.
+            string? entry = string.IsNullOrEmpty(opts.Call) ? null : opts.Call;
             try
             {
                 return ComponentMainHost.Run(result.ModuleClass!,

@@ -9,6 +9,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using Wacs.HostBindings.Abstractions;
 using Wacs.Transpiler.Cli;
 
 namespace Wacs.Transpiler.AOT.Component
@@ -38,9 +39,18 @@ namespace Wacs.Transpiler.AOT.Component
         /// <paramref name="exportName"/> on its IExports interface.
         /// Returns the export's scalar result (cast to int) when
         /// applicable, otherwise 0.
+        ///
+        /// <para>When <paramref name="exportName"/> is <c>null</c>
+        /// or empty, auto-resolution kicks in: the canonical
+        /// command-component entry <c>wasi:cli/run@&lt;version&gt;#run</c>
+        /// is matched first (via <c>[WasmName]</c> on the emitted
+        /// IExports method), then plain <c>_start</c>, then a
+        /// helpful error listing the available exports. This
+        /// matches the wasmtime / jco / wasmer behavior where a
+        /// stock command component just runs.</para>
         /// </summary>
         public static int Run(Type moduleClass, string[] args,
-            string exportName)
+            string? exportName = null)
         {
             if (moduleClass == null) throw new ArgumentNullException(nameof(moduleClass));
 
@@ -98,14 +108,22 @@ namespace Wacs.Transpiler.AOT.Component
                 .FirstOrDefault(i => i.Name.StartsWith("IExports"))
                 ?? throw new InvalidOperationException(
                     "Module class does not implement an IExports interface; "
-                    + "cannot dispatch '" + exportName + "'.");
+                    + "cannot dispatch '" + (exportName ?? "<auto>") + "'.");
 
-            var sanitized = SanitizeExportName(exportName);
-            var method = exportsInterface.GetMethod(sanitized)
-                ?? exportsInterface.GetMethod(exportName)
-                ?? throw new InvalidOperationException(
-                    "Export '" + exportName + "' (sanitized '" + sanitized
-                    + "') not found on " + exportsInterface.FullName + ".");
+            MethodInfo method;
+            if (string.IsNullOrEmpty(exportName))
+            {
+                method = AutoResolveCommandEntry(exportsInterface);
+            }
+            else
+            {
+                var sanitized = SanitizeExportName(exportName!);
+                method = exportsInterface.GetMethod(sanitized)
+                    ?? exportsInterface.GetMethod(exportName!)
+                    ?? throw new InvalidOperationException(
+                        "Export '" + exportName + "' (sanitized '" + sanitized
+                        + "') not found on " + exportsInterface.FullName + ".");
+            }
 
             // Parse argv into the export's CLR param types. v0
             // covers primitives (i32/u32/i64/u64/f32/f64 + narrow
@@ -116,16 +134,72 @@ namespace Wacs.Transpiler.AOT.Component
             var pars = method.GetParameters();
             if (args.Length < pars.Length)
                 throw new InvalidOperationException(
-                    "Export '" + sanitized + "' expects "
+                    "Export '" + method.Name + "' expects "
                     + pars.Length + " argument(s); got " + args.Length + ".");
             var parsedArgs = new object?[pars.Length];
             for (int i = 0; i < pars.Length; i++)
                 parsedArgs[i] = ParseArg(args[i], pars[i].ParameterType,
-                    sanitized, i);
+                    method.Name, i);
 
             object? result = method.Invoke(instance, parsedArgs);
 
             return RenderResult(result);
+        }
+
+        // Auto-resolve the entry point of a command component when
+        // the embedder didn't pass an explicit export name. Prefers
+        // the canonical `wasi:cli/run@<version>#run` (matched via
+        // [WasmName]); falls back to `_start` if the module is a
+        // pre-component WASI Preview 1 binary that ended up on this
+        // path. Anything else is an error with a hint.
+        private static MethodInfo AutoResolveCommandEntry(
+            Type exportsInterface)
+        {
+            // Pass 1: scan [WasmName] attributes for the
+            // `wasi:cli/run@*#run` shape. wit-bindgen-rust,
+            // jco/wit-bindgen-js, and the wasm-tools embed/new
+            // toolchain all emit this shape for command-world
+            // components. Multiple `@<version>` strings can
+            // co-exist in principle, but a single component
+            // typically declares one — pick the first match.
+            foreach (var m in exportsInterface.GetMethods())
+            {
+                var wn = m.GetCustomAttribute<WasmNameAttribute>();
+                if (wn == null) continue;
+                if (IsWasiCliRunRunExport(wn.Name))
+                    return m;
+            }
+
+            // Pass 2: legacy / mis-classified module — try plain
+            // `_start`. Preserves backwards compatibility for
+            // anything that ended up on the component path despite
+            // being a Preview 1 binary.
+            var start = exportsInterface.GetMethod("_start");
+            if (start != null) return start;
+
+            // Pass 3: surface the available exports so the user
+            // knows what to pass to --call.
+            var available = string.Join(", ",
+                exportsInterface.GetMethods().Select(m =>
+                    m.GetCustomAttribute<WasmNameAttribute>()?.Name ?? m.Name));
+            throw new InvalidOperationException(
+                "No entry point found on " + exportsInterface.FullName + ". "
+                + "Expected `wasi:cli/run@<version>#run` (command component) "
+                + "or `_start` (Preview 1). Available exports: "
+                + (string.IsNullOrEmpty(available) ? "<none>" : available)
+                + ". Pass --call <export> to dispatch one explicitly.");
+        }
+
+        // Match the wit-bindgen `wasi:cli/run@<version>#run`
+        // convention without committing to a specific version.
+        // The `wasi:cli/run@` prefix and `#run` suffix together
+        // are unique enough — `wasi:cli/run@0.2.0#run`,
+        // `wasi:cli/run@0.2.3#run`, etc. all match.
+        private static bool IsWasiCliRunRunExport(string exportName)
+        {
+            return exportName.StartsWith("wasi:cli/run@",
+                       StringComparison.Ordinal)
+                && exportName.EndsWith("#run", StringComparison.Ordinal);
         }
 
         // Parse one CLI arg into the expected CLR type. Throws an
