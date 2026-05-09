@@ -1,5 +1,78 @@
 # Changelog
 
+## WACS.Transpiler.Lib 0.7.3 / WACS.Cli 1.4.1 / WACS.WASI.Preview2 0.3.1 / WACS.WASI.Preview2.DependencyInjection 0.1.1 — gap 9: preopens reach the wasip2 transpiler engine
+
+Closes the gap that prevented `wacs run --wasip2 -d models repro.wasm`
+(reading `/models/x.txt`) from succeeding under the transpiler
+engine. The reproducer now runs end-to-end:
+
+```
+$ wacs run --wasip2 -d models preopen-repro.wasm
+got: hi
+```
+
+Two layered fixes:
+
+1. **WACS.Transpiler.Lib (`DirectLinkedImportEmit`)**: extends the
+   per-field aggregate emit to recognize tuple/record fields that
+   are resource interfaces (`own<R>`) alongside the existing
+   primitive / string / byte[] cases. New shape covered:
+   `list<tuple<own<R>, string>>` (the gap-9 reproducer's
+   `wasi:filesystem/preopens.get-directories` return) and the
+   broader env/args/headers/accept "list of (resource, label)"
+   shape class. Per-element wire layout: handle@+0 (i32, 4B) +
+   string-ptr@+4 (i32, 4B) + string-len@+8 (i32, 4B) for the
+   gap-9 shape; per-element store dispatches per-field —
+   `ctx.Resources.AllocateResource(typeof(IRes), value) +
+   StoreI32` for `own<R>`, `cabi_realloc + StoreString` for
+   strings, primitive `StoreXxx` for primitives. Resolver-aware
+   variants of the predicates (`IsTupleOfFlatFields`,
+   `IsRecordOfFlatFields`, `SizeOfFlatField` overload,
+   `IsFlatField` overload) keep the existing primitive-only
+   paths byte-stable; only the list-of-aggregate path consults
+   the resolver.
+
+2. **WACS.WASI.Preview2.DependencyInjection
+   (`WasiPreview2RuntimeScope`)**: new one-shot owner of the DI
+   scope that binds the wasip2 host package against the
+   transpiler runtime. Auto-detects WASI.NN.DI and registers the
+   composite `WasiPreview2NNBundle` whenever both packages are
+   on the load path — required because the transpiler emits its
+   direct-link IL against the composite type at transpile time;
+   handing back the base bundle here trips
+   `InvalidCastException` at the first import call. Embedders
+   that want preopens hand them in via the scope's `preopens`
+   parameter instead of re-implementing `IPreopens` +
+   `services.AddSingleton`.
+
+3. **WACS.WASI.Preview2 (`Preopens`)**: restored
+   `Preopens(IEnumerable<(string hostPath, string guestPath)>)`
+   ctor so the scope can build a `Preopens` instance from any
+   iterable mount-pair source.
+
+4. **WACS.Cli (`RunHandler`)**: the `--dir` flag now accepts the
+   wasmtime-style `host::guest` mount-pair syntax in addition to
+   the bare-path form. Validation checks the host-path side
+   only. The wasip2 path constructs a `WasiPreview2RuntimeScope`
+   inside `configureImports` so the bundle the transpiler
+   receives is the same one the run uses.
+
+5. **WACS.Transpiler.Lib (`ComponentMainHost.Run`)**: accepts
+   optional `prebuiltBundle` / `prebuiltResources` parameters so
+   the run path can hand off the scope's bundle/resources
+   directly. Saved-dll `Program.Main` IL keeps the old reflective
+   fallback (passes `null` / `null`).
+
+Verification:
+- 750/751 (1 SKIP) Wacs.Transpiler tests pass — including a new
+  `E2E_Preopens_GetDirectories_ListResourceStringTuple` E2E test
+  that transpiles `Spec.Test/components/fixtures/wasi-preopens-component`
+  with a 3-entry `IPreopens` stub and verifies `count` returns 3.
+- 347 ComponentModel + 189 Preview2 + 18 WASI.NN + 72 Preview1 +
+  355 Core + 13 Bindgen + 8 HostBindings tests pass.
+- End-to-end: `wacs run --wasip2 -d models repro.wasm` reads
+  `/models/x.txt` cleanly; hello-wasip2 unchanged.
+
 ## Spec.Test fixtures — WASI 0.2.3 → 0.2.8 bump
 
 Bumps the `Spec.Test/components/wasi-cli` submodule pointer from
