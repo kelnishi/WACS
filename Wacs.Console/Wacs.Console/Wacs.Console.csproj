@@ -69,14 +69,16 @@
          WACS.ComponentModel.Bindgen tool (`wit-bindgen-wacs`) is
          deprecated in favor of this verb. -->
     <ProjectReference Include="..\..\Wacs.ComponentModel\Wacs.ComponentModel.Bindgen.Lib\Wacs.ComponentModel.Bindgen.Lib.csproj" />
-    <!-- Bundled with the apphost so component-mode emit-main can
-         reflectively construct WasiPreview2Bundle at runtime via
-         AddWasiPreview2(). ExcludeAssets=compile keeps these out
-         of the public API surface; only the apphost ships them. -->
-    <ProjectReference Include="..\..\Wacs.WASI\Wacs.WASI.Preview2\Wacs.WASI.Preview2\Wacs.WASI.Preview2.csproj"
-                      ExcludeAssets="compile" />
-    <ProjectReference Include="..\..\Wacs.WASI\Wacs.WASI.Preview2\Wacs.WASI.Preview2.DependencyInjection\Wacs.WASI.Preview2.DependencyInjection.csproj"
-                      ExcludeAssets="compile" />
+    <!-- Compile-referenced so RunHandler can construct the typed
+         WasiPreview2RuntimeScope (which owns the DI scope that
+         pre-binds every *Bindings.BindToRuntime against the
+         transpiler's runtime — closing the
+         direct-link-vs-BindHostFunction gap from
+         wasi-nn/WACS-GAPS.md round 3 issue 9).
+         The save-to-dll emit-main path still loads them
+         reflectively via Assembly.Load. -->
+    <ProjectReference Include="..\..\Wacs.WASI\Wacs.WASI.Preview2\Wacs.WASI.Preview2\Wacs.WASI.Preview2.csproj" />
+    <ProjectReference Include="..\..\Wacs.WASI\Wacs.WASI.Preview2\Wacs.WASI.Preview2.DependencyInjection\Wacs.WASI.Preview2.DependencyInjection.csproj" />
     <!-- Bundled so the wasi-nn flag resolves the DLL via
          Assembly.Load without spelling out a filesystem path.
          The ONNX Runtime native binaries (~50 MB across RIDs)

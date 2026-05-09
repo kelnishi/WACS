@@ -109,7 +109,12 @@ namespace Wacs.Transpiler.AOT.Component
             var il = mainMethod.GetILGenerator();
 
             // return ComponentMainHost.Run(typeof(<ModuleClass>),
-            //                              args, "<exportName>");
+            //                              args, "<exportName>",
+            //                              prebuiltBundle: null,
+            //                              prebuiltResources: null);
+            // The two trailing nulls match Run's optional-param default —
+            // C# default-arg sugar is compile-time only, so the IL has
+            // to push every actual stack slot.
             il.Emit(OpCodes.Ldtoken, moduleClassMeta);
             il.Emit(OpCodes.Call,
                 typeof(Type).GetMethod(
@@ -117,6 +122,8 @@ namespace Wacs.Transpiler.AOT.Component
                     new[] { typeof(RuntimeTypeHandle) })!);
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldstr, exportName);
+            il.Emit(OpCodes.Ldnull); // prebuiltBundle: saved-dll path resolves via DI reflectively
+            il.Emit(OpCodes.Ldnull); // prebuiltResources
             il.Emit(OpCodes.Call,
                 typeof(ComponentMainHost).GetMethod(
                     nameof(ComponentMainHost.Run),

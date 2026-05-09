@@ -50,7 +50,9 @@ namespace Wacs.Transpiler.AOT.Component
         /// stock command component just runs.</para>
         /// </summary>
         public static int Run(Type moduleClass, string[] args,
-            string? exportName = null)
+            string? exportName = null,
+            object? prebuiltBundle = null,
+            object? prebuiltResources = null)
         {
             if (moduleClass == null) throw new ArgumentNullException(nameof(moduleClass));
 
@@ -91,7 +93,31 @@ namespace Wacs.Transpiler.AOT.Component
                 object? bundle = null;
                 object? resources = null;
                 if (ctorParams.Length >= 2)
-                    (bundle, resources) = BuildWasip2BundleAndResources();
+                {
+                    if (prebuiltBundle != null)
+                    {
+                        // Caller built the scope (typically via
+                        // WasiPreview2RuntimeScope) so the bundle's
+                        // Linker has already fired every
+                        // BindToRuntime against the runtime — this
+                        // is the path where wasi:filesystem/preopens
+                        // (and every other complex-shape import)
+                        // resolves correctly.
+                        bundle = prebuiltBundle;
+                        resources = prebuiltResources;
+                    }
+                    else
+                    {
+                        // Fallback for `wacs build --emit-main`:
+                        // the saved-dll's Program.Main calls Run
+                        // without a prebuilt scope, so we build
+                        // one reflectively. This path doesn't
+                        // wire the Linker — works for simple
+                        // imports the transpiler direct-links
+                        // cleanly.
+                        (bundle, resources) = BuildWasip2BundleAndResources();
+                    }
+                }
 
                 instance = ctorParams.Length switch
                 {
