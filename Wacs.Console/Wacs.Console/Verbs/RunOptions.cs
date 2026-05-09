@@ -31,10 +31,20 @@ namespace Wacs.Console.Verbs
         public IEnumerable<string> Files { get; set; } = new List<string>();
 
         [Option("call", HelpText =
-            "Function export to invoke (default: _start, then any "
-            + "configured WASM start section). Pass arguments after "
-            + "`--` for the function or for WASI argv.")]
+            "Function export to invoke. Default behavior auto-resolves: "
+            + "components dispatch wasi:cli/run@<v>#run if present; "
+            + "core modules dispatch _start. Pass arguments after "
+            + "`--` for the function or for WASI argv. `--invoke` is an "
+            + "alias (matches the wasmtime CLI convention).")]
         public string Call { get; set; } = "";
+
+        [Option("invoke", Hidden = true, HelpText =
+            "Alias for --call (wasmtime-compatible spelling).")]
+        public string Invoke
+        {
+            get => Call;
+            set { if (!string.IsNullOrEmpty(value)) Call = value; }
+        }
 
         [Option("engine", Default = "interpreter", HelpText =
             "Execution engine: interpreter (default) or transpiler. "
