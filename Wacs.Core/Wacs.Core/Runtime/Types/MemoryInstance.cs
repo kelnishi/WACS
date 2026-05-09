@@ -80,7 +80,7 @@ namespace Wacs.Core.Runtime.Types
             Type = type;
             StorageMode = storage;
 
-            if (type.Limits.Minimum > Constants.HostMaxPages)
+            if (type.Limits.Minimum > MaxPagesForMode(storage))
                 throw new InstantiationException($"Cannot allocate memory of size {type.Limits.Minimum}");
 
             long initialSize = type.Limits.Minimum * Constants.PageSize;
@@ -156,7 +156,7 @@ namespace Wacs.Core.Runtime.Types
                 : Data.Length / Constants.PageSize;
             long newNumPages = oldNumPages + numPages;
 
-            if (newNumPages > Constants.HostMaxPages)
+            if (newNumPages > MaxPagesForMode(StorageMode))
                 return false;
 
             if (newNumPages > Type.Limits.Maximum)
@@ -217,6 +217,17 @@ namespace Wacs.Core.Runtime.Types
             }
             Type = new MemoryType(newLimits);
         }
+
+        // Page-count cap, by storage mode. ManagedArray is hard-
+        // capped at HostMaxPages (~2 GiB, the byte[] limit even with
+        // gcAllowVeryLargeObjects). NativePointer lifts the cap to
+        // the wasm32 spec max (WasmMaxPages = 4 GiB) for memory32 —
+        // memory64 widens it further to WasmMaxPages64 (2^48), but
+        // that requires Phase D's i64-address plumbing.
+        private static long MaxPagesForMode(MemoryStorageMode mode)
+            => mode == MemoryStorageMode.NativePointer
+                ? Constants.WasmMaxPages
+                : Constants.HostMaxPages;
 
         // Native buffer allocator. Prefers NativeMemory.AllocZeroed
         // on .NET 6+ (single syscall, page-zeroed by the OS); falls
