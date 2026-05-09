@@ -1,5 +1,21 @@
 # Changelog
 
+## [WACS.WASI.Preview2 0.2.0] — WasiPreview2Host composite + UseWasiPreview2 extension
+
+`WasiPreview2Host` is the interpreter-side composite that wires every
+sub-binding (random, clocks, io, streams, cli, filesystem, optionally
+sockets + http) onto a `WasmRuntime` from one shared
+`ResourceContext`. Symmetric with `WasiNNHost` — interpreter
+consumers no longer thread the resource context through eight
+separate `BindToRuntime` calls.
+
+`runtime.UseWasiPreview2(b => b.WithStdout(...).EnableSockets())` is
+the matching one-liner. Default posture matches Wasmtime: host
+clocks/random/cli stdio + sandboxed-no-fs are wired, sockets and http
+require explicit opt-in. The
+`Wacs.WASI.Preview2.DependencyInjection` bundle path remains the
+perf-optimized (transpiler direct-link) wiring.
+
 ## [WACS.Cli 1.4.0] — Component-mode ergonomics: auto-dispatch + --bind + --wasi-nn
 
 `wacs run --wasip2 my.component.wasm` now starts a stock command
