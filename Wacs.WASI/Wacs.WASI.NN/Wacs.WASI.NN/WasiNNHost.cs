@@ -31,7 +31,7 @@ namespace Wacs.WASI.NN
     /// canonical-ABI shape differences in the two `set/get`
     /// styles make that uncommon in practice).</para>
     /// </summary>
-    public sealed class WasiNNHost : IDisposable
+    public sealed class WasiNNHost : IBindable, IDisposable
     {
         private readonly WasiNNConfiguration _config;
         internal ResourceTable Graphs { get; } = new();
