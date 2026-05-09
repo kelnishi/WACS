@@ -12,6 +12,35 @@ WIT package's "unexpected character '-'" failure path. Unblocks the
 SourceGen-driven host-interface emission for wasi-nn (see
 WACS.WASI.NN 0.3.0).
 
+## [WACS.WASI.NN.DependencyInjection 0.2.0] — Concrete resource impls
+
+Replaces the GraphStub / ErrorStub placeholders with real resource
+implementations (`Tensor`, `Graph`, `GraphExecutionContext`, `Error`)
+of the source-gen interfaces. Each class has a parameterless ctor
+so the canonical-ABI resource-construct lift can
+`Activator.CreateInstance` it; instance methods either route to the
+backend SPI (`Graph` → `IBackendGraph`, `GraphExecutionContext` →
+`IBackendContext`) or hold pure state (`Tensor`, `Error`).
+
+`GraphFuncsImpl.Load` / `LoadByName` now return real `Graph`
+instances; `Graph.InitExecutionContext` mints a real
+`GraphExecutionContext`; `compute` bridges between the wasi-nn
+resource handles and the backend SPI's `NamedTensor` values
+(copying output bytes so the resource handle owns its data
+independent of the next compute).
+
+Smoke tests in `Wacs.WASI.NN.Test/DependencyInjectionResourceTests`
+cover the round-trip + double-construction + access-before-construct
+guards.
+
+The remaining piece for the SLM workload's transpiler-direct-link
+path is multi-bundle wiring in `ComponentMainHost`: the existing
+ctor-arity-based emit assumes a single `object hostBundle` slot,
+so a component importing both `wasi:cli/*` (Preview2) and
+`wasi:nn/*` can't yet have both bundles wired through one slot.
+The resolver's `bundleType` parameter takes a single type today;
+extending to a composite bundle (or `Type[]`) is the open work.
+
 ## [WACS.WASI.NN.DependencyInjection 0.1.0] — WasiNNBundle scaffolding
 
 New package mirroring `Wacs.WASI.Preview2.DependencyInjection`. Ships
