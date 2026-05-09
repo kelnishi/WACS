@@ -5,6 +5,20 @@ The shared vocabulary for WACS host bindings. Exposes:
 - `[WacsImport(string module, string name)]` — annotate a static method as
   the implementation of a wasm import. Consumed by
   `WACS.HostBindings.SourceGen` at consumer build time.
+- `[WacsImportNames(string mapping)]` — assembly-level mapping for save-to-dll
+  outputs whose method-level attributes don't survive the PE serializer.
+- `[WacsTranspiledImports]` — marks a generated imports type for the
+  transpiler's source-gen pickup.
+- `[WasmName(string)]` — round-trips the original wasm name (e.g.
+  `wasi:cli/run@0.2.0#run`) on auto-generated `IExports` / `IImports`
+  methods whose CLR identifier got sanitized
+  (`wasi_cli_run_0_2_0_run`). Stamped automatically by the WACS
+  interface generator; consumers reflect on it for dispatch and
+  diagnostics.
+- `[assembly: WasiHostPackage(string? label)]` — assembly-level marker
+  flagging an assembly as a WACS host package — discoverable by
+  `runtime.AutoDiscoverHostPackages()`. Pairs with the explicit-list
+  `runtime.UseHostPackages(name1, name2, …)`.
 - `WacsHostMemory` — a 16-byte readonly struct view over wasm linear memory,
   passed as the first parameter to every binding method. Bounds-checked
   accessors plus an `AsSpan` escape hatch for bulk I/O.

@@ -132,14 +132,40 @@ wacs bindgen app.dll -o ./regen
 
 ### Embedding
 
-For `Microsoft.Extensions.DependencyInjection` consumers, `WACS.WASI.Preview2.DependencyInjection` registers every subsystem default and a pre-wired `Linker` in one call:
+#### Interpreter — one-liner extensions
+
+```csharp
+using Wacs.Core.Runtime;
+using Wacs.WASI.Preview2;
+using Wacs.WASI.NN;
+using Wacs.WASI.NN.OnnxRuntime;
+using Wacs.WASI.NN.Types;
+using Wacs.WASI.Threads;
+
+var runtime = new WasmRuntime();
+runtime.UseWasiPreview2(b => b.EnableSockets());
+runtime.UseWasiNN(b => b.AddBackend(GraphEncoding.ONNX, new OnnxBackend()));
+runtime.UseWasiThreads();
+
+// Or — discover whatever's loaded:
+runtime.AutoDiscoverHostPackages();   // walks AppDomain for [WasiHostPackage]
+runtime.UseHostPackages("Wacs.WASI.NN.OnnxRuntime", "MyGameHost.dll");
+```
+
+#### Transpiler-direct-link — Microsoft.Extensions.DependencyInjection
+
+For component-model perf-path embedding, `WACS.WASI.Preview2.DependencyInjection` registers every subsystem default and a pre-wired `Linker` in one call:
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
 using Wacs.WASI.Preview2.DependencyInjection;
+using Wacs.WASI.NN.DependencyInjection;
 
 var services = new ServiceCollection();
-services.AddWasiPreview2();   // every subsystem, scoped lifetime by default
+services
+    .AddWasiPreview2()
+    .AddWasiNN(b => b.AddBackend(GraphEncoding.ONNX, new OnnxBackend()))
+    .AddWasiPreview2NNBundle();   // composite for components importing both
 
 using var sp = services.BuildServiceProvider();
 using var scope = sp.CreateScope();
@@ -148,6 +174,12 @@ var linker = scope.ServiceProvider.GetRequiredService<Linker>();
 var runtime = linker.Runtime;
 // ... instantiate the component
 ```
+
+The `WasiPreview2NNBundle` composite forwards both Preview 2 and
+WASI.NN `[WitSource]` interface properties through one CLR object,
+satisfying the transpiler's single `object hostBundle` ctor slot
+without any emit changes. `HostPackageResolver` auto-discovers it
+when both packages are loaded.
 
 Selective overrides use DI's normal `TryAdd` semantics — see
 [`Wacs.WASI/Wacs.WASI.Preview2/Wacs.WASI.Preview2/README.md`](Wacs.WASI/Wacs.WASI.Preview2/Wacs.WASI.Preview2/README.md) for
@@ -160,8 +192,12 @@ patterns.
 |---|---|
 | [`WACS.ComponentModel`](https://www.nuget.org/packages/WACS.ComponentModel) | Component runtime, canonical-ABI lift/lower, `ComponentBridge` cross-engine adapter |
 | [`WACS.ComponentModel.Bindgen.Lib`](https://www.nuget.org/packages/WACS.ComponentModel.Bindgen.Lib) | Programmatic forward / reverse bindgen (used by `wacs bindgen`) |
-| [`WACS.WASI.Preview2`](https://www.nuget.org/packages/WACS.WASI.Preview2) | Typed host impls for `wasi:cli` / `clocks` / `filesystem` / `http` / `io` / `random` / `sockets` |
+| [`WACS.WASI.Preview2`](https://www.nuget.org/packages/WACS.WASI.Preview2) | Typed host impls + `WasiPreview2Host : IBindable` composite + `runtime.UseWasiPreview2(...)` |
 | [`WACS.WASI.Preview2.DependencyInjection`](https://www.nuget.org/packages/WACS.WASI.Preview2.DependencyInjection) | One-call DI registration of the bundle |
+| [`WACS.WASI.NN`](https://www.nuget.org/packages/WACS.WASI.NN) | wasi-nn host bindings (WIT + WITX) + `WasiNNHost : IBindable` + source-gen `[WitSource]` interfaces |
+| [`WACS.WASI.NN.DependencyInjection`](https://www.nuget.org/packages/WACS.WASI.NN.DependencyInjection) | `WasiNNBundle`, `WasiPreview2NNBundle` composite, concrete resource impls (`Tensor`, `Graph`, `GraphExecutionContext`, `Error`) |
+| [`WACS.WASI.NN.{OnnxRuntime,MLNet,LlamaSharp}`](https://www.nuget.org/packages/WACS.WASI.NN.OnnxRuntime) | Backend implementations + parameterless `IBindable` adapters (`WasiNNOnnxBindable`, `WasiNNMLNetBindable`, `WasiNNLlamaSharpBindable`) for `--bind` |
+| [`WACS.WASI.Threads`](https://www.nuget.org/packages/WACS.WASI.Threads) | `wasi:thread-spawn` host adapter + `runtime.UseWasiThreads()` |
 
 ## WASI Preview 1
 
@@ -269,12 +305,34 @@ wacs run app.component.wasm --wasip2
 wacs aot app.component.wasm --wasip2 -o app   # all the way to NativeAOT
 ```
 
+Command components don't need `--call` — `wacs run --wasip2`
+auto-dispatches the canonical `wasi:cli/run@<version>#run` export,
+matching `wasmtime` / `jco` / `wasmer`. Reactor modules
+(`_initialize` without `_start`) get `_initialize` invoked before
+any explicit `--call`. `wasi:cli/exit.exit(N)` propagates to the
+host process exit code.
+
+For wasi-nn (ONNX inference) and wasi-threads, the matching
+shorthands wire the bundled host packages:
+
+```bash
+wacs run my.component.wasm --wasip2 --wasi-nn -d ./models
+wacs run my.threaded.wasm --wasi-threads
+```
+
 For custom host imports (`env.sayc`, game bindings, etc.), use
-`--bind <asm>` to load any `IBindable` host library, or — for
-programmatic embedding — reference
+`--bind <asm>` to load any `IBindable` host library. `--bind`
+accepts file paths (`Assembly.LoadFrom`) or assembly names
+(`Assembly.Load`); honored on every dispatch path including the
+component paths. For programmatic embedding, reference
 [`WACS.Transpiler.Lib`](https://www.nuget.org/packages/WACS.Transpiler.Lib)
 and use `BindHostFunction` + the built-in `TranspiledModuleLoader`
 or a custom `ImportDispatcher` proxy.
+
+Want to know which host packages a component needs? `wacs inspect
+<comp.wasm> --imports` enumerates the component-level imports
+(instance + name + version) so you can predict what to wire before
+running.
 
 See [`Wacs.Console/Wacs.Console/README.md`](Wacs.Console/Wacs.Console/README.md) for the full
 verb reference (`run` / `build` / `inspect`), the direct-run

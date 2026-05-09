@@ -399,6 +399,26 @@ wacs inspect module.wasm --exports
 wacs inspect module.wasm --imports
 ```
 
+For components, `--imports` enumerates each top-level instance import
+with its package + version — useful for predicting which host packages
+to wire before running:
+
+```bash
+$ wacs inspect my.component.wasm --imports
+=== component-level imports ===
+  Instance  wasi:nn/inference@0.2.0-rc-2024-10-28
+  Instance  wasi:nn/graph@0.2.0-rc-2024-10-28
+  Instance  wasi:cli/stdout@0.2.9
+  Instance  wasi:cli/exit@0.2.9
+  …
+```
+
+A component with `wasi:nn/*` imports needs `--wasi-nn` (or
+`--bind Wacs.WASI.NN.<backend>` for non-ONNX backends). `wasi:cli/*`
+needs `--wasip2`. Version mismatches (e.g. component compiled against
+`wasi:cli/stdout@0.2.9` but `Wacs.WASI.Preview2` ships `0.2.0`) surface
+as direct-link resolution failures at instantiation.
+
 **Dump WAT (round-trips back through the text parser):**
 
 ```bash
