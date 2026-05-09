@@ -206,31 +206,33 @@ namespace Wacs.Transpiler.AOT.Emitters
         public static void MemoryCopy(ThinContext ctx, int dstMemIdx, int srcMemIdx,
             int dst, int src, int len)
         {
-            var dstMem = ctx.Memories[dstMemIdx].Data;
-            var srcMem = ctx.Memories[srcMemIdx].Data;
+            var dstMem = ctx.Memories[dstMemIdx];
+            var srcMem = ctx.Memories[srcMemIdx];
             // WASM spec: bounds check applies even when len == 0
-            if ((long)(uint)src + (long)(uint)len > srcMem.Length ||
-                (long)(uint)dst + (long)(uint)len > dstMem.Length)
+            if ((long)(uint)src + (long)(uint)len > (long)srcMem.ByteLength ||
+                (long)(uint)dst + (long)(uint)len > (long)dstMem.ByteLength)
                 throw new TrapException("out of bounds memory access");
             if (len == 0) return;
-            Buffer.BlockCopy(srcMem, src, dstMem, dst, len);
+            // Span<byte>.CopyTo dispatches to Buffer.Memmove and
+            // handles overlap correctly across both modes.
+            srcMem.AsSpan(src, len).CopyTo(dstMem.AsSpan(dst, len));
         }
 
         public static void MemoryFill(ThinContext ctx, int memIdx,
             int dst, int val, int len)
         {
-            var mem = ctx.Memories[memIdx].Data;
+            var mem = ctx.Memories[memIdx];
             // WASM spec: bounds check applies even when len == 0
-            if ((long)(uint)dst + (long)(uint)len > mem.Length)
+            if ((long)(uint)dst + (long)(uint)len > (long)mem.ByteLength)
                 throw new TrapException("out of bounds memory access");
             if (len == 0) return;
-            Array.Fill(mem, (byte)val, dst, len);
+            mem.AsSpan(dst, len).Fill((byte)val);
         }
 
         public static void MemoryInit(ThinContext ctx, int memIdx, int dataIdx,
             int dst, int src, int len)
         {
-            var mem = ctx.Memories[memIdx].Data;
+            var mem = ctx.Memories[memIdx];
             byte[] segData;
 
             if (ctx.Store != null && ctx.Module != null)
@@ -248,10 +250,10 @@ namespace Wacs.Transpiler.AOT.Emitters
 
             // WASM spec: bounds check applies even when len == 0
             if ((long)(uint)src + (long)(uint)len > segData.Length ||
-                (long)(uint)dst + (long)(uint)len > mem.Length)
+                (long)(uint)dst + (long)(uint)len > (long)mem.ByteLength)
                 throw new TrapException("out of bounds memory access");
             if (len == 0) return;
-            Buffer.BlockCopy(segData, src, mem, dst, len);
+            new ReadOnlySpan<byte>(segData, src, len).CopyTo(mem.AsSpan(dst, len));
         }
 
         public static void DataDrop(ThinContext ctx, int dataIdx)

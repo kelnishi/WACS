@@ -40,6 +40,11 @@ namespace Wacs.Transpiler.AOT.Emitters
     {
         private static readonly FieldInfo MemoriesField =
             typeof(ThinContext).GetField(nameof(ThinContext.Memories))!;
+        internal static readonly MethodInfo MemorySizeGetter =
+            typeof(Wacs.Core.Runtime.Types.MemoryInstance).GetProperty(
+                nameof(Wacs.Core.Runtime.Types.MemoryInstance.Size))!
+                .GetGetMethod()!;
+
         internal static readonly FieldInfo MemoryDataField =
             typeof(Wacs.Core.Runtime.Types.MemoryInstance).GetField(
                 nameof(Wacs.Core.Runtime.Types.MemoryInstance.Data))!;
@@ -149,7 +154,7 @@ namespace Wacs.Transpiler.AOT.Emitters
         private static void EmitLoad(ILGenerator il, InstMemoryLoad inst, string helperName)
         {
             // Stack: [address (i32)]
-            // We need: MemoryHelpers.LoadXxx(byte[] mem, int address, long offset)
+            // We need: MemoryHelpers.LoadXxx(MemoryInstance mem, int address, long offset)
 
             var addrLocal = il.DeclareLocal(typeof(int));
             il.Emit(OpCodes.Stloc, addrLocal);      // save address
@@ -158,7 +163,6 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Ldfld, MemoriesField);   // MemoryInstance[]
             il.Emit(OpCodes.Ldc_I4, inst.MemIndex);  // memIdx
             il.Emit(OpCodes.Ldelem_Ref);              // MemoryInstance
-            il.Emit(OpCodes.Ldfld, MemoryDataField);  // byte[] Data
 
             il.Emit(OpCodes.Ldloc, addrLocal);        // address
             il.Emit(OpCodes.Ldc_I8, inst.MemOffset);  // offset
@@ -170,7 +174,7 @@ namespace Wacs.Transpiler.AOT.Emitters
 
         /// <summary>
         /// Emit a memory store: stack has [address, value], result is [].
-        /// call MemoryHelpers.StoreXxx(byte[] mem, int address, long offset, value)
+        /// call MemoryHelpers.StoreXxx(MemoryInstance mem, int address, long offset, value)
         /// </summary>
         private static void EmitStore(ILGenerator il, InstMemoryStore inst, string helperName)
         {
@@ -190,7 +194,6 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Ldfld, MemoriesField);     // MemoryInstance[]
             il.Emit(OpCodes.Ldc_I4, inst.MemIndex);    // memIdx
             il.Emit(OpCodes.Ldelem_Ref);                // MemoryInstance
-            il.Emit(OpCodes.Ldfld, MemoryDataField);    // byte[] Data
 
             il.Emit(OpCodes.Ldloc, addrLocal);          // address
             il.Emit(OpCodes.Ldc_I8, inst.MemOffset);    // offset
@@ -201,16 +204,14 @@ namespace Wacs.Transpiler.AOT.Emitters
 
         private static void EmitMemorySize(ILGenerator il, InstMemorySize inst)
         {
-            // Push ctx.Memories[memIdx].Data.Length / PageSize
+            // Push ctx.Memories[memIdx].Size — mode-aware via the
+            // Size property (which dispatches by StorageMode).
             il.Emit(OpCodes.Ldarg_0);                  // ThinContext
             il.Emit(OpCodes.Ldfld, MemoriesField);     // MemoryInstance[]
             il.Emit(OpCodes.Ldc_I4, inst.MemIndex);    // memIdx
             il.Emit(OpCodes.Ldelem_Ref);                // MemoryInstance
-            il.Emit(OpCodes.Ldfld, MemoryDataField);    // byte[] Data
-            il.Emit(OpCodes.Ldlen);                     // length (native int)
-            il.Emit(OpCodes.Conv_I4);
-            il.Emit(OpCodes.Ldc_I4, 65536);             // PageSize
-            il.Emit(OpCodes.Div);
+            il.Emit(OpCodes.Call, MemorySizeGetter);    // long pages
+            il.Emit(OpCodes.Conv_I4);                   // i32 pages
         }
 
         private static void EmitMemoryGrow(ILGenerator il, InstMemoryGrow inst)
@@ -238,181 +239,177 @@ namespace Wacs.Transpiler.AOT.Emitters
     public static class MemoryHelpers
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static void BoundsCheck(byte[] mem, long ea, int width)
+        private static void BoundsCheck(MemoryInstance mem, long ea, int width)
         {
-            if (ea < 0 || ea + width > mem.Length)
+            if (ea < 0 || ea + width > (long)mem.ByteLength)
                 throw new TrapException("out of bounds memory access");
         }
 
         // === i32 loads ===
-        public static int LoadI32(byte[] mem, int addr, long offset)
+        public static int LoadI32(MemoryInstance mem, int addr, long offset)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 4);
-            return Unsafe.ReadUnaligned<int>(ref mem[(int)ea]);
+            return Unsafe.ReadUnaligned<int>(ref mem.RefAs<byte>((int)ea));
         }
 
-        public static int LoadI32_8S(byte[] mem, int addr, long offset)
+        public static int LoadI32_8S(MemoryInstance mem, int addr, long offset)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 1);
-            return (sbyte)mem[(int)ea];
+            return (sbyte)mem.AsSpan((int)ea, 1)[0];
         }
 
-        public static int LoadI32_8U(byte[] mem, int addr, long offset)
+        public static int LoadI32_8U(MemoryInstance mem, int addr, long offset)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 1);
-            return mem[(int)ea];
+            return mem.AsSpan((int)ea, 1)[0];
         }
 
-        public static int LoadI32_16S(byte[] mem, int addr, long offset)
+        public static int LoadI32_16S(MemoryInstance mem, int addr, long offset)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 2);
-            return Unsafe.ReadUnaligned<short>(ref mem[(int)ea]);
+            return Unsafe.ReadUnaligned<short>(ref mem.RefAs<byte>((int)ea));
         }
 
-        public static int LoadI32_16U(byte[] mem, int addr, long offset)
+        public static int LoadI32_16U(MemoryInstance mem, int addr, long offset)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 2);
-            return Unsafe.ReadUnaligned<ushort>(ref mem[(int)ea]);
+            return Unsafe.ReadUnaligned<ushort>(ref mem.RefAs<byte>((int)ea));
         }
 
         // === i64 loads ===
-        public static long LoadI64(byte[] mem, int addr, long offset)
+        public static long LoadI64(MemoryInstance mem, int addr, long offset)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 8);
-            return Unsafe.ReadUnaligned<long>(ref mem[(int)ea]);
+            return Unsafe.ReadUnaligned<long>(ref mem.RefAs<byte>((int)ea));
         }
 
-        public static long LoadI64_8S(byte[] mem, int addr, long offset)
+        public static long LoadI64_8S(MemoryInstance mem, int addr, long offset)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 1);
-            return (sbyte)mem[(int)ea];
+            return (sbyte)mem.AsSpan((int)ea, 1)[0];
         }
 
-        public static long LoadI64_8U(byte[] mem, int addr, long offset)
+        public static long LoadI64_8U(MemoryInstance mem, int addr, long offset)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 1);
-            return mem[(int)ea];
+            return mem.AsSpan((int)ea, 1)[0];
         }
 
-        public static long LoadI64_16S(byte[] mem, int addr, long offset)
+        public static long LoadI64_16S(MemoryInstance mem, int addr, long offset)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 2);
-            return Unsafe.ReadUnaligned<short>(ref mem[(int)ea]);
+            return Unsafe.ReadUnaligned<short>(ref mem.RefAs<byte>((int)ea));
         }
 
-        public static long LoadI64_16U(byte[] mem, int addr, long offset)
+        public static long LoadI64_16U(MemoryInstance mem, int addr, long offset)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 2);
-            return Unsafe.ReadUnaligned<ushort>(ref mem[(int)ea]);
+            return Unsafe.ReadUnaligned<ushort>(ref mem.RefAs<byte>((int)ea));
         }
 
-        public static long LoadI64_32S(byte[] mem, int addr, long offset)
+        public static long LoadI64_32S(MemoryInstance mem, int addr, long offset)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 4);
-            int raw = Unsafe.ReadUnaligned<int>(ref mem[(int)ea]);
-            System.IO.File.AppendAllText("/tmp/mem_trace.log",$"  L32S mem={mem.GetHashCode()} ea={ea} bytes=[{mem[(int)ea]:X2},{mem[(int)ea+1]:X2},{mem[(int)ea+2]:X2},{mem[(int)ea+3]:X2}] raw=0x{raw:X8}={raw}\n");
-            return raw;
+            return Unsafe.ReadUnaligned<int>(ref mem.RefAs<byte>((int)ea));
         }
 
-        public static long LoadI64_32U(byte[] mem, int addr, long offset)
+        public static long LoadI64_32U(MemoryInstance mem, int addr, long offset)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 4);
-            return (uint)Unsafe.ReadUnaligned<int>(ref mem[(int)ea]);
+            return (uint)Unsafe.ReadUnaligned<int>(ref mem.RefAs<byte>((int)ea));
         }
 
         // === float loads ===
-        public static float LoadF32(byte[] mem, int addr, long offset)
+        public static float LoadF32(MemoryInstance mem, int addr, long offset)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 4);
-            return Unsafe.ReadUnaligned<float>(ref mem[(int)ea]);
+            return Unsafe.ReadUnaligned<float>(ref mem.RefAs<byte>((int)ea));
         }
 
-        public static double LoadF64(byte[] mem, int addr, long offset)
+        public static double LoadF64(MemoryInstance mem, int addr, long offset)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 8);
-            return Unsafe.ReadUnaligned<double>(ref mem[(int)ea]);
+            return Unsafe.ReadUnaligned<double>(ref mem.RefAs<byte>((int)ea));
         }
 
         // === i32 stores ===
-        public static void StoreI32(byte[] mem, int addr, long offset, int value)
+        public static void StoreI32(MemoryInstance mem, int addr, long offset, int value)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 4);
-            Unsafe.WriteUnaligned(ref mem[(int)ea], value);
+            Unsafe.WriteUnaligned(ref mem.RefAs<byte>((int)ea), value);
         }
 
-        public static void StoreI32_8(byte[] mem, int addr, long offset, int value)
+        public static void StoreI32_8(MemoryInstance mem, int addr, long offset, int value)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 1);
-            mem[(int)ea] = (byte)value;
-            if (ea < 4)
-                System.IO.File.AppendAllText("/tmp/mem_trace.log",$"  S8 mem={mem.GetHashCode()} ea={ea} val=0x{value:X8} byte=0x{(byte)value:X2} mem[0..3]=[{mem[0]:X2},{mem[1]:X2},{mem[2]:X2},{mem[3]:X2}]\n");
+            mem.AsSpan((int)ea, 1)[0] = (byte)value;
         }
 
-        public static void StoreI32_16(byte[] mem, int addr, long offset, int value)
+        public static void StoreI32_16(MemoryInstance mem, int addr, long offset, int value)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 2);
-            Unsafe.WriteUnaligned(ref mem[(int)ea], (short)value);
+            Unsafe.WriteUnaligned(ref mem.RefAs<byte>((int)ea), (short)value);
         }
 
         // === i64 stores ===
-        public static void StoreI64(byte[] mem, int addr, long offset, long value)
+        public static void StoreI64(MemoryInstance mem, int addr, long offset, long value)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 8);
-            Unsafe.WriteUnaligned(ref mem[(int)ea], value);
+            Unsafe.WriteUnaligned(ref mem.RefAs<byte>((int)ea), value);
         }
 
-        public static void StoreI64_8(byte[] mem, int addr, long offset, long value)
+        public static void StoreI64_8(MemoryInstance mem, int addr, long offset, long value)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 1);
-            mem[(int)ea] = (byte)value;
+            mem.AsSpan((int)ea, 1)[0] = (byte)value;
         }
 
-        public static void StoreI64_16(byte[] mem, int addr, long offset, long value)
+        public static void StoreI64_16(MemoryInstance mem, int addr, long offset, long value)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 2);
-            Unsafe.WriteUnaligned(ref mem[(int)ea], (short)value);
+            Unsafe.WriteUnaligned(ref mem.RefAs<byte>((int)ea), (short)value);
         }
 
-        public static void StoreI64_32(byte[] mem, int addr, long offset, long value)
+        public static void StoreI64_32(MemoryInstance mem, int addr, long offset, long value)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 4);
-            Unsafe.WriteUnaligned(ref mem[(int)ea], (int)value);
+            Unsafe.WriteUnaligned(ref mem.RefAs<byte>((int)ea), (int)value);
         }
 
         // === float stores ===
-        public static void StoreF32(byte[] mem, int addr, long offset, float value)
+        public static void StoreF32(MemoryInstance mem, int addr, long offset, float value)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 4);
-            Unsafe.WriteUnaligned(ref mem[(int)ea], value);
+            Unsafe.WriteUnaligned(ref mem.RefAs<byte>((int)ea), value);
         }
 
-        public static void StoreF64(byte[] mem, int addr, long offset, double value)
+        public static void StoreF64(MemoryInstance mem, int addr, long offset, double value)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 8);
-            Unsafe.WriteUnaligned(ref mem[(int)ea], value);
+            Unsafe.WriteUnaligned(ref mem.RefAs<byte>((int)ea), value);
         }
 
         // ================================================================
@@ -420,207 +417,207 @@ namespace Wacs.Transpiler.AOT.Emitters
         // ================================================================
 
         // v128.load: load 16 bytes
-        public static V128 LoadV128(byte[] mem, int addr, long offset)
+        public static V128 LoadV128(MemoryInstance mem, int addr, long offset)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 16);
-            return Unsafe.ReadUnaligned<V128>(ref mem[(int)ea]);
+            return Unsafe.ReadUnaligned<V128>(ref mem.RefAs<byte>((int)ea));
         }
 
         // v128.store: store 16 bytes
-        public static void StoreV128(byte[] mem, int addr, long offset, V128 value)
+        public static void StoreV128(MemoryInstance mem, int addr, long offset, V128 value)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 16);
-            Unsafe.WriteUnaligned(ref mem[(int)ea], value);
+            Unsafe.WriteUnaligned(ref mem.RefAs<byte>((int)ea), value);
         }
 
         // v128.load8x8_s: load 8 bytes, sign-extend each to i16
-        public static V128 LoadV128_8x8S(byte[] mem, int addr, long offset)
+        public static V128 LoadV128_8x8S(MemoryInstance mem, int addr, long offset)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 8);
             return new V128(
-                (short)(sbyte)mem[(int)ea], (short)(sbyte)mem[(int)ea+1],
-                (short)(sbyte)mem[(int)ea+2], (short)(sbyte)mem[(int)ea+3],
-                (short)(sbyte)mem[(int)ea+4], (short)(sbyte)mem[(int)ea+5],
-                (short)(sbyte)mem[(int)ea+6], (short)(sbyte)mem[(int)ea+7]);
+                (short)(sbyte)mem.AsSpan((int)ea, 1)[0], (short)(sbyte)mem.AsSpan((int)ea+1, 1)[0],
+                (short)(sbyte)mem.AsSpan((int)ea+2, 1)[0], (short)(sbyte)mem.AsSpan((int)ea+3, 1)[0],
+                (short)(sbyte)mem.AsSpan((int)ea+4, 1)[0], (short)(sbyte)mem.AsSpan((int)ea+5, 1)[0],
+                (short)(sbyte)mem.AsSpan((int)ea+6, 1)[0], (short)(sbyte)mem.AsSpan((int)ea+7, 1)[0]);
         }
 
         // v128.load8x8_u: load 8 bytes, zero-extend each to i16
-        public static V128 LoadV128_8x8U(byte[] mem, int addr, long offset)
+        public static V128 LoadV128_8x8U(MemoryInstance mem, int addr, long offset)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 8);
             return new V128(
-                (short)mem[(int)ea], (short)mem[(int)ea+1],
-                (short)mem[(int)ea+2], (short)mem[(int)ea+3],
-                (short)mem[(int)ea+4], (short)mem[(int)ea+5],
-                (short)mem[(int)ea+6], (short)mem[(int)ea+7]);
+                (short)mem.AsSpan((int)ea, 1)[0], (short)mem.AsSpan((int)ea+1, 1)[0],
+                (short)mem.AsSpan((int)ea+2, 1)[0], (short)mem.AsSpan((int)ea+3, 1)[0],
+                (short)mem.AsSpan((int)ea+4, 1)[0], (short)mem.AsSpan((int)ea+5, 1)[0],
+                (short)mem.AsSpan((int)ea+6, 1)[0], (short)mem.AsSpan((int)ea+7, 1)[0]);
         }
 
         // v128.load16x4_s: load 8 bytes as 4 i16, sign-extend to i32
-        public static V128 LoadV128_16x4S(byte[] mem, int addr, long offset)
+        public static V128 LoadV128_16x4S(MemoryInstance mem, int addr, long offset)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 8);
             return new V128(
-                (int)Unsafe.ReadUnaligned<short>(ref mem[(int)ea]),
-                (int)Unsafe.ReadUnaligned<short>(ref mem[(int)ea+2]),
-                (int)Unsafe.ReadUnaligned<short>(ref mem[(int)ea+4]),
-                (int)Unsafe.ReadUnaligned<short>(ref mem[(int)ea+6]));
+                (int)Unsafe.ReadUnaligned<short>(ref mem.RefAs<byte>((int)ea)),
+                (int)Unsafe.ReadUnaligned<short>(ref mem.AsSpan((int)ea+2, 1)[0]),
+                (int)Unsafe.ReadUnaligned<short>(ref mem.AsSpan((int)ea+4, 1)[0]),
+                (int)Unsafe.ReadUnaligned<short>(ref mem.AsSpan((int)ea+6, 1)[0]));
         }
 
         // v128.load16x4_u
-        public static V128 LoadV128_16x4U(byte[] mem, int addr, long offset)
+        public static V128 LoadV128_16x4U(MemoryInstance mem, int addr, long offset)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 8);
             return new V128(
-                (int)Unsafe.ReadUnaligned<ushort>(ref mem[(int)ea]),
-                (int)Unsafe.ReadUnaligned<ushort>(ref mem[(int)ea+2]),
-                (int)Unsafe.ReadUnaligned<ushort>(ref mem[(int)ea+4]),
-                (int)Unsafe.ReadUnaligned<ushort>(ref mem[(int)ea+6]));
+                (int)Unsafe.ReadUnaligned<ushort>(ref mem.RefAs<byte>((int)ea)),
+                (int)Unsafe.ReadUnaligned<ushort>(ref mem.AsSpan((int)ea+2, 1)[0]),
+                (int)Unsafe.ReadUnaligned<ushort>(ref mem.AsSpan((int)ea+4, 1)[0]),
+                (int)Unsafe.ReadUnaligned<ushort>(ref mem.AsSpan((int)ea+6, 1)[0]));
         }
 
         // v128.load32x2_s: load 8 bytes as 2 i32, sign-extend to i64
-        public static V128 LoadV128_32x2S(byte[] mem, int addr, long offset)
+        public static V128 LoadV128_32x2S(MemoryInstance mem, int addr, long offset)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 8);
             return new V128(
-                (long)Unsafe.ReadUnaligned<int>(ref mem[(int)ea]),
-                (long)Unsafe.ReadUnaligned<int>(ref mem[(int)ea+4]));
+                (long)Unsafe.ReadUnaligned<int>(ref mem.RefAs<byte>((int)ea)),
+                (long)Unsafe.ReadUnaligned<int>(ref mem.AsSpan((int)ea+4, 1)[0]));
         }
 
         // v128.load32x2_u
-        public static V128 LoadV128_32x2U(byte[] mem, int addr, long offset)
+        public static V128 LoadV128_32x2U(MemoryInstance mem, int addr, long offset)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 8);
             return new V128(
-                (long)(uint)Unsafe.ReadUnaligned<int>(ref mem[(int)ea]),
-                (long)(uint)Unsafe.ReadUnaligned<int>(ref mem[(int)ea+4]));
+                (long)(uint)Unsafe.ReadUnaligned<int>(ref mem.RefAs<byte>((int)ea)),
+                (long)(uint)Unsafe.ReadUnaligned<int>(ref mem.AsSpan((int)ea+4, 1)[0]));
         }
 
         // v128.load8_splat
-        public static V128 LoadV128_8Splat(byte[] mem, int addr, long offset)
+        public static V128 LoadV128_8Splat(MemoryInstance mem, int addr, long offset)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 1);
-            byte v = mem[(int)ea];
+            byte v = mem.AsSpan((int)ea, 1)[0];
             return new V128(v,v,v,v,v,v,v,v,v,v,v,v,v,v,v,v);
         }
 
         // v128.load16_splat
-        public static V128 LoadV128_16Splat(byte[] mem, int addr, long offset)
+        public static V128 LoadV128_16Splat(MemoryInstance mem, int addr, long offset)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 2);
-            ushort v = Unsafe.ReadUnaligned<ushort>(ref mem[(int)ea]);
+            ushort v = Unsafe.ReadUnaligned<ushort>(ref mem.RefAs<byte>((int)ea));
             return new V128(v,v,v,v,v,v,v,v);
         }
 
         // v128.load32_splat
-        public static V128 LoadV128_32Splat(byte[] mem, int addr, long offset)
+        public static V128 LoadV128_32Splat(MemoryInstance mem, int addr, long offset)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 4);
-            uint v = Unsafe.ReadUnaligned<uint>(ref mem[(int)ea]);
+            uint v = Unsafe.ReadUnaligned<uint>(ref mem.RefAs<byte>((int)ea));
             return new V128(v,v,v,v);
         }
 
         // v128.load64_splat
-        public static V128 LoadV128_64Splat(byte[] mem, int addr, long offset)
+        public static V128 LoadV128_64Splat(MemoryInstance mem, int addr, long offset)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 8);
-            ulong v = Unsafe.ReadUnaligned<ulong>(ref mem[(int)ea]);
+            ulong v = Unsafe.ReadUnaligned<ulong>(ref mem.RefAs<byte>((int)ea));
             return new V128(v,v);
         }
 
         // v128.load32_zero: load 4 bytes into lane 0, rest zero
-        public static V128 LoadV128_32Zero(byte[] mem, int addr, long offset)
+        public static V128 LoadV128_32Zero(MemoryInstance mem, int addr, long offset)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 4);
-            uint v = Unsafe.ReadUnaligned<uint>(ref mem[(int)ea]);
+            uint v = Unsafe.ReadUnaligned<uint>(ref mem.RefAs<byte>((int)ea));
             return new V128(v, 0u, 0u, 0u);
         }
 
         // v128.load64_zero: load 8 bytes into lane 0, rest zero
-        public static V128 LoadV128_64Zero(byte[] mem, int addr, long offset)
+        public static V128 LoadV128_64Zero(MemoryInstance mem, int addr, long offset)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 8);
-            ulong v = Unsafe.ReadUnaligned<ulong>(ref mem[(int)ea]);
+            ulong v = Unsafe.ReadUnaligned<ulong>(ref mem.RefAs<byte>((int)ea));
             return new V128(v, 0UL);
         }
 
         // v128.loadN_lane: load N bits from memory into a lane of existing v128
-        public static V128 LoadV128_8Lane(byte[] mem, int addr, long offset, V128 vec, byte lane)
+        public static V128 LoadV128_8Lane(MemoryInstance mem, int addr, long offset, V128 vec, byte lane)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 1);
             MV128 result = vec;
-            result[(byte)lane] = mem[(int)ea];
+            result[(byte)lane] = mem.AsSpan((int)ea, 1)[0];
             return result;
         }
 
-        public static V128 LoadV128_16Lane(byte[] mem, int addr, long offset, V128 vec, byte lane)
+        public static V128 LoadV128_16Lane(MemoryInstance mem, int addr, long offset, V128 vec, byte lane)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 2);
             MV128 result = vec;
-            result[(ushort)lane] = Unsafe.ReadUnaligned<ushort>(ref mem[(int)ea]);
+            result[(ushort)lane] = Unsafe.ReadUnaligned<ushort>(ref mem.RefAs<byte>((int)ea));
             return result;
         }
 
-        public static V128 LoadV128_32Lane(byte[] mem, int addr, long offset, V128 vec, byte lane)
+        public static V128 LoadV128_32Lane(MemoryInstance mem, int addr, long offset, V128 vec, byte lane)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 4);
             MV128 result = vec;
-            result[(uint)lane] = Unsafe.ReadUnaligned<uint>(ref mem[(int)ea]);
+            result[(uint)lane] = Unsafe.ReadUnaligned<uint>(ref mem.RefAs<byte>((int)ea));
             return result;
         }
 
-        public static V128 LoadV128_64Lane(byte[] mem, int addr, long offset, V128 vec, byte lane)
+        public static V128 LoadV128_64Lane(MemoryInstance mem, int addr, long offset, V128 vec, byte lane)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 8);
             MV128 result = vec;
-            result[(ulong)lane] = Unsafe.ReadUnaligned<ulong>(ref mem[(int)ea]);
+            result[(ulong)lane] = Unsafe.ReadUnaligned<ulong>(ref mem.RefAs<byte>((int)ea));
             return result;
         }
 
         // v128.storeN_lane: store a lane to memory
-        public static void StoreV128_8Lane(byte[] mem, int addr, long offset, V128 vec, byte lane)
+        public static void StoreV128_8Lane(MemoryInstance mem, int addr, long offset, V128 vec, byte lane)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 1);
-            mem[(int)ea] = vec[(byte)lane];
+            mem.AsSpan((int)ea, 1)[0] = vec[(byte)lane];
         }
 
-        public static void StoreV128_16Lane(byte[] mem, int addr, long offset, V128 vec, byte lane)
+        public static void StoreV128_16Lane(MemoryInstance mem, int addr, long offset, V128 vec, byte lane)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 2);
-            Unsafe.WriteUnaligned(ref mem[(int)ea], vec[(ushort)lane]);
+            Unsafe.WriteUnaligned(ref mem.RefAs<byte>((int)ea), vec[(ushort)lane]);
         }
 
-        public static void StoreV128_32Lane(byte[] mem, int addr, long offset, V128 vec, byte lane)
+        public static void StoreV128_32Lane(MemoryInstance mem, int addr, long offset, V128 vec, byte lane)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 4);
-            Unsafe.WriteUnaligned(ref mem[(int)ea], vec[(uint)lane]);
+            Unsafe.WriteUnaligned(ref mem.RefAs<byte>((int)ea), vec[(uint)lane]);
         }
 
-        public static void StoreV128_64Lane(byte[] mem, int addr, long offset, V128 vec, byte lane)
+        public static void StoreV128_64Lane(MemoryInstance mem, int addr, long offset, V128 vec, byte lane)
         {
             long ea = (uint)addr + offset;
             BoundsCheck(mem, ea, 8);
-            Unsafe.WriteUnaligned(ref mem[(int)ea], vec[(ulong)lane]);
+            Unsafe.WriteUnaligned(ref mem.RefAs<byte>((int)ea), vec[(ulong)lane]);
         }
 
         // === memory.grow ===

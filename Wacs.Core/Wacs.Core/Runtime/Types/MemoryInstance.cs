@@ -337,7 +337,7 @@ namespace Wacs.Core.Runtime.Types
         /// aligned for <typeparamref name="T"/>.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal ref T RefAs<T>(int ea) where T : unmanaged
+        public ref T RefAs<T>(int ea) where T : unmanaged
         {
             if (StorageMode == MemoryStorageMode.NativePointer)
                 return ref Unsafe.AsRef<T>(NativeBase + ea);
