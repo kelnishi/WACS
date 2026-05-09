@@ -8,6 +8,10 @@
         <Authors>Kelvin Nishikawa</Authors>
         <TargetFramework>net8.0</TargetFramework>
         <IsPackable>false</IsPackable>
+        <!-- MemoryInstanceNativeStorageTests reads through the
+             public byte* NativeBase pointer to verify writes hit
+             native memory. -->
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>
 
     <ItemGroup>

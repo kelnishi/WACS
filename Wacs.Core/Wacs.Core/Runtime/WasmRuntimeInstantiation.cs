@@ -133,7 +133,8 @@ namespace Wacs.Core.Runtime
         /// @Spec 4.5.3.10. Modules Allocation
         /// *We also evaluate globals and elements here, per instantiation
         /// </summary>
-        private ModuleInstance AllocateModule(Module module)
+        private ModuleInstance AllocateModule(Module module,
+            MemoryStorageMode memStorage = MemoryStorageMode.ManagedArray)
         {
             //20. Include Types from module
             var moduleInstance = new ModuleInstance(module);
@@ -248,7 +249,7 @@ namespace Wacs.Core.Runtime
             //10. index ordered memory addresses
             foreach (var mem in module.Memories)
             {
-                moduleInstance.MemAddrs.Add(AllocateMemory(Store, mem));
+                moduleInstance.MemAddrs.Add(AllocateMemory(Store, mem, memStorage));
             }
             //Make the address space permanent
             moduleInstance.MemAddrs.Finalize();
@@ -434,7 +435,7 @@ namespace Wacs.Core.Runtime
                     throw new WasmRuntimeException("OpStack should be empty");
 
                 //2, 3, 4 Checks if imports are satisfied
-                moduleInstance = AllocateModule(module);
+                moduleInstance = AllocateModule(module, options.MemoryStorage);
 
                 //12.
                 var auxFrame = GetExecContext().ReserveFrame(moduleInstance, 0);
@@ -647,9 +648,10 @@ namespace Wacs.Core.Runtime
         /// <summary>
         /// @Spec 4.5.3.4. Memories
         /// </summary>
-        private static MemAddr AllocateMemory(Store store, MemoryType memType)
+        private static MemAddr AllocateMemory(Store store, MemoryType memType,
+            MemoryStorageMode storage = MemoryStorageMode.ManagedArray)
         {
-            var memInst = new MemoryInstance(memType);
+            var memInst = new MemoryInstance(memType, storage);
             var memAddr = store.AddMemory(memInst);
             return memAddr;
         }

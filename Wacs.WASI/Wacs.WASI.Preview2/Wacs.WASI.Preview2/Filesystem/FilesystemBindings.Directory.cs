@@ -53,30 +53,30 @@ namespace Wacs.WASI.Preview2.Filesystem
                         return;
                     }
                     // Outer Ok disc.
-                    mem[retArea] = 0;
-                    mem[retArea + 1] = 0;
-                    mem[retArea + 2] = 0;
-                    mem[retArea + 3] = 0;
+                    mem.AsSpan(retArea, 1)[0] = 0;
+                    mem.AsSpan(retArea + 1, 1)[0] = 0;
+                    mem.AsSpan(retArea + 2, 1)[0] = 0;
+                    mem.AsSpan(retArea + 3, 1)[0] = 0;
                     if (!r.Ok.HasValue)
                     {
                         // option None — disc=0, rest zero.
-                        for (int i = 4; i < 20; i++) mem[retArea + i] = 0;
+                        for (int i = 4; i < 20; i++) mem.AsSpan(retArea + i, 1)[0] = 0;
                         return;
                     }
                     var entry = r.Ok.Value;
                     // option Some at offset 4.
-                    mem[retArea + 4] = 1;
-                    mem[retArea + 5] = 0;
-                    mem[retArea + 6] = 0;
-                    mem[retArea + 7] = 0;
-                    mem[retArea + 8] = (byte)entry.Type;
-                    mem[retArea + 9] = 0;
-                    mem[retArea + 10] = 0;
-                    mem[retArea + 11] = 0;
+                    mem.AsSpan(retArea + 4, 1)[0] = 1;
+                    mem.AsSpan(retArea + 5, 1)[0] = 0;
+                    mem.AsSpan(retArea + 6, 1)[0] = 0;
+                    mem.AsSpan(retArea + 7, 1)[0] = 0;
+                    mem.AsSpan(retArea + 8, 1)[0] = (byte)entry.Type;
+                    mem.AsSpan(retArea + 9, 1)[0] = 0;
+                    mem.AsSpan(retArea + 10, 1)[0] = 0;
+                    mem.AsSpan(retArea + 11, 1)[0] = 0;
                     // alloc may invalidate `mem` if the guest's
                     // cabi_realloc grows memory; re-fetch.
                     var (ptr, len) = MemoryWriter.WriteUtf8StringAllocated(
-                        ctx.Memory, entry.Name, alloc);
+                        ctx.Memory(), entry.Name, alloc);
                     mem = ctx.Memory();
                     MemoryWriter.WriteI32LE(mem, retArea + 12, ptr);
                     MemoryWriter.WriteI32LE(mem, retArea + 16, len);

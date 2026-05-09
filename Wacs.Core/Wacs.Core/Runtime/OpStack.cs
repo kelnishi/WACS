@@ -147,11 +147,16 @@ namespace Wacs.Core.Runtime
             return _registers[Count].Data.UInt64;
         }
 
+        // Returns a long whose unsigned reading is the wasm address.
+        // memory32 pops i32 zero-extended into the low 32 bits;
+        // memory64 pops i64 bit-patterns up to 2^64-1. Bounds-check
+        // sites cast to ulong for unsigned comparison and detect
+        // wrap explicitly.
         public long PopAddr()
         {
             --Count;
             var value = _registers[Count];
-            var addr = value.Type switch
+            return value.Type switch
             {
                 ValType.I32 => value.Data.UInt32,
                 ValType.I64 => value.Data.Int64,
@@ -159,9 +164,6 @@ namespace Wacs.Core.Runtime
                 ValType.U64 => (long)value.Data.UInt64,
                 _ => throw new InvalidDataException($"OperandStack contained wrong type {value.Type} expected int")
             };
-            if (addr < 0)
-                throw new TrapException($"Address was negative {addr}");
-            return addr;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

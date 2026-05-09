@@ -13,40 +13,82 @@ namespace Wacs.HostBindings
     /// parameter to every <see cref="WacsImportAttribute"/>-annotated
     /// binding method.
     ///
-    /// <para>Wraps the live <see cref="byte"/>[] backing array plus the
-    /// authoritative byte length (which can grow via <c>memory.grow</c>).
-    /// Designed to be passed by value — it's a 16-byte struct; the JIT
-    /// (or NativeAOT) inlines accesses.</para>
+    /// <para>Wraps either a managed <see cref="byte"/>[] backing array
+    /// (~2 GiB cap per <c>Array.MaxLength</c>) or a native pointer +
+    /// length (no 2 GiB cap; up to 4 GiB on wasm32 and 2^48 on
+    /// memory64). Mode is decided at construction; consumers don't
+    /// need to know which backing they got — every accessor
+    /// dispatches automatically.</para>
     ///
-    /// <para>Bounds-checks every access via the public methods. Bindings
-    /// that need raw <see cref="Span{T}"/> access (e.g. for bulk
-    /// memcpy-style I/O) call <see cref="AsSpan(int, int)"/>, which performs
-    /// a single bounds check per slice.</para>
+    /// <para>24-byte <c>readonly struct</c> passed by value; the JIT
+    /// (or NativeAOT) inlines the mode dispatch to a single branch
+    /// per access. Every access bounds-checks through the public
+    /// methods. Bindings that need raw <see cref="Span{T}"/> access
+    /// (bulk memcpy-style I/O) call <see cref="AsSpan(int, int)"/>,
+    /// which performs a single bounds check per slice.</para>
     ///
-    /// <para>The struct does not own the byte[] — it's a view, valid only
-    /// for the duration of the binding call. Don't squirrel it away across
-    /// asynchronous boundaries; the underlying array can be reallocated
-    /// by <c>memory.grow</c> and any cached reference becomes stale.</para>
+    /// <para>The struct does not own the backing storage — it's a view,
+    /// valid only for the duration of the binding call. Don't squirrel
+    /// it away across asynchronous boundaries; the underlying buffer
+    /// can be reallocated by <c>memory.grow</c> and any cached
+    /// reference becomes stale.</para>
     /// </summary>
     public readonly struct WacsHostMemory
     {
-        private readonly byte[] _data;
+        // ManagedArray backing; null in NativePointer mode.
+        private readonly byte[]? _data;
+
+        // NativePointer backing; IntPtr.Zero in ManagedArray mode.
+        // Stored as IntPtr so the struct stays usable in safe code;
+        // methods that dereference cast to byte* in unsafe blocks.
+        private readonly IntPtr _nativeBase;
+
+        // wasm-visible byte length. int (not nuint) — bindings work
+        // in int-bounded slices anyway (a >2 GiB native memory is
+        // still sliceable in int chunks) and the public Length API
+        // is int-typed for back-compat.
         private readonly int _length;
 
         /// <summary>
-        /// Wraps the given backing array. Pass the live <c>byte[]</c> from
-        /// <c>MemoryInstance.Data</c> (or the equivalent in your runtime)
-        /// plus the authoritative wasm-visible byte length (which may be
-        /// less than <c>_data.Length</c> when the runtime over-allocates
-        /// for grow headroom).
+        /// Wraps a managed <c>byte[]</c> backing.
         /// </summary>
         public WacsHostMemory(byte[] data, int length)
         {
             _data = data ?? throw new ArgumentNullException(nameof(data));
+            _nativeBase = IntPtr.Zero;
             if ((uint)length > (uint)data.Length)
                 throw new ArgumentOutOfRangeException(nameof(length),
                     "length exceeds backing array length");
             _length = length;
+        }
+
+        /// <summary>
+        /// Wraps a native-pointer backing. <paramref name="nativeBase"/>
+        /// must point to <paramref name="length"/> bytes of valid
+        /// linear memory; the runtime guarantees the pointer outlives
+        /// the binding call. Pass <c>IntPtr.Zero</c> only with
+        /// <c>length == 0</c>.
+        /// </summary>
+        public WacsHostMemory(IntPtr nativeBase, int length)
+        {
+            _data = null;
+            _nativeBase = nativeBase;
+            if (length < 0)
+                throw new ArgumentOutOfRangeException(nameof(length),
+                    "length must be non-negative");
+            if (length > 0 && nativeBase == IntPtr.Zero)
+                throw new ArgumentNullException(nameof(nativeBase),
+                    "nativeBase must be non-zero for non-empty memory");
+            _length = length;
+        }
+
+        /// <summary>True when this view is backed by native memory
+        /// (<see cref="MemoryStorageMode.NativePointer"/>) rather than
+        /// a managed byte[].</summary>
+        public bool IsNative
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => _data == null;
         }
 
         /// <summary>Authoritative wasm-visible byte length.</summary>
@@ -54,31 +96,40 @@ namespace Wacs.HostBindings
 
         /// <summary>Read a single byte. Throws on out-of-range access.</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public byte ReadByte(int offset)
+        public unsafe byte ReadByte(int offset)
         {
             CheckRange(offset, 1);
-            return _data[offset];
+            return _data != null
+                ? _data[offset]
+                : ((byte*)_nativeBase)[offset];
         }
 
         /// <summary>Write a single byte. Throws on out-of-range access.</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void WriteByte(int offset, byte value)
+        public unsafe void WriteByte(int offset, byte value)
         {
             CheckRange(offset, 1);
-            _data[offset] = value;
+            if (_data != null)
+                _data[offset] = value;
+            else
+                ((byte*)_nativeBase)[offset] = value;
         }
 
         /// <summary>
         /// Slice as a <see cref="Span{Byte}"/> — one bounds check per slice,
         /// then per-element accesses inside the span are unchecked. The
         /// returned span is live; reads see writes from concurrent wasm
-        /// execution if any.
+        /// execution if any. The span is valid only for the duration of
+        /// the binding call; <c>memory.grow</c> can reallocate the
+        /// backing buffer and invalidate it.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public Span<byte> AsSpan(int offset, int length)
+        public unsafe Span<byte> AsSpan(int offset, int length)
         {
             CheckRange(offset, length);
-            return _data.AsSpan(offset, length);
+            return _data != null
+                ? _data.AsSpan(offset, length)
+                : new Span<byte>((byte*)_nativeBase + offset, length);
         }
 
         /// <summary>
@@ -88,37 +139,37 @@ namespace Wacs.HostBindings
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public int ReadInt32LE(int offset)
         {
-            CheckRange(offset, 4);
-            return _data[offset]
-                 | (_data[offset + 1] << 8)
-                 | (_data[offset + 2] << 16)
-                 | (_data[offset + 3] << 24);
+            var span = AsSpan(offset, 4);
+            return span[0]
+                 | (span[1] << 8)
+                 | (span[2] << 16)
+                 | (span[3] << 24);
         }
 
         /// <summary>Convenience writer for a 4-byte little-endian int.</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void WriteInt32LE(int offset, int value)
         {
-            CheckRange(offset, 4);
-            _data[offset]     = (byte)value;
-            _data[offset + 1] = (byte)(value >> 8);
-            _data[offset + 2] = (byte)(value >> 16);
-            _data[offset + 3] = (byte)(value >> 24);
+            var span = AsSpan(offset, 4);
+            span[0] = (byte)value;
+            span[1] = (byte)(value >> 8);
+            span[2] = (byte)(value >> 16);
+            span[3] = (byte)(value >> 24);
         }
 
         /// <summary>Convenience reader for an 8-byte little-endian long.</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public long ReadInt64LE(int offset)
         {
-            CheckRange(offset, 8);
-            uint lo = (uint)(_data[offset]
-                          | (_data[offset + 1] << 8)
-                          | (_data[offset + 2] << 16)
-                          | (_data[offset + 3] << 24));
-            uint hi = (uint)(_data[offset + 4]
-                          | (_data[offset + 5] << 8)
-                          | (_data[offset + 6] << 16)
-                          | (_data[offset + 7] << 24));
+            var span = AsSpan(offset, 8);
+            uint lo = (uint)(span[0]
+                          | (span[1] << 8)
+                          | (span[2] << 16)
+                          | (span[3] << 24));
+            uint hi = (uint)(span[4]
+                          | (span[5] << 8)
+                          | (span[6] << 16)
+                          | (span[7] << 24));
             return (long)((ulong)hi << 32 | lo);
         }
 
@@ -126,15 +177,15 @@ namespace Wacs.HostBindings
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void WriteInt64LE(int offset, long value)
         {
-            CheckRange(offset, 8);
-            _data[offset]     = (byte)value;
-            _data[offset + 1] = (byte)(value >> 8);
-            _data[offset + 2] = (byte)(value >> 16);
-            _data[offset + 3] = (byte)(value >> 24);
-            _data[offset + 4] = (byte)(value >> 32);
-            _data[offset + 5] = (byte)(value >> 40);
-            _data[offset + 6] = (byte)(value >> 48);
-            _data[offset + 7] = (byte)(value >> 56);
+            var span = AsSpan(offset, 8);
+            span[0] = (byte)value;
+            span[1] = (byte)(value >> 8);
+            span[2] = (byte)(value >> 16);
+            span[3] = (byte)(value >> 24);
+            span[4] = (byte)(value >> 32);
+            span[5] = (byte)(value >> 40);
+            span[6] = (byte)(value >> 48);
+            span[7] = (byte)(value >> 56);
         }
 
         /// <summary>True if [offset, offset+byteCount) lies within the
@@ -154,12 +205,17 @@ namespace Wacs.HostBindings
             if (value == null) throw new ArgumentNullException(nameof(value));
             int byteCount = System.Text.Encoding.UTF8.GetByteCount(value);
             int total = byteCount + (nullTerminate ? 1 : 0);
-            CheckRange(offset, total);
-            // Encoding.UTF8.GetBytes(string, byte[], int) is available on both
-            // netstandard2.0 and net8.0; the (string, Span<byte>) overload is
-            // net5+ only.
-            System.Text.Encoding.UTF8.GetBytes(value, 0, value.Length, _data, offset);
-            if (nullTerminate) _data[offset + byteCount] = 0;
+            var span = AsSpan(offset, total);
+#if NET5_0_OR_GREATER
+            System.Text.Encoding.UTF8.GetBytes(value, span);
+#else
+            // netstandard2.0 fallback — encode to a byte[] first then
+            // copy. The legacy path historically went straight through
+            // _data; native-mode requires the copy regardless.
+            var bytes = System.Text.Encoding.UTF8.GetBytes(value);
+            new ReadOnlySpan<byte>(bytes).CopyTo(span);
+#endif
+            if (nullTerminate) span[byteCount] = 0;
             return total;
         }
 
@@ -168,10 +224,19 @@ namespace Wacs.HostBindings
         /// <paramref name="byteCount"/> bytes (no nul-terminator handling
         /// — pass the explicit length). Throws on out-of-range.
         /// </summary>
-        public string ReadUtf8String(int offset, int byteCount)
+        public unsafe string ReadUtf8String(int offset, int byteCount)
         {
             CheckRange(offset, byteCount);
-            return System.Text.Encoding.UTF8.GetString(_data, offset, byteCount);
+            if (_data != null)
+                return System.Text.Encoding.UTF8.GetString(_data, offset, byteCount);
+#if NET5_0_OR_GREATER
+            return System.Text.Encoding.UTF8.GetString(
+                new ReadOnlySpan<byte>((byte*)_nativeBase + offset, byteCount));
+#else
+            // netstandard2.0 has GetString(byte*, int).
+            return System.Text.Encoding.UTF8.GetString(
+                (byte*)_nativeBase + offset, byteCount);
+#endif
         }
 
         /// <summary>Alias for <see cref="ReadUtf8String(int,int)"/> matching
@@ -208,9 +273,8 @@ namespace Wacs.HostBindings
         public T[] ReadStructs<T>(int offset, int count) where T : unmanaged
         {
             int sz = System.Runtime.CompilerServices.Unsafe.SizeOf<T>();
-            CheckRange(offset, sz * count);
             var span = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, T>(
-                _data.AsSpan(offset, sz * count));
+                AsSpan(offset, sz * count));
             var arr = new T[count];
             span.CopyTo(arr);
             return arr;
@@ -222,9 +286,8 @@ namespace Wacs.HostBindings
         public T ReadStruct<T>(int offset) where T : unmanaged
         {
             int sz = System.Runtime.CompilerServices.Unsafe.SizeOf<T>();
-            CheckRange(offset, sz);
             return System.Runtime.InteropServices.MemoryMarshal.Read<T>(
-                _data.AsSpan(offset, sz));
+                AsSpan(offset, sz));
         }
 
         /// <summary>
@@ -233,9 +296,8 @@ namespace Wacs.HostBindings
         public void WriteStruct<T>(int offset, T value) where T : unmanaged
         {
             int sz = System.Runtime.CompilerServices.Unsafe.SizeOf<T>();
-            CheckRange(offset, sz);
             System.Runtime.InteropServices.MemoryMarshal.Write(
-                _data.AsSpan(offset, sz),
+                AsSpan(offset, sz),
 #if NET8_0_OR_GREATER
                 in value);
 #else
@@ -243,9 +305,16 @@ namespace Wacs.HostBindings
 #endif
         }
 
-        /// <summary>The underlying backing array. Use with care; prefer
-        /// the typed accessors above.</summary>
-        public byte[] Data => _data;
+        /// <summary>
+        /// The underlying byte[] backing array, or
+        /// <see cref="Array.Empty{T}"/> in NativePointer mode where no
+        /// managed buffer exists. Use <see cref="AsSpan(int, int)"/> for
+        /// mode-agnostic access; this getter exists only for legacy
+        /// callers that need a byte[] handle (pinning, marshaling). In
+        /// NativePointer mode legacy callers see an empty array — they
+        /// must migrate to AsSpan to read native memory.
+        /// </summary>
+        public byte[] Data => _data ?? Array.Empty<byte>();
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void CheckRange(int offset, int byteCount)

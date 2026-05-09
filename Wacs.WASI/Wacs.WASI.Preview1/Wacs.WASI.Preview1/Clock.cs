@@ -137,13 +137,21 @@ namespace Wacs.WASI.Preview1
         // Helpers
         // ============================================================
 
-        // Wrap a runtime ExecContext's default memory in WacsHostMemory.
-        // The ExecContext path is interpreter-side only; AOT-side
-        // callers construct WacsHostMemory directly from their host's
-        // byte-buffer view.
-        internal static WacsHostMemory WacsHost(ExecContext ctx)
+        // Wrap a runtime ExecContext's default memory in
+        // WacsHostMemory. The ExecContext path is interpreter-side
+        // only; AOT-side callers construct WacsHostMemory directly
+        // from their host's byte-buffer view. Dispatches on the
+        // memory's storage mode so native-backed memories pass
+        // through the byte* ctor.
+        internal static unsafe WacsHostMemory WacsHost(ExecContext ctx)
         {
             var m = ctx.DefaultMemory;
+            if (m.StorageMode == Wacs.Core.Runtime.MemoryStorageMode.NativePointer)
+            {
+                int len = (int)System.Math.Min(
+                    (ulong)m.NativeSize, (ulong)int.MaxValue);
+                return new WacsHostMemory((System.IntPtr)m.NativeBase, len);
+            }
             return new WacsHostMemory(m.Data, m.Data.Length);
         }
 

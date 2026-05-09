@@ -40,7 +40,7 @@ namespace Wacs.Core.Instructions.Atomic
     {
         public InstI32AtomicLoad8U() : base((ByteCode)AtomCode.I32AtomicLoad8U, ValType.I32, 1) {}
         protected override void DoLoad(ExecContext context, int ea) =>
-            context.OpStack.PushU32(Volatile.Read(ref CachedMem.Data[ea]));
+            context.OpStack.PushU32(Volatile.Read(ref CachedMem.RefAs<byte>(ea)));
     }
 
     public sealed class InstI32AtomicLoad16U : InstAtomicLoad
@@ -48,7 +48,7 @@ namespace Wacs.Core.Instructions.Atomic
         public InstI32AtomicLoad16U() : base((ByteCode)AtomCode.I32AtomicLoad16U, ValType.I32, 2) {}
         protected override void DoLoad(ExecContext context, int ea)
         {
-            ref ushort cell = ref Unsafe.As<byte, ushort>(ref CachedMem.Data[ea]);
+            ref ushort cell = ref CachedMem.RefAs<ushort>(ea);
             context.OpStack.PushU32(Volatile.Read(ref cell));
         }
     }
@@ -57,7 +57,7 @@ namespace Wacs.Core.Instructions.Atomic
     {
         public InstI64AtomicLoad8U() : base((ByteCode)AtomCode.I64AtomicLoad8U, ValType.I64, 1) {}
         protected override void DoLoad(ExecContext context, int ea) =>
-            context.OpStack.PushU64(Volatile.Read(ref CachedMem.Data[ea]));
+            context.OpStack.PushU64(Volatile.Read(ref CachedMem.RefAs<byte>(ea)));
     }
 
     public sealed class InstI64AtomicLoad16U : InstAtomicLoad
@@ -65,7 +65,7 @@ namespace Wacs.Core.Instructions.Atomic
         public InstI64AtomicLoad16U() : base((ByteCode)AtomCode.I64AtomicLoad16U, ValType.I64, 2) {}
         protected override void DoLoad(ExecContext context, int ea)
         {
-            ref ushort cell = ref Unsafe.As<byte, ushort>(ref CachedMem.Data[ea]);
+            ref ushort cell = ref CachedMem.RefAs<ushort>(ea);
             context.OpStack.PushU64(Volatile.Read(ref cell));
         }
     }
@@ -104,7 +104,7 @@ namespace Wacs.Core.Instructions.Atomic
     {
         public InstI32AtomicStore8() : base((ByteCode)AtomCode.I32AtomicStore8, 1) {}
         protected override void DoStore(MemoryInstance mem, int ea, int value) =>
-            Volatile.Write(ref mem.Data[ea], (byte)value);
+            Volatile.Write(ref mem.RefAs<byte>(ea), (byte)value);
     }
 
     public sealed class InstI32AtomicStore16 : InstAtomicStore32
@@ -112,7 +112,7 @@ namespace Wacs.Core.Instructions.Atomic
         public InstI32AtomicStore16() : base((ByteCode)AtomCode.I32AtomicStore16, 2) {}
         protected override void DoStore(MemoryInstance mem, int ea, int value)
         {
-            ref ushort cell = ref Unsafe.As<byte, ushort>(ref mem.Data[ea]);
+            ref ushort cell = ref mem.RefAs<ushort>(ea);
             Volatile.Write(ref cell, (ushort)value);
         }
     }
@@ -121,7 +121,7 @@ namespace Wacs.Core.Instructions.Atomic
     {
         public InstI64AtomicStore8() : base((ByteCode)AtomCode.I64AtomicStore8, 1) {}
         protected override void DoStore(MemoryInstance mem, int ea, long value) =>
-            Volatile.Write(ref mem.Data[ea], (byte)value);
+            Volatile.Write(ref mem.RefAs<byte>(ea), (byte)value);
     }
 
     public sealed class InstI64AtomicStore16 : InstAtomicStore64
@@ -129,7 +129,7 @@ namespace Wacs.Core.Instructions.Atomic
         public InstI64AtomicStore16() : base((ByteCode)AtomCode.I64AtomicStore16, 2) {}
         protected override void DoStore(MemoryInstance mem, int ea, long value)
         {
-            ref ushort cell = ref Unsafe.As<byte, ushort>(ref mem.Data[ea]);
+            ref ushort cell = ref mem.RefAs<ushort>(ea);
             Volatile.Write(ref cell, (ushort)value);
         }
     }

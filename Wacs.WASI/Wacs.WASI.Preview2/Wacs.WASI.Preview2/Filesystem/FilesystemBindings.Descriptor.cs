@@ -83,7 +83,7 @@ namespace Wacs.WASI.Preview2.Filesystem
             runtime.BindHostFunction<Action<ExecContext, int, long, long, int>>(
                 (Ns, "[method]descriptor.read"),
                 (ctx, handle, length, offset, retArea) =>
-                    WriteResultBytesEofTuple(ctx.Memory, retArea,
+                    WriteResultBytesEofTuple(ctx.Memory(), retArea,
                         ((Descriptor)descriptors.Get(handle))
                             .Read((ulong)length, (ulong)offset),
                         alloc));
@@ -231,7 +231,7 @@ namespace Wacs.WASI.Preview2.Filesystem
             runtime.BindHostFunction<Action<ExecContext, int, int, int, int>>(
                 (Ns, "[method]descriptor.readlink-at"),
                 (ctx, handle, ptr, len, retArea) =>
-                    WriteResultString(ctx.Memory, retArea,
+                    WriteResultString(ctx.Memory(), retArea,
                         ((Descriptor)descriptors.Get(handle))
                             .ReadlinkAt(ctx.ReadUtf8String(ptr, len)),
                         alloc));

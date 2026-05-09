@@ -54,10 +54,10 @@ namespace Wacs.WASI.Preview2.Http
                         int vPtr = MemoryReader.ReadI32LE(mem, eb + 8);
                         int vLen = MemoryReader.ReadI32LE(mem, eb + 12);
                         var key = Encoding.UTF8.GetString(
-                            mem, kPtr, kLen);
+                            mem.AsSpan(kPtr, kLen));
                         var val = new byte[vLen];
                         if (vLen > 0)
-                            Array.Copy(mem, vPtr, val, 0, vLen);
+                            mem.AsSpan(vPtr, vLen).CopyTo(val);
                         entries[i] = (key, val);
                     }
                     // Use the static factory (concrete-typed) so
@@ -100,8 +100,9 @@ namespace Wacs.WASI.Preview2.Http
                             : alloc.Allocate(1, bytes.Length);
                         var memInner = ctx.Memory();
                         if (bytes.Length > 0)
-                            Array.Copy(bytes, 0, memInner,
-                                dataPtr, bytes.Length);
+                            new ReadOnlySpan<byte>(bytes)
+                                .CopyTo(memInner.AsSpan(
+                                    dataPtr, bytes.Length));
                         MemoryWriter.WriteI32LE(memInner,
                             arrayPtr + i * 8, dataPtr);
                         MemoryWriter.WriteI32LE(memInner,
@@ -164,12 +165,13 @@ namespace Wacs.WASI.Preview2.Http
                         var (key, val) = arr[i];
                         var (kPtr, kLen) = MemoryWriter
                             .WriteUtf8StringAllocated(
-                                ctx.Memory, key, alloc);
+                                ctx.Memory(), key, alloc);
                         int vPtr = val.Length == 0 ? 0
                             : alloc.Allocate(1, val.Length);
                         var memInner = ctx.Memory();
                         if (val.Length > 0)
-                            Array.Copy(val, 0, memInner, vPtr, val.Length);
+                            new ReadOnlySpan<byte>(val)
+                                .CopyTo(memInner.AsSpan(vPtr, val.Length));
                         int eb = arrayPtr + i * 16;
                         MemoryWriter.WriteI32LE(memInner, eb, kPtr);
                         MemoryWriter.WriteI32LE(memInner, eb + 4, kLen);

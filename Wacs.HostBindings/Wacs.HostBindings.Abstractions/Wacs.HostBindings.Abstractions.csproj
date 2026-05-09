@@ -13,14 +13,20 @@
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.HostBindings.Abstractions</AssemblyName>
         <RootNamespace>Wacs.HostBindings</RootNamespace>
-        <AssemblyVersion>0.2.0</AssemblyVersion>
-        <Version>0.2.0</Version>
+        <AssemblyVersion>0.3.0</AssemblyVersion>
+        <Version>0.3.0</Version>
         <RepositoryType>git</RepositoryType>
         <!-- netstandard2.0 so the matching source generator (also
              netstandard2.0 by Roslyn requirement) can reference this
              at analyzer-load time without target-framework gymnastics. -->
         <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
         <IsAotCompatible Condition="'$(TargetFramework)' == 'net8.0'">true</IsAotCompatible>
+        <!-- WacsHostMemory supports a NativePointer backing
+             (byte* via IntPtr) for >2 GiB linear-memory hosts that
+             use Wacs.Core's MemoryStorageMode.NativePointer. Methods
+             that dereference the pointer are method-level unsafe;
+             this flag enables those blocks. -->
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
         <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
         <PackageReadmeFile>README.md</PackageReadmeFile>
     </PropertyGroup>

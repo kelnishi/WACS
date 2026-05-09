@@ -21,13 +21,32 @@ using System.Threading;
 using FluentValidation;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Runtime.Types
 {
-    public class MemoryInstance
+    public unsafe class MemoryInstance : IDisposable
     {
+        // ManagedArray-mode backing. In NativePointer mode this
+        // stays as Array.Empty<byte>() so accidental Data[i] access
+        // surfaces an AOOR rather than silently zero-reading.
         public byte[] Data;
+
+        // NativePointer-mode storage; zero/null in ManagedArray
+        // mode. NativeSize is authoritative — Data.Length is
+        // meaningless when StorageMode == NativePointer.
+        public byte* NativeBase;
+        public nuint NativeSize;
+
+        /// <summary>
+        /// Backing storage selector. <see cref="MemoryStorageMode.ManagedArray"/>
+        /// reads/writes <see cref="Data"/>; <see cref="MemoryStorageMode.NativePointer"/>
+        /// reads/writes <see cref="NativeBase"/> + <see cref="NativeSize"/>.
+        /// Set at construction; immutable for the lifetime of this
+        /// instance (Grow preserves the chosen mode).
+        /// </summary>
+        public MemoryStorageMode StorageMode { get; }
 
         // Lazy-allocated only when the host has opted into concurrent wasm
         // execution (see ConcurrencyPolicyMode.HostDefined) AND the memory
@@ -40,39 +59,98 @@ namespace Wacs.Core.Runtime.Types
         // off the lock entirely.
         internal ReaderWriterLockSlim? _growLock;
 
+        // Idempotency flag: explicit Dispose and the finalizer both
+        // hit DisposeCore; the native-buffer free runs once.
+        private bool _disposed;
+
         [SuppressMessage("ReSharper.DPA", "DPA0003: Excessive memory allocations in LOH", MessageId = "type: System.Byte[]; size: 134MB")]
         public MemoryInstance(MemoryType type)
+            : this(type, MemoryStorageMode.ManagedArray) { }
+
+        public MemoryInstance(MemoryType type, MemoryStorageMode storage)
         {
             Type = type;
+            StorageMode = storage;
 
-            if (type.Limits.Minimum > Constants.HostMaxPages)
+            if (type.Limits.Minimum > MaxPagesForMode(storage))
                 throw new InstantiationException($"Cannot allocate memory of size {type.Limits.Minimum}");
-            
-            long initialSize = (type.Limits.Minimum)* Constants.PageSize;
-            Data = new byte[initialSize];
+
+            long initialSize = type.Limits.Minimum * Constants.PageSize;
+            switch (storage)
+            {
+                case MemoryStorageMode.NativePointer:
+                    NativeBase = AllocateZeroed((nuint)initialSize);
+                    NativeSize = (nuint)initialSize;
+                    // Sentinel empty array so accidental Data[i]
+                    // reads fail loudly instead of zero-reading.
+                    Data = Array.Empty<byte>();
+                    break;
+                case MemoryStorageMode.ManagedArray:
+                default:
+                    Data = new byte[initialSize];
+                    break;
+            }
         }
 
         public MemoryType Type { get; private set; }
 
-        public long Size => Data.Length / Constants.PageSize;
+        public long Size => StorageMode == MemoryStorageMode.NativePointer
+            ? (long)(NativeSize / Constants.PageSize)
+            : Data.Length / Constants.PageSize;
+
+        /// <summary>
+        /// Authoritative byte length in either mode. <c>nuint</c>
+        /// (host-pointer-sized) so memory64 callers don't truncate.
+        /// </summary>
+        public nuint ByteLength => StorageMode == MemoryStorageMode.NativePointer
+            ? NativeSize
+            : (nuint)Data.Length;
 
         //TODO bounds checking?
-        public Span<byte> this[Range range] => Data.AsSpan(range);
+        public Span<byte> this[Range range]
+        {
+            get
+            {
+                if (StorageMode == MemoryStorageMode.NativePointer)
+                {
+                    var (offset, length) = range.GetOffsetAndLength((int)NativeSize);
+                    return new Span<byte>(NativeBase + offset, length);
+                }
+                return Data.AsSpan(range);
+            }
+        }
+
+        /// <summary>
+        /// Returns a <see cref="Span{T}"/> over the storage,
+        /// regardless of mode. Callers must not retain the span past
+        /// the next <see cref="Grow"/> on this instance — grow
+        /// reallocates the backing storage and the span becomes
+        /// stale (matches the contract <c>byte[].AsSpan</c> already
+        /// imposed via Array.Resize).
+        /// </summary>
+        public Span<byte> AsSpan(int offset, int length)
+        {
+            if (StorageMode == MemoryStorageMode.NativePointer)
+                return new Span<byte>(NativeBase + offset, length);
+            return Data.AsSpan(offset, length);
+        }
 
         /// <summary>
         /// @Spec 4.5.3.9. Growing memories
         /// </summary>
         public bool Grow(long numPages)
         {
-            long oldNumPages = Data.Length / Constants.PageSize;
+            long oldNumPages = StorageMode == MemoryStorageMode.NativePointer
+                ? (long)(NativeSize / Constants.PageSize)
+                : Data.Length / Constants.PageSize;
             long newNumPages = oldNumPages + numPages;
 
-            if (newNumPages > Constants.HostMaxPages)
+            if (newNumPages > MaxPagesForMode(StorageMode))
                 return false;
-            
+
             if (newNumPages > Type.Limits.Maximum)
                 return false;
-            
+
             var newLimits = new Limits(Type.Limits)
             {
                 Minimum = newNumPages
@@ -88,29 +166,125 @@ namespace Wacs.Core.Runtime.Types
                 return false;
             }
 
-            int len = (int)(newNumPages * Constants.PageSize);
+            long len = newNumPages * Constants.PageSize;
 
             var gl = _growLock;
             if (gl != null)
             {
                 gl.EnterWriteLock();
-                try
-                {
-                    Array.Resize(ref Data, len);
-                    Type = new MemoryType(newLimits);
-                }
-                finally
-                {
-                    gl.ExitWriteLock();
-                }
+                try { GrowStorage(len, newLimits); }
+                finally { gl.ExitWriteLock(); }
             }
             else
             {
-                Array.Resize(ref Data, len);
-                Type = new MemoryType(newLimits);
+                GrowStorage(len, newLimits);
             }
 
             return true;
+        }
+
+        // Mode-specific grow body. ManagedArray uses Array.Resize
+        // (capped at ~2 GiB). NativePointer allocates a new
+        // zero-initialized native buffer, copies the live bytes,
+        // and frees the old buffer — no 2 GiB cap.
+        private void GrowStorage(long newLenBytes, Limits newLimits)
+        {
+            if (StorageMode == MemoryStorageMode.NativePointer)
+            {
+                nuint newSize = (nuint)newLenBytes;
+                byte* newBase = AllocateZeroed(newSize);
+                if (NativeSize > 0)
+                    Buffer.MemoryCopy(NativeBase, newBase,
+                        (long)newSize, (long)NativeSize);
+                FreeNative(NativeBase);
+                NativeBase = newBase;
+                NativeSize = newSize;
+            }
+            else
+            {
+                Array.Resize(ref Data, (int)newLenBytes);
+            }
+            Type = new MemoryType(newLimits);
+        }
+
+        // Page-count cap, by storage mode + address type.
+        // ManagedArray: hard-capped at HostMaxPages (~2 GiB, the
+        // byte[] limit even with gcAllowVeryLargeObjects).
+        // NativePointer + i32 memory: WasmMaxPages (4 GiB, wasm32
+        // spec max).
+        // NativePointer + i64 memory: WasmMaxPages64 (2^48).
+        private long MaxPagesForMode(MemoryStorageMode mode)
+        {
+            if (mode != MemoryStorageMode.NativePointer)
+                return Constants.HostMaxPages;
+            return Type.Limits.AddressType == AddrType.I64
+                ? Constants.WasmMaxPages64
+                : Constants.WasmMaxPages;
+        }
+
+        // Native buffer allocator. Prefers NativeMemory.AllocZeroed
+        // on .NET 6+ (single syscall, page-zeroed by the OS); falls
+        // back to AllocHGlobal + InitBlock on legacy targets.
+        private static byte* AllocateZeroed(nuint size)
+        {
+#if NET6_0_OR_GREATER
+            return (byte*)NativeMemory.AllocZeroed(size);
+#else
+            // AllocHGlobal returns uninitialized memory; zero it
+            // explicitly so the byte[] default-zero spec holds.
+            // size cap: AllocHGlobal takes IntPtr (signed) — for
+            // sizes near nuint.MaxValue on 64-bit hosts this would
+            // truncate; netstandard2.1 callers don't need >2 GiB
+            // memories, so the cast is safe in practice.
+            byte* ptr = (byte*)Marshal.AllocHGlobal((IntPtr)(long)size);
+            if (size > 0)
+                Unsafe.InitBlockUnaligned(ptr, 0, (uint)size);
+            return ptr;
+#endif
+        }
+
+        private static void FreeNative(byte* ptr)
+        {
+            if (ptr == null) return;
+#if NET6_0_OR_GREATER
+            NativeMemory.Free(ptr);
+#else
+            Marshal.FreeHGlobal((IntPtr)ptr);
+#endif
+        }
+
+        // Explicit dispose — caller owns the lifetime and is
+        // responsible for releasing native memory when the runtime
+        // is torn down. Finalizer is a backstop for native-mode
+        // leaks; ManagedArray mode skips the finalizer registration.
+        public void Dispose()
+        {
+            DisposeCore();
+            // Fully-qualified — Wacs.Core.Runtime has a sibling
+            // GC sub-namespace that the resolver picks first.
+            System.GC.SuppressFinalize(this);
+        }
+
+        ~MemoryInstance()
+        {
+            DisposeCore();
+        }
+
+        private void DisposeCore()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            if (StorageMode == MemoryStorageMode.NativePointer
+                && NativeBase != null)
+            {
+                FreeNative(NativeBase);
+                NativeBase = null;
+                NativeSize = 0;
+            }
+            // ManagedArray: nothing to free — the GC reclaims Data
+            // when the MemoryInstance becomes unreachable.
+            _growLock?.Dispose();
+            _growLock = null;
         }
 
         /// <summary>
@@ -145,6 +319,24 @@ namespace Wacs.Core.Runtime.Types
             _growLock?.ExitReadLock();
         }
 
+        /// <summary>
+        /// Mode-dispatched <c>ref T</c> over the byte at offset
+        /// <paramref name="ea"/>. ManagedArray returns
+        /// <c>ref Unsafe.As&lt;byte, T&gt;(ref Data[ea])</c>;
+        /// NativePointer returns <c>ref Unsafe.AsRef&lt;T&gt;(NativeBase + ea)</c>.
+        /// Used by atomic load/store/RMW so the same Interlocked /
+        /// Volatile call sites work on both backings.
+        /// Caller guarantees <paramref name="ea"/> is in-bounds and
+        /// aligned for <typeparamref name="T"/>.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public ref T RefAs<T>(int ea) where T : unmanaged
+        {
+            if (StorageMode == MemoryStorageMode.NativePointer)
+                return ref Unsafe.AsRef<T>(NativeBase + ea);
+            return ref Unsafe.As<byte, T>(ref Data[ea]);
+        }
+
         /// <summary>Atomic 32-bit load at byte offset <paramref name="ea"/>.
         /// Caller guarantees <paramref name="ea"/> is in-bounds and 4-byte
         /// aligned.</summary>
@@ -153,7 +345,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                ref int cell = ref RefAs<int>(ea);
                 return Volatile.Read(ref cell);
             }
             finally { ExitReadIfShared(); }
@@ -166,7 +358,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                ref long cell = ref RefAs<long>(ea);
                 return Interlocked.Read(ref cell);
             }
             finally { ExitReadIfShared(); }
@@ -180,7 +372,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                ref int cell = ref RefAs<int>(ea);
                 Interlocked.Exchange(ref cell, value);
             }
             finally { ExitReadIfShared(); }
@@ -191,7 +383,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                ref long cell = ref RefAs<long>(ea);
                 Interlocked.Exchange(ref cell, value);
             }
             finally { ExitReadIfShared(); }
@@ -203,7 +395,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                ref int cell = ref RefAs<int>(ea);
                 return Interlocked.CompareExchange(ref cell, newValue, expected);
             }
             finally { ExitReadIfShared(); }
@@ -214,7 +406,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                ref long cell = ref RefAs<long>(ea);
                 return Interlocked.CompareExchange(ref cell, newValue, expected);
             }
             finally { ExitReadIfShared(); }
@@ -226,7 +418,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                ref int cell = ref RefAs<int>(ea);
                 // Interlocked.Add returns the new value; subtract to get original.
                 return Interlocked.Add(ref cell, value) - value;
             }
@@ -238,7 +430,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                ref long cell = ref RefAs<long>(ea);
                 return Interlocked.Add(ref cell, value) - value;
             }
             finally { ExitReadIfShared(); }
@@ -250,7 +442,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                ref int cell = ref RefAs<int>(ea);
                 return Interlocked.Exchange(ref cell, value);
             }
             finally { ExitReadIfShared(); }
@@ -261,7 +453,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                ref long cell = ref RefAs<long>(ea);
                 return Interlocked.Exchange(ref cell, value);
             }
             finally { ExitReadIfShared(); }
@@ -274,7 +466,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                ref int cell = ref RefAs<int>(ea);
                 return Interlocked.And(ref cell, value);
             }
             finally { ExitReadIfShared(); }
@@ -285,7 +477,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                ref int cell = ref RefAs<int>(ea);
                 return Interlocked.Or(ref cell, value);
             }
             finally { ExitReadIfShared(); }
@@ -296,7 +488,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                ref long cell = ref RefAs<long>(ea);
                 return Interlocked.And(ref cell, value);
             }
             finally { ExitReadIfShared(); }
@@ -307,7 +499,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                ref long cell = ref RefAs<long>(ea);
                 return Interlocked.Or(ref cell, value);
             }
             finally { ExitReadIfShared(); }
@@ -319,7 +511,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                ref int cell = ref RefAs<int>(ea);
                 int old;
                 do { old = Volatile.Read(ref cell); }
                 while (Interlocked.CompareExchange(ref cell, old & value, old) != old);
@@ -333,7 +525,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                ref int cell = ref RefAs<int>(ea);
                 int old;
                 do { old = Volatile.Read(ref cell); }
                 while (Interlocked.CompareExchange(ref cell, old | value, old) != old);
@@ -347,7 +539,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                ref long cell = ref RefAs<long>(ea);
                 long old;
                 do { old = Interlocked.Read(ref cell); }
                 while (Interlocked.CompareExchange(ref cell, old & value, old) != old);
@@ -361,7 +553,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                ref long cell = ref RefAs<long>(ea);
                 long old;
                 do { old = Interlocked.Read(ref cell); }
                 while (Interlocked.CompareExchange(ref cell, old & value, old) != old);
@@ -377,7 +569,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                ref int cell = ref RefAs<int>(ea);
                 int old;
                 do { old = Volatile.Read(ref cell); }
                 while (Interlocked.CompareExchange(ref cell, old ^ value, old) != old);
@@ -391,7 +583,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                ref long cell = ref RefAs<long>(ea);
                 long old;
                 do { old = Interlocked.Read(ref cell); }
                 while (Interlocked.CompareExchange(ref cell, old ^ value, old) != old);

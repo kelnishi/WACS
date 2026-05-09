@@ -431,9 +431,7 @@ namespace Wacs.Transpiler.Test
             // emit lifts the list correctly: per-element
             // AllocateResource for the own&lt;descriptor&gt; field plus
             // cabi_realloc + UTF-8 encode for the string field, all
-            // packed into the 12-byte stride the wasm probes. Closes
-            // gap 9 from wasi-nn/WACS-GAPS.md (preopens not reaching
-            // the guest under the transpiler engine).
+            // packed into the 12-byte stride the wasm probes.
 
             InitRegistry.Reset();
             ModuleInit.Reset();
@@ -554,6 +552,473 @@ namespace Wacs.Transpiler.Test
             // proves the direct-link emit assembled the list.
             Assert.IsType<int>(raw);
             Assert.Equal(3, (int)raw!);
+        }
+
+        [Fact]
+        public void E2E_DescriptorStat_RecordWithOptionFields()
+        {
+            // wasi:filesystem/types.[method]descriptor.stat returns
+            // result<descriptor-stat, error-code>. descriptor-stat is
+            // a record { type: descriptor-type, link-count: u64,
+            // size: u64, three option<datetime> timestamps }. Wires
+            // a stub IDescriptor whose Stat() returns a known Size,
+            // transpiles the fsstat fixture, reads retArea+24 (the
+            // size field within the OK arm). A returned 0 would mean
+            // direct-link emit fell back to the IImports default-zero
+            // stub; the expected value proves record-with-option-
+            // fields emit lifted the result correctly.
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            // Trap-stub the import so InstantiateModule's import
+            // resolution succeeds. Direct-link IL bypasses this —
+            // it fires only if the path falls back to IImports.
+            runtime.BindHostFunction<Action<int, int>>(
+                ("wasi:filesystem/types@0.2.8",
+                    "[method]descriptor.stat"),
+                (_, __) => throw new InvalidOperationException(
+                    "stub descriptor.stat must not be invoked when "
+                    + "direct linking is in effect"));
+
+            var fixturePath = FindFixturePath(
+                "wasi-fs-stat-component", "fsstat.component.wasm");
+            // Some fixtures only ship the wat alongside; fall back
+            // to assembling the wat module if no precompiled wasm
+            // is on disk.
+            // Hand-rolled fixture wasm so the test isn't gated on
+            // wat assembly tooling. Imports descriptor.stat with
+            // signature (i32, i32) → () and exports ask-stat-size +
+            // ask-stat-mtime-disc, both reading from retArea.
+            byte[] fixtureBytes = BuildFsStatFixtureWasm();
+            using var ms = new MemoryStream(fixtureBytes);
+            var coreModule = BinaryModuleParser
+                .ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(coreModule);
+
+            var hostAsm = typeof(Wacs.WASI.Preview2.Filesystem
+                .IDescriptor).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm });
+            // descriptor.stat MUST resolve through the bundle path.
+            Assert.True(resolver.TryResolve(
+                "wasi:filesystem/types@0.2.8",
+                "[method]descriptor.stat", out _));
+
+            // Independent predicate check — the resolver-aware
+            // recognition of Result<DescriptorStat, ErrorCode>.
+            // Pre-fix this returned false, falling through to the
+            // IImports stub.
+            var isAggSupportedMethod = typeof(DirectLinkedImportEmit)
+                .GetMethod("IsAggregateReturnSupported",
+                    System.Reflection.BindingFlags.NonPublic
+                    | System.Reflection.BindingFlags.Static);
+            if (isAggSupportedMethod != null)
+            {
+                var resultType = typeof(Wacs.ComponentModel.Runtime
+                    .Result<Wacs.WASI.Preview2.Filesystem.DescriptorStat,
+                        Wacs.WASI.Preview2.Filesystem.ErrorCode>);
+                Assert.True((bool)isAggSupportedMethod.Invoke(null,
+                    new object?[] { resultType, resolver })!);
+            }
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.DescriptorStatE2E", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "FsStatModule");
+            Assert.True(options.ResolverImportBindings!.Count >= 1);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    [InterfaceGenerator.SanitizeName(
+                        "wasi:filesystem/types@0.2.8_[method]descriptor.stat")]
+                        = _ => throw new InvalidOperationException(
+                            "IImports stub for descriptor.stat must "
+                            + "not be invoked"),
+                });
+
+            var bundle = new WasiPreview2Bundle(
+                environment: new StubEnv(),
+                exit: new StubExit(),
+                stdin: new StubStdin(),
+                stdout: new StubStdout(),
+                stderr: new StubStderr(),
+                terminalStdin: new StubTermStdin(),
+                terminalStdout: new StubTermStdout(),
+                terminalStderr: new StubTermStderr(),
+                monotonicClock: new StubMonotonic(),
+                wallClock: new StubWall(),
+                timezone: new StubTimezone(),
+                random: new StubRandom(),
+                insecure: new StubInsecure(),
+                insecureSeed: new StubInsecureSeed(),
+                poll: new StubPoll(),
+                preopens: new StubPreopens(),
+                filesystemErrorCode: new StubFsErr(),
+                instanceNetwork: new StubInstNet(),
+                tcpCreateSocket: new StubTcp(),
+                udpCreateSocket: new StubUdp(),
+                ipNameLookup: new StubDns(),
+                outgoingHandler: new StubHttpHandler());
+
+            var resources = new WasiPreview2Resources(
+                new Wacs.WASI.Preview2.HostBinding.ResourceContext());
+
+            // Allocate the stub descriptor BEFORE module construction
+            // so the handle is stable. Stat() returns OK with a known
+            // Size + None timestamps so retArea+24 (size) and
+            // retArea+56 (mtime option disc) both have predictable
+            // values for the assertions.
+            const ulong ExpectedSize = 0x0000_DEAD_C0DE_F00DUL;
+            var stubDescriptor = new StatStubDescriptor(ExpectedSize);
+            int handle = resources.AllocateResource(
+                typeof(Wacs.WASI.Preview2.Filesystem.IDescriptor),
+                stubDescriptor);
+
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            var sizeMethod = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("ask-stat-size"))!;
+            object? rawSize = sizeMethod.Invoke(instance,
+                new object[] { handle });
+
+            // ulong (low 64 bits of the size field) returned by the
+            // wasm export through i64.load offset=24. Pre-fix this
+            // would be 0 (silent IImports fallback); post-fix it
+            // matches what the stub Stat() set.
+            Assert.IsType<long>(rawSize);
+            Assert.Equal(ExpectedSize, unchecked((ulong)(long)rawSize!));
+
+            var discMethod = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("ask-stat-mtime-disc"));
+            if (discMethod != null)
+            {
+                // mtime was None → option disc at retArea+56 must be 0.
+                object? rawDisc = discMethod.Invoke(instance,
+                    new object[] { handle });
+                Assert.Equal(0, (int)rawDisc!);
+            }
+        }
+
+        // Minimal fallback wasm equivalent to fsstat.wat — assembled
+        // here so the test runs even if the .component.wasm has not
+        // been built into the fixture tree. Imports
+        // [method]descriptor.stat (i32, i32) → (); exports
+        // ask-stat-size (i32) → i64 reading i64 at retArea+24.
+        private static byte[] BuildFsStatFixtureWasm()
+        {
+            // wat:
+            //   (module
+            //     (import "wasi:filesystem/types@0.2.8"
+            //       "[method]descriptor.stat" (func $stat (param i32 i32)))
+            //     (memory (export "memory") 1)
+            //     (func (export "ask-stat-size") (param i32) (result i64)
+            //       (local i32)
+            //       i32.const 8
+            //       local.set 1
+            //       local.get 0
+            //       local.get 1
+            //       call $stat
+            //       local.get 1
+            //       i64.load offset=24)
+            //     (func (export "ask-stat-mtime-disc") (param i32) (result i32)
+            //       (local i32)
+            //       i32.const 8
+            //       local.set 1
+            //       local.get 0
+            //       local.get 1
+            //       call $stat
+            //       local.get 1
+            //       i32.load8_u offset=56))
+            //
+            // Hand-rolled binary: we only need the byte sequence, and
+            // assembling via Wat would pull in extra deps.
+            var stream = new MemoryStream();
+            var w = new BinaryWriter(stream);
+            // magic + version
+            w.Write((byte)0x00); w.Write((byte)0x61); w.Write((byte)0x73); w.Write((byte)0x6D);
+            w.Write((byte)0x01); w.Write((byte)0x00); w.Write((byte)0x00); w.Write((byte)0x00);
+            // type section: 3 types
+            //   0: (i32, i32) → ()    [stat]
+            //   1: (i32) → i64        [ask-stat-size]
+            //   2: (i32) → i32        [ask-stat-mtime-disc]
+            byte[] typeSec = new byte[]
+            {
+                0x03,
+                0x60, 0x02, 0x7F, 0x7F, 0x00,
+                0x60, 0x01, 0x7F, 0x01, 0x7E,
+                0x60, 0x01, 0x7F, 0x01, 0x7F,
+            };
+            w.Write((byte)0x01); WriteLeb(w, (uint)typeSec.Length); w.Write(typeSec);
+            // import section: 1 import
+            //   "wasi:filesystem/types@0.2.8" (28) . "[method]descriptor.stat" (23) : type 0
+            string imodule = "wasi:filesystem/types@0.2.8";
+            string iname = "[method]descriptor.stat";
+            var imodB = System.Text.Encoding.UTF8.GetBytes(imodule);
+            var inmB = System.Text.Encoding.UTF8.GetBytes(iname);
+            var iSec = new MemoryStream();
+            var iw = new BinaryWriter(iSec);
+            iw.Write((byte)0x01); // 1 import
+            WriteLeb(iw, (uint)imodB.Length); iw.Write(imodB);
+            WriteLeb(iw, (uint)inmB.Length); iw.Write(inmB);
+            iw.Write((byte)0x00); iw.Write((byte)0x00); // func, type 0
+            w.Write((byte)0x02);
+            WriteLeb(w, (uint)iSec.Length); w.Write(iSec.ToArray());
+            // function section: 2 local funcs (types 1 and 2)
+            w.Write((byte)0x03);
+            WriteLeb(w, 3u);
+            w.Write((byte)0x02); w.Write((byte)0x01); w.Write((byte)0x02);
+            // memory section: 1 memory, min=1
+            w.Write((byte)0x05);
+            WriteLeb(w, 3u);
+            w.Write((byte)0x01); w.Write((byte)0x00); w.Write((byte)0x01);
+            // export section: memory + 2 funcs
+            //   "memory" (6) → memory 0
+            //   "ask-stat-size" (13) → func 1 (after 1 import)
+            //   "ask-stat-mtime-disc" (19) → func 2
+            var eSec = new MemoryStream();
+            var ew = new BinaryWriter(eSec);
+            ew.Write((byte)0x03);
+            string e0 = "memory";
+            var e0B = System.Text.Encoding.UTF8.GetBytes(e0);
+            WriteLeb(ew, (uint)e0B.Length); ew.Write(e0B);
+            ew.Write((byte)0x02); WriteLeb(ew, 0u);
+            string e1 = "ask-stat-size";
+            var e1B = System.Text.Encoding.UTF8.GetBytes(e1);
+            WriteLeb(ew, (uint)e1B.Length); ew.Write(e1B);
+            ew.Write((byte)0x00); WriteLeb(ew, 1u);
+            string e2 = "ask-stat-mtime-disc";
+            var e2B = System.Text.Encoding.UTF8.GetBytes(e2);
+            WriteLeb(ew, (uint)e2B.Length); ew.Write(e2B);
+            ew.Write((byte)0x00); WriteLeb(ew, 2u);
+            w.Write((byte)0x07);
+            WriteLeb(w, (uint)eSec.Length); w.Write(eSec.ToArray());
+            // code section: 2 bodies
+            //   ask-stat-size body:
+            //     locals: 1 i32
+            //     i32.const 8 ; local.set 1
+            //     local.get 0 ; local.get 1 ; call 0
+            //     local.get 1 ; i64.load offset=24, align=3
+            //     end
+            byte[] body1 = new byte[]
+            {
+                0x01, 0x01, 0x7F,                        // 1 local of i32
+                0x41, 0x08, 0x21, 0x01,                  // i32.const 8 ; local.set 1
+                0x20, 0x00, 0x20, 0x01, 0x10, 0x00,      // local.get 0 ; local.get 1 ; call 0
+                0x20, 0x01, 0x29, 0x03, 0x18,            // local.get 1 ; i64.load align=3 offset=24
+                0x0B,
+            };
+            byte[] body2 = new byte[]
+            {
+                0x01, 0x01, 0x7F,                        // 1 local of i32
+                0x41, 0x08, 0x21, 0x01,                  // i32.const 8 ; local.set 1
+                0x20, 0x00, 0x20, 0x01, 0x10, 0x00,      // local.get 0 ; local.get 1 ; call 0
+                0x20, 0x01, 0x2D, 0x00, 0x38,            // local.get 1 ; i32.load8_u align=0 offset=56
+                0x0B,
+            };
+            var cSec = new MemoryStream();
+            var cw = new BinaryWriter(cSec);
+            cw.Write((byte)0x02);
+            WriteLeb(cw, (uint)body1.Length); cw.Write(body1);
+            WriteLeb(cw, (uint)body2.Length); cw.Write(body2);
+            w.Write((byte)0x0A);
+            WriteLeb(w, (uint)cSec.Length); cw.Flush();
+            w.Write(cSec.ToArray());
+
+            return stream.ToArray();
+        }
+
+        private static void WriteLeb(BinaryWriter w, uint value)
+        {
+            while (true)
+            {
+                byte b = (byte)(value & 0x7F);
+                value >>= 7;
+                if (value == 0) { w.Write(b); return; }
+                w.Write((byte)(b | 0x80));
+            }
+        }
+
+        // Stub IDescriptor whose Stat() returns a hand-shaped
+        // DescriptorStat with a known Size and all-None timestamps.
+        // Every other method throws — this fixture only exercises
+        // Stat().
+        private sealed class StatStubDescriptor
+            : Wacs.WASI.Preview2.Filesystem.IDescriptor
+        {
+            private readonly ulong _size;
+            public StatStubDescriptor(ulong size) { _size = size; }
+
+            public Wacs.ComponentModel.Runtime.Result<
+                Wacs.WASI.Preview2.Filesystem.DescriptorStat,
+                Wacs.WASI.Preview2.Filesystem.ErrorCode> Stat()
+                => Wacs.ComponentModel.Runtime.Result<
+                    Wacs.WASI.Preview2.Filesystem.DescriptorStat,
+                    Wacs.WASI.Preview2.Filesystem.ErrorCode>.FromOk(
+                    new Wacs.WASI.Preview2.Filesystem.DescriptorStat
+                    {
+                        Type = Wacs.WASI.Preview2.Filesystem
+                            .DescriptorType.RegularFile,
+                        LinkCount = 1,
+                        Size = _size,
+                        DataAccessTimestamp = Wacs.ComponentModel
+                            .Runtime.Option<Wacs.WASI.Preview2.Clocks
+                                .Datetime>.None,
+                        DataModificationTimestamp = Wacs.ComponentModel
+                            .Runtime.Option<Wacs.WASI.Preview2.Clocks
+                                .Datetime>.None,
+                        StatusChangeTimestamp = Wacs.ComponentModel
+                            .Runtime.Option<Wacs.WASI.Preview2.Clocks
+                                .Datetime>.None,
+                    });
+
+            // Every other method on IDescriptor — irrelevant to the
+            // gap-10 path, throw so a stray dispatch is loud.
+            public Wacs.ComponentModel.Runtime.Result<
+                Wacs.WASI.Preview2.Io.IInputStream,
+                Wacs.WASI.Preview2.Filesystem.ErrorCode>
+                ReadViaStream(ulong offset)
+                => throw new NotImplementedException();
+            public Wacs.ComponentModel.Runtime.Result<
+                Wacs.WASI.Preview2.Io.IOutputStream,
+                Wacs.WASI.Preview2.Filesystem.ErrorCode>
+                WriteViaStream(ulong offset)
+                => throw new NotImplementedException();
+            public Wacs.ComponentModel.Runtime.Result<
+                Wacs.WASI.Preview2.Io.IOutputStream,
+                Wacs.WASI.Preview2.Filesystem.ErrorCode>
+                AppendViaStream()
+                => throw new NotImplementedException();
+            public Wacs.ComponentModel.Runtime.Result<
+                Wacs.ComponentModel.Runtime.Unit,
+                Wacs.WASI.Preview2.Filesystem.ErrorCode>
+                Advise(ulong offset, ulong length,
+                    Wacs.WASI.Preview2.Filesystem.Advice advice)
+                => throw new NotImplementedException();
+            public Wacs.ComponentModel.Runtime.Result<
+                Wacs.ComponentModel.Runtime.Unit,
+                Wacs.WASI.Preview2.Filesystem.ErrorCode> SyncData()
+                => throw new NotImplementedException();
+            public Wacs.ComponentModel.Runtime.Result<
+                Wacs.WASI.Preview2.Filesystem.DescriptorFlags,
+                Wacs.WASI.Preview2.Filesystem.ErrorCode> GetFlags()
+                => throw new NotImplementedException();
+            public new Wacs.ComponentModel.Runtime.Result<
+                Wacs.WASI.Preview2.Filesystem.DescriptorType,
+                Wacs.WASI.Preview2.Filesystem.ErrorCode> GetType()
+                => throw new NotImplementedException();
+            public Wacs.ComponentModel.Runtime.Result<
+                Wacs.ComponentModel.Runtime.Unit,
+                Wacs.WASI.Preview2.Filesystem.ErrorCode> SetSize(ulong size)
+                => throw new NotImplementedException();
+            public Wacs.ComponentModel.Runtime.Result<
+                Wacs.ComponentModel.Runtime.Unit,
+                Wacs.WASI.Preview2.Filesystem.ErrorCode> SetTimes(
+                Wacs.WASI.Preview2.Filesystem.NewTimestamp ats,
+                Wacs.WASI.Preview2.Filesystem.NewTimestamp mts)
+                => throw new NotImplementedException();
+            public Wacs.ComponentModel.Runtime.Result<
+                (byte[], bool),
+                Wacs.WASI.Preview2.Filesystem.ErrorCode>
+                Read(ulong length, ulong offset)
+                => throw new NotImplementedException();
+            public Wacs.ComponentModel.Runtime.Result<ulong,
+                Wacs.WASI.Preview2.Filesystem.ErrorCode>
+                Write(byte[] buffer, ulong offset)
+                => throw new NotImplementedException();
+            public Wacs.ComponentModel.Runtime.Result<
+                Wacs.WASI.Preview2.Filesystem.IDirectoryEntryStream,
+                Wacs.WASI.Preview2.Filesystem.ErrorCode>
+                ReadDirectory()
+                => throw new NotImplementedException();
+            public Wacs.ComponentModel.Runtime.Result<
+                Wacs.ComponentModel.Runtime.Unit,
+                Wacs.WASI.Preview2.Filesystem.ErrorCode> Sync()
+                => throw new NotImplementedException();
+            public Wacs.ComponentModel.Runtime.Result<
+                Wacs.ComponentModel.Runtime.Unit,
+                Wacs.WASI.Preview2.Filesystem.ErrorCode>
+                CreateDirectoryAt(string path)
+                => throw new NotImplementedException();
+            public Wacs.ComponentModel.Runtime.Result<
+                Wacs.WASI.Preview2.Filesystem.DescriptorStat,
+                Wacs.WASI.Preview2.Filesystem.ErrorCode>
+                StatAt(Wacs.WASI.Preview2.Filesystem.PathFlags pf,
+                    string path)
+                => throw new NotImplementedException();
+            public Wacs.ComponentModel.Runtime.Result<
+                Wacs.ComponentModel.Runtime.Unit,
+                Wacs.WASI.Preview2.Filesystem.ErrorCode>
+                SetTimesAt(Wacs.WASI.Preview2.Filesystem.PathFlags pf,
+                    string path,
+                    Wacs.WASI.Preview2.Filesystem.NewTimestamp ats,
+                    Wacs.WASI.Preview2.Filesystem.NewTimestamp mts)
+                => throw new NotImplementedException();
+            public Wacs.ComponentModel.Runtime.Result<
+                Wacs.ComponentModel.Runtime.Unit,
+                Wacs.WASI.Preview2.Filesystem.ErrorCode>
+                LinkAt(Wacs.WASI.Preview2.Filesystem.PathFlags pf,
+                    string oldPath,
+                    Wacs.WASI.Preview2.Filesystem.IDescriptor newDesc,
+                    string newPath)
+                => throw new NotImplementedException();
+            public Wacs.ComponentModel.Runtime.Result<
+                Wacs.WASI.Preview2.Filesystem.IDescriptor,
+                Wacs.WASI.Preview2.Filesystem.ErrorCode>
+                OpenAt(Wacs.WASI.Preview2.Filesystem.PathFlags pf,
+                    string path,
+                    Wacs.WASI.Preview2.Filesystem.OpenFlags of,
+                    Wacs.WASI.Preview2.Filesystem.DescriptorFlags df)
+                => throw new NotImplementedException();
+            public Wacs.ComponentModel.Runtime.Result<string,
+                Wacs.WASI.Preview2.Filesystem.ErrorCode>
+                ReadlinkAt(string path)
+                => throw new NotImplementedException();
+            public Wacs.ComponentModel.Runtime.Result<
+                Wacs.ComponentModel.Runtime.Unit,
+                Wacs.WASI.Preview2.Filesystem.ErrorCode>
+                RemoveDirectoryAt(string path)
+                => throw new NotImplementedException();
+            public Wacs.ComponentModel.Runtime.Result<
+                Wacs.ComponentModel.Runtime.Unit,
+                Wacs.WASI.Preview2.Filesystem.ErrorCode>
+                RenameAt(string oldPath,
+                    Wacs.WASI.Preview2.Filesystem.IDescriptor newDesc,
+                    string newPath)
+                => throw new NotImplementedException();
+            public Wacs.ComponentModel.Runtime.Result<
+                Wacs.ComponentModel.Runtime.Unit,
+                Wacs.WASI.Preview2.Filesystem.ErrorCode>
+                SymlinkAt(string oldPath, string newPath)
+                => throw new NotImplementedException();
+            public Wacs.ComponentModel.Runtime.Result<
+                Wacs.ComponentModel.Runtime.Unit,
+                Wacs.WASI.Preview2.Filesystem.ErrorCode>
+                UnlinkFileAt(string path)
+                => throw new NotImplementedException();
+            public bool IsSameObject(
+                Wacs.WASI.Preview2.Filesystem.IDescriptor other)
+                => throw new NotImplementedException();
+            public Wacs.ComponentModel.Runtime.Result<
+                Wacs.WASI.Preview2.Filesystem.MetadataHashValue,
+                Wacs.WASI.Preview2.Filesystem.ErrorCode>
+                MetadataHash()
+                => throw new NotImplementedException();
+            public Wacs.ComponentModel.Runtime.Result<
+                Wacs.WASI.Preview2.Filesystem.MetadataHashValue,
+                Wacs.WASI.Preview2.Filesystem.ErrorCode>
+                MetadataHashAt(Wacs.WASI.Preview2.Filesystem.PathFlags pf,
+                    string path)
+                => throw new NotImplementedException();
         }
 
         private static string FindFixturePath(string fixtureDir,

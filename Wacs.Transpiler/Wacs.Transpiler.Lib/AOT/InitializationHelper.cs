@@ -479,14 +479,18 @@ namespace Wacs.Transpiler.AOT
             // handled by InitializeFromData before reaching Core). Kept as
             // a parameter so the call sites document their intent.
 
-            // 1. Allocate memories (as MemoryInstance for shared growth)
+            // 1. Allocate memories (as MemoryInstance for shared
+            // growth). The host pins ModuleInit.CurrentMemoryStorage
+            // before construction to opt into NativePointer storage;
+            // ManagedArray is the default.
             var memories = new MemoryInstance[data.Memories.Length];
+            var storage = ModuleInit.CurrentMemoryStorage;
             for (int i = 0; i < data.Memories.Length; i++)
             {
                 var (min, max) = data.Memories[i];
                 var memType = new MemoryType(minimum: (uint)min,
                     maximum: max.HasValue ? (uint?)max.Value : null);
-                memories[i] = new MemoryInstance(memType);
+                memories[i] = new MemoryInstance(memType, storage);
             }
 
             // 2. Allocate tables (default values evaluated after globals in step 3b)

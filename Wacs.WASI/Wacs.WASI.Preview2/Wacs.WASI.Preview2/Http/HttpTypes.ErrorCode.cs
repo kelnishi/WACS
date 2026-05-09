@@ -42,19 +42,19 @@ namespace Wacs.WASI.Preview2.Http
                     var mem = ctx.Memory();
                     if (impl == null)
                     {
-                        mem[retArea] = 0;       // None
+                        mem.AsSpan(retArea, 1)[0] = 0;       // None
                         return;
                     }
                     var err = (Error)errors.Get(handle);
                     var code = impl.HttpErrorCode(err);
                     if (code == null)
                     {
-                        mem[retArea] = 0;       // None
+                        mem.AsSpan(retArea, 1)[0] = 0;       // None
                         return;
                     }
-                    mem[retArea] = 1;           // Some
+                    mem.AsSpan(retArea, 1)[0] = 1;           // Some
                     for (int p = 1; p < 8; p++)
-                        mem[retArea + p] = 0;
+                        mem.AsSpan(retArea + p, 1)[0] = 0;
                     ErrorCodeEncoder.Write(mem, retArea + 8, code,
                         alloc.Allocate);
                 });

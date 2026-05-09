@@ -53,13 +53,11 @@ namespace Wacs.Core.Instructions.Memory
             var mem = context.Store[a];
 
             long ea = offset + M.Offset;
-            if (ea < 0)
-                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea} out of bounds.");
-            if (ea + WidthTByteSize > mem.Data.Length)
+            if ((ulong)ea > (ulong)mem.ByteLength || (ulong)mem.ByteLength - (ulong)ea < (ulong)WidthTByteSize)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer out of bounds.");
             //13,14,15
-            Span<byte> bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
-            
+            Span<byte> bs = mem.AsSpan((int)ea, WidthTByteSize);
+
 #if NET8_0_OR_GREATER
             MemoryMarshal.Write(bs, in cU32);
 #else
@@ -98,13 +96,10 @@ namespace Wacs.Core.Instructions.Memory
             var mem = context.Store[a];
 
             long ea = offset + M.Offset;
-            if (ea < 0)
-                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea} out of bounds.");
-            if (ea + WidthTByteSize > mem.Data.Length)
+            if ((ulong)ea > (ulong)mem.ByteLength || (ulong)mem.ByteLength - (ulong)ea < (ulong)WidthTByteSize)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer out of bounds.");
-            //13,14,15
-            // Span<byte> bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
-            mem.Data[(int)ea] = (byte)(0xFF & cU32);
+            // Single-byte store via mode-aware AsSpan.
+            mem.AsSpan((int)ea, 1)[0] = (byte)(0xFF & cU32);
         }
     }
     
@@ -138,12 +133,10 @@ namespace Wacs.Core.Instructions.Memory
             var mem = context.Store[a];
 
             long ea = offset + M.Offset;
-            if (ea < 0)
-                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea} out of bounds.");
-            if (ea + WidthTByteSize > mem.Data.Length)
+            if ((ulong)ea > (ulong)mem.ByteLength || (ulong)mem.ByteLength - (ulong)ea < (ulong)WidthTByteSize)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer out of bounds.");
             //13,14,15
-            Span<byte> bs = mem.Data.AsSpan((int)ea, WidthTByteSize);
+            Span<byte> bs = mem.AsSpan((int)ea, WidthTByteSize);
             
             ushort cI16 = (ushort)cU32;
 #if NET8_0_OR_GREATER

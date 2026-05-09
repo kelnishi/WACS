@@ -89,22 +89,22 @@ namespace Wacs.WASI.Preview2.Http
                         {
                             // Spec layout: disc@+0, pad@+1..+7,
                             // handle@+8, zero@+12..+39.
-                            mem[retArea] = 0;
+                            mem.AsSpan(retArea, 1)[0] = 0;
                             for (int p = 1; p < 8; p++)
-                                mem[retArea + p] = 0;
+                                mem.AsSpan(retArea + p, 1)[0] = 0;
                             MemoryWriter.WriteI32LE(mem,
                                 retArea + 8, handle);
                             for (int p = 12; p < 40; p++)
-                                mem[retArea + p] = 0;
+                                mem.AsSpan(retArea + p, 1)[0] = 0;
                         }
                         else
                         {
                             // Simplified: disc@+0, pad@+1..+3,
                             // handle@+4.
-                            mem[retArea] = 0;
-                            mem[retArea + 1] = 0;
-                            mem[retArea + 2] = 0;
-                            mem[retArea + 3] = 0;
+                            mem.AsSpan(retArea, 1)[0] = 0;
+                            mem.AsSpan(retArea + 1, 1)[0] = 0;
+                            mem.AsSpan(retArea + 2, 1)[0] = 0;
+                            mem.AsSpan(retArea + 3, 1)[0] = 0;
                             MemoryWriter.WriteI32LE(mem,
                                 retArea + 4, handle);
                         }
@@ -114,18 +114,18 @@ namespace Wacs.WASI.Preview2.Http
                     // Err path
                     if (spec)
                     {
-                        mem[retArea] = 1;
+                        mem.AsSpan(retArea, 1)[0] = 1;
                         for (int p = 1; p < 8; p++)
-                            mem[retArea + p] = 0;
+                            mem.AsSpan(retArea + p, 1)[0] = 0;
                         ErrorCodeEncoder.Write(mem, retArea + 8,
                             result.Err, alloc.Allocate);
                     }
                     else
                     {
                         // Simplified: outer disc=1 only.
-                        mem[retArea] = 1;
+                        mem.AsSpan(retArea, 1)[0] = 1;
                         for (int p = 1; p < 8; p++)
-                            mem[retArea + p] = 0;
+                            mem.AsSpan(retArea + p, 1)[0] = 0;
                     }
                 });
         }

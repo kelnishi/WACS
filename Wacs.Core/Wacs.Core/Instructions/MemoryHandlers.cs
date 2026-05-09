@@ -41,10 +41,14 @@ namespace Wacs.Core.Instructions
         {
             var mem = ctx.Store[ctx.Frame.Module.MemAddrs[(MemIdx)memIdx]];
             long ea = (long)addr + (long)offset;
-            if (ea < 0 || ea + width > mem.Data.Length)
+            // ByteLength + AsSpan dispatch by StorageMode, so this
+            // single chokepoint covers every [OpHandler] memory
+            // load/store / narrow / size on either backing.
+            long len = (long)mem.ByteLength;
+            if (ea < 0 || ea + width > len)
                 throw new Wacs.Core.Runtime.Types.TrapException(
-                    $"{op}: out of bounds memory access (ea={ea}, width={width}, size={mem.Data.Length})");
-            return new Span<byte>(mem.Data, (int)ea, width);
+                    $"{op}: out of bounds memory access (ea={ea}, width={width}, size={len})");
+            return mem.AsSpan((int)ea, width);
         }
 
         // ---- Loads ---------------------------------------------------------------------
@@ -190,10 +194,14 @@ namespace Wacs.Core.Instructions
         {
             var mem = ctx.Store[ctx.Frame.Module.MemAddrs[(MemIdx)memIdx]];
             var data = ctx.Store[ctx.Frame.Module.DataAddrs[(DataIdx)dataIdx]];
-            if ((long)s + n > data.Data.Length || (long)d + n > mem.Data.Length)
+            // mem.ByteLength is mode-agnostic; data is always byte[].
+            if ((long)s + n > data.Data.Length || (long)d + n > (long)mem.ByteLength)
                 throw new Wacs.Core.Runtime.Types.TrapException("memory.init: out of bounds memory access");
             if (n == 0) return;
-            Array.Copy(data.Data, (int)s, mem.Data, (int)d, (int)n);
+            // Span<byte>.CopyTo memmoves underneath; handles either
+            // backing for mem (data segment is always byte[]).
+            new ReadOnlySpan<byte>(data.Data, (int)s, (int)n)
+                .CopyTo(mem.AsSpan((int)d, (int)n));
         }
 
         // 0xFC 09 data.drop — invalidate the data segment (subsequent memory.init traps).
@@ -208,11 +216,13 @@ namespace Wacs.Core.Instructions
         {
             var src = ctx.Store[ctx.Frame.Module.MemAddrs[(MemIdx)srcIdx]];
             var dst = ctx.Store[ctx.Frame.Module.MemAddrs[(MemIdx)dstIdx]];
-            if ((long)s + n > src.Data.Length || (long)d + n > dst.Data.Length)
+            if ((long)s + n > (long)src.ByteLength || (long)d + n > (long)dst.ByteLength)
                 throw new Wacs.Core.Runtime.Types.TrapException("memory.copy: out of bounds memory access");
             if (n == 0) return;
-            // Array.Copy handles overlapping regions correctly (memmove semantics).
-            Array.Copy(src.Data, (int)s, dst.Data, (int)d, (int)n);
+            // Span<byte>.CopyTo dispatches to Buffer.Memmove under
+            // the hood, which handles overlap correctly even when
+            // src and dst alias the same backing.
+            src.AsSpan((int)s, (int)n).CopyTo(dst.AsSpan((int)d, (int)n));
         }
 
         // 0xFC 0B memory.fill — mem[d..d+n] = (byte)val for the low 8 bits of val.
@@ -221,10 +231,10 @@ namespace Wacs.Core.Instructions
                                         uint d, uint val, uint n)
         {
             var mem = ctx.Store[ctx.Frame.Module.MemAddrs[(MemIdx)memIdx]];
-            if ((long)d + n > mem.Data.Length)
+            if ((long)d + n > (long)mem.ByteLength)
                 throw new Wacs.Core.Runtime.Types.TrapException("memory.fill: out of bounds memory access");
             if (n == 0) return;
-            new Span<byte>(mem.Data, (int)d, (int)n).Fill((byte)val);
+            mem.AsSpan((int)d, (int)n).Fill((byte)val);
         }
 
         // ---- Size/Grow -----------------------------------------------------------------

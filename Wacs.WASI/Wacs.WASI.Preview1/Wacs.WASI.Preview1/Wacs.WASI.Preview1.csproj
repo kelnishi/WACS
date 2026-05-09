@@ -13,12 +13,16 @@
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.WASI.Preview1</AssemblyName>
         <RootNamespace>Wacs.WASI.Preview1</RootNamespace>
-        <AssemblyVersion>0.12.0</AssemblyVersion>
+        <AssemblyVersion>0.13.0</AssemblyVersion>
         <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-        <Version>0.12.0</Version>
+        <Version>0.13.0</Version>
         <RepositoryType>git</RepositoryType>
         <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
         <IsAotCompatible>true</IsAotCompatible>
+        <!-- Clock.WacsHost branches by MemoryInstance.StorageMode and
+             constructs WacsHostMemory from a byte* in NativePointer
+             mode; needs an unsafe block at that one site. -->
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>
 
     <PropertyGroup>

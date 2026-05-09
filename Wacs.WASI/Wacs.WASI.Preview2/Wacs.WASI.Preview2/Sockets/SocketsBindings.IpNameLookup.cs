@@ -59,35 +59,35 @@ namespace Wacs.WASI.Preview2.Sockets
                         WriteErrCode(mem, retArea, 22, r.Err);
                         return;
                     }
-                    mem[retArea] = 0;       // outer Ok
-                    mem[retArea + 1] = 0;   // pad
+                    mem.AsSpan(retArea, 1)[0] = 0;       // outer Ok
+                    mem.AsSpan(retArea + 1, 1)[0] = 0;   // pad
                     var item = r.Ok;
                     if (!item.HasValue)
                     {
-                        mem[retArea + 2] = 0;     // option None
+                        mem.AsSpan(retArea + 2, 1)[0] = 0;     // option None
                         for (int i = 3; i < 22; i++)
-                            mem[retArea + i] = 0;
+                            mem.AsSpan(retArea + i, 1)[0] = 0;
                         return;
                     }
-                    mem[retArea + 2] = 1;       // option Some
-                    mem[retArea + 3] = 0;
+                    mem.AsSpan(retArea + 2, 1)[0] = 1;       // option Some
+                    mem.AsSpan(retArea + 3, 1)[0] = 0;
                     if (item.Value is IpAddress.IpAddressIpv4 v4Case)
                     {
                         var v4 = v4Case.Value;
-                        mem[retArea + 4] = 0;   // variant ipv4
-                        mem[retArea + 5] = 0;
-                        mem[retArea + 6] = v4.Item1;
-                        mem[retArea + 7] = v4.Item2;
-                        mem[retArea + 8] = v4.Item3;
-                        mem[retArea + 9] = v4.Item4;
+                        mem.AsSpan(retArea + 4, 1)[0] = 0;   // variant ipv4
+                        mem.AsSpan(retArea + 5, 1)[0] = 0;
+                        mem.AsSpan(retArea + 6, 1)[0] = v4.Item1;
+                        mem.AsSpan(retArea + 7, 1)[0] = v4.Item2;
+                        mem.AsSpan(retArea + 8, 1)[0] = v4.Item3;
+                        mem.AsSpan(retArea + 9, 1)[0] = v4.Item4;
                         for (int i = 10; i < 22; i++)
-                            mem[retArea + i] = 0;
+                            mem.AsSpan(retArea + i, 1)[0] = 0;
                     }
                     else
                     {
                         var v6 = ((IpAddress.IpAddressIpv6)item.Value).Value;
-                        mem[retArea + 4] = 1;   // variant ipv6
-                        mem[retArea + 5] = 0;
+                        mem.AsSpan(retArea + 4, 1)[0] = 1;   // variant ipv6
+                        mem.AsSpan(retArea + 5, 1)[0] = 0;
                         MemoryWriter.WriteU16LE(mem, retArea + 6, v6.Item1);
                         MemoryWriter.WriteU16LE(mem, retArea + 8, v6.Item2);
                         MemoryWriter.WriteU16LE(mem, retArea + 10, v6.Item3);

@@ -9,6 +9,8 @@ using System;
 using System.Buffers.Binary;
 using System.Text;
 
+using Wacs.Core.Runtime.Types;
+
 namespace Wacs.WASI.Preview2.HostBinding.CanonicalAbi
 {
     /// <summary>
@@ -27,20 +29,20 @@ namespace Wacs.WASI.Preview2.HostBinding.CanonicalAbi
         /// <summary>UTF-8 decode a string from
         /// <paramref name="ptr"/> for <paramref name="len"/>
         /// bytes. Used for plain <c>string</c> params.</summary>
-        public static string ReadUtf8String(byte[] memory,
+        public static string ReadUtf8String(MemoryInstance memory,
             int ptr, int len)
-            => Encoding.UTF8.GetString(memory, ptr, len);
+            => Encoding.UTF8.GetString(memory.AsSpan(ptr, len));
 
         /// <summary>Copy a slice of guest memory into a fresh
         /// <c>byte[]</c>. Used for <c>list&lt;u8&gt;</c> params
         /// (the host gets a copy, not an alias into guest
         /// memory).</summary>
-        public static byte[] ReadByteArray(byte[] memory,
+        public static byte[] ReadByteArray(MemoryInstance memory,
             int ptr, int len)
         {
             var slice = new byte[len];
             if (len > 0)
-                Array.Copy(memory, ptr, slice, 0, len);
+                memory.AsSpan(ptr, len).CopyTo(slice);
             return slice;
         }
 
@@ -49,7 +51,7 @@ namespace Wacs.WASI.Preview2.HostBinding.CanonicalAbi
         /// <paramref name="listLen"/> entries, each 8 bytes
         /// (bytes-ptr i32 + bytes-len i32). Returns a fresh
         /// <c>byte[][]</c> — host owns the elements.</summary>
-        public static byte[][] ReadByteArrayList(byte[] memory,
+        public static byte[][] ReadByteArrayList(MemoryInstance memory,
             int listPtr, int listLen)
         {
             var result = new byte[listLen][];
@@ -68,25 +70,25 @@ namespace Wacs.WASI.Preview2.HostBinding.CanonicalAbi
         /// <summary>Read an i32 in little-endian at
         /// <paramref name="ptr"/>. Mirror of
         /// <see cref="MemoryWriter.WriteI32LE"/>.</summary>
-        public static int ReadI32LE(byte[] memory, int ptr)
+        public static int ReadI32LE(MemoryInstance memory, int ptr)
             => BinaryPrimitives.ReadInt32LittleEndian(
                 memory.AsSpan(ptr, 4));
 
         /// <summary>Read a u16 in little-endian at
         /// <paramref name="ptr"/>.</summary>
-        public static ushort ReadU16LE(byte[] memory, int ptr)
+        public static ushort ReadU16LE(MemoryInstance memory, int ptr)
             => BinaryPrimitives.ReadUInt16LittleEndian(
                 memory.AsSpan(ptr, 2));
 
         /// <summary>Read a u32 in little-endian at
         /// <paramref name="ptr"/>.</summary>
-        public static uint ReadU32LE(byte[] memory, int ptr)
+        public static uint ReadU32LE(MemoryInstance memory, int ptr)
             => BinaryPrimitives.ReadUInt32LittleEndian(
                 memory.AsSpan(ptr, 4));
 
         /// <summary>Read a u64 in little-endian at
         /// <paramref name="ptr"/>.</summary>
-        public static ulong ReadU64LE(byte[] memory, int ptr)
+        public static ulong ReadU64LE(MemoryInstance memory, int ptr)
             => BinaryPrimitives.ReadUInt64LittleEndian(
                 memory.AsSpan(ptr, 8));
     }

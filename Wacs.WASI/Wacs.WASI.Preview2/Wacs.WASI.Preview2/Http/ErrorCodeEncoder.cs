@@ -10,6 +10,8 @@ using System.Buffers.Binary;
 using System.Text;
 using Wacs.ComponentModel.Runtime;
 
+using Wacs.Core.Runtime.Types;
+
 namespace Wacs.WASI.Preview2.Http
 {
     /// <summary>Canonical-ABI encoder for the 39-case
@@ -115,16 +117,16 @@ namespace Wacs.WASI.Preview2.Http
         /// 32-byte slot so the guest sees a clean variant</item>
         /// </list>
         /// </summary>
-        public static void Write(byte[] memory, int offset,
+        public static void Write(MemoryInstance memory, int offset,
             ErrorCode value, Func<int, int, int> allocate)
         {
             // Zero the whole 32-byte slot first; the case
             // writers only touch the bytes their payload
             // occupies, so anything else stays clean.
             for (int i = 0; i < Size; i++)
-                memory[offset + i] = 0;
+                memory.AsSpan(offset + i, 1)[0] = 0;
 
-            memory[offset] = Discriminant(value);
+            memory.AsSpan(offset, 1)[0] = Discriminant(value);
             int p = offset + PayloadOffset;
 
             switch (value)
@@ -227,21 +229,21 @@ namespace Wacs.WASI.Preview2.Http
 
         // option<string>: 12 bytes — 1B disc + 3B padding +
         // 4B ptr + 4B len. ptr/len are zero when None.
-        private static void WriteOptionString(byte[] memory,
+        private static void WriteOptionString(MemoryInstance memory,
             int offset, Option<string> opt,
             Func<int, int, int> allocate)
         {
             if (!opt.HasValue)
             {
-                memory[offset] = 0;
+                memory.AsSpan(offset, 1)[0] = 0;
                 return;
             }
-            memory[offset] = 1;
+            memory.AsSpan(offset, 1)[0] = 1;
             var bytes = Encoding.UTF8.GetBytes(opt.Value);
             int dataPtr = bytes.Length == 0 ? 0
                 : allocate(1, bytes.Length);
             if (bytes.Length > 0)
-                Array.Copy(bytes, 0, memory, dataPtr, bytes.Length);
+                new ReadOnlySpan<byte>(bytes, 0, bytes.Length).CopyTo(memory.AsSpan(dataPtr, bytes.Length));
             BinaryPrimitives.WriteInt32LittleEndian(
                 memory.AsSpan(offset + 4, 4), dataPtr);
             BinaryPrimitives.WriteInt32LittleEndian(
@@ -249,46 +251,46 @@ namespace Wacs.WASI.Preview2.Http
         }
 
         // option<u8>: 2 bytes — disc + value.
-        private static void WriteOptionU8(byte[] memory,
+        private static void WriteOptionU8(MemoryInstance memory,
             int offset, Option<byte> opt)
         {
-            if (!opt.HasValue) { memory[offset] = 0; return; }
-            memory[offset] = 1;
-            memory[offset + 1] = opt.Value;
+            if (!opt.HasValue) { memory.AsSpan(offset, 1)[0] = 0; return; }
+            memory.AsSpan(offset, 1)[0] = 1;
+            memory.AsSpan(offset + 1, 1)[0] = opt.Value;
         }
 
         // option<u16>: 4 bytes — disc + 1B padding + 2B value.
-        private static void WriteOptionU16(byte[] memory,
+        private static void WriteOptionU16(MemoryInstance memory,
             int offset, Option<ushort> opt)
         {
-            if (!opt.HasValue) { memory[offset] = 0; return; }
-            memory[offset] = 1;
+            if (!opt.HasValue) { memory.AsSpan(offset, 1)[0] = 0; return; }
+            memory.AsSpan(offset, 1)[0] = 1;
             BinaryPrimitives.WriteUInt16LittleEndian(
                 memory.AsSpan(offset + 2, 2), opt.Value);
         }
 
         // option<u32>: 8 bytes — disc + 3B padding + 4B value.
-        private static void WriteOptionU32(byte[] memory,
+        private static void WriteOptionU32(MemoryInstance memory,
             int offset, Option<uint> opt)
         {
-            if (!opt.HasValue) { memory[offset] = 0; return; }
-            memory[offset] = 1;
+            if (!opt.HasValue) { memory.AsSpan(offset, 1)[0] = 0; return; }
+            memory.AsSpan(offset, 1)[0] = 1;
             BinaryPrimitives.WriteUInt32LittleEndian(
                 memory.AsSpan(offset + 4, 4), opt.Value);
         }
 
         // option<u64>: 16 bytes — disc + 7B padding + 8B value.
-        private static void WriteOptionU64(byte[] memory,
+        private static void WriteOptionU64(MemoryInstance memory,
             int offset, Option<ulong> opt)
         {
-            if (!opt.HasValue) { memory[offset] = 0; return; }
-            memory[offset] = 1;
+            if (!opt.HasValue) { memory.AsSpan(offset, 1)[0] = 0; return; }
+            memory.AsSpan(offset, 1)[0] = 1;
             BinaryPrimitives.WriteUInt64LittleEndian(
                 memory.AsSpan(offset + 8, 8), opt.Value);
         }
 
         // DnsErrorPayload (16B align 4): rcode @0, info-code @12.
-        private static void WriteDnsErrorPayload(byte[] memory,
+        private static void WriteDnsErrorPayload(MemoryInstance memory,
             int offset, DNSErrorPayload p,
             Func<int, int, int> allocate)
         {
@@ -300,21 +302,21 @@ namespace Wacs.WASI.Preview2.Http
         // alert-id (option<u8>) @0 (2 bytes), padding @2..3,
         // alert-message (option<string>) @4 (12 bytes).
         private static void WriteTlsAlertReceivedPayload(
-            byte[] memory, int offset,
+            MemoryInstance memory, int offset,
             TLSAlertReceivedPayload p,
             Func<int, int, int> allocate)
         {
             WriteOptionU8(memory, offset, p.AlertId);
             // zero pad bytes 2-3
-            memory[offset + 2] = 0;
-            memory[offset + 3] = 0;
+            memory.AsSpan(offset + 2, 1)[0] = 0;
+            memory.AsSpan(offset + 3, 1)[0] = 0;
             WriteOptionString(memory, offset + 4,
                 p.AlertMessage, allocate);
         }
 
         // FieldSizePayload (20B align 4): field-name @0,
         // field-size @12.
-        private static void WriteFieldSizePayload(byte[] memory,
+        private static void WriteFieldSizePayload(MemoryInstance memory,
             int offset, FieldSizePayload p,
             Func<int, int, int> allocate)
         {
@@ -324,12 +326,12 @@ namespace Wacs.WASI.Preview2.Http
 
         // option<FieldSizePayload> (24B align 4): disc @0,
         // 3B padding, payload @4 (20 bytes).
-        private static void WriteOptionFieldSize(byte[] memory,
+        private static void WriteOptionFieldSize(MemoryInstance memory,
             int offset, Option<FieldSizePayload> p,
             Func<int, int, int> allocate)
         {
-            if (!p.HasValue) { memory[offset] = 0; return; }
-            memory[offset] = 1;
+            if (!p.HasValue) { memory.AsSpan(offset, 1)[0] = 0; return; }
+            memory.AsSpan(offset, 1)[0] = 1;
             WriteFieldSizePayload(memory, offset + 4, p.Value, allocate);
         }
     }

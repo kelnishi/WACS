@@ -73,47 +73,47 @@ namespace Wacs.WASI.Preview2.Http
                     var mem = ctx.Memory();
                     if (!ret.HasValue)
                     {
-                        mem[retArea] = 0;           // outer None
+                        mem.AsSpan(retArea, 1)[0] = 0;           // outer None
                         return;
                     }
                     var outer = ret.Value;
                     if (!outer.IsOk)
                     {
                         // Outer Err (bare Unit) — already-consumed.
-                        mem[retArea] = 1;           // outer Some
+                        mem.AsSpan(retArea, 1)[0] = 1;           // outer Some
                         for (int p = 1; p <= 7; p++)
-                            mem[retArea + p] = 0;
-                        mem[retArea + 8] = 1;       // outer Err
+                            mem.AsSpan(retArea + p, 1)[0] = 0;
+                        mem.AsSpan(retArea + 8, 1)[0] = 1;       // outer Err
                         for (int p = 9; p <= 55; p++)
-                            mem[retArea + p] = 0;
+                            mem.AsSpan(retArea + p, 1)[0] = 0;
                         return;
                     }
                     var inner = outer.Ok;
-                    mem[retArea] = 1;               // outer Some
+                    mem.AsSpan(retArea, 1)[0] = 1;               // outer Some
                     for (int p = 1; p <= 7; p++)
-                        mem[retArea + p] = 0;
-                    mem[retArea + 8] = 0;           // outer Ok
+                        mem.AsSpan(retArea + p, 1)[0] = 0;
+                    mem.AsSpan(retArea + 8, 1)[0] = 0;           // outer Ok
                     for (int p = 9; p <= 15; p++)
-                        mem[retArea + p] = 0;
+                        mem.AsSpan(retArea + p, 1)[0] = 0;
                     if (!inner.IsOk)
                     {
-                        mem[retArea + 16] = 1;      // inner Err
+                        mem.AsSpan(retArea + 16, 1)[0] = 1;      // inner Err
                         for (int p = 17; p <= 23; p++)
-                            mem[retArea + p] = 0;
+                            mem.AsSpan(retArea + p, 1)[0] = 0;
                         ErrorCodeEncoder.Write(mem, retArea + 24,
                             inner.Err, alloc.Allocate);
                         return;
                     }
-                    mem[retArea + 16] = 0;          // inner Ok
+                    mem.AsSpan(retArea + 16, 1)[0] = 0;          // inner Ok
                     for (int p = 17; p <= 23; p++)
-                        mem[retArea + p] = 0;
+                        mem.AsSpan(retArea + p, 1)[0] = 0;
                     // Downcast IIncomingResponse → IncomingResponse
                     // for resource-table allocation.
                     int respHandle = responses.Allocate(
                         (IncomingResponse)inner.Ok);
                     MemoryWriter.WriteI32LE(mem, retArea + 24, respHandle);
                     for (int p = 28; p <= 55; p++)
-                        mem[retArea + p] = 0;
+                        mem.AsSpan(retArea + p, 1)[0] = 0;
                 });
         }
 
@@ -194,54 +194,54 @@ namespace Wacs.WASI.Preview2.Http
                     var mem = ctx.Memory();
                     if (!ret.HasValue)
                     {
-                        mem[retArea] = 0;           // outer None
+                        mem.AsSpan(retArea, 1)[0] = 0;           // outer None
                         return;
                     }
                     var outer = ret.Value;
-                    mem[retArea] = 1;               // outer Some
+                    mem.AsSpan(retArea, 1)[0] = 1;               // outer Some
                     for (int p = 1; p <= 7; p++)
-                        mem[retArea + p] = 0;
+                        mem.AsSpan(retArea + p, 1)[0] = 0;
                     if (!outer.IsOk)
                     {
                         // Outer-Err (bare Unit) — fixture path
                         // unused; treat as result=1 with empty
                         // payload.
-                        mem[retArea + 8] = 1;
+                        mem.AsSpan(retArea + 8, 1)[0] = 1;
                         for (int p = 9; p <= 47; p++)
-                            mem[retArea + p] = 0;
+                            mem.AsSpan(retArea + p, 1)[0] = 0;
                         return;
                     }
                     var inner = outer.Ok;
                     if (!inner.IsOk)
                     {
-                        mem[retArea + 8] = 1;       // result Err
+                        mem.AsSpan(retArea + 8, 1)[0] = 1;       // result Err
                         for (int p = 9; p <= 15; p++)
-                            mem[retArea + p] = 0;
+                            mem.AsSpan(retArea + p, 1)[0] = 0;
                         ErrorCodeEncoder.Write(mem, retArea + 16,
                             inner.Err, alloc.Allocate);
                         return;
                     }
-                    mem[retArea + 8] = 0;           // result Ok
+                    mem.AsSpan(retArea + 8, 1)[0] = 0;           // result Ok
                     for (int p = 9; p <= 15; p++)
-                        mem[retArea + p] = 0;
+                        mem.AsSpan(retArea + p, 1)[0] = 0;
                     if (!inner.Ok.HasValue)
                     {
-                        mem[retArea + 16] = 0;      // inner None
+                        mem.AsSpan(retArea + 16, 1)[0] = 0;      // inner None
                         for (int p = 17; p <= 19; p++)
-                            mem[retArea + p] = 0;
+                            mem.AsSpan(retArea + p, 1)[0] = 0;
                         MemoryWriter.WriteI32LE(mem, retArea + 20, 0);
                         for (int p = 24; p <= 47; p++)
-                            mem[retArea + p] = 0;
+                            mem.AsSpan(retArea + p, 1)[0] = 0;
                         return;
                     }
-                    mem[retArea + 16] = 1;          // inner Some
+                    mem.AsSpan(retArea + 16, 1)[0] = 1;          // inner Some
                     for (int p = 17; p <= 19; p++)
-                        mem[retArea + p] = 0;
+                        mem.AsSpan(retArea + p, 1)[0] = 0;
                     int tHandle = trailers.Allocate(
                         (Fields)inner.Ok.Value);
                     MemoryWriter.WriteI32LE(mem, retArea + 20, tHandle);
                     for (int p = 24; p <= 47; p++)
-                        mem[retArea + p] = 0;
+                        mem.AsSpan(retArea + p, 1)[0] = 0;
                 });
         }
     }

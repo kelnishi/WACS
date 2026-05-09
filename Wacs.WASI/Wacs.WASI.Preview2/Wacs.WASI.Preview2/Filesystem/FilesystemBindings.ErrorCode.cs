@@ -36,12 +36,12 @@ namespace Wacs.WASI.Preview2.Filesystem
                     var mem = ctx.Memory();
                     if (!code.HasValue)
                     {
-                        mem[retArea] = 0;
-                        mem[retArea + 1] = 0;
+                        mem.AsSpan(retArea, 1)[0] = 0;
+                        mem.AsSpan(retArea + 1, 1)[0] = 0;
                         return;
                     }
-                    mem[retArea] = 1;
-                    mem[retArea + 1] = (byte)(int)code.Value;
+                    mem.AsSpan(retArea, 1)[0] = 1;
+                    mem.AsSpan(retArea + 1, 1)[0] = (byte)(int)code.Value;
                 });
         }
     }

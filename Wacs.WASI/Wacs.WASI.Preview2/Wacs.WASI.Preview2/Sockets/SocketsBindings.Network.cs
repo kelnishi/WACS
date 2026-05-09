@@ -43,8 +43,8 @@ namespace Wacs.WASI.Preview2.Sockets
                     // The errHandle borrow is informational; we
                     // don't dereference it in the default impl.
                     var mem = ctx.Memory();
-                    mem[retArea] = 0;       // option None
-                    mem[retArea + 1] = 0;   // payload zeroed
+                    mem.AsSpan(retArea, 1)[0] = 0;       // option None
+                    mem.AsSpan(retArea + 1, 1)[0] = 0;   // payload zeroed
                 });
         }
 
