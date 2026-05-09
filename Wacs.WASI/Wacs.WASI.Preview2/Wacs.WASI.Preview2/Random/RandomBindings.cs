@@ -116,7 +116,8 @@ namespace Wacs.WASI.Preview2.Random
             int ptr = data.Length == 0 ? 0
                 : alloc.Allocate(1, data.Length);
             if (data.Length > 0)
-                Array.Copy(data, 0, ctx.Memory(), ptr, data.Length);
+                new ReadOnlySpan<byte>(data)
+                    .CopyTo(ctx.Memory().AsSpan(ptr, data.Length));
             ctx.WriteI32LE(retArea, ptr);
             ctx.WriteI32LE(retArea + 4, data.Length);
         }

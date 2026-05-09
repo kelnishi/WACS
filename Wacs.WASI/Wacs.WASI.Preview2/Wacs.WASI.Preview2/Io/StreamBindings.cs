@@ -60,12 +60,12 @@ namespace Wacs.WASI.Preview2.Io
                 int ptr = data.Length == 0 ? 0
                     : alloc.Allocate(1, data.Length);
                 var mem = ctx.Memory();
-                mem[retArea] = 0;
-                mem[retArea + 1] = 0;
-                mem[retArea + 2] = 0;
-                mem[retArea + 3] = 0;
+                mem.AsSpan(retArea, 1)[0] = 0;
+                mem.AsSpan(retArea + 1, 1)[0] = 0;
+                mem.AsSpan(retArea + 2, 1)[0] = 0;
+                mem.AsSpan(retArea + 3, 1)[0] = 0;
                 if (data.Length > 0)
-                    Array.Copy(data, 0, mem, ptr, data.Length);
+                    new ReadOnlySpan<byte>(data, 0, data.Length).CopyTo(mem.AsSpan(ptr, data.Length));
                 MemoryWriter.WriteI32LE(mem, retArea + 4, ptr);
                 MemoryWriter.WriteI32LE(mem, retArea + 8, data.Length);
                 return;
@@ -86,8 +86,8 @@ namespace Wacs.WASI.Preview2.Io
             var mem = ctx.Memory();
             if (r.IsOk)
             {
-                mem[retArea] = 0;
-                for (int i = 1; i < 8; i++) mem[retArea + i] = 0;
+                mem.AsSpan(retArea, 1)[0] = 0;
+                for (int i = 1; i < 8; i++) mem.AsSpan(retArea + i, 1)[0] = 0;
                 MemoryWriter.WriteU64LE(mem, retArea + 8, r.Ok);
                 return;
             }
@@ -105,8 +105,8 @@ namespace Wacs.WASI.Preview2.Io
             var mem = ctx.Memory();
             if (r.IsOk)
             {
-                mem[retArea] = 0;
-                for (int i = 1; i < 12; i++) mem[retArea + i] = 0;
+                mem.AsSpan(retArea, 1)[0] = 0;
+                for (int i = 1; i < 12; i++) mem.AsSpan(retArea + i, 1)[0] = 0;
                 return;
             }
             WriteStreamErrorVariant(ctx, errors, retArea, r.Err,
@@ -123,25 +123,25 @@ namespace Wacs.WASI.Preview2.Io
         {
             var mem = ctx.Memory();
             // Outer Err disc + leading padding to payloadOffset.
-            mem[retArea] = 1;
+            mem.AsSpan(retArea, 1)[0] = 1;
             for (int i = 1; i < payloadOffset; i++)
-                mem[retArea + i] = 0;
+                mem.AsSpan(retArea + i, 1)[0] = 0;
             if (err is StreamError.StreamErrorLastOperationFailed lof)
             {
-                mem[retArea + payloadOffset] = 0;   // case disc
+                mem.AsSpan(retArea + payloadOffset, 1)[0] = 0;   // case disc
                 for (int i = payloadOffset + 1;
                      i < handleOffset; i++)
-                    mem[retArea + i] = 0;
+                    mem.AsSpan(retArea + i, 1)[0] = 0;
                 int handle = errors.Allocate(lof.Value);
                 MemoryWriter.WriteI32LE(mem,
                     retArea + handleOffset, handle);
             }
             else  // StreamErrorClosed
             {
-                mem[retArea + payloadOffset] = 1;   // case disc
+                mem.AsSpan(retArea + payloadOffset, 1)[0] = 1;   // case disc
                 for (int i = payloadOffset + 1;
                      i < handleOffset + 4; i++)
-                    mem[retArea + i] = 0;
+                    mem.AsSpan(retArea + i, 1)[0] = 0;
             }
         }
     }

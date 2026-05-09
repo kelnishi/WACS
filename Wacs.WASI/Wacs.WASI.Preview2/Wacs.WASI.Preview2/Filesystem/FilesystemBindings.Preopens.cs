@@ -49,7 +49,7 @@ namespace Wacs.WASI.Preview2.Filesystem
                             (Descriptor)entries[i].Item1);
                         var (sPtr, sLen) = MemoryWriter
                             .WriteUtf8StringAllocated(
-                                ctx.Memory, entries[i].Item2, alloc);
+                                ctx.Memory(), entries[i].Item2, alloc);
                         var mem = ctx.Memory();
                         MemoryWriter.WriteI32LE(
                             mem, arrayPtr + i * 12, handle);

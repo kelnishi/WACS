@@ -104,10 +104,10 @@ namespace Wacs.WASI.Preview2.Sockets
                     if (r.IsOk)
                     {
                         var (inS, outS) = r.Ok;
-                        mem[retArea] = 0;
-                        mem[retArea + 1] = 0;
-                        mem[retArea + 2] = 0;
-                        mem[retArea + 3] = 0;
+                        mem.AsSpan(retArea, 1)[0] = 0;
+                        mem.AsSpan(retArea + 1, 1)[0] = 0;
+                        mem.AsSpan(retArea + 2, 1)[0] = 0;
+                        mem.AsSpan(retArea + 3, 1)[0] = 0;
                         MemoryWriter.WriteI32LE(mem, retArea + 4,
                             ins.Allocate((InputStream)inS));
                         MemoryWriter.WriteI32LE(mem, retArea + 8,
@@ -150,10 +150,10 @@ namespace Wacs.WASI.Preview2.Sockets
                     if (r.IsOk)
                     {
                         var (s, inS, outS) = r.Ok;
-                        mem[retArea] = 0;
-                        mem[retArea + 1] = 0;
-                        mem[retArea + 2] = 0;
-                        mem[retArea + 3] = 0;
+                        mem.AsSpan(retArea, 1)[0] = 0;
+                        mem.AsSpan(retArea + 1, 1)[0] = 0;
+                        mem.AsSpan(retArea + 2, 1)[0] = 0;
+                        mem.AsSpan(retArea + 3, 1)[0] = 0;
                         MemoryWriter.WriteI32LE(mem, retArea + 4,
                             socks.Allocate((TcpSocket)s));
                         MemoryWriter.WriteI32LE(mem, retArea + 8,

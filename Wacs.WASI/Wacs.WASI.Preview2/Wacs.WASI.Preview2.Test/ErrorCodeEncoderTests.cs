@@ -9,6 +9,8 @@ using System;
 using System.Buffers.Binary;
 using System.Text;
 using Wacs.ComponentModel.Runtime;
+using Wacs.Core.Runtime.Types;
+using Wacs.Core.Types;
 using Wacs.WASI.Preview2.Http;
 using Xunit;
 
@@ -23,15 +25,20 @@ namespace Wacs.WASI.Preview2.Test
     /// shared backing buffer.</summary>
     public class ErrorCodeEncoderTests
     {
-        // Bump-pointer allocator simulating cabi_realloc.
+        // Bump-pointer allocator simulating cabi_realloc. Phase
+        // C.4b: backs onto a real MemoryInstance so the encoder's
+        // mode-aware AsSpan dispatches correctly. Tests construct
+        // a 1-page (64 KiB) memory and use the first `_size` bytes
+        // — single-byte assertions go through Memory.AsSpan(N, 1)[0].
         private sealed class BumpAllocator
         {
-            public readonly byte[] Memory;
+            public readonly MemoryInstance Memory;
             private int _next;
 
             public BumpAllocator(int size, int initialCursor)
             {
-                Memory = new byte[size];
+                _ = size;  // tests stay within one page
+                Memory = new MemoryInstance(new MemoryType(1, 10));
                 _next = initialCursor;
             }
 
@@ -41,6 +48,16 @@ namespace Wacs.WASI.Preview2.Test
                 _next = aligned + size;
                 return aligned;
             }
+
+            // Convenience byte accessor for assertions: avoids the
+            // .AsSpan(N, 1)[0] boilerplate at every test site.
+            public byte this[int idx]
+            {
+                get => Memory.AsSpan(idx, 1)[0];
+                set => Memory.AsSpan(idx, 1)[0] = value;
+            }
+            public Span<byte> Span(int offset, int length)
+                => Memory.AsSpan(offset, length);
         }
 
         [Fact]
@@ -50,17 +67,17 @@ namespace Wacs.WASI.Preview2.Test
             ErrorCodeEncoder.Write(alloc.Memory, 0,
                 new ErrorCode.ErrorCodeConnectionRefused(),
                 alloc.Allocate);
-            Assert.Equal(6, alloc.Memory[0]);
+            Assert.Equal(6, alloc[0]);
             for (int i = 1; i < 32; i++)
-                Assert.Equal(0, alloc.Memory[i]);
+                Assert.Equal(0, alloc[i]);
 
-            for (int i = 32; i < 64; i++) alloc.Memory[i] = 0xAA;
+            for (int i = 32; i < 64; i++) alloc[i] = 0xAA;
             ErrorCodeEncoder.Write(alloc.Memory, 32,
                 new ErrorCode.ErrorCodeLoopDetected(),
                 alloc.Allocate);
-            Assert.Equal(36, alloc.Memory[32]);
+            Assert.Equal(36, alloc[32]);
             for (int i = 33; i < 64; i++)
-                Assert.Equal(0, alloc.Memory[i]);
+                Assert.Equal(0, alloc[i]);
         }
 
         [Fact]
@@ -71,19 +88,19 @@ namespace Wacs.WASI.Preview2.Test
                 new ErrorCode.ErrorCodeHTTPRequestBodySize(
                     Option<ulong>.Some(0x0123456789ABCDEFUL)),
                 alloc.Allocate);
-            Assert.Equal(17, alloc.Memory[0]);
-            Assert.Equal(1, alloc.Memory[8]);
+            Assert.Equal(17, alloc[0]);
+            Assert.Equal(1, alloc[8]);
             ulong v = BinaryPrimitives.ReadUInt64LittleEndian(
-                alloc.Memory.AsSpan(16, 8));
+                alloc.Span(16, 8));
             Assert.Equal(0x0123456789ABCDEFUL, v);
 
-            for (int i = 0; i < 32; i++) alloc.Memory[i] = 0xAA;
+            for (int i = 0; i < 32; i++) alloc[i] = 0xAA;
             ErrorCodeEncoder.Write(alloc.Memory, 0,
                 new ErrorCode.ErrorCodeHTTPRequestBodySize(
                     Option<ulong>.None),
                 alloc.Allocate);
-            Assert.Equal(17, alloc.Memory[0]);
-            Assert.Equal(0, alloc.Memory[8]);
+            Assert.Equal(17, alloc[0]);
+            Assert.Equal(0, alloc[8]);
         }
 
         [Fact]
@@ -94,10 +111,10 @@ namespace Wacs.WASI.Preview2.Test
                 new ErrorCode.ErrorCodeHTTPRequestHeaderSectionSize(
                     Option<uint>.Some(4096u)),
                 alloc.Allocate);
-            Assert.Equal(21, alloc.Memory[0]);
-            Assert.Equal(1, alloc.Memory[8]);
+            Assert.Equal(21, alloc[0]);
+            Assert.Equal(1, alloc[8]);
             uint v = BinaryPrimitives.ReadUInt32LittleEndian(
-                alloc.Memory.AsSpan(12, 4));
+                alloc.Span(12, 4));
             Assert.Equal(4096u, v);
         }
 
@@ -110,16 +127,16 @@ namespace Wacs.WASI.Preview2.Test
                 new ErrorCode.ErrorCodeInternalError(
                     Option<string>.Some(msg)),
                 alloc.Allocate);
-            Assert.Equal(38, alloc.Memory[0]);
-            Assert.Equal(1, alloc.Memory[8]);
+            Assert.Equal(38, alloc[0]);
+            Assert.Equal(1, alloc[8]);
             int ptr = BinaryPrimitives.ReadInt32LittleEndian(
-                alloc.Memory.AsSpan(12, 4));
+                alloc.Span(12, 4));
             int len = BinaryPrimitives.ReadInt32LittleEndian(
-                alloc.Memory.AsSpan(16, 4));
+                alloc.Span(16, 4));
             Assert.True(ptr >= 64);
             Assert.Equal(msg.Length, len);
             Assert.Equal(msg, Encoding.UTF8.GetString(
-                alloc.Memory, ptr, len));
+                alloc.Span(ptr, len)));
         }
 
         [Fact]
@@ -133,17 +150,17 @@ namespace Wacs.WASI.Preview2.Test
             ErrorCodeEncoder.Write(alloc.Memory, 0,
                 new ErrorCode.ErrorCodeDNSError(payload),
                 alloc.Allocate);
-            Assert.Equal(1, alloc.Memory[0]);
-            Assert.Equal(1, alloc.Memory[8]);
+            Assert.Equal(1, alloc[0]);
+            Assert.Equal(1, alloc[8]);
             int ptr = BinaryPrimitives.ReadInt32LittleEndian(
-                alloc.Memory.AsSpan(12, 4));
+                alloc.Span(12, 4));
             int len = BinaryPrimitives.ReadInt32LittleEndian(
-                alloc.Memory.AsSpan(16, 4));
+                alloc.Span(16, 4));
             Assert.Equal("SERVFAIL",
-                Encoding.UTF8.GetString(alloc.Memory, ptr, len));
-            Assert.Equal(1, alloc.Memory[20]);
+                Encoding.UTF8.GetString(alloc.Span(ptr, len)));
+            Assert.Equal(1, alloc[20]);
             ushort info = BinaryPrimitives.ReadUInt16LittleEndian(
-                alloc.Memory.AsSpan(22, 2));
+                alloc.Span(22, 2));
             Assert.Equal(2, info);
         }
 
@@ -158,18 +175,18 @@ namespace Wacs.WASI.Preview2.Test
             ErrorCodeEncoder.Write(alloc.Memory, 0,
                 new ErrorCode.ErrorCodeTLSAlertReceived(payload),
                 alloc.Allocate);
-            Assert.Equal(14, alloc.Memory[0]);
-            Assert.Equal(1, alloc.Memory[8]);
-            Assert.Equal(51, alloc.Memory[9]);
-            Assert.Equal(0, alloc.Memory[10]);
-            Assert.Equal(0, alloc.Memory[11]);
-            Assert.Equal(1, alloc.Memory[12]);
+            Assert.Equal(14, alloc[0]);
+            Assert.Equal(1, alloc[8]);
+            Assert.Equal(51, alloc[9]);
+            Assert.Equal(0, alloc[10]);
+            Assert.Equal(0, alloc[11]);
+            Assert.Equal(1, alloc[12]);
             int ptr = BinaryPrimitives.ReadInt32LittleEndian(
-                alloc.Memory.AsSpan(16, 4));
+                alloc.Span(16, 4));
             int len = BinaryPrimitives.ReadInt32LittleEndian(
-                alloc.Memory.AsSpan(20, 4));
+                alloc.Span(20, 4));
             Assert.Equal("decrypt error",
-                Encoding.UTF8.GetString(alloc.Memory, ptr, len));
+                Encoding.UTF8.GetString(alloc.Span(ptr, len)));
         }
 
         [Fact]
@@ -184,27 +201,27 @@ namespace Wacs.WASI.Preview2.Test
                 new ErrorCode.ErrorCodeHTTPRequestHeaderSize(
                     Option<FieldSizePayload>.Some(payload)),
                 alloc.Allocate);
-            Assert.Equal(22, alloc.Memory[0]);
-            Assert.Equal(1, alloc.Memory[8]);
-            Assert.Equal(1, alloc.Memory[12]);
+            Assert.Equal(22, alloc[0]);
+            Assert.Equal(1, alloc[8]);
+            Assert.Equal(1, alloc[12]);
             int ptr = BinaryPrimitives.ReadInt32LittleEndian(
-                alloc.Memory.AsSpan(16, 4));
+                alloc.Span(16, 4));
             int len = BinaryPrimitives.ReadInt32LittleEndian(
-                alloc.Memory.AsSpan(20, 4));
+                alloc.Span(20, 4));
             Assert.Equal("Authorization",
-                Encoding.UTF8.GetString(alloc.Memory, ptr, len));
-            Assert.Equal(1, alloc.Memory[24]);
+                Encoding.UTF8.GetString(alloc.Span(ptr, len)));
+            Assert.Equal(1, alloc[24]);
             uint sz = BinaryPrimitives.ReadUInt32LittleEndian(
-                alloc.Memory.AsSpan(28, 4));
+                alloc.Span(28, 4));
             Assert.Equal(8192u, sz);
 
-            for (int i = 0; i < 32; i++) alloc.Memory[i] = 0xAA;
+            for (int i = 0; i < 32; i++) alloc[i] = 0xAA;
             ErrorCodeEncoder.Write(alloc.Memory, 0,
                 new ErrorCode.ErrorCodeHTTPRequestHeaderSize(
                     Option<FieldSizePayload>.None),
                 alloc.Allocate);
-            Assert.Equal(22, alloc.Memory[0]);
-            Assert.Equal(0, alloc.Memory[8]);
+            Assert.Equal(22, alloc[0]);
+            Assert.Equal(0, alloc[8]);
         }
 
         [Fact]
@@ -215,8 +232,8 @@ namespace Wacs.WASI.Preview2.Test
                 new ErrorCode.ErrorCodeHTTPResponseTransferCoding(
                     Option<string>.None),
                 alloc.Allocate);
-            Assert.Equal(31, alloc.Memory[0]);
-            Assert.Equal(0, alloc.Memory[8]);
+            Assert.Equal(31, alloc[0]);
+            Assert.Equal(0, alloc[8]);
         }
 
         [Fact]

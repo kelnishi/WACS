@@ -11,6 +11,8 @@ using Wacs.Core.Runtime;
 using Wacs.WASI.Preview2.HostBinding;
 using Wacs.WASI.Preview2.HostBinding.CanonicalAbi;
 
+using Wacs.Core.Runtime.Types;
+
 namespace Wacs.WASI.Preview2.Sockets
 {
     /// <summary>
@@ -104,63 +106,63 @@ namespace Wacs.WASI.Preview2.Sockets
 
         // Encode the Err side: outer disc=1 at retArea+0,
         // ErrorCode byte at retArea+1, zero through retArea+totalSize.
-        private static void WriteErrCode(byte[] mem, int retArea,
+        private static void WriteErrCode(MemoryInstance mem, int retArea,
             int totalSize, ErrorCode code)
         {
-            mem[retArea] = 1;
-            mem[retArea + 1] = (byte)code;
-            for (int i = 2; i < totalSize; i++) mem[retArea + i] = 0;
+            mem.AsSpan(retArea, 1)[0] = 1;
+            mem.AsSpan(retArea + 1, 1)[0] = (byte)code;
+            for (int i = 2; i < totalSize; i++) mem.AsSpan(retArea + i, 1)[0] = 0;
         }
 
         // result<_, error-code>: 2 bytes (1 disc + 1 byte).
-        private static void WriteResultUnit(byte[] mem, int retArea,
+        private static void WriteResultUnit(MemoryInstance mem, int retArea,
             Result<Unit, ErrorCode> r)
         {
             if (r.IsOk)
             {
-                mem[retArea] = 0;
-                mem[retArea + 1] = 0;
+                mem.AsSpan(retArea, 1)[0] = 0;
+                mem.AsSpan(retArea + 1, 1)[0] = 0;
                 return;
             }
             WriteErrCode(mem, retArea, 2, r.Err);
         }
 
         // result<bool, error-code>: 2 bytes (disc + bool).
-        private static void WriteResultBool(byte[] mem, int retArea,
+        private static void WriteResultBool(MemoryInstance mem, int retArea,
             Result<bool, ErrorCode> r)
         {
             if (r.IsOk)
             {
-                mem[retArea] = 0;
-                mem[retArea + 1] = r.Ok ? (byte)1 : (byte)0;
+                mem.AsSpan(retArea, 1)[0] = 0;
+                mem.AsSpan(retArea + 1, 1)[0] = r.Ok ? (byte)1 : (byte)0;
                 return;
             }
             WriteErrCode(mem, retArea, 2, r.Err);
         }
 
         // result<u8, error-code>: 2 bytes (disc + u8).
-        private static void WriteResultU8(byte[] mem, int retArea,
+        private static void WriteResultU8(MemoryInstance mem, int retArea,
             Result<byte, ErrorCode> r)
         {
             if (r.IsOk)
             {
-                mem[retArea] = 0;
-                mem[retArea + 1] = r.Ok;
+                mem.AsSpan(retArea, 1)[0] = 0;
+                mem.AsSpan(retArea + 1, 1)[0] = r.Ok;
                 return;
             }
             WriteErrCode(mem, retArea, 2, r.Err);
         }
 
         // result<u32, error-code>: 8 bytes (disc + 3 pad + u32).
-        private static void WriteResultU32(byte[] mem, int retArea,
+        private static void WriteResultU32(MemoryInstance mem, int retArea,
             Result<uint, ErrorCode> r)
         {
             if (r.IsOk)
             {
-                mem[retArea] = 0;
-                mem[retArea + 1] = 0;
-                mem[retArea + 2] = 0;
-                mem[retArea + 3] = 0;
+                mem.AsSpan(retArea, 1)[0] = 0;
+                mem.AsSpan(retArea + 1, 1)[0] = 0;
+                mem.AsSpan(retArea + 2, 1)[0] = 0;
+                mem.AsSpan(retArea + 3, 1)[0] = 0;
                 MemoryWriter.WriteU32LE(mem, retArea + 4, r.Ok);
                 return;
             }
@@ -168,13 +170,13 @@ namespace Wacs.WASI.Preview2.Sockets
         }
 
         // result<u64, error-code>: 16 bytes (disc + 7 pad + u64).
-        private static void WriteResultU64(byte[] mem, int retArea,
+        private static void WriteResultU64(MemoryInstance mem, int retArea,
             Result<ulong, ErrorCode> r)
         {
             if (r.IsOk)
             {
-                mem[retArea] = 0;
-                for (int i = 1; i < 8; i++) mem[retArea + i] = 0;
+                mem.AsSpan(retArea, 1)[0] = 0;
+                for (int i = 1; i < 8; i++) mem.AsSpan(retArea + i, 1)[0] = 0;
                 MemoryWriter.WriteU64LE(mem, retArea + 8, r.Ok);
                 return;
             }
@@ -186,15 +188,15 @@ namespace Wacs.WASI.Preview2.Sockets
         // whose Ok-side handle has already been allocated via
         // the appropriate resource table; the encoder just
         // writes the handle bits.
-        private static void WriteResultHandle(byte[] mem, int retArea,
+        private static void WriteResultHandle(MemoryInstance mem, int retArea,
             Result<int, ErrorCode> r)
         {
             if (r.IsOk)
             {
-                mem[retArea] = 0;
-                mem[retArea + 1] = 0;
-                mem[retArea + 2] = 0;
-                mem[retArea + 3] = 0;
+                mem.AsSpan(retArea, 1)[0] = 0;
+                mem.AsSpan(retArea + 1, 1)[0] = 0;
+                mem.AsSpan(retArea + 2, 1)[0] = 0;
+                mem.AsSpan(retArea + 3, 1)[0] = 0;
                 MemoryWriter.WriteI32LE(mem, retArea + 4, r.Ok);
                 return;
             }
@@ -242,32 +244,32 @@ namespace Wacs.WASI.Preview2.Sockets
         //   ipv4 case: port(u16)@+4, address(4B)@+6 — 6 bytes used.
         //   ipv6 case: port@+4, 2B pad@+6, flow(u32)@+8,
         //     8×u16(16B)@+12, scope(u32)@+28 — 28 bytes used.
-        private static void WriteIpSocketAddress(byte[] mem, int ptr,
+        private static void WriteIpSocketAddress(MemoryInstance mem, int ptr,
             IpSocketAddress addr)
         {
             if (addr is IpSocketAddress.IpSocketAddressIpv4 v4Case)
             {
                 var v4 = v4Case.Value;
-                mem[ptr] = 0;
-                mem[ptr + 1] = 0;
-                mem[ptr + 2] = 0;
-                mem[ptr + 3] = 0;
+                mem.AsSpan(ptr, 1)[0] = 0;
+                mem.AsSpan(ptr + 1, 1)[0] = 0;
+                mem.AsSpan(ptr + 2, 1)[0] = 0;
+                mem.AsSpan(ptr + 3, 1)[0] = 0;
                 MemoryWriter.WriteU16LE(mem, ptr + 4, v4.Port);
-                mem[ptr + 6] = v4.Address.Item1;
-                mem[ptr + 7] = v4.Address.Item2;
-                mem[ptr + 8] = v4.Address.Item3;
-                mem[ptr + 9] = v4.Address.Item4;
+                mem.AsSpan(ptr + 6, 1)[0] = v4.Address.Item1;
+                mem.AsSpan(ptr + 7, 1)[0] = v4.Address.Item2;
+                mem.AsSpan(ptr + 8, 1)[0] = v4.Address.Item3;
+                mem.AsSpan(ptr + 9, 1)[0] = v4.Address.Item4;
                 return;
             }
             var v6Case = (IpSocketAddress.IpSocketAddressIpv6)addr;
             var v6 = v6Case.Value;
-            mem[ptr] = 1;
-            mem[ptr + 1] = 0;
-            mem[ptr + 2] = 0;
-            mem[ptr + 3] = 0;
+            mem.AsSpan(ptr, 1)[0] = 1;
+            mem.AsSpan(ptr + 1, 1)[0] = 0;
+            mem.AsSpan(ptr + 2, 1)[0] = 0;
+            mem.AsSpan(ptr + 3, 1)[0] = 0;
             MemoryWriter.WriteU16LE(mem, ptr + 4, v6.Port);
-            mem[ptr + 6] = 0;
-            mem[ptr + 7] = 0;
+            mem.AsSpan(ptr + 6, 1)[0] = 0;
+            mem.AsSpan(ptr + 7, 1)[0] = 0;
             MemoryWriter.WriteU32LE(mem, ptr + 8, v6.FlowInfo);
             MemoryWriter.WriteU16LE(mem, ptr + 12, v6.Address.Item1);
             MemoryWriter.WriteU16LE(mem, ptr + 14, v6.Address.Item2);
@@ -282,15 +284,15 @@ namespace Wacs.WASI.Preview2.Sockets
 
         // result<ip-socket-address, error-code>: 36 bytes.
         // outer disc=0 + 3 pad + ip-socket-address (32B) at +4.
-        private static void WriteResultIpSocketAddress(byte[] mem, int retArea,
+        private static void WriteResultIpSocketAddress(MemoryInstance mem, int retArea,
             Result<IpSocketAddress, ErrorCode> r)
         {
             if (r.IsOk)
             {
-                mem[retArea] = 0;
-                mem[retArea + 1] = 0;
-                mem[retArea + 2] = 0;
-                mem[retArea + 3] = 0;
+                mem.AsSpan(retArea, 1)[0] = 0;
+                mem.AsSpan(retArea + 1, 1)[0] = 0;
+                mem.AsSpan(retArea + 2, 1)[0] = 0;
+                mem.AsSpan(retArea + 3, 1)[0] = 0;
                 WriteIpSocketAddress(mem, retArea + 4, r.Ok);
                 return;
             }

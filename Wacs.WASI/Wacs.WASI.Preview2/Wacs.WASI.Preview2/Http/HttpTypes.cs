@@ -12,6 +12,8 @@ using Wacs.Core.Runtime;
 using Wacs.WASI.Preview2.HostBinding;
 using Wacs.WASI.Preview2.HostBinding.CanonicalAbi;
 
+using Wacs.Core.Runtime.Types;
+
 namespace Wacs.WASI.Preview2.Http
 {
     /// <summary>
@@ -74,10 +76,10 @@ namespace Wacs.WASI.Preview2.Http
 
         // result<_, _> (bare Unit/Unit): 1 byte (just outer
         // Ok disc).
-        private static void WriteResultUnit(byte[] mem, int retArea,
+        private static void WriteResultUnit(MemoryInstance mem, int retArea,
             Result<Unit, Unit> r)
         {
-            mem[retArea] = r.IsOk ? (byte)0 : (byte)1;
+            mem.AsSpan(retArea, 1)[0] = r.IsOk ? (byte)0 : (byte)1;
         }
 
         // result<_, header-error>: 1 byte (header-error fixtures
@@ -85,49 +87,49 @@ namespace Wacs.WASI.Preview2.Http
         // method returns Result<Unit, HeaderError>; we only
         // surface the disc byte. Err-payload encoding is
         // deferred until a fixture exercises it.
-        private static void WriteResultUnitHeaderError(byte[] mem,
+        private static void WriteResultUnitHeaderError(MemoryInstance mem,
             int retArea, Result<Unit, HeaderError> r)
         {
-            mem[retArea] = r.IsOk ? (byte)0 : (byte)1;
+            mem.AsSpan(retArea, 1)[0] = r.IsOk ? (byte)0 : (byte)1;
         }
 
         // result<own<X>, _>: 8 bytes (1B disc + 3B pad +
         // 4B handle). Caller supplies an int Ok handle that
         // has been resource-table-allocated.
-        private static void WriteResultHandleBareErr(byte[] mem,
+        private static void WriteResultHandleBareErr(MemoryInstance mem,
             int retArea, Result<int, Unit> r)
         {
             if (r.IsOk)
             {
-                mem[retArea] = 0;
-                mem[retArea + 1] = 0;
-                mem[retArea + 2] = 0;
-                mem[retArea + 3] = 0;
+                mem.AsSpan(retArea, 1)[0] = 0;
+                mem.AsSpan(retArea + 1, 1)[0] = 0;
+                mem.AsSpan(retArea + 2, 1)[0] = 0;
+                mem.AsSpan(retArea + 3, 1)[0] = 0;
                 MemoryWriter.WriteI32LE(mem, retArea + 4, r.Ok);
                 return;
             }
             // Bare-Unit Err: disc=1, rest stays zeroed.
-            mem[retArea] = 1;
-            for (int i = 1; i < 8; i++) mem[retArea + i] = 0;
+            mem.AsSpan(retArea, 1)[0] = 1;
+            for (int i = 1; i < 8; i++) mem.AsSpan(retArea + i, 1)[0] = 0;
         }
 
         // result<own<X>, header-error>: 8 bytes. Same shape as
         // result<own<X>, _> on the Ok side; Err-payload not
         // written in v0.
-        private static void WriteResultHandleHeaderError(byte[] mem,
+        private static void WriteResultHandleHeaderError(MemoryInstance mem,
             int retArea, Result<int, HeaderError> r)
         {
             if (r.IsOk)
             {
-                mem[retArea] = 0;
-                mem[retArea + 1] = 0;
-                mem[retArea + 2] = 0;
-                mem[retArea + 3] = 0;
+                mem.AsSpan(retArea, 1)[0] = 0;
+                mem.AsSpan(retArea + 1, 1)[0] = 0;
+                mem.AsSpan(retArea + 2, 1)[0] = 0;
+                mem.AsSpan(retArea + 3, 1)[0] = 0;
                 MemoryWriter.WriteI32LE(mem, retArea + 4, r.Ok);
                 return;
             }
-            mem[retArea] = 1;
-            for (int i = 1; i < 8; i++) mem[retArea + i] = 0;
+            mem.AsSpan(retArea, 1)[0] = 1;
+            for (int i = 1; i < 8; i++) mem.AsSpan(retArea + i, 1)[0] = 0;
         }
 
         // result<_, error-code> (placeholder error-code: 1 byte
@@ -135,23 +137,23 @@ namespace Wacs.WASI.Preview2.Http
         // single-case error-code, so the result variant is just
         // 1 byte — just the outer disc. Used by outgoing-body.
         // finish (whose fixture uses a placeholder).
-        private static void WriteResultUnitPlaceholder(byte[] mem,
+        private static void WriteResultUnitPlaceholder(MemoryInstance mem,
             int retArea, Result<Unit, ErrorCode> r)
         {
-            mem[retArea] = r.IsOk ? (byte)0 : (byte)1;
+            mem.AsSpan(retArea, 1)[0] = r.IsOk ? (byte)0 : (byte)1;
         }
 
         // option<u64>: 16 bytes — disc (1B) + 7B pad + u64 (8B).
-        private static void WriteOptionU64(byte[] mem, int retArea,
+        private static void WriteOptionU64(MemoryInstance mem, int retArea,
             Option<ulong> opt)
         {
             if (!opt.HasValue)
             {
-                mem[retArea] = 0;
+                mem.AsSpan(retArea, 1)[0] = 0;
                 return;
             }
-            mem[retArea] = 1;
-            for (int i = 1; i < 8; i++) mem[retArea + i] = 0;
+            mem.AsSpan(retArea, 1)[0] = 1;
+            for (int i = 1; i < 8; i++) mem.AsSpan(retArea + i, 1)[0] = 0;
             MemoryWriter.WriteU64LE(mem, retArea + 8, opt.Value);
         }
 
@@ -162,15 +164,15 @@ namespace Wacs.WASI.Preview2.Http
             var mem = ctx.Memory();
             if (!opt.HasValue)
             {
-                mem[retArea] = 0;
+                mem.AsSpan(retArea, 1)[0] = 0;
                 return;
             }
-            mem[retArea] = 1;
-            mem[retArea + 1] = 0;
-            mem[retArea + 2] = 0;
-            mem[retArea + 3] = 0;
+            mem.AsSpan(retArea, 1)[0] = 1;
+            mem.AsSpan(retArea + 1, 1)[0] = 0;
+            mem.AsSpan(retArea + 2, 1)[0] = 0;
+            mem.AsSpan(retArea + 3, 1)[0] = 0;
             var (ptr, len) = MemoryWriter.WriteUtf8StringAllocated(
-                ctx.Memory, opt.Value, alloc);
+                ctx.Memory(), opt.Value, alloc);
             mem = ctx.Memory();
             MemoryWriter.WriteI32LE(mem, retArea + 4, ptr);
             MemoryWriter.WriteI32LE(mem, retArea + 8, len);
@@ -184,7 +186,7 @@ namespace Wacs.WASI.Preview2.Http
         // generated Method.Method* nested classes. Disc 0–8 are
         // no-payload; disc 9 is other(string).
         private static Method DecodeHttpMethodFlat(
-            byte[] memory, int disc, int ptr, int len)
+            MemoryInstance memory, int disc, int ptr, int len)
         {
             switch (disc)
             {
@@ -199,7 +201,7 @@ namespace Wacs.WASI.Preview2.Http
                 case 8: return new Method.MethodPatch();
                 case 9:
                     var name = Encoding.UTF8.GetString(
-                        memory, ptr, len);
+                        memory.AsSpan(ptr, len));
                     return new Method.MethodOther(name);
                 default:
                     throw new ArgumentException(
@@ -209,7 +211,7 @@ namespace Wacs.WASI.Preview2.Http
 
         // variant scheme (3 cases) flat-decoded.
         private static Scheme DecodeHttpSchemeFlat(
-            byte[] memory, int disc, int ptr, int len)
+            MemoryInstance memory, int disc, int ptr, int len)
         {
             switch (disc)
             {
@@ -217,7 +219,7 @@ namespace Wacs.WASI.Preview2.Http
                 case 1: return new Scheme.SchemeHTTPS();
                 case 2:
                     var name = Encoding.UTF8.GetString(
-                        memory, ptr, len);
+                        memory.AsSpan(ptr, len));
                     return new Scheme.SchemeOther(name);
                 default:
                     throw new ArgumentException(
@@ -266,10 +268,10 @@ namespace Wacs.WASI.Preview2.Http
         {
             var (disc, payload) = MapHttpMethod(method);
             var mem = ctx.Memory();
-            mem[retArea] = disc;
-            mem[retArea + 1] = 0;
-            mem[retArea + 2] = 0;
-            mem[retArea + 3] = 0;
+            mem.AsSpan(retArea, 1)[0] = disc;
+            mem.AsSpan(retArea + 1, 1)[0] = 0;
+            mem.AsSpan(retArea + 2, 1)[0] = 0;
+            mem.AsSpan(retArea + 3, 1)[0] = 0;
             if (payload == null)
             {
                 MemoryWriter.WriteI32LE(mem, retArea + 4, 0);
@@ -277,7 +279,7 @@ namespace Wacs.WASI.Preview2.Http
                 return;
             }
             var (ptr, len) = MemoryWriter.WriteUtf8StringAllocated(
-                ctx.Memory, payload, alloc);
+                ctx.Memory(), payload, alloc);
             mem = ctx.Memory();
             MemoryWriter.WriteI32LE(mem, retArea + 4, ptr);
             MemoryWriter.WriteI32LE(mem, retArea + 8, len);
@@ -291,18 +293,18 @@ namespace Wacs.WASI.Preview2.Http
             var mem = ctx.Memory();
             if (!opt.HasValue)
             {
-                mem[retArea] = 0;
+                mem.AsSpan(retArea, 1)[0] = 0;
                 return;
             }
-            mem[retArea] = 1;
-            mem[retArea + 1] = 0;
-            mem[retArea + 2] = 0;
-            mem[retArea + 3] = 0;
+            mem.AsSpan(retArea, 1)[0] = 1;
+            mem.AsSpan(retArea + 1, 1)[0] = 0;
+            mem.AsSpan(retArea + 2, 1)[0] = 0;
+            mem.AsSpan(retArea + 3, 1)[0] = 0;
             var (disc, payload) = MapHttpScheme(opt.Value);
-            mem[retArea + 4] = disc;
-            mem[retArea + 5] = 0;
-            mem[retArea + 6] = 0;
-            mem[retArea + 7] = 0;
+            mem.AsSpan(retArea + 4, 1)[0] = disc;
+            mem.AsSpan(retArea + 5, 1)[0] = 0;
+            mem.AsSpan(retArea + 6, 1)[0] = 0;
+            mem.AsSpan(retArea + 7, 1)[0] = 0;
             if (payload == null)
             {
                 MemoryWriter.WriteI32LE(mem, retArea + 8, 0);
@@ -310,7 +312,7 @@ namespace Wacs.WASI.Preview2.Http
                 return;
             }
             var (ptr, len) = MemoryWriter.WriteUtf8StringAllocated(
-                ctx.Memory, payload, alloc);
+                ctx.Memory(), payload, alloc);
             mem = ctx.Memory();
             MemoryWriter.WriteI32LE(mem, retArea + 8, ptr);
             MemoryWriter.WriteI32LE(mem, retArea + 12, len);

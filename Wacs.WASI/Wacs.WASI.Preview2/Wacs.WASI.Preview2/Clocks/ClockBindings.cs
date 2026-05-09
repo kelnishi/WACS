@@ -141,17 +141,17 @@ namespace Wacs.WASI.Preview2.Clocks
                     });
                     var (namePtr, nameLen) = MemoryWriter
                         .WriteUtf8StringAllocated(
-                            ctx.Memory, disp.Name ?? "", alloc);
+                            ctx.Memory(), disp.Name ?? "", alloc);
                     var mem = ctx.Memory();
                     MemoryWriter.WriteI32LE(mem, retArea,
                         disp.UtcOffset);
                     MemoryWriter.WriteI32LE(mem, retArea + 4, namePtr);
                     MemoryWriter.WriteI32LE(mem, retArea + 8, nameLen);
-                    mem[retArea + 12] = disp.InDaylightSavingTime
+                    mem.AsSpan(retArea + 12, 1)[0] = disp.InDaylightSavingTime
                         ? (byte)1 : (byte)0;
-                    mem[retArea + 13] = 0;
-                    mem[retArea + 14] = 0;
-                    mem[retArea + 15] = 0;
+                    mem.AsSpan(retArea + 13, 1)[0] = 0;
+                    mem.AsSpan(retArea + 14, 1)[0] = 0;
+                    mem.AsSpan(retArea + 15, 1)[0] = 0;
                 });
         }
 

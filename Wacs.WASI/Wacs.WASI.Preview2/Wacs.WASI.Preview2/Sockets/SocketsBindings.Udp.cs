@@ -89,10 +89,10 @@ namespace Wacs.WASI.Preview2.Sockets
                     if (r.IsOk)
                     {
                         var (inS, outS) = r.Ok;
-                        mem[retArea] = 0;
-                        mem[retArea + 1] = 0;
-                        mem[retArea + 2] = 0;
-                        mem[retArea + 3] = 0;
+                        mem.AsSpan(retArea, 1)[0] = 0;
+                        mem.AsSpan(retArea + 1, 1)[0] = 0;
+                        mem.AsSpan(retArea + 2, 1)[0] = 0;
+                        mem.AsSpan(retArea + 3, 1)[0] = 0;
                         MemoryWriter.WriteI32LE(mem, retArea + 4,
                             ins.Allocate((IncomingDatagramStream)inS));
                         MemoryWriter.WriteI32LE(mem, retArea + 8,
@@ -212,8 +212,9 @@ namespace Wacs.WASI.Preview2.Sockets
                             : alloc.Allocate(1, dg.Data.Length);
                         var memBuf = ctx.Memory();
                         if (dg.Data.Length > 0)
-                            Array.Copy(dg.Data, 0, memBuf, dataPtr,
-                                dg.Data.Length);
+                            new ReadOnlySpan<byte>(dg.Data)
+                                .CopyTo(memBuf.AsSpan(dataPtr,
+                                    dg.Data.Length));
                         MemoryWriter.WriteI32LE(memBuf, elemBase, dataPtr);
                         MemoryWriter.WriteI32LE(memBuf, elemBase + 4,
                             dg.Data.Length);
@@ -223,10 +224,10 @@ namespace Wacs.WASI.Preview2.Sockets
                             dg.RemoteAddress);
                     }
                     mem = ctx.Memory();
-                    mem[retArea] = 0;
-                    mem[retArea + 1] = 0;
-                    mem[retArea + 2] = 0;
-                    mem[retArea + 3] = 0;
+                    mem.AsSpan(retArea, 1)[0] = 0;
+                    mem.AsSpan(retArea + 1, 1)[0] = 0;
+                    mem.AsSpan(retArea + 2, 1)[0] = 0;
+                    mem.AsSpan(retArea + 3, 1)[0] = 0;
                     MemoryWriter.WriteI32LE(mem, retArea + 4, arrayPtr);
                     MemoryWriter.WriteI32LE(mem, retArea + 8, count);
                 });
@@ -278,35 +279,35 @@ namespace Wacs.WASI.Preview2.Sockets
                             memory, elemBase + 4);
                         var data = new byte[dataLen];
                         if (dataLen > 0)
-                            Array.Copy(memory, dataPtr, data, 0, dataLen);
+                            memory.AsSpan(dataPtr, dataLen).CopyTo(data);
                         Option<IpSocketAddress> remote =
                             Option<IpSocketAddress>.None;
-                        if (memory[elemBase + 8] != 0)
+                        if (memory.AsSpan(elemBase + 8, 1)[0] != 0)
                         {
-                            byte vDisc = memory[elemBase + 12];
+                            byte vDisc = memory.AsSpan(elemBase + 12, 1)[0];
                             if (vDisc == 0)
                             {
-                                ushort port = (ushort)(memory[elemBase + 16]
-                                    | (memory[elemBase + 17] << 8));
+                                ushort port = (ushort)(memory.AsSpan(elemBase + 16, 1)[0]
+                                    | (memory.AsSpan(elemBase + 17, 1)[0] << 8));
                                 remote = Option<IpSocketAddress>.Some(
                                     new IpSocketAddress.IpSocketAddressIpv4(
                                         new Ipv4SocketAddress {
                                             Port = port,
                                             Address = (
-                                                memory[elemBase + 18],
-                                                memory[elemBase + 19],
-                                                memory[elemBase + 20],
-                                                memory[elemBase + 21]),
+                                                memory.AsSpan(elemBase + 18, 1)[0],
+                                                memory.AsSpan(elemBase + 19, 1)[0],
+                                                memory.AsSpan(elemBase + 20, 1)[0],
+                                                memory.AsSpan(elemBase + 21, 1)[0]),
                                         }));
                             }
                             else
                             {
-                                ushort port = (ushort)(memory[elemBase + 16]
-                                    | (memory[elemBase + 17] << 8));
+                                ushort port = (ushort)(memory.AsSpan(elemBase + 16, 1)[0]
+                                    | (memory.AsSpan(elemBase + 17, 1)[0] << 8));
                                 uint flow = (uint)MemoryReader.ReadI32LE(
                                     memory, elemBase + 20);
-                                ushort A(int off) => (ushort)(memory[off]
-                                    | (memory[off + 1] << 8));
+                                ushort A(int off) => (ushort)(memory.AsSpan(off, 1)[0]
+                                    | (memory.AsSpan(off + 1, 1)[0] << 8));
                                 uint scope = (uint)MemoryReader.ReadI32LE(
                                     memory, elemBase + 40);
                                 remote = Option<IpSocketAddress>.Some(

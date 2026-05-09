@@ -134,7 +134,7 @@ namespace Wacs.WASI.Preview2.Cli
                     var cwd = impl.InitialCwd();
                     string? value = cwd.TryGetValue(out var v) ? v : null;
                     MemoryWriter.WriteOptionString(
-                        ctx.Memory, retArea, value, alloc);
+                        ctx.Memory(), retArea, value, alloc);
                 });
         }
 
@@ -257,13 +257,13 @@ namespace Wacs.WASI.Preview2.Cli
             var mem = ctx.Memory();
             if (value == null)
             {
-                mem[retArea] = 0;
+                mem.AsSpan(retArea, 1)[0] = 0;
                 return;
             }
-            mem[retArea] = 1;
-            mem[retArea + 1] = 0;
-            mem[retArea + 2] = 0;
-            mem[retArea + 3] = 0;
+            mem.AsSpan(retArea, 1)[0] = 1;
+            mem.AsSpan(retArea + 1, 1)[0] = 0;
+            mem.AsSpan(retArea + 2, 1)[0] = 0;
+            mem.AsSpan(retArea + 3, 1)[0] = 0;
             MemoryWriter.WriteI32LE(mem, retArea + 4,
                 table.Allocate(value));
         }
@@ -282,7 +282,7 @@ namespace Wacs.WASI.Preview2.Cli
             for (int i = 0; i < count; i++)
             {
                 var (ptr, len) = MemoryWriter.WriteUtf8StringAllocated(
-                    ctx.Memory, values[i], alloc);
+                    ctx.Memory(), values[i], alloc);
                 var mem = ctx.Memory();
                 MemoryWriter.WriteI32LE(mem, arrayPtr + i * 8, ptr);
                 MemoryWriter.WriteI32LE(mem, arrayPtr + i * 8 + 4, len);
@@ -304,9 +304,9 @@ namespace Wacs.WASI.Preview2.Cli
             for (int i = 0; i < count; i++)
             {
                 var (kPtr, kLen) = MemoryWriter
-                    .WriteUtf8StringAllocated(ctx.Memory, pairs[i].Item1, alloc);
+                    .WriteUtf8StringAllocated(ctx.Memory(), pairs[i].Item1, alloc);
                 var (vPtr, vLen) = MemoryWriter
-                    .WriteUtf8StringAllocated(ctx.Memory, pairs[i].Item2, alloc);
+                    .WriteUtf8StringAllocated(ctx.Memory(), pairs[i].Item2, alloc);
                 var mem = ctx.Memory();
                 MemoryWriter.WriteI32LE(mem, arrayPtr + i * 16, kPtr);
                 MemoryWriter.WriteI32LE(mem, arrayPtr + i * 16 + 4, kLen);

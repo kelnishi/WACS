@@ -1,5 +1,60 @@
 # Changelog
 
+## WACS.WASI.Preview2 0.3.2 — gap 12 phase C.4b: wasip2 host-binding migration to MemoryInstance
+
+`MemoryReader` / `MemoryWriter` (~30 helpers), `ExecContextExtensions`,
+and the ~150 callsites across `SocketsBindings`, `FilesystemBindings`,
+`HttpTypes`, `Cli`, `Clocks`, `Io`, `Random`, and 39 private
+`Write*` helpers in those binding files now thread
+`MemoryInstance` instead of raw `byte[] memory`. The historical
+return type of `ExecContextExtensions.Memory()` (which silently
+broke in NativePointer mode where `Data` is the empty-array
+sentinel) is gone — every callsite consults the mode-aware
+`mem.AsSpan(...)`, `mem.RefAs<T>(...)`, `mem.ByteLength` surface
+the gap-12 phases A → C.3 already wired through the runtime.
+
+Helper signatures changed:
+
+- `MemoryReader.{ReadUtf8String, ReadByteArray, ReadByteArrayList,
+   ReadI32LE, ReadU16LE, ReadU32LE, ReadU64LE}`: `byte[] memory` →
+  `MemoryInstance memory`.
+- `MemoryWriter.{WriteI32LE, WriteU16LE, WriteU32LE, WriteU64LE,
+   WritePrimitiveLE, WriteResultUnitOk, ZeroRange}`: same.
+- `MemoryWriter.WriteUtf8StringAllocated`: `Func<byte[]> getMemory`
+  → `MemoryInstance memory`. The post-cabi_realloc refresh now
+  happens inside `mem.AsSpan` (gap 11 pattern).
+- `MemoryWriter.WriteOptionString`: same — now takes
+  `MemoryInstance` directly.
+- `ExecContextExtensions.Memory(this ExecContext ctx)`: returns
+  `MemoryInstance`, not `byte[]`. Callers that pass `ctx.Memory`
+  as a method group (e.g. `WriteUtf8StringAllocated(ctx.Memory, ...)`)
+  now invoke it as `ctx.Memory()`.
+
+Per-binding file changes follow the same pattern: every
+`mem[ptr]` indexer becomes `mem.AsSpan(ptr, 1)[0]` (with the
+exception of legitimate `Range` indexers, which the regex
+preserves); every `Array.Copy(src, X, mem, Y, len)` becomes
+`new ReadOnlySpan<byte>(src, X, len).CopyTo(mem.AsSpan(Y, len))`;
+every `Encoding.UTF8.GetString(mem, ptr, len)` becomes
+`Encoding.UTF8.GetString(mem.AsSpan(ptr, len))`.
+
+`Wacs.WASI.Preview2.Test.ErrorCodeEncoderTests` got the same
+treatment — its `BumpAllocator` test fixture now wraps a real
+`MemoryInstance` (1-page) instead of a raw `byte[]`, and assertions
+go through a thin indexer / span helper that hides the
+`AsSpan(N, 1)[0]` boilerplate.
+
+Tests: Wacs.Core 391, Wacs.Transpiler 751, Wacs.ComponentModel
+350, Wacs.WASI.Preview2 189, Wacs.WASI.Preview1 72,
+Wacs.HostBindings 14 — all green, no regressions.
+
+After C.4b, an embedder running `wacs run --wasip2 ... model.wasm`
+with `MemoryStorage = NativePointer` exercises native-backed
+memory through every wasip2 host binding. The remaining gap-12
+work is the CLI flag (C.5 — trivial) and the AOT-emitted module
+surface (C.4c — `module.Memory` byte[] in transpiler-emitted
+`Program.cs` template + `WacsHostMemory` ctor).
+
 ## WACS.HostBindings.Abstractions 0.2.1 / WACS.WASI.Preview1 0.12.1 — gap 12 phase C.4a: WacsHostMemory mode-aware
 
 The host-binding ABI now carries a NativePointer-mode case alongside
