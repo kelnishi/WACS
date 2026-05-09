@@ -234,6 +234,47 @@ namespace Wacs.Console.Verbs
                 SynchronousExecution = true,
             };
 
+            // BasicModuleABI reactor convention: a module that
+            // exports `_initialize` (no args, no result) but does
+            // NOT export `_start` is a reactor library — runtimes
+            // must invoke `_initialize` once before any other
+            // export touches state, but never as the lone entry.
+            // Detect-and-call here, ahead of the entry-point
+            // selection below; falls through to --call (or the
+            // helpful "this is a reactor" error) once init runs.
+            bool hasStart = runtime.TryGetExportedFunction(
+                (moduleName, "_start"), out _);
+            if (!hasStart && runtime.TryGetExportedFunction(
+                    (moduleName, "_initialize"), out var initAddr))
+            {
+                if (opts.Verbose)
+                    System.Console.Error.WriteLine(
+                        "Calling _initialize (reactor module per BasicModuleABI)");
+                var initCaller = runtime.CreateInvokerAction(initAddr, callOptions);
+                try { initCaller(); }
+                catch (TrapException exc)
+                {
+                    System.Console.Error.WriteLine(exc);
+                    return 1;
+                }
+                catch (SignalException exc)
+                {
+                    if (opts.Verbose)
+                        System.Console.Error.WriteLine(
+                            $"{((ErrNo)exc.Signal).HumanReadable()}");
+                    return exc.Signal;
+                }
+                if (string.IsNullOrEmpty(opts.Call))
+                {
+                    System.Console.Error.WriteLine(
+                        "error: module is a reactor (exports _initialize but "
+                        + "not _start). Pass --call <export> to invoke a "
+                        + "specific function.");
+                    return 1;
+                }
+                // Fall through to --call dispatch below.
+            }
+
             // Entry-point selection priority:
             //   1. WASM start section (modInst.StartFunc)
             //   2. _start export (WASI command convention)
