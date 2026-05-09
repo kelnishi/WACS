@@ -632,7 +632,16 @@ namespace Wacs.Console.Verbs
         private static void ApplyBindings(RunOptions opts,
             WasmRuntime runtime, List<IDisposable>? disposables = null)
         {
-            foreach (var asmPath in opts.Bind ?? Enumerable.Empty<string>())
+            // Compose --wasi-nn (built-in shorthand) and --bind
+            // (explicit list). --wasi-nn loads first so an
+            // explicit --bind for the same package can override
+            // the default ONNX wiring (BindHostFunction's
+            // last-write-wins semantics).
+            var paths = new List<string>();
+            if (opts.WasiNN) paths.Add("Wacs.WASI.NN.OnnxRuntime");
+            if (opts.Bind != null) paths.AddRange(opts.Bind);
+
+            foreach (var asmPath in paths)
             {
                 var loaded = BindingLoader.LoadFromAssembly(asmPath);
                 foreach (var b in loaded)

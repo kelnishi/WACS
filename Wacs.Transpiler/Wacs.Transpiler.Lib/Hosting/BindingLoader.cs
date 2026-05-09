@@ -26,21 +26,39 @@ namespace Wacs.Transpiler.Hosting
     public static class BindingLoader
     {
         /// <summary>
-        /// Load the assembly at <paramref name="path"/>, find every
-        /// concrete <see cref="IBindable"/> with a parameterless
-        /// constructor, instantiate it, and return the bindings.
-        /// Caller is responsible for calling
+        /// Load the assembly identified by <paramref name="nameOrPath"/>,
+        /// find every concrete <see cref="IBindable"/> with a
+        /// parameterless constructor, instantiate it, and return the
+        /// bindings. Caller is responsible for calling
         /// <see cref="IBindable.BindToRuntime"/> and (for IDisposable
         /// bindings) disposing at shutdown.
+        ///
+        /// <para>Resolution mirrors <c>ResolveHostPackages</c>: a
+        /// file path on disk is loaded via
+        /// <see cref="Assembly.LoadFrom(string)"/>; otherwise the
+        /// argument is treated as an assembly name and resolved via
+        /// <see cref="Assembly.Load(string)"/>. This lets
+        /// <c>--bind &lt;path&gt;</c> and <c>--bind &lt;name&gt;</c>
+        /// both work and matches what users expect from
+        /// <c>--host-package</c>.</para>
         /// </summary>
-        public static List<IBindable> LoadFromAssembly(string path)
+        public static List<IBindable> LoadFromAssembly(string nameOrPath)
         {
-            var fullPath = Path.GetFullPath(path);
-            if (!File.Exists(fullPath))
-                throw new FileNotFoundException(
-                    "binding assembly not found: " + fullPath);
-
-            var asm = Assembly.LoadFrom(fullPath);
+            Assembly asm;
+            if (File.Exists(nameOrPath))
+            {
+                asm = Assembly.LoadFrom(Path.GetFullPath(nameOrPath));
+            }
+            else
+            {
+                try { asm = Assembly.Load(nameOrPath); }
+                catch (Exception ex)
+                {
+                    throw new FileNotFoundException(
+                        "binding assembly not found as file or name: "
+                        + nameOrPath + " (" + ex.Message + ")");
+                }
+            }
             return LoadFromAssembly(asm);
         }
 

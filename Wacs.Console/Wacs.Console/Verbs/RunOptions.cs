@@ -82,8 +82,19 @@ namespace Wacs.Console.Verbs
 
         [Option("bind", Separator = ',', HelpText =
             "Path(s) to assemblies containing IBindable host "
-            + "libraries to wire into the runtime before execution.")]
+            + "libraries to wire into the runtime before execution. "
+            + "Accepts an assembly name (resolved via Assembly.Load) "
+            + "or a file path (Assembly.LoadFrom). Each IBindable type "
+            + "with a parameterless ctor is activated and bound.")]
         public IEnumerable<string> Bind { get; set; } = new List<string>();
+
+        [Option("wasi-nn", HelpText =
+            "Wire wasi-nn host bindings using the default ONNX backend "
+            + "(`Wacs.WASI.NN.OnnxRuntime`). Equivalent to "
+            + "`--bind Wacs.WASI.NN.OnnxRuntime`. For other backends "
+            + "(MLNet, LlamaSharp, …), use `--bind` directly with that "
+            + "package's name.")]
+        public bool WasiNN { get; set; }
 
         // ---- Instrumentation (interpreter engine only) ----
 
