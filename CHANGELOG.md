@@ -1,5 +1,48 @@
 # Changelog
 
+## WACS 0.12.3 — gap 12 phase A: NativePointer storage mode for MemoryInstance
+
+Phase A of the byte[]→native-pointer migration from gap 12 of
+`wasi-nn/WACS-GAPS.md`. Lifts the type-system surface so subsequent
+phases can flip access sites; this phase ships no behavior change
+for default-mode callers.
+
+`MemoryInstance` now has two backing storages selected via
+`MemoryStorageMode`:
+
+- `ManagedArray` (default): historical `byte[] Data` +
+  `Array.Resize` on grow. ~2 GiB cap.
+- `NativePointer`: `byte* NativeBase` + `nuint NativeSize` allocated
+  via `NativeMemory.AllocZeroed` (.NET 6+) or `Marshal.AllocHGlobal`
+  + `InitBlockUnaligned` (legacy). Grow allocates a new buffer,
+  `Buffer.MemoryCopy`s the live bytes, frees the old. No 2 GiB cap.
+
+New public surface on `MemoryInstance`:
+
+- `StorageMode` (read-only) — which backing this instance uses.
+- `byte* NativeBase` + `nuint NativeSize` — exposed for emit code in
+  later phases.
+- `nuint ByteLength` — authoritative byte length, both modes.
+- `Span<byte> AsSpan(int offset, int length)` — mode-dispatched
+  span access. Existing `[Range]` indexer also dispatches.
+- `IDisposable` — Dispose frees the native buffer in
+  `NativePointer` mode and is a no-op in `ManagedArray` mode (the
+  GC reclaims the byte[]). A finalizer backstops native-mode
+  leaks.
+
+`RuntimeOptions.MemoryStorage` (default `ManagedArray`) is the
+runtime-level switch; phases B/C will thread it through
+`WasmRuntimeInstantiation` and the transpiler's emitted IL so the
+mode the user requested is the mode every memory in the runtime
+gets.
+
+Phase A is byte-stable for default-mode callers — every existing
+test (Wacs.Core 355, Wacs.Transpiler 751, Wacs.ComponentModel 350,
+Wacs.WASI.Preview2 189) passes unchanged. Eight new tests in
+`MemoryInstanceNativeStorageTests` cover allocation, grow
+preservation + zero-fill, indexer + AsSpan, dispose
+idempotency, and `HostMaxPages` rejection in native mode.
+
 ## WACS.ComponentModel 0.2.1 / WACS.Transpiler.Lib 0.7.4 — gaps 10 + 11: descriptor-stat lifting and post-grow byte[] safety
 
 Closes the next two gaps from `wasi-nn/WACS-GAPS.md` (round 4):
