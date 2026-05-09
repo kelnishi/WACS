@@ -42,6 +42,28 @@ namespace Wacs.Console
 
         static int Main(string[] args)
         {
+            try
+            {
+                return Dispatch(args);
+            }
+            catch (Exception ex)
+            {
+                // Fall-through guard: any verb handler that lets an
+                // exception escape (typically a transpile-time
+                // failure or a host-binding misconfiguration) gets
+                // a non-zero exit code instead of the .NET runtime's
+                // default exit-0-with-stack-trace behavior. Without
+                // this, scripted callers couldn't distinguish a
+                // crashed wacs from a successful run.
+                System.Console.Error.WriteLine(
+                    "error: unhandled exception: " + ex.GetType().FullName);
+                System.Console.Error.WriteLine(ex);
+                return 1;
+            }
+        }
+
+        private static int Dispatch(string[] args)
+        {
             // Direct-run shortcut: if argv[0] looks like a wasm/wat
             // path (and isn't a verb keyword), prepend `run`.
             //   wacs my.wasm                    → wacs run my.wasm
