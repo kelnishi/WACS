@@ -136,6 +136,26 @@ namespace Wacs.Core.Runtime.Types
         }
 
         /// <summary>
+        /// High-address sibling of <see cref="AsSpan(int, int)"/>.
+        /// The transpiler's narrow-load/store helpers
+        /// (<c>StoreI32_8</c>, etc.) compute byte offsets up to
+        /// <c>nuint</c> range under
+        /// <see cref="MemoryStorageMode.NativePointer"/>; the int
+        /// overload would truncate offsets past <c>int.MaxValue</c>
+        /// and produce a span pointing far below
+        /// <see cref="NativeBase"/>. ManagedArray mode falls back to
+        /// the byte[] AsSpan after a safe-by-construction
+        /// <c>(int)offset</c> cast (the byte[] is bounded ≤ 2 GiB by
+        /// Array.MaxLength).
+        /// </summary>
+        public Span<byte> AsSpan(nuint offset, int length)
+        {
+            if (StorageMode == MemoryStorageMode.NativePointer)
+                return new Span<byte>(NativeBase + offset, length);
+            return Data.AsSpan((int)offset, length);
+        }
+
+        /// <summary>
         /// @Spec 4.5.3.9. Growing memories
         /// </summary>
         public bool Grow(long numPages)
@@ -335,6 +355,28 @@ namespace Wacs.Core.Runtime.Types
             if (StorageMode == MemoryStorageMode.NativePointer)
                 return ref Unsafe.AsRef<T>(NativeBase + ea);
             return ref Unsafe.As<byte, T>(ref Data[ea]);
+        }
+
+        /// <summary>
+        /// High-address sibling of <see cref="RefAs{T}(int)"/>. The
+        /// transpiler's load/store helpers compute <c>ea</c> as a
+        /// 64-bit value (<c>(uint)addr + offset</c>) so guests with
+        /// > 2 GiB linear memory under <see cref="MemoryStorageMode.NativePointer"/>
+        /// can address into the high half. The <c>int</c> overload
+        /// truncates such <c>ea</c> values to a negative pointer
+        /// arithmetic offset and trips an AccessViolationException.
+        /// This overload accepts the full <see cref="nuint"/> range.
+        /// <para>ManagedArray-mode memories are bounded by
+        /// <c>Array.MaxLength</c> (~2 GiB) so the <c>(int)ea</c> cast
+        /// in that branch is safe by construction; the bug is purely
+        /// the NativePointer pointer arithmetic.</para>
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public unsafe ref T RefAs<T>(nuint ea) where T : unmanaged
+        {
+            if (StorageMode == MemoryStorageMode.NativePointer)
+                return ref Unsafe.AsRef<T>(NativeBase + ea);
+            return ref Unsafe.As<byte, T>(ref Data[(int)ea]);
         }
 
         /// <summary>Atomic 32-bit load at byte offset <paramref name="ea"/>.

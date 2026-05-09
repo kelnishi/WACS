@@ -1,5 +1,54 @@
 # Changelog
 
+## WACS 0.13.3 / WACS.Cli 1.5.3 / WACS.Transpiler.Lib 0.8.3 — high-address load/store on NativePointer memories
+
+`MemoryHelpers.StoreI32` / `LoadI32` (and every load/store/narrow/F32/F64
+sibling) cast the effective address to `int` on the final
+`mem.RefAs<byte>(...)` / `mem.AsSpan(...)` call. With ea > `int.MaxValue`
+— anything past 2 GiB into a NativePointer-backed linear memory —
+that cast wrapped to a negative pointer offset; the kernel signaled
+SIGSEGV and the .NET runtime aborted with `AccessViolationException`.
+Bypassed managed exception handling, so the wasm-trap-to-exit-1
+path didn't catch it.
+
+The bounds check itself was correct (`ea` is `long` and compared
+against `mem.ByteLength` which is `nuint`). Only the truncating cast
+on the access call was wrong.
+
+`MemoryInstance` adds `nuint` overloads alongside the existing `int`
+ones:
+- `RefAs<T>(nuint ea)` — `byte* + nuint` pointer arithmetic on
+  `NativeBase`; ManagedArray branch keeps the safe `(int)ea` cast
+  (Array.MaxLength bounds the byte[] backing ≤ 2 GiB).
+- `AsSpan(nuint offset, int length)` — same shape for narrow
+  load/store siblings (`StoreI32_8`, etc.).
+
+Migrated call sites:
+- `Wacs.Transpiler.Lib/AOT/Emitters/MemoryEmitter.cs`
+  `MemoryHelpers` — every `(int)ea` cast (59 sites across i32/i64
+  + every narrow variant + f32/f64) now passes `(nuint)ea`.
+- `Wacs.Core/Wacs.Core/Instructions/Memory/{I32,I64,F}MemoryLoad.cs`
+  + `Inst{I32,I64}Store.cs` + `FMemoryStore.cs` — interpreter
+  per-instruction handlers had the same shape; now route through
+  the `nuint` overloads.
+
+Test surface: new
+`Wacs.Transpiler.Test.MemoryHelpersHighAddressTests` covers
+`StoreI32` / `LoadI32` / `StoreI64` / `LoadI64` / `StoreI32_8` +
+`LoadI32_8U` / `StoreF32` / `LoadF32` / `StoreF64` / `LoadF64` at
+`ea = 0x80000000 + 1024` (~2 GiB into the memory) on a NativePointer
+33000-page (~2.0625 GiB) instance. Pre-fix every test AVs;
+post-fix all five round-trip cleanly. `NativeMemory.AllocZeroed`
+is lazy-zero on calloc so the 2 GiB virtual reservation does not
+commit physical pages.
+
+Out of scope (separate gap): atomics. `AtomicHelpers.CheckEa`
+still returns `int`, and the `int ea` parameter cascades through
+the abstract `InstAtomicLoad.DoLoad(ExecContext, int ea)` /
+`InstAtomicStore.DoStore` signatures. Same shape as gap 15 but a
+different cohort of guests (atomic-using shared-memory threading);
+follow-up.
+
 ## WACS 0.13.2 / WACS.Cli 1.5.2 / WACS.Transpiler.Lib 0.8.2 / WACS.ComponentModel 0.3.2 — host paths route through MemoryInstance; retire byte[] pinning across canonical-ABI
 
 NativePointer-mode memories carry an empty sentinel `Array.Empty<byte>()`

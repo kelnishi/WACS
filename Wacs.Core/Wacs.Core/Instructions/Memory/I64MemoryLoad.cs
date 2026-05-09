@@ -50,7 +50,7 @@ namespace Wacs.Core.Instructions.Memory
             long ea = offset + M.Offset;
             if ((ulong)ea > (ulong)mem.ByteLength || (ulong)mem.ByteLength - (ulong)ea < (ulong)WidthTByteSize)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthTByteSize} out of bounds ({(long)mem.ByteLength}).");
-            var bs = mem.AsSpan((int)ea, WidthTByteSize);
+            var bs = mem.AsSpan((nuint)ea, WidthTByteSize);
 #if NET8_0_OR_GREATER
             return MemoryMarshal.AsRef<ulong>(bs);
 #else
@@ -86,7 +86,7 @@ namespace Wacs.Core.Instructions.Memory
             long ea = offset + M.Offset;
             if ((ulong)ea > (ulong)mem.ByteLength || (ulong)mem.ByteLength - (ulong)ea < (ulong)WidthTByteSize)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthTByteSize} out of bounds ({(long)mem.ByteLength}).");
-            var bs = mem.AsSpan((int)ea, WidthTByteSize);
+            var bs = mem.AsSpan((nuint)ea, WidthTByteSize);
             
             int cS8 = (sbyte)bs[0];
             return cS8;
@@ -120,7 +120,7 @@ namespace Wacs.Core.Instructions.Memory
             long ea = offset + M.Offset;
             if ((ulong)ea > (ulong)mem.ByteLength || (ulong)mem.ByteLength - (ulong)ea < (ulong)WidthTByteSize)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthTByteSize} out of bounds ({(long)mem.ByteLength}).");
-            var bs = mem.AsSpan((int)ea, WidthTByteSize);
+            var bs = mem.AsSpan((nuint)ea, WidthTByteSize);
             
             uint cU8 = bs[0];
             return cU8;
@@ -154,7 +154,7 @@ namespace Wacs.Core.Instructions.Memory
             long ea = offset + M.Offset;
             if ((ulong)ea > (ulong)mem.ByteLength || (ulong)mem.ByteLength - (ulong)ea < (ulong)WidthTByteSize)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthTByteSize} out of bounds ({(long)mem.ByteLength}).");
-            var bs = mem.AsSpan((int)ea, WidthTByteSize);
+            var bs = mem.AsSpan((nuint)ea, WidthTByteSize);
 #if NET8_0_OR_GREATER
             return MemoryMarshal.AsRef<short>(bs);
 #else
@@ -190,7 +190,7 @@ namespace Wacs.Core.Instructions.Memory
             long ea = offset + M.Offset;
             if ((ulong)ea > (ulong)mem.ByteLength || (ulong)mem.ByteLength - (ulong)ea < (ulong)WidthTByteSize)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthTByteSize} out of bounds ({(long)mem.ByteLength}).");
-            var bs = mem.AsSpan((int)ea, WidthTByteSize);
+            var bs = mem.AsSpan((nuint)ea, WidthTByteSize);
 
 #if NET8_0_OR_GREATER
             return MemoryMarshal.AsRef<ushort>(bs);
@@ -227,7 +227,7 @@ namespace Wacs.Core.Instructions.Memory
             long ea = offset + M.Offset;
             if ((ulong)ea > (ulong)mem.ByteLength || (ulong)mem.ByteLength - (ulong)ea < (ulong)WidthTByteSize)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthTByteSize} out of bounds ({(long)mem.ByteLength}).");
-            var bs = mem.AsSpan((int)ea, WidthTByteSize);
+            var bs = mem.AsSpan((nuint)ea, WidthTByteSize);
 #if NET8_0_OR_GREATER
             return MemoryMarshal.AsRef<int>(bs);
 #else
@@ -263,7 +263,7 @@ namespace Wacs.Core.Instructions.Memory
             long ea = offset + M.Offset;
             if ((ulong)ea > (ulong)mem.ByteLength || (ulong)mem.ByteLength - (ulong)ea < (ulong)WidthTByteSize)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthTByteSize} out of bounds ({(long)mem.ByteLength}).");
-            var bs = mem.AsSpan((int)ea, WidthTByteSize);
+            var bs = mem.AsSpan((nuint)ea, WidthTByteSize);
 #if NET8_0_OR_GREATER
             return MemoryMarshal.AsRef<uint>(bs);
 #else
