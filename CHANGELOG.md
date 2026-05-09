@@ -1,5 +1,88 @@
 # Changelog
 
+## WACS 0.12.3 / WACS.Transpiler.Lib 0.7.4 — gap 12 phases A → C.3: NativePointer storage mode through interpreter and transpiler
+
+Phases A → C.3 of the byte[]→native-pointer migration from gap 12
+of `wasi-nn/WACS-GAPS.md`. Previous CHANGELOG entries below cover
+A and B; this entry adds C.1 (atomic ref helper), C.2 (cap lift),
+and C.3 (transpiler emit migration).
+
+### Phase C.1 — atomic ref helper
+
+`MemoryInstance.RefAs<T>(int ea)` (public, generic-on-T-unmanaged)
+returns a `ref T` over the requested byte offset, dispatching by
+`StorageMode`. ManagedArray returns
+`ref Unsafe.As<byte, T>(ref Data[ea])`; NativePointer returns
+`ref Unsafe.AsRef<T>(NativeBase + ea)`. Every atomic helper on
+`MemoryInstance` (Load/Store/CmpExchange/Add/And/Or/Xor in i32+i64)
+and every subword `Volatile.Read/Write` site in
+`Atomic/AtomicLoadStore.cs` and `Atomic/AtomicHandlers.cs` migrated
+to use it. `Interlocked.*` and `Volatile.*` are ref-T-based, so
+flipping the ref's source is invisible to them.
+
+Fixes a stray `CachedMem.Data.Length` in `AtomicBase.CheckEa`
+bounds check → `(long)CachedMem.ByteLength`.
+
+### Phase C.2 — cap lift for NativePointer
+
+ManagedArray stays capped at `Constants.HostMaxPages` (0x8000 =
+2 GiB, the byte[] hard limit). NativePointer lifts the cap to
+`Constants.WasmMaxPages` (0x10000 = 4 GiB, the wasm32 spec max).
+`MaxPagesForMode` dispatches both the constructor's initial check
+and `Grow`'s newNumPages check. memory64 (`WasmMaxPages64 = 2^48`)
+stays out-of-scope until phase D wires the i64-address path.
+
+### Phase C.3 — transpiler emit migration
+
+`MemoryHelpers` (`MemoryEmitter.cs`, ~40 helpers) and `BulkHelpers`
+(`BulkEmitter.cs` MemoryCopy/Fill/Init) now take `MemoryInstance`
+instead of `byte[]`. Helper bodies dispatch by mode via
+`mem.AsSpan` / `mem.RefAs<T>` / `mem.ByteLength`. The transpiler's
+emit sites in `MemoryEmitter`, `SimdEmitter`, and `BulkEmitter`
+drop the `Ldfld MemoryDataField` step and pass `MemoryInstance`
+directly. `EmitMemorySize` uses `Call get_Size` (mode-aware
+property) instead of `Ldfld Data; Ldlen`.
+
+Cleaned up two leftover `/tmp/mem_trace.log` debug-print lines in
+`LoadI64_32S` and `StoreI32_8` from earlier diagnostic work.
+
+`InitializationHelper.cs` (the standalone-AOT-loader path for
+saved .dll modules) still defaults memories to `ManagedArray`;
+threading NativePointer through that path needs a separate option
+on `TranspilerOptions` or `ModuleInitData` and lands with C.4.
+
+### Still ahead in phase C / D
+
+- **C.4: drop byte[] dual storage** — touches `WacsHostMemory`
+  (host-binding ABI), the `MemoryReader`/`MemoryWriter` helpers in
+  `Wacs.WASI.Preview2/HostBinding/CanonicalAbi/`, and every wasip2
+  binding callsite that takes a raw `byte[] memory`. Without
+  C.4, NativePointer mode works inside the wasm execution engine
+  but host bindings can't see the bytes (Data is an empty-array
+  sentinel in NativePointer mode). C.4 is required before the
+  CLI can offer a `--native-memory` flag.
+- **C.5: CLI flag** — `wacs run --native-memory` opts the run
+  into NativePointer storage end-to-end. Trivial once C.4 is in.
+- **Phase D: memory64** — widen `OpStack.PopAddr` to `nuint`,
+  switch bounds-check arithmetic to unsigned, lift cap to
+  `WasmMaxPages64`. The default-mode-aware bounds checks in
+  C.1/C.2/C.3 are already 64-bit-clean; phase D is mostly the
+  i64-address plumbing through the OpStack and validator.
+
+### Tests
+
+| Suite | Total | Note |
+|---|---|---|
+| Wacs.Core | 391 | +28 from gap 12 work (8 unit + 12 e2e + 8 atomic theory pairs) |
+| Wacs.Transpiler | 752 | unchanged |
+| Wacs.ComponentModel | 350 | unchanged |
+| Wacs.WASI.Preview2 | 189 | unchanged |
+
+All suites byte-stable on default `ManagedArray` mode; new
+`NativePointer` paths covered by `MemoryInstanceNativeStorageTests`
+(8 unit) and `MemoryNativePointerEndToEndTests` (12 [Theory]×
+2-mode end-to-end through the interpreter).
+
 ## WACS 0.12.3 — gap 12 phases A + B: NativePointer storage mode end-to-end through the interpreter
 
 Phases A + B of the byte[]→native-pointer migration from gap 12 of
