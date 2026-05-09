@@ -5,11 +5,12 @@ WASI WIT for the hello-world reference output.
 
 ## Layout
 
-- **`wasi-cli/`** — git submodule pinned at `v0.2.3` (currently). Tracks
-  upstream `WebAssembly/wasi-cli` so the loader/emitter tests have a
-  stable WASI 0.2.x WIT tree to exercise. The runtime-side
-  `Wacs.WASI.Preview2/wit/` is a separate vendored copy that may be at
-  a different (typically newer) version — see that package's CHANGELOG.
+- **`wasi-cli/`** — git submodule pinned at `v0.2.8` (currently).
+  Tracks upstream `WebAssembly/wasi-cli` so the loader/emitter tests
+  have a stable WASI 0.2.x WIT tree to exercise. The runtime-side
+  `Wacs.WASI.Preview2/wit/` is a separate vendored copy that may be
+  at a different version when the two coordinates intentionally
+  diverge — see that package's CHANGELOG.
 - **`fixtures/`** — 135 hand-crafted component fixtures exercising
   specific canonical-ABI shapes (primitives, records, variants, enums,
   resources, lists, options, results, every WASI subsystem).
@@ -89,9 +90,11 @@ The hello-world check requires `wit-bindgen-cli 0.30.0` on the runner
 
 ## Why the wasi-cli submodule and Wacs.WASI.Preview2/wit are decoupled
 
-The submodule pin defines what version the loader/emitter test
-fixtures target — moving it forces regenerating the entire fixture
-set (including the 9 `v0_2_3`-baked reference filenames). The
+The two coordinates currently track the same WASI patch (0.2.8 each),
+but they're decoupled by design — moving the submodule forces
+regenerating the entire fixture set (including the
+`v0_2_<version>`-baked reference filenames in
+`fixtures/hello-world/reference/`), which is non-trivial. The
 runtime-side `Wacs.WASI.Preview2/wit/` is what gets emitted as
 `[WitSource]` interfaces and what `wacs inspect --imports` shows; it
 can move forward independently because the wasm Component Model
