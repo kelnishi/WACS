@@ -231,9 +231,12 @@ namespace Wacs.Core.Instructions
 
             // Bulk Span.CopyTo (memmove); mode-aware via mem.AsSpan
             // and zero-cost on byte[] (Span over the array's data).
+            // (nuint)d for the dst guest memory keeps the AsSpan
+            // dispatch in the unsigned range past 2 GiB. The data
+            // segment is byte[]-bounded so int casts on s/n are safe.
             if (n == 0) return;
             new ReadOnlySpan<byte>(data.Data, (int)s, (int)n)
-                .CopyTo(mem.AsSpan((int)d, (int)n));
+                .CopyTo(mem.AsSpan((nuint)d, (int)n));
         }
 
         public override InstructionBase Parse(BinaryReader reader)
@@ -384,9 +387,12 @@ namespace Wacs.Core.Instructions
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Destination memory overflow.");
 
             // Span<byte>.CopyTo dispatches to Buffer.Memmove and
-            // handles overlap correctly across both modes.
+            // handles overlap correctly across both modes. Both src
+            // and dst go through the (nuint, int) AsSpan overload so
+            // the high half of NativePointer memory addresses round-
+            // trip without sign truncation.
             if (n == 0) return;
-            memSrc.AsSpan((int)s, (int)n).CopyTo(memDst.AsSpan((int)d, (int)n));
+            memSrc.AsSpan((nuint)s, (int)n).CopyTo(memDst.AsSpan((nuint)d, (int)n));
         }
 
         public override InstructionBase Parse(BinaryReader reader)
@@ -454,9 +460,11 @@ namespace Wacs.Core.Instructions
                 || (ulong)mem.ByteLength - (ulong)d < (ulong)n)
                 throw new TrapException("Instruction memory.fill failed. Buffer overflow");
 
-            // Bulk Span.Fill — mode-aware via mem.AsSpan.
+            // Bulk Span.Fill — mode-aware via mem.AsSpan. The
+            // (nuint, int) overload preserves the full unsigned dst
+            // range so NativePointer memories past 2 GiB don't wrap.
             if (n == 0) return;
-            mem.AsSpan((int)d, (int)n).Fill((byte)(0xFF & cU32));
+            mem.AsSpan((nuint)d, (int)n).Fill((byte)(0xFF & cU32));
         }
 
         public override InstructionBase Parse(BinaryReader reader)

@@ -8,6 +8,7 @@
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
+using Wacs.Transpiler.AOT;
 using Wacs.Transpiler.AOT.Emitters;
 using Xunit;
 
@@ -110,6 +111,76 @@ namespace Wacs.Transpiler.Test
             MemoryHelpers.StoreF64(mem, HighAddrArg, HighAddrOffset, value);
             double read = MemoryHelpers.LoadF64(mem, HighAddrArg, HighAddrOffset);
             Assert.Equal(value, read);
+        }
+
+        // === Bulk-op high-address coverage (gap 16) ===
+        // BulkHelpers.{MemoryFill, MemoryCopy, MemoryInit} took raw
+        // int dst/src into AsSpan, hitting the int overload that
+        // wraps to a negative pointer offset on NativePointer
+        // memories past 2 GiB. Pre-fix each AVs; post-fix bytes
+        // round-trip.
+
+        private static ThinContext NewHighContext(MemoryInstance mem)
+            => new ThinContext(memories: new[] { mem });
+
+        [Fact]
+        public void MemoryFill_PastTwoGiB_FillsRegion()
+        {
+            using var mem = NewHighMemory();
+            var ctx = NewHighContext(mem);
+            const int len = 256;
+            BulkHelpers.MemoryFill(ctx, /*memIdx*/ 0,
+                HighAddrArg + (int)HighAddrOffset, /*val*/ 0xAB, len);
+            // Read back via the (already-migrated) load helpers.
+            var span = mem.AsSpan((nuint)HighEa, len);
+            for (int i = 0; i < len; i++)
+                Assert.Equal((byte)0xAB, span[i]);
+        }
+
+        [Fact]
+        public void MemoryCopy_PastTwoGiB_CopiesRegion()
+        {
+            using var mem = NewHighMemory();
+            var ctx = NewHighContext(mem);
+            // Stage source bytes at offset 0 (low half), copy them
+            // up to the high-address dst. Single-memory copy.
+            const int len = 64;
+            var srcSpan = mem.AsSpan(0, len);
+            for (int i = 0; i < len; i++) srcSpan[i] = (byte)i;
+            int dstAddr = HighAddrArg + (int)HighAddrOffset;
+            BulkHelpers.MemoryCopy(ctx, /*dstMemIdx*/ 0, /*srcMemIdx*/ 0,
+                dstAddr, /*src*/ 0, len);
+            var dstSpan = mem.AsSpan((nuint)HighEa, len);
+            for (int i = 0; i < len; i++)
+                Assert.Equal((byte)i, dstSpan[i]);
+        }
+
+        [Fact]
+        public void MemoryInit_PastTwoGiB_CopiesFromDataSegment()
+        {
+            using var mem = NewHighMemory();
+            var ctx = NewHighContext(mem);
+            // Register a passive data segment in ModuleInit.
+            var segBytes = new byte[128];
+            for (int i = 0; i < segBytes.Length; i++) segBytes[i] = (byte)(0x80 ^ i);
+            int segId = ModuleInit.RegisterDataSegment(segBytes);
+            try
+            {
+                // ctx.DataSegmentBaseId defaults to 0; pass dataIdx
+                // = segId so the helper resolves the segment.
+                int dstAddr = HighAddrArg + (int)HighAddrOffset;
+                BulkHelpers.MemoryInit(ctx, /*memIdx*/ 0,
+                    /*dataIdx*/ segId, dstAddr, /*src*/ 0,
+                    segBytes.Length);
+                var dstSpan = mem.AsSpan((nuint)HighEa, segBytes.Length);
+                for (int i = 0; i < segBytes.Length; i++)
+                    Assert.Equal((byte)(0x80 ^ i), dstSpan[i]);
+            }
+            finally
+            {
+                // Drop the segment so cross-test state doesn't leak.
+                ModuleInit.DropDataSegment(segId);
+            }
         }
     }
 }

@@ -1,5 +1,43 @@
 # Changelog
 
+## WACS 0.13.4 / WACS.Cli 1.5.4 / WACS.Transpiler.Lib 0.8.4 — high-address bulk memory ops + MemSlice chokepoint
+
+Round 7 closed `(int)ea` truncation in the load/store helpers
+(`MemoryHelpers.{Load,Store}*`) but missed the bulk-op family and the
+`[OpHandler]`-dispatch chokepoint. Both had the same shape and the
+same crash mode — any guest writing to a memory address past
+`int.MaxValue` AVs the host process. Rust's release-mode `vec![0u8; N]`
+lowers to a single `memory.fill` after `cabi_realloc`, so non-trivial
+allocations past 2 GiB trip it.
+
+Migrated to the `nuint` overloads added in 0.13.3:
+
+- `Wacs.Transpiler.Lib/AOT/Emitters/BulkEmitter.cs`
+  `BulkHelpers.{MemoryCopy, MemoryFill, MemoryInit}` — widen
+  `dst` (and `src` for the dst-side memory in MemoryCopy) to
+  `nuint` at the start, route through `mem.AsSpan(nuint, int)`.
+  `MemoryInit`'s `src` stays `int` (data segment is byte[]-bounded).
+- `Wacs.Core/Wacs.Core/Instructions/MemoryHandlers.cs` `MemSlice`
+  — single chokepoint for every `[OpHandler]` load/store dispatch.
+  Last line `return mem.AsSpan((int)ea, width)` becomes
+  `return mem.AsSpan((nuint)ea, width)`. This site was missed in
+  round 7's per-instruction-file sweep.
+- `Wacs.Core/Wacs.Core/Instructions/MemoryBulk.cs` —
+  `InstMemoryInit.Execute` (line 235), `InstMemoryCopy.Execute`
+  (line 389), `InstMemoryFill.Execute` (line 459) all switch
+  guest-memory address args from `(int)x` to `(nuint)x`.
+
+Test surface: 3 new [Fact]s in
+`Wacs.Transpiler.Test.MemoryHelpersHighAddressTests` covering
+`BulkHelpers.MemoryFill / MemoryCopy / MemoryInit` at
+`addr = 0x80000400` (~2 GiB + 1 KiB) on a NativePointer
+33000-page memory. Pre-fix each AVs; post-fix bytes round-trip.
+Total in that suite: 8/8 (5 from gap 15 + 3 from gap 16).
+
+Out of scope: atomics still pin `int ea` through abstract
+`InstAtomicLoad.DoLoad` signatures. Same-shape gap, different
+cohort. Follow-up.
+
 ## WACS 0.13.3 / WACS.Cli 1.5.3 / WACS.Transpiler.Lib 0.8.3 — high-address load/store on NativePointer memories
 
 `MemoryHelpers.StoreI32` / `LoadI32` (and every load/store/narrow/F32/F64

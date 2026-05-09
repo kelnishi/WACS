@@ -210,25 +210,35 @@ namespace Wacs.Transpiler.AOT.Emitters
         {
             var dstMem = ctx.Memories[dstMemIdx];
             var srcMem = ctx.Memories[srcMemIdx];
+            // Widen each i32 wasm address to nuint up front so the
+            // arithmetic and the AsSpan dispatch stay in the unsigned
+            // range that NativePointer-backed memories use past 2 GiB.
+            // Raw `int` would hit the AsSpan(int, int) overload and
+            // wrap to a negative pointer offset on the high half.
+            nuint srcEa = (uint)src;
+            nuint dstEa = (uint)dst;
+            nuint nlen = (uint)len;
             // WASM spec: bounds check applies even when len == 0
-            if ((long)(uint)src + (long)(uint)len > (long)srcMem.ByteLength ||
-                (long)(uint)dst + (long)(uint)len > (long)dstMem.ByteLength)
+            if ((ulong)srcEa + (ulong)nlen > (ulong)srcMem.ByteLength ||
+                (ulong)dstEa + (ulong)nlen > (ulong)dstMem.ByteLength)
                 throw new TrapException("out of bounds memory access");
             if (len == 0) return;
             // Span<byte>.CopyTo dispatches to Buffer.Memmove and
             // handles overlap correctly across both modes.
-            srcMem.AsSpan(src, len).CopyTo(dstMem.AsSpan(dst, len));
+            srcMem.AsSpan(srcEa, len).CopyTo(dstMem.AsSpan(dstEa, len));
         }
 
         public static void MemoryFill(ThinContext ctx, int memIdx,
             int dst, int val, int len)
         {
             var mem = ctx.Memories[memIdx];
+            nuint dstEa = (uint)dst;
+            nuint nlen = (uint)len;
             // WASM spec: bounds check applies even when len == 0
-            if ((long)(uint)dst + (long)(uint)len > (long)mem.ByteLength)
+            if ((ulong)dstEa + (ulong)nlen > (ulong)mem.ByteLength)
                 throw new TrapException("out of bounds memory access");
             if (len == 0) return;
-            mem.AsSpan(dst, len).Fill((byte)val);
+            mem.AsSpan(dstEa, len).Fill((byte)val);
         }
 
         public static void MemoryInit(ThinContext ctx, int memIdx, int dataIdx,
@@ -250,12 +260,17 @@ namespace Wacs.Transpiler.AOT.Emitters
                     ?? Array.Empty<byte>();
             }
 
-            // WASM spec: bounds check applies even when len == 0
+            // Source side is a byte[] data segment — bounded ≤ 2 GiB by
+            // Array.MaxLength, so int arithmetic on `src` is safe by
+            // construction. The dst (guest memory) is the side that
+            // can sit past 2 GiB under NativePointer mode.
+            nuint dstEa = (uint)dst;
+            nuint nlen = (uint)len;
             if ((long)(uint)src + (long)(uint)len > segData.Length ||
-                (long)(uint)dst + (long)(uint)len > (long)mem.ByteLength)
+                (ulong)dstEa + (ulong)nlen > (ulong)mem.ByteLength)
                 throw new TrapException("out of bounds memory access");
             if (len == 0) return;
-            new ReadOnlySpan<byte>(segData, src, len).CopyTo(mem.AsSpan(dst, len));
+            new ReadOnlySpan<byte>(segData, src, len).CopyTo(mem.AsSpan(dstEa, len));
         }
 
         public static void DataDrop(ThinContext ctx, int dataIdx)
