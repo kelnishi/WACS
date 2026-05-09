@@ -16,7 +16,7 @@ namespace Wacs.WASI.Preview2.Sockets
 {
     /// <summary>
     /// Host representation of
-    /// <c>wasi:sockets/ip-name-lookup@0.2.3</c>'s
+    /// <c>wasi:sockets/ip-name-lookup@0.2.8</c>'s
     /// <c>resolve-address-stream</c> resource. A resolver
     /// pull-stream — guest calls
     /// <see cref="ResolveNextAddress"/> in a loop, getting

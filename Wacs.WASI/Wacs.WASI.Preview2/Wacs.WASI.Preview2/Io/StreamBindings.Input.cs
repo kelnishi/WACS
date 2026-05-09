@@ -14,7 +14,7 @@ namespace Wacs.WASI.Preview2.Io
 {
     public sealed partial class StreamBindings
     {
-        // wasi:io/streams@0.2.3
+        // wasi:io/streams@0.2.8
         //   resource input-stream {
         //     read: func(len: u64) -> result<list<u8>, stream-error>;
         //     blocking-read: func(len: u64) -> result<list<u8>, stream-error>;

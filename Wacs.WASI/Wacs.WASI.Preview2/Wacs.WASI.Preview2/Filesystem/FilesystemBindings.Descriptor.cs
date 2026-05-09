@@ -16,7 +16,7 @@ namespace Wacs.WASI.Preview2.Filesystem
 {
     public sealed partial class FilesystemBindings
     {
-        // wasi:filesystem/types@0.2.3 — descriptor resource.
+        // wasi:filesystem/types@0.2.8 — descriptor resource.
         // Each binding line wires one wire shape to its host
         // method on Descriptor. Host methods return
         // Result<X, ErrorCode>; the Write* helpers encode both

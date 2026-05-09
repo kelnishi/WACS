@@ -106,14 +106,14 @@ namespace Wacs.ComponentModel.Test
         public void Versioned_ref_matches_exact_version_string()
         {
             var providerSrc = @"
-                package wasi:io@0.2.3;
+                package wasi:io@0.2.8;
                 interface streams {
                     dummy: func() -> u32;
                 }";
             var consumerSrc = @"
                 package local:consumer;
                 world app {
-                    import wasi:io/streams@0.2.3;
+                    import wasi:io/streams@0.2.8;
                 }";
             var packages = new List<CtPackage>();
             packages.AddRange(ParseAndConvert(providerSrc));
@@ -132,7 +132,7 @@ namespace Wacs.ComponentModel.Test
             // 0.x versions are exact-match per the scope plan. 0.2.2
             // consumer can't bind to 0.2.3 provider.
             var providerSrc = @"
-                package wasi:io@0.2.3;
+                package wasi:io@0.2.8;
                 interface streams { dummy: func() -> u32; }";
             var consumerSrc = @"
                 package local:consumer;
@@ -164,7 +164,7 @@ namespace Wacs.ComponentModel.Test
         {
             // End-to-end: parse hello.wit + wasi-cli/run.wit from the
             // submodule, build the package set, resolve. The export
-            // `wasi:cli/run@0.2.3` ref on hello's world should bind
+            // `wasi:cli/run@0.2.8` ref on hello's world should bind
             // to wasi-cli's run interface.
             var root = FindSubmoduleRoot();
             var helloWit = File.ReadAllText(Path.Combine(root,

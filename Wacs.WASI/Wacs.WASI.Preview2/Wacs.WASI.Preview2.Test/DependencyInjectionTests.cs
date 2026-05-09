@@ -82,15 +82,15 @@ namespace Wacs.WASI.Preview2.Test
             // the linker's tracked binding set.
             var bindings = linker.Bindings;
             Assert.Contains(bindings, b =>
-                b.Module == "wasi:cli/exit@0.2.3");
+                b.Module == "wasi:cli/exit@0.2.8");
             Assert.Contains(bindings, b =>
-                b.Module == "wasi:random/random@0.2.3");
+                b.Module == "wasi:random/random@0.2.8");
             Assert.Contains(bindings, b =>
-                b.Module == "wasi:io/streams@0.2.3");
+                b.Module == "wasi:io/streams@0.2.8");
             Assert.Contains(bindings, b =>
-                b.Module == "wasi:http/types@0.2.3");
+                b.Module == "wasi:http/types@0.2.8");
             Assert.Contains(bindings, b =>
-                b.Module == "wasi:sockets/tcp@0.2.3");
+                b.Module == "wasi:sockets/tcp@0.2.8");
         }
 
         // ---------- Selective override -------------------------
@@ -163,15 +163,15 @@ namespace Wacs.WASI.Preview2.Test
             // canonical entries — exact-arity matching is
             // a separate concern.
             Assert.DoesNotContain(report.Issues, i =>
-                i.Module == "wasi:io/streams@0.2.3"
+                i.Module == "wasi:io/streams@0.2.8"
                 && i.Entity == "[method]input-stream.read"
                 && i.Kind == ValidationIssueKind.MissingBinding);
             Assert.DoesNotContain(report.Issues, i =>
-                i.Module == "wasi:random/random@0.2.3"
+                i.Module == "wasi:random/random@0.2.8"
                 && i.Entity == "get-random-bytes"
                 && i.Kind == ValidationIssueKind.MissingBinding);
             Assert.DoesNotContain(report.Issues, i =>
-                i.Module == "wasi:http/types@0.2.3"
+                i.Module == "wasi:http/types@0.2.8"
                 && i.Entity == "[constructor]fields"
                 && i.Kind == ValidationIssueKind.MissingBinding);
         }

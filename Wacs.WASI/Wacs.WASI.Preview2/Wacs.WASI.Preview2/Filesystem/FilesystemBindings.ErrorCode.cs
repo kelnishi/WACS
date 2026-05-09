@@ -16,7 +16,7 @@ namespace Wacs.WASI.Preview2.Filesystem
 {
     public sealed partial class FilesystemBindings
     {
-        // wasi:filesystem/types@0.2.3 — top-level
+        // wasi:filesystem/types@0.2.8 — top-level
         //   filesystem-error-code: func(err: borrow<error>)
         //     -> option<error-code>
         //

@@ -84,7 +84,7 @@ namespace Wacs.WASI.Preview2.Cli
             {
                 var t = _resources.Table<TerminalInput>();
                 runtime.BindHostFunction<Action<ExecContext, int>>(
-                    ("wasi:cli/terminal-input@0.2.3",
+                    ("wasi:cli/terminal-input@0.2.8",
                      "[resource-drop]terminal-input"),
                     (_, h) => t.Drop(h));
             }
@@ -92,20 +92,20 @@ namespace Wacs.WASI.Preview2.Cli
             {
                 var t = _resources.Table<TerminalOutput>();
                 runtime.BindHostFunction<Action<ExecContext, int>>(
-                    ("wasi:cli/terminal-output@0.2.3",
+                    ("wasi:cli/terminal-output@0.2.8",
                      "[resource-drop]terminal-output"),
                     (_, h) => t.Drop(h));
             }
         }
 
-        // wasi:cli/environment@0.2.3
+        // wasi:cli/environment@0.2.8
         //   get-environment: func() -> list<tuple<string, string>>
         //   get-arguments: func() -> list<string>
         //   initial-cwd: func() -> option<string>
         private static void BindEnvironment(WasmRuntime runtime,
             Realloc alloc, IEnvironment impl)
         {
-            const string ns = "wasi:cli/environment@0.2.3";
+            const string ns = "wasi:cli/environment@0.2.8";
 
             runtime.BindHostFunction<Action<ExecContext, int>>(
                 (ns, "get-arguments"),
@@ -138,13 +138,13 @@ namespace Wacs.WASI.Preview2.Cli
                 });
         }
 
-        // wasi:cli/exit@0.2.3
+        // wasi:cli/exit@0.2.8
         //   exit: func(status: result)        ; result<_,_> flat → 1 i32
         //   exit-with-code: func(status-code: u8) ; u8 widens to i32
         // Both diverge — the impl typically throws ExitException.
         private static void BindExit(WasmRuntime runtime, IExit impl)
         {
-            const string ns = "wasi:cli/exit@0.2.3";
+            const string ns = "wasi:cli/exit@0.2.8";
 
             runtime.BindHostFunction<Action<ExecContext, int>>(
                 (ns, "exit"),
@@ -163,40 +163,40 @@ namespace Wacs.WASI.Preview2.Cli
                 (_, code) => impl.ExitWithCode((byte)code));
         }
 
-        // wasi:cli/stdin@0.2.3 — get-stdin: func() -> own<input-stream>
+        // wasi:cli/stdin@0.2.8 — get-stdin: func() -> own<input-stream>
         private static void BindStdin(WasmRuntime runtime,
             ResourceContext resources, IStdin impl)
         {
-            const string ns = "wasi:cli/stdin@0.2.3";
+            const string ns = "wasi:cli/stdin@0.2.8";
             var streams = resources.Table<InputStream>();
             runtime.BindHostFunction<Func<ExecContext, int>>(
                 (ns, "get-stdin"),
                 _ => streams.Allocate(impl.GetStdin()));
         }
 
-        // wasi:cli/stdout@0.2.3 — get-stdout: func() -> own<output-stream>
+        // wasi:cli/stdout@0.2.8 — get-stdout: func() -> own<output-stream>
         private static void BindStdout(WasmRuntime runtime,
             ResourceContext resources, IStdout impl)
         {
-            const string ns = "wasi:cli/stdout@0.2.3";
+            const string ns = "wasi:cli/stdout@0.2.8";
             var streams = resources.Table<OutputStream>();
             runtime.BindHostFunction<Func<ExecContext, int>>(
                 (ns, "get-stdout"),
                 _ => streams.Allocate(impl.GetStdout()));
         }
 
-        // wasi:cli/stderr@0.2.3 — get-stderr: func() -> own<output-stream>
+        // wasi:cli/stderr@0.2.8 — get-stderr: func() -> own<output-stream>
         private static void BindStderr(WasmRuntime runtime,
             ResourceContext resources, IStderr impl)
         {
-            const string ns = "wasi:cli/stderr@0.2.3";
+            const string ns = "wasi:cli/stderr@0.2.8";
             var streams = resources.Table<OutputStream>();
             runtime.BindHostFunction<Func<ExecContext, int>>(
                 (ns, "get-stderr"),
                 _ => streams.Allocate(impl.GetStderr()));
         }
 
-        // wasi:cli/terminal-stdin@0.2.3
+        // wasi:cli/terminal-stdin@0.2.8
         //   get-terminal-stdin: func() -> option<own<terminal-input>>
         // retArea: 8 bytes — disc(u8) + 3 pad + handle(i32).
         // Generated impl returns Option<ITerminalInput> — TryGet
@@ -204,7 +204,7 @@ namespace Wacs.WASI.Preview2.Cli
         private static void BindTerminalStdin(WasmRuntime runtime,
             ResourceContext resources, ITerminalStdin impl)
         {
-            const string ns = "wasi:cli/terminal-stdin@0.2.3";
+            const string ns = "wasi:cli/terminal-stdin@0.2.8";
             var t = resources.Table<TerminalInput>();
             runtime.BindHostFunction<Action<ExecContext, int>>(
                 (ns, "get-terminal-stdin"),
@@ -219,7 +219,7 @@ namespace Wacs.WASI.Preview2.Cli
         private static void BindTerminalStdout(WasmRuntime runtime,
             ResourceContext resources, ITerminalStdout impl)
         {
-            const string ns = "wasi:cli/terminal-stdout@0.2.3";
+            const string ns = "wasi:cli/terminal-stdout@0.2.8";
             var t = resources.Table<TerminalOutput>();
             runtime.BindHostFunction<Action<ExecContext, int>>(
                 (ns, "get-terminal-stdout"),
@@ -234,7 +234,7 @@ namespace Wacs.WASI.Preview2.Cli
         private static void BindTerminalStderr(WasmRuntime runtime,
             ResourceContext resources, ITerminalStderr impl)
         {
-            const string ns = "wasi:cli/terminal-stderr@0.2.3";
+            const string ns = "wasi:cli/terminal-stderr@0.2.8";
             var t = resources.Table<TerminalOutput>();
             runtime.BindHostFunction<Action<ExecContext, int>>(
                 (ns, "get-terminal-stderr"),

@@ -14,7 +14,7 @@ using Wacs.WASI.Preview2.HostBinding.CanonicalAbi;
 namespace Wacs.WASI.Preview2.Http
 {
     /// <summary>
-    /// Bindings for <c>wasi:http/outgoing-handler@0.2.3</c>:
+    /// Bindings for <c>wasi:http/outgoing-handler@0.2.8</c>:
     /// <code>handle: func(
     ///     request: own&lt;outgoing-request&gt;,
     ///     options: option&lt;own&lt;request-options&gt;&gt;,
@@ -39,7 +39,7 @@ namespace Wacs.WASI.Preview2.Http
     /// </summary>
     public sealed class OutgoingHandlerBindings : IBindable
     {
-        private const string Ns = "wasi:http/outgoing-handler@0.2.3";
+        private const string Ns = "wasi:http/outgoing-handler@0.2.8";
 
         private readonly ResourceContext _resources;
         private readonly IOutgoingHandler _impl;

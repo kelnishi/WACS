@@ -50,13 +50,13 @@ namespace Wacs.WASI.Preview2.Random
                 BindInsecureSeed(runtime, _insecureSeed);
         }
 
-        // wasi:random/random@0.2.3
+        // wasi:random/random@0.2.8
         //   get-random-bytes: func(len: u64) -> list<u8>
         //   get-random-u64: func() -> u64
         private static void BindRandom(WasmRuntime runtime,
             Realloc alloc, IRandom impl)
         {
-            const string ns = "wasi:random/random@0.2.3";
+            const string ns = "wasi:random/random@0.2.8";
 
             runtime.BindHostFunction<Func<ExecContext, long>>(
                 (ns, "get-random-u64"),
@@ -69,13 +69,13 @@ namespace Wacs.WASI.Preview2.Random
                         impl.GetRandomBytes((ulong)len)));
         }
 
-        // wasi:random/insecure@0.2.3
+        // wasi:random/insecure@0.2.8
         //   get-insecure-random-bytes: func(len: u64) -> list<u8>
         //   get-insecure-random-u64: func() -> u64
         private static void BindInsecureRandom(WasmRuntime runtime,
             Realloc alloc, IInsecure impl)
         {
-            const string ns = "wasi:random/insecure@0.2.3";
+            const string ns = "wasi:random/insecure@0.2.8";
 
             runtime.BindHostFunction<Func<ExecContext, long>>(
                 (ns, "get-insecure-random-u64"),
@@ -88,13 +88,13 @@ namespace Wacs.WASI.Preview2.Random
                         impl.GetInsecureRandomBytes((ulong)len)));
         }
 
-        // wasi:random/insecure-seed@0.2.3
+        // wasi:random/insecure-seed@0.2.8
         //   insecure-seed: func() -> tuple<u64, u64>
         // Tuple of primitives: 16-byte retArea (two u64s, align 8).
         private static void BindInsecureSeed(WasmRuntime runtime,
             IInsecureSeed impl)
         {
-            const string ns = "wasi:random/insecure-seed@0.2.3";
+            const string ns = "wasi:random/insecure-seed@0.2.8";
 
             runtime.BindHostFunction<Action<ExecContext, int>>(
                 (ns, "insecure-seed"),

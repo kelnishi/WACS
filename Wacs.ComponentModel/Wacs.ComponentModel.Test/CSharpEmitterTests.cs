@@ -1245,6 +1245,11 @@ world w { export def; }";
             // All should merge into a single wasi:cli package with
             // every interface visible.
             var cli = Assert.Single(packages);
+            // Tracks the wasi-cli submodule pinned in
+            // Spec.Test/components/wasi-cli (currently v0.2.3).
+            // The runtime-side Wacs.WASI.Preview2 ships @0.2.8 WIT
+            // separately; this test exercises the WIT loader
+            // against the submodule fixture.
             Assert.Equal("wasi:cli@0.2.3", cli.Name.ToString());
             Assert.Contains(cli.Interfaces, i => i.Name == "run");
             Assert.Contains(cli.Interfaces, i => i.Name == "environment");
@@ -1271,6 +1276,10 @@ world w { export def; }";
             var packages = WitLoader.LoadDirectoryTree(witDir);
 
             var names = packages.Select(p => p.Name.ToString()).ToArray();
+            // Tracks the wasi-cli submodule pinned at v0.2.3 (see
+            // WitLoader_merges_headerless_files_into_named_package
+            // for the rationale on why the submodule and the
+            // runtime-shipped @0.2.8 WIT diverge).
             Assert.Contains("wasi:cli@0.2.3", names);
             Assert.Contains("wasi:io@0.2.3", names);
             Assert.Contains("wasi:clocks@0.2.3", names);

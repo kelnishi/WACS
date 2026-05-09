@@ -12,7 +12,7 @@ using Wacs.WASI.Preview2.HostBinding;
 namespace Wacs.WASI.Preview2.Io
 {
     /// <summary>
-    /// Host representation of <c>wasi:io/streams@0.2.3</c>'s
+    /// Host representation of <c>wasi:io/streams@0.2.8</c>'s
     /// <c>output-stream</c> resource. Implements
     /// <see cref="IOutputStream"/> directly — every method
     /// returns the canonical-ABI <c>result&lt;X,

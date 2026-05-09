@@ -18,12 +18,12 @@ namespace Wacs.WASI.Preview2.Filesystem
     /// Orchestrator for the two <c>wasi:filesystem/*</c>
     /// interfaces:
     ///
-    ///   wasi:filesystem/types@0.2.3     — the Descriptor +
+    ///   wasi:filesystem/types@0.2.8     — the Descriptor +
     ///                                     DirectoryEntryStream
     ///                                     resources, plus the
     ///                                     top-level
     ///                                     filesystem-error-code
-    ///   wasi:filesystem/preopens@0.2.3  — get-directories
+    ///   wasi:filesystem/preopens@0.2.8  — get-directories
     ///
     /// <para>Constructor takes an optional
     /// <see cref="IPreopens"/> +
@@ -42,8 +42,8 @@ namespace Wacs.WASI.Preview2.Filesystem
     /// </summary>
     public sealed partial class FilesystemBindings : IBindable
     {
-        private const string Ns = "wasi:filesystem/types@0.2.3";
-        private const string PreopensNs = "wasi:filesystem/preopens@0.2.3";
+        private const string Ns = "wasi:filesystem/types@0.2.8";
+        private const string PreopensNs = "wasi:filesystem/preopens@0.2.8";
 
         private readonly ResourceContext _resources;
         private readonly IPreopens? _preopens;

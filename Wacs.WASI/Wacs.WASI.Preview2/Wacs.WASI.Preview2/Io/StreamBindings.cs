@@ -14,7 +14,7 @@ using Wacs.WASI.Preview2.HostBinding.CanonicalAbi;
 namespace Wacs.WASI.Preview2.Io
 {
     /// <summary>
-    /// Orchestrator for <c>wasi:io/streams@0.2.3</c> — both
+    /// Orchestrator for <c>wasi:io/streams@0.2.8</c> — both
     /// the <see cref="InputStream"/> and
     /// <see cref="OutputStream"/> resources, plus their
     /// (resource-drop) destructors.
@@ -29,7 +29,7 @@ namespace Wacs.WASI.Preview2.Io
     /// </summary>
     public sealed partial class StreamBindings : IBindable
     {
-        private const string Ns = "wasi:io/streams@0.2.3";
+        private const string Ns = "wasi:io/streams@0.2.8";
         private readonly ResourceContext _resources;
 
         public StreamBindings(ResourceContext resources)

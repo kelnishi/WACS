@@ -1,10 +1,10 @@
-package wasi:http@0.2.3;
+package wasi:http@0.2.8;
 
 interface types {
-    use wasi:clocks/monotonic-clock@0.2.3.{duration};
-    use wasi:io/streams@0.2.3.{input-stream, output-stream};
-    use wasi:io/error@0.2.3.{error as io-error};
-    use wasi:io/poll@0.2.3.{pollable};
+    use wasi:clocks/monotonic-clock@0.2.8.{duration};
+    use wasi:io/streams@0.2.8.{input-stream, output-stream};
+    use wasi:io/error@0.2.8.{error as io-error};
+    use wasi:io/poll@0.2.8.{pollable};
 
     variant method {
         get,

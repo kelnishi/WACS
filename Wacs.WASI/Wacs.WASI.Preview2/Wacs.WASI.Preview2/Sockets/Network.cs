@@ -11,7 +11,7 @@ using Wacs.WASI.Preview2.HostBinding;
 namespace Wacs.WASI.Preview2.Sockets
 {
     /// <summary>
-    /// Host representation of <c>wasi:sockets/network@0.2.3</c>'s
+    /// Host representation of <c>wasi:sockets/network@0.2.8</c>'s
     /// <c>network</c> resource. The WIT type carries no
     /// methods in 0.2.3 — it's an opaque capability handle
     /// that gates which sockets a guest can create. Pass to

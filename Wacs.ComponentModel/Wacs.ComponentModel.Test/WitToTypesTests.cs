@@ -305,7 +305,7 @@ namespace Wacs.ComponentModel.Test
             var pkgs = Convert(@"
                 package test:pkg;
                 world app {
-                    import wasi:io/streams@0.2.3;
+                    import wasi:io/streams@0.2.8;
                 }");
             var w = pkgs[0].Worlds[0];
             var imp = Assert.Single(w.Imports);
@@ -313,7 +313,7 @@ namespace Wacs.ComponentModel.Test
             Assert.NotNull(iref.Package);
             Assert.Equal("wasi", iref.Package!.Namespace);
             Assert.Equal("streams", iref.InterfaceName);
-            Assert.Equal("0.2.3", iref.Package.Version);
+            Assert.Equal("0.2.8", iref.Package.Version);
         }
 
         // ---- Fixture smoke tests over WASI 0.2.3 ---------------------------
@@ -399,6 +399,8 @@ namespace Wacs.ComponentModel.Test
 
             var pkgs = WitToTypes.Convert(WitParser.Parse(src));
             var pkg = Assert.Single(pkgs);
+            // Asserts the version pinned in
+            // Spec.Test/components/wasi-cli (currently v0.2.3).
             Assert.Equal("wasi:io@0.2.3", pkg.Name.ToString());
 
             var streams = Assert.Single(pkg.Interfaces);

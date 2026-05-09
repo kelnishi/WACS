@@ -16,7 +16,7 @@ namespace Wacs.WASI.Preview2.Sockets
 {
     public sealed partial class SocketsBindings
     {
-        // wasi:sockets/tcp@0.2.3 — tcp-socket resource. Bare
+        // wasi:sockets/tcp@0.2.8 — tcp-socket resource. Bare
         // bool / enum returns skip the result wrapper; everything
         // else is result<X, error-code> with the Result-returning
         // host method dispatched through WriteResult* helpers.
