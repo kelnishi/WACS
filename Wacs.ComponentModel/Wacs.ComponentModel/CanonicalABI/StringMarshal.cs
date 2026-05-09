@@ -8,6 +8,7 @@
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
+using Wacs.Core.Runtime.Types;
 
 namespace Wacs.ComponentModel.CanonicalABI
 {
@@ -65,14 +66,13 @@ namespace Wacs.ComponentModel.CanonicalABI
         /// offset <paramref name="ptr"/>, length
         /// <paramref name="len"/> into a <see cref="string"/>.
         /// <paramref name="source"/> is the core module's linear
-        /// memory (a <c>byte[]</c> snapshot or equivalent).
+        /// memory; the mode-aware <see cref="MemoryInstance.AsSpan"/>
+        /// returns the right view regardless of
+        /// <see cref="MemoryInstance.StorageMode"/>.
         /// </summary>
-        public static string LiftUtf8(byte[] source, int ptr, int len)
+        public static string LiftUtf8(MemoryInstance source, int ptr, int len)
         {
-            if (ptr < 0 || len < 0 || ptr + len > source.Length)
-                throw new ArgumentOutOfRangeException(nameof(ptr),
-                    "String span out of range of provided memory buffer.");
-            return Encoding.UTF8.GetString(source, ptr, len);
+            return Encoding.UTF8.GetString(source.AsSpan(ptr, len));
         }
 
         /// <summary>
@@ -111,13 +111,12 @@ namespace Wacs.ComponentModel.CanonicalABI
         /// memory at <paramref name="dstPtr"/>. Companion to
         /// <see cref="EncodeUtf8"/> for the transpiler's lower
         /// path; see that method's remarks for the IL contract.
+        /// Mode-agnostic: routes through
+        /// <see cref="MemoryInstance.AsSpan"/>.
         /// </summary>
-        public static void CopyToGuest(byte[] bytes, byte[] memory, int dstPtr)
+        public static void CopyToGuest(byte[] bytes, MemoryInstance memory, int dstPtr)
         {
-            if (dstPtr < 0 || dstPtr + bytes.Length > memory.Length)
-                throw new ArgumentOutOfRangeException(nameof(dstPtr),
-                    "UTF-8 copy span out of range of guest memory buffer.");
-            Array.Copy(bytes, 0, memory, dstPtr, bytes.Length);
+            bytes.AsSpan().CopyTo(memory.AsSpan(dstPtr, bytes.Length));
         }
 
         /// <summary>
@@ -131,13 +130,10 @@ namespace Wacs.ComponentModel.CanonicalABI
         /// unit, little-endian on every component-supporting
         /// platform we care about.
         /// </summary>
-        public static string LiftUtf16(byte[] source, int ptr, int codeUnitCount)
+        public static string LiftUtf16(MemoryInstance source, int ptr, int codeUnitCount)
         {
-            if (ptr < 0 || codeUnitCount < 0
-                || ptr + 2L * codeUnitCount > source.Length)
-                throw new ArgumentOutOfRangeException(nameof(ptr),
-                    "UTF-16 string span out of range of provided memory buffer.");
-            return Encoding.Unicode.GetString(source, ptr, codeUnitCount * 2);
+            return Encoding.Unicode.GetString(
+                source.AsSpan(ptr, codeUnitCount * 2));
         }
 
         /// <summary>
@@ -171,7 +167,7 @@ namespace Wacs.ComponentModel.CanonicalABI
         /// otherwise treat as Latin-1 with <c>byte_length = tagged</c>
         /// (each byte one code point in U+0000..U+00FF).
         /// </summary>
-        public static string LiftLatin1OrUtf16(byte[] source, int ptr, int taggedCodeUnits)
+        public static string LiftLatin1OrUtf16(MemoryInstance source, int ptr, int taggedCodeUnits)
         {
             // Cast to uint to inspect the high bit safely — the
             // wire value is treated as unsigned per CanonicalABI.
@@ -186,10 +182,7 @@ namespace Wacs.ComponentModel.CanonicalABI
             // by codepage rather than the .NET 5+ Encoding.Latin1
             // shorthand to keep netstandard2.1 happy.
             var byteLen = (int)tagged;
-            if (ptr < 0 || byteLen < 0 || ptr + byteLen > source.Length)
-                throw new ArgumentOutOfRangeException(nameof(ptr),
-                    "Latin-1 string span out of range of provided memory buffer.");
-            return Latin1.GetString(source, ptr, byteLen);
+            return Latin1.GetString(source.AsSpan(ptr, byteLen));
         }
 
         /// <summary>Cached ISO-8859-1 decoder. Equivalent to

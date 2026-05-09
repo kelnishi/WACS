@@ -1302,7 +1302,6 @@ namespace Wacs.Transpiler.AOT
             if (data.ActiveDataSegments.Length == 0) return;
 
             var memoriesField = typeof(ThinContext).GetField(nameof(ThinContext.Memories))!;
-            var memoryDataField = typeof(MemoryInstance).GetField(nameof(MemoryInstance.Data))!;
             var createSpanOpen = typeof(System.Runtime.CompilerServices.RuntimeHelpers).GetMethod(
                 nameof(System.Runtime.CompilerServices.RuntimeHelpers.CreateSpan),
                 BindingFlags.Public | BindingFlags.Static)!;
@@ -1319,7 +1318,7 @@ namespace Wacs.Transpiler.AOT
 
                 // BulkHelpers.CopySegmentToMemory(
                 //     RuntimeHelpers.CreateSpan<byte>(__ldtoken __WACSAotData.Segment_N__),
-                //     ctx.Memories[memIdx].Data,
+                //     ctx.Memories[memIdx],     // MemoryInstance, mode-aware
                 //     (int)offset, bytes.Length);
                 il.Emit(OpCodes.Ldtoken, segField);
                 il.Emit(OpCodes.Call, createSpanByte);
@@ -1328,7 +1327,6 @@ namespace Wacs.Transpiler.AOT
                 il.Emit(OpCodes.Ldfld, memoriesField);
                 il.Emit(OpCodes.Ldc_I4, memIdx);
                 il.Emit(OpCodes.Ldelem_Ref);
-                il.Emit(OpCodes.Ldfld, memoryDataField);
 
                 il.Emit(OpCodes.Ldc_I4, (int)offset);
                 il.Emit(OpCodes.Ldc_I4, bytes.Length);
@@ -2308,14 +2306,19 @@ namespace Wacs.Transpiler.AOT
         {
             if (_memoryCount == 0) return;
 
-            // Memory property: byte[] Memory => _ctx.Memories[0]
+            // Memory property: MemoryInstance Memory => _ctx.Memories[0]
+            // Returning the live MemoryInstance (not its byte[] field)
+            // keeps the canonical-ABI lower path mode-agnostic — the
+            // host's CopyToGuest / CopyArrayToGuest helpers route
+            // through MemoryInstance.AsSpan, which dispatches on
+            // ManagedArray vs NativePointer storage.
             var memProp = ModuleType!.DefineProperty(
-                "Memory", PropertyAttributes.None, typeof(byte[]), null);
+                "Memory", PropertyAttributes.None, typeof(MemoryInstance), null);
 
             var getter = ModuleType.DefineMethod(
                 "get_Memory",
                 MethodAttributes.Public | MethodAttributes.SpecialName,
-                typeof(byte[]), Type.EmptyTypes);
+                typeof(MemoryInstance), Type.EmptyTypes);
 
             var il = getter.GetILGenerator();
             il.Emit(OpCodes.Ldarg_0);
@@ -2323,7 +2326,6 @@ namespace Wacs.Transpiler.AOT
             il.Emit(OpCodes.Ldfld, typeof(ThinContext).GetField(nameof(ThinContext.Memories))!);
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ldelem_Ref);              // MemoryInstance
-            il.Emit(OpCodes.Ldfld, typeof(MemoryInstance).GetField(nameof(MemoryInstance.Data))!);
             il.Emit(OpCodes.Ret);
 
             memProp.SetGetMethod(getter);

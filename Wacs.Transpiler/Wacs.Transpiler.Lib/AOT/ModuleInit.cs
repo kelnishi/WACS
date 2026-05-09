@@ -111,14 +111,18 @@ namespace Wacs.Transpiler.AOT
 
         /// <summary>
         /// Copy a registered data segment into a memory at the given offset.
-        /// Called from the Module constructor's IL.
+        /// Called from the Module constructor's IL. Routes through
+        /// <see cref="Wacs.Core.Runtime.Types.MemoryInstance.AsSpan"/>
+        /// so both <see cref="Wacs.Core.Runtime.MemoryStorageMode.ManagedArray"/>
+        /// and <see cref="Wacs.Core.Runtime.MemoryStorageMode.NativePointer"/>
+        /// backings work the same.
         /// </summary>
         public static void CopyDataSegment(Wacs.Core.Runtime.Types.MemoryInstance[] memories, int memIdx, int offset, int segmentId)
         {
             if (!_dataSegments.TryGetValue(segmentId, out var data)) return;
-            var memory = memories[memIdx].Data;
-            if (offset + data.Length > memory.Length) return; // bounds safety
-            Buffer.BlockCopy(data, 0, memory, offset, data.Length);
+            var memory = memories[memIdx];
+            if ((ulong)offset + (ulong)data.Length > memory.ByteLength) return; // bounds safety
+            data.AsSpan().CopyTo(memory.AsSpan(offset, data.Length));
         }
 
         /// <summary>

@@ -1,5 +1,66 @@
 # Changelog
 
+## WACS 0.13.2 / WACS.Cli 1.5.2 / WACS.Transpiler.Lib 0.8.2 / WACS.ComponentModel 0.3.2 — host paths route through MemoryInstance; retire byte[] pinning across canonical-ABI
+
+NativePointer-mode memories carry an empty sentinel `Array.Empty<byte>()`
+in `MemoryInstance.Data` so accidental `mem.Data[i]` access surfaces
+loudly. Pre-fix, every host-side canonical-ABI path pinned that field
+directly: the AotLinked active-data-segment install copied through
+`BulkHelpers.CopySegmentToMemory(byte[] dst, …)`; the canonical-ABI
+lower path called `Buffer.BlockCopy(value, 0, mem.Data, …)`; the lift
+path read `_memory.Data[disc]` and passed `_memory.Data` to
+`StringMarshal.LiftUtf8` and `ListMarshal.LiftPrim`. All AOORed in
+NativePointer mode.
+
+Routes every canonical-ABI host path through
+`MemoryInstance.AsSpan(int, int)` (the existing mode-aware accessor)
+so both `ManagedArray` and `NativePointer` backings work the same.
+Helper signatures migrated from `byte[]` to `MemoryInstance`:
+
+- `StringMarshal.LiftUtf8` / `LiftUtf16` / `LiftLatin1OrUtf16` / `CopyToGuest`
+- `ListMarshal.LiftPrim<T>` / `LiftStringList` / `LiftStringListUtf16` / `CopyArrayToGuest<T>`
+- `BulkHelpers.CopySegmentToMemory`
+- `ModuleInit.CopyDataSegment` (interpreter active-segment install)
+
+`PrimitiveStore` gains a reader sibling family — `ReadU8`, `ReadU16LE`,
+`ReadU32LE`, `ReadI32LE` — used at IL emit time to decode disc bytes
+and (ptr, len) header pairs. The scalar writer family
+(`StoreI8` / `StoreU8` / `StoreI16` / … / `StoreBool`) now takes
+`MemoryInstance` instead of `byte[]`.
+
+Transpiled module class's `Memory` property changes type from
+`byte[]` to `MemoryInstance`. Saved DLLs from v0.8.1 keep the old
+shape; v0.8.2 generates the new shape. Consumers that read
+`instance.Memory` directly need to update — `mem.Data` becomes
+`mem.AsSpan(...)` for byte access.
+
+IL emit sites in `DirectLinkedImportEmit` and `ComponentExportsEmit`
+drop the `Ldfld MemoryInstance.Data` instruction at every helper
+call site (the `MemoryInstance` is left on the stack instead) and
+replace `BitConverter.ToInt32(byte[], int)` lookups with
+`PrimitiveStore.ReadI32LE(MemoryInstance, int)`. Variant disc-byte
+reads use `PrimitiveStore.ReadU8/U16/U32` instead of `Ldelem_U1`.
+
+Test surface: new `data-segment-component` fixture (active data
+segment + string return). `ComponentInstanceTests
+.Component_data_segment_install_and_string_lift_under_storage`
+covers the interpreter component path × `MemoryStorageMode`;
+`ComponentTranspilerTests
+.TranspileSingleModule_data_segment_install_and_lift_honor_storage`
+covers `EmissionTarget × MemoryStorageMode` (4 cases). Both flavors
+of guest-memory shape are exercised: segment install at module ctor
++ string lift on call.
+
+Existing `StringMarshalTests` / `ListMarshalTests` updated to stage
+inputs in a `MemoryInstance` rather than a bare `byte[]`.
+
+Out of scope (separate gaps): `AtomicHelpers` (transpiler atomic
+ops still pin `mem.Data` for `ref byte` semantics), MemoryInstance's
+own `WriteInt32` / `WriteUtf8String` convenience methods (used by
+WASI Preview1), and `Wacs.WASI.NN`'s `ExecContextExtensions`. Each
+fails the grep'able `\.Data\b on MemoryInstance` invariant outside
+the `MemoryInstance.cs` file in domains independent of canonical-ABI.
+
 ## WACS 0.13.1 / WACS.Cli 1.5.1 / WACS.Transpiler.Lib 0.8.1 / WACS.ComponentModel 0.3.1 — `--native-memory` honored on every component path
 
 `--native-memory` was silently no-oped for component-mode runs:

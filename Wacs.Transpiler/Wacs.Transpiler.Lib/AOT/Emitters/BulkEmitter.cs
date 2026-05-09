@@ -160,11 +160,13 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// Zero-copy active-segment install: copy <paramref name="len"/> bytes
         /// from an RVA-mapped <see cref="ReadOnlySpan{Byte}"/> (typically
         /// produced by <c>RuntimeHelpers.CreateSpan&lt;byte&gt;</c> over a
-        /// <c>DefineInitializedData</c> field) into the wasm linear-memory
-        /// backing array at <paramref name="dstOffset"/>. Bounds are
-        /// transpile-time constants; no defensive checks here.
+        /// <c>DefineInitializedData</c> field) into <paramref name="dst"/>'s
+        /// linear-memory backing at <paramref name="dstOffset"/>. Routes
+        /// through <see cref="MemoryInstance.AsSpan"/> so both
+        /// <c>ManagedArray</c> and <c>NativePointer</c> backings work.
+        /// Bounds are transpile-time constants; no defensive checks here.
         /// </summary>
-        public static void CopySegmentToMemory(ReadOnlySpan<byte> src, byte[] dst, int dstOffset, int len)
+        public static void CopySegmentToMemory(ReadOnlySpan<byte> src, MemoryInstance dst, int dstOffset, int len)
         {
             src.Slice(0, len).CopyTo(dst.AsSpan(dstOffset, len));
         }

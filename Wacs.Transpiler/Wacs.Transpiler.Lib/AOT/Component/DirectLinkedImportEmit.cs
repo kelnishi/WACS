@@ -649,7 +649,6 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Ldfld, MemoriesField);
                 il.Emit(OpCodes.Ldc_I4_0);
                 il.Emit(OpCodes.Ldelem_Ref);
-                il.Emit(OpCodes.Ldfld, MemoryDataField);
                 il.Emit(OpCodes.Ldloc, temps[wasmCursor]);     // ptr
                 il.Emit(OpCodes.Ldloc, temps[wasmCursor + 1]); // len
                 il.Emit(OpCodes.Call, ResolveLiftStringMethod(
@@ -664,7 +663,6 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Ldfld, MemoriesField);
                 il.Emit(OpCodes.Ldc_I4_0);
                 il.Emit(OpCodes.Ldelem_Ref);
-                il.Emit(OpCodes.Ldfld, MemoryDataField);
                 il.Emit(OpCodes.Ldloc, temps[wasmCursor]);     // ptr
                 il.Emit(OpCodes.Ldloc, temps[wasmCursor + 1]); // len
                 il.Emit(OpCodes.Call,
@@ -680,7 +678,6 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Ldfld, MemoriesField);
                 il.Emit(OpCodes.Ldc_I4_0);
                 il.Emit(OpCodes.Ldelem_Ref);
-                il.Emit(OpCodes.Ldfld, MemoryDataField);
                 il.Emit(OpCodes.Ldloc, temps[wasmCursor]);     // listPtr
                 il.Emit(OpCodes.Ldloc, temps[wasmCursor + 1]); // count
                 il.Emit(OpCodes.Call, LiftStringListMethod);
@@ -888,16 +885,12 @@ namespace Wacs.Transpiler.AOT.Component
             typeof(ThinContext).GetField(
                 nameof(ThinContext.Memories))!;
 
-        private static readonly FieldInfo MemoryDataField =
-            typeof(MemoryInstance).GetField(
-                nameof(MemoryInstance.Data))!;
-
         private static readonly MethodInfo LiftUtf8Method =
             typeof(StringMarshal).GetMethod(
                 nameof(StringMarshal.LiftUtf8),
                 BindingFlags.Public | BindingFlags.Static,
                 binder: null,
-                types: new[] { typeof(byte[]), typeof(int), typeof(int) },
+                types: new[] { typeof(MemoryInstance), typeof(int), typeof(int) },
                 modifiers: null)!;
 
         private static readonly MethodInfo LiftUtf16Method =
@@ -905,7 +898,7 @@ namespace Wacs.Transpiler.AOT.Component
                 nameof(StringMarshal.LiftUtf16),
                 BindingFlags.Public | BindingFlags.Static,
                 binder: null,
-                types: new[] { typeof(byte[]), typeof(int), typeof(int) },
+                types: new[] { typeof(MemoryInstance), typeof(int), typeof(int) },
                 modifiers: null)!;
 
         private static readonly MethodInfo LiftLatin1OrUtf16Method =
@@ -913,7 +906,7 @@ namespace Wacs.Transpiler.AOT.Component
                 nameof(StringMarshal.LiftLatin1OrUtf16),
                 BindingFlags.Public | BindingFlags.Static,
                 binder: null,
-                types: new[] { typeof(byte[]), typeof(int), typeof(int) },
+                types: new[] { typeof(MemoryInstance), typeof(int), typeof(int) },
                 modifiers: null)!;
 
         // Resolve the LiftXxx for a string read at the binding's
@@ -936,7 +929,7 @@ namespace Wacs.Transpiler.AOT.Component
                 nameof(ListMarshal.LiftPrim),
                 BindingFlags.Public | BindingFlags.Static,
                 binder: null,
-                types: new[] { typeof(byte[]), typeof(int), typeof(int) },
+                types: new[] { typeof(MemoryInstance), typeof(int), typeof(int) },
                 modifiers: null)!;
 
         private static readonly ConcurrentDictionary<Type, MethodInfo>
@@ -965,7 +958,7 @@ namespace Wacs.Transpiler.AOT.Component
                 nameof(ListMarshal.LiftStringList),
                 BindingFlags.Public | BindingFlags.Static,
                 binder: null,
-                types: new[] { typeof(byte[]), typeof(int), typeof(int) },
+                types: new[] { typeof(MemoryInstance), typeof(int), typeof(int) },
                 modifiers: null)!;
 
         private static readonly FieldInfo CabiReallocField =
@@ -1718,7 +1711,6 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Ldfld, MemoriesField);
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ldelem_Ref);
-            il.Emit(OpCodes.Ldfld, MemoryDataField);
             // dest_offset = base + fieldOffset
             pushBaseAddress(il);
             if (fieldOffset != 0)
@@ -1874,7 +1866,6 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Ldfld, MemoriesField);
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ldelem_Ref);
-            il.Emit(OpCodes.Ldfld, MemoryDataField);
             il.Emit(OpCodes.Ldloc, retAreaLocal);
             il.Emit(OpCodes.Ldloc, outerPtrLocal);
             il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(int)));
@@ -1884,7 +1875,6 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Ldfld, MemoriesField);
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ldelem_Ref);
-            il.Emit(OpCodes.Ldfld, MemoryDataField);
             il.Emit(OpCodes.Ldloc, retAreaLocal);
             il.Emit(OpCodes.Ldc_I4_4);
             il.Emit(OpCodes.Add);
@@ -2033,7 +2023,6 @@ namespace Wacs.Transpiler.AOT.Component
                     il.Emit(OpCodes.Ldfld, MemoriesField);
                     il.Emit(OpCodes.Ldc_I4_0);
                     il.Emit(OpCodes.Ldelem_Ref);
-                    il.Emit(OpCodes.Ldfld, MemoryDataField);
                     il.Emit(OpCodes.Ldloc, retAreaLocal);
                     if (totalOffset != 0)
                     {
@@ -2231,7 +2220,6 @@ namespace Wacs.Transpiler.AOT.Component
                             il.Emit(OpCodes.Ldfld, MemoriesField);
                             il.Emit(OpCodes.Ldc_I4_0);
                             il.Emit(OpCodes.Ldelem_Ref);
-                            il.Emit(OpCodes.Ldfld, MemoryDataField);
                             il.Emit(OpCodes.Ldloc, retAreaLocal);
                             if (payloadAddrOffset != 0)
                             {
@@ -2333,7 +2321,6 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Ldfld, MemoriesField);
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ldelem_Ref);
-            il.Emit(OpCodes.Ldfld, MemoryDataField);
             il.Emit(OpCodes.Ldloc, retAreaLocal);
             if (offset != 0)
             {
@@ -2437,7 +2424,6 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Ldfld, MemoriesField);
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ldelem_Ref);
-            il.Emit(OpCodes.Ldfld, MemoryDataField);
             il.Emit(OpCodes.Ldloc, outerPtrLocal);
             il.Emit(OpCodes.Ldloc, indexLocal);
             il.Emit(OpCodes.Ldc_I4_4);
@@ -2475,7 +2461,6 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Ldfld, MemoriesField);
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ldelem_Ref);
-            il.Emit(OpCodes.Ldfld, MemoryDataField);
             il.Emit(OpCodes.Ldloc, retAreaLocal);
             il.Emit(OpCodes.Ldloc, outerPtrLocal);
             il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(int)));
@@ -2484,7 +2469,6 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Ldfld, MemoriesField);
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ldelem_Ref);
-            il.Emit(OpCodes.Ldfld, MemoryDataField);
             il.Emit(OpCodes.Ldloc, retAreaLocal);
             il.Emit(OpCodes.Ldc_I4_4);
             il.Emit(OpCodes.Add);
@@ -2596,7 +2580,6 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Ldfld, MemoriesField);
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ldelem_Ref);
-            il.Emit(OpCodes.Ldfld, MemoryDataField);
             il.Emit(OpCodes.Ldloc, retAreaLocal);
             il.Emit(OpCodes.Ldloc, outerPtrLocal);
             il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(int)));
@@ -2605,7 +2588,6 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Ldfld, MemoriesField);
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ldelem_Ref);
-            il.Emit(OpCodes.Ldfld, MemoryDataField);
             il.Emit(OpCodes.Ldloc, retAreaLocal);
             il.Emit(OpCodes.Ldc_I4_4);
             il.Emit(OpCodes.Add);
@@ -2965,7 +2947,6 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Ldfld, MemoriesField);
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ldelem_Ref);
-            il.Emit(OpCodes.Ldfld, MemoryDataField);
             il.Emit(OpCodes.Ldloc, retAreaLocal);
             if (valueOffset != 0)
             {

@@ -576,7 +576,7 @@ namespace Wacs.ComponentModel.Runtime
                 bytes = StringMarshal.EncodeUtf8(value);
             var align = isUtf16 ? 2 : 1;
             var ptr = CabiRealloc(0, 0, align, bytes.Length);
-            StringMarshal.CopyToGuest(bytes, _memory.Data, ptr);
+            StringMarshal.CopyToGuest(bytes, _memory, ptr);
             int len = isUtf16 ? bytes.Length / 2 : bytes.Length;
             if (enc == CanonOption.Kind.StringLatin1OrUtf16)
                 len = (int)((uint)len | StringMarshal.Latin1OrUtf16Tag);
@@ -617,7 +617,7 @@ namespace Wacs.ComponentModel.Runtime
                 Array.Copy(arr, typed, count);
                 arr = typed;
             }
-            copyClosed.Invoke(null, new object[] { arr, _memory.Data, ptr });
+            copyClosed.Invoke(null, new object[] { arr, _memory, ptr });
             return (ptr, count);
         }
 
@@ -784,12 +784,12 @@ namespace Wacs.ComponentModel.Runtime
             var liftOpen = typeof(ListMarshal).GetMethod(
                 nameof(ListMarshal.LiftPrim),
                 1,
-                new[] { typeof(byte[]), typeof(int), typeof(int) })!;
+                new[] { typeof(MemoryInstance), typeof(int), typeof(int) })!;
             var liftClosed = liftOpen.MakeGenericMethod(elemCs);
-            // Pass the full memory snapshot so the helper's
-            // bounds checks run against the real buffer length.
+            // Pass the live MemoryInstance so the helper's AsSpan
+            // dispatches on storage mode (ManagedArray / NativePointer).
             result = liftClosed.Invoke(null,
-                new object[] { _memory.Data, dataPtr, count });
+                new object[] { _memory, dataPtr, count });
             return true;
         }
 
@@ -806,7 +806,7 @@ namespace Wacs.ComponentModel.Runtime
             if (opt.Inner.Prim == ComponentPrim.String) return false;
             if (_memory == null) return false;
 
-            var disc = _memory.Data[retAreaPtr];
+            var disc = PrimitiveStore.ReadU8(_memory, retAreaPtr);
             var innerCs = PrimToCs(opt.Inner.Prim);
             var nullableT = typeof(Nullable<>).MakeGenericType(innerCs);
             if (disc == 0)
@@ -859,8 +859,8 @@ namespace Wacs.ComponentModel.Runtime
             var listPtr = BitConverter.ToInt32(header, 0);
             var count = BitConverter.ToInt32(header, 4);
             result = _stringEncoding == CanonOption.Kind.StringUtf16
-                ? ListMarshal.LiftStringListUtf16(_memory.Data, listPtr, count)
-                : ListMarshal.LiftStringList(_memory.Data, listPtr, count);
+                ? ListMarshal.LiftStringListUtf16(_memory, listPtr, count)
+                : ListMarshal.LiftStringList(_memory, listPtr, count);
             return true;
         }
 
@@ -926,15 +926,13 @@ namespace Wacs.ComponentModel.Runtime
                 || opt.Inner.Prim != ComponentPrim.String) return false;
             if (_memory == null) return false;
 
-            var disc = _memory.Data[retAreaPtr];
+            var disc = PrimitiveStore.ReadU8(_memory, retAreaPtr);
             if (disc == 0) { result = null; return true; }
             if (disc != 1)
                 throw new FormatException(
                     $"Invalid option discriminant 0x{disc:X2}; expected 0 or 1.");
-            var strPtr = BitConverter.ToInt32(
-                ReadMemoryBytes(retAreaPtr + 4, 4), 0);
-            var strLen = BitConverter.ToInt32(
-                ReadMemoryBytes(retAreaPtr + 8, 4), 0);
+            var strPtr = PrimitiveStore.ReadI32LE(_memory, retAreaPtr + 4);
+            var strLen = PrimitiveStore.ReadI32LE(_memory, retAreaPtr + 8);
             result = LiftStringAt(strPtr, strLen);
             return true;
         }
@@ -1003,7 +1001,7 @@ namespace Wacs.ComponentModel.Runtime
                 return false;
             if (_memory == null) return false;
 
-            var disc = _memory.Data[retAreaPtr];
+            var disc = PrimitiveStore.ReadU8(_memory, retAreaPtr);
             if (disc > 1)
                 throw new FormatException(
                     $"Invalid result discriminant 0x{disc:X2}.");
@@ -1256,10 +1254,10 @@ namespace Wacs.ComponentModel.Runtime
             var payloadOffset = AlignUp(discWidth, payloadAlign);
 
             uint disc;
-            if (discWidth == 1) disc = _memory.Data[retAreaPtr];
-            else if (discWidth == 2) disc = BitConverter.ToUInt16(
-                _memory.Data, retAreaPtr);
-            else disc = BitConverter.ToUInt32(_memory.Data, retAreaPtr);
+            if (discWidth == 1) disc = PrimitiveStore.ReadU8(_memory, retAreaPtr);
+            else if (discWidth == 2)
+                disc = PrimitiveStore.ReadU16LE(_memory, retAreaPtr);
+            else disc = PrimitiveStore.ReadU32LE(_memory, retAreaPtr);
             if (disc >= caseCount)
                 throw new FormatException(
                     $"Variant discriminant {disc} out of range "
@@ -1324,17 +1322,16 @@ namespace Wacs.ComponentModel.Runtime
         /// over the element CLR type.</summary>
         private object LiftListPayload(int offset, ComponentPrim elemPrim)
         {
-            var header = ReadMemoryBytes(offset, 8);
-            var dataPtr = BitConverter.ToInt32(header, 0);
-            var count = BitConverter.ToInt32(header, 4);
+            var dataPtr = PrimitiveStore.ReadI32LE(_memory!, offset);
+            var count = PrimitiveStore.ReadI32LE(_memory!, offset + 4);
             var elemCs = PrimToCs(elemPrim);
             var liftOpen = typeof(ListMarshal).GetMethod(
                 nameof(ListMarshal.LiftPrim),
                 1,
-                new[] { typeof(byte[]), typeof(int), typeof(int) })!;
+                new[] { typeof(MemoryInstance), typeof(int), typeof(int) })!;
             var liftClosed = liftOpen.MakeGenericMethod(elemCs);
             return liftClosed.Invoke(null,
-                new object[] { _memory!.Data, dataPtr, count })!;
+                new object[] { _memory!, dataPtr, count })!;
         }
 
         /// <summary>Lift a record-of-primitive payload at a given
@@ -1472,12 +1469,12 @@ namespace Wacs.ComponentModel.Runtime
         {
             if (_stringEncoding == CanonOption.Kind.StringUtf16)
                 return StringMarshal.LiftUtf16(
-                    _memory!.Data, strPtr, strLen);
+                    _memory!, strPtr, strLen);
             if (_stringEncoding == CanonOption.Kind.StringLatin1OrUtf16)
                 return StringMarshal.LiftLatin1OrUtf16(
-                    _memory!.Data, strPtr, strLen);
+                    _memory!, strPtr, strLen);
             return StringMarshal.LiftUtf8(
-                _memory!.Data, strPtr, strLen);
+                _memory!, strPtr, strLen);
         }
 
         /// <summary>Snapshot a slice of the core module's
@@ -1489,10 +1486,10 @@ namespace Wacs.ComponentModel.Runtime
         /// MemoryInstance's concern.</summary>
         private byte[] ReadMemoryBytes(int offset, int length)
         {
-            var snapshot = new byte[length];
-            for (int i = 0; i < length; i++)
-                snapshot[i] = _memory!.Data[offset + i];
-            return snapshot;
+            // mem.AsSpan is the mode-aware accessor; ToArray() copies
+            // out of the live span (ManagedArray byte[] or
+            // NativePointer span over native memory) into a snapshot.
+            return _memory!.AsSpan(offset, length).ToArray();
         }
 
     }

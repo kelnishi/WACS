@@ -13,6 +13,7 @@ using Wacs.ComponentModel.CanonicalABI;
 using Wacs.ComponentModel.Runtime;
 using Wacs.ComponentModel.Runtime.Parser;
 using Wacs.ComponentModel.Types;
+using Wacs.Core.Runtime.Types;
 
 namespace Wacs.Transpiler.AOT.Component
 {
@@ -893,7 +894,7 @@ namespace Wacs.Transpiler.AOT.Component
 
         /// <summary>Resolve the <see cref="StringMarshal"/> lift
         /// method matching <paramref name="encoding"/>. All
-        /// three methods take <c>(byte[] source, int ptr, int len)</c>
+        /// three methods take <c>(MemoryInstance source, int ptr, int len)</c>
         /// — for UTF-8 <c>len</c> is bytes; for UTF-16 <c>len</c>
         /// is u16 code units; for latin1+utf16 the high bit
         /// distinguishes per-string (set → UTF-16 code units;
@@ -911,7 +912,7 @@ namespace Wacs.Transpiler.AOT.Component
             };
             return typeof(StringMarshal).GetMethod(
                 name,
-                new[] { typeof(byte[]), typeof(int), typeof(int) })!;
+                new[] { typeof(MemoryInstance), typeof(int), typeof(int) })!;
         }
 
         /// <summary>Gate for whether the emitter can handle this
@@ -1898,7 +1899,7 @@ namespace Wacs.Transpiler.AOT.Component
                 encodeMethod, new[] { typeof(string) })!;
             var copy = typeof(StringMarshal).GetMethod(
                 nameof(StringMarshal.CopyToGuest),
-                new[] { typeof(byte[]), typeof(byte[]), typeof(int) })!;
+                new[] { typeof(byte[]), typeof(MemoryInstance), typeof(int) })!;
 
             var bytesLocal = il.DeclareLocal(typeof(byte[]));
             var byteLenLocal = il.DeclareLocal(typeof(int));
@@ -2073,7 +2074,7 @@ namespace Wacs.Transpiler.AOT.Component
                     + "declare a memory — Module.Memory accessor is missing.");
 
             var retAreaLocal = il.DeclareLocal(typeof(int));
-            var memoryLocal = il.DeclareLocal(typeof(byte[]));
+            var memoryLocal = il.DeclareLocal(typeof(MemoryInstance));
 
             // int P = core.hello(args...);  (args lowered via cabi_realloc if string)
             EmitCoreCall(il, instanceField, coreMethod, export, types);
@@ -2090,8 +2091,8 @@ namespace Wacs.Transpiler.AOT.Component
             // The chosen lift dispatches on canon-lift's
             // string-encoding option (utf8 default, utf16 for
             // export.StringEncoding == StringUtf16).
-            var bitCToInt32 = typeof(BitConverter).GetMethod(
-                "ToInt32", new[] { typeof(byte[]), typeof(int) });
+            var bitCToInt32 = typeof(PrimitiveStore).GetMethod(
+                nameof(PrimitiveStore.ReadI32LE), new[] { typeof(MemoryInstance), typeof(int) });
             var liftMethod = ResolveLiftMethod(export.StringEncoding);
 
             il.Emit(OpCodes.Ldloc, memoryLocal);            // source
@@ -2128,7 +2129,7 @@ namespace Wacs.Transpiler.AOT.Component
                     + "declare a memory — Module.Memory accessor is missing.");
 
             var retAreaLocal = il.DeclareLocal(typeof(int));
-            var memoryLocal = il.DeclareLocal(typeof(byte[]));
+            var memoryLocal = il.DeclareLocal(typeof(MemoryInstance));
 
             // int P = core.bytes(args...);
             EmitCoreCall(il, instanceField, coreMethod, export, types);
@@ -2144,12 +2145,12 @@ namespace Wacs.Transpiler.AOT.Component
             //   where dataPtr = BitConverter.ToInt32(memory, P)
             //         count   = BitConverter.ToInt32(memory, P + 4)
             var elemType = PrimToCs(elemPrim);
-            var bitCToInt32 = typeof(BitConverter).GetMethod(
-                "ToInt32", new[] { typeof(byte[]), typeof(int) });
+            var bitCToInt32 = typeof(PrimitiveStore).GetMethod(
+                nameof(PrimitiveStore.ReadI32LE), new[] { typeof(MemoryInstance), typeof(int) });
             var liftOpen = typeof(ListMarshal).GetMethod(
                 nameof(ListMarshal.LiftPrim),
                 1,
-                new[] { typeof(byte[]), typeof(int), typeof(int) })!;
+                new[] { typeof(MemoryInstance), typeof(int), typeof(int) })!;
             var liftClosed = liftOpen.MakeGenericMethod(elemType);
 
             il.Emit(OpCodes.Ldloc, memoryLocal);            // source
@@ -2185,7 +2186,7 @@ namespace Wacs.Transpiler.AOT.Component
                     "list<string>-returning component requires Module.Memory.");
 
             var retAreaLocal = il.DeclareLocal(typeof(int));
-            var memoryLocal = il.DeclareLocal(typeof(byte[]));
+            var memoryLocal = il.DeclareLocal(typeof(MemoryInstance));
 
             EmitCoreCall(il, instanceField, coreMethod, export, types);
             il.Emit(OpCodes.Stloc, retAreaLocal);
@@ -2194,8 +2195,8 @@ namespace Wacs.Transpiler.AOT.Component
             il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 
-            var bitCToInt32 = typeof(BitConverter).GetMethod(
-                "ToInt32", new[] { typeof(byte[]), typeof(int) })!;
+            var bitCToInt32 = typeof(PrimitiveStore).GetMethod(
+                nameof(PrimitiveStore.ReadI32LE), new[] { typeof(MemoryInstance), typeof(int) })!;
             // UTF-8 vs UTF-16 picked from canon-lift's
             // string-encoding option; both helpers have the same
             // (memory, listPtr, count) signature.
@@ -2203,7 +2204,7 @@ namespace Wacs.Transpiler.AOT.Component
                 export.StringEncoding == CanonOption.Kind.StringUtf16
                     ? nameof(ListMarshal.LiftStringListUtf16)
                     : nameof(ListMarshal.LiftStringList),
-                new[] { typeof(byte[]), typeof(int), typeof(int) })!;
+                new[] { typeof(MemoryInstance), typeof(int), typeof(int) })!;
 
             // ListMarshal.LiftStringList(memory, listPtr, count)
             il.Emit(OpCodes.Ldloc, memoryLocal);             // arg 1
@@ -2243,7 +2244,7 @@ namespace Wacs.Transpiler.AOT.Component
             var nullableCs = typeof(Nullable<>).MakeGenericType(innerCs);
 
             var retAreaLocal = il.DeclareLocal(typeof(int));
-            var memoryLocal = il.DeclareLocal(typeof(byte[]));
+            var memoryLocal = il.DeclareLocal(typeof(MemoryInstance));
             var resultLocal = il.DeclareLocal(nullableCs);
             var noneLabel = il.DefineLabel();
             var endLabel = il.DefineLabel();
@@ -2265,14 +2266,14 @@ namespace Wacs.Transpiler.AOT.Component
             // we go direct here and inline an equivalent check.
             il.Emit(OpCodes.Ldloc, memoryLocal);            // memory[]
             il.Emit(OpCodes.Ldloc, retAreaLocal);           // P
-            il.Emit(OpCodes.Ldelem_U1);                     // memory[P]
+            il.EmitCall(OpCodes.Call, typeof(PrimitiveStore).GetMethod(nameof(PrimitiveStore.ReadU8), new[] { typeof(MemoryInstance), typeof(int) })!, null);                     // memory[P]
             il.Emit(OpCodes.Brfalse, noneLabel);            // disc == 0 ? None
 
             // Some branch: payload at P + 4 (for small prims).
             // Load T via BitConverter.ToInt32 / ToSingle etc.,
             // wrap in Nullable<T> constructor, store to result.
-            var bitCToInt32 = typeof(BitConverter).GetMethod(
-                "ToInt32", new[] { typeof(byte[]), typeof(int) })!;
+            var bitCToInt32 = typeof(PrimitiveStore).GetMethod(
+                nameof(PrimitiveStore.ReadI32LE), new[] { typeof(MemoryInstance), typeof(int) })!;
             il.Emit(OpCodes.Ldloc, memoryLocal);
             il.Emit(OpCodes.Ldloc, retAreaLocal);
             il.Emit(OpCodes.Ldc_I4_4);
@@ -2331,7 +2332,7 @@ namespace Wacs.Transpiler.AOT.Component
                     "option<string>-returning component requires Module.Memory.");
 
             var retAreaLocal = il.DeclareLocal(typeof(int));
-            var memoryLocal = il.DeclareLocal(typeof(byte[]));
+            var memoryLocal = il.DeclareLocal(typeof(MemoryInstance));
             var resultLocal = il.DeclareLocal(typeof(string));
             var noneLabel = il.DefineLabel();
             var endLabel = il.DefineLabel();
@@ -2346,7 +2347,7 @@ namespace Wacs.Transpiler.AOT.Component
             // disc = memory[retArea];  if disc == 0 goto none
             il.Emit(OpCodes.Ldloc, memoryLocal);
             il.Emit(OpCodes.Ldloc, retAreaLocal);
-            il.Emit(OpCodes.Ldelem_U1);
+            il.EmitCall(OpCodes.Call, typeof(PrimitiveStore).GetMethod(nameof(PrimitiveStore.ReadU8), new[] { typeof(MemoryInstance), typeof(int) })!, null);
             il.Emit(OpCodes.Brfalse, noneLabel);
 
             // Some: StringMarshal.LiftXxx(memory,
@@ -2354,8 +2355,8 @@ namespace Wacs.Transpiler.AOT.Component
             //    BitConverter.ToInt32(memory, retArea + 8))
             // Lift method dispatches on the export's canon-lift
             // string-encoding option.
-            var bitCToInt32 = typeof(BitConverter).GetMethod(
-                "ToInt32", new[] { typeof(byte[]), typeof(int) })!;
+            var bitCToInt32 = typeof(PrimitiveStore).GetMethod(
+                nameof(PrimitiveStore.ReadI32LE), new[] { typeof(MemoryInstance), typeof(int) })!;
             var liftMethod = ResolveLiftMethod(export.StringEncoding);
 
             il.Emit(OpCodes.Ldloc, memoryLocal);      // lift arg 1
@@ -2414,7 +2415,7 @@ namespace Wacs.Transpiler.AOT.Component
                     "ValueTuple<bool,Ok,Err> constructor not found.");
 
             var retAreaLocal = il.DeclareLocal(typeof(int));
-            var memoryLocal = il.DeclareLocal(typeof(byte[]));
+            var memoryLocal = il.DeclareLocal(typeof(MemoryInstance));
             var errLabel = il.DefineLabel();
             var endLabel = il.DefineLabel();
 
@@ -2428,7 +2429,7 @@ namespace Wacs.Transpiler.AOT.Component
             // if (memory[P] != 0) goto errLabel;
             il.Emit(OpCodes.Ldloc, memoryLocal);
             il.Emit(OpCodes.Ldloc, retAreaLocal);
-            il.Emit(OpCodes.Ldelem_U1);
+            il.EmitCall(OpCodes.Call, typeof(PrimitiveStore).GetMethod(nameof(PrimitiveStore.ReadU8), new[] { typeof(MemoryInstance), typeof(int) })!, null);
             il.Emit(OpCodes.Brtrue, errLabel);
 
             // Ok branch: stack = (true, okPayload, default(Err)) → Newobj
@@ -2513,8 +2514,8 @@ namespace Wacs.Transpiler.AOT.Component
                     return;
                 case ResultSide.SideKind.String:
                 {
-                    var bitCToInt32 = typeof(BitConverter).GetMethod(
-                        "ToInt32", new[] { typeof(byte[]), typeof(int) })!;
+                    var bitCToInt32 = typeof(PrimitiveStore).GetMethod(
+                        nameof(PrimitiveStore.ReadI32LE), new[] { typeof(MemoryInstance), typeof(int) })!;
                     var liftMethod = ResolveLiftMethod(encoding);
                     // LiftXxx(memory,
                     //   BitConverter.ToInt32(memory, retArea + off),
@@ -2550,8 +2551,8 @@ namespace Wacs.Transpiler.AOT.Component
             ILGenerator il, LocalBuilder memoryLocal,
             LocalBuilder retAreaLocal, int offset, ComponentPrim prim)
         {
-            var bitCToInt32 = typeof(BitConverter).GetMethod(
-                "ToInt32", new[] { typeof(byte[]), typeof(int) })!;
+            var bitCToInt32 = typeof(PrimitiveStore).GetMethod(
+                nameof(PrimitiveStore.ReadI32LE), new[] { typeof(MemoryInstance), typeof(int) })!;
             il.Emit(OpCodes.Ldloc, memoryLocal);
             il.Emit(OpCodes.Ldloc, retAreaLocal);
             if (offset != 0)
@@ -2651,7 +2652,7 @@ namespace Wacs.Transpiler.AOT.Component
                     "Record-returning component requires Module.Memory.");
 
             var retAreaLocal = il.DeclareLocal(typeof(int));
-            var memoryLocal = il.DeclareLocal(typeof(byte[]));
+            var memoryLocal = il.DeclareLocal(typeof(MemoryInstance));
 
             EmitCoreCall(il, instanceField, coreMethod, export, types);
             il.Emit(OpCodes.Stloc, retAreaLocal);
@@ -2737,7 +2738,7 @@ namespace Wacs.Transpiler.AOT.Component
                     "Variant-returning component requires Module.Memory.");
 
             var retAreaLocal = il.DeclareLocal(typeof(int));
-            var memoryLocal = il.DeclareLocal(typeof(byte[]));
+            var memoryLocal = il.DeclareLocal(typeof(MemoryInstance));
 
             EmitCoreCall(il, instanceField, coreMethod, export, types);
             il.Emit(OpCodes.Stloc, retAreaLocal);
@@ -2769,20 +2770,19 @@ namespace Wacs.Transpiler.AOT.Component
             }
             var payloadOffset = AlignUp(discWidth, payloadAlign);
 
-            // Push tag (read disc byte, narrow as needed).
+            // Push tag (read disc byte, narrow as needed). Mode-aware
+            // via PrimitiveStore.ReadU8/U16/U32 so the disc byte is
+            // routed through MemoryInstance.AsSpan regardless of
+            // ManagedArray vs NativePointer backing.
             il.Emit(OpCodes.Ldloc, memoryLocal);
             il.Emit(OpCodes.Ldloc, retAreaLocal);
-            if (discWidth == 1)
-            {
-                il.Emit(OpCodes.Ldelem_U1);
-            }
-            else
-            {
-                var bitC = typeof(BitConverter).GetMethod(
-                    discWidth == 2 ? "ToUInt16" : "ToUInt32",
-                    new[] { typeof(byte[]), typeof(int) })!;
-                il.EmitCall(OpCodes.Call, bitC, null);
-            }
+            string readerName = discWidth == 1 ? nameof(PrimitiveStore.ReadU8)
+                : discWidth == 2 ? nameof(PrimitiveStore.ReadU16LE)
+                : nameof(PrimitiveStore.ReadU32LE);
+            var discReader = typeof(PrimitiveStore).GetMethod(
+                readerName,
+                new[] { typeof(MemoryInstance), typeof(int) })!;
+            il.EmitCall(OpCodes.Call, discReader, null);
 
             // For each payload-bearing case, read its payload
             // at the shared payload offset. Order matches the
@@ -2908,12 +2908,12 @@ namespace Wacs.Transpiler.AOT.Component
             ILGenerator il, LocalBuilder memoryLocal,
             LocalBuilder retAreaLocal, int offset, ComponentPrim elemPrim)
         {
-            var bitCToInt32 = typeof(BitConverter).GetMethod(
-                "ToInt32", new[] { typeof(byte[]), typeof(int) })!;
+            var bitCToInt32 = typeof(PrimitiveStore).GetMethod(
+                nameof(PrimitiveStore.ReadI32LE), new[] { typeof(MemoryInstance), typeof(int) })!;
             var liftOpen = typeof(ListMarshal).GetMethod(
                 nameof(ListMarshal.LiftPrim),
                 1,
-                new[] { typeof(byte[]), typeof(int), typeof(int) })!;
+                new[] { typeof(MemoryInstance), typeof(int), typeof(int) })!;
             var liftClosed = liftOpen.MakeGenericMethod(PrimToCs(elemPrim));
 
             il.Emit(OpCodes.Ldloc, memoryLocal);    // source
@@ -2941,8 +2941,8 @@ namespace Wacs.Transpiler.AOT.Component
             LocalBuilder retAreaLocal, int offset,
             CanonOption.Kind encoding)
         {
-            var bitCToInt32 = typeof(BitConverter).GetMethod(
-                "ToInt32", new[] { typeof(byte[]), typeof(int) })!;
+            var bitCToInt32 = typeof(PrimitiveStore).GetMethod(
+                nameof(PrimitiveStore.ReadI32LE), new[] { typeof(MemoryInstance), typeof(int) })!;
             var liftMethod = ResolveLiftMethod(encoding);
 
             il.Emit(OpCodes.Ldloc, memoryLocal);    // for LiftXxx
@@ -3065,7 +3065,7 @@ namespace Wacs.Transpiler.AOT.Component
                     "Tuple-returning component requires Module.Memory.");
 
             var retAreaLocal = il.DeclareLocal(typeof(int));
-            var memoryLocal = il.DeclareLocal(typeof(byte[]));
+            var memoryLocal = il.DeclareLocal(typeof(MemoryInstance));
 
             EmitCoreCall(il, instanceField, coreMethod, export, types);
             il.Emit(OpCodes.Stloc, retAreaLocal);

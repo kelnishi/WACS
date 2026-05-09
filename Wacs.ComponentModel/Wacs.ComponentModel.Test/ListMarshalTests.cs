@@ -8,6 +8,8 @@
 using System;
 using System.Runtime.InteropServices;
 using Wacs.ComponentModel.CanonicalABI;
+using Wacs.Core.Runtime.Types;
+using Wacs.Core.Types;
 using Xunit;
 
 namespace Wacs.ComponentModel.Test
@@ -21,6 +23,16 @@ namespace Wacs.ComponentModel.Test
     /// </summary>
     public class ListMarshalTests
     {
+        // Helper: build a one-page MemoryInstance with `bytes` copied
+        // in at `offset`. Tests want a guest-memory shape they can
+        // hand to the now-MemoryInstance-typed LiftPrim helpers.
+        private static MemoryInstance NewMemoryWith(byte[] bytes, int offset = 0)
+        {
+            var mem = new MemoryInstance(new MemoryType(1));
+            bytes.AsSpan().CopyTo(mem.AsSpan(offset, bytes.Length));
+            return mem;
+        }
+
         [Fact]
         public void LowerPrim_u32_pins_address_and_reports_count()
         {
@@ -48,21 +60,23 @@ namespace Wacs.ComponentModel.Test
             var original = new uint[] { 1, 2, 3, 42, 0xFFFFFFFF };
             // Build the byte blob the same way guest memory would
             // contain it — 4 bytes per element, little-endian.
-            var memory = new byte[32];
+            var raw = new byte[20];
             for (int i = 0; i < original.Length; i++)
-                BitConverter.GetBytes(original[i]).CopyTo(memory, 4 + i * 4);
+                BitConverter.GetBytes(original[i]).CopyTo(raw, i * 4);
+            var mem = NewMemoryWith(raw, offset: 4);
 
-            var lifted = ListMarshal.LiftPrim<uint>(memory, 4, original.Length);
+            var lifted = ListMarshal.LiftPrim<uint>(mem, 4, original.Length);
             Assert.Equal(original, lifted);
         }
 
         [Fact]
         public void LiftPrim_u8_reads_bytes_directly()
         {
-            var memory = new byte[] {
+            var raw = new byte[] {
                 0x00, 0x01, 0x02, 0x10, 0x20, 0x30, 0xFF
             };
-            var lifted = ListMarshal.LiftPrim<byte>(memory, 3, 3);
+            var mem = NewMemoryWith(raw);
+            var lifted = ListMarshal.LiftPrim<byte>(mem, 3, 3);
             Assert.Equal(new byte[] { 0x10, 0x20, 0x30 }, lifted);
         }
 
@@ -70,23 +84,27 @@ namespace Wacs.ComponentModel.Test
         public void LiftPrim_u64_unpacks_8_byte_elements()
         {
             var original = new ulong[] { 0x0123456789ABCDEFUL, 0xFEDCBA9876543210UL };
-            var memory = new byte[16];
+            var raw = new byte[16];
             for (int i = 0; i < original.Length; i++)
-                BitConverter.GetBytes(original[i]).CopyTo(memory, i * 8);
-            var lifted = ListMarshal.LiftPrim<ulong>(memory, 0, original.Length);
+                BitConverter.GetBytes(original[i]).CopyTo(raw, i * 8);
+            var mem = NewMemoryWith(raw);
+            var lifted = ListMarshal.LiftPrim<ulong>(mem, 0, original.Length);
             Assert.Equal(original, lifted);
         }
 
         [Fact]
         public void LiftPrim_rejects_out_of_range_span()
         {
-            var memory = new byte[16];
-            // Past end.
+            // MemoryInstance.AsSpan does the bounds check; tests
+            // exercise the throw-on-overrun shape against a single
+            // page to avoid materializing larger backing.
+            var mem = new MemoryInstance(new MemoryType(1));
+            // Past end of the page.
             Assert.Throws<ArgumentOutOfRangeException>(
-                () => ListMarshal.LiftPrim<uint>(memory, 12, 5));
+                () => ListMarshal.LiftPrim<uint>(mem, 65530, 5));
             // Negative offset.
             Assert.Throws<ArgumentOutOfRangeException>(
-                () => ListMarshal.LiftPrim<uint>(memory, -1, 1));
+                () => ListMarshal.LiftPrim<uint>(mem, -1, 1));
         }
 
         [Fact]
@@ -110,7 +128,8 @@ namespace Wacs.ComponentModel.Test
                 // the bytes-only overload.
                 var bytes = new byte[count * 2];
                 Marshal.Copy((IntPtr)addr, bytes, 0, bytes.Length);
-                var lifted = ListMarshal.LiftPrim<short>(bytes, 0, count);
+                var mem = NewMemoryWith(bytes);
+                var lifted = ListMarshal.LiftPrim<short>(mem, 0, count);
                 Assert.Equal(original, lifted);
             }
             finally { h.Free(); }

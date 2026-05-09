@@ -501,6 +501,40 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Theory]
+        [InlineData(MemoryStorageMode.ManagedArray)]
+        [InlineData(MemoryStorageMode.NativePointer)]
+        public void Component_data_segment_install_and_string_lift_under_storage(
+            MemoryStorageMode mode)
+        {
+            // data-segment-component lays "hello world" down at
+            // offset 100 via an active data segment, and exports
+            // greet() returning the string lifted out of the
+            // (ptr=100, len=11) retArea pair at offset 200.
+            //
+            // Pre-gap-14 (PR #125 / #127): the active-segment
+            // install path went through BulkHelpers.CopySegmentToMemory
+            // taking byte[] → AOOR in NativePointer mode where
+            // mem.Data is the empty sentinel. The lift path read
+            // through _memory.Data — same shape AOOR.
+            // Post-fix: every host path routes through
+            // MemoryInstance.AsSpan, so both modes complete the
+            // segment install and the string lift correctly.
+            var prev = AmbientRuntime.MemoryStorage;
+            AmbientRuntime.MemoryStorage = mode;
+            try
+            {
+                var bytes = File.ReadAllBytes(FindFixturePath(
+                    "data-segment-component", "dseg.component.wasm"));
+                var ci = ComponentInstance.Instantiate(bytes);
+                Assert.Equal("hello world", ci.Invoke("greet"));
+            }
+            finally
+            {
+                AmbientRuntime.MemoryStorage = prev;
+            }
+        }
+
+        [Theory]
         [InlineData(MemoryStorageMode.ManagedArray, -1)]
         [InlineData(MemoryStorageMode.NativePointer, 1)]
         public void Component_memory_honors_AmbientRuntime_storage(
