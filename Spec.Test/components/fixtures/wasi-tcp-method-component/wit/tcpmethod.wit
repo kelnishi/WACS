@@ -1,6 +1,6 @@
 package local:tcpmethod;
 world demo {
-    import wasi:sockets/tcp@0.2.3;
+    import wasi:sockets/tcp@0.2.8;
     /// Calls tcp-socket.address-family(handle) and
     /// tcp-socket.subscribe(handle); drops the pollable.
     /// Returns address-family as u32 (0=ipv4, 1=ipv6).

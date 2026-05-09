@@ -1,7 +1,7 @@
 package local:handlerspec;
 world demo {
-    import wasi:http/types@0.2.3;
-    import wasi:http/outgoing-handler@0.2.3;
+    import wasi:http/types@0.2.8;
+    import wasi:http/outgoing-handler@0.2.8;
     /// Calls handle(req, None) — full spec WIT layout
     /// (40-byte retArea, align 8). Returns the outer disc.
     export ask-outer-disc: func(req: u32) -> u32;

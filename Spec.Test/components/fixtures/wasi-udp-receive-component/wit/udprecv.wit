@@ -1,6 +1,6 @@
 package local:udprecv;
 world demo {
-    import wasi:sockets/udp@0.2.3;
+    import wasi:sockets/udp@0.2.8;
     /// Calls receive(handle, 4); reads list-len at retArea+8.
     /// Returns the list-len as u32.
     export ask-recv-count: func(handle: u32) -> u32;

@@ -42,7 +42,7 @@ namespace Wacs.ComponentModel.Test
             Assert.Equal(expected, NameMangler.ToUpperSnake(kebab));
 
         [Theory]
-        [InlineData("0.2.3", "v0_2_3")]
+        [InlineData("0.2.8", "v0_2_8")]
         [InlineData("1.0.0", "v1_0_0")]
         [InlineData(null, "")]
         [InlineData("", "")]
@@ -101,16 +101,16 @@ namespace Wacs.ComponentModel.Test
         [Fact]
         public void InterfaceNamespace_versioned_export()
         {
-            var pkg = new CtPackageName("wasi", new[] { "cli" }, "0.2.3");
-            Assert.Equal("HelloWorld.wit.exports.wasi.cli.v0_2_3",
+            var pkg = new CtPackageName("wasi", new[] { "cli" }, "0.2.8");
+            Assert.Equal("HelloWorld.wit.exports.wasi.cli.v0_2_8",
                          NameMangler.InterfaceNamespace("hello", true, pkg));
         }
 
         [Fact]
         public void JoinPackagePath_dotted_form()
         {
-            var pkg = new CtPackageName("wasi", new[] { "io" }, "0.2.3");
-            Assert.Equal("wasi.io.v0_2_3", NameMangler.JoinPackagePath(pkg));
+            var pkg = new CtPackageName("wasi", new[] { "io" }, "0.2.8");
+            Assert.Equal("wasi.io.v0_2_8", NameMangler.JoinPackagePath(pkg));
         }
 
         // ---- NameScope collision resolution ------------------------------

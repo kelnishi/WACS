@@ -11,11 +11,11 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 
-namespace HelloWorld.wit.exports.wasi.cli.v0_2_3
+namespace HelloWorld.wit.exports.wasi.cli.v0_2_8
 {
     public static class RunInterop {
 
-        [UnmanagedCallersOnly(EntryPoint = "wasi:cli/run@0.2.3#run")]
+        [UnmanagedCallersOnly(EntryPoint = "wasi:cli/run@0.2.8#run")]
         public static unsafe int wasmExportRun() {
 
             Result<None, None> ret;
@@ -55,9 +55,9 @@ namespace HelloWorld.wit.exports.wasi.cli.v0_2_3
 
         }
 
-        [UnmanagedCallersOnly(EntryPoint = "cabi_post_wasi:cli/run@0.2.3#run")]
+        [UnmanagedCallersOnly(EntryPoint = "cabi_post_wasi:cli/run@0.2.8#run")]
         public static void cabi_post_wasmExportRun(int returnValue) {
-            Console.WriteLine("TODO: cabi_post_wasi:cli/run@0.2.3#run");
+            Console.WriteLine("TODO: cabi_post_wasi:cli/run@0.2.8#run");
         }
 
     }

@@ -1,5 +1,5 @@
 (module
-  (import "wasi:io/streams@0.2.3" "[method]output-stream.splice"
+  (import "wasi:io/streams@0.2.8" "[method]output-stream.splice"
     (func $sp (param i32 i32 i64 i32)))
   (memory (export "memory") 1)
   (global $next (mut i32) (i32.const 1024))

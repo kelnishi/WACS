@@ -1,4 +1,4 @@
-package wasi:sockets@0.2.3;
+package wasi:sockets@0.2.8;
 interface tcp {
     enum error-code { unknown }
     resource tcp-socket {

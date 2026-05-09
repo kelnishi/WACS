@@ -1,4 +1,4 @@
-package wasi:sockets@0.2.3;
+package wasi:sockets@0.2.8;
 interface ip-name-lookup {
     use network.{network, ip-address, error-code};
     resource resolve-address-stream {

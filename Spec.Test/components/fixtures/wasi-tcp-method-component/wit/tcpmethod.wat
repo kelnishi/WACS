@@ -1,11 +1,11 @@
 (module
-  (import "wasi:sockets/tcp@0.2.3" "[method]tcp-socket.address-family"
+  (import "wasi:sockets/tcp@0.2.8" "[method]tcp-socket.address-family"
     (func $family (param i32) (result i32)))
-  (import "wasi:sockets/tcp@0.2.3" "[method]tcp-socket.subscribe"
+  (import "wasi:sockets/tcp@0.2.8" "[method]tcp-socket.subscribe"
     (func $subscribe (param i32) (result i32)))
-  (import "wasi:sockets/tcp@0.2.3" "[resource-drop]tcp-socket"
+  (import "wasi:sockets/tcp@0.2.8" "[resource-drop]tcp-socket"
     (func $drop_sock (param i32)))
-  (import "wasi:io/poll@0.2.3" "[resource-drop]pollable"
+  (import "wasi:io/poll@0.2.8" "[resource-drop]pollable"
     (func $drop_pol (param i32)))
   (memory (export "memory") 1)
   (global $next (mut i32) (i32.const 1024))

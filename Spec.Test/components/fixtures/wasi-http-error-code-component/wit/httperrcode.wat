@@ -1,5 +1,5 @@
 (module
-  (import "wasi:http/types@0.2.3" "http-error-code"
+  (import "wasi:http/types@0.2.8" "http-error-code"
     (func $hec (param i32 i32)))
   (memory (export "memory") 1)
   (global $next (mut i32) (i32.const 1024))

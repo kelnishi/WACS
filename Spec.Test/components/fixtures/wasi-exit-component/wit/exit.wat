@@ -1,5 +1,5 @@
 (module
-  (import "wasi:cli/exit@0.2.3" "exit"
+  (import "wasi:cli/exit@0.2.8" "exit"
     (func $exit (param i32)))
   (memory (export "memory") 1)
   (func $realloc (param i32 i32 i32 i32) (result i32) i32.const 1024)

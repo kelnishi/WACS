@@ -1,4 +1,4 @@
-package wasi:http@0.2.3;
+package wasi:http@0.2.8;
 interface types {
     type duration = u64;
     resource request-options {

@@ -1,10 +1,10 @@
 (module
-  (import "wasi:sockets/ip-name-lookup@0.2.3" "resolve-addresses"
+  (import "wasi:sockets/ip-name-lookup@0.2.8" "resolve-addresses"
     (func $ra (param i32 i32 i32 i32)))
-  (import "wasi:sockets/ip-name-lookup@0.2.3"
+  (import "wasi:sockets/ip-name-lookup@0.2.8"
     "[method]resolve-address-stream.resolve-next-address"
     (func $rna (param i32 i32)))
-  (import "wasi:sockets/ip-name-lookup@0.2.3"
+  (import "wasi:sockets/ip-name-lookup@0.2.8"
     "[resource-drop]resolve-address-stream"
     (func $drop (param i32)))
   (memory (export "memory") 1)

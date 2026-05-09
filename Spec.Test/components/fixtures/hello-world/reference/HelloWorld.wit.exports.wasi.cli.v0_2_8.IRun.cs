@@ -11,7 +11,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 
-namespace HelloWorld.wit.exports.wasi.cli.v0_2_3;
+namespace HelloWorld.wit.exports.wasi.cli.v0_2_8;
 
 public interface IRun {
     static abstract void Run();

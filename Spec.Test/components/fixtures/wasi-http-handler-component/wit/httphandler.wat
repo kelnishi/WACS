@@ -1,7 +1,7 @@
 (module
-  (import "wasi:http/outgoing-handler@0.2.3" "handle"
+  (import "wasi:http/outgoing-handler@0.2.8" "handle"
     (func $h (param i32 i32 i32 i32)))
-  (import "wasi:http/types@0.2.3" "[resource-drop]future-incoming-response"
+  (import "wasi:http/types@0.2.8" "[resource-drop]future-incoming-response"
     (func $drop (param i32)))
   (memory (export "memory") 1)
   (global $next (mut i32) (i32.const 1024))

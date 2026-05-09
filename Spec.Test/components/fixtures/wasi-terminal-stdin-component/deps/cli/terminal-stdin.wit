@@ -1,4 +1,4 @@
-package wasi:cli@0.2.3;
+package wasi:cli@0.2.8;
 interface terminal-stdin {
     use terminal-input.{terminal-input};
     get-terminal-stdin: func() -> option<terminal-input>;

@@ -1,5 +1,5 @@
 package local:sr;
 world demo {
-    import wasi:io/streams@0.2.3;
+    import wasi:io/streams@0.2.8;
     export try-read: func(handle: u32, len: u64) -> u32;
 }

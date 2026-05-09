@@ -33,11 +33,11 @@ namespace Wacs.Transpiler.Test
         //   (type $tExit (func (param i32)))                 ;; exit-with-code
         //   (type $tClock (func (result i64)))               ;; monotonic-clock.now
         //   (type $tEntry (func (param i32) (result i64)))   ;; call_all(exitCode) → randVal+now
-        //   (import "wasi:random/random@0.2.3" "get-random-u64"
+        //   (import "wasi:random/random@0.2.8" "get-random-u64"
         //           (func $rand (type $tRand)))
-        //   (import "wasi:cli/exit@0.2.3" "exit-with-code"
+        //   (import "wasi:cli/exit@0.2.8" "exit-with-code"
         //           (func $exit (type $tExit)))
-        //   (import "wasi:clocks/monotonic-clock@0.2.3" "now"
+        //   (import "wasi:clocks/monotonic-clock@0.2.8" "now"
         //           (func $now (type $tClock)))
         //   (func (export "call_all") (param i32) (result i64)
         //     local.get 0
@@ -65,11 +65,11 @@ namespace Wacs.Transpiler.Test
             0x60, 0x00, 0x01, 0x7E,
             0x60, 0x01, 0x7F, 0x01, 0x7E,
             // Import section: 3 imports
-            // imp0: wasi:random/random@0.2.3 (24) . get-random-u64 (14) : type 0
+            // imp0: wasi:random/random@0.2.8 (24) . get-random-u64 (14) : type 0
             //       = 1+24+1+14+2 = 42
-            // imp1: wasi:cli/exit@0.2.3 (19) . exit-with-code (14) : type 1
+            // imp1: wasi:cli/exit@0.2.8 (19) . exit-with-code (14) : type 1
             //       = 1+19+1+14+2 = 37
-            // imp2: wasi:clocks/monotonic-clock@0.2.3 (33) . now (3) : type 2
+            // imp2: wasi:clocks/monotonic-clock@0.2.8 (33) . now (3) : type 2
             //       = 1+33+1+3+2 = 40
             // size = 1 + 42 + 37 + 40 = 120 = 0x78
             0x02, 0x78, 0x03,
@@ -121,7 +121,7 @@ namespace Wacs.Transpiler.Test
 
         // (module
         //   (type $t (func (result i64)))
-        //   (import "wasi:random/random@0.2.3" "get-random-u64"
+        //   (import "wasi:random/random@0.2.8" "get-random-u64"
         //           (func $imp (type $t)))
         //   (func (export "call_random") (result i64) call $imp))
         private static byte[] BuildRandomFixtureWasm() => new byte[]
@@ -132,7 +132,7 @@ namespace Wacs.Transpiler.Test
             // Import section
             // size = count(1) + modlen(1) + mod(24) + entlen(1) + ent(14) + desc(2) = 43 = 0x2B
             0x02, 0x2B, 0x01,
-            // module: "wasi:random/random@0.2.3" (24 bytes)
+            // module: "wasi:random/random@0.2.8" (24 bytes)
             0x18,
             0x77, 0x61, 0x73, 0x69, 0x3A, 0x72, 0x61, 0x6E,
             0x64, 0x6F, 0x6D, 0x2F, 0x72, 0x61, 0x6E, 0x64,
@@ -201,7 +201,7 @@ namespace Wacs.Transpiler.Test
             // here we just need a stub host fn so InstantiateModule
             // is satisfied. The direct-linked IL bypasses this.
             runtime.BindHostFunction<Func<long>>(
-                ("wasi:random/random@0.2.3", "get-random-u64"),
+                ("wasi:random/random@0.2.8", "get-random-u64"),
                 () => throw new InvalidOperationException(
                     "stub host fn must not be invoked when "
                     + "direct linking is in effect"));
@@ -237,7 +237,7 @@ namespace Wacs.Transpiler.Test
                 new Dictionary<string, Func<object?[], object?>>
                 {
                     [InterfaceGenerator.SanitizeName(
-                        "wasi:random/random@0.2.3_get-random-u64")] = _ =>
+                        "wasi:random/random@0.2.8_get-random-u64")] = _ =>
                         throw new InvalidOperationException(
                             "IImports stub for get-random-u64 must "
                             + "not be invoked"),
@@ -320,13 +320,13 @@ namespace Wacs.Transpiler.Test
             var runtime = new WasmRuntime();
             // Stubs throw if invoked — direct-linked path bypasses.
             runtime.BindHostFunction<Func<long>>(
-                ("wasi:random/random@0.2.3", "get-random-u64"),
+                ("wasi:random/random@0.2.8", "get-random-u64"),
                 () => throw new InvalidOperationException("rand stub"));
             runtime.BindHostFunction<Action<int>>(
-                ("wasi:cli/exit@0.2.3", "exit-with-code"),
+                ("wasi:cli/exit@0.2.8", "exit-with-code"),
                 _ => throw new InvalidOperationException("exit stub"));
             runtime.BindHostFunction<Func<long>>(
-                ("wasi:clocks/monotonic-clock@0.2.3", "now"),
+                ("wasi:clocks/monotonic-clock@0.2.8", "now"),
                 () => throw new InvalidOperationException("clock stub"));
 
             using var ms = new MemoryStream(BuildMultiImportFixtureWasm());
@@ -355,13 +355,13 @@ namespace Wacs.Transpiler.Test
                 new Dictionary<string, Func<object?[], object?>>
                 {
                     [InterfaceGenerator.SanitizeName(
-                        "wasi:random/random@0.2.3_get-random-u64")] = _ =>
+                        "wasi:random/random@0.2.8_get-random-u64")] = _ =>
                         throw new InvalidOperationException("rand IImports stub"),
                     [InterfaceGenerator.SanitizeName(
-                        "wasi:cli/exit@0.2.3_exit-with-code")] = _ =>
+                        "wasi:cli/exit@0.2.8_exit-with-code")] = _ =>
                         throw new InvalidOperationException("exit IImports stub"),
                     [InterfaceGenerator.SanitizeName(
-                        "wasi:clocks/monotonic-clock@0.2.3_now")] = _ =>
+                        "wasi:clocks/monotonic-clock@0.2.8_now")] = _ =>
                         throw new InvalidOperationException("clock IImports stub"),
                 });
 

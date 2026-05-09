@@ -2,7 +2,7 @@
   ;; Canonical-ABI flat lowering — 9 wire slots:
   ;;   paramHandle, resultDisc,
   ;;   rp0 (i32), rp1 (i32), rp2 (i64), rp3..rp6 (i32).
-  (import "wasi:http/types@0.2.3" "[static]response-outparam.set"
+  (import "wasi:http/types@0.2.8" "[static]response-outparam.set"
     (func $set (param i32 i32 i32 i32 i64 i32 i32 i32 i32)))
   (memory (export "memory") 1)
   ;; "bad" UTF-8 bytes at offset 256.

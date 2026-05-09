@@ -1,7 +1,7 @@
 (module
-  (import "wasi:http/types@0.2.3" "[method]outgoing-request.path-with-query"
+  (import "wasi:http/types@0.2.8" "[method]outgoing-request.path-with-query"
     (func $pq (param i32 i32)))
-  (import "wasi:http/types@0.2.3" "[method]outgoing-request.authority"
+  (import "wasi:http/types@0.2.8" "[method]outgoing-request.authority"
     (func $au (param i32 i32)))
   (memory (export "memory") 1)
   (global $next (mut i32) (i32.const 1024))

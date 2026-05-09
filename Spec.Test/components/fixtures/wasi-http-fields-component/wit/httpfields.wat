@@ -1,19 +1,19 @@
 (module
-  (import "wasi:http/types@0.2.3" "[method]fields.delete"
+  (import "wasi:http/types@0.2.8" "[method]fields.delete"
     (func $del (param i32 i32 i32 i32)))
-  (import "wasi:http/types@0.2.3" "[method]fields.clone"
+  (import "wasi:http/types@0.2.8" "[method]fields.clone"
     (func $clone (param i32) (result i32)))
-  (import "wasi:http/types@0.2.3" "[method]fields.has"
+  (import "wasi:http/types@0.2.8" "[method]fields.has"
     (func $has (param i32 i32 i32) (result i32)))
-  (import "wasi:http/types@0.2.3" "[method]fields.append"
+  (import "wasi:http/types@0.2.8" "[method]fields.append"
     (func $app (param i32 i32 i32 i32 i32 i32)))
-  (import "wasi:http/types@0.2.3" "[method]fields.entries"
+  (import "wasi:http/types@0.2.8" "[method]fields.entries"
     (func $ent (param i32 i32)))
-  (import "wasi:http/types@0.2.3" "[method]fields.get"
+  (import "wasi:http/types@0.2.8" "[method]fields.get"
     (func $get (param i32 i32 i32 i32)))
-  (import "wasi:http/types@0.2.3" "[method]fields.set"
+  (import "wasi:http/types@0.2.8" "[method]fields.set"
     (func $set (param i32 i32 i32 i32 i32 i32)))
-  (import "wasi:http/types@0.2.3" "[resource-drop]fields"
+  (import "wasi:http/types@0.2.8" "[resource-drop]fields"
     (func $drop (param i32)))
   (memory (export "memory") 1)
   (data (i32.const 100) "X-Custom")

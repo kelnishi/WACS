@@ -1,14 +1,14 @@
 package local:hello;
 
 world hello {
-  import wasi:io/error@0.2.3;
-  import wasi:io/poll@0.2.3;
-  import wasi:io/streams@0.2.3;
-  import wasi:cli/stdout@0.2.3;
+  import wasi:io/error@0.2.8;
+  import wasi:io/poll@0.2.8;
+  import wasi:io/streams@0.2.8;
+  import wasi:cli/stdout@0.2.8;
 
-  export wasi:cli/run@0.2.3;
+  export wasi:cli/run@0.2.8;
 }
-package wasi:io@0.2.3 {
+package wasi:io@0.2.8 {
   interface error {
     resource error {
       to-debug-string: func() -> string;
@@ -55,9 +55,9 @@ package wasi:io@0.2.3 {
 }
 
 
-package wasi:cli@0.2.3 {
+package wasi:cli@0.2.8 {
   interface stdout {
-    use wasi:io/streams@0.2.3.{output-stream};
+    use wasi:io/streams@0.2.8.{output-stream};
 
     get-stdout: func() -> output-stream;
   }

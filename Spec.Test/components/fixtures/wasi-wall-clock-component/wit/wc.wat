@@ -1,7 +1,7 @@
 (module
   ;; Imported canon-lowered wall-clock.now — takes
   ;; retAreaPtr, writes 12 bytes (u64 seconds + u32 nanoseconds).
-  (import "wasi:clocks/wall-clock@0.2.3" "now"
+  (import "wasi:clocks/wall-clock@0.2.8" "now"
     (func $now (param i32)))
   (memory (export "memory") 1)
   (global $next (mut i32) (i32.const 1024))

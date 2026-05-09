@@ -130,7 +130,7 @@ namespace Wacs.ComponentModel.Test
         public void Versioned_ref_does_not_match_different_patch_on_0x()
         {
             // 0.x versions are exact-match per the scope plan. 0.2.2
-            // consumer can't bind to 0.2.3 provider.
+            // consumer can't bind to 0.2.8 provider.
             var providerSrc = @"
                 package wasi:io@0.2.8;
                 interface streams { dummy: func() -> u32; }";
@@ -178,7 +178,7 @@ namespace Wacs.ComponentModel.Test
             // anonymous package. Give it the right context by
             // prepending the wasi-cli package declaration.
             packages.AddRange(ParseAndConvert(
-                "package wasi:cli@0.2.3;\n" + runWit));
+                "package wasi:cli@0.2.8;\n" + runWit));
 
             WitResolver.Resolve(packages);
 

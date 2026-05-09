@@ -13,7 +13,7 @@ using Xunit;
 namespace Wacs.ComponentModel.Test
 {
     /// <summary>
-    /// Smoke-parse every .wit file in the vendored WASI 0.2.3 fixture tree
+    /// Smoke-parse every .wit file in the vendored WASI 0.2.8 fixture tree
     /// at <c>Spec.Test/components/wasi-cli/wit/</c>. This is the Phase 0b
     /// validation gate — the WIT parser needs to handle the grammar
     /// constructs real-world WASI interface packages use before we commit
@@ -25,8 +25,8 @@ namespace Wacs.ComponentModel.Test
     /// regressions in the parser surface as specific failures rather
     /// than all-or-nothing smoke breakage.
     ///
-    /// The fixture tree is a git submodule pinned at wasi-cli v0.2.3
-    /// (commit <c>d4fddec</c>, tag <c>v0.2.3</c>). Bump via
+    /// The fixture tree is a git submodule pinned at wasi-cli v0.2.8
+    /// (commit <c>d4fddec</c>, tag <c>v0.2.8</c>). Bump via
     /// <c>git -C Spec.Test/components/wasi-cli checkout vX.Y.Z</c>
     /// and update the expected inventory below.
     /// </summary>
@@ -95,14 +95,14 @@ namespace Wacs.ComponentModel.Test
         /// fixtures were added.
         /// </summary>
         [Fact]
-        public void Fixture_inventory_matches_v0_2_3()
+        public void Fixture_inventory_matches_v0_2_8()
         {
             var root = FindWasiCliWitDir();
             if (!Directory.Exists(root)) return; // skipped when submodule absent
             var files = Directory.EnumerateFiles(root, "*.wit",
                                                  SearchOption.AllDirectories)
                                  .Count();
-            // wasi-cli v0.2.3 ships 7 top-level .wit files + 23 files in
+            // wasi-cli v0.2.8 ships 7 top-level .wit files + 23 files in
             // deps/{clocks,filesystem,io,random,sockets} = 30 total.
             Assert.Equal(30, files);
         }

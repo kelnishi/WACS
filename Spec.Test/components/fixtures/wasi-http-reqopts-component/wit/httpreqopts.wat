@@ -1,5 +1,5 @@
 (module
-  (import "wasi:http/types@0.2.3" "[method]request-options.connect-timeout"
+  (import "wasi:http/types@0.2.8" "[method]request-options.connect-timeout"
     (func $ct (param i32 i32)))
   (memory (export "memory") 1)
   (global $next (mut i32) (i32.const 1024))

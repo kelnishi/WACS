@@ -1,11 +1,11 @@
 (module
-  (import "wasi:sockets/tcp@0.2.3" "[method]tcp-socket.finish-bind"
+  (import "wasi:sockets/tcp@0.2.8" "[method]tcp-socket.finish-bind"
     (func $fb (param i32 i32)))
-  (import "wasi:sockets/tcp@0.2.3" "[method]tcp-socket.start-listen"
+  (import "wasi:sockets/tcp@0.2.8" "[method]tcp-socket.start-listen"
     (func $sl (param i32 i32)))
-  (import "wasi:sockets/tcp@0.2.3" "[method]tcp-socket.finish-listen"
+  (import "wasi:sockets/tcp@0.2.8" "[method]tcp-socket.finish-listen"
     (func $fl (param i32 i32)))
-  (import "wasi:sockets/tcp@0.2.3" "[method]tcp-socket.shutdown"
+  (import "wasi:sockets/tcp@0.2.8" "[method]tcp-socket.shutdown"
     (func $sh (param i32 i32 i32)))
   (memory (export "memory") 1)
   (global $next (mut i32) (i32.const 1024))

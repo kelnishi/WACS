@@ -1,13 +1,13 @@
 (module
-  (import "wasi:sockets/tcp@0.2.3" "[method]tcp-socket.is-listening"
+  (import "wasi:sockets/tcp@0.2.8" "[method]tcp-socket.is-listening"
     (func $isl (param i32) (result i32)))
-  (import "wasi:sockets/tcp@0.2.3" "[method]tcp-socket.set-hop-limit"
+  (import "wasi:sockets/tcp@0.2.8" "[method]tcp-socket.set-hop-limit"
     (func $shl (param i32 i32 i32)))
-  (import "wasi:sockets/tcp@0.2.3" "[method]tcp-socket.hop-limit"
+  (import "wasi:sockets/tcp@0.2.8" "[method]tcp-socket.hop-limit"
     (func $hl (param i32 i32)))
-  (import "wasi:sockets/tcp@0.2.3" "[method]tcp-socket.set-keep-alive-enabled"
+  (import "wasi:sockets/tcp@0.2.8" "[method]tcp-socket.set-keep-alive-enabled"
     (func $skae (param i32 i32 i32)))
-  (import "wasi:sockets/tcp@0.2.3" "[method]tcp-socket.keep-alive-enabled"
+  (import "wasi:sockets/tcp@0.2.8" "[method]tcp-socket.keep-alive-enabled"
     (func $kae (param i32 i32)))
   (memory (export "memory") 1)
   (global $next (mut i32) (i32.const 1024))

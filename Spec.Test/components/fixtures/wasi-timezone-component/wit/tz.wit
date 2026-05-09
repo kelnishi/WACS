@@ -1,5 +1,5 @@
 package local:tz;
 world demo {
-    import wasi:clocks/timezone@0.2.3;
+    import wasi:clocks/timezone@0.2.8;
     export ask-offset: func(seconds: u64, nanos: u32) -> s32;
 }

@@ -1,6 +1,6 @@
 package local:fsreaddir;
 world demo {
-    import wasi:filesystem/types@0.2.3;
+    import wasi:filesystem/types@0.2.8;
     /// Calls read-directory then read-directory-entry once.
     /// Packs (option-disc | type<<8 | name-len<<16 | first-name-byte<<24)
     /// into a u32.

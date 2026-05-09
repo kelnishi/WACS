@@ -1,5 +1,5 @@
 (module
-  (import "wasi:io/error@0.2.3" "[method]error.to-debug-string"
+  (import "wasi:io/error@0.2.8" "[method]error.to-debug-string"
     (func $tds (param i32 i32)))
   (memory (export "memory") 1)
   (global $next (mut i32) (i32.const 1024))

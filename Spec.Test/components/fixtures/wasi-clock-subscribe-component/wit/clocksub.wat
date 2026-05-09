@@ -1,9 +1,9 @@
 (module
-  (import "wasi:clocks/monotonic-clock@0.2.3" "subscribe-instant"
+  (import "wasi:clocks/monotonic-clock@0.2.8" "subscribe-instant"
     (func $si (param i64) (result i32)))
-  (import "wasi:clocks/monotonic-clock@0.2.3" "subscribe-duration"
+  (import "wasi:clocks/monotonic-clock@0.2.8" "subscribe-duration"
     (func $sd (param i64) (result i32)))
-  (import "wasi:io/poll@0.2.3" "[resource-drop]pollable"
+  (import "wasi:io/poll@0.2.8" "[resource-drop]pollable"
     (func $drop (param i32)))
   (memory (export "memory") 1)
   (func (export "ask-subscribe") (result i32)

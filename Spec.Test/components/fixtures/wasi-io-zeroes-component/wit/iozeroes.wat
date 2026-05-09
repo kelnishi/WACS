@@ -1,7 +1,7 @@
 (module
-  (import "wasi:io/streams@0.2.3" "[method]output-stream.write-zeroes"
+  (import "wasi:io/streams@0.2.8" "[method]output-stream.write-zeroes"
     (func $wz (param i32 i64 i32)))
-  (import "wasi:io/streams@0.2.3" "[method]output-stream.blocking-write-zeroes-and-flush"
+  (import "wasi:io/streams@0.2.8" "[method]output-stream.blocking-write-zeroes-and-flush"
     (func $bwzf (param i32 i64 i32)))
   (memory (export "memory") 1)
   (global $next (mut i32) (i32.const 1024))

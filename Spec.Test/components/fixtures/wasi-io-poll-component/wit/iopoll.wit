@@ -1,6 +1,6 @@
 package local:iopoll;
 world demo {
-    import wasi:io/poll@0.2.3;
+    import wasi:io/poll@0.2.8;
     /// Builds a list<borrow<pollable>> of [a, b], calls poll,
     /// and returns the count of ready indices.
     export ask-poll: func(a: u32, b: u32) -> u32;

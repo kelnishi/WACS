@@ -1,4 +1,4 @@
-package wasi:sockets@0.2.3;
+package wasi:sockets@0.2.8;
 interface tcp {
     use network.{network, ip-socket-address, error-code};
     resource tcp-socket {

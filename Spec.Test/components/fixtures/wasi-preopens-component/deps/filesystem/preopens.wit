@@ -1,4 +1,4 @@
-package wasi:filesystem@0.2.3;
+package wasi:filesystem@0.2.8;
 interface preopens {
     use types.{descriptor};
     get-directories: func() -> list<tuple<descriptor, string>>;

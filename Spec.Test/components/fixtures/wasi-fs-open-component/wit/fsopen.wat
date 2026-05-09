@@ -1,7 +1,7 @@
 (module
-  (import "wasi:filesystem/types@0.2.3" "[method]descriptor.open-at"
+  (import "wasi:filesystem/types@0.2.8" "[method]descriptor.open-at"
     (func $open (param i32 i32 i32 i32 i32 i32 i32)))
-  (import "wasi:filesystem/types@0.2.3" "[resource-drop]descriptor"
+  (import "wasi:filesystem/types@0.2.8" "[resource-drop]descriptor"
     (func $drop (param i32)))
   (memory (export "memory") 1)
   ;; "child" path string at 100, 5 bytes.

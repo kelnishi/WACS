@@ -11,7 +11,7 @@
 package local:hello;
 
 world hello {
-    import wasi:cli/stdout@0.2.3;
-    import wasi:io/streams@0.2.3;
-    export wasi:cli/run@0.2.3;
+    import wasi:cli/stdout@0.2.8;
+    import wasi:io/streams@0.2.8;
+    export wasi:cli/run@0.2.8;
 }

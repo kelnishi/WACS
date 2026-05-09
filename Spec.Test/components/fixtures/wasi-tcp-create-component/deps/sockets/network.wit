@@ -1,4 +1,4 @@
-package wasi:sockets@0.2.3;
+package wasi:sockets@0.2.8;
 interface network {
     enum ip-address-family { ipv4, ipv6 }
 }

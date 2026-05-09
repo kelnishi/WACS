@@ -1,4 +1,4 @@
-package wasi:io@0.2.3;
+package wasi:io@0.2.8;
 interface streams {
     resource input-stream;
     resource output-stream;

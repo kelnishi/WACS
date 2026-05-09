@@ -1,5 +1,5 @@
 (module
-  (import "wasi:filesystem/types@0.2.3" "[method]descriptor.stat"
+  (import "wasi:filesystem/types@0.2.8" "[method]descriptor.stat"
     (func $stat (param i32 i32)))
   (memory (export "memory") 1)
   (global $next (mut i32) (i32.const 1024))

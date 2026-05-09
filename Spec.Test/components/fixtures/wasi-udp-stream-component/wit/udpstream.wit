@@ -1,6 +1,6 @@
 package local:udpstream;
 world demo {
-    import wasi:sockets/udp@0.2.3;
+    import wasi:sockets/udp@0.2.8;
     /// Calls %stream(None) — passes option<ip-socket-address>
     /// = None (disc=0). Drops the returned streams. Returns
     /// the count of distinct non-zero handles (2).

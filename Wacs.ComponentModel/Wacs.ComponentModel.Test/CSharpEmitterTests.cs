@@ -106,10 +106,10 @@ namespace Wacs.ComponentModel.Test
             var world = LoadHelloWorld();
             var sources = CSharpEmitter.EmitWorld(world);
             var streamsInterop = sources.Single(s =>
-                s.FileName == "HelloWorld.wit.imports.wasi.io.v0_2_3.StreamsInterop.cs");
+                s.FileName == "HelloWorld.wit.imports.wasi.io.v0_2_8.StreamsInterop.cs");
 
             var expected = LoadReference(
-                "HelloWorld.wit.imports.wasi.io.v0_2_3.StreamsInterop.cs");
+                "HelloWorld.wit.imports.wasi.io.v0_2_8.StreamsInterop.cs");
             Assert.Equal(expected, streamsInterop.Content);
         }
 
@@ -137,11 +137,11 @@ namespace Wacs.ComponentModel.Test
             Assert.Contains("Hello.cs", names);
             Assert.Contains("HelloWorld_wasm_import_linkage_attribute.cs", names);
             Assert.Contains(
-                "HelloWorld.wit.exports.wasi.cli.v0_2_3.RunInterop.cs", names);
+                "HelloWorld.wit.exports.wasi.cli.v0_2_8.RunInterop.cs", names);
             Assert.Contains(
-                "HelloWorld.wit.imports.wasi.cli.v0_2_3.StdoutInterop.cs", names);
+                "HelloWorld.wit.imports.wasi.cli.v0_2_8.StdoutInterop.cs", names);
             Assert.Contains(
-                "HelloWorld.wit.imports.wasi.io.v0_2_3.StreamsInterop.cs", names);
+                "HelloWorld.wit.imports.wasi.io.v0_2_8.StreamsInterop.cs", names);
         }
 
         // ---- Naming convention unit tests ----------------------------------
@@ -174,7 +174,7 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Theory]
-        [InlineData("0.2.3", "v0_2_3")]
+        [InlineData("0.2.8", "v0_2_8")]
         [InlineData("1.0.0", "v1_0_0")]
         [InlineData(null, "")]
         [InlineData("", "")]
@@ -210,8 +210,8 @@ namespace Wacs.ComponentModel.Test
         [Fact]
         public void InterfaceNamespace_for_imports()
         {
-            var pkg = new CtPackageName("wasi", new[] { "io" }, "0.2.3");
-            Assert.Equal("HelloWorld.wit.imports.wasi.io.v0_2_3",
+            var pkg = new CtPackageName("wasi", new[] { "io" }, "0.2.8");
+            Assert.Equal("HelloWorld.wit.imports.wasi.io.v0_2_8",
                          NameConventions.InterfaceNamespace("hello",
                                                             isExport: false,
                                                             pkg));
@@ -220,8 +220,8 @@ namespace Wacs.ComponentModel.Test
         [Fact]
         public void InterfaceNamespace_for_exports()
         {
-            var pkg = new CtPackageName("wasi", new[] { "cli" }, "0.2.3");
-            Assert.Equal("HelloWorld.wit.exports.wasi.cli.v0_2_3",
+            var pkg = new CtPackageName("wasi", new[] { "cli" }, "0.2.8");
+            Assert.Equal("HelloWorld.wit.exports.wasi.cli.v0_2_8",
                          NameConventions.InterfaceNamespace("hello",
                                                             isExport: true,
                                                             pkg));
@@ -246,7 +246,7 @@ namespace Wacs.ComponentModel.Test
         /// </summary>
         private static CtInterfaceType BuildRunInterface()
         {
-            var pkg = new CtPackageName("wasi", new[] { "cli" }, "0.2.3");
+            var pkg = new CtPackageName("wasi", new[] { "cli" }, "0.2.8");
             var runFnType = new CtFunctionType(
                 new System.Collections.Generic.List<CtFuncParam>(),
                 result: null,
@@ -266,11 +266,11 @@ namespace Wacs.ComponentModel.Test
             var emitted = CSharpEmitter.EmitExportInterfaceFile(iface, "hello");
 
             Assert.Equal(
-                "HelloWorld.wit.exports.wasi.cli.v0_2_3.IRun.cs",
+                "HelloWorld.wit.exports.wasi.cli.v0_2_8.IRun.cs",
                 emitted.FileName);
 
             var expected = LoadReference(
-                "HelloWorld.wit.exports.wasi.cli.v0_2_3.IRun.cs");
+                "HelloWorld.wit.exports.wasi.cli.v0_2_8.IRun.cs");
             Assert.Equal(expected, emitted.Content);
         }
 
@@ -1246,11 +1246,11 @@ world w { export def; }";
             // every interface visible.
             var cli = Assert.Single(packages);
             // Tracks the wasi-cli submodule pinned in
-            // Spec.Test/components/wasi-cli (currently v0.2.3).
+            // Spec.Test/components/wasi-cli (currently v0.2.8).
             // The runtime-side Wacs.WASI.Preview2 ships @0.2.8 WIT
             // separately; this test exercises the WIT loader
             // against the submodule fixture.
-            Assert.Equal("wasi:cli@0.2.3", cli.Name.ToString());
+            Assert.Equal("wasi:cli@0.2.8", cli.Name.ToString());
             Assert.Contains(cli.Interfaces, i => i.Name == "run");
             Assert.Contains(cli.Interfaces, i => i.Name == "environment");
             Assert.Contains(cli.Interfaces, i => i.Name == "stdin");
@@ -1276,21 +1276,21 @@ world w { export def; }";
             var packages = WitLoader.LoadDirectoryTree(witDir);
 
             var names = packages.Select(p => p.Name.ToString()).ToArray();
-            // Tracks the wasi-cli submodule pinned at v0.2.3 (see
+            // Tracks the wasi-cli submodule pinned at v0.2.8 (see
             // WitLoader_merges_headerless_files_into_named_package
             // for the rationale on why the submodule and the
             // runtime-shipped @0.2.8 WIT diverge).
-            Assert.Contains("wasi:cli@0.2.3", names);
-            Assert.Contains("wasi:io@0.2.3", names);
-            Assert.Contains("wasi:clocks@0.2.3", names);
-            Assert.Contains("wasi:filesystem@0.2.3", names);
-            Assert.Contains("wasi:sockets@0.2.3", names);
-            Assert.Contains("wasi:random@0.2.3", names);
+            Assert.Contains("wasi:cli@0.2.8", names);
+            Assert.Contains("wasi:io@0.2.8", names);
+            Assert.Contains("wasi:clocks@0.2.8", names);
+            Assert.Contains("wasi:filesystem@0.2.8", names);
+            Assert.Contains("wasi:sockets@0.2.8", names);
+            Assert.Contains("wasi:random@0.2.8", names);
 
             // wasi:io has streams/error/poll interfaces —
             // transitively reachable from wasi:io/streams's
             // type graph.
-            var io = packages.Single(p => p.Name.ToString() == "wasi:io@0.2.3");
+            var io = packages.Single(p => p.Name.ToString() == "wasi:io@0.2.8");
             Assert.Contains(io.Interfaces, i => i.Name == "streams");
             Assert.Contains(io.Interfaces, i => i.Name == "error");
             Assert.Contains(io.Interfaces, i => i.Name == "poll");
@@ -2154,17 +2154,17 @@ world trans-world { import env; }";
             var packages = new System.Collections.Generic.List<CtPackage>();
             packages.AddRange(WitToTypes.Convert(WitParser.Parse(helloWit)));
             packages.AddRange(WitToTypes.Convert(WitParser.Parse(
-                "package wasi:cli@0.2.3;\n" + runWit)));
+                "package wasi:cli@0.2.8;\n" + runWit)));
             WitResolver.Resolve(packages);
 
             var world = packages.First(p => p.Name.Namespace == "local"
                 && p.Name.Path.Single() == "hello").Worlds.Single();
             var sources = CSharpEmitter.EmitWorld(world);
             var runInterop = sources.Single(s => s.FileName ==
-                "HelloWorld.wit.exports.wasi.cli.v0_2_3.RunInterop.cs");
+                "HelloWorld.wit.exports.wasi.cli.v0_2_8.RunInterop.cs");
 
             var expected = LoadReference(
-                "HelloWorld.wit.exports.wasi.cli.v0_2_3.RunInterop.cs");
+                "HelloWorld.wit.exports.wasi.cli.v0_2_8.RunInterop.cs");
             Assert.Equal(expected, runInterop.Content);
         }
 
@@ -2182,7 +2182,7 @@ world trans-world { import env; }";
             var packages = new System.Collections.Generic.List<CtPackage>();
             packages.AddRange(WitToTypes.Convert(WitParser.Parse(helloWit)));
             packages.AddRange(WitToTypes.Convert(WitParser.Parse(
-                "package wasi:cli@0.2.3;\n" + runWit)));
+                "package wasi:cli@0.2.8;\n" + runWit)));
 
             WitResolver.Resolve(packages);
 
@@ -2192,11 +2192,11 @@ world trans-world { import env; }";
 
             var sources = CSharpEmitter.EmitWorld(world);
             var irunFile = sources.SingleOrDefault(s =>
-                s.FileName == "HelloWorld.wit.exports.wasi.cli.v0_2_3.IRun.cs");
+                s.FileName == "HelloWorld.wit.exports.wasi.cli.v0_2_8.IRun.cs");
             Assert.NotNull(irunFile);
 
             var expected = LoadReference(
-                "HelloWorld.wit.exports.wasi.cli.v0_2_3.IRun.cs");
+                "HelloWorld.wit.exports.wasi.cli.v0_2_8.IRun.cs");
             Assert.Equal(expected, irunFile!.Content);
         }
     }

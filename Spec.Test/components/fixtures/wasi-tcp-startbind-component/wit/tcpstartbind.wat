@@ -1,5 +1,5 @@
 (module
-  (import "wasi:sockets/tcp@0.2.3" "[method]tcp-socket.start-bind"
+  (import "wasi:sockets/tcp@0.2.8" "[method]tcp-socket.start-bind"
     (func $sb (param i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32)))
   (memory (export "memory") 1)
   (global $next (mut i32) (i32.const 1024))

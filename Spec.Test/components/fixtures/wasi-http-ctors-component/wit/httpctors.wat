@@ -1,9 +1,9 @@
 (module
-  (import "wasi:http/types@0.2.3" "[constructor]request-options"
+  (import "wasi:http/types@0.2.8" "[constructor]request-options"
     (func $newOpts (result i32)))
-  (import "wasi:http/types@0.2.3" "[constructor]outgoing-request"
+  (import "wasi:http/types@0.2.8" "[constructor]outgoing-request"
     (func $newReq (param i32) (result i32)))
-  (import "wasi:http/types@0.2.3" "[constructor]outgoing-response"
+  (import "wasi:http/types@0.2.8" "[constructor]outgoing-response"
     (func $newResp (param i32) (result i32)))
   (memory (export "memory") 1)
   (func (export "ask-new-request-options") (result i32)

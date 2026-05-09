@@ -1,6 +1,6 @@
-package wasi:http@0.2.3;
+package wasi:http@0.2.8;
 interface types {
-    use wasi:io/error@0.2.3.{error as io-error};
+    use wasi:io/error@0.2.8.{error as io-error};
 
     record DNS-error-payload {
         rcode: option<string>,

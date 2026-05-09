@@ -1,4 +1,4 @@
-package wasi:cli@0.2.3;
+package wasi:cli@0.2.8;
 interface environment {
     get-environment: func() -> list<tuple<string, string>>;
     get-arguments: func() -> list<string>;

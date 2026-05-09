@@ -1,9 +1,9 @@
 (module
-  (import "wasi:filesystem/types@0.2.3" "[method]descriptor.read-directory"
+  (import "wasi:filesystem/types@0.2.8" "[method]descriptor.read-directory"
     (func $rd (param i32 i32)))
-  (import "wasi:filesystem/types@0.2.3" "[method]directory-entry-stream.read-directory-entry"
+  (import "wasi:filesystem/types@0.2.8" "[method]directory-entry-stream.read-directory-entry"
     (func $rde (param i32 i32)))
-  (import "wasi:filesystem/types@0.2.3" "[resource-drop]directory-entry-stream"
+  (import "wasi:filesystem/types@0.2.8" "[resource-drop]directory-entry-stream"
     (func $drop (param i32)))
   (memory (export "memory") 1)
   (global $next (mut i32) (i32.const 1024))

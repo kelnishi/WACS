@@ -1,14 +1,14 @@
 (module
-  (import "wasi:http/types@0.2.3" "[method]incoming-response.status"
+  (import "wasi:http/types@0.2.8" "[method]incoming-response.status"
     (func $st (param i32) (result i32)))
-  (import "wasi:http/types@0.2.3" "[method]incoming-response.headers"
+  (import "wasi:http/types@0.2.8" "[method]incoming-response.headers"
     (func $hd (param i32) (result i32)))
-  (import "wasi:http/types@0.2.3" "[method]outgoing-response.status-code"
+  (import "wasi:http/types@0.2.8" "[method]outgoing-response.status-code"
     (func $osc (param i32) (result i32)))
   ;; set-status-code returns result<_, _> = flat i32 disc.
-  (import "wasi:http/types@0.2.3" "[method]outgoing-response.set-status-code"
+  (import "wasi:http/types@0.2.8" "[method]outgoing-response.set-status-code"
     (func $sosc (param i32 i32) (result i32)))
-  (import "wasi:http/types@0.2.3" "[resource-drop]fields"
+  (import "wasi:http/types@0.2.8" "[resource-drop]fields"
     (func $drop_fields (param i32)))
   (memory (export "memory") 1)
   (global $next (mut i32) (i32.const 1024))

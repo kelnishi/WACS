@@ -1,5 +1,5 @@
 package local:wc;
 world wc {
-    import wasi:clocks/wall-clock@0.2.3;
+    import wasi:clocks/wall-clock@0.2.8;
     export wall-now: func() -> tuple<u64, u32>;
 }

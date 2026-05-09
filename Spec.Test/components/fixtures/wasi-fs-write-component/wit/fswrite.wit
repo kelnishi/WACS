@@ -1,6 +1,6 @@
 package local:fswrite;
 world demo {
-    import wasi:filesystem/types@0.2.3;
+    import wasi:filesystem/types@0.2.8;
     /// write(handle, "hello", 0) → returns the count written.
     export ask-write: func(handle: u32) -> u64;
 }
