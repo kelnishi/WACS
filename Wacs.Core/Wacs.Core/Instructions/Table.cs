@@ -64,8 +64,13 @@ namespace Wacs.Core.Instructions
                 $"Instruction table.get failed. Wrong type on stack.");
             //7.
             long i = context.OpStack.PopAddr();
-            //8.
-            if (i >= tab.Elements.Count || (i > (long)int.MaxValue))
+            //8. Phase D: unsigned compare. table64 indices ride on
+            // the same OpStack pop path; PopAddr no longer traps on
+            // negative (memory64-compatible). For tables, treat i
+            // as u64 — negative-as-signed maps to a huge ulong that
+            // always fails the bound.
+            if ((ulong)i >= (ulong)tab.Elements.Count
+                || i > (long)int.MaxValue)
             {
                 throw new TrapException("Trap in table.get");
             }
@@ -130,8 +135,8 @@ namespace Wacs.Core.Instructions
                 $"Instruction table.set found incorrect type on top of the Stack");
             //9.
             long i = context.OpStack.PopAddr();
-            //10.
-            if (i >= tab.Elements.Count)
+            //10. Phase D: unsigned compare for table64 indices.
+            if ((ulong)i >= (ulong)tab.Elements.Count)
             {
                 throw new TrapException("table.set index exceeds table size.");
             }

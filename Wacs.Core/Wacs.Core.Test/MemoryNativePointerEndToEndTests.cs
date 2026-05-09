@@ -8,6 +8,9 @@
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Text;
+using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
+using Wacs.Core.Utilities;
 using Xunit;
 
 namespace Wacs.Core.Test
@@ -372,6 +375,71 @@ namespace Wacs.Core.Test
                     i32.atomic.load))";
             var (runtime, inst) = Instantiate(src, mode);
             Assert.Equal(42, (int)Invoke(runtime, inst, "run"));
+        }
+
+        // === Phase D: memory64 ===
+        // memory64 modules use i64 addresses. NativePointer mode is
+        // required (ManagedArray's byte[] cap is ~2 GiB). The cap
+        // shifts from WasmMaxPages (2^16) to WasmMaxPages64 (2^48).
+
+        [Fact]
+        public void Memory64_Pages_AllocationCapsAtWasmMaxPages64()
+        {
+            // memory64 type with explicit max=WasmMaxPages64 should
+            // construct under NativePointer. ManagedArray rejects
+            // anything past HostMaxPages even for memory64 (the
+            // byte[] backing has the hard 2 GiB limit).
+            var memType = new MemoryType(new Limits(
+                AddrType.I64, 1, Constants.WasmMaxPages64));
+            using var mem = new MemoryInstance(memType,
+                MemoryStorageMode.NativePointer);
+            Assert.Equal(MemoryStorageMode.NativePointer, mem.StorageMode);
+            Assert.Equal(AddrType.I64, mem.Type.Limits.AddressType);
+            Assert.Equal(1, mem.Size);
+        }
+
+        [Fact]
+        public void Memory64_StoreLoad_RoundTripsAtHighAddress()
+        {
+            // Grow to 4 pages (256 KiB) and write/read past the
+            // first page boundary. Validates that memory64-mode
+            // bounds-check arithmetic (unsigned) accepts addresses
+            // well within range and stores survive grow.
+            var src = @"
+                (module
+                  (memory i64 1)
+                  (func (export ""run"") (result i64)
+                    ;; Store 0xDEADC0DE_00112233 at offset 100000
+                    ;; (within 1 page after 2-page grow). Then read it.
+                    i64.const 3
+                    memory.grow
+                    drop
+                    i64.const 100000
+                    i64.const 0xDEADC0DE00112233
+                    i64.store
+                    i64.const 100000
+                    i64.load))";
+            var (runtime, inst) = Instantiate(src,
+                MemoryStorageMode.NativePointer);
+            Assert.Equal(unchecked((long)0xDEADC0DE00112233UL),
+                Invoke(runtime, inst, "run"));
+        }
+
+        [Fact]
+        public void Memory64_OutOfBoundsLoad_Traps()
+        {
+            // 1 page = 65536 bytes. Loading at 65535 with i64 (8B)
+            // crosses the boundary → trap.
+            var src = @"
+                (module
+                  (memory i64 1)
+                  (func (export ""run"") (result i64)
+                    i64.const 65535
+                    i64.load))";
+            var (runtime, inst) = Instantiate(src,
+                MemoryStorageMode.NativePointer);
+            Assert.Throws<TrapException>(() =>
+                Invoke(runtime, inst, "run"));
         }
 
         [Theory]

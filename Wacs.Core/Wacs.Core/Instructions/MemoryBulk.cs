@@ -220,10 +220,13 @@ namespace Wacs.Core.Instructions
             //15.
             long d = context.OpStack.PopAddr();
 
-            if (s + n > data.Data.Length)
+            // Wrap-safe unsigned bounds for memory64; data segment is
+            // always byte[]-bounded so its check stays in long.
+            if ((ulong)s > (ulong)data.Data.Length
+                || (ulong)data.Data.Length - (ulong)s < (ulong)n)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Data underflow.");
-            
-            if (d + n > (long)mem.ByteLength)
+            if ((ulong)d > (ulong)mem.ByteLength
+                || (ulong)mem.ByteLength - (ulong)d < (ulong)n)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory overflow.");
 
             // Bulk Span.CopyTo (memmove); mode-aware via mem.AsSpan
@@ -369,10 +372,15 @@ namespace Wacs.Core.Instructions
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //15.
             long d = context.OpStack.PopAddr();
-            //16.
-            if (s+n > (long)memSrc.ByteLength)
+            //16. Wrap-safe unsigned bounds — memory64 addresses
+            // can sit anywhere in [0, 2^64); the spec wraps in u64
+            // arithmetic but out-of-bounds at the byte level still
+            // traps.
+            if ((ulong)s > (ulong)memSrc.ByteLength
+                || (ulong)memSrc.ByteLength - (ulong)s < (ulong)n)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Source memory overflow.");
-            if (d+n > (long)memDst.ByteLength)
+            if ((ulong)d > (ulong)memDst.ByteLength
+                || (ulong)memDst.ByteLength - (ulong)d < (ulong)n)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Destination memory overflow.");
 
             // Span<byte>.CopyTo dispatches to Buffer.Memmove and
@@ -441,8 +449,9 @@ namespace Wacs.Core.Instructions
                 $"Instruction {Op.GetMnemonic()} failed. Wrong type on stack.");
             //11.
             long d = context.OpStack.PopAddr();
-            //12.
-            if (d + n > (long)mem.ByteLength)
+            //12. Wrap-safe unsigned bounds for memory64.
+            if ((ulong)d > (ulong)mem.ByteLength
+                || (ulong)mem.ByteLength - (ulong)d < (ulong)n)
                 throw new TrapException("Instruction memory.fill failed. Buffer overflow");
 
             // Bulk Span.Fill — mode-aware via mem.AsSpan.

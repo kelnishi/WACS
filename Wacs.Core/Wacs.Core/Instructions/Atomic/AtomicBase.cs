@@ -144,7 +144,7 @@ namespace Wacs.Core.Instructions.Atomic
             if (ea < 0)
                 throw new TrapException(
                     $"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea} out of bounds.");
-            if (ea + WidthBytes > (long)CachedMem.ByteLength)
+            if ((ulong)ea > (ulong)CachedMem.ByteLength || (ulong)CachedMem.ByteLength - (ulong)ea < (ulong)WidthBytes)
                 throw new TrapException(
                     $"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea}+{WidthBytes} out of bounds ({(long)CachedMem.ByteLength}).");
             if ((ea & (WidthBytes - 1)) != 0)

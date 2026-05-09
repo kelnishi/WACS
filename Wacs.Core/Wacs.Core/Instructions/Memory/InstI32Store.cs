@@ -53,9 +53,7 @@ namespace Wacs.Core.Instructions.Memory
             var mem = context.Store[a];
 
             long ea = offset + M.Offset;
-            if (ea < 0)
-                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea} out of bounds.");
-            if (ea + WidthTByteSize > (long)mem.ByteLength)
+            if ((ulong)ea > (ulong)mem.ByteLength || (ulong)mem.ByteLength - (ulong)ea < (ulong)WidthTByteSize)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer out of bounds.");
             //13,14,15
             Span<byte> bs = mem.AsSpan((int)ea, WidthTByteSize);
@@ -98,9 +96,7 @@ namespace Wacs.Core.Instructions.Memory
             var mem = context.Store[a];
 
             long ea = offset + M.Offset;
-            if (ea < 0)
-                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea} out of bounds.");
-            if (ea + WidthTByteSize > (long)mem.ByteLength)
+            if ((ulong)ea > (ulong)mem.ByteLength || (ulong)mem.ByteLength - (ulong)ea < (ulong)WidthTByteSize)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer out of bounds.");
             // Single-byte store via mode-aware AsSpan.
             mem.AsSpan((int)ea, 1)[0] = (byte)(0xFF & cU32);
@@ -137,9 +133,7 @@ namespace Wacs.Core.Instructions.Memory
             var mem = context.Store[a];
 
             long ea = offset + M.Offset;
-            if (ea < 0)
-                throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer {ea} out of bounds.");
-            if (ea + WidthTByteSize > (long)mem.ByteLength)
+            if ((ulong)ea > (ulong)mem.ByteLength || (ulong)mem.ByteLength - (ulong)ea < (ulong)WidthTByteSize)
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Memory pointer out of bounds.");
             //13,14,15
             Span<byte> bs = mem.AsSpan((int)ea, WidthTByteSize);

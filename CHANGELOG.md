@@ -1,5 +1,80 @@
 # Changelog
 
+## WACS 0.12.4 — gap 12 phase D: memory64 support
+
+memory64 modules (`(memory i64 N)`) now run end-to-end through the
+interpreter and transpiler when paired with NativePointer storage.
+The cap shifts from `WasmMaxPages` (2^16, 4 GiB for memory32) to
+`WasmMaxPages64` (2^48). All 4 spec.test fixtures under
+`spec/test/core/memory64/` pass on both the WAST and
+WAST-transpiled paths.
+
+### Bounds-check arithmetic
+
+The historical `if (ea < 0) trap; if (ea + W > Length) trap;`
+pattern was correct for memory32 (PopAddr trapped on negative
+addresses, addr+offset stayed in long range) but broke for
+memory64: a u64 address with the high bit set is legitimate, and
+ea+width can wrap into negative when addr is near 2^64. Switched
+every memory-op bounds check (single-byte loads/stores, narrow
+loads/stores, full-width, SIMD, atomics, bulk ops) to a wrap-safe
+unsigned form:
+
+```csharp
+if ((ulong)ea > (ulong)mem.ByteLength
+    || (ulong)mem.ByteLength - (ulong)ea < (ulong)width)
+    trap;
+```
+
+Negative `ea` casts to a huge ulong that fails the first
+clause; small `ea` near `ByteLength` fails via the subtract-and-
+compare without overflow risk.
+
+### Other changes
+
+- `OpStack.PopAddr` no longer traps on negative — memory64
+  addresses with the high bit set are valid wasm. Bounds-check
+  sites are now responsible for trapping on out-of-bounds.
+- `MemoryInstance.MaxPagesForMode` reads `Type.Limits.AddressType`
+  and returns `WasmMaxPages64` (2^48) for `i64`-address NativePointer
+  memories; `WasmMaxPages` (2^16) for `i32`; `HostMaxPages` (2^15)
+  for ManagedArray either way (byte[] cap is hard).
+- `InstTableGet` / `InstTableSet` switched to unsigned
+  `(ulong)i >= (ulong)tab.Elements.Count` so table64 (`(table i64 …)`)
+  indices behave correctly.
+
+### Bulk ops
+
+`memory.copy` / `memory.fill` / `memory.init` already used long
+arithmetic for their `(s + n)` / `(d + n)` overflow checks; for
+memory64 those wrap silently. Switched to the same wrap-safe
+unsigned form.
+
+### Tests
+
+Three new theory cases in `MemoryNativePointerEndToEndTests`
+(`Memory64_Pages_AllocationCapsAtWasmMaxPages64`,
+`Memory64_StoreLoad_RoundTripsAtHighAddress`,
+`Memory64_OutOfBoundsLoad_Traps`) plus all 4 spec.test memory64
+fixtures pass. Wacs.Core 394 (was 391), Spec.Test 770/772, every
+other suite unchanged.
+
+### What's not in phase D
+
+- Transpiler-emit memory-op IL still uses `int addr, long offset`
+  on the helper signatures and `(int)ea` truncation at the
+  AsSpan call site. memory64 modules going through the AOT
+  saved-DLL path (`wacs aot --wasi`) work today only when ea
+  fits in int32 (i.e., the 4 GiB sub-window of a memory64
+  address space). Spec memory64 tests pass because they wrap to
+  small ea values; arbitrary memory64 transpiled use of
+  ea > int.MaxValue will still trap on AsSpan. A follow-up phase
+  D.2 widens the helper signatures to `nuint addr, ulong offset`
+  if that use case ever shows up in practice.
+- `WacsHostMemory.AsSpan(int, int)` is `int`-bounded; host
+  bindings reading >2 GiB views need the future `MemoryHandle`
+  surface (also phase D.2).
+
 ## WACS.Cli 1.4.2 / WACS.Transpiler.Lib 0.7.5 — gap 12 phases C.4c + C.5: `wacs run --native-memory`
 
 End-to-end CLI plumbing for NativePointer storage. With this

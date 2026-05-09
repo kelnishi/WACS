@@ -21,6 +21,7 @@ using System.Threading;
 using FluentValidation;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Runtime.Types
@@ -218,16 +219,22 @@ namespace Wacs.Core.Runtime.Types
             Type = new MemoryType(newLimits);
         }
 
-        // Page-count cap, by storage mode. ManagedArray is hard-
-        // capped at HostMaxPages (~2 GiB, the byte[] limit even with
-        // gcAllowVeryLargeObjects). NativePointer lifts the cap to
-        // the wasm32 spec max (WasmMaxPages = 4 GiB) for memory32 —
-        // memory64 widens it further to WasmMaxPages64 (2^48), but
-        // that requires Phase D's i64-address plumbing.
-        private static long MaxPagesForMode(MemoryStorageMode mode)
-            => mode == MemoryStorageMode.NativePointer
-                ? Constants.WasmMaxPages
-                : Constants.HostMaxPages;
+        // Page-count cap, by storage mode + address type. ManagedArray
+        // is hard-capped at HostMaxPages (~2 GiB, the byte[] limit
+        // even with gcAllowVeryLargeObjects). NativePointer lifts the
+        // cap to the wasm32 spec max (WasmMaxPages = 4 GiB) for
+        // memory32 modules and to WasmMaxPages64 (2^48) for memory64
+        // modules — phase D wires the i64-address plumbing through
+        // PopAddr / bounds-check arithmetic so the high cap is
+        // actually reachable.
+        private long MaxPagesForMode(MemoryStorageMode mode)
+        {
+            if (mode != MemoryStorageMode.NativePointer)
+                return Constants.HostMaxPages;
+            return Type.Limits.AddressType == AddrType.I64
+                ? Constants.WasmMaxPages64
+                : Constants.WasmMaxPages;
+        }
 
         // Native buffer allocator. Prefers NativeMemory.AllocZeroed
         // on .NET 6+ (single syscall, page-zeroed by the OS); falls
