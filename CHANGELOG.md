@@ -1,5 +1,219 @@
 # Changelog
 
+## [WACS.ComponentModel 0.2.0] — WIT parser accepts pre-release semver tags
+
+`WitLexer` now emits dedicated `Dash` and `Plus` tokens (only when
+not part of `->` or kebab-case identifiers). `WitParser.ParseSemver`
+consumes them as the optional pre-release / build suffixes per
+semver, populating `WitVersion.Prerelease` / `Build`.
+
+Closes the `wasi:nn@0.2.0-rc-2024-10-28` (and any future rc-tagged)
+WIT package's "unexpected character '-'" failure path. Unblocks the
+SourceGen-driven host-interface emission for wasi-nn (see
+WACS.WASI.NN 0.3.0).
+
+## [WACS.WASI.NN.DependencyInjection 0.2.0] — Concrete resource impls
+
+Replaces the GraphStub / ErrorStub placeholders with real resource
+implementations (`Tensor`, `Graph`, `GraphExecutionContext`, `Error`)
+of the source-gen interfaces. Each class has a parameterless ctor
+so the canonical-ABI resource-construct lift can
+`Activator.CreateInstance` it; instance methods either route to the
+backend SPI (`Graph` → `IBackendGraph`, `GraphExecutionContext` →
+`IBackendContext`) or hold pure state (`Tensor`, `Error`).
+
+`GraphFuncsImpl.Load` / `LoadByName` now return real `Graph`
+instances; `Graph.InitExecutionContext` mints a real
+`GraphExecutionContext`; `compute` bridges between the wasi-nn
+resource handles and the backend SPI's `NamedTensor` values
+(copying output bytes so the resource handle owns its data
+independent of the next compute).
+
+Smoke tests in `Wacs.WASI.NN.Test/DependencyInjectionResourceTests`
+cover the round-trip + double-construction + access-before-construct
+guards.
+
+The remaining piece for the SLM workload's transpiler-direct-link
+path is multi-bundle wiring in `ComponentMainHost`: the existing
+ctor-arity-based emit assumes a single `object hostBundle` slot,
+so a component importing both `wasi:cli/*` (Preview2) and
+`wasi:nn/*` can't yet have both bundles wired through one slot.
+The resolver's `bundleType` parameter takes a single type today;
+extending to a composite bundle (or `Type[]`) is the open work.
+
+## [WACS.WASI.NN.DependencyInjection 0.1.0] — WasiNNBundle scaffolding
+
+New package mirroring `Wacs.WASI.Preview2.DependencyInjection`. Ships
+the `WasiNNBundle` that the transpiler's `HostPackageResolver`
+direct-links wasi-nn's stateless `graph.load` /
+`graph.load-by-name` against, plus
+`services.AddWasiNN(b => b.AddBackend(GraphEncoding.ONNX, new
+OnnxBackend()))` for DI registration.
+
+`GraphFuncsImpl` is the concrete `Nn.IGraphFuncs` implementation —
+delegates to the configured `WasiNNConfiguration` backends (same
+registry the interpreter binding consults). `Result<IGraph,
+IError>` returns route through `GraphStub` / `ErrorStub`
+placeholders that satisfy the type contract.
+
+The resource-method-direct-link (`graph.init-execution-context`,
+`tensor.constructor`, `inference.compute`) is the next deferred
+chunk — the `GraphStub.InitExecutionContext` returns
+`unsupported-operation` with a clear "wait for the resource-impl
+PR" message rather than silently mis-dispatching. Resource methods
+on the interpreter `BindToRuntime` path continue to work via the
+hand-written `WitBindings` today.
+
+## [WACS.WASI.NN 0.3.0] — Source-gen [WitSource] interfaces
+
+Wires `Wacs.ComponentModel.Bindgen.SourceGen` against
+`wit/wasi-nn.wit`, producing `[WitSource]`-decorated interfaces
+under `Wacs.WASI.NN.Nn.{Errors, Graph, Inference, Tensor}`. The
+transpiler's `HostPackageResolver` discovers these to direct-link
+component-model wasi-nn imports — symmetric with how
+`Wacs.WASI.Preview2` wires its hand-migrated subsystems.
+
+The hand-written `WitBindings` continues to own the interpreter-
+side `BindHostFunction` wiring; the generated interfaces feed the
+transpiler-direct-link path on the wasip2 component path.
+
+## [WACS.WASI.Preview2 0.2.0] — WasiPreview2Host composite + UseWasiPreview2 extension
+
+`WasiPreview2Host` is the interpreter-side composite that wires every
+sub-binding (random, clocks, io, streams, cli, filesystem, optionally
+sockets + http) onto a `WasmRuntime` from one shared
+`ResourceContext`. Symmetric with `WasiNNHost` — interpreter
+consumers no longer thread the resource context through eight
+separate `BindToRuntime` calls.
+
+`runtime.UseWasiPreview2(b => b.WithStdout(...).EnableSockets())` is
+the matching one-liner. Default posture matches Wasmtime: host
+clocks/random/cli stdio + sandboxed-no-fs are wired, sockets and http
+require explicit opt-in. The
+`Wacs.WASI.Preview2.DependencyInjection` bundle path remains the
+perf-optimized (transpiler direct-link) wiring.
+
+## [WACS.Cli 1.4.0] — Component-mode ergonomics: auto-dispatch + --bind + --wasi-nn
+
+`wacs run --wasip2 my.component.wasm` now starts a stock command
+component without `--call`. The CLI looks for the canonical
+`wasi:cli/run@<version>#run` export (matched via the new
+`[WasmName]` round-trip attribute) and dispatches it automatically;
+falls back to `_start`, then to a helpful error listing the
+available exports. Aligns with wasmtime / jco / wasmer behavior for
+stock command components.
+
+`--bind <asm>` is now honored on the component paths
+(`ExecuteComponent` + `ExecuteComponentTranspiled`), not just on the
+core paths. Custom IBindable host packages can satisfy component
+imports the same way they do for core modules. On the
+component-transpiler path bindings run AFTER the default trap-stub
+registration so `--bind` overrides cover the imports they care about.
+`--bind` accepts both file paths and assembly names (resolves via
+`Assembly.LoadFrom` / `Assembly.Load`, mirroring `--host-package`).
+
+`--wasi-nn` shorthand: equivalent to
+`--bind Wacs.WASI.NN.OnnxRuntime`. The DLL is bundled with the CLI
+(via `ExcludeAssets="compile"` like Preview2) so it resolves out of
+the box. For other backends (MLNet, LlamaSharp), pass the package
+name through `--bind` directly.
+
+## [WACS.WASI.NN 0.2.0] — IBindable + UseWasiNN extension
+
+`WasiNNHost` now implements `IBindable` (it already exposed
+`BindToRuntime(WasmRuntime)` — declaring the interface is
+truth-in-advertising). Lets it ride the `--bind` discovery path.
+
+New `runtime.UseWasiNN(b => b.AddBackend(GraphEncoding.ONNX, new OnnxBackend()))`
+extension method. Replaces the
+config → host → BindToRuntime sequence with the same shape we want
+across the WASI host family.
+
+## [WACS.WASI.Threads 0.2.0] — IBindable polish for symmetry
+
+- Tagged `[assembly: WasiHostPackage]` so
+  `runtime.AutoDiscoverHostPackages()` finds it alongside the
+  other tagged WASI packages.
+- New `runtime.UseWasiThreads()` extension method — one-liner
+  symmetric with `UseWasiPreview2` / `UseWasiNN`.
+- New `--wasi-threads` CLI flag (shorthand for
+  `--bind Wacs.WASI.Threads`); the package is bundled with the
+  CLI so the flag resolves out-of-box.
+
+`WasiThreads` already implemented `IBindable` with a parameterless
+ctor, so `--bind Wacs.WASI.Threads` worked before this change.
+This is consistency polish across the WASI host family.
+
+## [WACS.WASI.NN.MLNet 0.2.0] — Parameterless WasiNNMLNetBindable for --bind
+
+Adapter exposing a parameterless ctor that pre-registers the
+ML.NET-flavored ONNX backend. `--bind Wacs.WASI.NN.MLNet` activates
+it via `BindingLoader`, identical shape to the OnnxRuntime adapter.
+Tagged `[assembly: WasiHostPackage]` for `AutoDiscoverHostPackages`.
+
+## [WACS.WASI.NN.LlamaSharp 0.2.0] — Parameterless WasiNNLlamaSharpBindable
+
+Adapter for the GGUF / LlamaSharp backend with environment-variable-
+driven name registry. Set `WACS_WASINN_GGUF_DIR=/path/to/models` and
+every `*.gguf` file in that directory is registered under its
+filename-sans-extension. Empty registry is fine — guests calling
+`load-by-name` get `NotFound` rather than a trap.
+
+`--bind Wacs.WASI.NN.LlamaSharp` activates it for guests using
+`graph-encoding.ggml`. For richer registries (HF cache scan,
+per-model `ModelParams`, custom paths), embedders should construct
+`LlamaSharpBackend` directly via `runtime.UseWasiNN(b => b.AddBackend(...))`.
+
+Tagged `[assembly: WasiHostPackage]`.
+
+## [WACS.WASI.NN.OnnxRuntime 0.2.0] — Parameterless WasiNNOnnxBindable for --bind
+
+Adapter exposing a parameterless ctor that pre-registers the ONNX
+backend. `BindingLoader.LoadFromAssembly` activates it
+automatically, so `wacs run my.wasm --wasip2 --bind Wacs.WASI.NN.OnnxRuntime`
+(or the new `--wasi-nn` shorthand) is the whole story for stock
+ONNX components — no per-consumer shim DLL.
+
+## [WACS.HostBindings.Abstractions 0.2.0] — `[WasmName]` + `[WasiHostPackage]`
+
+`[WasmName(string)]` carries the original wasm name on
+auto-generated IExports/IImports methods. Round-trips a sanitized
+CLR identifier (`wasi_cli_run_0_2_0_run`) back to its wasm form
+(`wasi:cli/run@0.2.0#run`) for dispatch and diagnostics. Stamped
+automatically by the WACS interface generator; hand-written types
+implementing those interfaces don't need to apply it.
+
+`[assembly: WasiHostPackage]` flags an assembly as auto-discoverable
+by the runtime's host-package scan
+(`runtime.AutoDiscoverHostPackages()`). Pairs with
+`runtime.UseHostPackages(name1, name2, …)` for the explicit-list
+shape. Either path activates every `IBindable` with a parameterless
+ctor that the tagged assembly ships.
+
+## [WACS.Transpiler.Lib 0.7.2] — `[WasmName]` emit, ComponentMainHost auto-resolve, BindingLoader name resolution
+
+`InterfaceGenerator` stamps `[WasmName]` on every IExports / IImports
+method, preserving the original wasm name through CLR-identifier
+sanitization. Survives Reflection.Emit and PersistedAssemblyBuilder
+paths; still dropped by Lokad.ILPack saved-dll output (a
+follow-up).
+
+`ComponentMainHost.Run` now accepts a null `exportName` and
+auto-resolves `wasi:cli/run@<version>#run` via `[WasmName]` before
+falling back to `_start`. Used by the `wacs run --wasip2`
+component-command auto-dispatch path.
+
+`BindingLoader.LoadFromAssembly(string)` now accepts either a file
+path (`Assembly.LoadFrom`) or an assembly name (`Assembly.Load`),
+matching `ResolveHostPackages` so `--bind` and `--host-package` have
+identical resolution semantics.
+
+New `WasmRuntime.UseHostPackages(name1, name2, …)` and
+`WasmRuntime.AutoDiscoverHostPackages()` extension methods: the
+explicit-list and AppDomain-scan shapes for ergonomic IBindable
+wire-up. The scan uses the new `[WasiHostPackage]` assembly
+marker.
+
 ## [WACS.Transpiler.Lib 0.7.1] — Re-instantiation restores dropped active data segments
 
 Each Module instance's ctor copies active data segments from the

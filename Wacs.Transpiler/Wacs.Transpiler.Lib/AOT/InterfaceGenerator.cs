@@ -22,6 +22,7 @@ using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
+using Wacs.HostBindings.Abstractions;
 
 namespace Wacs.Transpiler.AOT
 {
@@ -120,7 +121,14 @@ namespace Wacs.Transpiler.AOT
 
                 string methodName = SanitizeName($"{import.ModuleName}_{import.Name}");
 
-                var method = DefineInterfaceMethod(ImportsInterface, methodName, funcType);
+                // Preserve the original (module, entity) on the
+                // emitted method so tooling and host-package
+                // resolvers can round-trip from the sanitized
+                // CLR identifier back to the wasm import pair.
+                // Format matches WasmRuntime.BindHostFunction's
+                // (module, entity) tuple — joined with ':'.
+                var method = DefineInterfaceMethod(ImportsInterface, methodName, funcType,
+                    wasmName: $"{import.ModuleName}:{import.Name}");
 
                 // Track the (methodName, module, name) tuple — the
                 // ModuleTranspiler will fold it into a single
@@ -168,7 +176,14 @@ namespace Wacs.Transpiler.AOT
                 while (!usedExportNames.Add(methodName))
                     methodName = $"{baseName}_{suffix++}";
 
-                var method = DefineInterfaceMethod(ExportsInterface, methodName, funcType);
+                // The original export name (e.g.
+                // `wasi:cli/run@0.2.0#run`) is what runtimes look
+                // for when auto-dispatching command components —
+                // sanitization to a CLR identifier loses the
+                // version digits and structural punctuation, so
+                // [WasmName] is the round-trip back.
+                var method = DefineInterfaceMethod(ExportsInterface, methodName, funcType,
+                    wasmName: export.Name);
                 ExportMethods.Add(new InterfaceMethod(methodName, funcType, funcIdx, export.Name)
                 {
                     Method = method
@@ -178,7 +193,8 @@ namespace Wacs.Transpiler.AOT
             ExportsInterface.CreateType();
         }
 
-        private MethodBuilder DefineInterfaceMethod(TypeBuilder iface, string name, FunctionType funcType)
+        private MethodBuilder DefineInterfaceMethod(TypeBuilder iface, string name, FunctionType funcType,
+            string? wasmName = null)
         {
             var paramTypes = funcType.ParameterTypes.Types
                 .Select(t => ModuleTranspiler.MapValType(t)).ToArray();
@@ -207,6 +223,21 @@ namespace Wacs.Transpiler.AOT
                 mb.DefineParameter(i + 1, ParameterAttributes.None, $"param{i}");
             for (int i = 0; i < outParamCount; i++)
                 mb.DefineParameter(paramTypes.Length + i + 1, ParameterAttributes.Out, $"result{i + 1}");
+
+            // Stamp [WasmName] with the original export/import
+            // name for auto-dispatch and diagnostic round-trip.
+            // Method-level attributes survive on Reflection.Emit
+            // and PersistedAssemblyBuilder paths; the Lokad.ILPack
+            // saved-dll path drops them, so save-to-dll consumers
+            // still need to dispatch via the sanitized name (or
+            // wait for the matching assembly-level mirror).
+            if (wasmName != null)
+            {
+                var ctor = typeof(WasmNameAttribute)
+                    .GetConstructor(new[] { typeof(string) })!;
+                mb.SetCustomAttribute(new CustomAttributeBuilder(ctor,
+                    new object[] { wasmName }));
+            }
 
             return mb;
         }

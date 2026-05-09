@@ -277,6 +277,31 @@ namespace Wacs.Console.Verbs
                 }
             }
 
+            if (opts.ListImports)
+            {
+                System.Console.WriteLine();
+                System.Console.WriteLine("=== component-level imports ===");
+                // Walk RawSections directly — ComponentModule
+                // doesn't surface a typed Imports accessor (the
+                // outer-component import section is rare, used
+                // mostly by wit-component to name shared types).
+                // For wit-bindgen-rust output the imports come
+                // through the WORLD's `import` statements; those
+                // surface here as Instance / Func entries.
+                bool anyImport = false;
+                foreach (var s in component.RawSections)
+                {
+                    if (s.Id != ComponentSectionId.Import) continue;
+                    foreach (var e in ImportSectionReader.Decode(s.Payload))
+                    {
+                        anyImport = true;
+                        System.Console.WriteLine("  " + e.Sort + "  " + e.Name);
+                    }
+                }
+                if (!anyImport)
+                    System.Console.WriteLine("  (none)");
+            }
+
             if (opts.DumpWat)
             {
                 System.Console.Error.WriteLine(

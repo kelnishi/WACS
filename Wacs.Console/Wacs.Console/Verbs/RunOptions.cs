@@ -31,10 +31,20 @@ namespace Wacs.Console.Verbs
         public IEnumerable<string> Files { get; set; } = new List<string>();
 
         [Option("call", HelpText =
-            "Function export to invoke (default: _start, then any "
-            + "configured WASM start section). Pass arguments after "
-            + "`--` for the function or for WASI argv.")]
+            "Function export to invoke. Default behavior auto-resolves: "
+            + "components dispatch wasi:cli/run@<v>#run if present; "
+            + "core modules dispatch _start. Pass arguments after "
+            + "`--` for the function or for WASI argv. `--invoke` is an "
+            + "alias (matches the wasmtime CLI convention).")]
         public string Call { get; set; } = "";
+
+        [Option("invoke", Hidden = true, HelpText =
+            "Alias for --call (wasmtime-compatible spelling).")]
+        public string Invoke
+        {
+            get => Call;
+            set { if (!string.IsNullOrEmpty(value)) Call = value; }
+        }
 
         [Option("engine", Default = "interpreter", HelpText =
             "Execution engine: interpreter (default) or transpiler. "
@@ -72,7 +82,10 @@ namespace Wacs.Console.Verbs
         [Option("host-package", Separator = ',', HelpText =
             "Host package assembly name(s) or path(s) whose "
             + "[WitSource]-tagged interfaces resolve a component's "
-            + "imports at transpile time. Component-mode only.")]
+            + "imports at transpile time. Accepts an assembly name "
+            + "(resolved via Assembly.Load) or a file path "
+            + "(Assembly.LoadFrom) — same resolution rules as "
+            + "`--bind`. Component-mode only.")]
         public IEnumerable<string> HostPackage { get; set; } = new List<string>();
 
         [Option("wasip2", HelpText =
@@ -82,8 +95,26 @@ namespace Wacs.Console.Verbs
 
         [Option("bind", Separator = ',', HelpText =
             "Path(s) to assemblies containing IBindable host "
-            + "libraries to wire into the runtime before execution.")]
+            + "libraries to wire into the runtime before execution. "
+            + "Accepts an assembly name (resolved via Assembly.Load) "
+            + "or a file path (Assembly.LoadFrom). Each IBindable type "
+            + "with a parameterless ctor is activated and bound.")]
         public IEnumerable<string> Bind { get; set; } = new List<string>();
+
+        [Option("wasi-nn", HelpText =
+            "Wire wasi-nn host bindings using the default ONNX backend "
+            + "(`Wacs.WASI.NN.OnnxRuntime`). Equivalent to "
+            + "`--bind Wacs.WASI.NN.OnnxRuntime`. For other backends "
+            + "(MLNet, LlamaSharp, …), use `--bind` directly with that "
+            + "package's name.")]
+        public bool WasiNN { get; set; }
+
+        [Option("wasi-threads", HelpText =
+            "Wire wasi-threads (`wasi:thread-spawn`) host binding. "
+            + "Equivalent to `--bind Wacs.WASI.Threads`. Module must "
+            + "declare or import shared memory and export "
+            + "`wasi_thread_start (param i32 i32)`.")]
+        public bool WasiThreads { get; set; }
 
         // ---- Instrumentation (interpreter engine only) ----
 

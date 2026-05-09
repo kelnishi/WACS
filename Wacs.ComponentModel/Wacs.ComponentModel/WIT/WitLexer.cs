@@ -32,6 +32,10 @@ namespace Wacs.ComponentModel.WIT
         At,          // @
         Arrow,       // ->
         Star,        // *
+        Dash,        // - (only emitted standalone — kebab-case `-` inside an
+                     // identifier stays part of the Ident lexeme; this token
+                     // surfaces in semver pre-release tags after the patch).
+        Plus,        // + (semver build-metadata separator, same scoping).
 
         // Literals / ids
         Ident,       // foo, kebab-case, _foo
@@ -206,6 +210,23 @@ namespace Wacs.ComponentModel.WIT
                 {
                     toks.Add(new WitToken(WitTokenKind.Arrow, start, 2, line, col));
                     Advance(); Advance();
+                    continue;
+                }
+
+                // Standalone '-' / '+' — only emitted when not part of a
+                // larger token (Arrow consumed '->' above; kebab-case
+                // identifiers eat '-' through IsIdentContinue). Surfaces
+                // in semver pre-release / build suffixes after `@x.y.z`.
+                if (c == '-')
+                {
+                    toks.Add(new WitToken(WitTokenKind.Dash, start, 1, line, col));
+                    Advance();
+                    continue;
+                }
+                if (c == '+')
+                {
+                    toks.Add(new WitToken(WitTokenKind.Plus, start, 1, line, col));
+                    Advance();
                     continue;
                 }
 

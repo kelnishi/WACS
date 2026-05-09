@@ -11,10 +11,11 @@ host orchestrator routes accordingly.
 
 | Package | Role |
 |---|---|
-| `WACS.WASI.NN` | Core: `WasiNNConfiguration`, `WasiNNHost`, `IBackend` SPI, WIT + WITX bindings, `IdentityBackend` for smoke tests |
-| `WACS.WASI.NN.OnnxRuntime` | Direct ONNX Runtime backend (`graph-encoding.onnx`) |
-| `WACS.WASI.NN.MLNet` | Microsoft.ML-flavored backend wrapping ONNX Runtime under an `MLContext` lifecycle |
-| `WACS.WASI.NN.LlamaSharp` | LlamaSharp / llama.cpp backend (`graph-encoding.ggml`) on the WasmEdge convention |
+| `WACS.WASI.NN` | Core: `WasiNNConfiguration`, `WasiNNHost` (`IBindable`), `IBackend` SPI, WIT + WITX bindings, source-gen `[WitSource]` interfaces under `Wacs.WASI.NN.Nn.{Tensor, Errors, Graph, Inference}`, `IdentityBackend`, `runtime.UseWasiNN(...)` extension |
+| `WACS.WASI.NN.DependencyInjection` | DI bundle for the transpiler-direct-link path: `WasiNNBundle`, `WasiPreview2NNBundle` composite, concrete resource impls (`Tensor`, `Graph`, `GraphExecutionContext`, `Error`), `services.AddWasiNN(...)` registration |
+| `WACS.WASI.NN.OnnxRuntime` | Direct ONNX Runtime backend (`graph-encoding.onnx`). Ships `WasiNNOnnxBindable` parameterless adapter for `--bind` |
+| `WACS.WASI.NN.MLNet` | Microsoft.ML-flavored backend wrapping ONNX Runtime under an `MLContext` lifecycle. Ships `WasiNNMLNetBindable` for `--bind` |
+| `WACS.WASI.NN.LlamaSharp` | LlamaSharp / llama.cpp backend (`graph-encoding.ggml`). Ships `WasiNNLlamaSharpBindable` with `WACS_WASINN_GGUF_DIR`-driven name registry |
 
 The packages are siblings — consumers wiring only one backend skip the
 others' NuGet transitives (ORT native binaries, `Microsoft.ML`,
@@ -22,22 +23,53 @@ LlamaSharp's llama.cpp runtime).
 
 ## Quick start
 
+**CLI (zero code):**
+
+```sh
+wacs run my.component.wasm --wasip2 --wasi-nn -d ./models
+# --wasi-nn loads Wacs.WASI.NN.OnnxRuntime; bundled with the CLI.
+# Component auto-dispatches wasi:cli/run@<version>#run.
+```
+
+**Embedder one-liner (interpreter path):**
+
 ```csharp
 using Wacs.Core.Runtime;
 using Wacs.WASI.NN;
 using Wacs.WASI.NN.OnnxRuntime;
 using Wacs.WASI.NN.Types;
 
+var runtime = new WasmRuntime();
+using var host = runtime.UseWasiNN(b =>
+    b.AddBackend(GraphEncoding.ONNX, new OnnxBackend()));
+// runtime now satisfies wasi-nn imports for both ABIs.
+```
+
+**Verbose path (still supported):**
+
+```csharp
 var cfg = WasiNNConfiguration.DefaultConfiguration();
 cfg.Backends[GraphEncoding.ONNX] = new OnnxBackend();
-
 using var host = new WasiNNHost(cfg);
-var runtime = new WasmRuntime();
 host.BindToRuntime(runtime);
-
-// runtime now satisfies wasi-nn imports for both ABIs.
-// Instantiate your wasi-nn-using guest as usual.
 ```
+
+**Transpiler-direct-link (component-model perf path):**
+
+```csharp
+using Wacs.WASI.Preview2.DependencyInjection;
+using Wacs.WASI.NN.DependencyInjection;
+
+services
+    .AddWasiPreview2()
+    .AddWasiNN(b => b.AddBackend(GraphEncoding.ONNX, new OnnxBackend()))
+    .AddWasiPreview2NNBundle();   // composite for the single hostBundle slot
+```
+
+`HostPackageResolver` finds the `WasiPreview2NNBundle` composite when
+both packages are loaded — its forwarding properties cover both
+Preview2 + WASI.NN `[WitSource]` interfaces through one CLR object,
+no transpiler emit changes required.
 
 For LLM workloads on the WasmEdge GGUF convention:
 

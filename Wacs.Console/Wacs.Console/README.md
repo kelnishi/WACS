@@ -106,7 +106,23 @@ running `_start`.
 wacs run app.component.wasm --wasip2
 # auto-routes to transpiler engine + WasiPreview2Bundle when
 # --wasip2 / --host-package is set (those flags only make sense
-# with the bundle path)
+# with the bundle path).
+#
+# Command components don't need --call — `wacs run --wasip2` looks
+# for the canonical wasi:cli/run@<version>#run export and dispatches
+# it automatically. Falls back to _start, then to a helpful error
+# listing the available exports. Pass --call <export> (or
+# --invoke <export>) to override.
+```
+
+**Run a component that imports `wasi:nn` (ONNX inference):**
+
+```bash
+wacs run my.component.wasm --wasip2 --wasi-nn -d ./models
+# --wasi-nn loads Wacs.WASI.NN.OnnxRuntime (bundled with the CLI)
+# and wires its IBindable adapter into the runtime. For other
+# wasi-nn backends (ML.NET, LlamaSharp), pass the package name
+# through --bind directly.
 ```
 
 **Multi-module composition via ModuleLinker:**
@@ -161,15 +177,17 @@ wacs run app.wasm --bind ./MyGameHost.dll
 
 | Flag | Default | Notes |
 |---|---|---|
-| `--call <export>` | `_start` | Function to invoke. Args after `--` are parsed per its wasm signature. |
+| `--call <export>` | auto | Function to invoke. Args after `--` are parsed per its wasm signature. Auto: components dispatch `wasi:cli/run@<v>#run` if present; cores dispatch `_start`. `--invoke` is an alias. |
 | `--engine` | `interpreter` | `interpreter` or `transpiler` (Reflection.Emit AOT, mixed-mode imports). |
 | `-m, --module <name>` | `_` | Name to register the instantiated module under. |
 | `-e, --env K=V` | — | WASI Preview 1 environ. Repeat or comma-separate. |
 | `-d, --dir <path>` | — | WASI Preview 1 preopen. Repeat or comma-separate. |
 | `--wasi` | off | Bind WASI Preview 1 host imports. |
-| `--bind <asm>` | — | Load `IBindable` host packages. Repeat or comma-separate. |
-| `--host-package <name>` | — | Component-mode `[WitSource]` host package(s). |
+| `--bind <asm>` | — | Load `IBindable` host packages. Accepts a file path (`Assembly.LoadFrom`) or assembly name (`Assembly.Load`). Repeat or comma-separate. |
+| `--host-package <name>` | — | Component-mode `[WitSource]` host package(s). Accepts assembly name or file path. |
 | `--wasip2` | off | Shorthand `--host-package Wacs.WASI.Preview2`. |
+| `--wasi-nn` | off | Shorthand `--bind Wacs.WASI.NN.OnnxRuntime` (ONNX). For ML.NET / LlamaSharp / etc., use `--bind <package>` directly. |
+| `--wasi-threads` | off | Shorthand `--bind Wacs.WASI.Threads`. Wires `wasi:thread-spawn`; module must declare/import shared memory and export `wasi_thread_start (param i32 i32)`. |
 | `--profile` | off | JetBrains dotTrace measure-profiler session. |
 | `--log-gas` | off | Print total instructions executed. |
 | `--gas-limit <N>` | 0 (∞) | Trap if instructions exceed N. |
@@ -380,6 +398,26 @@ raw sections      26
 wacs inspect module.wasm --exports
 wacs inspect module.wasm --imports
 ```
+
+For components, `--imports` enumerates each top-level instance import
+with its package + version — useful for predicting which host packages
+to wire before running:
+
+```bash
+$ wacs inspect my.component.wasm --imports
+=== component-level imports ===
+  Instance  wasi:nn/inference@0.2.0-rc-2024-10-28
+  Instance  wasi:nn/graph@0.2.0-rc-2024-10-28
+  Instance  wasi:cli/stdout@0.2.9
+  Instance  wasi:cli/exit@0.2.9
+  …
+```
+
+A component with `wasi:nn/*` imports needs `--wasi-nn` (or
+`--bind Wacs.WASI.NN.<backend>` for non-ONNX backends). `wasi:cli/*`
+needs `--wasip2`. Version mismatches (e.g. component compiled against
+`wasi:cli/stdout@0.2.9` but `Wacs.WASI.Preview2` ships `0.2.0`) surface
+as direct-link resolution failures at instantiation.
 
 **Dump WAT (round-trips back through the text parser):**
 

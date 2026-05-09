@@ -36,8 +36,29 @@ dotnet add package WACS.WASI.Preview2
 
 ## Usage
 
-Wire each WASI subsystem you want to expose. Constructor params are
-nullable; pass `null` (or omit) to skip an interface.
+### Recommended: composite host + extension method
+
+```csharp
+using Wacs.Core.Runtime;
+using Wacs.WASI.Preview2;
+
+var runtime = new WasmRuntime();
+runtime.UseWasiPreview2(b =>
+    b.WithEnvironment(/* IEnvironment */)
+     .EnableSockets()       // off by default
+     .EnableHttp());         // off by default
+```
+
+The `runtime.UseWasiPreview2(...)` extension constructs a
+`WasiPreview2Host : IBindable` that wires all sub-bindings off a
+shared `ResourceContext` in one call. Default posture matches
+Wasmtime: random / clocks / cli stdio / FS preopens always wired;
+sockets and HTTP require explicit opt-in.
+
+### Per-subsystem (verbose)
+
+For embedders who need to override individual subsystems or wire a
+strict subset, the hand-managed shape is still supported:
 
 ```csharp
 using Wacs.Core.Runtime;
