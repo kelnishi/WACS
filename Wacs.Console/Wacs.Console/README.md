@@ -89,6 +89,18 @@ wacs run app.wasm -e PATH=/usr/bin -d ./data
 # WASI Preview 1: env vars, preopened directory, _start dispatch
 ```
 
+**Mount a host directory into a wasip2 component:**
+
+```bash
+wacs run app.component.wasm --wasip2 -d ./models::/models
+# `host::guest` mount-pair syntax — the host side is `./models`,
+# the guest sees `/models`. Bare `-d models` mounts at `/models`
+# (Preview1's rooting convention so the same flag form works on
+# both engines). Both sides reach the guest through the
+# transpiler's direct-link emit for
+# wasi:filesystem/preopens.get-directories — no shim needed.
+```
+
 **Invoke a specific export with arguments:**
 
 ```bash
@@ -181,7 +193,7 @@ wacs run app.wasm --bind ./MyGameHost.dll
 | `--engine` | `interpreter` | `interpreter` or `transpiler` (Reflection.Emit AOT, mixed-mode imports). |
 | `-m, --module <name>` | `_` | Name to register the instantiated module under. |
 | `-e, --env K=V` | — | WASI Preview 1 environ. Repeat or comma-separate. |
-| `-d, --dir <path>` | — | WASI Preview 1 preopen. Repeat or comma-separate. |
+| `-d, --dir <path>` | — | Preopen directory. Bare path mounts at `/<basename>`; `host::guest` syntax (matches wasmtime) sets the guest mount explicitly. Honored on both `--wasi` (Preview 1) and `--wasip2` (Preview 2). Repeat or comma-separate. |
 | `--wasi` | off | Bind WASI Preview 1 host imports. |
 | `--bind <asm>` | — | Load `IBindable` host packages. Accepts a file path (`Assembly.LoadFrom`) or assembly name (`Assembly.Load`). Repeat or comma-separate. |
 | `--host-package <name>` | — | Component-mode `[WitSource]` host package(s). Accepts assembly name or file path. |

@@ -155,6 +155,54 @@ is the default — `WasmRuntime` / `ResourceContext` / bindings /
 wasm execution). Pass `Transient` for per-call construction or
 `Singleton` for single-component apps.
 
+### One-shot run scope: `WasiPreview2RuntimeScope`
+
+For embedders running a single component against a single
+runtime — the typical CLI / tool / one-shot host shape — the DI
+package also ships `WasiPreview2RuntimeScope`, a disposable
+that bundles the scope lifecycle into one constructor call:
+
+```csharp
+using Wacs.Core.Runtime;
+using Wacs.WASI.Preview2.DependencyInjection;
+
+var runtime = new WasmRuntime();
+using var wasi = new WasiPreview2RuntimeScope(
+    runtime,
+    preopens: new[] { ("./models", "/models") });
+
+// wasi.Bundle      → the resolved bundle (composite when
+//                     Wacs.WASI.NN.DependencyInjection is on the
+//                     load path; base WasiPreview2Bundle otherwise)
+// wasi.Resources   → the WasiPreview2Resources for ctor arg 3
+// wasi.Runtime     → runtime, with every *Bindings.BindToRuntime
+//                     already fired
+```
+
+The scope:
+
+1. Registers the external `runtime` as a singleton in DI before
+   `AddWasiPreview2`'s `TryAdd<WasmRuntime>` fires, so the Linker
+   binds against THIS runtime (not a fresh one DI would otherwise
+   build).
+2. Registers a `Preopens(IEnumerable<(host, guest)>)` impl as
+   `IPreopens` when `preopens` is non-empty, ahead of
+   `AddWasiPreview2`'s `TryAddSingleton<IPreopens>` default.
+3. Auto-detects `Wacs.WASI.NN.DependencyInjection` and registers
+   the composite `WasiPreview2NNBundle` when available — required
+   because the transpiler emits its direct-link IL against
+   whichever bundle type was visible at transpile time, and a
+   mismatch between transpile-time and run-time bundle types
+   trips an `InvalidCastException` at the first import call.
+4. Eagerly resolves the `Linker` so the runtime has every
+   `wasi:*` binding registered by the time the ctor returns.
+
+`Dispose` releases the underlying `IServiceScope` and
+`ServiceProvider`. The wasip2 `wacs run` path uses this; programmatic
+embedders should prefer it over hand-rolling the DI scope unless they
+need the `IServiceCollection` for additional registrations (which the
+optional `configure` callback covers).
+
 ## Validating bindings against the WIT contract
 
 Optional but recommended: catch contract drift at link time before
@@ -191,7 +239,7 @@ real BCL primitive.
 | `wasi:clocks/monotonic` | `MonotonicClock` | `Stopwatch` (high-res) + `Task.Delay` for subscribe-* |
 | `wasi:clocks/wall-clock` | `WallClock` | `DateTimeOffset.UtcNow` |
 | `wasi:clocks/timezone` | `Timezone` | `TimeZoneInfo` |
-| `wasi:filesystem` | `Descriptor` + `HostFileInputStream` / `HostFileOutputStream` | `System.IO.File` / `Directory` |
+| `wasi:filesystem` | `Descriptor` + `HostFileInputStream` / `HostFileOutputStream` + `Preopens` | `System.IO.File` / `Directory` |
 | `wasi:random` | `Random` / `InsecureRandom` / `InsecureSeed` | `RandomNumberGenerator` (CSPRNG) + `System.Random` |
 | `wasi:io/streams` | Through filesystem / cli wrappers | Result-encoded `System.IO.Stream` |
 | `wasi:io/poll` | `PollSource` + `ManualResetPollable` / `TimerPollable` | `ManualResetEventSlim` + `Task.WhenAny` |
@@ -206,6 +254,24 @@ backed class, pass `null` to skip wiring an interface entirely.
 Hosts that need different behavior (sandbox restrictions, custom
 DNS, fakes for testing) subclass the relevant base type and
 override the methods they want to replace.
+
+`Preopens` accepts a list of `(hostPath, guestPath)` mount pairs
+through either of two ctors:
+
+```csharp
+new Preopens(("./models", "/models"),
+             ("./assets", "/assets"))
+// or
+new Preopens(IEnumerable<(string, string)> mounts)
+```
+
+Each pair becomes a `Descriptor` wrapping the host path; the guest
+sees the list through `wasi:filesystem/preopens.get-directories`.
+Wiring this through the DI scope's `IPreopens` registration (or
+the `WasiPreview2RuntimeScope` `preopens:` parameter) lets the
+transpiler's direct-link emit lift the
+`list<tuple<own<descriptor>, string>>` return shape inline — no
+delegate dispatch on the host call.
 
 ## License
 

@@ -495,10 +495,28 @@ callvirt I_TypedInterface::Method(…)
 ```
 
 Direct-linked dispatch handles roughly the same shape matrix
-`wit-bindgen-csharp` does (primitives, `string`, `byte[]`, `Option<T>`,
-`Result<T,E>`, `list<T>`, primitive-tuples, simple records, resource
-handles); shapes outside that fall back to the delegate path silently.
-`CanEmitDirect` (in `DirectLinkedImportEmit.cs`) is the gate.
+`wit-bindgen-csharp` does:
+
+| Shape | Notes |
+|---|---|
+| primitives | `i32` / `i64` / `f32` / `f64` + narrow ints + `bool` |
+| `string` | `cabi_realloc` + UTF-8 / UTF-16 / Latin1 encode per import option |
+| `byte[]` (`list<u8>`) | `cabi_realloc` + raw memcpy |
+| `Option<T>` | recursive on inner shape (incl. `Option<Option<X>>` / `Option<Result<X,Y>>`) |
+| `Result<TOk, TErr>` | each arm storable per the same rules |
+| resource handle (`own<R>` / `borrow<R>`) | `Resources.AllocateResource` (return) / `Resources.GetResource` (param) |
+| `list<T>` for primitive `T` / `string` / `byte[]` | outer `(ptr, count)` + per-element store |
+| `list<list<T>>` | three-level `cabi_realloc` (outer pair-array + per-sub buffers) |
+| `list<own<R>>` | per-element `AllocateResource` + `i32` handle |
+| `list<tuple<...>>` / `list<record<...>>` | per-element fields packed inline at the type's natural stride. Field types may be primitive / `string` / `byte[]` **or `own<R>`** — covers `wasi:filesystem/preopens.get-directories` (`list<tuple<own<descriptor>, string>>`), `wasi:cli/environment.get-environment` (`list<tuple<string, string>>`), and the broader env / args / headers / TCP `accept` "list of (resource-or-string, label)" shape class. |
+| `list<Option<X>>` / `list<Result<X, Y>>` | per-element variant store at outer-ptr + i*elemSize |
+| variants | `EmitVariantStoreAt` per-case payload encoding |
+
+Shapes outside that fall back to the delegate path silently.
+`CanEmitDirect` (in `DirectLinkedImportEmit.cs`) is the gate;
+the resolver-aware predicate variants
+(`IsTupleOfFlatFields` / `IsRecordOfFlatFields`) are what gate
+the resource-bearing aggregates.
 
 ### `ThinContext` — the runtime hand-off slot
 
