@@ -1,0 +1,5 @@
+package local:grow;
+
+world grow {
+    export grow-big: func() -> s32;
+}

@@ -2047,5 +2047,64 @@ namespace Wacs.Transpiler.Test
                 typeof(System.ValueTuple<uint, uint>),
                 pick.ReturnType);
         }
+
+        private static string FindGrowMemoryComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "grow-memory-component", "wasm",
+                                "grow.component.wasm");
+        }
+
+        [Theory]
+        [InlineData(EmissionTarget.AotLinked, MemoryStorageMode.ManagedArray, -1)]
+        [InlineData(EmissionTarget.AotLinked, MemoryStorageMode.NativePointer, 1)]
+        [InlineData(EmissionTarget.Standard, MemoryStorageMode.ManagedArray, -1)]
+        [InlineData(EmissionTarget.Standard, MemoryStorageMode.NativePointer, 1)]
+        public void TranspileSingleModule_memory_init_honors_AmbientRuntime_storage(
+            EmissionTarget emission, MemoryStorageMode mode, int expected)
+        {
+            // grow-memory-component exports `grow-big: func() -> s32`
+            // whose core does `(memory.grow 50000)`. ManagedArray's
+            // HostMaxPages cap (~2 GiB) forces -1; NativePointer's
+            // WasmMaxPages cap (~4 GiB) accepts the grow and returns
+            // the previous size (1).
+            //
+            // Both transpiler emission paths must read
+            // AmbientRuntime.MemoryStorage at instantiation time —
+            // Standard via InitializationHelper, AotLinked via the
+            // Ldsfld emitted by ModuleClassGenerator.EmitMemoryArray.
+            // Prior to gap 13's fix, AotLinked hardcoded the
+            // 1-arg MemoryInstance ctor (defaulting to ManagedArray)
+            // and the NativePointer case would have returned -1.
+            //
+            // NativeMemory.AllocZeroed maps to lazy-zero calloc, so
+            // the 3 GiB virtual reservation does not commit physical
+            // pages.
+            var prev = AmbientRuntime.MemoryStorage;
+            AmbientRuntime.MemoryStorage = mode;
+            try
+            {
+                using var fs = File.OpenRead(FindGrowMemoryComponentPath());
+                var result = ComponentTranspiler.TranspileSingleModule(fs,
+                    options: new TranspilerOptions { Emission = emission });
+
+                var componentExports = result.Assembly
+                    .GetType("Wacs.Transpiled.Component.ComponentExports");
+                Assert.NotNull(componentExports);
+
+                var growBig = componentExports!.GetMethod("GrowBig");
+                Assert.NotNull(growBig);
+
+                var actual = (int)growBig!.Invoke(null, null)!;
+                Assert.Equal(expected, actual);
+            }
+            finally
+            {
+                AmbientRuntime.MemoryStorage = prev;
+            }
+        }
     }
 }

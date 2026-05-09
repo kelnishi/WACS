@@ -8,6 +8,7 @@
 using System.Collections.Generic;
 using System.IO;
 using Wacs.ComponentModel.Runtime;
+using Wacs.Core.Runtime;
 using Xunit;
 
 namespace Wacs.ComponentModel.Test
@@ -497,6 +498,43 @@ namespace Wacs.ComponentModel.Test
             Assert.Equal(0u, ci.Invoke("add", 0u, 0u));
             Assert.Equal(uint.MaxValue,
                 ci.Invoke("add", uint.MaxValue - 100u, 100u));
+        }
+
+        [Theory]
+        [InlineData(MemoryStorageMode.ManagedArray, -1)]
+        [InlineData(MemoryStorageMode.NativePointer, 1)]
+        public void Component_memory_honors_AmbientRuntime_storage(
+            MemoryStorageMode mode, int expected)
+        {
+            // grow-memory-component exports `grow-big: func() -> s32`
+            // whose core does `(memory.grow 50000)` — i.e. asks for
+            // ~3.125 GiB. ManagedArray's HostMaxPages cap (~2 GiB)
+            // forces -1; NativePointer's WasmMaxPages cap (~4 GiB)
+            // accepts the grow and returns the previous size (1).
+            //
+            // Regression for the gap-13 wiring: prior to the fix,
+            // ComponentInstance.Instantiate ignored the host's
+            // ambient pin and constructed every memory under the
+            // ManagedArray default. NativePointer would have
+            // returned -1 here too.
+            //
+            // NativeMemory.AllocZeroed maps to calloc on Unix /
+            // VirtualAlloc on Windows — both lazy-zero, so the 3 GiB
+            // address-space reservation does not commit physical
+            // pages.
+            var prev = AmbientRuntime.MemoryStorage;
+            AmbientRuntime.MemoryStorage = mode;
+            try
+            {
+                var bytes = File.ReadAllBytes(FindFixturePath(
+                    "grow-memory-component", "grow.component.wasm"));
+                var ci = ComponentInstance.Instantiate(bytes);
+                Assert.Equal(expected, (int)ci.Invoke("grow-big")!);
+            }
+            finally
+            {
+                AmbientRuntime.MemoryStorage = prev;
+            }
         }
     }
 }

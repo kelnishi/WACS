@@ -480,11 +480,11 @@ namespace Wacs.Transpiler.AOT
             // a parameter so the call sites document their intent.
 
             // 1. Allocate memories (as MemoryInstance for shared
-            // growth). The host pins ModuleInit.CurrentMemoryStorage
+            // growth). The host pins AmbientRuntime.MemoryStorage
             // before construction to opt into NativePointer storage;
             // ManagedArray is the default.
             var memories = new MemoryInstance[data.Memories.Length];
-            var storage = ModuleInit.CurrentMemoryStorage;
+            var storage = AmbientRuntime.MemoryStorage;
             for (int i = 0; i < data.Memories.Length; i++)
             {
                 var (min, max) = data.Memories[i];
