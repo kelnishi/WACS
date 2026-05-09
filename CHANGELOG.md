@@ -1,5 +1,55 @@
 # Changelog
 
+## WACS.Cli 1.5.6 — `--wasi-nn` skips legacy IBindable under `--wasip2` to close registry split
+
+Pre-fix, `wacs run --wasip2 --wasi-nn` registered the WASI.NN
+backend twice — once via `Wacs.WASI.NN.OnnxRuntime`'s `IBindable`
+(which calls `WitBindings.Bind` → registers BindHostFunction
+handlers + WASI.NN's internal `host.Graphs` / `host.Tensors` /
+`host.Errors` resource registries) and once via the wasip2
+RuntimeScope's `AutoRegisterOnnxBackend` (which wires the ONNX
+backend into the DI bundle's `WasiNNConfiguration`, surfaced
+through `WasiPreview2NNBundle`'s `IGraphFuncs` to the transpiler's
+direct-link emit, with handles minted in `WasiPreview2Resources`).
+
+The two registries hold the same `i32` handle namespace but no
+bridge between them. A guest minting `wasi:nn/graph-funcs.load`'s
+return handle through one path and looking it up later through
+the other gets either `Resource handle N is not registered` (if
+the lookup misses) or `Handle 0 is reserved as the null sentinel`
+(if a default-init slot leaked through). The `wasi-nn-slm.wasm`
+demo trips this between `load()` and
+`graph.init_execution_context()`.
+
+Fix per round-10's option (2): under `opts.Wasip2`, skip the
+WASI.NN IBindable from the `ApplyBindings` path. The
+`ReflectivelyAddWasiNN` flow already wires the ONNX backend to
+the direct-link side; the IBindable's `WasiNNHost` (separate
+`Graphs`/`Tensors`/`Errors`) is redundant and structurally
+incorrect under wasip2. Interpreter-only `--wasi --wasi-nn`
+(Preview 1 + WITX legacy ABI) keeps the IBindable since
+direct-link isn't on its path.
+
+```diff
+-if (opts.WasiNN) paths.Add("Wacs.WASI.NN.OnnxRuntime");
++if (opts.WasiNN && !opts.Wasip2)
++    paths.Add("Wacs.WASI.NN.OnnxRuntime");
+```
+
+Verified by the round-10 follow-up probe (`/tmp/nn-probe`): the
+30-line wasi-nn shim that calls `load()` then
+`graph.init_execution_context()` traps pre-fix at the second call
+("Resource handle 4 is not registered"); post-fix the
+WitBindings registration doesn't happen and the direct-link path
+mints the handle in `WasiPreview2Resources` where the lookup
+finds it.
+
+Out of scope (separate gap if it surfaces): a programmatic
+embedder that wires both paths explicitly (not via the CLI) hits
+the same registry split. A library-level `WasiNNHost
+.SuppressWitBindings` opt-out is the natural follow-up but not
+needed to close the SLM trip site.
+
 ## WACS 0.13.5 / WACS.Cli 1.5.5 / WACS.Transpiler.Lib 0.8.5 — direct-link emit accepts SourceGen-shape resource constructors
 
 `Wacs.ComponentModel.Bindgen.SourceGen` emits resource constructors
