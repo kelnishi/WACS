@@ -254,5 +254,89 @@ namespace Wacs.Core.Test
         delegate int HostInOut(int a, out int b);
 
         delegate Task<int> HostAsyncInRet(int a);
+
+        [Fact]
+        public void BindHostFunction_DirectLinkCoverage_SilentlyShadowsRegistration()
+        {
+            // The transpiler's import pre-pass calls
+            // MarkEntityProvidedByDirectLink for every (module,
+            // entity) pair the resolver matches. The IL it emits
+            // hardcodes the call into the bundle's typed interface
+            // and bypasses the runtime entity registry, so any
+            // subsequent BindHostFunction call for the same entity
+            // would shadow nothing useful — and for resource-
+            // returning host paths, would alias the resource-handle
+            // namespace across two independent registries (the
+            // SLM's gap-18 trip site).
+            //
+            // This test pins the runtime-level shadow rule directly:
+            // mark an entity as direct-link-provided, then
+            // BindHostFunction the same entity, and verify the
+            // entity registry shows no binding (i.e. the
+            // registration was silently dropped).
+
+            var runtime = new WasmRuntime();
+            var id = ("wasi:nn/graph-funcs@0.2.0-rc-2024-10-28", "load");
+
+            Assert.False(runtime.IsEntityProvidedByDirectLink(id));
+
+            runtime.MarkEntityProvidedByDirectLink(id);
+            Assert.True(runtime.IsEntityProvidedByDirectLink(id));
+
+            // Pre-shadow: no entity binding yet.
+            Assert.False(runtime.TryGetBoundHostFunctionType(id, out _));
+
+            // Now an IBindable would call BindHostFunction. The
+            // call should silently no-op.
+            runtime.BindHostFunction<HostInOut>(id, BoundHost);
+
+            // Post-call: still no entity binding. The shadow rule
+            // dropped the registration without throwing.
+            Assert.False(runtime.TryGetBoundHostFunctionType(id, out _));
+        }
+
+        [Fact]
+        public void BindHostFunction_NoCoverage_RegistersNormally()
+        {
+            // Sanity: the shadow rule fires only for marked entities.
+            // Unmarked entities still bind normally — protects the
+            // common-case interpreter-only path.
+            var runtime = new WasmRuntime();
+            var id = ("env", "unmarked-handler");
+
+            Assert.False(runtime.IsEntityProvidedByDirectLink(id));
+
+            runtime.BindHostFunction<HostInOut>(id, BoundHost);
+
+            // Unmarked: registration succeeded, type observable.
+            Assert.True(runtime.TryGetBoundHostFunctionType(id, out _));
+        }
+
+        [Fact]
+        public void BindHostFunction_PartialCoverage_SelectiveShadow()
+        {
+            // The SLM's wasi-nn IBindable wires BOTH the WIT and
+            // WITX ABIs (host.BindToRuntime calls WitxBindings.Bind
+            // + WitBindings.Bind). The transpiler's bundle covers
+            // the WIT entities (wasi:nn/graph-funcs.* etc.) but NOT
+            // the legacy WITX ones (wasi_ephemeral_nn::*). The
+            // shadow rule should drop the WIT registrations and
+            // pass the WITX ones through unchanged so an embedder
+            // running mixed-ABI guests doesn't lose the legacy
+            // path.
+            var runtime = new WasmRuntime();
+            var witLoad = ("wasi:nn/graph-funcs@0.2.0-rc-2024-10-28", "load");
+            var witxLoad = ("wasi_ephemeral_nn", "load");
+
+            // Cover the WIT entity only.
+            runtime.MarkEntityProvidedByDirectLink(witLoad);
+
+            runtime.BindHostFunction<HostInOut>(witLoad, BoundHost);
+            runtime.BindHostFunction<HostInOut>(witxLoad, BoundHost);
+
+            // WIT: shadowed. WITX: registered normally.
+            Assert.False(runtime.TryGetBoundHostFunctionType(witLoad, out _));
+            Assert.True(runtime.TryGetBoundHostFunctionType(witxLoad, out _));
+        }
     }
 }

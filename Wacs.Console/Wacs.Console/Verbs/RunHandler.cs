@@ -783,25 +783,19 @@ namespace Wacs.Console.Verbs
             // the default wiring (BindHostFunction's
             // last-write-wins semantics).
             //
-            // Under --wasip2, skip the WASI.NN IBindable: the
-            // wasip2 RuntimeScope's AutoRegisterOnnxBackend wires
-            // the ONNX backend through the DI bundle's
-            // WasiNNConfiguration, and direct-link IL emits against
-            // the bundle's resource interfaces. Loading the
-            // IBindable in addition would double-register handlers
-            // against a SEPARATE WasiNNHost-internal resource table
-            // (Graphs/Tensors/Errors), splitting the i32 handle
-            // namespace from the canonical WasiPreview2Resources
-            // table the direct-link IL looks up against. The split
-            // lets a guest mint a handle in registry A and have its
-            // next method call lookup-fail in registry B (the SLM's
-            // round-10 verification trip site, gap 18). The
-            // interpreter-only `--wasi --wasi-nn` path keeps the
-            // IBindable since direct-link emit isn't on its hot
-            // path.
+            // No name-based carve-outs for direct-link-covered
+            // entities — `WasmRuntime.BindHostFunction` silently
+            // no-ops registrations for any (module, entity) pair the
+            // transpiler's pre-pass marked as provided by a
+            // direct-link bundle. So `--wasip2 --wasi-nn` can still
+            // load the WASI.NN IBindable; the WitBindings handlers
+            // for entities the bundle covers (graph-funcs,
+            // tensor.*, etc.) drop silently while handlers for
+            // bundle-uncovered entities (e.g. the legacy WITX ABI
+            // under wasi_ephemeral_nn) still register normally. The
+            // architectural rule lives in the runtime, not the CLI.
             var paths = new List<string>();
-            if (opts.WasiNN && !opts.Wasip2)
-                paths.Add("Wacs.WASI.NN.OnnxRuntime");
+            if (opts.WasiNN) paths.Add("Wacs.WASI.NN.OnnxRuntime");
             if (opts.WasiThreads) paths.Add("Wacs.WASI.Threads");
             if (opts.Bind != null) paths.AddRange(opts.Bind);
 

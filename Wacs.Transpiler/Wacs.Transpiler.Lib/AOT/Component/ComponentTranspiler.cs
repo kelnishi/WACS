@@ -245,6 +245,45 @@ namespace Wacs.Transpiler.AOT.Component
                 parsed.Component);
 
             var runtime = new WasmRuntime();
+
+            // Direct-link coverage pre-pass: for every wasm import
+            // on the primary core module that the resolver matches,
+            // tell the runtime "this entity is provided by a
+            // direct-link bundle." The emitted IL hardcodes the call
+            // into the bundle's typed interface and bypasses the
+            // runtime entity registry, so any later
+            // BindHostFunction call for the same (module, entity)
+            // pair would shadow nothing useful — and for resource-
+            // returning methods, would actively risk aliasing the
+            // resource-handle namespace across two independent
+            // registries (the bundle's WasiPreview2Resources +
+            // whatever per-host table an IBindable uses). The
+            // runtime's BindHostFunction silently no-ops for
+            // entities in this set, so configureImports below can
+            // freely stack ComponentImportStubs / wasip2 scope /
+            // ApplyBindings IBindables without name-based carve-
+            // outs at the CLI layer.
+            //
+            // Closes the wasi-nn SLM registry split (round-10/11
+            // bisection) at the architectural layer rather than
+            // the CLI gating layer.
+            if (effectiveOptions.Resolver != null)
+            {
+                var primaryCore = parsed.CoreModules[primaryCoreIdx];
+                if (primaryCore.Imports != null)
+                {
+                    foreach (var imp in primaryCore.Imports)
+                    {
+                        if (effectiveOptions.Resolver.TryResolve(
+                                imp.ModuleName, imp.Name, out _))
+                        {
+                            runtime.MarkEntityProvidedByDirectLink(
+                                (imp.ModuleName, imp.Name));
+                        }
+                    }
+                }
+            }
+
             // The runtime's InstantiateModule throws on any unbound
             // import, so the caller must register stubs (or real
             // bindings) for every (module, entity) the core module
@@ -253,6 +292,10 @@ namespace Wacs.Transpiler.AOT.Component
             // satisfy the runtime's own validation. Mirrors the
             // ComponentInstance.Instantiate(component, configureImports)
             // pattern in the interpreter path.
+            //
+            // BindHostFunction calls inside configureImports for
+            // direct-link-covered entities silently no-op (see
+            // pre-pass above); other entities register normally.
             configureImports?.Invoke(runtime);
 
             var instance = runtime.InstantiateModule(

@@ -1,5 +1,91 @@
 # Changelog
 
+## WACS 0.13.6 / WACS.Cli 1.5.7 / WACS.Transpiler.Lib 0.8.6 — direct-link coverage shadows BindHostFunction registrations
+
+Replaces the round-11 CLI gating kludge (`if (opts.WasiNN &&
+!opts.Wasip2)`) with a runtime-level architectural rule. The kludge
+was fragile in the ways the user called out — hardcoded the
+`Wacs.WASI.NN.OnnxRuntime` package name, tied the carve-out to
+specific CLI flag combinations, and didn't generalize to future
+wasi-* packages or programmatic embedders that wire both paths.
+
+### Architectural rule
+
+`WasmRuntime` tracks a set of `(module, entity)` pairs provided
+by transpiler-direct-link bundles:
+
+```csharp
+public void MarkEntityProvidedByDirectLink((string, string) id);
+public bool IsEntityProvidedByDirectLink((string, string) id);
+```
+
+`BindHostFunction` (both delegate and `IFunctionInstance`
+overloads) silently no-ops registrations for entities in this
+set. The emitted IL hardcodes the call into the bundle's typed
+interface and bypasses the runtime entity registry, so any
+later registration for the same entity would shadow nothing
+useful — and for resource-returning host paths, would alias the
+resource-handle namespace across two independent registries (the
+SLM gap-18 trip site).
+
+### Pre-pass
+
+`ComponentTranspiler.TranspileSingleModule` walks the primary
+core module's imports BEFORE invoking `configureImports`. For
+every import where the resolver matches a binding, it calls
+`runtime.MarkEntityProvidedByDirectLink`. So when `configureImports`
+later runs `WasiPreview2RuntimeScope` construction +
+`ApplyBindings` IBindables, every bundle-covered entity's
+registration silently drops.
+
+### Selective shadow
+
+The rule is per-entity, not per-package. An IBindable that
+covers BOTH bundle-covered and bundle-uncovered entities (e.g.
+`WasiNNHost.BindToRuntime` calls both `WitxBindings.Bind` for
+the legacy `wasi_ephemeral_nn` core-wasm ABI AND `WitBindings.Bind`
+for the WIT component-model ABI) gets its WIT registrations
+shadowed (covered by the bundle) and its WITX registrations
+through (not covered). Mixed-ABI guests don't lose the legacy
+path.
+
+### CLI revert
+
+`Wacs.Console/Verbs/RunHandler.cs::ApplyBindings` reverts the
+`opts.WasiNN && !opts.Wasip2` gating. The architectural rule
+now lives in the runtime; the CLI doesn't need to know which
+packages are direct-link-covered. Future wasi-* host packages
+(wasi-tls, wasi-keyvalue, etc.) automatically benefit — drop
+the package's `[WitSource]` interfaces into a bundle, and any
+matching IBindable's `BindHostFunction` calls drop without
+config.
+
+### Test surface
+
+3 new [Fact]s in `Wacs.Core.Test.BindingTests`:
+
+- `BindHostFunction_DirectLinkCoverage_SilentlyShadowsRegistration`
+  — mark, then BindHostFunction; entity registry stays empty.
+- `BindHostFunction_NoCoverage_RegistersNormally` — sanity:
+  unmarked entities still bind.
+- `BindHostFunction_PartialCoverage_SelectiveShadow` — mark only
+  the WIT entity; verify the WITX BindHostFunction still
+  registers (mixed-ABI safety).
+
+Total Wacs.Core 394 → **397** (+3). All other suites unchanged.
+
+### Versions
+
+- `WACS` 0.13.5 → **0.13.6** (new public API on `WasmRuntime`)
+- `WACS.Cli` 1.5.6 → **1.5.7** (revert kludge)
+- `WACS.Transpiler.Lib` 0.8.5 → **0.8.6** (pre-pass in
+  `TranspileSingleModule`)
+
+(Untouched: `WACS.ComponentModel`, `WASI.Preview1`, `.Preview2`,
+`.HostBindings.Abstractions`, `WACS.WASI.NN`. The library
+mechanism replaces the CLI workaround; no name-based carve-outs
+anywhere.)
+
 ## WACS.Cli 1.5.6 — `--wasi-nn` skips legacy IBindable under `--wasip2` to close registry split
 
 Pre-fix, `wacs run --wasip2 --wasi-nn` registered the WASI.NN
