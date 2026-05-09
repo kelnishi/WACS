@@ -12,6 +12,29 @@ WIT package's "unexpected character '-'" failure path. Unblocks the
 SourceGen-driven host-interface emission for wasi-nn (see
 WACS.WASI.NN 0.3.0).
 
+## [WACS.WASI.NN.DependencyInjection 0.1.0] — WasiNNBundle scaffolding
+
+New package mirroring `Wacs.WASI.Preview2.DependencyInjection`. Ships
+the `WasiNNBundle` that the transpiler's `HostPackageResolver`
+direct-links wasi-nn's stateless `graph.load` /
+`graph.load-by-name` against, plus
+`services.AddWasiNN(b => b.AddBackend(GraphEncoding.ONNX, new
+OnnxBackend()))` for DI registration.
+
+`GraphFuncsImpl` is the concrete `Nn.IGraphFuncs` implementation —
+delegates to the configured `WasiNNConfiguration` backends (same
+registry the interpreter binding consults). `Result<IGraph,
+IError>` returns route through `GraphStub` / `ErrorStub`
+placeholders that satisfy the type contract.
+
+The resource-method-direct-link (`graph.init-execution-context`,
+`tensor.constructor`, `inference.compute`) is the next deferred
+chunk — the `GraphStub.InitExecutionContext` returns
+`unsupported-operation` with a clear "wait for the resource-impl
+PR" message rather than silently mis-dispatching. Resource methods
+on the interpreter `BindToRuntime` path continue to work via the
+hand-written `WitBindings` today.
+
 ## [WACS.WASI.NN 0.3.0] — Source-gen [WitSource] interfaces
 
 Wires `Wacs.ComponentModel.Bindgen.SourceGen` against
