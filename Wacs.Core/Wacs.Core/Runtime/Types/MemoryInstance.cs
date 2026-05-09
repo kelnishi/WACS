@@ -315,6 +315,24 @@ namespace Wacs.Core.Runtime.Types
             _growLock?.ExitReadLock();
         }
 
+        /// <summary>
+        /// Mode-dispatched <c>ref T</c> over the byte at offset
+        /// <paramref name="ea"/>. ManagedArray returns
+        /// <c>ref Unsafe.As&lt;byte, T&gt;(ref Data[ea])</c>;
+        /// NativePointer returns <c>ref Unsafe.AsRef&lt;T&gt;(NativeBase + ea)</c>.
+        /// Used by atomic load/store/RMW so the same Interlocked /
+        /// Volatile call sites work on both backings.
+        /// Caller guarantees <paramref name="ea"/> is in-bounds and
+        /// aligned for <typeparamref name="T"/>.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal ref T RefAs<T>(int ea) where T : unmanaged
+        {
+            if (StorageMode == MemoryStorageMode.NativePointer)
+                return ref Unsafe.AsRef<T>(NativeBase + ea);
+            return ref Unsafe.As<byte, T>(ref Data[ea]);
+        }
+
         /// <summary>Atomic 32-bit load at byte offset <paramref name="ea"/>.
         /// Caller guarantees <paramref name="ea"/> is in-bounds and 4-byte
         /// aligned.</summary>
@@ -323,7 +341,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                ref int cell = ref RefAs<int>(ea);
                 return Volatile.Read(ref cell);
             }
             finally { ExitReadIfShared(); }
@@ -336,7 +354,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                ref long cell = ref RefAs<long>(ea);
                 return Interlocked.Read(ref cell);
             }
             finally { ExitReadIfShared(); }
@@ -350,7 +368,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                ref int cell = ref RefAs<int>(ea);
                 Interlocked.Exchange(ref cell, value);
             }
             finally { ExitReadIfShared(); }
@@ -361,7 +379,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                ref long cell = ref RefAs<long>(ea);
                 Interlocked.Exchange(ref cell, value);
             }
             finally { ExitReadIfShared(); }
@@ -373,7 +391,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                ref int cell = ref RefAs<int>(ea);
                 return Interlocked.CompareExchange(ref cell, newValue, expected);
             }
             finally { ExitReadIfShared(); }
@@ -384,7 +402,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                ref long cell = ref RefAs<long>(ea);
                 return Interlocked.CompareExchange(ref cell, newValue, expected);
             }
             finally { ExitReadIfShared(); }
@@ -396,7 +414,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                ref int cell = ref RefAs<int>(ea);
                 // Interlocked.Add returns the new value; subtract to get original.
                 return Interlocked.Add(ref cell, value) - value;
             }
@@ -408,7 +426,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                ref long cell = ref RefAs<long>(ea);
                 return Interlocked.Add(ref cell, value) - value;
             }
             finally { ExitReadIfShared(); }
@@ -420,7 +438,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                ref int cell = ref RefAs<int>(ea);
                 return Interlocked.Exchange(ref cell, value);
             }
             finally { ExitReadIfShared(); }
@@ -431,7 +449,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                ref long cell = ref RefAs<long>(ea);
                 return Interlocked.Exchange(ref cell, value);
             }
             finally { ExitReadIfShared(); }
@@ -444,7 +462,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                ref int cell = ref RefAs<int>(ea);
                 return Interlocked.And(ref cell, value);
             }
             finally { ExitReadIfShared(); }
@@ -455,7 +473,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                ref int cell = ref RefAs<int>(ea);
                 return Interlocked.Or(ref cell, value);
             }
             finally { ExitReadIfShared(); }
@@ -466,7 +484,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                ref long cell = ref RefAs<long>(ea);
                 return Interlocked.And(ref cell, value);
             }
             finally { ExitReadIfShared(); }
@@ -477,7 +495,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                ref long cell = ref RefAs<long>(ea);
                 return Interlocked.Or(ref cell, value);
             }
             finally { ExitReadIfShared(); }
@@ -489,7 +507,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                ref int cell = ref RefAs<int>(ea);
                 int old;
                 do { old = Volatile.Read(ref cell); }
                 while (Interlocked.CompareExchange(ref cell, old & value, old) != old);
@@ -503,7 +521,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                ref int cell = ref RefAs<int>(ea);
                 int old;
                 do { old = Volatile.Read(ref cell); }
                 while (Interlocked.CompareExchange(ref cell, old | value, old) != old);
@@ -517,7 +535,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                ref long cell = ref RefAs<long>(ea);
                 long old;
                 do { old = Interlocked.Read(ref cell); }
                 while (Interlocked.CompareExchange(ref cell, old & value, old) != old);
@@ -531,7 +549,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                ref long cell = ref RefAs<long>(ea);
                 long old;
                 do { old = Interlocked.Read(ref cell); }
                 while (Interlocked.CompareExchange(ref cell, old & value, old) != old);
@@ -547,7 +565,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref int cell = ref Unsafe.As<byte, int>(ref Data[ea]);
+                ref int cell = ref RefAs<int>(ea);
                 int old;
                 do { old = Volatile.Read(ref cell); }
                 while (Interlocked.CompareExchange(ref cell, old ^ value, old) != old);
@@ -561,7 +579,7 @@ namespace Wacs.Core.Runtime.Types
             EnterReadIfShared();
             try
             {
-                ref long cell = ref Unsafe.As<byte, long>(ref Data[ea]);
+                ref long cell = ref RefAs<long>(ea);
                 long old;
                 do { old = Interlocked.Read(ref cell); }
                 while (Interlocked.CompareExchange(ref cell, old ^ value, old) != old);

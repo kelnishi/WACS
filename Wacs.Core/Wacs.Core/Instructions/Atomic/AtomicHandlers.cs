@@ -47,9 +47,9 @@ namespace Wacs.Core.Instructions.Atomic
         {
             var mem = ctx.Store[ctx.Frame.Module.MemAddrs[(MemIdx)memIdx]];
             long eaLong = (long)addr + (long)offset;
-            if (eaLong < 0 || eaLong + widthBytes > mem.Data.Length)
+            if (eaLong < 0 || eaLong + widthBytes > (long)mem.ByteLength)
                 throw new TrapException(
-                    $"{op}: out of bounds atomic access (ea={eaLong}, width={widthBytes}, size={mem.Data.Length})");
+                    $"{op}: out of bounds atomic access (ea={eaLong}, width={widthBytes}, size={(long)mem.ByteLength})");
             if ((eaLong & (widthBytes - 1)) != 0)
                 throw new TrapException(
                     $"{op}: unaligned atomic access at ea={eaLong} (width={widthBytes})");
@@ -79,14 +79,14 @@ namespace Wacs.Core.Instructions.Atomic
         private static uint I32AtomicLoad8U(ExecContext ctx, [Imm] uint memIdx, [Imm] ulong offset, uint addr)
         {
             var mem = Wacs.Core.Instructions.Atomic.AtomicHandlers.ResolveAtomic(ctx, memIdx, addr, offset, 1, "i32.atomic.load8_u", out int ea);
-            return System.Threading.Volatile.Read(ref mem.Data[ea]);
+            return System.Threading.Volatile.Read(ref mem.RefAs<byte>(ea));
         }
 
         [OpHandler(AtomCode.I32AtomicLoad16U)]
         private static uint I32AtomicLoad16U(ExecContext ctx, [Imm] uint memIdx, [Imm] ulong offset, uint addr)
         {
             var mem = Wacs.Core.Instructions.Atomic.AtomicHandlers.ResolveAtomic(ctx, memIdx, addr, offset, 2, "i32.atomic.load16_u", out int ea);
-            ref ushort cell = ref System.Runtime.CompilerServices.Unsafe.As<byte, ushort>(ref mem.Data[ea]);
+            ref ushort cell = ref mem.RefAs<ushort>(ea);
             return System.Threading.Volatile.Read(ref cell);
         }
 
@@ -94,14 +94,14 @@ namespace Wacs.Core.Instructions.Atomic
         private static ulong I64AtomicLoad8U(ExecContext ctx, [Imm] uint memIdx, [Imm] ulong offset, uint addr)
         {
             var mem = Wacs.Core.Instructions.Atomic.AtomicHandlers.ResolveAtomic(ctx, memIdx, addr, offset, 1, "i64.atomic.load8_u", out int ea);
-            return System.Threading.Volatile.Read(ref mem.Data[ea]);
+            return System.Threading.Volatile.Read(ref mem.RefAs<byte>(ea));
         }
 
         [OpHandler(AtomCode.I64AtomicLoad16U)]
         private static ulong I64AtomicLoad16U(ExecContext ctx, [Imm] uint memIdx, [Imm] ulong offset, uint addr)
         {
             var mem = Wacs.Core.Instructions.Atomic.AtomicHandlers.ResolveAtomic(ctx, memIdx, addr, offset, 2, "i64.atomic.load16_u", out int ea);
-            ref ushort cell = ref System.Runtime.CompilerServices.Unsafe.As<byte, ushort>(ref mem.Data[ea]);
+            ref ushort cell = ref mem.RefAs<ushort>(ea);
             return System.Threading.Volatile.Read(ref cell);
         }
 
@@ -134,14 +134,14 @@ namespace Wacs.Core.Instructions.Atomic
         private static void I32AtomicStore8(ExecContext ctx, [Imm] uint memIdx, [Imm] ulong offset, uint addr, uint value)
         {
             var mem = Wacs.Core.Instructions.Atomic.AtomicHandlers.ResolveAtomic(ctx, memIdx, addr, offset, 1, "i32.atomic.store8", out int ea);
-            System.Threading.Volatile.Write(ref mem.Data[ea], (byte)value);
+            System.Threading.Volatile.Write(ref mem.RefAs<byte>(ea), (byte)value);
         }
 
         [OpHandler(AtomCode.I32AtomicStore16)]
         private static void I32AtomicStore16(ExecContext ctx, [Imm] uint memIdx, [Imm] ulong offset, uint addr, uint value)
         {
             var mem = Wacs.Core.Instructions.Atomic.AtomicHandlers.ResolveAtomic(ctx, memIdx, addr, offset, 2, "i32.atomic.store16", out int ea);
-            ref ushort cell = ref System.Runtime.CompilerServices.Unsafe.As<byte, ushort>(ref mem.Data[ea]);
+            ref ushort cell = ref mem.RefAs<ushort>(ea);
             System.Threading.Volatile.Write(ref cell, (ushort)value);
         }
 
@@ -149,14 +149,14 @@ namespace Wacs.Core.Instructions.Atomic
         private static void I64AtomicStore8(ExecContext ctx, [Imm] uint memIdx, [Imm] ulong offset, uint addr, ulong value)
         {
             var mem = Wacs.Core.Instructions.Atomic.AtomicHandlers.ResolveAtomic(ctx, memIdx, addr, offset, 1, "i64.atomic.store8", out int ea);
-            System.Threading.Volatile.Write(ref mem.Data[ea], (byte)value);
+            System.Threading.Volatile.Write(ref mem.RefAs<byte>(ea), (byte)value);
         }
 
         [OpHandler(AtomCode.I64AtomicStore16)]
         private static void I64AtomicStore16(ExecContext ctx, [Imm] uint memIdx, [Imm] ulong offset, uint addr, ulong value)
         {
             var mem = Wacs.Core.Instructions.Atomic.AtomicHandlers.ResolveAtomic(ctx, memIdx, addr, offset, 2, "i64.atomic.store16", out int ea);
-            ref ushort cell = ref System.Runtime.CompilerServices.Unsafe.As<byte, ushort>(ref mem.Data[ea]);
+            ref ushort cell = ref mem.RefAs<ushort>(ea);
             System.Threading.Volatile.Write(ref cell, (ushort)value);
         }
 

@@ -285,6 +285,98 @@ namespace Wacs.Core.Test
         [Theory]
         [InlineData(MemoryStorageMode.ManagedArray)]
         [InlineData(MemoryStorageMode.NativePointer)]
+        public void I32AtomicStoreLoad_RoundTrips(MemoryStorageMode mode)
+        {
+            // shared memory required for atomic ops. Aligned 4-byte
+            // store + atomic load round-trip through the new RefAs<T>
+            // helper (Phase C.1).
+            var src = @"
+                (module
+                  (memory 1 1 shared)
+                  (func (export ""run"") (result i32)
+                    i32.const 16
+                    i32.const 0xCAFEBABE
+                    i32.atomic.store
+                    i32.const 16
+                    i32.atomic.load))";
+            var (runtime, inst) = Instantiate(src, mode);
+            Assert.Equal(unchecked((int)0xCAFEBABE),
+                (int)Invoke(runtime, inst, "run"));
+        }
+
+        [Theory]
+        [InlineData(MemoryStorageMode.ManagedArray)]
+        [InlineData(MemoryStorageMode.NativePointer)]
+        public void I64AtomicRMW_Add_RoundTrips(MemoryStorageMode mode)
+        {
+            // i64.atomic.rmw.add returns the OLD value; cell ends up
+            // at original + delta. Initial = 100, delta = 23, result
+            // load should return 123.
+            var src = @"
+                (module
+                  (memory 1 1 shared)
+                  (func (export ""run"") (result i64)
+                    i32.const 32
+                    i64.const 100
+                    i64.atomic.store
+                    i32.const 32
+                    i64.const 23
+                    i64.atomic.rmw.add
+                    drop
+                    i32.const 32
+                    i64.atomic.load))";
+            var (runtime, inst) = Instantiate(src, mode);
+            Assert.Equal(123L, Invoke(runtime, inst, "run"));
+        }
+
+        [Theory]
+        [InlineData(MemoryStorageMode.ManagedArray)]
+        [InlineData(MemoryStorageMode.NativePointer)]
+        public void I32AtomicSubword_Load8_RoundTrips(MemoryStorageMode mode)
+        {
+            // i32.atomic.store8 + i32.atomic.load8_u: subword path
+            // through Volatile.Read/Write on a single byte ref.
+            var src = @"
+                (module
+                  (memory 1 1 shared)
+                  (func (export ""run"") (result i32)
+                    i32.const 8
+                    i32.const 0xA5
+                    i32.atomic.store8
+                    i32.const 8
+                    i32.atomic.load8_u))";
+            var (runtime, inst) = Instantiate(src, mode);
+            Assert.Equal(0xA5, (int)Invoke(runtime, inst, "run"));
+        }
+
+        [Theory]
+        [InlineData(MemoryStorageMode.ManagedArray)]
+        [InlineData(MemoryStorageMode.NativePointer)]
+        public void I32AtomicCmpxchg_Success(MemoryStorageMode mode)
+        {
+            // Initial 7. cmpxchg(expected=7, new=42) succeeds, returns
+            // old (7). Subsequent load returns 42.
+            var src = @"
+                (module
+                  (memory 1 1 shared)
+                  (func (export ""run"") (result i32)
+                    i32.const 0
+                    i32.const 7
+                    i32.atomic.store
+                    i32.const 0
+                    i32.const 7
+                    i32.const 42
+                    i32.atomic.rmw.cmpxchg
+                    drop
+                    i32.const 0
+                    i32.atomic.load))";
+            var (runtime, inst) = Instantiate(src, mode);
+            Assert.Equal(42, (int)Invoke(runtime, inst, "run"));
+        }
+
+        [Theory]
+        [InlineData(MemoryStorageMode.ManagedArray)]
+        [InlineData(MemoryStorageMode.NativePointer)]
         public void OutOfBoundsLoad_Traps(MemoryStorageMode mode)
         {
             // 1 page = 65536 bytes. Loading at 65535 with an i32
