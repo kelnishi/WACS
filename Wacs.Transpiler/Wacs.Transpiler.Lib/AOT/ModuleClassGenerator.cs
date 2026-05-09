@@ -1236,8 +1236,13 @@ namespace Wacs.Transpiler.AOT
         }
 
         /// <summary>
-        /// IL: <c>new MemoryInstance[N] { new MemoryInstance(new MemoryType((uint)min[0], (uint?)max[0])), ... }</c>.
-        /// Pushes the memories array onto the stack.
+        /// IL: <c>new MemoryInstance[N] { new MemoryInstance(new MemoryType((uint)min[0], (uint?)max[0]), AmbientRuntime.MemoryStorage), ... }</c>.
+        /// Pushes the memories array onto the stack. Reading the
+        /// ambient storage field at construction time keeps the
+        /// AotLinked path symmetric with the Standard transpilation
+        /// path (<see cref="InitializationHelper"/>) and the
+        /// interpreter component path — every WACS instantiation route
+        /// honors the host's <c>--native-memory</c> pin.
         /// </summary>
         private void EmitMemoryArray(ILGenerator il, ModuleInitData data)
         {
@@ -1249,7 +1254,10 @@ namespace Wacs.Transpiler.AOT
             var memoryTypeCtor = typeof(MemoryType).GetConstructor(new[]
                 { typeof(uint), typeof(uint?), typeof(Wacs.Core.Types.Defs.AddrType) })!;
             var nullableUintCtor = typeof(uint?).GetConstructor(new[] { typeof(uint) })!;
-            var memoryInstanceCtor = typeof(MemoryInstance).GetConstructor(new[] { typeof(MemoryType) })!;
+            var memoryInstanceCtor = typeof(MemoryInstance).GetConstructor(
+                new[] { typeof(MemoryType), typeof(MemoryStorageMode) })!;
+            var ambientStorageField = typeof(AmbientRuntime).GetField(
+                nameof(AmbientRuntime.MemoryStorage))!;
 
             for (int i = 0; i < n; i++)
             {
@@ -1274,6 +1282,7 @@ namespace Wacs.Transpiler.AOT
                 il.Emit(OpCodes.Ldc_I4, (int)Wacs.Core.Types.Defs.AddrType.I32);
                 il.Emit(OpCodes.Newobj, memoryTypeCtor);
 
+                il.Emit(OpCodes.Ldsfld, ambientStorageField);
                 il.Emit(OpCodes.Newobj, memoryInstanceCtor);
                 il.Emit(OpCodes.Stelem_Ref);
             }

@@ -31,23 +31,6 @@ namespace Wacs.Transpiler.AOT
         private static readonly object _lock = new();
 
         /// <summary>
-        /// Storage backing for memories the next transpiled module
-        /// instance allocates via <see cref="InitializationHelper"/>.
-        /// Set by the host before constructing the transpiled module
-        /// class; read inside the helper's memory allocation loop.
-        /// Defaults to <see cref="MemoryStorageMode.ManagedArray"/>.
-        /// </summary>
-        /// <remarks>
-        /// Static-flag dispatch is intentionally simple: a single
-        /// transpile-and-dispatch sequence is single-threaded, the
-        /// flag is set just before module construction and not
-        /// inspected afterwards. <c>AsyncLocal&lt;T&gt;</c> would be
-        /// the right tool if concurrent transpiled-module construction
-        /// with mixed modes ever became a use case.
-        /// </remarks>
-        public static MemoryStorageMode CurrentMemoryStorage = MemoryStorageMode.ManagedArray;
-
-        /// <summary>
         /// Register a data segment's bytes at transpile time.
         /// </summary>
         public static int RegisterDataSegment(byte[] data)

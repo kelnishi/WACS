@@ -1,5 +1,44 @@
 # Changelog
 
+## WACS 0.13.1 / WACS.Cli 1.5.1 / WACS.Transpiler.Lib 0.8.1 / WACS.ComponentModel 0.3.1 — `--native-memory` honored on every component path
+
+`--native-memory` was silently no-oped for component-mode runs:
+the CLI pinned the storage mode but neither
+`Wacs.ComponentModel.Runtime.ComponentInstance.Instantiate` (the
+interpreter component path) nor
+`ModuleClassGenerator.EmitMemoryArray` (the AotLinked emission)
+read the pin. Components requesting more than the
+`ManagedArray` ~2 GiB cap got `memory.grow → -1` regardless of the
+flag.
+
+The pin migrates from `Wacs.Transpiler.AOT.ModuleInit.CurrentMemoryStorage`
+(only readable from the transpiler layer) to
+`Wacs.Core.Runtime.AmbientRuntime.MemoryStorage` so every layer
+above `Wacs.Core` shares one source of truth.
+
+Reads added:
+- `Wacs.ComponentModel.Runtime.ComponentInstance.Instantiate`
+  (single-core and multi-core paths) constructs `RuntimeOptions`
+  with `MemoryStorage = AmbientRuntime.MemoryStorage`.
+- `Wacs.Transpiler.AOT.ModuleClassGenerator.EmitMemoryArray` emits
+  `Ldsfld AmbientRuntime.MemoryStorage` before `Newobj` against
+  the 2-arg `MemoryInstance(MemoryType, MemoryStorageMode)` ctor,
+  so the runtime value of the pin reaches every memory the
+  AotLinked path constructs.
+
+Test surface: new `grow-memory-component` fixture (exports
+`grow-big: func() -> s32` whose core does `(memory.grow 50000)`).
+`Wacs.ComponentModel.Test.ComponentInstanceTests
+.Component_memory_honors_AmbientRuntime_storage` exercises the
+interpreter component path (returns -1 under ManagedArray, 1
+under NativePointer);
+`Wacs.Transpiler.Test.ComponentTranspilerTests
+.TranspileSingleModule_memory_init_honors_AmbientRuntime_storage`
+covers the cross-product of `EmissionTarget × MemoryStorageMode`.
+`NativeMemory.AllocZeroed` is lazy-zero (calloc on Unix,
+VirtualAlloc on Windows), so the 3 GiB virtual reservation does
+not commit physical pages.
+
 ## WACS 0.13.0 / WACS.Cli 1.5.0 / WACS.Transpiler.Lib 0.8.0 / WACS.ComponentModel 0.3.0 / WACS.WASI.Preview2 0.4.0 / WACS.WASI.Preview1 0.13.0 / WACS.HostBindings.Abstractions 0.3.0 — Linear-memory storage modes, memory64, and component-model lift fixes
 
 Lifts WACS's linear-memory backing to a host-selected mode and

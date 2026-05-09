@@ -98,24 +98,22 @@ namespace Wacs.Console.Verbs
 
         private static int ExecuteSingleCore(RunOptions opts, string wasmPath)
         {
-            // --native-memory pins the storage mode for both the
-            // interpreter (RuntimeOptions.MemoryStorage) and the
-            // transpiler-engine path (the static
-            // ModuleInit.CurrentMemoryStorage that
-            // InitializationHelper reads when the transpiled module
-            // class is constructed). Restored on exit so subsequent
+            // --native-memory pins the ambient storage mode read by
+            // every WACS instantiation path (interpreter core path,
+            // interpreter component path, transpiler Standard +
+            // AotLinked emission). Restored on exit so subsequent
             // in-process callers (test harnesses, library hosts)
             // aren't affected.
-            var prevStorage = ModuleInit.CurrentMemoryStorage;
+            var prevStorage = AmbientRuntime.MemoryStorage;
             if (opts.NativeMemory)
-                ModuleInit.CurrentMemoryStorage = MemoryStorageMode.NativePointer;
+                AmbientRuntime.MemoryStorage = MemoryStorageMode.NativePointer;
             try
             {
                 return ExecuteSingleCoreInner(opts, wasmPath);
             }
             finally
             {
-                ModuleInit.CurrentMemoryStorage = prevStorage;
+                AmbientRuntime.MemoryStorage = prevStorage;
             }
         }
 
@@ -534,20 +532,20 @@ namespace Wacs.Console.Verbs
             // Both the interpreter component path
             // (Wacs.ComponentModel.Runtime.ComponentInstance.Instantiate)
             // and the transpiled path (ExecuteComponentTranspiled →
-            // InitializationHelper) observe
-            // ModuleInit.CurrentMemoryStorage at memory-alloc time.
-            // Restored on return so other in-process callers
-            // aren't affected.
-            var prevStorage = ModuleInit.CurrentMemoryStorage;
+            // InitializationHelper, and the AotLinked emission's
+            // memory-array IL) observe AmbientRuntime.MemoryStorage at
+            // memory-alloc time. Restored on return so other in-process
+            // callers aren't affected.
+            var prevStorage = AmbientRuntime.MemoryStorage;
             if (opts.NativeMemory)
-                ModuleInit.CurrentMemoryStorage = MemoryStorageMode.NativePointer;
+                AmbientRuntime.MemoryStorage = MemoryStorageMode.NativePointer;
             try
             {
                 return ExecuteComponentInner(opts, componentPath);
             }
             finally
             {
-                ModuleInit.CurrentMemoryStorage = prevStorage;
+                AmbientRuntime.MemoryStorage = prevStorage;
             }
         }
 

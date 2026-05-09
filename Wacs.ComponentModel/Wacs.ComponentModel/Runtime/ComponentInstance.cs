@@ -123,7 +123,8 @@ namespace Wacs.ComponentModel.Runtime
                 using var coreMs = new MemoryStream(coreBinaries[0]);
                 var coreModule = BinaryModuleParser.ParseWasm(coreMs);
                 configureImports?.Invoke(runtime);
-                var coreInstance = runtime.InstantiateModule(coreModule);
+                var coreInstance = runtime.InstantiateModule(coreModule,
+                    new RuntimeOptions { MemoryStorage = AmbientRuntime.MemoryStorage });
                 return new ComponentInstance(component, runtime, coreInstance);
             }
 
@@ -282,7 +283,8 @@ namespace Wacs.ComponentModel.Runtime
             using var coreMs = new MemoryStream(coreBinaries[primaryIdx]);
             var coreModule = BinaryModuleParser.ParseWasm(coreMs);
             configureImports?.Invoke(runtime);
-            var coreInstance = runtime.InstantiateModule(coreModule);
+            var coreInstance = runtime.InstantiateModule(coreModule,
+                new RuntimeOptions { MemoryStorage = AmbientRuntime.MemoryStorage });
             return new ComponentInstance(component, runtime, coreInstance);
         }
 
