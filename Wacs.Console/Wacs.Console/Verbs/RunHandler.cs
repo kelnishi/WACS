@@ -180,15 +180,7 @@ namespace Wacs.Console.Verbs
             wasi.BindToRuntime(runtime);
 
             // --bind: load custom IBindable host packages.
-            foreach (var asmPath in opts.Bind ?? Enumerable.Empty<string>())
-            {
-                var loaded = BindingLoader.LoadFromAssembly(asmPath);
-                foreach (var b in loaded) b.BindToRuntime(runtime);
-                if (opts.Verbose)
-                    System.Console.Error.WriteLine(
-                        "bind          " + asmPath + " -> "
-                        + loaded.Count + " binding(s)");
-            }
+            ApplyBindings(opts, runtime);
 
             string moduleName = opts.ModuleName;
             if (opts.Verbose)
@@ -371,15 +363,7 @@ namespace Wacs.Console.Verbs
                 wasiBinding.BindToRuntime(runtime);
                 disposables.Add(wasiBinding);
             }
-            foreach (var asmPath in opts.Bind ?? Enumerable.Empty<string>())
-            {
-                var loaded = BindingLoader.LoadFromAssembly(asmPath);
-                foreach (var b in loaded)
-                {
-                    b.BindToRuntime(runtime);
-                    if (b is IDisposable d) disposables.Add(d);
-                }
-            }
+            ApplyBindings(opts, runtime, disposables);
 
             var parsed = new List<(string Name, Wacs.Core.Module M, ModuleInstance Inst)>();
             foreach (var inputPath in files)
@@ -481,13 +465,14 @@ namespace Wacs.Console.Verbs
 
             if (!useTranspiler)
             {
-                // Interpreter component path. configureImports stays
-                // empty here — components that need host imports
-                // should use --wasip2 / --host-package, which routes
-                // through the transpiler path above.
+                // Interpreter component path. The configureImports
+                // callback gives us the underlying WasmRuntime —
+                // honor `--bind` here so custom IBindable host
+                // packages can satisfy component imports the same
+                // way they do on the core paths.
                 var bytes = File.ReadAllBytes(componentPath);
                 var ci = Wacs.ComponentModel.Runtime.ComponentInstance
-                    .Instantiate(bytes, _ => { });
+                    .Instantiate(bytes, rt => ApplyBindings(opts, rt));
 
                 string entry = !string.IsNullOrEmpty(opts.Call)
                     ? opts.Call : "_start";
@@ -545,6 +530,14 @@ namespace Wacs.Console.Verbs
                               ?? 0);
                         ComponentImportStubs.RegisterAll(rt,
                             parsed.CoreModules[primary]);
+
+                        // --bind runs AFTER the import stubs so an
+                        // explicit IBindable.BindHostFunction
+                        // overrides the default trap-stub for that
+                        // import. Custom shims (e.g. a wasi-nn
+                        // shim that constructs WasiNNHost +
+                        // OnnxBackend) plug in here.
+                        ApplyBindings(opts, rt);
                     });
             }
             catch (Exception ex)
@@ -618,6 +611,42 @@ namespace Wacs.Console.Verbs
         // ============================================================
         // Helpers
         // ============================================================
+
+        /// <summary>
+        /// Apply <c>--bind</c> assemblies to <paramref name="runtime"/>.
+        /// Each assembly is loaded via <see cref="BindingLoader"/>,
+        /// every <c>IBindable</c> it exposes calls <c>BindToRuntime</c>,
+        /// and any <c>IDisposable</c> bindings get registered with
+        /// <paramref name="disposables"/> for end-of-run cleanup.
+        ///
+        /// <para>Honored on every dispatch path — core single-module
+        /// (<c>ExecuteCore</c>), multi-core (<c>ExecuteMultiCore</c>),
+        /// and both component paths (<c>ExecuteComponent</c>,
+        /// <c>ExecuteComponentTranspiled</c>) — so symmetric to
+        /// <c>--wasi</c>: explicit host bindings are available
+        /// regardless of module shape. On the component-transpiler
+        /// path bindings run AFTER the default trap-stub
+        /// registration so they override the stubs for any imports
+        /// they cover.</para>
+        /// </summary>
+        private static void ApplyBindings(RunOptions opts,
+            WasmRuntime runtime, List<IDisposable>? disposables = null)
+        {
+            foreach (var asmPath in opts.Bind ?? Enumerable.Empty<string>())
+            {
+                var loaded = BindingLoader.LoadFromAssembly(asmPath);
+                foreach (var b in loaded)
+                {
+                    b.BindToRuntime(runtime);
+                    if (disposables != null && b is IDisposable d)
+                        disposables.Add(d);
+                }
+                if (opts.Verbose)
+                    System.Console.Error.WriteLine(
+                        "bind          " + asmPath + " -> "
+                        + loaded.Count + " binding(s)");
+            }
+        }
 
         private static bool DetectComponent(string path)
         {
