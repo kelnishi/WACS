@@ -141,9 +141,48 @@ namespace Wacs.Transpiler.AOT.Component
                 parsedArgs[i] = ParseArg(args[i], pars[i].ParameterType,
                     method.Name, i);
 
-            object? result = method.Invoke(instance, parsedArgs);
+            object? result;
+            try
+            {
+                result = method.Invoke(instance, parsedArgs);
+            }
+            catch (TargetInvocationException tie)
+                when (IsExitException(tie.InnerException, out byte exitCode))
+            {
+                // wasi:cli/exit.exit(N) is a terminal divergent
+                // control flow — the host translates it into a
+                // process-exit code, NOT a generic error. Match
+                // wasmtime / jco / wasmer behavior: exit code N
+                // becomes our return value, no error message
+                // printed (the guest already gets to write to
+                // stderr through wasi:cli/stderr if it wants).
+                return exitCode;
+            }
 
             return RenderResult(result);
+        }
+
+        // Match Wacs.WASI.Preview2.Cli.ExitException by name. We
+        // can't reference Preview2 directly here without flipping
+        // the dep direction (Transpiler.Lib is below the WASI
+        // packages in the layering), so the contract is the
+        // type's full name + a `byte ExitCode` property. Any
+        // future host package that wants to participate in
+        // exit-code propagation declares the same shape.
+        private static bool IsExitException(Exception? ex,
+            out byte exitCode)
+        {
+            exitCode = 0;
+            if (ex == null) return false;
+            var t = ex.GetType();
+            if (t.FullName != "Wacs.WASI.Preview2.Cli.ExitException")
+                return false;
+            var prop = t.GetProperty("ExitCode");
+            if (prop == null) return false;
+            var raw = prop.GetValue(ex);
+            if (raw is byte b) { exitCode = b; return true; }
+            if (raw is int i) { exitCode = unchecked((byte)i); return true; }
+            return false;
         }
 
         // Auto-resolve the entry point of a command component when
