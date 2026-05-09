@@ -27,8 +27,8 @@ namespace Wacs.WASI.NN.DependencyInjection
     ///
     /// <para>Returns <c>Result&lt;IGraph, IError&gt;</c> per the
     /// WIT signature. Until the resource concrete classes land
-    /// (Phase C step 4 follow-up), <see cref="GraphStub"/> and
-    /// <see cref="ErrorStub"/> are placeholder impls that satisfy
+    /// (Phase C step 4 follow-up), <see cref="Graph"/> and
+    /// <see cref="Error"/> are placeholder impls that satisfy
     /// the type contract; calling resource methods on the
     /// returned handles traps with a clear message rather than
     /// silently mis-dispatching.</para>
@@ -51,17 +51,17 @@ namespace Wacs.WASI.NN.DependencyInjection
             {
                 if (!_config.Backends.TryGetValue(typedEncoding, out var backend))
                     return Result<Nn.IGraph, Nn.IError>.FromErr(
-                        new ErrorStub(Nn.ErrorCode.InvalidEncoding,
+                        new Error(Nn.ErrorCode.InvalidEncoding,
                             "No backend registered for encoding " + typedEncoding));
                 var buffers = new ReadOnlyMemory<byte>[builder.Length];
                 for (int i = 0; i < builder.Length; i++) buffers[i] = builder[i];
                 var bg = backend.LoadGraph(buffers, typedTarget);
-                return Result<Nn.IGraph, Nn.IError>.FromOk(new GraphStub(bg));
+                return Result<Nn.IGraph, Nn.IError>.FromOk(new Graph(bg));
             }
             catch (Types.WasiNNException ex)
             {
                 return Result<Nn.IGraph, Nn.IError>.FromErr(
-                    new ErrorStub(MapError(ex.Code), ex.Message));
+                    new Error(MapError(ex.Code), ex.Message));
             }
         }
 
@@ -71,30 +71,30 @@ namespace Wacs.WASI.NN.DependencyInjection
             {
                 if (!_config.AllowLoadByName)
                     return Result<Nn.IGraph, Nn.IError>.FromErr(
-                        new ErrorStub(Nn.ErrorCode.UnsupportedOperation,
+                        new Error(Nn.ErrorCode.UnsupportedOperation,
                             "load-by-name is disabled for this configuration"));
                 var resolver = _config.NamedModelResolver;
                 if (resolver == null)
                     return Result<Nn.IGraph, Nn.IError>.FromErr(
-                        new ErrorStub(Nn.ErrorCode.NotFound,
+                        new Error(Nn.ErrorCode.NotFound,
                             "no named-model resolver configured"));
                 var record = resolver(name);
                 if (record == null)
                     return Result<Nn.IGraph, Nn.IError>.FromErr(
-                        new ErrorStub(Nn.ErrorCode.NotFound,
+                        new Error(Nn.ErrorCode.NotFound,
                             "named-model resolver returned null for '" + name + "'"));
                 if (!_config.Backends.TryGetValue(record.Value.Encoding, out var backend))
                     return Result<Nn.IGraph, Nn.IError>.FromErr(
-                        new ErrorStub(Nn.ErrorCode.InvalidEncoding,
+                        new Error(Nn.ErrorCode.InvalidEncoding,
                             "No backend registered for encoding "
                             + record.Value.Encoding));
                 var bg = backend.LoadGraph(record.Value.Builders, record.Value.Target);
-                return Result<Nn.IGraph, Nn.IError>.FromOk(new GraphStub(bg));
+                return Result<Nn.IGraph, Nn.IError>.FromOk(new Graph(bg));
             }
             catch (Types.WasiNNException ex)
             {
                 return Result<Nn.IGraph, Nn.IError>.FromErr(
-                    new ErrorStub(MapError(ex.Code), ex.Message));
+                    new Error(MapError(ex.Code), ex.Message));
             }
         }
 
