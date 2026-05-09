@@ -59,25 +59,25 @@ namespace Wacs.Transpiler.Test
             // one must resolve to a concrete typed-method binding;
             // any miss means a guest can't direct-link that import.
             AssertResolves(resolver,
-                "wasi:random/random@0.2.3", "get-random-u64");
+                "wasi:random/random@0.2.8", "get-random-u64");
             AssertResolves(resolver,
-                "wasi:cli/exit@0.2.3", "exit-with-code");
+                "wasi:cli/exit@0.2.8", "exit-with-code");
             AssertResolves(resolver,
-                "wasi:clocks/monotonic-clock@0.2.3", "now");
+                "wasi:clocks/monotonic-clock@0.2.8", "now");
             AssertResolves(resolver,
-                "wasi:cli/stdout@0.2.3", "get-stdout");
+                "wasi:cli/stdout@0.2.8", "get-stdout");
 
             // Resource methods on stream resources — the canonical
             // WASI write pattern.
             AssertResolves(resolver,
-                "wasi:io/streams@0.2.3", "[method]output-stream.write");
+                "wasi:io/streams@0.2.8", "[method]output-stream.write");
             AssertResolves(resolver,
-                "wasi:io/streams@0.2.3",
+                "wasi:io/streams@0.2.8",
                 "[method]output-stream.blocking-write-and-flush");
 
             // Resource constructor — exercises the kind detection.
             AssertResolves(resolver,
-                "wasi:http/types@0.2.3", "[constructor]fields");
+                "wasi:http/types@0.2.8", "[constructor]fields");
         }
 
         private static void AssertResolves(HostPackageResolver r,
