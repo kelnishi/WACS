@@ -719,6 +719,7 @@ namespace Wacs.Console.Verbs
         {
             var names = new List<string>();
             if (opts.Wasip2) names.Add("Wacs.WASI.Preview2");
+            if (opts.WasiNN) names.Add("Wacs.WASI.NN");
             foreach (var n in opts.HostPackage ?? Enumerable.Empty<string>())
             {
                 if (string.IsNullOrWhiteSpace(n)) continue;

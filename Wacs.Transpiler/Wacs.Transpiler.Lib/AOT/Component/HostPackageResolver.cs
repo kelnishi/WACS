@@ -346,9 +346,17 @@ namespace Wacs.Transpiler.AOT.Component
             // class that only takes 2.
             Type? resources = resourcesType;
             if (resources == null && bundleType == null && bundle != null
-                && bundle.FullName ==
-                    "Wacs.WASI.Preview2.DependencyInjection.WasiPreview2Bundle")
+                && (bundle.FullName ==
+                        "Wacs.WASI.Preview2.DependencyInjection.WasiPreview2Bundle"
+                    || bundle.FullName ==
+                        "Wacs.WASI.NN.DependencyInjection.WasiPreview2NNBundle"))
             {
+                // Both the pure-Preview2 and the composite bundle
+                // route resources through WasiPreview2Resources —
+                // wasi-nn's resource handles (graph / context /
+                // tensor / error) ride the same per-instance
+                // ResourceContext as Preview2's pollables /
+                // streams / etc.
                 resources = FindWasiPreview2Resources(assemblies);
             }
 
@@ -473,41 +481,54 @@ namespace Wacs.Transpiler.AOT.Component
         }
 
         // Walk the loaded assemblies (and their referenced
-        // assemblies) looking for WasiPreview2Bundle. The DI
-        // package is a separate assembly from Wacs.WASI.Preview2;
-        // when --wasip2 is on, the user's host project usually
-        // references both, so a Type.GetType across loaded asms
-        // suffices. Returns null if the bundle isn't loadable.
+        // assemblies) looking for a bundle type that satisfies the
+        // collected bindings. Prefers the WasiPreview2NN composite
+        // when WASI.NN is on the path (its forwarding properties
+        // cover both Preview2 and WASI.NN [WitSource] interfaces);
+        // falls back to the Preview2-only bundle otherwise.
+        // Returns null when neither is loadable — direct-link emit
+        // then falls back to the legacy delegate dispatch.
         private static Type? FindWasiPreview2Bundle(
             IReadOnlyList<Assembly> assemblies)
         {
-            const string bundleQualifiedName =
-                "Wacs.WASI.Preview2.DependencyInjection.WasiPreview2Bundle";
+            // Prefer the composite. When a component imports both
+            // wasi:cli/* and wasi:nn/*, the composite's forwarding
+            // properties cover all bindings through one CLR object —
+            // ResolveBundleProperty's name-or-type lookup finds
+            // each one without needing emit changes.
+            const string compositeName =
+                "Wacs.WASI.NN.DependencyInjection.WasiPreview2NNBundle";
+            var composite = FindBundleType(compositeName, assemblies,
+                fallbackAssembly: "Wacs.WASI.NN.DependencyInjection");
+            if (composite != null) return composite;
 
-            // First — check assemblies the resolver was handed.
+            // Fall back to Preview2-only — for components without
+            // wasi:nn imports.
+            const string preview2Name =
+                "Wacs.WASI.Preview2.DependencyInjection.WasiPreview2Bundle";
+            return FindBundleType(preview2Name, assemblies,
+                fallbackAssembly: "Wacs.WASI.Preview2.DependencyInjection");
+        }
+
+        private static Type? FindBundleType(string qualifiedName,
+            IReadOnlyList<Assembly> assemblies,
+            string fallbackAssembly)
+        {
             foreach (var asm in assemblies)
             {
-                var t = asm.GetType(bundleQualifiedName, false);
+                var t = asm.GetType(qualifiedName, false);
                 if (t != null) return t;
             }
-
-            // Then — check the AppDomain (the DI assembly may
-            // already be loaded by the host process).
-            foreach (var asm in AppDomain.CurrentDomain
-                .GetAssemblies())
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
             {
                 if (asm.IsDynamic) continue;
-                var t = asm.GetType(bundleQualifiedName, false);
+                var t = asm.GetType(qualifiedName, false);
                 if (t != null) return t;
             }
-
-            // Last — try Assembly.Load by name. Catches the case
-            // where the DI assembly is on disk but not yet loaded.
             try
             {
-                var asm = Assembly.Load(
-                    "Wacs.WASI.Preview2.DependencyInjection");
-                return asm.GetType(bundleQualifiedName, false);
+                var asm = Assembly.Load(fallbackAssembly);
+                return asm.GetType(qualifiedName, false);
             }
             catch
             {

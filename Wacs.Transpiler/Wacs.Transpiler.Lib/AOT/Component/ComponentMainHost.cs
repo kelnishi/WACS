@@ -357,32 +357,55 @@ namespace Wacs.Transpiler.AOT.Component
         // invocation. Reflective construction keeps this library
         // free of compile-time refs on Wacs.WASI.Preview2.* and
         // Microsoft.Extensions.DependencyInjection.
+        //
+        // Multi-bundle: when Wacs.WASI.NN.DependencyInjection is on
+        // the load path AND it can register a default ONNX backend
+        // (via Wacs.WASI.NN.OnnxRuntime), the host returns a
+        // WasiPreview2NNBundle composite that satisfies BOTH the
+        // Preview2 and the WASI.NN [WitSource] interfaces through
+        // one CLR object. The transpiler's ResolveBundleProperty
+        // finds each binding's matching forwarder by name — no
+        // emit changes required.
         private static (object bundle, object? resources)
             BuildWasip2BundleAndResources()
         {
-            var diAsmName = "Wacs.WASI.Preview2.DependencyInjection";
-            Assembly diAsm;
-            try { diAsm = Assembly.Load(diAsmName); }
+            var p2DiAsmName = "Wacs.WASI.Preview2.DependencyInjection";
+            Assembly p2DiAsm;
+            try { p2DiAsm = Assembly.Load(p2DiAsmName); }
             catch (Exception ex)
             {
                 throw new InvalidOperationException(
-                    "Component --emit-main needs " + diAsmName
+                    "Component --emit-main needs " + p2DiAsmName
                     + ".dll on the load path. " + ex.Message);
             }
 
-            var bundleType = diAsm.GetType(
-                diAsmName + ".WasiPreview2Bundle")
+            var p2BundleType = p2DiAsm.GetType(
+                p2DiAsmName + ".WasiPreview2Bundle")
                 ?? throw new InvalidOperationException(
-                    "Could not find WasiPreview2Bundle in " + diAsmName);
-            var resourcesType = diAsm.GetType(
-                diAsmName + ".WasiPreview2Resources");
-            var extType = diAsm.GetType(
-                diAsmName + ".WasiPreview2ServiceCollectionExtensions")
+                    "Could not find WasiPreview2Bundle in " + p2DiAsmName);
+            var resourcesType = p2DiAsm.GetType(
+                p2DiAsmName + ".WasiPreview2Resources");
+            var p2ExtType = p2DiAsm.GetType(
+                p2DiAsmName + ".WasiPreview2ServiceCollectionExtensions")
                 ?? throw new InvalidOperationException(
-                    "Could not find WasiPreview2ServiceCollectionExtensions in " + diAsmName);
+                    "Could not find WasiPreview2ServiceCollectionExtensions in " + p2DiAsmName);
 
-            var mediAsm = Assembly.Load("Microsoft.Extensions.DependencyInjection");
-            var mediAbstractionsAsm = Assembly.Load("Microsoft.Extensions.DependencyInjection.Abstractions");
+            // Optional WASI.NN.DI — when present, the bundle becomes
+            // the composite WasiPreview2NNBundle. Failure to load
+            // this assembly is NOT an error: components without
+            // wasi-nn imports never need it.
+            Assembly? nnDiAsm = TryLoadAssembly(
+                "Wacs.WASI.NN.DependencyInjection");
+            Type? nnExtType = nnDiAsm?.GetType(
+                "Wacs.WASI.NN.DependencyInjection."
+                + "WasiNNServiceCollectionExtensions");
+            Type? compositeBundleType = nnDiAsm?.GetType(
+                "Wacs.WASI.NN.DependencyInjection.WasiPreview2NNBundle");
+
+            var mediAsm = Assembly.Load(
+                "Microsoft.Extensions.DependencyInjection");
+            var mediAbstractionsAsm = Assembly.Load(
+                "Microsoft.Extensions.DependencyInjection.Abstractions");
 
             var serviceCollectionType = mediAsm.GetType(
                 "Microsoft.Extensions.DependencyInjection.ServiceCollection")!;
@@ -391,9 +414,25 @@ namespace Wacs.Transpiler.AOT.Component
 
             var services = Activator.CreateInstance(serviceCollectionType)!;
 
-            var addMethod = extType.GetMethod("AddWasiPreview2",
-                BindingFlags.Public | BindingFlags.Static)!;
-            addMethod.Invoke(null, new object?[] { services, null });
+            // AddWasiPreview2(IServiceCollection, Action<...>?) — null
+            // accepts defaults.
+            p2ExtType.GetMethod("AddWasiPreview2",
+                    BindingFlags.Public | BindingFlags.Static)!
+                .Invoke(null, new object?[] { services, null });
+
+            // AddWasiNN(IServiceCollection, Action<...>?) when WASI.NN
+            // is on the path — registers a default-empty backend
+            // configuration; AutoRegisterDefaultBackends below tries
+            // to populate it from any loadable backend assembly.
+            if (nnExtType != null)
+            {
+                nnExtType.GetMethod("AddWasiNN",
+                        BindingFlags.Public | BindingFlags.Static)!
+                    .Invoke(null, new object?[] { services, null });
+                nnExtType.GetMethod("AddWasiPreview2NNBundle",
+                        BindingFlags.Public | BindingFlags.Static)!
+                    .Invoke(null, new object?[] { services });
+            }
 
             var containerExtType = mediAsm.GetType(
                 "Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions")!;
@@ -426,6 +465,18 @@ namespace Wacs.Transpiler.AOT.Component
                     && m.GetParameters()[0].ParameterType
                         == iServiceProviderType);
 
+            // Auto-register the ONNX backend with the WASI.NN config
+            // when both DI and OnnxRuntime are loaded — saves the
+            // embedder a manual `b.AddBackend(...)` call for the
+            // common case. Pure no-op when either assembly is
+            // missing or the backend type isn't found.
+            if (nnDiAsm != null)
+                AutoRegisterDefaultBackends(scopeSp, getRequired,
+                    nnDiAsm);
+
+            // Resolve the bundle. Composite when WASI.NN is loaded;
+            // pure Preview2 otherwise.
+            Type bundleType = compositeBundleType ?? p2BundleType;
             var bundle = getRequired.MakeGenericMethod(bundleType)
                 .Invoke(null, new object?[] { scopeSp })!;
             object? resources = null;
@@ -434,6 +485,64 @@ namespace Wacs.Transpiler.AOT.Component
                     .Invoke(null, new object?[] { scopeSp });
 
             return (bundle, resources);
+        }
+
+        private static Assembly? TryLoadAssembly(string name)
+        {
+            try { return Assembly.Load(name); }
+            catch { return null; }
+        }
+
+        // Reflectively register an OnnxBackend for graph-encoding.onnx
+        // when Wacs.WASI.NN.OnnxRuntime is on the load path. Lets
+        // `wacs run --wasip2 --wasi-nn my.component.wasm` work end-
+        // to-end without an embedder shim. No-op when the OnnxRuntime
+        // assembly isn't loadable.
+        private static void AutoRegisterDefaultBackends(object scopeSp,
+            MethodInfo getRequired, Assembly nnDiAsm)
+        {
+            // Get the registered WasiNNConfiguration.
+            var configType = nnDiAsm.GetType(
+                "Wacs.WASI.NN.WasiNNConfiguration");
+            if (configType == null) return;
+
+            object? config;
+            try
+            {
+                config = getRequired.MakeGenericMethod(configType)
+                    .Invoke(null, new object?[] { scopeSp });
+            }
+            catch { return; }
+            if (config == null) return;
+
+            var backendsProp = configType.GetProperty("Backends");
+            if (backendsProp == null) return;
+            var backends = backendsProp.GetValue(config);
+            if (backends == null) return;
+
+            // Try to load the OnnxRuntime backend.
+            var ortAsm = TryLoadAssembly("Wacs.WASI.NN.OnnxRuntime");
+            var onnxBackendType = ortAsm?.GetType(
+                "Wacs.WASI.NN.OnnxRuntime.OnnxBackend");
+            if (onnxBackendType == null) return;
+            object? onnxBackend;
+            try { onnxBackend = Activator.CreateInstance(onnxBackendType); }
+            catch { return; }
+            if (onnxBackend == null) return;
+
+            // GraphEncoding.ONNX = 1 per the WIT enum order — use
+            // the underlying integer to avoid hard-typing on the
+            // enum here.
+            var encodingType = nnDiAsm.GetType(
+                "Wacs.WASI.NN.Types.GraphEncoding");
+            if (encodingType == null) return;
+            object onnxEncoding = Enum.ToObject(encodingType, 1);
+
+            // Backends is IDictionary<GraphEncoding, IBackend> — set
+            // via the indexer.
+            var indexer = backends.GetType().GetMethod("set_Item");
+            indexer?.Invoke(backends,
+                new object?[] { onnxEncoding, onnxBackend });
         }
     }
 }

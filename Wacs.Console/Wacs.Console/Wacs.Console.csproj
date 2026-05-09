@@ -86,6 +86,8 @@
                       ExcludeAssets="compile" />
     <ProjectReference Include="..\..\Wacs.WASI\Wacs.WASI.NN\Wacs.WASI.NN.OnnxRuntime\Wacs.WASI.NN.OnnxRuntime.csproj"
                       ExcludeAssets="compile" />
+    <ProjectReference Include="..\..\Wacs.WASI\Wacs.WASI.NN\Wacs.WASI.NN.DependencyInjection\Wacs.WASI.NN.DependencyInjection.csproj"
+                      ExcludeAssets="compile" />
   </ItemGroup>
 
   <ItemGroup>

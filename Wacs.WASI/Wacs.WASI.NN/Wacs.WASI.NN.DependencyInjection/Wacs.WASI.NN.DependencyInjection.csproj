@@ -23,6 +23,14 @@
         <ProjectReference Include="..\Wacs.WASI.NN\Wacs.WASI.NN.csproj" />
         <ProjectReference Include="..\..\..\Wacs.ComponentModel\Wacs.ComponentModel\Wacs.ComponentModel.csproj" />
         <ProjectReference Include="..\..\..\Wacs.Core\Wacs.Core\Wacs.Core.csproj" />
+        <!-- Soft dep on Preview2's DI package: enables the
+             WasiPreview2NNBundle composite that the transpiler-
+             direct-link path uses when both Preview2 and WASI.NN
+             host packages are wired (the typical command-component
+             with wasi-nn imports). The wasi-nn-only ctor doesn't
+             require this — it constructs WasiNNBundle alone — but
+             the composite path needs the Preview2 types. -->
+        <ProjectReference Include="..\..\Wacs.WASI.Preview2\Wacs.WASI.Preview2.DependencyInjection\Wacs.WASI.Preview2.DependencyInjection.csproj" />
         <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.0" />
     </ItemGroup>
 

@@ -60,5 +60,20 @@ namespace Wacs.WASI.NN.DependencyInjection
             services.TryAddSingleton<WasiNNBundle>();
             return services;
         }
+
+        /// <summary>
+        /// Register the <see cref="WasiPreview2NNBundle"/> composite
+        /// that ComponentMainHost uses for components importing both
+        /// <c>wasi:cli/*</c> and <c>wasi:nn/*</c>. Assumes
+        /// <c>AddWasiPreview2()</c> and <c>AddWasiNN()</c> have
+        /// already been called on the same service collection.
+        /// </summary>
+        public static IServiceCollection AddWasiPreview2NNBundle(
+            this IServiceCollection services)
+        {
+            if (services == null) throw new ArgumentNullException(nameof(services));
+            services.TryAddSingleton<WasiPreview2NNBundle>();
+            return services;
+        }
     }
 }
