@@ -49,7 +49,7 @@ namespace Wacs.WASI.Preview2.Test
             // wasi:random/random has 2 free functions:
             // get-random-bytes, get-random-u64.
             var randomKeys = linker.Bindings
-                .Where(b => b.Module == "wasi:random/random@0.2.3")
+                .Where(b => b.Module == "wasi:random/random@0.2.8")
                 .Select(b => b.Entity)
                 .ToHashSet();
             Assert.Contains("get-random-bytes", randomKeys);
@@ -66,7 +66,7 @@ namespace Wacs.WASI.Preview2.Test
             // Don't bind anything; the contract requires
             // wasi:random/random imports — but Off skips checks.
             var contract = WitContract.FromText(@"
-                package wasi:random@0.2.3;
+                package wasi:random@0.2.8;
                 interface random {
                     get-random-bytes: func(len: u64) -> list<u8>;
                 }
@@ -84,7 +84,7 @@ namespace Wacs.WASI.Preview2.Test
             var linker = new Linker(runtime, ValidationLevel.Warnings);
             // No bindings registered; contract demands one.
             var contract = WitContract.FromText(@"
-                package wasi:random@0.2.3;
+                package wasi:random@0.2.8;
                 interface random {
                     get-random-bytes: func(len: u64) -> list<u8>;
                     get-random-u64: func() -> u64;
@@ -106,7 +106,7 @@ namespace Wacs.WASI.Preview2.Test
             linker.Bind(new RandomBindings(new Random.Random()));
 
             var contract = WitContract.FromText(@"
-                package wasi:random@0.2.3;
+                package wasi:random@0.2.8;
                 interface random {
                     get-random-bytes: func(len: u64) -> list<u8>;
                     get-random-u64: func() -> u64;
@@ -126,7 +126,7 @@ namespace Wacs.WASI.Preview2.Test
             var linker = new Linker(runtime, ValidationLevel.Strict);
 
             var contract = WitContract.FromText(@"
-                package wasi:random@0.2.3;
+                package wasi:random@0.2.8;
                 interface random {
                     get-random-bytes: func(len: u64) -> list<u8>;
                 }
@@ -247,7 +247,7 @@ namespace Wacs.WASI.Preview2.Test
             Assert.False(report.IsClean);
             Assert.Contains(report.Issues, i =>
                 i.Kind == ValidationIssueKind.MissingBinding
-                && i.Module == "wasi:random/random@0.2.3"
+                && i.Module == "wasi:random/random@0.2.8"
                 && i.Entity == "get-random-bytes");
         }
 
@@ -265,9 +265,9 @@ namespace Wacs.WASI.Preview2.Test
             var packages = WitContract.LoadAssemblyPackages(asm);
 
             var importsContract = WitContract.FromWorld(packages,
-                "wasi:cli/imports@0.2.3");
+                "wasi:cli/imports@0.2.8");
             var commandContract = WitContract.FromWorld(packages,
-                "wasi:cli/command@0.2.3");
+                "wasi:cli/command@0.2.8");
 
             // Both worlds should pull in CLI + clocks + io +
             // random + sockets + filesystem imports.
@@ -277,11 +277,11 @@ namespace Wacs.WASI.Preview2.Test
                 var modules = c.Imports.Select(i => i.Module)
                     .Distinct().ToList();
                 Assert.Contains(modules, m =>
-                    m == "wasi:cli/environment@0.2.3");
+                    m == "wasi:cli/environment@0.2.8");
                 Assert.Contains(modules, m =>
-                    m == "wasi:io/streams@0.2.3");
+                    m == "wasi:io/streams@0.2.8");
                 Assert.Contains(modules, m =>
-                    m == "wasi:filesystem/types@0.2.3");
+                    m == "wasi:filesystem/types@0.2.8");
             }
 
             // Neither contract should include guest-export
@@ -291,7 +291,7 @@ namespace Wacs.WASI.Preview2.Test
                 commandContract })
             {
                 Assert.DoesNotContain(c.Imports, i =>
-                    i.Module == "wasi:cli/run@0.2.3");
+                    i.Module == "wasi:cli/run@0.2.8");
             }
         }
 
@@ -324,7 +324,7 @@ namespace Wacs.WASI.Preview2.Test
                 .Assembly;
             var contract = WitContract.FromAssembly(asm);
             Assert.DoesNotContain(contract.Imports, i =>
-                i.Module == "wasi:cli/run@0.2.3");
+                i.Module == "wasi:cli/run@0.2.8");
         }
 
         [Fact]
@@ -366,7 +366,7 @@ namespace Wacs.WASI.Preview2.Test
             var packages = WitContract.LoadAssemblyPackages(
                 typeof(Wacs.WASI.Preview2.Cli.CliBindings).Assembly);
             var contract = WitContract.FromWorld(packages,
-                "wasi:cli/imports@0.2.3");
+                "wasi:cli/imports@0.2.8");
 
             // Validate; cli/imports world's bindings should
             // all be present even if some arity-mismatch noise

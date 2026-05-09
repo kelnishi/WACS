@@ -14,7 +14,7 @@ namespace Wacs.WASI.Preview2.Filesystem
 {
     public sealed partial class FilesystemBindings
     {
-        // wasi:filesystem/preopens@0.2.3
+        // wasi:filesystem/preopens@0.2.8
         //   get-directories: func()
         //     -> list<tuple<own<descriptor>, string>>
         //

@@ -16,7 +16,7 @@ namespace Wacs.WASI.Preview2.Sockets
 {
     public sealed partial class SocketsBindings
     {
-        // wasi:sockets/ip-name-lookup@0.2.3
+        // wasi:sockets/ip-name-lookup@0.2.8
         //   resolve-addresses: func(network: borrow<network>, name: string)
         //     -> result<own<resolve-address-stream>, error-code>
         // resource methods on resolve-address-stream:

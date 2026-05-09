@@ -20,7 +20,7 @@ namespace Wacs.WASI.Preview2.Sockets
 
     /// <summary>
     /// Host representation of
-    /// <c>wasi:sockets/udp@0.2.3</c>'s
+    /// <c>wasi:sockets/udp@0.2.8</c>'s
     /// <c>incoming-datagram-stream</c> resource. Pull-stream
     /// of UDP datagrams the socket has received from the
     /// network. Pairs with <see cref="OutgoingDatagramStream"/>
@@ -50,7 +50,7 @@ namespace Wacs.WASI.Preview2.Sockets
 
     /// <summary>
     /// Host representation of
-    /// <c>wasi:sockets/udp@0.2.3</c>'s
+    /// <c>wasi:sockets/udp@0.2.8</c>'s
     /// <c>outgoing-datagram-stream</c> resource. Push-stream
     /// of UDP datagrams the socket sends to the network.
     /// </summary>

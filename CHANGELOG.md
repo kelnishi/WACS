@@ -1,5 +1,37 @@
 # Changelog
 
+## [WACS.WASI.Preview2 0.3.0] — Bundled WIT bumped to WASI 0.2.8
+
+Refreshes the vendored WIT tree under `Wacs.WASI.Preview2/wit/`
+from upstream `WebAssembly/wasi-cli@v0.2.8` (latest stable patch,
+released after v0.2.3 with zero ABI changes — only doc clarifications
+and version-string bumps in `use` clauses). All hardcoded
+`wasi:*@0.2.3` strings in the per-subsystem `*Bindings.cs` files
+update in lockstep.
+
+The 0.2.3 → 0.2.8 delta is purely cosmetic at the wire level — the
+Component Model spec stabilizes minor revisions of WASI, so guests
+compiled against any 0.2.x version bind to this version-tolerantly.
+What changes: the version annotation in error messages, the strings
+`wacs inspect --imports` reports, and the canonical `[WitSource]`
+package identity the source-gen emits.
+
+The `Spec.Test/components/wasi-cli` submodule and the test fixtures
+under `Spec.Test/components/fixtures/` stay pinned at v0.2.3 — they
+exercise the loader/emitter against a specific frozen version. The
+two coordinates are deliberately decoupled.
+
+## [WACS.Core 0.12.2] — Version-tolerant GetBoundEntity
+
+Mirrors PR #119's `HostPackageResolver.TryResolve` fallback for the
+interpreter path: when an exact `(module, entity)` lookup misses,
+strip the trailing `@<version>` and try again, then fall back to an
+O(n) scan over all keys for any matching the same stripped module
++ entity. Lets guests built against newer WASI patch revisions
+bind to host packages registered against older ones (or vice
+versa), since wasm Component Model treats minor revisions of WASI
+as ABI-stable.
+
 ## [WACS.ComponentModel 0.2.0] — WIT parser accepts pre-release semver tags
 
 `WitLexer` now emits dedicated `Dash` and `Plus` tokens (only when

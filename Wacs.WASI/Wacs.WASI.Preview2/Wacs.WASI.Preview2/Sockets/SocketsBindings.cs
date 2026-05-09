@@ -25,13 +25,13 @@ namespace Wacs.WASI.Preview2.Sockets
     ///
     /// <para>WIT namespaces covered:
     /// <list type="bullet">
-    /// <item><c>wasi:sockets/network@0.2.3</c> (Network resource)</item>
-    /// <item><c>wasi:sockets/instance-network@0.2.3</c> (top-level)</item>
-    /// <item><c>wasi:sockets/tcp@0.2.3</c> (TcpSocket resource)</item>
-    /// <item><c>wasi:sockets/udp@0.2.3</c> (UdpSocket + datagram streams)</item>
-    /// <item><c>wasi:sockets/tcp-create-socket@0.2.3</c></item>
-    /// <item><c>wasi:sockets/udp-create-socket@0.2.3</c></item>
-    /// <item><c>wasi:sockets/ip-name-lookup@0.2.3</c></item>
+    /// <item><c>wasi:sockets/network@0.2.8</c> (Network resource)</item>
+    /// <item><c>wasi:sockets/instance-network@0.2.8</c> (top-level)</item>
+    /// <item><c>wasi:sockets/tcp@0.2.8</c> (TcpSocket resource)</item>
+    /// <item><c>wasi:sockets/udp@0.2.8</c> (UdpSocket + datagram streams)</item>
+    /// <item><c>wasi:sockets/tcp-create-socket@0.2.8</c></item>
+    /// <item><c>wasi:sockets/udp-create-socket@0.2.8</c></item>
+    /// <item><c>wasi:sockets/ip-name-lookup@0.2.8</c></item>
     /// </list></para>
     ///
     /// <para>Every host method that the WIT spec marks
@@ -47,13 +47,13 @@ namespace Wacs.WASI.Preview2.Sockets
     /// </summary>
     public sealed partial class SocketsBindings : IBindable
     {
-        private const string NetworkNs        = "wasi:sockets/network@0.2.3";
-        private const string InstanceNs       = "wasi:sockets/instance-network@0.2.3";
-        private const string TcpNs            = "wasi:sockets/tcp@0.2.3";
-        private const string UdpNs            = "wasi:sockets/udp@0.2.3";
-        private const string TcpCreateNs      = "wasi:sockets/tcp-create-socket@0.2.3";
-        private const string UdpCreateNs      = "wasi:sockets/udp-create-socket@0.2.3";
-        private const string IpNameLookupNs   = "wasi:sockets/ip-name-lookup@0.2.3";
+        private const string NetworkNs        = "wasi:sockets/network@0.2.8";
+        private const string InstanceNs       = "wasi:sockets/instance-network@0.2.8";
+        private const string TcpNs            = "wasi:sockets/tcp@0.2.8";
+        private const string UdpNs            = "wasi:sockets/udp@0.2.8";
+        private const string TcpCreateNs      = "wasi:sockets/tcp-create-socket@0.2.8";
+        private const string UdpCreateNs      = "wasi:sockets/udp-create-socket@0.2.8";
+        private const string IpNameLookupNs   = "wasi:sockets/ip-name-lookup@0.2.8";
 
         private readonly ResourceContext _resources;
         private readonly IInstanceNetwork? _instanceNetwork;

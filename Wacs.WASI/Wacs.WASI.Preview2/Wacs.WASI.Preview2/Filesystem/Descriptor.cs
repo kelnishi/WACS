@@ -23,7 +23,7 @@ namespace Wacs.WASI.Preview2.Filesystem
     // land in this namespace.
 
     /// <summary>
-    /// Host representation of <c>wasi:filesystem/types@0.2.3</c>'s
+    /// Host representation of <c>wasi:filesystem/types@0.2.8</c>'s
     /// <c>descriptor</c> resource. Implements
     /// <see cref="IDescriptor"/> directly — every method returns
     /// the faithful canonical-ABI <c>result&lt;X,

@@ -15,7 +15,7 @@ using Wacs.WASI.Preview2.HostBinding.CanonicalAbi;
 namespace Wacs.WASI.Preview2.Http
 {
     /// <summary>
-    /// Orchestrator for <c>wasi:http/types@0.2.3</c> — the
+    /// Orchestrator for <c>wasi:http/types@0.2.8</c> — the
     /// 11 HTTP resources (Fields, OutgoingRequest,
     /// IncomingRequest, OutgoingResponse, IncomingResponse,
     /// OutgoingBody, IncomingBody, FutureIncomingResponse,
@@ -37,7 +37,7 @@ namespace Wacs.WASI.Preview2.Http
     /// </summary>
     public sealed partial class HttpTypes : IBindable
     {
-        private const string Ns = "wasi:http/types@0.2.3";
+        private const string Ns = "wasi:http/types@0.2.8";
 
         private readonly ResourceContext _resources;
         private readonly IHttpErrorCodeMapper? _errorCodeMapper;

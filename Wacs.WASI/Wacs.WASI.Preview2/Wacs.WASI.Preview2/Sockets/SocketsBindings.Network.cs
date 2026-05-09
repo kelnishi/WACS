@@ -14,7 +14,7 @@ namespace Wacs.WASI.Preview2.Sockets
 {
     public sealed partial class SocketsBindings
     {
-        // wasi:sockets/network@0.2.3 — Network resource (no
+        // wasi:sockets/network@0.2.8 — Network resource (no
         // methods) plus a top-level function:
         //   network-error-code: func(err: borrow<error>)
         //     -> option<error-code>
@@ -48,7 +48,7 @@ namespace Wacs.WASI.Preview2.Sockets
                 });
         }
 
-        // wasi:sockets/instance-network@0.2.3
+        // wasi:sockets/instance-network@0.2.8
         //   instance-network: func() -> own<network>
         private static void BindInstanceNetwork(WasmRuntime runtime,
             ResourceContext resources, IInstanceNetwork impl)
@@ -59,7 +59,7 @@ namespace Wacs.WASI.Preview2.Sockets
                 _ => nets.Allocate((Network)impl.InstanceNetwork()));
         }
 
-        // wasi:sockets/tcp-create-socket@0.2.3
+        // wasi:sockets/tcp-create-socket@0.2.8
         //   create-tcp-socket: func(address-family: ip-address-family)
         //     -> result<own<tcp-socket>, error-code>
         // Result-returning host method: allocate the handle on Ok,
@@ -83,7 +83,7 @@ namespace Wacs.WASI.Preview2.Sockets
                 });
         }
 
-        // wasi:sockets/udp-create-socket@0.2.3
+        // wasi:sockets/udp-create-socket@0.2.8
         //   create-udp-socket: func(address-family: ip-address-family)
         //     -> result<own<udp-socket>, error-code>
         private static void BindUdpCreateSocket(WasmRuntime runtime,

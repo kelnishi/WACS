@@ -16,7 +16,7 @@ namespace Wacs.WASI.Preview2.Sockets
 {
     public sealed partial class SocketsBindings
     {
-        // wasi:sockets/udp@0.2.3 — udp-socket resource. Smaller
+        // wasi:sockets/udp@0.2.8 — udp-socket resource. Smaller
         // surface than tcp; %stream returns a (incoming, outgoing)
         // datagram-stream pair gated on an option<address>.
         private static void BindUdpSocket(WasmRuntime runtime,
@@ -165,7 +165,7 @@ namespace Wacs.WASI.Preview2.Sockets
                 });
         }
 
-        // wasi:sockets/udp@0.2.3 — incoming-datagram-stream
+        // wasi:sockets/udp@0.2.8 — incoming-datagram-stream
         // resource. receive(maxResults) -> result<list<dgram>, _>
         // where each dgram = 40 bytes (data list 8B + addr 32B).
         private static void BindIncomingDatagramStream(WasmRuntime runtime,
@@ -232,7 +232,7 @@ namespace Wacs.WASI.Preview2.Sockets
                 });
         }
 
-        // wasi:sockets/udp@0.2.3 — outgoing-datagram-stream
+        // wasi:sockets/udp@0.2.8 — outgoing-datagram-stream
         // resource. send(list<dgram>) -> result<u64, _>; each
         // dgram on the param side is 44 bytes.
         private static void BindOutgoingDatagramStream(WasmRuntime runtime,

@@ -50,7 +50,7 @@ namespace Wacs.WASI.Preview2.Clocks
                 BindTimezone(runtime, _timezone);
         }
 
-        // wasi:clocks/monotonic-clock@0.2.3
+        // wasi:clocks/monotonic-clock@0.2.8
         //   now: func() -> instant            (u64)
         //   resolution: func() -> duration    (u64)
         //   subscribe-instant: func(when: instant) -> own<pollable>
@@ -58,7 +58,7 @@ namespace Wacs.WASI.Preview2.Clocks
         private static void BindMonotonicClock(WasmRuntime runtime,
             ResourceContext resources, IMonotonicClock impl)
         {
-            const string ns = "wasi:clocks/monotonic-clock@0.2.3";
+            const string ns = "wasi:clocks/monotonic-clock@0.2.8";
             var pollables = resources.Table<Pollable>();
 
             runtime.BindHostFunction<Func<ExecContext, long>>(
@@ -80,7 +80,7 @@ namespace Wacs.WASI.Preview2.Clocks
                     pollables.Allocate(impl.SubscribeDuration((ulong)when)));
         }
 
-        // wasi:clocks/wall-clock@0.2.3
+        // wasi:clocks/wall-clock@0.2.8
         //   record datetime { seconds: u64, nanoseconds: u32 }
         //   now: func() -> datetime           (retArea 16B, align 8)
         //   resolution: func() -> datetime    (same)
@@ -90,7 +90,7 @@ namespace Wacs.WASI.Preview2.Clocks
         private static void BindWallClock(WasmRuntime runtime,
             IWallClock impl)
         {
-            const string ns = "wasi:clocks/wall-clock@0.2.3";
+            const string ns = "wasi:clocks/wall-clock@0.2.8";
 
             runtime.BindHostFunction<Action<ExecContext, int>>(
                 (ns, "now"),
@@ -102,7 +102,7 @@ namespace Wacs.WASI.Preview2.Clocks
                     WriteDatetime(ctx, retArea, impl.Resolution()));
         }
 
-        // wasi:clocks/timezone@0.2.3
+        // wasi:clocks/timezone@0.2.8
         //   utc-offset: func(when: datetime) -> s32
         //   display: func(when: datetime) -> timezone-display
         //
@@ -119,7 +119,7 @@ namespace Wacs.WASI.Preview2.Clocks
         private static void BindTimezone(WasmRuntime runtime,
             ITimezone impl)
         {
-            const string ns = "wasi:clocks/timezone@0.2.3";
+            const string ns = "wasi:clocks/timezone@0.2.8";
             var alloc = new Realloc(runtime);
 
             runtime.BindHostFunction<Func<ExecContext, long, int, int>>(

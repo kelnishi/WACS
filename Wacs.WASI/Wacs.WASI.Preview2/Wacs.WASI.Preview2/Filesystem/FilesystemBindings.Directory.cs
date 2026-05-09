@@ -15,7 +15,7 @@ namespace Wacs.WASI.Preview2.Filesystem
 {
     public sealed partial class FilesystemBindings
     {
-        // wasi:filesystem/types@0.2.3 — directory-entry-stream
+        // wasi:filesystem/types@0.2.8 — directory-entry-stream
         // resource. Single method:
         //   read-directory-entry: func()
         //     -> result<option<directory-entry>, error-code>

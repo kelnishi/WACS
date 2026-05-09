@@ -65,8 +65,8 @@ namespace Wacs.WASI.Preview2.Test
         public void Hello_world_writes_through_stdout_chain()
         {
             // Component:
-            //   import wasi:cli/stdout@0.2.3;
-            //   import wasi:io/streams@0.2.3;
+            //   import wasi:cli/stdout@0.2.8;
+            //   import wasi:io/streams@0.2.8;
             //   export greet: func();
             // greet() calls stdout.get-stdout() → handle,
             // streams.[method]output-stream.blocking-write-and-flush(handle, "hello\n"),

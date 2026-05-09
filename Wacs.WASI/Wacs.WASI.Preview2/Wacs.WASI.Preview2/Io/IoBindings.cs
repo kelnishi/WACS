@@ -14,8 +14,8 @@ namespace Wacs.WASI.Preview2.Io
 {
     /// <summary>
     /// Orchestrator for two foundational WASI IO interfaces:
-    /// <c>wasi:io/error@0.2.3</c> (the <see cref="Error"/>
-    /// resource) and <c>wasi:io/poll@0.2.3</c> (the
+    /// <c>wasi:io/error@0.2.8</c> (the <see cref="Error"/>
+    /// resource) and <c>wasi:io/poll@0.2.8</c> (the
     /// <see cref="Pollable"/> resource + top-level <c>poll</c>).
     ///
     /// <para>Both register a resource into the shared
@@ -45,7 +45,7 @@ namespace Wacs.WASI.Preview2.Io
                 BindPoll(runtime, _resources, alloc, _poll);
         }
 
-        // wasi:io/error@0.2.3
+        // wasi:io/error@0.2.8
         //   resource error {
         //     to-debug-string: func() -> string;
         //   }
@@ -55,7 +55,7 @@ namespace Wacs.WASI.Preview2.Io
         private static void BindError(WasmRuntime runtime,
             ResourceContext resources, Realloc alloc)
         {
-            const string ns = "wasi:io/error@0.2.3";
+            const string ns = "wasi:io/error@0.2.8";
             var errors = resources.Table<Error>();
 
             runtime.BindHostFunction<Action<ExecContext, int>>(
@@ -74,7 +74,7 @@ namespace Wacs.WASI.Preview2.Io
                 });
         }
 
-        // wasi:io/poll@0.2.3
+        // wasi:io/poll@0.2.8
         //   resource pollable {
         //     ready: func() -> bool;
         //     block: func();
@@ -84,7 +84,7 @@ namespace Wacs.WASI.Preview2.Io
         private static void BindPollable(WasmRuntime runtime,
             ResourceContext resources)
         {
-            const string ns = "wasi:io/poll@0.2.3";
+            const string ns = "wasi:io/poll@0.2.8";
             var pollables = resources.Table<Pollable>();
 
             runtime.BindHostFunction<Action<ExecContext, int>>(
@@ -102,7 +102,7 @@ namespace Wacs.WASI.Preview2.Io
                     ((Pollable)pollables.Get(handle)).Block());
         }
 
-        // wasi:io/poll@0.2.3 top-level
+        // wasi:io/poll@0.2.8 top-level
         //   poll: func(in: list<borrow<pollable>>) -> list<u32>
         //
         // Wire: (param listPtr i32, listLen i32, retArea i32)
@@ -112,7 +112,7 @@ namespace Wacs.WASI.Preview2.Io
         private static void BindPoll(WasmRuntime runtime,
             ResourceContext resources, Realloc alloc, IPoll impl)
         {
-            const string ns = "wasi:io/poll@0.2.3";
+            const string ns = "wasi:io/poll@0.2.8";
             var pollables = resources.Table<Pollable>();
 
             runtime.BindHostFunction<Action<ExecContext, int, int, int>>(
