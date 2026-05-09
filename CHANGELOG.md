@@ -1,5 +1,47 @@
 # Changelog
 
+## [WACS.WASI.Preview2 0.4.0 + WACS.Cli 1.5.0] — `--dir host::guest` + `Preopens(host, guest)` ctor
+
+Closes the round-3 gap from `wasi-nn/WACS-GAPS.md` issue 9 ("`--dir`
+not plumbed through to the WASI Preview 2 component path") at the
+API level:
+
+- New `Wacs.WASI.Preview2.Filesystem.Preopens(IEnumerable<(string
+  hostPath, string guestPath)>)` ctor + `params` overload. Wraps
+  each pair in a `Descriptor` so the guest's
+  `wasi:filesystem/preopens.get-directories()` import returns
+  real entries instead of the `DefaultPreopens` empty list.
+- `wacs run -d host::guest` parses the wasmtime-style mount-pair
+  syntax. A bare `-d foo` mounts the host path at guest path
+  `/foo` (matches Preview1's existing rooting behavior so the same
+  flag form works on both engines).
+- `ComponentMainHost.BuildWasip2BundleAndResources(preopens)`
+  reflectively constructs a `Preopens` from the parsed mount pairs
+  and registers it as `IPreopens` on the DI service collection
+  BEFORE `AddWasiPreview2`'s `TryAddSingleton` default falls
+  through. The bundle's `Preopens` property carries the embedder-
+  configured impl into the transpiler-direct-link path.
+
+### Open follow-up
+
+The bundle now holds the right `IPreopens` instance, but the
+guest's `get-directories` import doesn't reach it end-to-end
+under `wacs run --wasip2`. The transpiler-direct-link emit may
+fall back to delegate dispatch for the
+`list<tuple<own<descriptor>, string>>` return shape (more complex
+than the single-resource returns like `get-stdout` that work
+today), and the BindHostFunction-side wiring in
+`FilesystemBindings.BindPreopens` doesn't fire on this path
+because `ComponentMainHost` resolves the bundle but not the
+`Linker` (which is what triggers each `*Bindings.BindToRuntime`).
+Tracked as the next chunk.
+
+This bump ships the structural API consumers can rely on:
+embedders constructing a `WasiPreview2Bundle` programmatically
+get a working `IPreopens`. The end-to-end CLI path needs the
+follow-up wiring before `wacs run --wasip2 -d models` reads
+`/models/x.txt` correctly.
+
 ## Spec.Test fixtures — WASI 0.2.3 → 0.2.8 bump
 
 Bumps the `Spec.Test/components/wasi-cli` submodule pointer from

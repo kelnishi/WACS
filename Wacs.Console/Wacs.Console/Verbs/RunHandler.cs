@@ -106,12 +106,15 @@ namespace Wacs.Console.Verbs
                 return 1;
             }
 
-            // Validate WASI directories.
+            // Validate WASI directories. Accepts both bare paths and
+            // wasmtime-style `host::guest` mount-pair syntax — the
+            // existence check applies to the host-path side only.
             foreach (var dir in opts.Directories ?? Enumerable.Empty<string>())
             {
-                if (!Directory.Exists(dir))
+                var (hostPath, _) = SplitMount(dir);
+                if (!Directory.Exists(hostPath))
                 {
-                    System.Console.Error.WriteLine($"Error: Directory not found: {dir}");
+                    System.Console.Error.WriteLine($"Error: Directory not found: {hostPath}");
                     return 1;
                 }
             }
@@ -595,11 +598,17 @@ namespace Wacs.Console.Verbs
             // before falling back to `_start`. Matches what wasmtime,
             // jco, and wasmer do for stock command components.
             string? entry = string.IsNullOrEmpty(opts.Call) ? null : opts.Call;
+            // Parse `-d host::guest` mounts for the wasip2
+            // filesystem-preopens binding. Bare `-d foo` mounts at
+            // guest path `/foo` (matches what Preview1 does so the
+            // same flag form works on both engines).
+            var preopens = ParsePreopenMounts(opts.Directories);
             try
             {
                 return ComponentMainHost.Run(result.ModuleClass!,
                     (opts.Args ?? Enumerable.Empty<string>()).ToArray(),
-                    entry);
+                    entry,
+                    preopens);
             }
             catch (Exception ex)
             {
@@ -708,6 +717,40 @@ namespace Wacs.Console.Verbs
                         "bind          " + asmPath + " -> "
                         + loaded.Count + " binding(s)");
             }
+        }
+
+        /// <summary>
+        /// Split a `--dir` entry into (hostPath, guestPath). Accepts
+        /// the wasmtime-style `host::guest` form for explicit mount
+        /// points; a bare path mounts at `/<basename>` so a guest's
+        /// canonical absolute-path read (`/models/x.txt`) works
+        /// against `wacs run -d models`. Matches Preview1's existing
+        /// guest-path-rooting behavior.
+        /// </summary>
+        private static (string hostPath, string guestPath) SplitMount(string raw)
+        {
+            int sep = raw.IndexOf("::", StringComparison.Ordinal);
+            if (sep >= 0)
+                return (raw.Substring(0, sep), raw.Substring(sep + 2));
+            // Bare path. Default to /<basename-of-host> so the guest
+            // reads it at a canonical absolute path. Strip leading
+            // `./` and trailing slashes for consistency.
+            var trimmed = raw.TrimEnd('/', '\\');
+            if (trimmed.StartsWith("./", StringComparison.Ordinal))
+                trimmed = trimmed.Substring(2);
+            return (raw, "/" + Path.GetFileName(trimmed));
+        }
+
+        /// <summary>
+        /// Parse the full list of `--dir` entries into mount pairs
+        /// for the wasip2 filesystem-preopens registration. Returns
+        /// an empty array when no `--dir` was supplied.
+        /// </summary>
+        private static (string hostPath, string guestPath)[] ParsePreopenMounts(
+            IEnumerable<string>? dirs)
+        {
+            if (dirs == null) return Array.Empty<(string, string)>();
+            return dirs.Select(SplitMount).ToArray();
         }
 
         private static bool DetectComponent(string path)

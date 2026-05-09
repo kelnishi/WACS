@@ -50,9 +50,17 @@ namespace Wacs.Transpiler.AOT.Component
         /// stock command component just runs.</para>
         /// </summary>
         public static int Run(Type moduleClass, string[] args,
-            string? exportName = null)
+            string? exportName = null,
+            IEnumerable<(string hostPath, string guestPath)>? preopens = null)
         {
             if (moduleClass == null) throw new ArgumentNullException(nameof(moduleClass));
+
+            // Materialize once so the iterator isn't drained on the
+            // first reflective use; threaded into
+            // BuildWasip2BundleAndResources when non-null + non-empty
+            // so the bundle's IPreopens exposes them instead of the
+            // empty default.
+            var preopenList = preopens?.ToArray();
 
             var ctor = moduleClass.GetConstructors()[0];
             var ctorParams = ctor.GetParameters();
@@ -91,7 +99,7 @@ namespace Wacs.Transpiler.AOT.Component
                 object? bundle = null;
                 object? resources = null;
                 if (ctorParams.Length >= 2)
-                    (bundle, resources) = BuildWasip2BundleAndResources();
+                    (bundle, resources) = BuildWasip2BundleAndResources(preopenList);
 
                 instance = ctorParams.Length switch
                 {
@@ -367,7 +375,8 @@ namespace Wacs.Transpiler.AOT.Component
         // finds each binding's matching forwarder by name — no
         // emit changes required.
         private static (object bundle, object? resources)
-            BuildWasip2BundleAndResources()
+            BuildWasip2BundleAndResources(
+                (string hostPath, string guestPath)[]? preopens = null)
         {
             var p2DiAsmName = "Wacs.WASI.Preview2.DependencyInjection";
             Assembly p2DiAsm;
@@ -413,6 +422,18 @@ namespace Wacs.Transpiler.AOT.Component
                 "Microsoft.Extensions.DependencyInjection.IServiceCollection")!;
 
             var services = Activator.CreateInstance(serviceCollectionType)!;
+
+            // Register IPreopens BEFORE AddWasiPreview2 so its
+            // TryAddSingleton<IPreopens> default registration falls
+            // through. Reflection-load the Preview2 Filesystem
+            // assembly's `Preopens(IEnumerable<(string, string)>)`
+            // ctor — keeps Wacs.Transpiler.Lib free of a compile-
+            // time reference to Wacs.WASI.Preview2.Filesystem.
+            if (preopens != null && preopens.Length > 0)
+            {
+                RegisterPreopens(services, p2DiAsm, mediAbstractionsAsm,
+                    preopens);
+            }
 
             // AddWasiPreview2(IServiceCollection, Action<...>?) — null
             // accepts defaults.
@@ -543,6 +564,76 @@ namespace Wacs.Transpiler.AOT.Component
             var indexer = backends.GetType().GetMethod("set_Item");
             indexer?.Invoke(backends,
                 new object?[] { onnxEncoding, onnxBackend });
+        }
+
+        // Reflectively construct a
+        // Wacs.WASI.Preview2.Filesystem.Preopens with the given
+        // mount pairs and register it as a singleton IPreopens on
+        // the service collection. Runs BEFORE AddWasiPreview2 so
+        // the default DefaultPreopens TryAddSingleton falls through.
+        private static void RegisterPreopens(object services,
+            Assembly p2DiAsm,
+            Assembly mediAbstractionsAsm,
+            (string hostPath, string guestPath)[] preopens)
+        {
+            // The Preopens / IPreopens types live in
+            // Wacs.WASI.Preview2 (not the DI package); the DI
+            // package transitively references it, so the Preview2
+            // assembly is loaded by the time we're called.
+            var p2Asm = Assembly.Load("Wacs.WASI.Preview2");
+
+            var iPreopensType = p2Asm.GetType(
+                "Wacs.WASI.Preview2.Filesystem.IPreopens");
+            var preopensType = p2Asm.GetType(
+                "Wacs.WASI.Preview2.Filesystem.Preopens");
+            if (iPreopensType == null || preopensType == null) return;
+
+            // Find the IEnumerable<(string, string)> ctor.
+            var ctor = preopensType.GetConstructors()
+                .FirstOrDefault(c =>
+                {
+                    var ps = c.GetParameters();
+                    return ps.Length == 1
+                        && ps[0].ParameterType.IsGenericType
+                        && ps[0].ParameterType.GetGenericTypeDefinition()
+                            == typeof(IEnumerable<>);
+                });
+            if (ctor == null) return;
+
+            // Materialize the mount pairs as List<ValueTuple<string,string>>
+            // — that's the concrete `IEnumerable<(string, string)>`
+            // shape the ctor expects.
+            var pairs = preopens
+                .Select(m => (m.hostPath, m.guestPath))
+                .ToList();
+            object preopensInstance;
+            try { preopensInstance = ctor.Invoke(new object[] { pairs })!; }
+            catch { return; }
+
+            // services.AddSingleton(typeof(IPreopens), instance) —
+            // use Add (not TryAdd) so we win against the default
+            // registration that AddWasiPreview2 would otherwise put
+            // in. The two AddSingleton overloads take
+            // (IServiceCollection, Type, object) for instance
+            // registration; resolve via reflection.
+            var addExtType = mediAbstractionsAsm.GetType(
+                "Microsoft.Extensions.DependencyInjection."
+                + "ServiceCollectionServiceExtensions");
+            if (addExtType == null) return;
+            var addSingleton = addExtType.GetMethods(
+                BindingFlags.Public | BindingFlags.Static)
+                .FirstOrDefault(m =>
+                {
+                    if (m.Name != "AddSingleton" || m.IsGenericMethod)
+                        return false;
+                    var ps = m.GetParameters();
+                    return ps.Length == 3
+                        && ps[1].ParameterType == typeof(Type)
+                        && ps[2].ParameterType == typeof(object);
+                });
+            if (addSingleton == null) return;
+            addSingleton.Invoke(null, new object[] {
+                services, iPreopensType, preopensInstance });
         }
     }
 }
