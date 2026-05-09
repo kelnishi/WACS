@@ -9,6 +9,7 @@ using System;
 using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using System.Text;
+using Wacs.Core.Runtime.Types;
 
 namespace Wacs.ComponentModel.CanonicalABI
 {
@@ -77,25 +78,26 @@ namespace Wacs.ComponentModel.CanonicalABI
         /// encoded with the canon-ABI default UTF-8; UTF-16 /
         /// Latin1+UTF-16 encoders ride incrementally.</para>
         /// </summary>
-        public static void StoreString(byte[] dest, int retAreaOffset,
+        public static void StoreString(MemoryInstance mem, int retAreaOffset,
             string value, Func<int, int, int, int, int> cabiRealloc)
         {
             if (cabiRealloc == null)
                 throw new InvalidOperationException(
                     "String returns require the component to "
                     + "export `cabi_realloc`.");
-            // The dest buffer can be re-bound by cabi_realloc if
-            // the underlying wasm memory grows; re-fetch by lookup
-            // through the same memory we got passed (in WACS today
-            // the byte[] reference is stable per memory instance,
-            // but defensive re-bind is cheap).
+            // cabi_realloc can call memory.grow, which reassigns
+            // MemoryInstance.Data to a fresh, larger byte[] —
+            // closes gap 11 (input-stream.read AOOR for buffers
+            // crossing the page boundary). Read mem.Data AFTER
+            // every cabi_realloc invocation so the writes target
+            // the post-grow array.
             var bytes = Encoding.UTF8.GetBytes(value);
             var ptr = cabiRealloc(0, 0, 1, bytes.Length);
-            Buffer.BlockCopy(bytes, 0, dest, ptr, bytes.Length);
+            Buffer.BlockCopy(bytes, 0, mem.Data, ptr, bytes.Length);
             BinaryPrimitives.WriteInt32LittleEndian(
-                dest.AsSpan(retAreaOffset, 4), ptr);
+                mem.Data.AsSpan(retAreaOffset, 4), ptr);
             BinaryPrimitives.WriteInt32LittleEndian(
-                dest.AsSpan(retAreaOffset + 4, 4), bytes.Length);
+                mem.Data.AsSpan(retAreaOffset + 4, 4), bytes.Length);
         }
 
         /// <summary>
@@ -106,8 +108,9 @@ namespace Wacs.ComponentModel.CanonicalABI
         /// receives (ptr, codeUnitCount) — note <b>length is in
         /// u16 code units, not bytes</b> per CanonicalABI.md.
         /// </summary>
-        public static void StoreStringUtf16(byte[] dest, int retAreaOffset,
-            string value, Func<int, int, int, int, int> cabiRealloc)
+        public static void StoreStringUtf16(MemoryInstance mem,
+            int retAreaOffset, string value,
+            Func<int, int, int, int, int> cabiRealloc)
         {
             if (cabiRealloc == null)
                 throw new InvalidOperationException(
@@ -115,11 +118,11 @@ namespace Wacs.ComponentModel.CanonicalABI
                     + "export `cabi_realloc`.");
             var bytes = Encoding.Unicode.GetBytes(value);
             var ptr = cabiRealloc(0, 0, 2, bytes.Length);
-            Buffer.BlockCopy(bytes, 0, dest, ptr, bytes.Length);
+            Buffer.BlockCopy(bytes, 0, mem.Data, ptr, bytes.Length);
             BinaryPrimitives.WriteInt32LittleEndian(
-                dest.AsSpan(retAreaOffset, 4), ptr);
+                mem.Data.AsSpan(retAreaOffset, 4), ptr);
             BinaryPrimitives.WriteInt32LittleEndian(
-                dest.AsSpan(retAreaOffset + 4, 4), bytes.Length / 2);
+                mem.Data.AsSpan(retAreaOffset + 4, 4), bytes.Length / 2);
         }
 
         /// <summary>
@@ -131,7 +134,7 @@ namespace Wacs.ComponentModel.CanonicalABI
         /// (ptr, taggedCodeUnits) where the tagged value =
         /// codeUnits | <see cref="StringMarshal.Latin1OrUtf16Tag"/>.
         /// </summary>
-        public static void StoreStringLatin1OrUtf16(byte[] dest,
+        public static void StoreStringLatin1OrUtf16(MemoryInstance mem,
             int retAreaOffset, string value,
             Func<int, int, int, int, int> cabiRealloc)
         {
@@ -141,14 +144,14 @@ namespace Wacs.ComponentModel.CanonicalABI
                     + "export `cabi_realloc`.");
             var bytes = Encoding.Unicode.GetBytes(value);
             var ptr = cabiRealloc(0, 0, 2, bytes.Length);
-            Buffer.BlockCopy(bytes, 0, dest, ptr, bytes.Length);
+            Buffer.BlockCopy(bytes, 0, mem.Data, ptr, bytes.Length);
             int codeUnits = bytes.Length / 2;
             uint tagged = (uint)codeUnits
                 | StringMarshal.Latin1OrUtf16Tag;
             BinaryPrimitives.WriteInt32LittleEndian(
-                dest.AsSpan(retAreaOffset, 4), ptr);
+                mem.Data.AsSpan(retAreaOffset, 4), ptr);
             BinaryPrimitives.WriteUInt32LittleEndian(
-                dest.AsSpan(retAreaOffset + 4, 4), tagged);
+                mem.Data.AsSpan(retAreaOffset + 4, 4), tagged);
         }
 
         /// <summary>
@@ -159,7 +162,7 @@ namespace Wacs.ComponentModel.CanonicalABI
         /// Used by direct-linked aggregate-RETURN emit when the
         /// host returns a byte[].
         /// </summary>
-        public static void StoreByteArray(byte[] dest, int retAreaOffset,
+        public static void StoreByteArray(MemoryInstance mem, int retAreaOffset,
             byte[] value, Func<int, int, int, int, int> cabiRealloc)
         {
             if (cabiRealloc == null)
@@ -167,11 +170,14 @@ namespace Wacs.ComponentModel.CanonicalABI
                     "byte[] returns require the component to "
                     + "export `cabi_realloc`.");
             var ptr = cabiRealloc(0, 0, 1, value.Length);
-            Buffer.BlockCopy(value, 0, dest, ptr, value.Length);
+            // Reference mem.Data AFTER cabi_realloc — gap 11: a
+            // memory.grow inside cabi_realloc reassigns mem.Data
+            // to a new (larger) byte[]; the old reference is stale.
+            Buffer.BlockCopy(value, 0, mem.Data, ptr, value.Length);
             BinaryPrimitives.WriteInt32LittleEndian(
-                dest.AsSpan(retAreaOffset, 4), ptr);
+                mem.Data.AsSpan(retAreaOffset, 4), ptr);
             BinaryPrimitives.WriteInt32LittleEndian(
-                dest.AsSpan(retAreaOffset + 4, 4), value.Length);
+                mem.Data.AsSpan(retAreaOffset + 4, 4), value.Length);
         }
 
         /// <summary>
@@ -191,7 +197,7 @@ namespace Wacs.ComponentModel.CanonicalABI
         /// <para>Used by direct-linked aggregate-RETURN emit when the
         /// host returns int[], long[], float[], etc.</para>
         /// </summary>
-        public static void StorePrimitiveArray<T>(byte[] dest,
+        public static void StorePrimitiveArray<T>(MemoryInstance mem,
             int retAreaOffset, T[] value,
             Func<int, int, int, int, int> cabiRealloc)
             where T : unmanaged
@@ -205,11 +211,11 @@ namespace Wacs.ComponentModel.CanonicalABI
             var ptr = cabiRealloc(0, 0, elementSize, byteCount);
             var srcBytes = MemoryMarshal.AsBytes(
                 new ReadOnlySpan<T>(value));
-            srcBytes.CopyTo(dest.AsSpan(ptr, byteCount));
+            srcBytes.CopyTo(mem.Data.AsSpan(ptr, byteCount));
             BinaryPrimitives.WriteInt32LittleEndian(
-                dest.AsSpan(retAreaOffset, 4), ptr);
+                mem.Data.AsSpan(retAreaOffset, 4), ptr);
             BinaryPrimitives.WriteInt32LittleEndian(
-                dest.AsSpan(retAreaOffset + 4, 4), value.Length);
+                mem.Data.AsSpan(retAreaOffset + 4, 4), value.Length);
         }
 
         /// <summary>
@@ -223,8 +229,9 @@ namespace Wacs.ComponentModel.CanonicalABI
         /// minus the UTF-8 encode step. Used by direct-linked
         /// aggregate-RETURN emit when the host returns byte[][].</para>
         /// </summary>
-        public static void StoreByteArrayList(byte[] dest, int retAreaOffset,
-            byte[][] value, Func<int, int, int, int, int> cabiRealloc)
+        public static void StoreByteArrayList(MemoryInstance mem,
+            int retAreaOffset, byte[][] value,
+            Func<int, int, int, int, int> cabiRealloc)
         {
             if (cabiRealloc == null)
                 throw new InvalidOperationException(
@@ -237,16 +244,16 @@ namespace Wacs.ComponentModel.CanonicalABI
             {
                 var sub = value[i];
                 var subPtr = cabiRealloc(0, 0, 1, sub.Length);
-                Buffer.BlockCopy(sub, 0, dest, subPtr, sub.Length);
+                Buffer.BlockCopy(sub, 0, mem.Data, subPtr, sub.Length);
                 BinaryPrimitives.WriteInt32LittleEndian(
-                    dest.AsSpan(outerPtr + i * 8, 4), subPtr);
+                    mem.Data.AsSpan(outerPtr + i * 8, 4), subPtr);
                 BinaryPrimitives.WriteInt32LittleEndian(
-                    dest.AsSpan(outerPtr + i * 8 + 4, 4), sub.Length);
+                    mem.Data.AsSpan(outerPtr + i * 8 + 4, 4), sub.Length);
             }
             BinaryPrimitives.WriteInt32LittleEndian(
-                dest.AsSpan(retAreaOffset, 4), outerPtr);
+                mem.Data.AsSpan(retAreaOffset, 4), outerPtr);
             BinaryPrimitives.WriteInt32LittleEndian(
-                dest.AsSpan(retAreaOffset + 4, 4), count);
+                mem.Data.AsSpan(retAreaOffset + 4, 4), count);
         }
 
         /// <summary>
@@ -263,7 +270,7 @@ namespace Wacs.ComponentModel.CanonicalABI
         /// <para>Used by direct-linked aggregate-RETURN emit when
         /// the host returns int[][], long[][], etc.</para>
         /// </summary>
-        public static void StorePrimArrayList<T>(byte[] dest,
+        public static void StorePrimArrayList<T>(MemoryInstance mem,
             int retAreaOffset, T[][] value,
             Func<int, int, int, int, int> cabiRealloc)
             where T : unmanaged
@@ -283,16 +290,16 @@ namespace Wacs.ComponentModel.CanonicalABI
                 var subPtr = cabiRealloc(0, 0, elementSize, subByteCount);
                 var srcBytes = MemoryMarshal.AsBytes(
                     new ReadOnlySpan<T>(sub));
-                srcBytes.CopyTo(dest.AsSpan(subPtr, subByteCount));
+                srcBytes.CopyTo(mem.Data.AsSpan(subPtr, subByteCount));
                 BinaryPrimitives.WriteInt32LittleEndian(
-                    dest.AsSpan(outerPtr + i * 8, 4), subPtr);
+                    mem.Data.AsSpan(outerPtr + i * 8, 4), subPtr);
                 BinaryPrimitives.WriteInt32LittleEndian(
-                    dest.AsSpan(outerPtr + i * 8 + 4, 4), sub.Length);
+                    mem.Data.AsSpan(outerPtr + i * 8 + 4, 4), sub.Length);
             }
             BinaryPrimitives.WriteInt32LittleEndian(
-                dest.AsSpan(retAreaOffset, 4), outerPtr);
+                mem.Data.AsSpan(retAreaOffset, 4), outerPtr);
             BinaryPrimitives.WriteInt32LittleEndian(
-                dest.AsSpan(retAreaOffset + 4, 4), count);
+                mem.Data.AsSpan(retAreaOffset + 4, 4), count);
         }
 
         /// <summary>
@@ -308,8 +315,9 @@ namespace Wacs.ComponentModel.CanonicalABI
         /// <para>Used by direct-linked aggregate-RETURN emit when the
         /// host returns string[].</para>
         /// </summary>
-        public static void StoreStringList(byte[] dest, int retAreaOffset,
-            string[] value, Func<int, int, int, int, int> cabiRealloc)
+        public static void StoreStringList(MemoryInstance mem,
+            int retAreaOffset, string[] value,
+            Func<int, int, int, int, int> cabiRealloc)
         {
             if (cabiRealloc == null)
                 throw new InvalidOperationException(
@@ -322,17 +330,17 @@ namespace Wacs.ComponentModel.CanonicalABI
             {
                 var bytes = Encoding.UTF8.GetBytes(value[i]);
                 var sPtr = cabiRealloc(0, 0, 1, bytes.Length);
-                Buffer.BlockCopy(bytes, 0, dest, sPtr, bytes.Length);
+                Buffer.BlockCopy(bytes, 0, mem.Data, sPtr, bytes.Length);
                 BinaryPrimitives.WriteInt32LittleEndian(
-                    dest.AsSpan(outerPtr + i * 8, 4), sPtr);
+                    mem.Data.AsSpan(outerPtr + i * 8, 4), sPtr);
                 BinaryPrimitives.WriteInt32LittleEndian(
-                    dest.AsSpan(outerPtr + i * 8 + 4, 4),
+                    mem.Data.AsSpan(outerPtr + i * 8 + 4, 4),
                     bytes.Length);
             }
             BinaryPrimitives.WriteInt32LittleEndian(
-                dest.AsSpan(retAreaOffset, 4), outerPtr);
+                mem.Data.AsSpan(retAreaOffset, 4), outerPtr);
             BinaryPrimitives.WriteInt32LittleEndian(
-                dest.AsSpan(retAreaOffset + 4, 4), count);
+                mem.Data.AsSpan(retAreaOffset + 4, 4), count);
         }
 
         /// <summary>
@@ -346,7 +354,7 @@ namespace Wacs.ComponentModel.CanonicalABI
         /// inner string-pair array + per-string UTF-8 buffers).
         /// Mirrors realistic shapes like HTTP's list-of-header-lists.</para>
         /// </summary>
-        public static void StoreListOfStringList(byte[] dest,
+        public static void StoreListOfStringList(MemoryInstance mem,
             int retAreaOffset, string[][] value,
             Func<int, int, int, int, int> cabiRealloc)
         {
@@ -359,13 +367,13 @@ namespace Wacs.ComponentModel.CanonicalABI
             int outerPtr = cabiRealloc(0, 0, 4, outerByteCount);
             for (int i = 0; i < count; i++)
             {
-                StoreStringList(dest, outerPtr + i * 8, value[i],
+                StoreStringList(mem, outerPtr + i * 8, value[i],
                     cabiRealloc);
             }
             BinaryPrimitives.WriteInt32LittleEndian(
-                dest.AsSpan(retAreaOffset, 4), outerPtr);
+                mem.Data.AsSpan(retAreaOffset, 4), outerPtr);
             BinaryPrimitives.WriteInt32LittleEndian(
-                dest.AsSpan(retAreaOffset + 4, 4), count);
+                mem.Data.AsSpan(retAreaOffset + 4, 4), count);
         }
 
         /// <summary>
@@ -375,7 +383,7 @@ namespace Wacs.ComponentModel.CanonicalABI
         /// <see cref="StoreListOfStringList"/> but with raw bytes
         /// instead of UTF-8 strings.
         /// </summary>
-        public static void StoreListOfByteArrayList(byte[] dest,
+        public static void StoreListOfByteArrayList(MemoryInstance mem,
             int retAreaOffset, byte[][][] value,
             Func<int, int, int, int, int> cabiRealloc)
         {
@@ -388,13 +396,13 @@ namespace Wacs.ComponentModel.CanonicalABI
             int outerPtr = cabiRealloc(0, 0, 4, outerByteCount);
             for (int i = 0; i < count; i++)
             {
-                StoreByteArrayList(dest, outerPtr + i * 8, value[i],
+                StoreByteArrayList(mem, outerPtr + i * 8, value[i],
                     cabiRealloc);
             }
             BinaryPrimitives.WriteInt32LittleEndian(
-                dest.AsSpan(retAreaOffset, 4), outerPtr);
+                mem.Data.AsSpan(retAreaOffset, 4), outerPtr);
             BinaryPrimitives.WriteInt32LittleEndian(
-                dest.AsSpan(retAreaOffset + 4, 4), count);
+                mem.Data.AsSpan(retAreaOffset + 4, 4), count);
         }
 
         // sizeof(T) requires unsafe; cache the per-T size once via

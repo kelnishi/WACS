@@ -489,13 +489,16 @@ namespace Wacs.Transpiler.AOT.Component
                     // cabi_realloc to allocate guest buffer(s),
                     // copy bytes, write (ptr, len) pair.
                     //
-                    //   StoreXxx(memory, retArea, value,
+                    //   StoreXxx(memory_instance, retArea, value,
                     //            ctx.CabiRealloc)
+                    // Pass MemoryInstance (not byte[].Data) — gap 11:
+                    // cabi_realloc may call memory.grow which
+                    // reassigns Data to a new array, and the helper
+                    // re-fetches mem.Data after each realloc.
                     il.Emit(OpCodes.Ldarg_0);
                     il.Emit(OpCodes.Ldfld, MemoriesField);
                     il.Emit(OpCodes.Ldc_I4_0);
                     il.Emit(OpCodes.Ldelem_Ref);
-                    il.Emit(OpCodes.Ldfld, MemoryDataField);
                     il.Emit(OpCodes.Ldloc, temps[retAreaSlot]);
                     il.Emit(OpCodes.Ldloc, returnLocal);
                     il.Emit(OpCodes.Ldarg_0);
@@ -539,13 +542,15 @@ namespace Wacs.Transpiler.AOT.Component
                 {
                     EmitInlineRecordOrTupleStore(il, method.ReturnType,
                         temps[retAreaSlot], 0, returnLocal,
-                        stringEncoding);
+                        stringEncoding,
+                        resolver, resourcesType);
                 }
                 else
                 {
                     EmitInlineRecordOrTupleStore(il, method.ReturnType,
                         temps[retAreaSlot], 0, returnLocal,
-                        stringEncoding);
+                        stringEncoding,
+                        resolver, resourcesType);
                 }
                 // Wasm sig has 0 returns; nothing further on the stack.
             }
@@ -1363,8 +1368,13 @@ namespace Wacs.Transpiler.AOT.Component
             }
             if (IsLikelyRecordType(t))
             {
+                // Resolver-aware: a record field can be a primitive,
+                // string, byte[], own<R> resource handle, OR an
+                // Option<X> with X a recognized aggregate. The last
+                // case covers DescriptorStat's option<datetime>
+                // fields (gap 10).
                 foreach (var p in GetRecordProperties(t))
-                    if (!IsFlatField(p.PropertyType)) return false;
+                    if (!IsFlatField(p.PropertyType, resolver)) return false;
                 return true;
             }
             if (t.IsGenericType)
@@ -1373,7 +1383,7 @@ namespace Wacs.Transpiler.AOT.Component
                 if (IsValueTupleType(def))
                 {
                     foreach (var ta in t.GetGenericArguments())
-                        if (!IsFlatField(ta)) return false;
+                        if (!IsFlatField(ta, resolver)) return false;
                     return true;
                 }
                 // Option<primitive> OR Option<own<R>> OR
@@ -1510,8 +1520,11 @@ namespace Wacs.Transpiler.AOT.Component
         // Max field alignment across a tuple/record. string/byte[]
         // contribute align 4 (i32 ptr); primitives use their own
         // alignment; resource interfaces contribute align 4 (i32
-        // handle) when a resolver is supplied.
-        private static int MaxFieldAlign(Type t)
+        // handle) when a resolver is supplied; Option<X> contributes
+        // MaxAlignOf(X) so adjacent fields after an option pack at
+        // the inner type's alignment.
+        private static int MaxFieldAlign(Type t,
+            HostPackageResolver? resolver = null)
         {
             int maxA = 1;
             if (t.IsGenericType
@@ -1519,7 +1532,7 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 foreach (var ta in t.GetGenericArguments())
                 {
-                    int a = AlignOfFlatField(ta);
+                    int a = AlignOfFlatField(ta, resolver);
                     if (a > maxA) maxA = a;
                 }
             }
@@ -1527,7 +1540,7 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 foreach (var p in GetRecordProperties(t))
                 {
-                    int a = AlignOfFlatField(p.PropertyType);
+                    int a = AlignOfFlatField(p.PropertyType, resolver);
                     if (a > maxA) maxA = a;
                 }
             }
@@ -1573,7 +1586,7 @@ namespace Wacs.Transpiler.AOT.Component
                 for (int i = 0; i < elements.Length; i++)
                 {
                     var et = elements[i];
-                    int fieldAlign = AlignOfFlatField(et);
+                    int fieldAlign = AlignOfFlatField(et, resolver);
                     int fieldOffset = Align(offsetSoFar, fieldAlign);
 
                     // PersistedAssemblyBuilder mis-encodes Ldfld against
@@ -1599,7 +1612,7 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 foreach (var p in GetRecordProperties(type))
                 {
-                    int fieldAlign = AlignOfFlatField(p.PropertyType);
+                    int fieldAlign = AlignOfFlatField(p.PropertyType, resolver);
                     int fieldOffset = Align(offsetSoFar, fieldAlign);
 
                     EmitTupleOrRecordFieldStore(il, p.PropertyType,
@@ -1638,8 +1651,67 @@ namespace Wacs.Transpiler.AOT.Component
             bool isResource = resolver != null
                 && resourcesType != null
                 && resolver.IsResourceInterface(fieldType);
+            bool isOption = fieldType.IsGenericType
+                && fieldType.GetGenericTypeDefinition() == typeof(Option<>);
 
-            // dest_array
+            if (isOption)
+            {
+                // Option<X> field: stash the option value into a
+                // local, compute the field's absolute base address
+                // (parent_base + fieldOffset) into a separate local,
+                // and dispatch to EmitOptionStoreAt with that local
+                // standing in for retArea + a zero baseOffset.
+                // EmitOptionStoreAt handles the disc + value layout
+                // and recurses into Option<Option<X>> /
+                // Option<Result<X,Y>> / Option<record-of-primitives>
+                // shapes the same way it does for top-level returns.
+                var optionLocal = il.DeclareLocal(fieldType);
+                pushFieldValue(il);
+                il.Emit(OpCodes.Stloc, optionLocal);
+
+                var fieldBaseLocal = il.DeclareLocal(typeof(int));
+                pushBaseAddress(il);
+                if (fieldOffset != 0)
+                {
+                    il.Emit(OpCodes.Ldc_I4, fieldOffset);
+                    il.Emit(OpCodes.Add);
+                }
+                il.Emit(OpCodes.Stloc, fieldBaseLocal);
+
+                EmitOptionStoreAt(il, fieldType, optionLocal,
+                    fieldBaseLocal, 0,
+                    resolver, resourcesType, stringEncoding);
+                return;
+            }
+
+            if (isString || isByteArray)
+            {
+                // Variable-length store: pass MemoryInstance (not
+                // mem.Data) — gap 11. cabi_realloc inside the helper
+                // can grow memory; helper re-fetches mem.Data after
+                // each realloc so writes target the post-grow array.
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, MemoriesField);
+                il.Emit(OpCodes.Ldc_I4_0);
+                il.Emit(OpCodes.Ldelem_Ref);
+                pushBaseAddress(il);
+                if (fieldOffset != 0)
+                {
+                    il.Emit(OpCodes.Ldc_I4, fieldOffset);
+                    il.Emit(OpCodes.Add);
+                }
+                pushFieldValue(il);
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, CabiReallocField);
+                il.Emit(OpCodes.Call, isString
+                    ? ResolveStoreStringMethod(stringEncoding)
+                    : StoreByteArrayMethod);
+                return;
+            }
+
+            // Fixed-width store (primitive / resource handle): the
+            // PrimitiveStore.StoreXxx helpers take byte[] dest, no
+            // cabi_realloc, no grow risk.
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldfld, MemoriesField);
             il.Emit(OpCodes.Ldc_I4_0);
@@ -1653,19 +1725,7 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Add);
             }
 
-            if (isString || isByteArray)
-            {
-                // Push value + cabiRealloc + StoreXxx (variable-length
-                // dispatch — cabi_realloc allocates a guest buffer
-                // and the helper writes (ptr, len) at retArea slot).
-                pushFieldValue(il);
-                il.Emit(OpCodes.Ldarg_0);
-                il.Emit(OpCodes.Ldfld, CabiReallocField);
-                il.Emit(OpCodes.Call, isString
-                    ? ResolveStoreStringMethod(stringEncoding)
-                    : StoreByteArrayMethod);
-            }
-            else if (isResource)
+            if (isResource)
             {
                 // handle = ctx.Resources.AllocateResource(typeof(IRes), value)
                 il.Emit(OpCodes.Ldarg_0);
@@ -1727,7 +1787,7 @@ namespace Wacs.Transpiler.AOT.Component
             Type? resourcesType = null)
         {
             int elemSize = SizeOfRecordOrTuple(elemType, resolver);
-            int elemAlign = MaxFieldAlign(elemType);
+            int elemAlign = MaxFieldAlign(elemType, resolver);
 
             // count = arrayLocal.Length
             var countLocal = il.DeclareLocal(typeof(int));
@@ -1931,35 +1991,24 @@ namespace Wacs.Transpiler.AOT.Component
             else
             {
                 int totalOffset = baseOffset + valueOffset;
-                // Some: write value at retArea+totalOffset
-                il.Emit(OpCodes.Ldarg_0);
-                il.Emit(OpCodes.Ldfld, MemoriesField);
-                il.Emit(OpCodes.Ldc_I4_0);
-                il.Emit(OpCodes.Ldelem_Ref);
-                il.Emit(OpCodes.Ldfld, MemoryDataField);
-                il.Emit(OpCodes.Ldloc, retAreaLocal);
-                if (totalOffset != 0)
-                {
-                    il.Emit(OpCodes.Ldc_I4, totalOffset);
-                    il.Emit(OpCodes.Add);
-                }
-                if (innerIsResource)
-                {
-                    il.Emit(OpCodes.Ldarg_0);
-                    il.Emit(OpCodes.Ldfld, ResourcesField);
-                    il.Emit(OpCodes.Castclass, resourcesType!);
-                    il.Emit(OpCodes.Ldtoken, inner);
-                    il.Emit(OpCodes.Call, GetTypeFromHandleMethod);
-                    il.Emit(OpCodes.Ldloca, optionLocal);
-                    il.Emit(OpCodes.Call, valueGetter);
-                    il.Emit(OpCodes.Callvirt,
-                        ResolveAllocateResourceMethod(resourcesType!));
-                    il.Emit(OpCodes.Call,
-                        ResolveStoreMethod(typeof(int)));
-                }
-                else if (innerIsString || innerIsByteArray
+
+                if (innerIsString || innerIsByteArray
                     || innerIsPrimArray || innerIsStringArray)
                 {
+                    // Variable-length value: pass MemoryInstance —
+                    // gap 11. cabi_realloc inside the helper can
+                    // grow memory; helper re-fetches mem.Data
+                    // post-realloc.
+                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Ldfld, MemoriesField);
+                    il.Emit(OpCodes.Ldc_I4_0);
+                    il.Emit(OpCodes.Ldelem_Ref);
+                    il.Emit(OpCodes.Ldloc, retAreaLocal);
+                    if (totalOffset != 0)
+                    {
+                        il.Emit(OpCodes.Ldc_I4, totalOffset);
+                        il.Emit(OpCodes.Add);
+                    }
                     il.Emit(OpCodes.Ldloca, optionLocal);
                     il.Emit(OpCodes.Call, valueGetter);
                     il.Emit(OpCodes.Ldarg_0);
@@ -1978,9 +2027,38 @@ namespace Wacs.Transpiler.AOT.Component
                 }
                 else
                 {
-                    il.Emit(OpCodes.Ldloca, optionLocal);
-                    il.Emit(OpCodes.Call, valueGetter);
-                    il.Emit(OpCodes.Call, ResolveStoreMethod(inner));
+                    // Fixed-width value: pass byte[] dest.
+                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Ldfld, MemoriesField);
+                    il.Emit(OpCodes.Ldc_I4_0);
+                    il.Emit(OpCodes.Ldelem_Ref);
+                    il.Emit(OpCodes.Ldfld, MemoryDataField);
+                    il.Emit(OpCodes.Ldloc, retAreaLocal);
+                    if (totalOffset != 0)
+                    {
+                        il.Emit(OpCodes.Ldc_I4, totalOffset);
+                        il.Emit(OpCodes.Add);
+                    }
+                    if (innerIsResource)
+                    {
+                        il.Emit(OpCodes.Ldarg_0);
+                        il.Emit(OpCodes.Ldfld, ResourcesField);
+                        il.Emit(OpCodes.Castclass, resourcesType!);
+                        il.Emit(OpCodes.Ldtoken, inner);
+                        il.Emit(OpCodes.Call, GetTypeFromHandleMethod);
+                        il.Emit(OpCodes.Ldloca, optionLocal);
+                        il.Emit(OpCodes.Call, valueGetter);
+                        il.Emit(OpCodes.Callvirt,
+                            ResolveAllocateResourceMethod(resourcesType!));
+                        il.Emit(OpCodes.Call,
+                            ResolveStoreMethod(typeof(int)));
+                    }
+                    else
+                    {
+                        il.Emit(OpCodes.Ldloca, optionLocal);
+                        il.Emit(OpCodes.Call, valueGetter);
+                        il.Emit(OpCodes.Call, ResolveStoreMethod(inner));
+                    }
                 }
             }
 
@@ -2113,39 +2191,20 @@ namespace Wacs.Transpiler.AOT.Component
                     }
                     else
                     {
-                        // Push: dest_array, dest_offset =
-                        // retArea + payloadAddrOffset
-                        il.Emit(OpCodes.Ldarg_0);
-                        il.Emit(OpCodes.Ldfld, MemoriesField);
-                        il.Emit(OpCodes.Ldc_I4_0);
-                        il.Emit(OpCodes.Ldelem_Ref);
-                        il.Emit(OpCodes.Ldfld, MemoryDataField);
-                        il.Emit(OpCodes.Ldloc, retAreaLocal);
-                        if (payloadAddrOffset != 0)
-                        {
-                            il.Emit(OpCodes.Ldc_I4, payloadAddrOffset);
-                            il.Emit(OpCodes.Add);
-                        }
-
-                        if (isResourcePayload)
-                        {
-                            il.Emit(OpCodes.Ldarg_0);
-                            il.Emit(OpCodes.Ldfld, ResourcesField);
-                            il.Emit(OpCodes.Castclass, resourcesType!);
-                            il.Emit(OpCodes.Ldtoken, c.Payload);
-                            il.Emit(OpCodes.Call, GetTypeFromHandleMethod);
-                            il.Emit(OpCodes.Ldloc, variantLocal);
-                            il.Emit(OpCodes.Castclass, c.CaseType);
-                            il.Emit(OpCodes.Callvirt,
-                                valueProp.GetGetMethod()!);
-                            il.Emit(OpCodes.Callvirt,
-                                ResolveAllocateResourceMethod(resourcesType!));
-                            il.Emit(OpCodes.Call,
-                                ResolveStoreMethod(typeof(int)));
-                        }
-                        else if (isStringPayload || isByteArrayPayload
+                        if (isStringPayload || isByteArrayPayload
                             || isPrimArrayPayload || isStringArrayPayload)
                         {
+                            // Variable-length payload: pass MemoryInstance.
+                            il.Emit(OpCodes.Ldarg_0);
+                            il.Emit(OpCodes.Ldfld, MemoriesField);
+                            il.Emit(OpCodes.Ldc_I4_0);
+                            il.Emit(OpCodes.Ldelem_Ref);
+                            il.Emit(OpCodes.Ldloc, retAreaLocal);
+                            if (payloadAddrOffset != 0)
+                            {
+                                il.Emit(OpCodes.Ldc_I4, payloadAddrOffset);
+                                il.Emit(OpCodes.Add);
+                            }
                             il.Emit(OpCodes.Ldloc, variantLocal);
                             il.Emit(OpCodes.Castclass, c.CaseType);
                             il.Emit(OpCodes.Callvirt,
@@ -2166,12 +2225,44 @@ namespace Wacs.Transpiler.AOT.Component
                         }
                         else
                         {
-                            il.Emit(OpCodes.Ldloc, variantLocal);
-                            il.Emit(OpCodes.Castclass, c.CaseType);
-                            il.Emit(OpCodes.Callvirt,
-                                valueProp.GetGetMethod()!);
-                            il.Emit(OpCodes.Call,
-                                ResolveStoreMethod(c.Payload));
+                            // Fixed-width payload: pass byte[] dest.
+                            il.Emit(OpCodes.Ldarg_0);
+                            il.Emit(OpCodes.Ldfld, MemoriesField);
+                            il.Emit(OpCodes.Ldc_I4_0);
+                            il.Emit(OpCodes.Ldelem_Ref);
+                            il.Emit(OpCodes.Ldfld, MemoryDataField);
+                            il.Emit(OpCodes.Ldloc, retAreaLocal);
+                            if (payloadAddrOffset != 0)
+                            {
+                                il.Emit(OpCodes.Ldc_I4, payloadAddrOffset);
+                                il.Emit(OpCodes.Add);
+                            }
+
+                            if (isResourcePayload)
+                            {
+                                il.Emit(OpCodes.Ldarg_0);
+                                il.Emit(OpCodes.Ldfld, ResourcesField);
+                                il.Emit(OpCodes.Castclass, resourcesType!);
+                                il.Emit(OpCodes.Ldtoken, c.Payload);
+                                il.Emit(OpCodes.Call, GetTypeFromHandleMethod);
+                                il.Emit(OpCodes.Ldloc, variantLocal);
+                                il.Emit(OpCodes.Castclass, c.CaseType);
+                                il.Emit(OpCodes.Callvirt,
+                                    valueProp.GetGetMethod()!);
+                                il.Emit(OpCodes.Callvirt,
+                                    ResolveAllocateResourceMethod(resourcesType!));
+                                il.Emit(OpCodes.Call,
+                                    ResolveStoreMethod(typeof(int)));
+                            }
+                            else
+                            {
+                                il.Emit(OpCodes.Ldloc, variantLocal);
+                                il.Emit(OpCodes.Castclass, c.CaseType);
+                                il.Emit(OpCodes.Callvirt,
+                                    valueProp.GetGetMethod()!);
+                                il.Emit(OpCodes.Call,
+                                    ResolveStoreMethod(c.Payload));
+                            }
                         }
                     }
                 }
@@ -2259,7 +2350,12 @@ namespace Wacs.Transpiler.AOT.Component
         {
             if (IsStorablePrimitive(t)) return AlignOfPrimitive(t);
             if (IsTupleOfPrimitives(t) || IsRecordOfPrimitives(t))
-                return MaxFieldAlign(t);
+                return MaxFieldAlign(t, resolver);
+            // Tuple/record-with-flat-fields (incl. Option fields):
+            // align is the max of recursive MaxAlignOf across fields.
+            if (IsTupleOfFlatFields(t, resolver)
+                || IsRecordOfFlatFields(t, resolver))
+                return MaxFieldAlign(t, resolver);
             if (t.IsGenericType)
             {
                 var def = t.GetGenericTypeDefinition();
@@ -2532,7 +2628,7 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 foreach (var et in type.GetGenericArguments())
                 {
-                    int fa = AlignOfFlatField(et);
+                    int fa = AlignOfFlatField(et, resolver);
                     offsetSoFar = Align(offsetSoFar, fa)
                         + SizeOfFlatField(et, resolver);
                 }
@@ -2541,14 +2637,14 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 foreach (var p in GetRecordProperties(type))
                 {
-                    int fa = AlignOfFlatField(p.PropertyType);
+                    int fa = AlignOfFlatField(p.PropertyType, resolver);
                     offsetSoFar = Align(offsetSoFar, fa)
                         + SizeOfFlatField(p.PropertyType, resolver);
                 }
             }
             // canon-ABI: pad the total to the type's alignment so
             // arrays of this type pack contiguously.
-            int maxA = MaxFieldAlign(type);
+            int maxA = MaxFieldAlign(type, resolver);
             return Align(offsetSoFar, maxA);
         }
 
@@ -2569,7 +2665,13 @@ namespace Wacs.Transpiler.AOT.Component
         {
             if (IsStorablePrimitive(t)) return SizeOfPrimitive(t);
             if (IsTupleOfPrimitives(t) || IsRecordOfPrimitives(t))
-                return SizeOfRecordOrTuple(t);
+                return SizeOfRecordOrTuple(t, resolver);
+            // Tuple/record-with-flat-fields (incl. Option-typed
+            // fields): walk fields via SizeOfRecordOrTuple, which
+            // dispatches per-field through SizeOfFlatField.
+            if (IsTupleOfFlatFields(t, resolver)
+                || IsRecordOfFlatFields(t, resolver))
+                return SizeOfRecordOrTuple(t, resolver);
             if (resolver != null
                 && resolver.IsResourceInterface(t))
                 return 4;
@@ -2659,7 +2761,13 @@ namespace Wacs.Transpiler.AOT.Component
                 return true;
             if (allowVariableLength
                 && (IsTupleOfPrimitives(t)
-                    || IsRecordOfPrimitives(t)))
+                    || IsRecordOfPrimitives(t)
+                    // Records / tuples whose fields include Option<X>
+                    // or own<R> resource handles. Closes gap 10 for
+                    // Result<DescriptorStat, ErrorCode> — the OK arm
+                    // is a record with three option<datetime> fields.
+                    || IsTupleOfFlatFields(t, resolver)
+                    || IsRecordOfFlatFields(t, resolver)))
                 return true;
             if (allowVariableLength
                 && t.IsArray && t.GetArrayRank() == 1)
@@ -2771,7 +2879,9 @@ namespace Wacs.Transpiler.AOT.Component
                 && armType.GetArrayRank() == 1
                 && armType.GetElementType() == typeof(string);
             bool isAggregate = IsTupleOfPrimitives(armType)
-                || IsRecordOfPrimitives(armType);
+                || IsRecordOfPrimitives(armType)
+                || IsTupleOfFlatFields(armType, resolver)
+                || IsRecordOfFlatFields(armType, resolver);
             bool isNestedOption = armType.IsGenericType
                 && armType.GetGenericTypeDefinition() == typeof(Option<>);
             bool isNestedResult = armType.IsGenericType
@@ -2803,7 +2913,9 @@ namespace Wacs.Transpiler.AOT.Component
             }
 
             // Aggregate arms write field-by-field with their own
-            // memory pushes — bypass the common pre-push.
+            // memory pushes — bypass the common pre-push. Resolver
+            // and resourcesType are forwarded so flat-fields-with-
+            // resources / option fields dispatch correctly.
             if (isAggregate)
             {
                 var armLocal = il.DeclareLocal(armType);
@@ -2811,11 +2923,43 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Call, armGetter);
                 il.Emit(OpCodes.Stloc, armLocal);
                 EmitInlineRecordOrTupleStore(il, armType, retAreaLocal,
-                    valueOffset, armLocal, stringEncoding);
+                    valueOffset, armLocal, stringEncoding,
+                    resolver, resourcesType);
                 return;
             }
 
-            // Push: dest_array, dest_offset
+            if (isString || isByteArray
+                || isPrimArray || isStringArray)
+            {
+                // Variable-length arm: pass MemoryInstance — gap 11.
+                // The helper re-fetches mem.Data after cabi_realloc
+                // (which may grow memory).
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, MemoriesField);
+                il.Emit(OpCodes.Ldc_I4_0);
+                il.Emit(OpCodes.Ldelem_Ref);
+                il.Emit(OpCodes.Ldloc, retAreaLocal);
+                if (valueOffset != 0)
+                {
+                    il.Emit(OpCodes.Ldc_I4, valueOffset);
+                    il.Emit(OpCodes.Add);
+                }
+                il.Emit(OpCodes.Ldloca, returnLocal);
+                il.Emit(OpCodes.Call, armGetter);
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, CabiReallocField);
+                MethodInfo storeMethod;
+                if (isString) storeMethod = ResolveStoreStringMethod(stringEncoding);
+                else if (isByteArray) storeMethod = StoreByteArrayMethod;
+                else if (isStringArray) storeMethod = StoreStringListMethod;
+                else storeMethod = ResolveStorePrimitiveArrayMethod(
+                    armType.GetElementType()!);
+                il.Emit(OpCodes.Call, storeMethod);
+                return;
+            }
+
+            // Fixed-width arm (resource handle / primitive): pass
+            // byte[] dest. No cabi_realloc, no grow risk.
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldfld, MemoriesField);
             il.Emit(OpCodes.Ldc_I4_0);
@@ -2827,7 +2971,6 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Ldc_I4, valueOffset);
                 il.Emit(OpCodes.Add);
             }
-
             if (isResource)
             {
                 // Allocate handle for the arm's instance, store i32.
@@ -2841,25 +2984,6 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Callvirt,
                     ResolveAllocateResourceMethod(resourcesType!));
                 il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(int)));
-            }
-            else if (isString || isByteArray
-                || isPrimArray || isStringArray)
-            {
-                // Stack: [memory_data, retArea+valueOffset]
-                // StoreXxx takes (byte[] dest, int retAreaOffset,
-                //   T value, Func realloc) — push value +
-                // cabi_realloc + call.
-                il.Emit(OpCodes.Ldloca, returnLocal);
-                il.Emit(OpCodes.Call, armGetter);
-                il.Emit(OpCodes.Ldarg_0);
-                il.Emit(OpCodes.Ldfld, CabiReallocField);
-                MethodInfo storeMethod;
-                if (isString) storeMethod = ResolveStoreStringMethod(stringEncoding);
-                else if (isByteArray) storeMethod = StoreByteArrayMethod;
-                else if (isStringArray) storeMethod = StoreStringListMethod;
-                else storeMethod = ResolveStorePrimitiveArrayMethod(
-                    armType.GetElementType()!);
-                il.Emit(OpCodes.Call, storeMethod);
             }
             else
             {
@@ -2923,6 +3047,16 @@ namespace Wacs.Transpiler.AOT.Component
             if (resolver != null && resolver.IsResourceInterface(t)
                 && resolver.PreferredResourcesType != null)
                 return true;
+            // Option<X> as a record/tuple field — wire form is u8
+            // disc + value at Align(1, MaxAlignOf(X)). Inner X must
+            // itself be a recognized aggregate. Closes gap 10:
+            // DescriptorStat's three option<datetime> fields ride
+            // this branch, with EmitOptionStoreAt handling the
+            // per-field write at the field's base offset.
+            if (t.IsGenericType
+                && t.GetGenericTypeDefinition() == typeof(Option<>)
+                && IsAggregateReturnSupported(t, resolver))
+                return true;
             return false;
         }
 
@@ -2938,14 +3072,31 @@ namespace Wacs.Transpiler.AOT.Component
             return 4;
         }
 
+        // Resolver-aware overload. Option<X> aligns to MaxAlignOf(X)
+        // — Option<datetime> aligns to 8 because Datetime's u64 field
+        // does. Other shapes match the non-resolver overload.
+        private static int AlignOfFlatField(Type t,
+            HostPackageResolver? resolver)
+        {
+            if (IsStorablePrimitive(t)) return AlignOfPrimitive(t);
+            if (t.IsGenericType
+                && t.GetGenericTypeDefinition() == typeof(Option<>))
+                return MaxAlignOf(t, resolver);
+            return 4;
+        }
+
         // Size for a flat field. string/byte[] = 8 (ptr + len);
-        // resource interface = 4 (i32 handle).
+        // resource interface = 4 (i32 handle); Option<X> dispatches
+        // to the recursive SizeOf for the full disc + value layout.
         private static int SizeOfFlatField(Type t,
             HostPackageResolver? resolver = null)
         {
             if (IsStorablePrimitive(t)) return SizeOfPrimitive(t);
             if (resolver != null && resolver.IsResourceInterface(t))
                 return 4;
+            if (t.IsGenericType
+                && t.GetGenericTypeDefinition() == typeof(Option<>))
+                return SizeOf(t, resolver);
             return 8;  // string / byte[] (ptr + len pair)
         }
 

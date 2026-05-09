@@ -1,5 +1,102 @@
 # Changelog
 
+## WACS.ComponentModel 0.2.1 / WACS.Transpiler.Lib 0.7.4 — gaps 10 + 11: descriptor-stat lifting and post-grow byte[] safety
+
+Closes the next two gaps from `wasi-nn/WACS-GAPS.md` (round 4):
+metadata-shaped record returns no longer come back zero-filled, and
+list/string returns survive cabi_realloc-triggered memory.grow.
+
+The Rust SLM repro that previously tripped both:
+
+```rust
+let len = std::fs::metadata("/probe/x.bin").unwrap().len();
+// gap 10: returned 0; now returns the real file size.
+let buf = std::fs::read("/probe/x.bin").unwrap();
+// gap 11: AOOR for any single read past ~24 KiB; now round-trips
+// the full file even across page-boundary growth.
+```
+
+### 1. **WACS.Transpiler.Lib (`DirectLinkedImportEmit`)** — gap 10
+
+Closes the silent IImports-stub fallback for record returns whose
+fields include `Option<X>`. `wasi:filesystem/types.descriptor.stat`
+returns `result<descriptor-stat, error-code>` where descriptor-stat
+is `record { type, link-count, size, opt<datetime>×3 }` — pre-fix
+`IsAggregateReturnSupported` rejected the record because
+`IsRecordOfPrimitives` walked fields with the non-resolver
+`IsFlatField` and bailed on the option fields, so direct-link emit
+fell back to the `IImports` proxy and the proxy returned a default-
+zero `DescriptorStat`. The fix mirrors PR #124's resource-bearing
+tuple/record extension:
+
+- Resolver-aware `IsFlatField(t, resolver)` now accepts `Option<X>`
+  whenever `IsAggregateReturnSupported(t, resolver)` recognizes the
+  Option's wire form (primitive / resource / string / byte[] /
+  record-of-primitives / nested option-or-result).
+- `IsAggregateReturnSupported`'s record + tuple branches use the
+  resolver-aware predicate so option fields cascade through.
+- `IsResultArmStorable` and `EmitResultArmStore`'s `isAggregate`
+  check accept `IsTupleOfFlatFields` / `IsRecordOfFlatFields` —
+  Result's OK arm can now BE a record-with-options.
+- `EmitTupleOrRecordFieldStore` dispatches Option fields to
+  `EmitOptionStoreAt` with a per-field base-address local. Reuses
+  the existing Option store machinery (handles innerIsRecord,
+  innerIsTuple, innerIsOption, innerIsResource, etc.) so nested
+  shapes like `Option<Datetime>` (record-of-primitives) Just Work.
+- `MaxFieldAlign`, `AlignOfFlatField`, `SizeOfFlatField`, `SizeOf`
+  pick up Option-aware overloads so per-field offsets and array
+  strides align on the inner type's MaxAlignOf.
+
+E2E coverage: new `E2E_DescriptorStat_RecordWithOptionFields`
+exercises `wasi-fs-stat-component`'s `ask-stat-size(handle)` against
+a stub `IDescriptor` that returns a known Size. Pre-fix this returns
+0; post-fix it returns the stub's value byte-for-byte.
+
+### 2. **WACS.ComponentModel (`PrimitiveStore`)** + **WACS.Transpiler.Lib (`DirectLinkedImportEmit`)** — gap 11
+
+Closes the AOOR fired by `Buffer.BlockCopy` whenever `cabi_realloc`
+triggers `memory.grow` mid-store. Root cause: `MemoryInstance.Grow`
+does `Array.Resize(ref Data, …)`, which reallocates the backing
+byte[]; every helper in `PrimitiveStore` captured `byte[] dest`
+BEFORE calling cabi_realloc, so the post-realloc copy targeted the
+stale (pre-grow) array's `int Length`, throwing AOOR for any
+allocation that crossed a page boundary. Rust std hides this behind
+"out of memory" because `fs::read` loops on `read(buf)` past 24 KiB.
+
+Fix:
+
+- Every cabi_realloc-using helper (`StoreString` / `StoreStringUtf16` /
+  `StoreStringLatin1OrUtf16` / `StoreByteArray` / `StorePrimitiveArray<T>` /
+  `StoreByteArrayList` / `StorePrimArrayList<T>` / `StoreStringList` /
+  `StoreListOfStringList` / `StoreListOfByteArrayList`) now takes
+  `MemoryInstance mem` instead of `byte[] dest` and dereferences
+  `mem.Data` per access. `mem.Data` is read AFTER each cabi_realloc
+  invocation, so writes target the post-grow array. The fixed-width
+  primitive helpers (`StoreI8`/`U8`/.../`Bool`) still take
+  `byte[] dest` — they have no cabi_realloc, no grow risk.
+- `DirectLinkedImportEmit`'s emit sites split into two prefixes:
+  variable-length helpers receive `MemoryInstance` (no
+  `Ldfld MemoryDataField`); fixed-width helpers receive `byte[] dest`
+  as before. Restructured the top-level dispatch,
+  `EmitTupleOrRecordFieldStore`, `EmitOptionStoreAt`,
+  `EmitVariantStoreAt`, and `EmitResultArmStore` accordingly.
+
+Regression coverage: new `PrimitiveStoreGrowTests` (3 cases): byte[]
+across grow, string across grow, byte[][] with mid-iteration grow.
+The cabi_realloc lambda calls `mem.Grow(...)` to mirror Rust std's
+growing realloc; pre-fix the helpers throw
+`ArgumentOutOfRangeException` deep in `Buffer.BlockCopy`, post-fix
+the bytes round-trip cleanly through the post-grow array.
+
+### API note
+
+`PrimitiveStore`'s cabi_realloc-using helpers are technically a
+public API surface, but every emit site in WACS proper is the only
+caller — the helpers exist solely to back direct-linked aggregate-
+return emit. Treating the signature change (`byte[] dest` →
+`MemoryInstance mem`) as a patch fix because the previous signature
+is unsafe to call across any cabi_realloc that grows memory.
+
 ## WACS.Transpiler.Lib 0.7.3 / WACS.Cli 1.4.1 / WACS.WASI.Preview2 0.3.1 / WACS.WASI.Preview2.DependencyInjection 0.1.1 — gap 9: preopens reach the wasip2 transpiler engine
 
 Closes the gap that prevented `wacs run --wasip2 -d models repro.wasm`
