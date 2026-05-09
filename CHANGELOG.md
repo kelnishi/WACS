@@ -60,14 +60,21 @@ automatically, so `wacs run my.wasm --wasip2 --bind Wacs.WASI.NN.OnnxRuntime`
 (or the new `--wasi-nn` shorthand) is the whole story for stock
 ONNX components — no per-consumer shim DLL.
 
-## [WACS.HostBindings.Abstractions 0.2.0] — `[WasmName]` for export round-trip
+## [WACS.HostBindings.Abstractions 0.2.0] — `[WasmName]` + `[WasiHostPackage]`
 
-New `[WasmName(string)]` attribute carries the original wasm name on
+`[WasmName(string)]` carries the original wasm name on
 auto-generated IExports/IImports methods. Round-trips a sanitized
 CLR identifier (`wasi_cli_run_0_2_0_run`) back to its wasm form
 (`wasi:cli/run@0.2.0#run`) for dispatch and diagnostics. Stamped
 automatically by the WACS interface generator; hand-written types
 implementing those interfaces don't need to apply it.
+
+`[assembly: WasiHostPackage]` flags an assembly as auto-discoverable
+by the runtime's host-package scan
+(`runtime.AutoDiscoverHostPackages()`). Pairs with
+`runtime.UseHostPackages(name1, name2, …)` for the explicit-list
+shape. Either path activates every `IBindable` with a parameterless
+ctor that the tagged assembly ships.
 
 ## [WACS.Transpiler.Lib 0.7.2] — `[WasmName]` emit, ComponentMainHost auto-resolve, BindingLoader name resolution
 
@@ -86,6 +93,12 @@ component-command auto-dispatch path.
 path (`Assembly.LoadFrom`) or an assembly name (`Assembly.Load`),
 matching `ResolveHostPackages` so `--bind` and `--host-package` have
 identical resolution semantics.
+
+New `WasmRuntime.UseHostPackages(name1, name2, …)` and
+`WasmRuntime.AutoDiscoverHostPackages()` extension methods: the
+explicit-list and AppDomain-scan shapes for ergonomic IBindable
+wire-up. The scan uses the new `[WasiHostPackage]` assembly
+marker.
 
 ## [WACS.Transpiler.Lib 0.7.1] — Re-instantiation restores dropped active data segments
 
