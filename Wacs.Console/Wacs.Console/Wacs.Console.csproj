@@ -29,9 +29,9 @@
          library); the tool command users type is still `wacs`. -->
     <PackageId>WACS.Cli</PackageId>
     <Title>WACS CLI</Title>
-    <Version>1.3.0</Version>
-    <AssemblyVersion>1.3.0</AssemblyVersion>
-    <FileVersion>1.3.0</FileVersion>
+    <Version>1.4.0</Version>
+    <AssemblyVersion>1.4.0</AssemblyVersion>
+    <FileVersion>1.4.0</FileVersion>
     <Description>WACS unified WebAssembly toolchain: run, build, aot, inspect, bindgen. v1.3 picks up WACS.Transpiler.Lib v0.7's PersistedAssemblyBuilder migration + RVA-mapped data segments, so `wacs build` produces ~11% smaller .dlls and the new EmissionTarget.Auto default cuts cold start by ~50% on the common module shapes. The `wacs aot` verb produces self-contained NativeAOT native binaries from a wasm input in one shot, with --wasi / --wasip2 baking in WASI Preview 1 / Preview 2 hosts. Supersedes wasm-transpile (WACS.Transpiler).</Description>
     <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
     <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
@@ -76,6 +76,15 @@
     <ProjectReference Include="..\..\Wacs.WASI\Wacs.WASI.Preview2\Wacs.WASI.Preview2\Wacs.WASI.Preview2.csproj"
                       ExcludeAssets="compile" />
     <ProjectReference Include="..\..\Wacs.WASI\Wacs.WASI.Preview2\Wacs.WASI.Preview2.DependencyInjection\Wacs.WASI.Preview2.DependencyInjection.csproj"
+                      ExcludeAssets="compile" />
+    <!-- Bundled so the wasi-nn flag resolves the DLL via
+         Assembly.Load without spelling out a filesystem path.
+         The ONNX Runtime native binaries (~50 MB across RIDs)
+         ride along; the cost embedders pay for the
+         out-of-box wasi-nn UX on stock command components. -->
+    <ProjectReference Include="..\..\Wacs.WASI\Wacs.WASI.NN\Wacs.WASI.NN\Wacs.WASI.NN.csproj"
+                      ExcludeAssets="compile" />
+    <ProjectReference Include="..\..\Wacs.WASI\Wacs.WASI.NN\Wacs.WASI.NN.OnnxRuntime\Wacs.WASI.NN.OnnxRuntime.csproj"
                       ExcludeAssets="compile" />
   </ItemGroup>
 

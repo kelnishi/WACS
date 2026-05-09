@@ -1,5 +1,76 @@
 # Changelog
 
+## [WACS.Cli 1.4.0] — Component-mode ergonomics: auto-dispatch + --bind + --wasi-nn
+
+`wacs run --wasip2 my.component.wasm` now starts a stock command
+component without `--call`. The CLI looks for the canonical
+`wasi:cli/run@<version>#run` export (matched via the new
+`[WasmName]` round-trip attribute) and dispatches it automatically;
+falls back to `_start`, then to a helpful error listing the
+available exports. Aligns with wasmtime / jco / wasmer behavior for
+stock command components.
+
+`--bind <asm>` is now honored on the component paths
+(`ExecuteComponent` + `ExecuteComponentTranspiled`), not just on the
+core paths. Custom IBindable host packages can satisfy component
+imports the same way they do for core modules. On the
+component-transpiler path bindings run AFTER the default trap-stub
+registration so `--bind` overrides cover the imports they care about.
+`--bind` accepts both file paths and assembly names (resolves via
+`Assembly.LoadFrom` / `Assembly.Load`, mirroring `--host-package`).
+
+`--wasi-nn` shorthand: equivalent to
+`--bind Wacs.WASI.NN.OnnxRuntime`. The DLL is bundled with the CLI
+(via `ExcludeAssets="compile"` like Preview2) so it resolves out of
+the box. For other backends (MLNet, LlamaSharp), pass the package
+name through `--bind` directly.
+
+## [WACS.WASI.NN 0.2.0] — IBindable + UseWasiNN extension
+
+`WasiNNHost` now implements `IBindable` (it already exposed
+`BindToRuntime(WasmRuntime)` — declaring the interface is
+truth-in-advertising). Lets it ride the `--bind` discovery path.
+
+New `runtime.UseWasiNN(b => b.AddBackend(GraphEncoding.ONNX, new OnnxBackend()))`
+extension method. Replaces the
+config → host → BindToRuntime sequence with the same shape we want
+across the WASI host family.
+
+## [WACS.WASI.NN.OnnxRuntime 0.2.0] — Parameterless WasiNNOnnxBindable for --bind
+
+Adapter exposing a parameterless ctor that pre-registers the ONNX
+backend. `BindingLoader.LoadFromAssembly` activates it
+automatically, so `wacs run my.wasm --wasip2 --bind Wacs.WASI.NN.OnnxRuntime`
+(or the new `--wasi-nn` shorthand) is the whole story for stock
+ONNX components — no per-consumer shim DLL.
+
+## [WACS.HostBindings.Abstractions 0.2.0] — `[WasmName]` for export round-trip
+
+New `[WasmName(string)]` attribute carries the original wasm name on
+auto-generated IExports/IImports methods. Round-trips a sanitized
+CLR identifier (`wasi_cli_run_0_2_0_run`) back to its wasm form
+(`wasi:cli/run@0.2.0#run`) for dispatch and diagnostics. Stamped
+automatically by the WACS interface generator; hand-written types
+implementing those interfaces don't need to apply it.
+
+## [WACS.Transpiler.Lib 0.7.2] — `[WasmName]` emit, ComponentMainHost auto-resolve, BindingLoader name resolution
+
+`InterfaceGenerator` stamps `[WasmName]` on every IExports / IImports
+method, preserving the original wasm name through CLR-identifier
+sanitization. Survives Reflection.Emit and PersistedAssemblyBuilder
+paths; still dropped by Lokad.ILPack saved-dll output (a
+follow-up).
+
+`ComponentMainHost.Run` now accepts a null `exportName` and
+auto-resolves `wasi:cli/run@<version>#run` via `[WasmName]` before
+falling back to `_start`. Used by the `wacs run --wasip2`
+component-command auto-dispatch path.
+
+`BindingLoader.LoadFromAssembly(string)` now accepts either a file
+path (`Assembly.LoadFrom`) or an assembly name (`Assembly.Load`),
+matching `ResolveHostPackages` so `--bind` and `--host-package` have
+identical resolution semantics.
+
 ## [WACS.Transpiler.Lib 0.7.1] — Re-instantiation restores dropped active data segments
 
 Each Module instance's ctor copies active data segments from the
