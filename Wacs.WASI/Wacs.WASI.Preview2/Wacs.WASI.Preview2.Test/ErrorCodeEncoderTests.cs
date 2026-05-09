@@ -25,11 +25,12 @@ namespace Wacs.WASI.Preview2.Test
     /// shared backing buffer.</summary>
     public class ErrorCodeEncoderTests
     {
-        // Bump-pointer allocator simulating cabi_realloc. Phase
-        // C.4b: backs onto a real MemoryInstance so the encoder's
-        // mode-aware AsSpan dispatches correctly. Tests construct
-        // a 1-page (64 KiB) memory and use the first `_size` bytes
-        // — single-byte assertions go through Memory.AsSpan(N, 1)[0].
+        // Bump-pointer allocator simulating cabi_realloc. Backs onto
+        // a real MemoryInstance so the encoder's mode-aware AsSpan
+        // dispatches correctly. Tests construct a 1-page (64 KiB)
+        // memory and use the first `_size` bytes — the indexer +
+        // Span helper hide the AsSpan(N, 1)[0] boilerplate at each
+        // assertion site.
         private sealed class BumpAllocator
         {
             public readonly MemoryInstance Memory;

@@ -147,15 +147,11 @@ namespace Wacs.Core.Runtime
             return _registers[Count].Data.UInt64;
         }
 
-        // Phase D: returns a long whose unsigned reading is the wasm
-        // address. memory32 pops i32 zero-extended into the low 32
-        // bits — fits in long without sign issues. memory64 pops i64
-        // bit-patterns up to 2^64-1; the long carries the bits and
-        // bounds-check sites cast to ulong for unsigned comparison.
-        // The historical `if (addr < 0) trap` is gone: a memory64
-        // address with the high bit set is legitimate, and the
-        // bounds check via ulong + width handles wrap detection
-        // explicitly.
+        // Returns a long whose unsigned reading is the wasm address.
+        // memory32 pops i32 zero-extended into the low 32 bits;
+        // memory64 pops i64 bit-patterns up to 2^64-1. Bounds-check
+        // sites cast to ulong for unsigned comparison and detect
+        // wrap explicitly.
         public long PopAddr()
         {
             --Count;

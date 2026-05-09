@@ -98,14 +98,14 @@ namespace Wacs.Console.Verbs
 
         private static int ExecuteSingleCore(RunOptions opts, string wasmPath)
         {
-            // Phase C.5 / C.4c: a `wacs run --native-memory` invocation
-            // sets the storage mode for both the interpreter
-            // (RuntimeOptions.MemoryStorage on the InstantiateModule
-            // call below) and the transpiler-engine path (the static
-            // ModuleInit.CurrentMemoryStorage flag InitializationHelper
-            // reads when the transpiled module class is constructed).
-            // Reset to ManagedArray on exit so subsequent in-process
-            // calls (test harnesses, library hosts) aren't affected.
+            // --native-memory pins the storage mode for both the
+            // interpreter (RuntimeOptions.MemoryStorage) and the
+            // transpiler-engine path (the static
+            // ModuleInit.CurrentMemoryStorage that
+            // InitializationHelper reads when the transpiled module
+            // class is constructed). Restored on exit so subsequent
+            // in-process callers (test harnesses, library hosts)
+            // aren't affected.
             var prevStorage = ModuleInit.CurrentMemoryStorage;
             if (opts.NativeMemory)
                 ModuleInit.CurrentMemoryStorage = MemoryStorageMode.NativePointer;
@@ -530,14 +530,14 @@ namespace Wacs.Console.Verbs
 
         private static int ExecuteComponent(RunOptions opts, string componentPath)
         {
-            // Phase C.5 / C.4c: pin the storage mode for the
-            // duration of the component run. Both the interpreter
-            // component path (Wacs.ComponentModel.Runtime.ComponentInstance
-            // .Instantiate) and the transpiled path
-            // (ExecuteComponentTranspiled → InitializationHelper)
-            // observe ModuleInit.CurrentMemoryStorage at memory-
-            // alloc time. Reset on return so other in-process
-            // callers aren't affected.
+            // Pin the storage mode for the duration of the run.
+            // Both the interpreter component path
+            // (Wacs.ComponentModel.Runtime.ComponentInstance.Instantiate)
+            // and the transpiled path (ExecuteComponentTranspiled →
+            // InitializationHelper) observe
+            // ModuleInit.CurrentMemoryStorage at memory-alloc time.
+            // Restored on return so other in-process callers
+            // aren't affected.
             var prevStorage = ModuleInit.CurrentMemoryStorage;
             if (opts.NativeMemory)
                 ModuleInit.CurrentMemoryStorage = MemoryStorageMode.NativePointer;

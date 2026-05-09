@@ -191,8 +191,9 @@ namespace Wacs.WASI.Preview2.Filesystem
 
         // result<(list<u8>, bool), error-code>: 16 bytes.
         // outer disc=0 + 3 pad + (list ptr@+4 + list len@+8 +
-        // bool@+12 + 3 tail pad). MemoryInstance dispatches mode-
-        // aware AsSpan post-cabi_realloc; gap 11 / phase C.4b.
+        // bool@+12 + 3 tail pad). cabi_realloc may grow linear
+        // memory mid-call; mem.AsSpan re-fetches the fresh backing
+        // each access.
         private static void WriteResultBytesEofTuple(MemoryInstance mem,
             int retArea, Result<(byte[], bool), ErrorCode> r, Realloc alloc)
         {

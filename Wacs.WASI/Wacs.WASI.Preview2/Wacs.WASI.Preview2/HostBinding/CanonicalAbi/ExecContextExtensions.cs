@@ -19,14 +19,10 @@ namespace Wacs.WASI.Preview2.HostBinding.CanonicalAbi
     /// <c>MemoryReader.ReadUtf8String(ctx.DefaultMemory, ptr, len)</c>
     /// — keeps the per-syscall code dense and readable.
     ///
-    /// <para>Phase C.4b: <see cref="Memory"/> returns the guest's
-    /// default <see cref="MemoryInstance"/> rather than its
-    /// <c>byte[] Data</c> field, so bindings using either
-    /// <see cref="MemoryStorageMode.ManagedArray"/> or
-    /// <see cref="MemoryStorageMode.NativePointer"/> see the right
-    /// backing automatically. The previous return type
-    /// (<c>byte[]</c>) silently broke in NativePointer mode where
-    /// <c>Data</c> is the empty-array sentinel.</para>
+    /// <para><see cref="Memory"/> returns the guest's default
+    /// <see cref="MemoryInstance"/> so bindings work transparently
+    /// against both <see cref="MemoryStorageMode.ManagedArray"/> and
+    /// <see cref="MemoryStorageMode.NativePointer"/> backings.</para>
     /// </summary>
     public static class ExecContextExtensions
     {

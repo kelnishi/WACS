@@ -86,11 +86,10 @@ namespace Wacs.ComponentModel.CanonicalABI
                     "String returns require the component to "
                     + "export `cabi_realloc`.");
             // cabi_realloc can call memory.grow, which reassigns
-            // MemoryInstance.Data to a fresh, larger byte[] —
-            // closes gap 11 (input-stream.read AOOR for buffers
-            // crossing the page boundary). Read mem.Data AFTER
-            // every cabi_realloc invocation so the writes target
-            // the post-grow array.
+            // MemoryInstance.Data to a fresh, larger byte[].
+            // Reading mem.Data AFTER each cabi_realloc keeps the
+            // BlockCopy / WriteInt32 targets pointing at the live
+            // backing.
             var bytes = Encoding.UTF8.GetBytes(value);
             var ptr = cabiRealloc(0, 0, 1, bytes.Length);
             Buffer.BlockCopy(bytes, 0, mem.Data, ptr, bytes.Length);
@@ -170,9 +169,9 @@ namespace Wacs.ComponentModel.CanonicalABI
                     "byte[] returns require the component to "
                     + "export `cabi_realloc`.");
             var ptr = cabiRealloc(0, 0, 1, value.Length);
-            // Reference mem.Data AFTER cabi_realloc — gap 11: a
-            // memory.grow inside cabi_realloc reassigns mem.Data
-            // to a new (larger) byte[]; the old reference is stale.
+            // Reference mem.Data AFTER cabi_realloc: a memory.grow
+            // inside cabi_realloc reassigns mem.Data to a new
+            // (larger) byte[], and any earlier reference is stale.
             Buffer.BlockCopy(value, 0, mem.Data, ptr, value.Length);
             BinaryPrimitives.WriteInt32LittleEndian(
                 mem.Data.AsSpan(retAreaOffset, 4), ptr);

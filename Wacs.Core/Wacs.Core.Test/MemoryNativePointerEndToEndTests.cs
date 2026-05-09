@@ -21,13 +21,8 @@ namespace Wacs.Core.Test
     /// every routine that lives behind <c>MemoryHandlers.MemSlice</c>
     /// — load, store, narrow load/store, bulk init/copy/fill,
     /// memory.size, memory.grow — with byte-identical results to
-    /// the default <c>ManagedArray</c> path.
-    ///
-    /// <para>Phase B from <c>wasi-nn/WACS-GAPS.md</c> gap 12: the
-    /// option threads through <c>WasmRuntimeInstantiation</c> and
-    /// <c>MemSlice</c> dispatches by mode, so a NativePointer-mode
-    /// run of these wasm fixtures is now a real end-to-end exercise
-    /// of the new storage path through the interpreter.</para>
+    /// the default <c>ManagedArray</c> path. Each [Theory] case
+    /// runs once per mode so any divergence surfaces immediately.
     /// </summary>
     public class MemoryNativePointerEndToEndTests
     {
@@ -291,8 +286,7 @@ namespace Wacs.Core.Test
         public void I32AtomicStoreLoad_RoundTrips(MemoryStorageMode mode)
         {
             // shared memory required for atomic ops. Aligned 4-byte
-            // store + atomic load round-trip through the new RefAs<T>
-            // helper (Phase C.1).
+            // store + atomic load round-trip through MemoryInstance.RefAs<T>.
             var src = @"
                 (module
                   (memory 1 1 shared)
@@ -377,7 +371,7 @@ namespace Wacs.Core.Test
             Assert.Equal(42, (int)Invoke(runtime, inst, "run"));
         }
 
-        // === Phase D: memory64 ===
+        // === memory64 ===
         // memory64 modules use i64 addresses. NativePointer mode is
         // required (ManagedArray's byte[] cap is ~2 GiB). The cap
         // shifts from WasmMaxPages (2^16) to WasmMaxPages64 (2^48).

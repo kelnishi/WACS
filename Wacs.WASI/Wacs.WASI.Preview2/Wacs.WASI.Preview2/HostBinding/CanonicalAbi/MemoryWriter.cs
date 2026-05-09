@@ -116,9 +116,9 @@ namespace Wacs.WASI.Preview2.HostBinding.CanonicalAbi
                 : alloc.Allocate(1, bytes.Length);
             if (bytes.Length > 0)
             {
-                // Re-read mem.Data/AsSpan AFTER cabi_realloc — the
-                // allocator may have grown linear memory and
-                // reassigned the byte[] backing (gap 11 pattern).
+                // memory.AsSpan re-reads the backing on each access —
+                // critical because alloc.Allocate above may have
+                // triggered memory.grow.
                 new ReadOnlySpan<byte>(bytes)
                     .CopyTo(memory.AsSpan(dataPtr, bytes.Length));
             }

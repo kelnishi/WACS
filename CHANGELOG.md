@@ -1,24 +1,66 @@
 # Changelog
 
-## WACS 0.12.4 — gap 12 phase D: memory64 support
+## WACS 0.13.0 / WACS.Cli 1.5.0 / WACS.Transpiler.Lib 0.8.0 / WACS.ComponentModel 0.3.0 / WACS.WASI.Preview2 0.4.0 / WACS.WASI.Preview1 0.13.0 / WACS.HostBindings.Abstractions 0.3.0 — Linear-memory storage modes, memory64, and component-model lift fixes
 
-memory64 modules (`(memory i64 N)`) now run end-to-end through the
-interpreter and transpiler when paired with NativePointer storage.
-The cap shifts from `WasmMaxPages` (2^16, 4 GiB for memory32) to
-`WasmMaxPages64` (2^48). All 4 spec.test fixtures under
-`spec/test/core/memory64/` pass on both the WAST and
-WAST-transpiled paths.
+Lifts WACS's linear-memory backing to a host-selected mode and
+plumbs that mode through every layer of the runtime, so the wasm32
+4 GiB ceiling and memory64's 2^48 ceiling are both reachable.
+Also closes two component-model lift correctness bugs that
+surfaced under realistic host-side memory growth.
 
-### Bounds-check arithmetic
+### Linear-memory storage modes
 
-The historical `if (ea < 0) trap; if (ea + W > Length) trap;`
-pattern was correct for memory32 (PopAddr trapped on negative
-addresses, addr+offset stayed in long range) but broke for
-memory64: a u64 address with the high bit set is legitimate, and
-ea+width can wrap into negative when addr is near 2^64. Switched
-every memory-op bounds check (single-byte loads/stores, narrow
-loads/stores, full-width, SIMD, atomics, bulk ops) to a wrap-safe
-unsigned form:
+`MemoryInstance` carries two backings selected via
+`RuntimeOptions.MemoryStorage`:
+
+- **`ManagedArray`** (default): managed `byte[]` grown via
+  `Array.Resize`. Capped at `Array.MaxLength` (~2 GiB).
+- **`NativePointer`**: `byte* NativeBase` + `nuint NativeSize`
+  allocated via `NativeMemory.AllocZeroed` (.NET 6+) or
+  `Marshal.AllocHGlobal` + `InitBlockUnaligned` (legacy). Grow
+  allocates a new buffer, `Buffer.MemoryCopy`s the live bytes,
+  frees the old. Capped at `WasmMaxPages` (4 GiB) for memory32
+  modules and `WasmMaxPages64` (2^48) for memory64.
+
+New public surface on `MemoryInstance`:
+
+- `StorageMode` (read-only) — which backing this instance uses.
+- `byte* NativeBase` + `nuint NativeSize` — public for emit code.
+- `nuint ByteLength` — authoritative byte length, both modes.
+- `Span<byte> AsSpan(int offset, int length)` — mode-dispatched
+  span access. The existing `[Range]` indexer also dispatches.
+- `ref T RefAs<T>(int ea) where T : unmanaged` — mode-dispatched
+  `ref T`. Atomic load/store/RMW routes through this so the same
+  `Interlocked.*` / `Volatile.*` sites work on both backings.
+- `IDisposable` — `Dispose` frees the native buffer in
+  NativePointer mode, no-op in ManagedArray. A finalizer
+  backstops native-mode leaks.
+
+`RuntimeOptions.MemoryStorage` (default `ManagedArray`) flows from
+`WasmRuntime.InstantiateModule` through to the `MemoryInstance`
+ctor. Every interpreter memory-access site (the `MemSlice`
+chokepoint covering 25+ `[OpHandler]` load/store/narrow/bulk
+ops, the per-instruction memory load/store classes, bulk init/
+copy/fill, SIMD v128, and atomics) dispatches through the
+mode-aware surface. The transpiler's emit follows the same
+pattern: `MemoryHelpers` and `BulkHelpers` take `MemoryInstance`
+and dispatch per access; `MemoryEmitter` / `SimdEmitter` /
+`BulkEmitter` pass `MemoryInstance` to the helpers directly;
+`EmitMemorySize` uses `Call get_Size` instead of
+`Ldfld Data; Ldlen`.
+
+`ManagedArray` callers stay byte-stable; NativePointer is
+covered by `MemoryInstanceNativeStorageTests` (allocation, grow
+preservation + zero-fill, indexer + AsSpan parity, dispose
+idempotency) and `MemoryNativePointerEndToEndTests` ([Theory]
+cases running every memory op in both modes through real wasm
+fixtures).
+
+### memory64
+
+memory64 modules (`(memory i64 N)`) execute end-to-end through
+the interpreter and transpiler when paired with NativePointer.
+Bounds checks use a wrap-safe unsigned form:
 
 ```csharp
 if ((ulong)ea > (ulong)mem.ByteLength
@@ -27,498 +69,187 @@ if ((ulong)ea > (ulong)mem.ByteLength
 ```
 
 Negative `ea` casts to a huge ulong that fails the first
-clause; small `ea` near `ByteLength` fails via the subtract-and-
-compare without overflow risk.
+clause; `ea` near `ByteLength` fails via subtract-and-compare
+without overflow risk. The check covers single-byte / narrow /
+full-width loads and stores, SIMD, atomics, and bulk
+init/copy/fill. `OpStack.PopAddr` no longer traps on negative —
+memory64 addresses with the high bit set are valid wasm.
+`InstTableGet` / `InstTableSet` also moved to unsigned compare
+so table64 (`(table i64 …)`) indices behave correctly.
 
-### Other changes
+All four spec.test fixtures under `spec/test/core/memory64/`
+pass on both the WAST and WAST-transpiled paths.
 
-- `OpStack.PopAddr` no longer traps on negative — memory64
-  addresses with the high bit set are valid wasm. Bounds-check
-  sites are now responsible for trapping on out-of-bounds.
-- `MemoryInstance.MaxPagesForMode` reads `Type.Limits.AddressType`
-  and returns `WasmMaxPages64` (2^48) for `i64`-address NativePointer
-  memories; `WasmMaxPages` (2^16) for `i32`; `HostMaxPages` (2^15)
-  for ManagedArray either way (byte[] cap is hard).
-- `InstTableGet` / `InstTableSet` switched to unsigned
-  `(ulong)i >= (ulong)tab.Elements.Count` so table64 (`(table i64 …)`)
-  indices behave correctly.
+memory64 modules going through the AOT saved-DLL path
+(`wacs aot --wasi`) work today only when the effective address
+fits in int32 — the transpiler's emitted memory-op IL truncates
+`(int)ea` at the AsSpan call site. Spec memory64 tests pass
+because the test wat wraps to small `ea`; arbitrary >2 GiB
+transpiled access does not. The interpreter and direct
+`wacs run` paths are unaffected. `WacsHostMemory.AsSpan(int, int)`
+is also int-bounded; host bindings reading >2 GiB views need a
+future `MemoryHandle`-style API.
 
-### Bulk ops
+### `wacs run --native-memory`
 
-`memory.copy` / `memory.fill` / `memory.init` already used long
-arithmetic for their `(s + n)` / `(d + n)` overflow checks; for
-memory64 those wrap silently. Switched to the same wrap-safe
-unsigned form.
+`wacs run --native-memory model.wasm` (or
+`--wasip2 --native-memory ...` for components) backs the
+guest's linear memory with native-pointer storage. The flag
+flips `RuntimeOptions.MemoryStorage` for the interpreter
+`InstantiateModule` call and pins the static
+`ModuleInit.CurrentMemoryStorage` (a new public field, default
+`MemoryStorageMode.ManagedArray`) that the transpiler's
+`InitializationHelper` reads when constructing transpiled
+module classes. `ExecuteSingleCore` and `ExecuteComponent`
+restore the prior values on exit so subsequent in-process
+callers (test harnesses, library hosts) see the original mode.
 
-### Tests
+### `WacsHostMemory` mode-aware
 
-Three new theory cases in `MemoryNativePointerEndToEndTests`
-(`Memory64_Pages_AllocationCapsAtWasmMaxPages64`,
-`Memory64_StoreLoad_RoundTripsAtHighAddress`,
-`Memory64_OutOfBoundsLoad_Traps`) plus all 4 spec.test memory64
-fixtures pass. Wacs.Core 394 (was 391), Spec.Test 770/772, every
-other suite unchanged.
+The host-binding ABI carries a NativePointer-mode case alongside
+the managed `byte[]` case. Wasip1 hosts running with
+`MemoryStorageMode.NativePointer` produce a `WacsHostMemory`
+that dispatches reads and writes against native memory.
 
-### What's not in phase D
+`Wacs.HostBindings.Abstractions.WacsHostMemory`:
 
-- Transpiler-emit memory-op IL still uses `int addr, long offset`
-  on the helper signatures and `(int)ea` truncation at the
-  AsSpan call site. memory64 modules going through the AOT
-  saved-DLL path (`wacs aot --wasi`) work today only when ea
-  fits in int32 (i.e., the 4 GiB sub-window of a memory64
-  address space). Spec memory64 tests pass because they wrap to
-  small ea values; arbitrary memory64 transpiled use of
-  ea > int.MaxValue will still trap on AsSpan. A follow-up phase
-  D.2 widens the helper signatures to `nuint addr, ulong offset`
-  if that use case ever shows up in practice.
-- `WacsHostMemory.AsSpan(int, int)` is `int`-bounded; host
-  bindings reading >2 GiB views need the future `MemoryHandle`
-  surface (also phase D.2).
-
-## WACS.Cli 1.4.2 / WACS.Transpiler.Lib 0.7.5 — gap 12 phases C.4c + C.5: `wacs run --native-memory`
-
-End-to-end CLI plumbing for NativePointer storage. With this
-release, `wacs run --native-memory model.wasm` (or
-`--wasip2 --native-memory ...` for components) runs the entire
-guest — interpreter or transpiler engine, core or component
-module, wasip1 or wasip2 host bindings — against native-pointer-
-backed linear memory. The 2 GiB byte[] cap stops mattering for
-this invocation; the wasm32 spec's 4 GiB limit applies instead.
-
-### `Wacs.Console` — phase C.5 (the flag)
-
-`RunOptions.NativeMemory` (`--native-memory`) flips
-`RuntimeOptions.MemoryStorage` to `NativePointer` for the
-interpreter `InstantiateModule` call (single-core run) and pins
-`ModuleInit.CurrentMemoryStorage` for the duration of the run
-so transpiler/component paths observe it too.
-`ExecuteSingleCore` and `ExecuteComponent` wrap their
-implementations in a try/finally that sets and restores the
-static, so subsequent in-process callers (test harnesses,
-library hosts) see the original mode.
-
-### `Wacs.Transpiler.Lib` — phase C.4c (transpiled module ctor)
-
-`ModuleInit.CurrentMemoryStorage` (new public static field,
-default `MemoryStorageMode.ManagedArray`) is read by
-`InitializationHelper.InitializeCore` when the transpiled module
-class allocates each linear memory via `new MemoryInstance(memType,
-storage)`. Single-threaded transpile/dispatch sequence — the static
-flag is set just before module construction and not consulted
-afterwards, so no AsyncLocal&lt;T&gt; ceremony.
-
-### Tests
-
-Wacs.Core 391, Wacs.Transpiler 751, Wacs.ComponentModel 350,
-Wacs.WASI.Preview2 189, Wacs.WASI.Preview1 72, Wacs.HostBindings
-14 — all green. ManagedArray default keeps every existing test
-byte-stable; NativePointer path was already covered by
-`MemoryNativePointerEndToEndTests` (Wacs.Core) and
-`MemoryInstanceNativeStorageTests` from phases A/B.
-
-### Net effect for the SLM use case from `wasi-nn/WACS-GAPS.md`
-
-`wacs run --wasip2 --wasi-nn --native-memory -d models slm.wasm`
-now allocates >2 GiB of linear memory through every layer:
-component-transpiled module ctor (C.4c) → wasip2 host bindings
-(C.4b) → memory access in interpreter + transpiler emit (B + C.3).
-Gap 12 closed for the wasm32 4 GiB ceiling. memory64
-(`WasmMaxPages64 = 2^48`) still sits behind phase D's
-i64-address widening.
-
-## WACS.WASI.Preview2 0.3.2 — gap 12 phase C.4b: wasip2 host-binding migration to MemoryInstance
-
-`MemoryReader` / `MemoryWriter` (~30 helpers), `ExecContextExtensions`,
-and the ~150 callsites across `SocketsBindings`, `FilesystemBindings`,
-`HttpTypes`, `Cli`, `Clocks`, `Io`, `Random`, and 39 private
-`Write*` helpers in those binding files now thread
-`MemoryInstance` instead of raw `byte[] memory`. The historical
-return type of `ExecContextExtensions.Memory()` (which silently
-broke in NativePointer mode where `Data` is the empty-array
-sentinel) is gone — every callsite consults the mode-aware
-`mem.AsSpan(...)`, `mem.RefAs<T>(...)`, `mem.ByteLength` surface
-the gap-12 phases A → C.3 already wired through the runtime.
-
-Helper signatures changed:
-
-- `MemoryReader.{ReadUtf8String, ReadByteArray, ReadByteArrayList,
-   ReadI32LE, ReadU16LE, ReadU32LE, ReadU64LE}`: `byte[] memory` →
-  `MemoryInstance memory`.
-- `MemoryWriter.{WriteI32LE, WriteU16LE, WriteU32LE, WriteU64LE,
-   WritePrimitiveLE, WriteResultUnitOk, ZeroRange}`: same.
-- `MemoryWriter.WriteUtf8StringAllocated`: `Func<byte[]> getMemory`
-  → `MemoryInstance memory`. The post-cabi_realloc refresh now
-  happens inside `mem.AsSpan` (gap 11 pattern).
-- `MemoryWriter.WriteOptionString`: same — now takes
-  `MemoryInstance` directly.
-- `ExecContextExtensions.Memory(this ExecContext ctx)`: returns
-  `MemoryInstance`, not `byte[]`. Callers that pass `ctx.Memory`
-  as a method group (e.g. `WriteUtf8StringAllocated(ctx.Memory, ...)`)
-  now invoke it as `ctx.Memory()`.
-
-Per-binding file changes follow the same pattern: every
-`mem[ptr]` indexer becomes `mem.AsSpan(ptr, 1)[0]` (with the
-exception of legitimate `Range` indexers, which the regex
-preserves); every `Array.Copy(src, X, mem, Y, len)` becomes
-`new ReadOnlySpan<byte>(src, X, len).CopyTo(mem.AsSpan(Y, len))`;
-every `Encoding.UTF8.GetString(mem, ptr, len)` becomes
-`Encoding.UTF8.GetString(mem.AsSpan(ptr, len))`.
-
-`Wacs.WASI.Preview2.Test.ErrorCodeEncoderTests` got the same
-treatment — its `BumpAllocator` test fixture now wraps a real
-`MemoryInstance` (1-page) instead of a raw `byte[]`, and assertions
-go through a thin indexer / span helper that hides the
-`AsSpan(N, 1)[0]` boilerplate.
-
-Tests: Wacs.Core 391, Wacs.Transpiler 751, Wacs.ComponentModel
-350, Wacs.WASI.Preview2 189, Wacs.WASI.Preview1 72,
-Wacs.HostBindings 14 — all green, no regressions.
-
-After C.4b, an embedder running `wacs run --wasip2 ... model.wasm`
-with `MemoryStorage = NativePointer` exercises native-backed
-memory through every wasip2 host binding. The remaining gap-12
-work is the CLI flag (C.5 — trivial) and the AOT-emitted module
-surface (C.4c — `module.Memory` byte[] in transpiler-emitted
-`Program.cs` template + `WacsHostMemory` ctor).
-
-## WACS.HostBindings.Abstractions 0.2.1 / WACS.WASI.Preview1 0.12.1 — gap 12 phase C.4a: WacsHostMemory mode-aware
-
-The host-binding ABI now carries a NativePointer-mode case alongside
-the historical byte[] mode. Wasip1 hosts running with
-`MemoryStorageMode.NativePointer` produce a `WacsHostMemory` that
-dispatches reads/writes against native memory instead of dereferencing
-an empty-array sentinel.
-
-### `Wacs.HostBindings.Abstractions.WacsHostMemory`
-
-- New `WacsHostMemory(IntPtr nativeBase, int length)` constructor.
-  The struct internally tracks both backings (byte[] _data nullable +
-  IntPtr _nativeBase) and dispatches every accessor through a
-  null-check on _data — JIT inlines to a single branch per access.
-- New `IsNative` property — true when the view is over native memory.
+- New `WacsHostMemory(IntPtr nativeBase, int length)` ctor.
+  The struct tracks both backings (`byte[]? _data` +
+  `IntPtr _nativeBase`) and dispatches every accessor through
+  a null-check on `_data` — JIT inlines to a single branch per
+  access.
+- New `IsNative` property — true when the view is over native
+  memory.
 - All accessors (`ReadByte`/`WriteByte`/`AsSpan`/`ReadInt32LE`/
   `WriteInt32LE`/`ReadInt64LE`/`WriteInt64LE`/`Contains`/
   `WriteUtf8String`/`ReadUtf8String`/`ReadStruct`/`ReadStructs`/
   `WriteStruct`) work in either mode.
-- `Data` getter still returns a `byte[]` for back-compat — but in
-  NativePointer mode it returns `Array.Empty<byte>()`. Legacy
-  callers that reach for `.Data` directly to read memory fail loud
-  (AOOR on first index) instead of silently zero-reading; they must
-  migrate to `AsSpan` for mode-agnostic access.
+- `Data` getter still returns a `byte[]` for back-compat — but
+  in NativePointer mode it returns `Array.Empty<byte>()`.
+  Legacy callers that reach for `.Data` directly fail loud
+  (AOOR on first index) instead of silently zero-reading; they
+  should migrate to `AsSpan`.
 
-### `Wacs.WASI.Preview1.Clock.WacsHost`
+`Wacs.WASI.Preview1.Clock.WacsHost` (the Preview1 ExecContext →
+WacsHostMemory adapter) branches by `MemoryInstance.StorageMode`.
+NativePointer-backed memories take the `(IntPtr, int)` ctor
+with `(IntPtr)mem.NativeBase` and
+`min(NativeSize, int.MaxValue)` length.
 
-The Preview1 ExecContext → WacsHostMemory adapter now branches by
-`MemoryInstance.StorageMode`. NativePointer-backed memories take the
-`(IntPtr, int)` ctor with `(IntPtr)mem.NativeBase` and
-`min(NativeSize, int.MaxValue)` length. ManagedArray-backed memories
-keep using the historical `(byte[], int)` ctor.
+`Wacs.HostBindings.Test`: 14 tests (was 8). Six new cases
+allocate via `NativeMemory.AllocZeroed`, exercise the
+accessors, and free the buffer.
 
-### Tests
+### wasip2 host bindings
 
-`Wacs.HostBindings.Test`: 14 tests (was 8) — six new cases cover
-`NativePointer_ReadWriteByte_RoundTrips`,
-`NativePointer_AsSpan_RoundTrips`,
-`NativePointer_Int32LERoundTrip`,
-`NativePointer_Utf8String_RoundTrips`,
-`NativePointer_ZeroLength_AcceptsZeroPointer`,
-`NativePointer_NonZeroLengthRequiresPointer`. Each allocates via
-`NativeMemory.AllocZeroed`, exercises the accessors, and frees the
-buffer — verifying writes hit native memory and reads come back
-untouched.
+The wasip2 host-binding stack threads `MemoryInstance` instead
+of raw `byte[]` everywhere — about 30 helpers in `MemoryReader`
+/ `MemoryWriter`, the `ExecContextExtensions` shortcuts, ~150
+callsites across `SocketsBindings`, `FilesystemBindings`,
+`HttpTypes`, `Cli`, `Clocks`, `Io`, and `Random`, plus 39
+private `Write*` helpers in those binding files. Every read and
+write goes through the mode-dispatching `mem.AsSpan(...)` /
+`mem.RefAs<T>(...)` / `mem.ByteLength` surface, so a wasip2
+binding works against either backing without per-binding
+awareness.
 
-### Still ahead in phase C.4
+API changes:
 
-- **C.4b: wasip2 host-binding migration** — `MemoryReader` /
-  `MemoryWriter` (~50 helpers) and `ExecContextExtensions.Memory()`
-  in `Wacs.WASI.Preview2/HostBinding/CanonicalAbi/` still take
-  `byte[] memory` directly. ~127 callsites use
-  `ctx.DefaultMemory.Data` or `ctx.Memory()` and fail in
-  NativePointer mode (sentinel empty array). Migrating them to
-  `MemoryInstance` (or to `Span<byte>` constructed via the
-  mode-aware `mem.AsSpan`) is the bulk of work before the SLM
-  use case runs end-to-end through wasip2 in NativePointer mode.
-- **C.4c: AOT emitted module surface** — the transpiler's
-  `ModuleClassGenerator` emits a `byte[] Memory` property on the
-  generated standalone module. AOT-published modules use the
-  `WacsHostMemory(byte[], int)` ctor from `wacs aot --wasi`'s
-  generated Program.cs. Lifting this to a mode-aware shape needs
-  a new `EmissionTarget` option or per-module flag.
-- **C.5: CLI flag** — `wacs run --native-memory` opts the run into
-  NativePointer storage end-to-end. Trivial after C.4b/c.
+- `MemoryReader.{ReadUtf8String, ReadByteArray, ReadByteArrayList,
+   ReadI32LE, ReadU16LE, ReadU32LE, ReadU64LE}`: `byte[] memory`
+  → `MemoryInstance memory`.
+- `MemoryWriter.{WriteI32LE, WriteU16LE, WriteU32LE, WriteU64LE,
+   WritePrimitiveLE, WriteResultUnitOk, ZeroRange}`: same.
+- `MemoryWriter.WriteUtf8StringAllocated` / `WriteOptionString`:
+  `Func<byte[]> getMemory` → `MemoryInstance memory`. Callers
+  no longer need to model the post-`cabi_realloc` re-fetch —
+  `mem.AsSpan` reads the live backing on each access.
+- `ExecContextExtensions.Memory(this ExecContext ctx)`: returns
+  `MemoryInstance`, not `byte[]`. Callers passing `ctx.Memory`
+  as a method group invoke it as `ctx.Memory()`.
 
-## WACS 0.12.3 / WACS.Transpiler.Lib 0.7.4 — gap 12 phases A → C.3: NativePointer storage mode through interpreter and transpiler
+Per-binding-file changes follow a uniform pattern: `mem[ptr]`
+→ `mem.AsSpan(ptr, 1)[0]`; `Array.Copy(src, X, mem, Y, len)`
+→ `new ReadOnlySpan<byte>(src, X, len).CopyTo(mem.AsSpan(Y, len))`;
+`Encoding.UTF8.GetString(mem, ptr, len)` →
+`Encoding.UTF8.GetString(mem.AsSpan(ptr, len))`.
 
-Phases A → C.3 of the byte[]→native-pointer migration from gap 12
-of `wasi-nn/WACS-GAPS.md`. Previous CHANGELOG entries below cover
-A and B; this entry adds C.1 (atomic ref helper), C.2 (cap lift),
-and C.3 (transpiler emit migration).
+`ErrorCodeEncoderTests`'s `BumpAllocator` test fixture wraps a
+real `MemoryInstance` (1-page) instead of a raw `byte[]`;
+assertions go through a thin indexer/Span helper.
 
-### Phase C.1 — atomic ref helper
+### Component-model lift fixes
 
-`MemoryInstance.RefAs<T>(int ea)` (public, generic-on-T-unmanaged)
-returns a `ref T` over the requested byte offset, dispatching by
-`StorageMode`. ManagedArray returns
-`ref Unsafe.As<byte, T>(ref Data[ea])`; NativePointer returns
-`ref Unsafe.AsRef<T>(NativeBase + ea)`. Every atomic helper on
-`MemoryInstance` (Load/Store/CmpExchange/Add/And/Or/Xor in i32+i64)
-and every subword `Volatile.Read/Write` site in
-`Atomic/AtomicLoadStore.cs` and `Atomic/AtomicHandlers.cs` migrated
-to use it. `Interlocked.*` and `Volatile.*` are ref-T-based, so
-flipping the ref's source is invisible to them.
+Two correctness bugs in `DirectLinkedImportEmit`:
 
-Fixes a stray `CachedMem.Data.Length` in `AtomicBase.CheckEa`
-bounds check → `(long)CachedMem.ByteLength`.
-
-### Phase C.2 — cap lift for NativePointer
-
-ManagedArray stays capped at `Constants.HostMaxPages` (0x8000 =
-2 GiB, the byte[] hard limit). NativePointer lifts the cap to
-`Constants.WasmMaxPages` (0x10000 = 4 GiB, the wasm32 spec max).
-`MaxPagesForMode` dispatches both the constructor's initial check
-and `Grow`'s newNumPages check. memory64 (`WasmMaxPages64 = 2^48`)
-stays out-of-scope until phase D wires the i64-address path.
-
-### Phase C.3 — transpiler emit migration
-
-`MemoryHelpers` (`MemoryEmitter.cs`, ~40 helpers) and `BulkHelpers`
-(`BulkEmitter.cs` MemoryCopy/Fill/Init) now take `MemoryInstance`
-instead of `byte[]`. Helper bodies dispatch by mode via
-`mem.AsSpan` / `mem.RefAs<T>` / `mem.ByteLength`. The transpiler's
-emit sites in `MemoryEmitter`, `SimdEmitter`, and `BulkEmitter`
-drop the `Ldfld MemoryDataField` step and pass `MemoryInstance`
-directly. `EmitMemorySize` uses `Call get_Size` (mode-aware
-property) instead of `Ldfld Data; Ldlen`.
-
-Cleaned up two leftover `/tmp/mem_trace.log` debug-print lines in
-`LoadI64_32S` and `StoreI32_8` from earlier diagnostic work.
-
-`InitializationHelper.cs` (the standalone-AOT-loader path for
-saved .dll modules) still defaults memories to `ManagedArray`;
-threading NativePointer through that path needs a separate option
-on `TranspilerOptions` or `ModuleInitData` and lands with C.4.
-
-### Still ahead in phase C / D
-
-- **C.4: drop byte[] dual storage** — touches `WacsHostMemory`
-  (host-binding ABI), the `MemoryReader`/`MemoryWriter` helpers in
-  `Wacs.WASI.Preview2/HostBinding/CanonicalAbi/`, and every wasip2
-  binding callsite that takes a raw `byte[] memory`. Without
-  C.4, NativePointer mode works inside the wasm execution engine
-  but host bindings can't see the bytes (Data is an empty-array
-  sentinel in NativePointer mode). C.4 is required before the
-  CLI can offer a `--native-memory` flag.
-- **C.5: CLI flag** — `wacs run --native-memory` opts the run
-  into NativePointer storage end-to-end. Trivial once C.4 is in.
-- **Phase D: memory64** — widen `OpStack.PopAddr` to `nuint`,
-  switch bounds-check arithmetic to unsigned, lift cap to
-  `WasmMaxPages64`. The default-mode-aware bounds checks in
-  C.1/C.2/C.3 are already 64-bit-clean; phase D is mostly the
-  i64-address plumbing through the OpStack and validator.
-
-### Tests
-
-| Suite | Total | Note |
-|---|---|---|
-| Wacs.Core | 391 | +28 from gap 12 work (8 unit + 12 e2e + 8 atomic theory pairs) |
-| Wacs.Transpiler | 752 | unchanged |
-| Wacs.ComponentModel | 350 | unchanged |
-| Wacs.WASI.Preview2 | 189 | unchanged |
-
-All suites byte-stable on default `ManagedArray` mode; new
-`NativePointer` paths covered by `MemoryInstanceNativeStorageTests`
-(8 unit) and `MemoryNativePointerEndToEndTests` (12 [Theory]×
-2-mode end-to-end through the interpreter).
-
-## WACS 0.12.3 — gap 12 phases A + B: NativePointer storage mode end-to-end through the interpreter
-
-Phases A + B of the byte[]→native-pointer migration from gap 12 of
-`wasi-nn/WACS-GAPS.md`. Phase A added the type surface; Phase B
-threaded the runtime option through instantiation and migrated
-every interpreter memory access site to the mode-dispatching API.
-A wasm module instantiated with `RuntimeOptions.MemoryStorage =
-NativePointer` now executes load/store/narrow/bulk/grow/size
-through native-pointer storage end-to-end via the interpreter.
-
-### Phase A (type surface)
-
-`MemoryInstance` now has two backing storages selected via
-`MemoryStorageMode`:
-
-- `ManagedArray` (default): historical `byte[] Data` +
-  `Array.Resize` on grow. ~2 GiB cap.
-- `NativePointer`: `byte* NativeBase` + `nuint NativeSize` allocated
-  via `NativeMemory.AllocZeroed` (.NET 6+) or `Marshal.AllocHGlobal`
-  + `InitBlockUnaligned` (legacy). Grow allocates a new buffer,
-  `Buffer.MemoryCopy`s the live bytes, frees the old. No 2 GiB cap.
-
-New public surface on `MemoryInstance`:
-
-- `StorageMode` (read-only) — which backing this instance uses.
-- `byte* NativeBase` + `nuint NativeSize` — exposed for emit code in
-  later phases.
-- `nuint ByteLength` — authoritative byte length, both modes.
-- `Span<byte> AsSpan(int offset, int length)` — mode-dispatched
-  span access. Existing `[Range]` indexer also dispatches.
-- `IDisposable` — Dispose frees the native buffer in
-  `NativePointer` mode and is a no-op in `ManagedArray` mode (the
-  GC reclaims the byte[]). A finalizer backstops native-mode
-  leaks.
-
-`RuntimeOptions.MemoryStorage` (default `ManagedArray`) is the
-runtime-level switch; phases B/C will thread it through
-`WasmRuntimeInstantiation` and the transpiler's emitted IL so the
-mode the user requested is the mode every memory in the runtime
-gets.
-
-Phase A is byte-stable for default-mode callers — every existing
-test (Wacs.Core 355, Wacs.Transpiler 751, Wacs.ComponentModel 350,
-Wacs.WASI.Preview2 189) passes unchanged. Eight new tests in
-`MemoryInstanceNativeStorageTests` cover allocation, grow
-preservation + zero-fill, indexer + AsSpan, dispose
-idempotency, and `HostMaxPages` rejection in native mode.
-
-### Phase B (interpreter wiring)
-
-`RuntimeOptions.MemoryStorage` now flows from
-`WasmRuntime.InstantiateModule` through `AllocateModule` →
-`AllocateMemory` → `new MemoryInstance(memType, mode)`. Embedders
-that pass `MemoryStorage = NativePointer` get native-pointer
-storage on every memory the runtime owns.
-
-Every interpreter memory access site has been migrated from raw
-`mem.Data[i]` / `mem.Data.AsSpan(...)` / `mem.Data.Length` to the
-mode-dispatching surface (`mem.AsSpan(int, int)`,
-`(long)mem.ByteLength`):
-
-- `MemoryHandlers.MemSlice` — the chokepoint for all 25+
-  `[OpHandler]` load/store/narrow/bulk/size/grow handlers on the
-  monolithic-switch path.
-- `Memory/I32MemoryLoad.cs`, `I64MemoryLoad.cs`, `FMemoryLoad.cs`
-  — full-width and narrow loads (i32.load, i32.load8_s/u,
-  i32.load16_s/u, i64.load, i64.load8/16/32_s/u, f32.load,
-  f64.load).
-- `Memory/InstI32Store.cs`, `InstI64Store.cs`, `FMemoryStore.cs`
-  — full-width and narrow stores.
-- `Instructions/MemoryBulk.cs` — `memory.init`, `memory.copy`
-  (overlap via `Span<byte>.CopyTo` → `Buffer.Memmove`),
-  `memory.fill` (`Span<byte>.Fill`).
-- `Instructions/SIMD/VMemory.cs` — every v128 load/store/lane op.
-
-Atomic instructions (`Instructions/Atomic/AtomicLoadStore.cs`,
-`AtomicHandlers.cs`) are deferred — they use `ref byte` semantics
-that need a slightly different mode-aware helper. They keep
-working in the default `ManagedArray` mode, and the spec test
-suite covers them there. NativePointer-mode atomic access is on
-the Phase C punch list alongside the byte[] retirement.
-
-Twelve new tests in `MemoryNativePointerEndToEndTests` exercise
-load/store/narrow/grow/fill/copy/init through the interpreter in
-both modes, including overlapping `memory.copy` and an
-out-of-bounds trap. Each [Theory] case runs once for
-`ManagedArray` and once for `NativePointer` so any divergence
-between the two paths surfaces immediately.
-
-Tests: Wacs.Core 383 (was 363), Wacs.Transpiler 751,
-Wacs.ComponentModel 350, Wacs.WASI.Preview2 189 — all green, no
-regressions.
-
-## WACS.ComponentModel 0.2.1 / WACS.Transpiler.Lib 0.7.4 — gaps 10 + 11: descriptor-stat lifting and post-grow byte[] safety
-
-Closes the next two gaps from `wasi-nn/WACS-GAPS.md` (round 4):
-metadata-shaped record returns no longer come back zero-filled, and
-list/string returns survive cabi_realloc-triggered memory.grow.
-
-The Rust SLM repro that previously tripped both:
-
-```rust
-let len = std::fs::metadata("/probe/x.bin").unwrap().len();
-// gap 10: returned 0; now returns the real file size.
-let buf = std::fs::read("/probe/x.bin").unwrap();
-// gap 11: AOOR for any single read past ~24 KiB; now round-trips
-// the full file even across page-boundary growth.
-```
-
-### 1. **WACS.Transpiler.Lib (`DirectLinkedImportEmit`)** — gap 10
-
-Closes the silent IImports-stub fallback for record returns whose
-fields include `Option<X>`. `wasi:filesystem/types.descriptor.stat`
-returns `result<descriptor-stat, error-code>` where descriptor-stat
-is `record { type, link-count, size, opt<datetime>×3 }` — pre-fix
-`IsAggregateReturnSupported` rejected the record because
+**Records with `option<X>` fields.**
+`wasi:filesystem/types.descriptor.stat` returns
+`result<descriptor-stat, error-code>`, where descriptor-stat is
+`record { type, link-count, size, opt<datetime>×3 }`. The
+predicate path rejected this record because
 `IsRecordOfPrimitives` walked fields with the non-resolver
-`IsFlatField` and bailed on the option fields, so direct-link emit
-fell back to the `IImports` proxy and the proxy returned a default-
-zero `DescriptorStat`. The fix mirrors PR #124's resource-bearing
-tuple/record extension:
-
-- Resolver-aware `IsFlatField(t, resolver)` now accepts `Option<X>`
-  whenever `IsAggregateReturnSupported(t, resolver)` recognizes the
-  Option's wire form (primitive / resource / string / byte[] /
-  record-of-primitives / nested option-or-result).
-- `IsAggregateReturnSupported`'s record + tuple branches use the
-  resolver-aware predicate so option fields cascade through.
-- `IsResultArmStorable` and `EmitResultArmStore`'s `isAggregate`
-  check accept `IsTupleOfFlatFields` / `IsRecordOfFlatFields` —
-  Result's OK arm can now BE a record-with-options.
-- `EmitTupleOrRecordFieldStore` dispatches Option fields to
-  `EmitOptionStoreAt` with a per-field base-address local. Reuses
-  the existing Option store machinery (handles innerIsRecord,
-  innerIsTuple, innerIsOption, innerIsResource, etc.) so nested
-  shapes like `Option<Datetime>` (record-of-primitives) Just Work.
-- `MaxFieldAlign`, `AlignOfFlatField`, `SizeOfFlatField`, `SizeOf`
-  pick up Option-aware overloads so per-field offsets and array
-  strides align on the inner type's MaxAlignOf.
+`IsFlatField` and bailed on the option fields; direct-link emit
+fell back to the `IImports` proxy and the proxy returned a
+default-zero `DescriptorStat`. Resolver-aware
+`IsFlatField(t, resolver)` now accepts `Option<X>` whenever
+`IsAggregateReturnSupported(t, resolver)` recognizes the
+Option's wire form. `IsAggregateReturnSupported`'s record +
+tuple branches use the resolver-aware predicate so option
+fields cascade through. `EmitTupleOrRecordFieldStore`
+dispatches Option fields to `EmitOptionStoreAt` with a per-
+field base-address local. `MaxFieldAlign`, `AlignOfFlatField`,
+`SizeOfFlatField`, `SizeOf` pick up Option-aware overloads so
+per-field offsets align on the inner type's `MaxAlignOf`.
 
 E2E coverage: new `E2E_DescriptorStat_RecordWithOptionFields`
-exercises `wasi-fs-stat-component`'s `ask-stat-size(handle)` against
-a stub `IDescriptor` that returns a known Size. Pre-fix this returns
-0; post-fix it returns the stub's value byte-for-byte.
+exercises a stub `IDescriptor.Stat()` returning a known `Size`
+through the `wasi-fs-stat-component` fixture.
 
-### 2. **WACS.ComponentModel (`PrimitiveStore`)** + **WACS.Transpiler.Lib (`DirectLinkedImportEmit`)** — gap 11
+**`cabi_realloc`-driven `memory.grow` invalidates captured byte[].**
+`MemoryInstance.Grow` does `Array.Resize(ref Data, …)`, which
+reallocates the backing `byte[]`. Every helper in
+`PrimitiveStore` captured `byte[] dest` BEFORE calling
+`cabi_realloc`, so the post-realloc copy targeted the stale
+(pre-grow) array's `int Length`, throwing AOOR for any
+allocation that crossed a page boundary. Rust std hid the trap
+behind "out of memory" because `fs::read` loops on `read(buf)`
+past 24 KiB.
 
-Closes the AOOR fired by `Buffer.BlockCopy` whenever `cabi_realloc`
-triggers `memory.grow` mid-store. Root cause: `MemoryInstance.Grow`
-does `Array.Resize(ref Data, …)`, which reallocates the backing
-byte[]; every helper in `PrimitiveStore` captured `byte[] dest`
-BEFORE calling cabi_realloc, so the post-realloc copy targeted the
-stale (pre-grow) array's `int Length`, throwing AOOR for any
-allocation that crossed a page boundary. Rust std hides this behind
-"out of memory" because `fs::read` loops on `read(buf)` past 24 KiB.
+Every cabi_realloc-using helper (`StoreString` /
+`StoreStringUtf16` / `StoreStringLatin1OrUtf16` /
+`StoreByteArray` / `StorePrimitiveArray<T>` /
+`StoreByteArrayList` / `StorePrimArrayList<T>` /
+`StoreStringList` / `StoreListOfStringList` /
+`StoreListOfByteArrayList`) now takes `MemoryInstance mem`
+instead of `byte[] dest` and reads `mem.Data` per access.
+`mem.Data` is read AFTER each cabi_realloc, so writes target
+the post-grow array. The fixed-width primitive helpers
+(`StoreI8` / `StoreU8` / … / `StoreBool`) still take
+`byte[] dest` — they have no cabi_realloc and no grow risk.
 
-Fix:
+`DirectLinkedImportEmit`'s emit sites split into two prefixes:
+variable-length helpers receive `MemoryInstance`, fixed-width
+helpers receive `byte[] dest` as before. The split runs through
+the top-level dispatch, `EmitTupleOrRecordFieldStore`,
+`EmitOptionStoreAt`, `EmitVariantStoreAt`, and
+`EmitResultArmStore`.
 
-- Every cabi_realloc-using helper (`StoreString` / `StoreStringUtf16` /
-  `StoreStringLatin1OrUtf16` / `StoreByteArray` / `StorePrimitiveArray<T>` /
-  `StoreByteArrayList` / `StorePrimArrayList<T>` / `StoreStringList` /
-  `StoreListOfStringList` / `StoreListOfByteArrayList`) now takes
-  `MemoryInstance mem` instead of `byte[] dest` and dereferences
-  `mem.Data` per access. `mem.Data` is read AFTER each cabi_realloc
-  invocation, so writes target the post-grow array. The fixed-width
-  primitive helpers (`StoreI8`/`U8`/.../`Bool`) still take
-  `byte[] dest` — they have no cabi_realloc, no grow risk.
-- `DirectLinkedImportEmit`'s emit sites split into two prefixes:
-  variable-length helpers receive `MemoryInstance` (no
-  `Ldfld MemoryDataField`); fixed-width helpers receive `byte[] dest`
-  as before. Restructured the top-level dispatch,
-  `EmitTupleOrRecordFieldStore`, `EmitOptionStoreAt`,
-  `EmitVariantStoreAt`, and `EmitResultArmStore` accordingly.
+Regression coverage: new `PrimitiveStoreGrowTests` (3 cases):
+byte[] across grow, string across grow, byte[][] with
+mid-iteration grow. The cabi_realloc lambda calls
+`mem.Grow(...)` to mirror Rust std's growing realloc.
 
-Regression coverage: new `PrimitiveStoreGrowTests` (3 cases): byte[]
-across grow, string across grow, byte[][] with mid-iteration grow.
-The cabi_realloc lambda calls `mem.Grow(...)` to mirror Rust std's
-growing realloc; pre-fix the helpers throw
-`ArgumentOutOfRangeException` deep in `Buffer.BlockCopy`, post-fix
-the bytes round-trip cleanly through the post-grow array.
+### Tests
 
-### API note
-
-`PrimitiveStore`'s cabi_realloc-using helpers are technically a
-public API surface, but every emit site in WACS proper is the only
-caller — the helpers exist solely to back direct-linked aggregate-
-return emit. Treating the signature change (`byte[] dest` →
-`MemoryInstance mem`) as a patch fix because the previous signature
-is unsafe to call across any cabi_realloc that grows memory.
+| Suite | Total | Notes |
+|---|---|---|
+| Wacs.Core | 394 | +31 (allocation/grow units, [Theory] mode pairs, memory64 fixtures, atomic round-trips) |
+| Wacs.Transpiler | 752 | +1 e2e (DescriptorStat record-with-options) |
+| Wacs.ComponentModel | 350 | +3 (PrimitiveStoreGrowTests) |
+| Wacs.WASI.Preview2 | 189 | unchanged (BumpAllocator fixture rewritten over MemoryInstance) |
+| Wacs.WASI.Preview1 | 72 | unchanged |
+| Wacs.HostBindings | 14 | +6 (NativePointer-mode WacsHostMemory accessors) |
+| Spec.Test | 770/772 | +8 (4 memory64 + 4 table64 fixtures) |
 
 ## WACS.Transpiler.Lib 0.7.3 / WACS.Cli 1.4.1 / WACS.WASI.Preview2 0.3.1 / WACS.WASI.Preview2.DependencyInjection 0.1.1 — gap 9: preopens reach the wasip2 transpiler engine
 

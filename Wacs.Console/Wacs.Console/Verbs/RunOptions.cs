@@ -188,14 +188,13 @@ namespace Wacs.Console.Verbs
         public string DataStorage { get; set; } = "compressed";
 
         [Option("native-memory", HelpText =
-            "Allocate wasm linear memory via NativeMemory.AllocZeroed "
-            + "(byte* + nuint length) instead of byte[]. Lifts the "
-            + "~2 GiB Array.MaxLength cap to the wasm32 spec's 4 GiB. "
-            + "Required for guests that allocate >2 GiB of linear "
-            + "memory. Adds a per-MemoryInstance dispatch branch on "
-            + "every memory access — minor perf hit on sub-2 GiB "
-            + "workloads where the default ManagedArray mode is "
-            + "byte-stable. Phase C.5 from gap 12.")]
+            "Back wasm linear memory with native-pointer storage "
+            + "(NativeMemory.AllocZeroed) instead of a managed byte[]. "
+            + "Lifts the ~2 GiB Array.MaxLength cap to the wasm32 "
+            + "spec's 4 GiB; required for memory64 modules and any "
+            + "guest that allocates more than ~2 GiB of linear memory. "
+            + "Adds a per-access mode-dispatch branch — minor perf "
+            + "cost on sub-2 GiB workloads.")]
         public bool NativeMemory { get; set; }
 
         // Trailing argv comes through the dispatcher (Program.cs's

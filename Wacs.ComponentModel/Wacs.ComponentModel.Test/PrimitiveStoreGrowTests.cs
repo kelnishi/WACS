@@ -15,17 +15,14 @@ using Xunit;
 namespace Wacs.ComponentModel.Test
 {
     /// <summary>
-    /// Pins the contract that PrimitiveStore.StoreXxx helpers
+    /// Pins the contract that <c>PrimitiveStore.StoreXxx</c> helpers
     /// re-fetch <see cref="MemoryInstance.Data"/> AFTER each
-    /// cabi_realloc invocation. <c>Array.Resize</c> on grow
-    /// reallocates the byte[] field and a captured-before
-    /// reference goes stale — gap 11 from
-    /// <c>wasi-nn/WACS-GAPS.md</c>: rust's
-    /// <c>std::io::Read::read</c> threw
-    /// <see cref="ArgumentOutOfRangeException"/> for any single
-    /// call past ~24 KiB because the lower path was capturing the
-    /// pre-grow byte[] before the cabi_realloc that triggered the
-    /// grow.
+    /// <c>cabi_realloc</c> invocation. <c>Array.Resize</c> on grow
+    /// reallocates the <c>byte[]</c> field and any reference
+    /// captured before the call goes stale — Rust guests calling
+    /// <c>std::io::Read::read</c> with buffers that cross a page
+    /// boundary surface this as <see cref="ArgumentOutOfRangeException"/>
+    /// inside <c>Buffer.BlockCopy</c>.
     /// </summary>
     public class PrimitiveStoreGrowTests
     {

@@ -479,12 +479,10 @@ namespace Wacs.Transpiler.AOT
             // handled by InitializeFromData before reaching Core). Kept as
             // a parameter so the call sites document their intent.
 
-            // 1. Allocate memories (as MemoryInstance for shared growth).
-            // Phase C.4c: respect ModuleInit.CurrentMemoryStorage so
-            // a `wacs run --native-memory` invocation actually
-            // allocates native-pointer-backed memories at the
-            // transpiled module ctor (default ManagedArray stays
-            // byte-stable for AOT modules with no opt-in).
+            // 1. Allocate memories (as MemoryInstance for shared
+            // growth). The host pins ModuleInit.CurrentMemoryStorage
+            // before construction to opt into NativePointer storage;
+            // ManagedArray is the default.
             var memories = new MemoryInstance[data.Memories.Length];
             var storage = ModuleInit.CurrentMemoryStorage;
             for (int i = 0; i < data.Memories.Length; i++)

@@ -33,22 +33,18 @@ namespace Wacs.Transpiler.AOT
         /// <summary>
         /// Storage backing for memories the next transpiled module
         /// instance allocates via <see cref="InitializationHelper"/>.
-        /// Set by the host (e.g. <c>wacs run --native-memory</c> from
-        /// <see cref="RunHandler"/>) before constructing the
-        /// transpiled module class; read inside
-        /// <see cref="InitializationHelper.InitializeCore"/>'s memory
-        /// allocation loop. Defaults to <see cref="MemoryStorageMode.ManagedArray"/>
-        /// so transpiled-and-saved AOT modules built without explicit
-        /// opt-in stay byte-stable.
-        ///
-        /// <para>Phase C.4c from <c>wasi-nn/WACS-GAPS.md</c> gap 12 —
-        /// the static-flag approach is intentionally simple: a single
-        /// transpile/dispatch sequence is single-threaded, and the
-        /// flag is set just before module construction and not
-        /// inspected afterwards. AsyncLocal&lt;T&gt; would be needed if
-        /// concurrent transpiled-module construction with mixed modes
-        /// became a real use case (it isn't today).</para>
+        /// Set by the host before constructing the transpiled module
+        /// class; read inside the helper's memory allocation loop.
+        /// Defaults to <see cref="MemoryStorageMode.ManagedArray"/>.
         /// </summary>
+        /// <remarks>
+        /// Static-flag dispatch is intentionally simple: a single
+        /// transpile-and-dispatch sequence is single-threaded, the
+        /// flag is set just before module construction and not
+        /// inspected afterwards. <c>AsyncLocal&lt;T&gt;</c> would be
+        /// the right tool if concurrent transpiled-module construction
+        /// with mixed modes ever became a use case.
+        /// </remarks>
         public static MemoryStorageMode CurrentMemoryStorage = MemoryStorageMode.ManagedArray;
 
         /// <summary>

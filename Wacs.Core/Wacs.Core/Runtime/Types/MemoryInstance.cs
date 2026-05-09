@@ -28,22 +28,14 @@ namespace Wacs.Core.Runtime.Types
 {
     public unsafe class MemoryInstance : IDisposable
     {
-        // Managed-array backing for ManagedArray mode. In
-        // NativePointer mode this stays as Array.Empty<byte>() so
-        // accidental Data[i] reads land on a bounds-checked empty
-        // span (clear AOOR) rather than silently zero-reading. The
-        // byte[] surface is preserved for callers that haven't yet
-        // migrated to NativeBase / AsSpan; Phase B/C will retire
-        // those access sites and Phase D will remove this field.
+        // ManagedArray-mode backing. In NativePointer mode this
+        // stays as Array.Empty<byte>() so accidental Data[i] access
+        // surfaces an AOOR rather than silently zero-reading.
         public byte[] Data;
 
-        // NativePointer-mode storage. Zero in ManagedArray mode.
-        // Native buffer is allocated by NativeMemory.AllocZeroed
-        // (.NET 6+) or Marshal.AllocHGlobal + InitBlock (legacy)
-        // and reallocated by Grow's own copy+free sequence.
-        // NativeSize is the authoritative byte length in this mode
-        // (Data.Length is meaningless when StorageMode ==
-        // NativePointer).
+        // NativePointer-mode storage; zero/null in ManagedArray
+        // mode. NativeSize is authoritative — Data.Length is
+        // meaningless when StorageMode == NativePointer.
         public byte* NativeBase;
         public nuint NativeSize;
 
@@ -67,9 +59,8 @@ namespace Wacs.Core.Runtime.Types
         // off the lock entirely.
         internal ReaderWriterLockSlim? _growLock;
 
-        // Disposed flag: cheap bool check on dispose paths so the
-        // finalizer + explicit Dispose are both idempotent. Native
-        // buffer free happens once.
+        // Idempotency flag: explicit Dispose and the finalizer both
+        // hit DisposeCore; the native-buffer free runs once.
         private bool _disposed;
 
         [SuppressMessage("ReSharper.DPA", "DPA0003: Excessive memory allocations in LOH", MessageId = "type: System.Byte[]; size: 134MB")]
@@ -88,13 +79,10 @@ namespace Wacs.Core.Runtime.Types
             switch (storage)
             {
                 case MemoryStorageMode.NativePointer:
-                    // AllocZeroed on .NET 6+ gives us page-zeroed memory
-                    // (matches byte[]'s default-zero spec). On legacy
-                    // targets fall back to AllocHGlobal + InitBlock.
                     NativeBase = AllocateZeroed((nuint)initialSize);
                     NativeSize = (nuint)initialSize;
-                    // Sentinel empty array so Data[i] callers fail loudly
-                    // (AOOR) instead of silently reading zeros.
+                    // Sentinel empty array so accidental Data[i]
+                    // reads fail loudly instead of zero-reading.
                     Data = Array.Empty<byte>();
                     break;
                 case MemoryStorageMode.ManagedArray:
@@ -110,10 +98,10 @@ namespace Wacs.Core.Runtime.Types
             ? (long)(NativeSize / Constants.PageSize)
             : Data.Length / Constants.PageSize;
 
-        // Authoritative byte length, both modes. Returns nuint (64-
-        // bit on 64-bit hosts) so memory64 callers don't truncate.
-        // Phase B/C migrate access sites to consult this instead of
-        // Data.Length; ManagedArray callers see the same value.
+        /// <summary>
+        /// Authoritative byte length in either mode. <c>nuint</c>
+        /// (host-pointer-sized) so memory64 callers don't truncate.
+        /// </summary>
         public nuint ByteLength => StorageMode == MemoryStorageMode.NativePointer
             ? NativeSize
             : (nuint)Data.Length;
@@ -219,14 +207,12 @@ namespace Wacs.Core.Runtime.Types
             Type = new MemoryType(newLimits);
         }
 
-        // Page-count cap, by storage mode + address type. ManagedArray
-        // is hard-capped at HostMaxPages (~2 GiB, the byte[] limit
-        // even with gcAllowVeryLargeObjects). NativePointer lifts the
-        // cap to the wasm32 spec max (WasmMaxPages = 4 GiB) for
-        // memory32 modules and to WasmMaxPages64 (2^48) for memory64
-        // modules — phase D wires the i64-address plumbing through
-        // PopAddr / bounds-check arithmetic so the high cap is
-        // actually reachable.
+        // Page-count cap, by storage mode + address type.
+        // ManagedArray: hard-capped at HostMaxPages (~2 GiB, the
+        // byte[] limit even with gcAllowVeryLargeObjects).
+        // NativePointer + i32 memory: WasmMaxPages (4 GiB, wasm32
+        // spec max).
+        // NativePointer + i64 memory: WasmMaxPages64 (2^48).
         private long MaxPagesForMode(MemoryStorageMode mode)
         {
             if (mode != MemoryStorageMode.NativePointer)

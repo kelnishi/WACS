@@ -19,11 +19,6 @@ namespace Wacs.Core.Test
     /// allocation, indexer + AsSpan parity with the byte[] backing,
     /// grow preserves live bytes and zero-fills the new pages, and
     /// Dispose actually releases the native buffer.
-    ///
-    /// <para>Phase A from <c>wasi-nn/WACS-GAPS.md</c> gap 12 — the
-    /// migration from byte[] (2 GiB cap) to native-pointer storage.
-    /// Phase A only adds the storage mode; subsequent phases migrate
-    /// the interpreter and transpiler access sites to consult it.</para>
     /// </summary>
     public unsafe class MemoryInstanceNativeStorageTests
     {

@@ -104,7 +104,7 @@ namespace Wacs.HostBindings.Test
                 () => new WacsHostMemory(null!, length: 0));
         }
 
-        // === NativePointer-mode coverage (gap 12 phase C.4) ===
+        // === NativePointer-mode coverage ===
 
         [Fact]
         public unsafe void NativePointer_ReadWriteByte_RoundTrips()

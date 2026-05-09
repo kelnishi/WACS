@@ -431,9 +431,7 @@ namespace Wacs.Transpiler.Test
             // emit lifts the list correctly: per-element
             // AllocateResource for the own&lt;descriptor&gt; field plus
             // cabi_realloc + UTF-8 encode for the string field, all
-            // packed into the 12-byte stride the wasm probes. Closes
-            // gap 9 from wasi-nn/WACS-GAPS.md (preopens not reaching
-            // the guest under the transpiler engine).
+            // packed into the 12-byte stride the wasm probes.
 
             InitRegistry.Reset();
             ModuleInit.Reset();
@@ -562,16 +560,13 @@ namespace Wacs.Transpiler.Test
             // wasi:filesystem/types.[method]descriptor.stat returns
             // result<descriptor-stat, error-code>. descriptor-stat is
             // a record { type: descriptor-type, link-count: u64,
-            // size: u64, three option<datetime> timestamps } — the
-            // shape gap 10 calls out as silently falling back to the
-            // IImports default-zero stub before this fix.
-            //
-            // This test wires a stub IDescriptor whose Stat() returns
-            // a known Size, transpiles the fsstat fixture, and reads
-            // back retArea+24 (the size field within the OK arm). A
-            // returned 0 would mean direct-link emit fell back; the
-            // expected value proves the record-with-option-fields
-            // emit lifted the result correctly.
+            // size: u64, three option<datetime> timestamps }. Wires
+            // a stub IDescriptor whose Stat() returns a known Size,
+            // transpiles the fsstat fixture, reads retArea+24 (the
+            // size field within the OK arm). A returned 0 would mean
+            // direct-link emit fell back to the IImports default-zero
+            // stub; the expected value proves record-with-option-
+            // fields emit lifted the result correctly.
             InitRegistry.Reset();
             ModuleInit.Reset();
             MultiReturnMethodRegistry.Reset();
@@ -855,7 +850,7 @@ namespace Wacs.Transpiler.Test
 
         // Stub IDescriptor whose Stat() returns a hand-shaped
         // DescriptorStat with a known Size and all-None timestamps.
-        // Every other method throws — gap 10's repro only exercises
+        // Every other method throws — this fixture only exercises
         // Stat().
         private sealed class StatStubDescriptor
             : Wacs.WASI.Preview2.Filesystem.IDescriptor

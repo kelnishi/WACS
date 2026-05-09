@@ -41,11 +41,9 @@ namespace Wacs.Core.Instructions
         {
             var mem = ctx.Store[ctx.Frame.Module.MemAddrs[(MemIdx)memIdx]];
             long ea = (long)addr + (long)offset;
-            // ByteLength is mode-agnostic (Data.Length for managed,
-            // NativeSize for native). AsSpan dispatches likewise.
-            // Gap 12 phase B: this is the chokepoint for every
-            // [OpHandler] memory load/store, so a single AsSpan
-            // dispatch flips all 25+ op-handlers to mode-aware.
+            // ByteLength + AsSpan dispatch by StorageMode, so this
+            // single chokepoint covers every [OpHandler] memory
+            // load/store / narrow / size on either backing.
             long len = (long)mem.ByteLength;
             if (ea < 0 || ea + width > len)
                 throw new Wacs.Core.Runtime.Types.TrapException(

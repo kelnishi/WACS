@@ -14,48 +14,43 @@ namespace Wacs.HostBindings
     /// binding method.
     ///
     /// <para>Wraps either a managed <see cref="byte"/>[] backing array
-    /// (the historical path; up to ~2 GiB per <c>Array.MaxLength</c>)
-    /// or a native pointer + length (added in gap-12 phase C.4 to
-    /// support hosts running with
-    /// <c>Wacs.Core.Runtime.MemoryStorageMode.NativePointer</c>; up to
-    /// 4 GiB on wasm32 — and 2^48 once memory64 lands).</para>
+    /// (~2 GiB cap per <c>Array.MaxLength</c>) or a native pointer +
+    /// length (no 2 GiB cap; up to 4 GiB on wasm32 and 2^48 on
+    /// memory64). Mode is decided at construction; consumers don't
+    /// need to know which backing they got — every accessor
+    /// dispatches automatically.</para>
     ///
-    /// <para>The struct is a 24-byte readonly struct passed by value; the
-    /// JIT (or NativeAOT) inlines the mode dispatch to a single branch
-    /// per access. Bounds-checks every access through the public methods.
-    /// Bindings that need raw <see cref="Span{T}"/> access (e.g. for bulk
-    /// memcpy-style I/O) call <see cref="AsSpan(int, int)"/>, which
-    /// performs a single bounds check per slice.</para>
+    /// <para>24-byte <c>readonly struct</c> passed by value; the JIT
+    /// (or NativeAOT) inlines the mode dispatch to a single branch
+    /// per access. Every access bounds-checks through the public
+    /// methods. Bindings that need raw <see cref="Span{T}"/> access
+    /// (bulk memcpy-style I/O) call <see cref="AsSpan(int, int)"/>,
+    /// which performs a single bounds check per slice.</para>
     ///
     /// <para>The struct does not own the backing storage — it's a view,
     /// valid only for the duration of the binding call. Don't squirrel
-    /// it away across asynchronous boundaries; the underlying buffer can
-    /// be reallocated by <c>memory.grow</c> and any cached reference
-    /// becomes stale.</para>
+    /// it away across asynchronous boundaries; the underlying buffer
+    /// can be reallocated by <c>memory.grow</c> and any cached
+    /// reference becomes stale.</para>
     /// </summary>
     public readonly struct WacsHostMemory
     {
-        // ManagedArray backing. Null in NativePointer mode.
+        // ManagedArray backing; null in NativePointer mode.
         private readonly byte[]? _data;
 
-        // NativePointer backing. IntPtr.Zero in ManagedArray mode.
+        // NativePointer backing; IntPtr.Zero in ManagedArray mode.
         // Stored as IntPtr so the struct stays usable in safe code;
         // methods that dereference cast to byte* in unsafe blocks.
         private readonly IntPtr _nativeBase;
 
-        // Authoritative wasm-visible byte length, both modes.
-        // int (not nuint) for back-compat with the public Length API
-        // and because bindings work in int-bounded slices anyway —
-        // a >2 GiB native memory still sliceable in int chunks. The
-        // ctor overload that takes a host's full nuint length
-        // (truncating to int.MaxValue) gives the binding a usable
-        // window without exposing an int → ulong promotion.
+        // wasm-visible byte length. int (not nuint) — bindings work
+        // in int-bounded slices anyway (a >2 GiB native memory is
+        // still sliceable in int chunks) and the public Length API
+        // is int-typed for back-compat.
         private readonly int _length;
 
         /// <summary>
-        /// Wraps the given byte[] backing array. The historical
-        /// constructor; used by hosts running with
-        /// <c>MemoryStorageMode.ManagedArray</c>.
+        /// Wraps a managed <c>byte[]</c> backing.
         /// </summary>
         public WacsHostMemory(byte[] data, int length)
         {
@@ -68,12 +63,11 @@ namespace Wacs.HostBindings
         }
 
         /// <summary>
-        /// Wraps a native-pointer backing. Used by hosts running with
-        /// <c>MemoryStorageMode.NativePointer</c> (gap 12 phase C.4).
-        /// <paramref name="nativeBase"/> must point to <paramref name="length"/>
-        /// bytes of valid linear memory; the caller (the runtime)
-        /// guarantees the pointer outlives the binding call. Pass
-        /// <c>IntPtr.Zero</c> only with <c>length == 0</c>.
+        /// Wraps a native-pointer backing. <paramref name="nativeBase"/>
+        /// must point to <paramref name="length"/> bytes of valid
+        /// linear memory; the runtime guarantees the pointer outlives
+        /// the binding call. Pass <c>IntPtr.Zero</c> only with
+        /// <c>length == 0</c>.
         /// </summary>
         public WacsHostMemory(IntPtr nativeBase, int length)
         {

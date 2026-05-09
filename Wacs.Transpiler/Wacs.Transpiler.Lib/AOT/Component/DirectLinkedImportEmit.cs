@@ -491,10 +491,11 @@ namespace Wacs.Transpiler.AOT.Component
                     //
                     //   StoreXxx(memory_instance, retArea, value,
                     //            ctx.CabiRealloc)
-                    // Pass MemoryInstance (not byte[].Data) — gap 11:
-                    // cabi_realloc may call memory.grow which
-                    // reassigns Data to a new array, and the helper
-                    // re-fetches mem.Data after each realloc.
+                    // Pass MemoryInstance (not byte[].Data) so the
+                    // helper re-fetches mem.Data after each
+                    // cabi_realloc — that call may grow memory and
+                    // reassign Data, leaving any captured reference
+                    // stale.
                     il.Emit(OpCodes.Ldarg_0);
                     il.Emit(OpCodes.Ldfld, MemoriesField);
                     il.Emit(OpCodes.Ldc_I4_0);
@@ -1371,8 +1372,9 @@ namespace Wacs.Transpiler.AOT.Component
                 // Resolver-aware: a record field can be a primitive,
                 // string, byte[], own<R> resource handle, OR an
                 // Option<X> with X a recognized aggregate. The last
-                // case covers DescriptorStat's option<datetime>
-                // fields (gap 10).
+                // case is what carries shapes like
+                // wasi:filesystem/types.descriptor-stat (record with
+                // option<datetime> fields).
                 foreach (var p in GetRecordProperties(t))
                     if (!IsFlatField(p.PropertyType, resolver)) return false;
                 return true;
@@ -1687,9 +1689,9 @@ namespace Wacs.Transpiler.AOT.Component
             if (isString || isByteArray)
             {
                 // Variable-length store: pass MemoryInstance (not
-                // mem.Data) — gap 11. cabi_realloc inside the helper
-                // can grow memory; helper re-fetches mem.Data after
-                // each realloc so writes target the post-grow array.
+                // mem.Data) so the helper re-fetches mem.Data after
+                // its internal cabi_realloc — that call may grow
+                // memory and stale-out any captured byte[] reference.
                 il.Emit(OpCodes.Ldarg_0);
                 il.Emit(OpCodes.Ldfld, MemoriesField);
                 il.Emit(OpCodes.Ldc_I4_0);
@@ -1995,10 +1997,9 @@ namespace Wacs.Transpiler.AOT.Component
                 if (innerIsString || innerIsByteArray
                     || innerIsPrimArray || innerIsStringArray)
                 {
-                    // Variable-length value: pass MemoryInstance —
-                    // gap 11. cabi_realloc inside the helper can
-                    // grow memory; helper re-fetches mem.Data
-                    // post-realloc.
+                    // Variable-length value: pass MemoryInstance so
+                    // the helper re-fetches mem.Data post-cabi_realloc
+                    // (the alloc may have grown linear memory).
                     il.Emit(OpCodes.Ldarg_0);
                     il.Emit(OpCodes.Ldfld, MemoriesField);
                     il.Emit(OpCodes.Ldc_I4_0);
@@ -2763,9 +2764,9 @@ namespace Wacs.Transpiler.AOT.Component
                 && (IsTupleOfPrimitives(t)
                     || IsRecordOfPrimitives(t)
                     // Records / tuples whose fields include Option<X>
-                    // or own<R> resource handles. Closes gap 10 for
-                    // Result<DescriptorStat, ErrorCode> — the OK arm
-                    // is a record with three option<datetime> fields.
+                    // or own<R> resource handles — covers shapes
+                    // like Result<descriptor-stat, error-code>'s OK
+                    // arm (record with option<datetime> fields).
                     || IsTupleOfFlatFields(t, resolver)
                     || IsRecordOfFlatFields(t, resolver)))
                 return true;
@@ -2931,9 +2932,9 @@ namespace Wacs.Transpiler.AOT.Component
             if (isString || isByteArray
                 || isPrimArray || isStringArray)
             {
-                // Variable-length arm: pass MemoryInstance — gap 11.
-                // The helper re-fetches mem.Data after cabi_realloc
-                // (which may grow memory).
+                // Variable-length arm: pass MemoryInstance so the
+                // helper re-fetches mem.Data after its internal
+                // cabi_realloc (which may grow memory).
                 il.Emit(OpCodes.Ldarg_0);
                 il.Emit(OpCodes.Ldfld, MemoriesField);
                 il.Emit(OpCodes.Ldc_I4_0);
@@ -3049,10 +3050,10 @@ namespace Wacs.Transpiler.AOT.Component
                 return true;
             // Option<X> as a record/tuple field — wire form is u8
             // disc + value at Align(1, MaxAlignOf(X)). Inner X must
-            // itself be a recognized aggregate. Closes gap 10:
-            // DescriptorStat's three option<datetime> fields ride
-            // this branch, with EmitOptionStoreAt handling the
-            // per-field write at the field's base offset.
+            // itself be a recognized aggregate. Lets records like
+            // wasi:filesystem/types.descriptor-stat (with three
+            // option<datetime> fields) flow through
+            // EmitOptionStoreAt at the field's base offset.
             if (t.IsGenericType
                 && t.GetGenericTypeDefinition() == typeof(Option<>)
                 && IsAggregateReturnSupported(t, resolver))
