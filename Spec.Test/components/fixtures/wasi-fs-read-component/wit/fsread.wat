@@ -1,11 +1,11 @@
 (module
-  (import "wasi:filesystem/types@0.2.3" "[method]descriptor.read-via-stream"
+  (import "wasi:filesystem/types@0.2.8" "[method]descriptor.read-via-stream"
     (func $rvs (param i32 i64 i32)))
-  (import "wasi:io/streams@0.2.3" "[method]input-stream.read"
+  (import "wasi:io/streams@0.2.8" "[method]input-stream.read"
     (func $read (param i32 i64 i32)))
-  (import "wasi:io/streams@0.2.3" "[resource-drop]input-stream"
+  (import "wasi:io/streams@0.2.8" "[resource-drop]input-stream"
     (func $drop_is (param i32)))
-  (import "wasi:filesystem/types@0.2.3" "[resource-drop]descriptor"
+  (import "wasi:filesystem/types@0.2.8" "[resource-drop]descriptor"
     (func $drop_d (param i32)))
   (memory (export "memory") 1)
   (global $next (mut i32) (i32.const 1024))

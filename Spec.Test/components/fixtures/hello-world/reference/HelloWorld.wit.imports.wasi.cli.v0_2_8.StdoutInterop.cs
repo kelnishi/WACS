@@ -11,21 +11,21 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 
-namespace HelloWorld.wit.imports.wasi.cli.v0_2_3
+namespace HelloWorld.wit.imports.wasi.cli.v0_2_8
 {
     public static class StdoutInterop {
 
         internal static class GetStdoutWasmInterop
         {
-            [DllImport("wasi:cli/stdout@0.2.3", EntryPoint = "get-stdout"), WasmImportLinkage]
+            [DllImport("wasi:cli/stdout@0.2.8", EntryPoint = "get-stdout"), WasmImportLinkage]
             internal static extern int wasmImportGetStdout();
 
         }
 
-        public  static unsafe global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.OutputStream GetStdout()
+        public  static unsafe global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.OutputStream GetStdout()
         {
             var result =  GetStdoutWasmInterop.wasmImportGetStdout();
-            var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.OutputStream(new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.OutputStream.THandle(result));
+            var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.OutputStream(new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.OutputStream.THandle(result));
             return resource;
 
             //TODO: free alloc handle (interopString) if exists

@@ -1,6 +1,6 @@
-package wasi:filesystem@0.2.3;
+package wasi:filesystem@0.2.8;
 interface types {
-    use wasi:io/streams@0.2.3.{input-stream, output-stream};
+    use wasi:io/streams@0.2.8.{input-stream, output-stream};
     enum error-code { unknown, access }
     type filesize = u64;
     resource descriptor {

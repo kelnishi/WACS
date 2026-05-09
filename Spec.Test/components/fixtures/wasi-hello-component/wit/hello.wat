@@ -1,9 +1,9 @@
 (module
-  (import "wasi:cli/stdout@0.2.3" "get-stdout"
+  (import "wasi:cli/stdout@0.2.8" "get-stdout"
     (func $get_stdout (result i32)))
-  (import "wasi:io/streams@0.2.3" "[method]output-stream.blocking-write-and-flush"
+  (import "wasi:io/streams@0.2.8" "[method]output-stream.blocking-write-and-flush"
     (func $write (param i32 i32 i32 i32)))
-  (import "wasi:io/streams@0.2.3" "[resource-drop]output-stream"
+  (import "wasi:io/streams@0.2.8" "[resource-drop]output-stream"
     (func $drop (param i32)))
   (memory (export "memory") 1)
   (data (i32.const 200) "hello\n")

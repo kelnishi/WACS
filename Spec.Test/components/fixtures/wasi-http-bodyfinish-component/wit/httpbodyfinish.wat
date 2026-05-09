@@ -1,5 +1,5 @@
 (module
-  (import "wasi:http/types@0.2.3" "[static]outgoing-body.finish"
+  (import "wasi:http/types@0.2.8" "[static]outgoing-body.finish"
     (func $finish (param i32 i32 i32 i32)))
   (memory (export "memory") 1)
   (global $next (mut i32) (i32.const 1024))

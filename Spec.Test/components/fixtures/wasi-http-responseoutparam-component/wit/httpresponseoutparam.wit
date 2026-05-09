@@ -1,6 +1,6 @@
 package local:httpresponseoutparam;
 world demo {
-    import wasi:http/types@0.2.3;
+    import wasi:http/types@0.2.8;
     /// Calls [static]response-outparam.set(param, Ok(response)).
     export ask-set-ok: func(param: u32, response: u32) -> u32;
     /// Err(internal-error(None)) — disc 38, all payload zero.

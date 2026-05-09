@@ -1,6 +1,6 @@
 package local:getscheme;
 world demo {
-    import wasi:http/types@0.2.3;
+    import wasi:http/types@0.2.8;
     /// Calls outgoing-request.scheme(handle); returns the
     /// outer option disc byte (0=None, 1=Some).
     export ask-scheme-disc: func(req: u32) -> u32;

@@ -1,6 +1,6 @@
 package local:clocksub;
 world demo {
-    import wasi:clocks/monotonic-clock@0.2.3;
+    import wasi:clocks/monotonic-clock@0.2.8;
     /// Calls subscribe-instant(1000) and subscribe-duration(2000);
     /// drops both pollables. Returns 0 on success.
     export ask-subscribe: func() -> u32;

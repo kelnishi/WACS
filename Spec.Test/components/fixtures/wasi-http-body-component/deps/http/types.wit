@@ -1,6 +1,6 @@
-package wasi:http@0.2.3;
+package wasi:http@0.2.8;
 interface types {
-    use wasi:io/streams@0.2.3.{input-stream, output-stream};
+    use wasi:io/streams@0.2.8.{input-stream, output-stream};
     variant error-code { internal-error }
     resource incoming-body {
         %stream: func() -> result<own<input-stream>>;

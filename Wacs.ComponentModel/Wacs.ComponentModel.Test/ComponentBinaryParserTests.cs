@@ -300,7 +300,7 @@ namespace Wacs.ComponentModel.Test
 
             // The instantiate entries' with-clauses target the
             // host-imported namespace; one of them should name
-            // the wasi:random/random@0.2.3 instance.
+            // the wasi:random/random@0.2.8 instance.
             bool foundWasiArg = false;
             foreach (var e in component.CoreInstances)
             {

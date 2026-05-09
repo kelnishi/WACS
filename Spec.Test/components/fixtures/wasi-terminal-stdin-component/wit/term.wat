@@ -1,7 +1,7 @@
 (module
-  (import "wasi:cli/terminal-stdin@0.2.3" "get-terminal-stdin"
+  (import "wasi:cli/terminal-stdin@0.2.8" "get-terminal-stdin"
     (func $get_term (param i32)))
-  (import "wasi:cli/terminal-input@0.2.3" "[resource-drop]terminal-input"
+  (import "wasi:cli/terminal-input@0.2.8" "[resource-drop]terminal-input"
     (func $drop (param i32)))
   (memory (export "memory") 1)
   (func $realloc (param i32 i32 i32 i32) (result i32) i32.const 1024)

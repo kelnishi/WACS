@@ -355,7 +355,7 @@ namespace Wacs.ComponentModel.Test
             var ci = ComponentInstance.Instantiate(bytes, runtime =>
             {
                 runtime.BindHostFunction<System.Func<Wacs.Core.Runtime.ExecContext, ulong>>(
-                    ("wasi:random/random@0.2.3", "get-random-u64"),
+                    ("wasi:random/random@0.2.8", "get-random-u64"),
                     _ => expected);
             });
             Assert.Equal(expected, ci.Invoke("pick"));

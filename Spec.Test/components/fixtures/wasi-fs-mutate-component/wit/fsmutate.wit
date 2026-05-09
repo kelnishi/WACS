@@ -1,6 +1,6 @@
 package local:fsmutate;
 world demo {
-    import wasi:filesystem/types@0.2.3;
+    import wasi:filesystem/types@0.2.8;
     /// Calls create-directory-at, remove-directory-at, and
     /// unlink-file-at — each with the same path string. Returns
     /// the outer disc summed across all three (always-Ok = 0).

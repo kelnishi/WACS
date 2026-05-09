@@ -1,6 +1,6 @@
 package local:tcpaccept;
 world demo {
-    import wasi:sockets/tcp@0.2.3;
+    import wasi:sockets/tcp@0.2.8;
     /// Calls accept; drops the three returned handles. Returns
     /// the count of distinct non-zero handles received (3 on
     /// happy path).

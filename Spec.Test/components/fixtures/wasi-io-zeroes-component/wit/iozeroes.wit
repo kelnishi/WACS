@@ -1,6 +1,6 @@
 package local:iozeroes;
 world demo {
-    import wasi:io/streams@0.2.3;
+    import wasi:io/streams@0.2.8;
     /// Calls write-zeroes(8) then blocking-write-zeroes-and-flush(16);
     /// returns the sum of outer-disc bytes (always-Ok = 0).
     export ask-zeroes: func(handle: u32) -> u32;

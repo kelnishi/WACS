@@ -1,8 +1,8 @@
 (module
   ;; set-path-with-query / set-authority return result<_, _> = flat i32 disc.
-  (import "wasi:http/types@0.2.3" "[method]outgoing-request.set-path-with-query"
+  (import "wasi:http/types@0.2.8" "[method]outgoing-request.set-path-with-query"
     (func $setPath (param i32 i32 i32 i32) (result i32)))
-  (import "wasi:http/types@0.2.3" "[method]outgoing-request.set-authority"
+  (import "wasi:http/types@0.2.8" "[method]outgoing-request.set-authority"
     (func $setAuth (param i32 i32 i32 i32) (result i32)))
   (memory (export "memory") 1)
   ;; Pre-fill UTF-8 buffers at fixed offsets.

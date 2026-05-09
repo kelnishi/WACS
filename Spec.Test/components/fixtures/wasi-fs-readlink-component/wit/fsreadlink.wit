@@ -1,6 +1,6 @@
 package local:fsreadlink;
 world demo {
-    import wasi:filesystem/types@0.2.3;
+    import wasi:filesystem/types@0.2.8;
     /// Calls readlink-at(handle, "src") and returns the
     /// resolved target string (Ok payload).
     export ask-readlink: func(handle: u32) -> string;

@@ -1,6 +1,6 @@
 package local:iplookup;
 world demo {
-    import wasi:sockets/ip-name-lookup@0.2.3;
+    import wasi:sockets/ip-name-lookup@0.2.8;
     /// Calls resolve-addresses(net, "example.com") then
     /// resolve-next-address. Returns a packed u32:
     ///   bit 0: stream non-zero (1 if resolve returned a stream)

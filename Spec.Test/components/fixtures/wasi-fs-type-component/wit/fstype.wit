@@ -1,5 +1,5 @@
 package local:fstype;
 world demo {
-    import wasi:filesystem/types@0.2.3;
+    import wasi:filesystem/types@0.2.8;
     export ask-type: func(handle: u32) -> u32;
 }

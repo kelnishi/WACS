@@ -1,7 +1,7 @@
 (module
-  (import "wasi:filesystem/preopens@0.2.3" "get-directories"
+  (import "wasi:filesystem/preopens@0.2.8" "get-directories"
     (func $get (param i32)))
-  (import "wasi:filesystem/types@0.2.3" "[resource-drop]descriptor"
+  (import "wasi:filesystem/types@0.2.8" "[resource-drop]descriptor"
     (func $drop (param i32)))
   (memory (export "memory") 1)
   ;; Bump allocator from 1024 onward — fresh address per call.

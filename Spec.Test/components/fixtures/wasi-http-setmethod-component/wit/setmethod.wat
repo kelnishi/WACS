@@ -1,5 +1,5 @@
 (module
-  (import "wasi:http/types@0.2.3" "[method]outgoing-request.set-method"
+  (import "wasi:http/types@0.2.8" "[method]outgoing-request.set-method"
     (func $setMeth (param i32 i32 i32 i32) (result i32)))
   (memory (export "memory") 1)
   (data (i32.const 256) "PURGE")

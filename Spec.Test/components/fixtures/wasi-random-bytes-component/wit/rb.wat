@@ -2,7 +2,7 @@
   ;; Imported canon-lowered get-random-bytes — takes
   ;; (len: i64, retAreaPtr: i32), writes (dataPtr, count) at
   ;; retAreaPtr.
-  (import "wasi:random/random@0.2.3" "get-random-bytes"
+  (import "wasi:random/random@0.2.8" "get-random-bytes"
     (func $get_random_bytes (param i64 i32)))
   (memory (export "memory") 1)
   ;; Bump allocator at 1024 onwards. Same shape used by the

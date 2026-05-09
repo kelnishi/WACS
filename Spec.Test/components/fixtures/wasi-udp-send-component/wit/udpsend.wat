@@ -1,5 +1,5 @@
 (module
-  (import "wasi:sockets/udp@0.2.3" "[method]outgoing-datagram-stream.send"
+  (import "wasi:sockets/udp@0.2.8" "[method]outgoing-datagram-stream.send"
     (func $snd (param i32 i32 i32 i32)))
   (memory (export "memory") 1)
   (data (i32.const 100) "ping")

@@ -17,7 +17,7 @@ namespace Wacs.Transpiler.Test
     /// End-to-end resolver-compat tests pinning down that the
     /// production <c>Wacs.WASI.Preview2</c> host package binds
     /// cleanly through <see cref="HostPackageResolver"/>. A real
-    /// guest targeting WASI 0.2.3 would route through this exact
+    /// guest targeting WASI 0.2.8 would route through this exact
     /// resolution path before any IL is emitted.
     /// </summary>
     public class WasiPreview2BundleResolverTests

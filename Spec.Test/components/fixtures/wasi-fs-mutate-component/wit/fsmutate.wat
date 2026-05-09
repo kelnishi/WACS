@@ -1,9 +1,9 @@
 (module
-  (import "wasi:filesystem/types@0.2.3" "[method]descriptor.create-directory-at"
+  (import "wasi:filesystem/types@0.2.8" "[method]descriptor.create-directory-at"
     (func $create (param i32 i32 i32 i32)))
-  (import "wasi:filesystem/types@0.2.3" "[method]descriptor.remove-directory-at"
+  (import "wasi:filesystem/types@0.2.8" "[method]descriptor.remove-directory-at"
     (func $remove (param i32 i32 i32 i32)))
-  (import "wasi:filesystem/types@0.2.3" "[method]descriptor.unlink-file-at"
+  (import "wasi:filesystem/types@0.2.8" "[method]descriptor.unlink-file-at"
     (func $unlink (param i32 i32 i32 i32)))
   (memory (export "memory") 1)
   ;; "child" path string at 100, 5 bytes.

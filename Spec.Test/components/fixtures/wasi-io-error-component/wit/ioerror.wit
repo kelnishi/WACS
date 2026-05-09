@@ -1,6 +1,6 @@
 package local:ioerror;
 world demo {
-    import wasi:io/error@0.2.3;
+    import wasi:io/error@0.2.8;
     /// Calls error.to-debug-string(handle) and copies the
     /// returned string into the export's own retArea so the
     /// outer canon-lift on the export sees the result.

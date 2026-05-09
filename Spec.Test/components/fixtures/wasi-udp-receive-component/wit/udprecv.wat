@@ -1,5 +1,5 @@
 (module
-  (import "wasi:sockets/udp@0.2.3" "[method]incoming-datagram-stream.receive"
+  (import "wasi:sockets/udp@0.2.8" "[method]incoming-datagram-stream.receive"
     (func $rcv (param i32 i64 i32)))
   (memory (export "memory") 1)
   (global $next (mut i32) (i32.const 1024))

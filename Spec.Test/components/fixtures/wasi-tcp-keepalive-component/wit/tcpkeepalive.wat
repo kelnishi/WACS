@@ -1,9 +1,9 @@
 (module
-  (import "wasi:sockets/tcp@0.2.3" "[method]tcp-socket.set-keep-alive-idle-time"
+  (import "wasi:sockets/tcp@0.2.8" "[method]tcp-socket.set-keep-alive-idle-time"
     (func $skait (param i32 i64 i32)))
-  (import "wasi:sockets/tcp@0.2.3" "[method]tcp-socket.set-keep-alive-count"
+  (import "wasi:sockets/tcp@0.2.8" "[method]tcp-socket.set-keep-alive-count"
     (func $skac (param i32 i32 i32)))
-  (import "wasi:sockets/tcp@0.2.3" "[method]tcp-socket.keep-alive-count"
+  (import "wasi:sockets/tcp@0.2.8" "[method]tcp-socket.keep-alive-count"
     (func $kac (param i32 i32)))
   (memory (export "memory") 1)
   (global $next (mut i32) (i32.const 1024))

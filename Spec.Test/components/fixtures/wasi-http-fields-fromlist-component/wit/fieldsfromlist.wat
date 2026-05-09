@@ -1,5 +1,5 @@
 (module
-  (import "wasi:http/types@0.2.3" "[static]fields.from-list"
+  (import "wasi:http/types@0.2.8" "[static]fields.from-list"
     (func $fromList (param i32 i32 i32)))
   (memory (export "memory") 1)
   ;; Pre-laid-out data:

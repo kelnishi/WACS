@@ -1,6 +1,6 @@
-package wasi:filesystem@0.2.3;
+package wasi:filesystem@0.2.8;
 interface types {
-    use wasi:clocks/wall-clock@0.2.3.{datetime};
+    use wasi:clocks/wall-clock@0.2.8.{datetime};
     enum error-code { unknown }
     enum descriptor-type {
         unknown, block-device, character-device, directory,

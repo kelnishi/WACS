@@ -11,7 +11,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 
-namespace HelloWorld.wit.imports.wasi.io.v0_2_3;
+namespace HelloWorld.wit.imports.wasi.io.v0_2_8;
 
 public interface IPoll {
 
@@ -33,7 +33,7 @@ public interface IPoll {
             GC.SuppressFinalize(this);
         }
 
-        [DllImport("wasi:io/poll@0.2.3", EntryPoint = "[resource-drop]pollable"), WasmImportLinkage]
+        [DllImport("wasi:io/poll@0.2.8", EntryPoint = "[resource-drop]pollable"), WasmImportLinkage]
         private static extern void wasmImportResourceDrop(int p0);
 
         protected virtual void Dispose(bool disposing) {
@@ -49,7 +49,7 @@ public interface IPoll {
 
         internal static class ReadyWasmInterop
         {
-            [DllImport("wasi:io/poll@0.2.3", EntryPoint = "[method]pollable.ready"), WasmImportLinkage]
+            [DllImport("wasi:io/poll@0.2.8", EntryPoint = "[method]pollable.ready"), WasmImportLinkage]
             internal static extern int wasmImportReady(int p0);
 
         }
@@ -65,7 +65,7 @@ public interface IPoll {
 
         internal static class BlockWasmInterop
         {
-            [DllImport("wasi:io/poll@0.2.3", EntryPoint = "[method]pollable.block"), WasmImportLinkage]
+            [DllImport("wasi:io/poll@0.2.8", EntryPoint = "[method]pollable.block"), WasmImportLinkage]
             internal static extern void wasmImportBlock(int p0);
 
         }

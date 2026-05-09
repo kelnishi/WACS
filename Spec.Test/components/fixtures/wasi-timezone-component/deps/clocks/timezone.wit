@@ -1,4 +1,4 @@
-package wasi:clocks@0.2.3;
+package wasi:clocks@0.2.8;
 interface timezone {
     use wall-clock.{datetime};
     record timezone-display {

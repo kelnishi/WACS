@@ -1,5 +1,5 @@
 (module
-  (import "wasi:filesystem/types@0.2.3" "[method]descriptor.symlink-at"
+  (import "wasi:filesystem/types@0.2.8" "[method]descriptor.symlink-at"
     (func $symlink (param i32 i32 i32 i32 i32 i32)))
   (memory (export "memory") 1)
   ;; "src" at 100 (3 bytes), "dst" at 200 (3 bytes).

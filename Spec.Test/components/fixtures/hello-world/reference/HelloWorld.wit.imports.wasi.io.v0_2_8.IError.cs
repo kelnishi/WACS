@@ -11,7 +11,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 
-namespace HelloWorld.wit.imports.wasi.io.v0_2_3;
+namespace HelloWorld.wit.imports.wasi.io.v0_2_8;
 
 public interface IError {
 
@@ -49,7 +49,7 @@ public interface IError {
             GC.SuppressFinalize(this);
         }
 
-        [DllImport("wasi:io/error@0.2.3", EntryPoint = "[resource-drop]error"), WasmImportLinkage]
+        [DllImport("wasi:io/error@0.2.8", EntryPoint = "[resource-drop]error"), WasmImportLinkage]
         private static extern void wasmImportResourceDrop(int p0);
 
         protected virtual void Dispose(bool disposing) {
@@ -65,7 +65,7 @@ public interface IError {
 
         internal static class ToDebugStringWasmInterop
         {
-            [DllImport("wasi:io/error@0.2.3", EntryPoint = "[method]error.to-debug-string"), WasmImportLinkage]
+            [DllImport("wasi:io/error@0.2.8", EntryPoint = "[method]error.to-debug-string"), WasmImportLinkage]
             internal static extern void wasmImportToDebugString(int p0, nint p1);
 
         }

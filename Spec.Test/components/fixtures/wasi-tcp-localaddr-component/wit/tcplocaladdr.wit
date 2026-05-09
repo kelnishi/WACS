@@ -1,6 +1,6 @@
 package local:tcplocaladdr;
 world demo {
-    import wasi:sockets/tcp@0.2.3;
+    import wasi:sockets/tcp@0.2.8;
     /// Calls local-address; returns a packed u32:
     ///   (port_hi << 24) | (port_lo << 16) | (b0 << 8) | b1
     /// using bytes from the ipv4 case at retArea+8/+10.

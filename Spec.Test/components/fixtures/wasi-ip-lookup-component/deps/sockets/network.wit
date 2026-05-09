@@ -1,4 +1,4 @@
-package wasi:sockets@0.2.3;
+package wasi:sockets@0.2.8;
 interface network {
     enum error-code { unknown }
     type ipv4-address = tuple<u8, u8, u8, u8>;

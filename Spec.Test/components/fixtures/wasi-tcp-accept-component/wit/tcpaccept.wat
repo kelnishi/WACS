@@ -1,13 +1,13 @@
 (module
-  (import "wasi:sockets/tcp@0.2.3" "[method]tcp-socket.accept"
+  (import "wasi:sockets/tcp@0.2.8" "[method]tcp-socket.accept"
     (func $acc (param i32 i32)))
-  (import "wasi:sockets/tcp@0.2.3" "[method]tcp-socket.finish-connect"
+  (import "wasi:sockets/tcp@0.2.8" "[method]tcp-socket.finish-connect"
     (func $fc (param i32 i32)))
-  (import "wasi:sockets/tcp@0.2.3" "[resource-drop]tcp-socket"
+  (import "wasi:sockets/tcp@0.2.8" "[resource-drop]tcp-socket"
     (func $drop_sock (param i32)))
-  (import "wasi:io/streams@0.2.3" "[resource-drop]input-stream"
+  (import "wasi:io/streams@0.2.8" "[resource-drop]input-stream"
     (func $drop_in (param i32)))
-  (import "wasi:io/streams@0.2.3" "[resource-drop]output-stream"
+  (import "wasi:io/streams@0.2.8" "[resource-drop]output-stream"
     (func $drop_out (param i32)))
   (memory (export "memory") 1)
   (global $next (mut i32) (i32.const 1024))

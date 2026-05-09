@@ -1,19 +1,19 @@
 (module
-  (import "wasi:http/types@0.2.3" "[method]outgoing-request.body"
+  (import "wasi:http/types@0.2.8" "[method]outgoing-request.body"
     (func $req-body (param i32 i32)))
-  (import "wasi:http/types@0.2.3" "[method]outgoing-body.write"
+  (import "wasi:http/types@0.2.8" "[method]outgoing-body.write"
     (func $body-write (param i32 i32)))
-  (import "wasi:http/types@0.2.3" "[method]incoming-response.consume"
+  (import "wasi:http/types@0.2.8" "[method]incoming-response.consume"
     (func $resp-consume (param i32 i32)))
-  (import "wasi:http/types@0.2.3" "[method]incoming-body.stream"
+  (import "wasi:http/types@0.2.8" "[method]incoming-body.stream"
     (func $body-stream (param i32 i32)))
-  (import "wasi:http/types@0.2.3" "[resource-drop]outgoing-body"
+  (import "wasi:http/types@0.2.8" "[resource-drop]outgoing-body"
     (func $drop-out-body (param i32)))
-  (import "wasi:http/types@0.2.3" "[resource-drop]incoming-body"
+  (import "wasi:http/types@0.2.8" "[resource-drop]incoming-body"
     (func $drop-in-body (param i32)))
-  (import "wasi:io/streams@0.2.3" "[resource-drop]output-stream"
+  (import "wasi:io/streams@0.2.8" "[resource-drop]output-stream"
     (func $drop-out-stream (param i32)))
-  (import "wasi:io/streams@0.2.3" "[resource-drop]input-stream"
+  (import "wasi:io/streams@0.2.8" "[resource-drop]input-stream"
     (func $drop-in-stream (param i32)))
   (memory (export "memory") 1)
   (global $next (mut i32) (i32.const 1024))

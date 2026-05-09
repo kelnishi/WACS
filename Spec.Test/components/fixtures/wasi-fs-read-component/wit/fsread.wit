@@ -1,7 +1,7 @@
 package local:fsread;
 world demo {
-    import wasi:filesystem/types@0.2.3;
-    import wasi:io/streams@0.2.3;
+    import wasi:filesystem/types@0.2.8;
+    import wasi:io/streams@0.2.8;
     /// Calls descriptor.read-via-stream(handle, 0), reads up
     /// to len bytes via the resulting input-stream, returns
     /// the actual byte count read.

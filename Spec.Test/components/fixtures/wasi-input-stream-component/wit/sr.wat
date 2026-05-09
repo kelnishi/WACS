@@ -1,7 +1,7 @@
 (module
-  (import "wasi:io/streams@0.2.3" "[method]input-stream.read"
+  (import "wasi:io/streams@0.2.8" "[method]input-stream.read"
     (func $read (param i32 i64 i32)))
-  (import "wasi:io/streams@0.2.3" "[resource-drop]input-stream"
+  (import "wasi:io/streams@0.2.8" "[resource-drop]input-stream"
     (func $drop (param i32)))
   (memory (export "memory") 1)
   (func $realloc (param i32 i32 i32 i32) (result i32) i32.const 1024)

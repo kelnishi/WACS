@@ -46,12 +46,12 @@ namespace Wacs.ComponentModel.Test
         public void InterfaceBase_versioned()
         {
             var iface = new CtInterfaceType(
-                new CtPackageName("wasi", new[] { "cli" }, "0.2.3"),
+                new CtPackageName("wasi", new[] { "cli" }, "0.2.8"),
                 "stdout",
                 System.Array.Empty<CtNamedType>(),
                 System.Array.Empty<CtInterfaceFunction>(),
                 System.Array.Empty<CtUse>());
-            Assert.Equal("wasi:cli/stdout@0.2.3", EntryPoints.InterfaceBase(iface));
+            Assert.Equal("wasi:cli/stdout@0.2.8", EntryPoints.InterfaceBase(iface));
         }
 
         [Fact]
@@ -91,15 +91,15 @@ namespace Wacs.ComponentModel.Test
         [Fact]
         public void ExportFreeFunction_separates_with_hash()
         {
-            Assert.Equal("wasi:cli/run@0.2.3#run",
-                EntryPoints.ExportFreeFunction("wasi:cli/run@0.2.3", "run"));
+            Assert.Equal("wasi:cli/run@0.2.8#run",
+                EntryPoints.ExportFreeFunction("wasi:cli/run@0.2.8", "run"));
         }
 
         [Fact]
         public void CabiPost_adds_prefix_and_hash()
         {
-            Assert.Equal("cabi_post_wasi:cli/run@0.2.3#run",
-                EntryPoints.CabiPost("wasi:cli/run@0.2.3", "run"));
+            Assert.Equal("cabi_post_wasi:cli/run@0.2.8#run",
+                EntryPoints.CabiPost("wasi:cli/run@0.2.8", "run"));
         }
 
         // ---- Resource entry points ---------------------------------------

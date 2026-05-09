@@ -1,5 +1,5 @@
-package wasi:cli@0.2.3;
+package wasi:cli@0.2.8;
 interface stdout {
-    use wasi:io/streams@0.2.3.{output-stream};
+    use wasi:io/streams@0.2.8.{output-stream};
     get-stdout: func() -> own<output-stream>;
 }

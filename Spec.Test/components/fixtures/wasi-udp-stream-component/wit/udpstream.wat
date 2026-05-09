@@ -1,9 +1,9 @@
 (module
-  (import "wasi:sockets/udp@0.2.3" "[method]udp-socket.stream"
+  (import "wasi:sockets/udp@0.2.8" "[method]udp-socket.stream"
     (func $st (param i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32 i32)))
-  (import "wasi:sockets/udp@0.2.3" "[resource-drop]incoming-datagram-stream"
+  (import "wasi:sockets/udp@0.2.8" "[resource-drop]incoming-datagram-stream"
     (func $drop_in (param i32)))
-  (import "wasi:sockets/udp@0.2.3" "[resource-drop]outgoing-datagram-stream"
+  (import "wasi:sockets/udp@0.2.8" "[resource-drop]outgoing-datagram-stream"
     (func $drop_out (param i32)))
   (memory (export "memory") 1)
   (global $next (mut i32) (i32.const 1024))

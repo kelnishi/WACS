@@ -11,7 +11,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 
-namespace HelloWorld.wit.imports.wasi.io.v0_2_3;
+namespace HelloWorld.wit.imports.wasi.io.v0_2_8;
 
 public interface IStreams {
 
@@ -28,7 +28,7 @@ public interface IStreams {
             this.value = value;
         }
 
-        public static StreamError lastOperationFailed(global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error lastOperationFailed) {
+        public static StreamError lastOperationFailed(global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error lastOperationFailed) {
             return new StreamError(LAST_OPERATION_FAILED, lastOperationFailed);
         }
 
@@ -36,12 +36,12 @@ public interface IStreams {
             return new StreamError(CLOSED, null);
         }
 
-        public global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error AsLastOperationFailed
+        public global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error AsLastOperationFailed
         {
             get
             {
                 if (Tag == LAST_OPERATION_FAILED)
-                return (global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error)value!;
+                return (global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error)value!;
                 else
                 throw new ArgumentException("expected LAST_OPERATION_FAILED, got " + Tag);
             }
@@ -76,7 +76,7 @@ public interface IStreams {
             GC.SuppressFinalize(this);
         }
 
-        [DllImport("wasi:io/streams@0.2.3", EntryPoint = "[resource-drop]input-stream"), WasmImportLinkage]
+        [DllImport("wasi:io/streams@0.2.8", EntryPoint = "[resource-drop]input-stream"), WasmImportLinkage]
         private static extern void wasmImportResourceDrop(int p0);
 
         protected virtual void Dispose(bool disposing) {
@@ -92,7 +92,7 @@ public interface IStreams {
 
         internal static class ReadWasmInterop
         {
-            [DllImport("wasi:io/streams@0.2.3", EntryPoint = "[method]input-stream.read"), WasmImportLinkage]
+            [DllImport("wasi:io/streams@0.2.8", EntryPoint = "[method]input-stream.read"), WasmImportLinkage]
             internal static extern void wasmImportRead(int p0, long p1, nint p2);
 
         }
@@ -107,7 +107,7 @@ public interface IStreams {
                 var ptr = (nint)retAreaByte0;
                 ReadWasmInterop.wasmImportRead(handle, unchecked((long)(len)), ptr);
 
-                Result<byte[], global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError> lifted6;
+                Result<byte[], global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError> lifted6;
 
                 switch (new Span<byte>((void*)(ptr + 0), 1)[0]) {
                     case 0: {
@@ -115,30 +115,30 @@ public interface IStreams {
                         var array = new byte[BitConverter.ToInt32(new Span<byte>((void*)(ptr + 8), 4))];
                         new Span<byte>((void*)(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 4), 4))), BitConverter.ToInt32(new Span<byte>((void*)(ptr + 8), 4))).CopyTo(new Span<byte>(array));
 
-                        lifted6 = Result<byte[], global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError>.ok(array);
+                        lifted6 = Result<byte[], global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError>.ok(array);
                         break;
                     }
                     case 1: {
 
-                        global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError lifted;
+                        global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError lifted;
 
                         switch (new Span<byte>((void*)(ptr + 4), 1)[0]) {
                             case 0: {
-                                var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error(new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error.THandle(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 8), 4))));
+                                var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error(new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error.THandle(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 8), 4))));
 
-                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError.lastOperationFailed(resource);
+                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError.lastOperationFailed(resource);
                                 break;
                             }
                             case 1: {
 
-                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError.closed();
+                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError.closed();
                                 break;
                             }
 
                             default: throw new ArgumentException($"invalid discriminant: {new Span<byte>((void*)(ptr + 4), 1)[0]}");
                         }
 
-                        lifted6 = Result<byte[], global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError>.err(lifted);
+                        lifted6 = Result<byte[], global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError>.err(lifted);
                         break;
                     }
 
@@ -157,7 +157,7 @@ public interface IStreams {
 
         internal static class BlockingReadWasmInterop
         {
-            [DllImport("wasi:io/streams@0.2.3", EntryPoint = "[method]input-stream.blocking-read"), WasmImportLinkage]
+            [DllImport("wasi:io/streams@0.2.8", EntryPoint = "[method]input-stream.blocking-read"), WasmImportLinkage]
             internal static extern void wasmImportBlockingRead(int p0, long p1, nint p2);
 
         }
@@ -172,7 +172,7 @@ public interface IStreams {
                 var ptr = (nint)retAreaByte0;
                 BlockingReadWasmInterop.wasmImportBlockingRead(handle, unchecked((long)(len)), ptr);
 
-                Result<byte[], global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError> lifted6;
+                Result<byte[], global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError> lifted6;
 
                 switch (new Span<byte>((void*)(ptr + 0), 1)[0]) {
                     case 0: {
@@ -180,30 +180,30 @@ public interface IStreams {
                         var array = new byte[BitConverter.ToInt32(new Span<byte>((void*)(ptr + 8), 4))];
                         new Span<byte>((void*)(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 4), 4))), BitConverter.ToInt32(new Span<byte>((void*)(ptr + 8), 4))).CopyTo(new Span<byte>(array));
 
-                        lifted6 = Result<byte[], global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError>.ok(array);
+                        lifted6 = Result<byte[], global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError>.ok(array);
                         break;
                     }
                     case 1: {
 
-                        global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError lifted;
+                        global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError lifted;
 
                         switch (new Span<byte>((void*)(ptr + 4), 1)[0]) {
                             case 0: {
-                                var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error(new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error.THandle(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 8), 4))));
+                                var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error(new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error.THandle(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 8), 4))));
 
-                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError.lastOperationFailed(resource);
+                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError.lastOperationFailed(resource);
                                 break;
                             }
                             case 1: {
 
-                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError.closed();
+                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError.closed();
                                 break;
                             }
 
                             default: throw new ArgumentException($"invalid discriminant: {new Span<byte>((void*)(ptr + 4), 1)[0]}");
                         }
 
-                        lifted6 = Result<byte[], global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError>.err(lifted);
+                        lifted6 = Result<byte[], global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError>.err(lifted);
                         break;
                     }
 
@@ -222,7 +222,7 @@ public interface IStreams {
 
         internal static class SkipWasmInterop
         {
-            [DllImport("wasi:io/streams@0.2.3", EntryPoint = "[method]input-stream.skip"), WasmImportLinkage]
+            [DllImport("wasi:io/streams@0.2.8", EntryPoint = "[method]input-stream.skip"), WasmImportLinkage]
             internal static extern void wasmImportSkip(int p0, long p1, nint p2);
 
         }
@@ -237,35 +237,35 @@ public interface IStreams {
                 var ptr = (nint)retAreaByte0;
                 SkipWasmInterop.wasmImportSkip(handle, unchecked((long)(len)), ptr);
 
-                Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError> lifted6;
+                Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError> lifted6;
 
                 switch (new Span<byte>((void*)(ptr + 0), 1)[0]) {
                     case 0: {
 
-                        lifted6 = Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError>.ok(unchecked((ulong)(BitConverter.ToInt64(new Span<byte>((void*)(ptr + 8), 8)))));
+                        lifted6 = Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError>.ok(unchecked((ulong)(BitConverter.ToInt64(new Span<byte>((void*)(ptr + 8), 8)))));
                         break;
                     }
                     case 1: {
 
-                        global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError lifted;
+                        global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError lifted;
 
                         switch (new Span<byte>((void*)(ptr + 8), 1)[0]) {
                             case 0: {
-                                var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error(new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error.THandle(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 12), 4))));
+                                var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error(new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error.THandle(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 12), 4))));
 
-                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError.lastOperationFailed(resource);
+                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError.lastOperationFailed(resource);
                                 break;
                             }
                             case 1: {
 
-                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError.closed();
+                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError.closed();
                                 break;
                             }
 
                             default: throw new ArgumentException($"invalid discriminant: {new Span<byte>((void*)(ptr + 8), 1)[0]}");
                         }
 
-                        lifted6 = Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError>.err(lifted);
+                        lifted6 = Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError>.err(lifted);
                         break;
                     }
 
@@ -284,7 +284,7 @@ public interface IStreams {
 
         internal static class BlockingSkipWasmInterop
         {
-            [DllImport("wasi:io/streams@0.2.3", EntryPoint = "[method]input-stream.blocking-skip"), WasmImportLinkage]
+            [DllImport("wasi:io/streams@0.2.8", EntryPoint = "[method]input-stream.blocking-skip"), WasmImportLinkage]
             internal static extern void wasmImportBlockingSkip(int p0, long p1, nint p2);
 
         }
@@ -299,35 +299,35 @@ public interface IStreams {
                 var ptr = (nint)retAreaByte0;
                 BlockingSkipWasmInterop.wasmImportBlockingSkip(handle, unchecked((long)(len)), ptr);
 
-                Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError> lifted6;
+                Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError> lifted6;
 
                 switch (new Span<byte>((void*)(ptr + 0), 1)[0]) {
                     case 0: {
 
-                        lifted6 = Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError>.ok(unchecked((ulong)(BitConverter.ToInt64(new Span<byte>((void*)(ptr + 8), 8)))));
+                        lifted6 = Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError>.ok(unchecked((ulong)(BitConverter.ToInt64(new Span<byte>((void*)(ptr + 8), 8)))));
                         break;
                     }
                     case 1: {
 
-                        global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError lifted;
+                        global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError lifted;
 
                         switch (new Span<byte>((void*)(ptr + 8), 1)[0]) {
                             case 0: {
-                                var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error(new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error.THandle(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 12), 4))));
+                                var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error(new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error.THandle(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 12), 4))));
 
-                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError.lastOperationFailed(resource);
+                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError.lastOperationFailed(resource);
                                 break;
                             }
                             case 1: {
 
-                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError.closed();
+                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError.closed();
                                 break;
                             }
 
                             default: throw new ArgumentException($"invalid discriminant: {new Span<byte>((void*)(ptr + 8), 1)[0]}");
                         }
 
-                        lifted6 = Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError>.err(lifted);
+                        lifted6 = Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError>.err(lifted);
                         break;
                     }
 
@@ -346,16 +346,16 @@ public interface IStreams {
 
         internal static class SubscribeWasmInterop
         {
-            [DllImport("wasi:io/streams@0.2.3", EntryPoint = "[method]input-stream.subscribe"), WasmImportLinkage]
+            [DllImport("wasi:io/streams@0.2.8", EntryPoint = "[method]input-stream.subscribe"), WasmImportLinkage]
             internal static extern int wasmImportSubscribe(int p0);
 
         }
 
-        public   unsafe global::HelloWorld.wit.imports.wasi.io.v0_2_3.IPoll.Pollable Subscribe()
+        public   unsafe global::HelloWorld.wit.imports.wasi.io.v0_2_8.IPoll.Pollable Subscribe()
         {
             var handle = this.Handle;
             var result =  SubscribeWasmInterop.wasmImportSubscribe(handle);
-            var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IPoll.Pollable(new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IPoll.Pollable.THandle(result));
+            var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IPoll.Pollable(new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IPoll.Pollable.THandle(result));
             return resource;
 
             //TODO: free alloc handle (interopString) if exists
@@ -392,7 +392,7 @@ public interface IStreams {
             GC.SuppressFinalize(this);
         }
 
-        [DllImport("wasi:io/streams@0.2.3", EntryPoint = "[resource-drop]output-stream"), WasmImportLinkage]
+        [DllImport("wasi:io/streams@0.2.8", EntryPoint = "[resource-drop]output-stream"), WasmImportLinkage]
         private static extern void wasmImportResourceDrop(int p0);
 
         protected virtual void Dispose(bool disposing) {
@@ -408,7 +408,7 @@ public interface IStreams {
 
         internal static class CheckWriteWasmInterop
         {
-            [DllImport("wasi:io/streams@0.2.3", EntryPoint = "[method]output-stream.check-write"), WasmImportLinkage]
+            [DllImport("wasi:io/streams@0.2.8", EntryPoint = "[method]output-stream.check-write"), WasmImportLinkage]
             internal static extern void wasmImportCheckWrite(int p0, nint p1);
 
         }
@@ -423,35 +423,35 @@ public interface IStreams {
                 var ptr = (nint)retAreaByte0;
                 CheckWriteWasmInterop.wasmImportCheckWrite(handle, ptr);
 
-                Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError> lifted6;
+                Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError> lifted6;
 
                 switch (new Span<byte>((void*)(ptr + 0), 1)[0]) {
                     case 0: {
 
-                        lifted6 = Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError>.ok(unchecked((ulong)(BitConverter.ToInt64(new Span<byte>((void*)(ptr + 8), 8)))));
+                        lifted6 = Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError>.ok(unchecked((ulong)(BitConverter.ToInt64(new Span<byte>((void*)(ptr + 8), 8)))));
                         break;
                     }
                     case 1: {
 
-                        global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError lifted;
+                        global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError lifted;
 
                         switch (new Span<byte>((void*)(ptr + 8), 1)[0]) {
                             case 0: {
-                                var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error(new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error.THandle(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 12), 4))));
+                                var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error(new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error.THandle(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 12), 4))));
 
-                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError.lastOperationFailed(resource);
+                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError.lastOperationFailed(resource);
                                 break;
                             }
                             case 1: {
 
-                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError.closed();
+                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError.closed();
                                 break;
                             }
 
                             default: throw new ArgumentException($"invalid discriminant: {new Span<byte>((void*)(ptr + 8), 1)[0]}");
                         }
 
-                        lifted6 = Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError>.err(lifted);
+                        lifted6 = Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError>.err(lifted);
                         break;
                     }
 
@@ -470,7 +470,7 @@ public interface IStreams {
 
         internal static class WriteWasmInterop
         {
-            [DllImport("wasi:io/streams@0.2.3", EntryPoint = "[method]output-stream.write"), WasmImportLinkage]
+            [DllImport("wasi:io/streams@0.2.8", EntryPoint = "[method]output-stream.write"), WasmImportLinkage]
             internal static extern void wasmImportWrite(int p0, nint p1, int p2, nint p3);
 
         }
@@ -488,35 +488,35 @@ public interface IStreams {
                 var ptr = (nint)retAreaByte0;
                 WriteWasmInterop.wasmImportWrite(handle, (int)buffer, (contents).Length, ptr);
 
-                Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError> lifted6;
+                Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError> lifted6;
 
                 switch (new Span<byte>((void*)(ptr + 0), 1)[0]) {
                     case 0: {
 
-                        lifted6 = Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError>.ok(new global::HelloWorld.None());
+                        lifted6 = Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError>.ok(new global::HelloWorld.None());
                         break;
                     }
                     case 1: {
 
-                        global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError lifted;
+                        global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError lifted;
 
                         switch (new Span<byte>((void*)(ptr + 4), 1)[0]) {
                             case 0: {
-                                var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error(new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error.THandle(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 8), 4))));
+                                var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error(new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error.THandle(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 8), 4))));
 
-                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError.lastOperationFailed(resource);
+                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError.lastOperationFailed(resource);
                                 break;
                             }
                             case 1: {
 
-                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError.closed();
+                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError.closed();
                                 break;
                             }
 
                             default: throw new ArgumentException($"invalid discriminant: {new Span<byte>((void*)(ptr + 4), 1)[0]}");
                         }
 
-                        lifted6 = Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError>.err(lifted);
+                        lifted6 = Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError>.err(lifted);
                         break;
                     }
 
@@ -535,7 +535,7 @@ public interface IStreams {
 
         internal static class BlockingWriteAndFlushWasmInterop
         {
-            [DllImport("wasi:io/streams@0.2.3", EntryPoint = "[method]output-stream.blocking-write-and-flush"), WasmImportLinkage]
+            [DllImport("wasi:io/streams@0.2.8", EntryPoint = "[method]output-stream.blocking-write-and-flush"), WasmImportLinkage]
             internal static extern void wasmImportBlockingWriteAndFlush(int p0, nint p1, int p2, nint p3);
 
         }
@@ -553,35 +553,35 @@ public interface IStreams {
                 var ptr = (nint)retAreaByte0;
                 BlockingWriteAndFlushWasmInterop.wasmImportBlockingWriteAndFlush(handle, (int)buffer, (contents).Length, ptr);
 
-                Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError> lifted6;
+                Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError> lifted6;
 
                 switch (new Span<byte>((void*)(ptr + 0), 1)[0]) {
                     case 0: {
 
-                        lifted6 = Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError>.ok(new global::HelloWorld.None());
+                        lifted6 = Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError>.ok(new global::HelloWorld.None());
                         break;
                     }
                     case 1: {
 
-                        global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError lifted;
+                        global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError lifted;
 
                         switch (new Span<byte>((void*)(ptr + 4), 1)[0]) {
                             case 0: {
-                                var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error(new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error.THandle(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 8), 4))));
+                                var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error(new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error.THandle(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 8), 4))));
 
-                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError.lastOperationFailed(resource);
+                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError.lastOperationFailed(resource);
                                 break;
                             }
                             case 1: {
 
-                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError.closed();
+                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError.closed();
                                 break;
                             }
 
                             default: throw new ArgumentException($"invalid discriminant: {new Span<byte>((void*)(ptr + 4), 1)[0]}");
                         }
 
-                        lifted6 = Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError>.err(lifted);
+                        lifted6 = Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError>.err(lifted);
                         break;
                     }
 
@@ -600,7 +600,7 @@ public interface IStreams {
 
         internal static class FlushWasmInterop
         {
-            [DllImport("wasi:io/streams@0.2.3", EntryPoint = "[method]output-stream.flush"), WasmImportLinkage]
+            [DllImport("wasi:io/streams@0.2.8", EntryPoint = "[method]output-stream.flush"), WasmImportLinkage]
             internal static extern void wasmImportFlush(int p0, nint p1);
 
         }
@@ -615,35 +615,35 @@ public interface IStreams {
                 var ptr = (nint)retAreaByte0;
                 FlushWasmInterop.wasmImportFlush(handle, ptr);
 
-                Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError> lifted6;
+                Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError> lifted6;
 
                 switch (new Span<byte>((void*)(ptr + 0), 1)[0]) {
                     case 0: {
 
-                        lifted6 = Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError>.ok(new global::HelloWorld.None());
+                        lifted6 = Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError>.ok(new global::HelloWorld.None());
                         break;
                     }
                     case 1: {
 
-                        global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError lifted;
+                        global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError lifted;
 
                         switch (new Span<byte>((void*)(ptr + 4), 1)[0]) {
                             case 0: {
-                                var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error(new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error.THandle(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 8), 4))));
+                                var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error(new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error.THandle(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 8), 4))));
 
-                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError.lastOperationFailed(resource);
+                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError.lastOperationFailed(resource);
                                 break;
                             }
                             case 1: {
 
-                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError.closed();
+                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError.closed();
                                 break;
                             }
 
                             default: throw new ArgumentException($"invalid discriminant: {new Span<byte>((void*)(ptr + 4), 1)[0]}");
                         }
 
-                        lifted6 = Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError>.err(lifted);
+                        lifted6 = Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError>.err(lifted);
                         break;
                     }
 
@@ -662,7 +662,7 @@ public interface IStreams {
 
         internal static class BlockingFlushWasmInterop
         {
-            [DllImport("wasi:io/streams@0.2.3", EntryPoint = "[method]output-stream.blocking-flush"), WasmImportLinkage]
+            [DllImport("wasi:io/streams@0.2.8", EntryPoint = "[method]output-stream.blocking-flush"), WasmImportLinkage]
             internal static extern void wasmImportBlockingFlush(int p0, nint p1);
 
         }
@@ -677,35 +677,35 @@ public interface IStreams {
                 var ptr = (nint)retAreaByte0;
                 BlockingFlushWasmInterop.wasmImportBlockingFlush(handle, ptr);
 
-                Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError> lifted6;
+                Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError> lifted6;
 
                 switch (new Span<byte>((void*)(ptr + 0), 1)[0]) {
                     case 0: {
 
-                        lifted6 = Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError>.ok(new global::HelloWorld.None());
+                        lifted6 = Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError>.ok(new global::HelloWorld.None());
                         break;
                     }
                     case 1: {
 
-                        global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError lifted;
+                        global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError lifted;
 
                         switch (new Span<byte>((void*)(ptr + 4), 1)[0]) {
                             case 0: {
-                                var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error(new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error.THandle(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 8), 4))));
+                                var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error(new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error.THandle(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 8), 4))));
 
-                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError.lastOperationFailed(resource);
+                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError.lastOperationFailed(resource);
                                 break;
                             }
                             case 1: {
 
-                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError.closed();
+                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError.closed();
                                 break;
                             }
 
                             default: throw new ArgumentException($"invalid discriminant: {new Span<byte>((void*)(ptr + 4), 1)[0]}");
                         }
 
-                        lifted6 = Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError>.err(lifted);
+                        lifted6 = Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError>.err(lifted);
                         break;
                     }
 
@@ -724,16 +724,16 @@ public interface IStreams {
 
         internal static class SubscribeWasmInterop
         {
-            [DllImport("wasi:io/streams@0.2.3", EntryPoint = "[method]output-stream.subscribe"), WasmImportLinkage]
+            [DllImport("wasi:io/streams@0.2.8", EntryPoint = "[method]output-stream.subscribe"), WasmImportLinkage]
             internal static extern int wasmImportSubscribe(int p0);
 
         }
 
-        public   unsafe global::HelloWorld.wit.imports.wasi.io.v0_2_3.IPoll.Pollable Subscribe()
+        public   unsafe global::HelloWorld.wit.imports.wasi.io.v0_2_8.IPoll.Pollable Subscribe()
         {
             var handle = this.Handle;
             var result =  SubscribeWasmInterop.wasmImportSubscribe(handle);
-            var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IPoll.Pollable(new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IPoll.Pollable.THandle(result));
+            var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IPoll.Pollable(new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IPoll.Pollable.THandle(result));
             return resource;
 
             //TODO: free alloc handle (interopString) if exists
@@ -741,7 +741,7 @@ public interface IStreams {
 
         internal static class WriteZeroesWasmInterop
         {
-            [DllImport("wasi:io/streams@0.2.3", EntryPoint = "[method]output-stream.write-zeroes"), WasmImportLinkage]
+            [DllImport("wasi:io/streams@0.2.8", EntryPoint = "[method]output-stream.write-zeroes"), WasmImportLinkage]
             internal static extern void wasmImportWriteZeroes(int p0, long p1, nint p2);
 
         }
@@ -756,35 +756,35 @@ public interface IStreams {
                 var ptr = (nint)retAreaByte0;
                 WriteZeroesWasmInterop.wasmImportWriteZeroes(handle, unchecked((long)(len)), ptr);
 
-                Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError> lifted6;
+                Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError> lifted6;
 
                 switch (new Span<byte>((void*)(ptr + 0), 1)[0]) {
                     case 0: {
 
-                        lifted6 = Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError>.ok(new global::HelloWorld.None());
+                        lifted6 = Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError>.ok(new global::HelloWorld.None());
                         break;
                     }
                     case 1: {
 
-                        global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError lifted;
+                        global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError lifted;
 
                         switch (new Span<byte>((void*)(ptr + 4), 1)[0]) {
                             case 0: {
-                                var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error(new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error.THandle(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 8), 4))));
+                                var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error(new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error.THandle(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 8), 4))));
 
-                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError.lastOperationFailed(resource);
+                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError.lastOperationFailed(resource);
                                 break;
                             }
                             case 1: {
 
-                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError.closed();
+                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError.closed();
                                 break;
                             }
 
                             default: throw new ArgumentException($"invalid discriminant: {new Span<byte>((void*)(ptr + 4), 1)[0]}");
                         }
 
-                        lifted6 = Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError>.err(lifted);
+                        lifted6 = Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError>.err(lifted);
                         break;
                     }
 
@@ -803,7 +803,7 @@ public interface IStreams {
 
         internal static class BlockingWriteZeroesAndFlushWasmInterop
         {
-            [DllImport("wasi:io/streams@0.2.3", EntryPoint = "[method]output-stream.blocking-write-zeroes-and-flush"), WasmImportLinkage]
+            [DllImport("wasi:io/streams@0.2.8", EntryPoint = "[method]output-stream.blocking-write-zeroes-and-flush"), WasmImportLinkage]
             internal static extern void wasmImportBlockingWriteZeroesAndFlush(int p0, long p1, nint p2);
 
         }
@@ -818,35 +818,35 @@ public interface IStreams {
                 var ptr = (nint)retAreaByte0;
                 BlockingWriteZeroesAndFlushWasmInterop.wasmImportBlockingWriteZeroesAndFlush(handle, unchecked((long)(len)), ptr);
 
-                Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError> lifted6;
+                Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError> lifted6;
 
                 switch (new Span<byte>((void*)(ptr + 0), 1)[0]) {
                     case 0: {
 
-                        lifted6 = Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError>.ok(new global::HelloWorld.None());
+                        lifted6 = Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError>.ok(new global::HelloWorld.None());
                         break;
                     }
                     case 1: {
 
-                        global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError lifted;
+                        global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError lifted;
 
                         switch (new Span<byte>((void*)(ptr + 4), 1)[0]) {
                             case 0: {
-                                var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error(new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error.THandle(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 8), 4))));
+                                var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error(new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error.THandle(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 8), 4))));
 
-                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError.lastOperationFailed(resource);
+                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError.lastOperationFailed(resource);
                                 break;
                             }
                             case 1: {
 
-                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError.closed();
+                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError.closed();
                                 break;
                             }
 
                             default: throw new ArgumentException($"invalid discriminant: {new Span<byte>((void*)(ptr + 4), 1)[0]}");
                         }
 
-                        lifted6 = Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError>.err(lifted);
+                        lifted6 = Result<None, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError>.err(lifted);
                         break;
                     }
 
@@ -865,12 +865,12 @@ public interface IStreams {
 
         internal static class SpliceWasmInterop
         {
-            [DllImport("wasi:io/streams@0.2.3", EntryPoint = "[method]output-stream.splice"), WasmImportLinkage]
+            [DllImport("wasi:io/streams@0.2.8", EntryPoint = "[method]output-stream.splice"), WasmImportLinkage]
             internal static extern void wasmImportSplice(int p0, int p1, long p2, nint p3);
 
         }
 
-        public   unsafe ulong Splice(global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.InputStream src, ulong len)
+        public   unsafe ulong Splice(global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.InputStream src, ulong len)
         {
             var handle = this.Handle;
             var handle0 = src.Handle;
@@ -881,35 +881,35 @@ public interface IStreams {
                 var ptr = (nint)retAreaByte0;
                 SpliceWasmInterop.wasmImportSplice(handle, handle0, unchecked((long)(len)), ptr);
 
-                Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError> lifted7;
+                Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError> lifted7;
 
                 switch (new Span<byte>((void*)(ptr + 0), 1)[0]) {
                     case 0: {
 
-                        lifted7 = Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError>.ok(unchecked((ulong)(BitConverter.ToInt64(new Span<byte>((void*)(ptr + 8), 8)))));
+                        lifted7 = Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError>.ok(unchecked((ulong)(BitConverter.ToInt64(new Span<byte>((void*)(ptr + 8), 8)))));
                         break;
                     }
                     case 1: {
 
-                        global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError lifted;
+                        global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError lifted;
 
                         switch (new Span<byte>((void*)(ptr + 8), 1)[0]) {
                             case 0: {
-                                var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error(new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error.THandle(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 12), 4))));
+                                var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error(new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error.THandle(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 12), 4))));
 
-                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError.lastOperationFailed(resource);
+                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError.lastOperationFailed(resource);
                                 break;
                             }
                             case 1: {
 
-                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError.closed();
+                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError.closed();
                                 break;
                             }
 
                             default: throw new ArgumentException($"invalid discriminant: {new Span<byte>((void*)(ptr + 8), 1)[0]}");
                         }
 
-                        lifted7 = Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError>.err(lifted);
+                        lifted7 = Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError>.err(lifted);
                         break;
                     }
 
@@ -928,12 +928,12 @@ public interface IStreams {
 
         internal static class BlockingSpliceWasmInterop
         {
-            [DllImport("wasi:io/streams@0.2.3", EntryPoint = "[method]output-stream.blocking-splice"), WasmImportLinkage]
+            [DllImport("wasi:io/streams@0.2.8", EntryPoint = "[method]output-stream.blocking-splice"), WasmImportLinkage]
             internal static extern void wasmImportBlockingSplice(int p0, int p1, long p2, nint p3);
 
         }
 
-        public   unsafe ulong BlockingSplice(global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.InputStream src, ulong len)
+        public   unsafe ulong BlockingSplice(global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.InputStream src, ulong len)
         {
             var handle = this.Handle;
             var handle0 = src.Handle;
@@ -944,35 +944,35 @@ public interface IStreams {
                 var ptr = (nint)retAreaByte0;
                 BlockingSpliceWasmInterop.wasmImportBlockingSplice(handle, handle0, unchecked((long)(len)), ptr);
 
-                Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError> lifted7;
+                Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError> lifted7;
 
                 switch (new Span<byte>((void*)(ptr + 0), 1)[0]) {
                     case 0: {
 
-                        lifted7 = Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError>.ok(unchecked((ulong)(BitConverter.ToInt64(new Span<byte>((void*)(ptr + 8), 8)))));
+                        lifted7 = Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError>.ok(unchecked((ulong)(BitConverter.ToInt64(new Span<byte>((void*)(ptr + 8), 8)))));
                         break;
                     }
                     case 1: {
 
-                        global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError lifted;
+                        global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError lifted;
 
                         switch (new Span<byte>((void*)(ptr + 8), 1)[0]) {
                             case 0: {
-                                var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error(new global::HelloWorld.wit.imports.wasi.io.v0_2_3.IError.Error.THandle(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 12), 4))));
+                                var resource = new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error(new global::HelloWorld.wit.imports.wasi.io.v0_2_8.IError.Error.THandle(BitConverter.ToInt32(new Span<byte>((void*)(ptr + 12), 4))));
 
-                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError.lastOperationFailed(resource);
+                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError.lastOperationFailed(resource);
                                 break;
                             }
                             case 1: {
 
-                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError.closed();
+                                lifted = global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError.closed();
                                 break;
                             }
 
                             default: throw new ArgumentException($"invalid discriminant: {new Span<byte>((void*)(ptr + 8), 1)[0]}");
                         }
 
-                        lifted7 = Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_3.IStreams.StreamError>.err(lifted);
+                        lifted7 = Result<ulong, global::HelloWorld.wit.imports.wasi.io.v0_2_8.IStreams.StreamError>.err(lifted);
                         break;
                     }
 

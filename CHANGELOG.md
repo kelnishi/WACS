@@ -1,5 +1,34 @@
 # Changelog
 
+## Spec.Test fixtures — WASI 0.2.3 → 0.2.8 bump
+
+Bumps the `Spec.Test/components/wasi-cli` submodule pointer from
+v0.2.3 to v0.2.8, and propagates the version bump across every
+fixture and test asserton:
+
+- 168 fixture WIT files: `@0.2.3` → `@0.2.8` in package /
+  use / import declarations.
+- 68 fixture WAT files: `@0.2.3` import strings updated.
+- 101 committed `<fixture>/wasm/<base>.component.wasm` binaries
+  regenerated via `Spec.Test/components/build_fixtures.sh`.
+- Hello-world reference (12 files, 9 with `v0_2_3`-baked
+  filenames) regenerated via
+  `Spec.Test/components/build_hello_world_reference.sh` with
+  `wit-bindgen-cli 0.30.0` (the pin).
+- 7 test C# files: `@0.2.3` / `0.2.3` / `v0_2_3` → `@0.2.8` /
+  `0.2.8` / `v0_2_8` in fixture-loading assertions, package-name
+  constructor calls, and reference-filename strings.
+
+Net delta: 324 files changed, 398+ / 1777-. The size asymmetry is
+the regenerated wasm binaries — `wasm-tools` 1.221's encoder packs
+slightly tighter than the originals were (no semantic difference;
+the .wat / .wit are byte-stable input → byte-stable output for any
+given tool version).
+
+The runtime-side WACS.WASI.Preview2 was already at 0.2.8 (PR #120);
+this brings the test fixtures into alignment, retiring the
+"deliberately decoupled" caveat in the README.
+
 ## [WACS.WASI.Preview2 0.3.0] — Bundled WIT bumped to WASI 0.2.8
 
 Refreshes the vendored WIT tree under `Wacs.WASI.Preview2/wit/`

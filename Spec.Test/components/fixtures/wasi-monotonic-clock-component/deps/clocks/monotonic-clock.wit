@@ -1,4 +1,4 @@
-package wasi:clocks@0.2.3;
+package wasi:clocks@0.2.8;
 interface monotonic-clock {
     type instant = u64;
     type duration = u64;

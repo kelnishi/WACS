@@ -1,6 +1,6 @@
 package local:setmethod;
 world demo {
-    import wasi:http/types@0.2.3;
+    import wasi:http/types@0.2.8;
     /// Calls set-method(req, Get) — variant disc 0, no payload.
     export ask-set-get: func(req: u32) -> u32;
     /// Calls set-method(req, Post) — variant disc 2.

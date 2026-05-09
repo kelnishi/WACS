@@ -17,7 +17,7 @@ namespace Wacs.ComponentModel.Test
     ///
     /// <para>Synthetic tests (one per Types feature) establish that
     /// each CtValType subclass can be produced and carries the correct
-    /// shape. Fixture tests (data-driven over the WASI 0.2.3 WIT
+    /// shape. Fixture tests (data-driven over the WASI 0.2.8 WIT
     /// submodule) smoke-run the converter end-to-end over real-world
     /// inputs; regressions surface as individual test failures keyed
     /// to a specific .wit filename.</para>
@@ -316,7 +316,7 @@ namespace Wacs.ComponentModel.Test
             Assert.Equal("0.2.8", iref.Package.Version);
         }
 
-        // ---- Fixture smoke tests over WASI 0.2.3 ---------------------------
+        // ---- Fixture smoke tests over WASI 0.2.8 ---------------------------
 
         private static string FindWasiCliWitDir()
         {
@@ -400,8 +400,8 @@ namespace Wacs.ComponentModel.Test
             var pkgs = WitToTypes.Convert(WitParser.Parse(src));
             var pkg = Assert.Single(pkgs);
             // Asserts the version pinned in
-            // Spec.Test/components/wasi-cli (currently v0.2.3).
-            Assert.Equal("wasi:io@0.2.3", pkg.Name.ToString());
+            // Spec.Test/components/wasi-cli (currently v0.2.8).
+            Assert.Equal("wasi:io@0.2.8", pkg.Name.ToString());
 
             var streams = Assert.Single(pkg.Interfaces);
             Assert.Equal("streams", streams.Name);

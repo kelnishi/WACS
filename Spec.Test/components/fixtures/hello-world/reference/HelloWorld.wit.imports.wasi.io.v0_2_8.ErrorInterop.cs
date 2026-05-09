@@ -11,9 +11,9 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 
-namespace HelloWorld.wit.imports.wasi.io.v0_2_3
+namespace HelloWorld.wit.imports.wasi.io.v0_2_8
 {
-    public static class StreamsInterop {
+    public static class ErrorInterop {
 
     }
 }

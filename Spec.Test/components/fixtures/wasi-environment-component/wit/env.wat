@@ -1,9 +1,9 @@
 (module
-  (import "wasi:cli/environment@0.2.3" "get-arguments"
+  (import "wasi:cli/environment@0.2.8" "get-arguments"
     (func $get_args (param i32)))
-  (import "wasi:cli/environment@0.2.3" "initial-cwd"
+  (import "wasi:cli/environment@0.2.8" "initial-cwd"
     (func $get_cwd (param i32)))
-  (import "wasi:cli/environment@0.2.3" "get-environment"
+  (import "wasi:cli/environment@0.2.8" "get-environment"
     (func $get_env (param i32)))
   (memory (export "memory") 1)
   (global $next (mut i32) (i32.const 1024))
