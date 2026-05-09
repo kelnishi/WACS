@@ -1,5 +1,56 @@
 # Changelog
 
+## WACS 0.13.5 / WACS.Cli 1.5.5 / WACS.Transpiler.Lib 0.8.5 — direct-link emit accepts SourceGen-shape resource constructors
+
+`Wacs.ComponentModel.Bindgen.SourceGen` emits resource constructors
+as `void Create(args)` instance methods on the resource interface
+(rather than static factories returning the interface). The
+`Wacs.WASI.NN.DependencyInjection.Tensor` impl class follows that
+contract — public parameterless ctor + `void Create(...)` for the
+two-step `Activator.CreateInstance` then `Create` lift the canonical
+ABI's `[constructor]X` calls into.
+
+Pre-fix, `DirectLinkedImportEmit.cs:101` rejected this shape
+(`if (!method.IsStatic) return false`). The constructor fell
+through to legacy delegate dispatch, which never bound a real
+handle for it, and the guest received 0 (the canonical-ABI null
+sentinel). The first downstream `[method]X.<x>` call AVs the host
+on `Resources.GetResource(typeof(IFace), 0)` — observed end-to-end
+in the `wasi-nn-slm.wasm` SLM after the round-7+8 high-address
+fixes unblocked it that far.
+
+`HostPackageResolver` adds `TryFindResourceImpl(Type
+resourceInterface, out Type implType)` that walks the loaded
+host-package assemblies for a public class implementing the
+interface with a public parameterless constructor. Cached per-
+interface; first match wins (stable order across host packages).
+
+`DirectLinkedImportEmit`'s constructor gate now accepts both
+shapes:
+
+- **Static factory** — existing path. Method is static, returns
+  the interface, IL emits `Call → AllocateResource`.
+- **Void instance method** — new path. Method is non-static and
+  returns void, resolver finds an impl class. IL emits
+  `Newobj <impl>; dup; stloc inst; castclass <iface>` before the
+  arg lift loop, then the lift loop pushes args, then `Callvirt
+  <Create>` (void), then `ldloc inst; ldarg ctx; ldfld Resources;
+  ldtoken <iface>; call typeof; ldloc inst; callvirt
+  AllocateResource → handle`.
+
+Test surface: new
+`DirectLinkedImportTests.DirectLinkedImport_SourceGenCtorThenInstance_AllocatesAndResolves`
+defines `ISgWidget` (SourceGen-shape, with `void Create();
+read: func() -> u32;`) plus `TestSgWidget` (parameterless ctor +
+sentinel-recording Create). Wasm imports `[constructor]widget` +
+`[method]widget.read`, calls them in sequence, asserts the
+sentinel value (42) round-trips. Pre-fix the gate rejects the
+SourceGen shape; post-fix the test passes.
+
+Out of scope (separate work): `wasi-nn-slm.wasm` end-to-end
+verification stays the user's call locally to avoid the round-4 /
+round-6 overclaim pattern.
+
 ## WACS 0.13.4 / WACS.Cli 1.5.4 / WACS.Transpiler.Lib 0.8.4 — high-address bulk memory ops + MemSlice chokepoint
 
 Round 7 closed `(int)ea` truncation in the load/store helpers

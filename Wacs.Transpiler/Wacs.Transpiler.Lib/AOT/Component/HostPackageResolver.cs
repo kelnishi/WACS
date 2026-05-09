@@ -109,6 +109,15 @@ namespace Wacs.Transpiler.AOT.Component
             _bindingsByStrippedModule;
         private readonly HashSet<Type> _resourceInterfaceTypes;
 
+        // Concrete impl class for each resource interface — used by
+        // direct-link emit's SourceGen-shape constructor path
+        // (interface-side `void Create(args)` instance method, no
+        // static factory). The bindgen contract is: the resource impl
+        // class implements the interface AND has a public parameter-
+        // less ctor. Discovered lazily on first lookup; cached.
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<Type, Type?>
+            _resourceImplCache = new();
+
         private HostPackageResolver(
             IReadOnlyList<Assembly> hostPackages,
             Dictionary<(string Module, string Entity), Binding> bindings,
@@ -125,6 +134,46 @@ namespace Wacs.Transpiler.AOT.Component
             ResourceInterfaceTypes = resourceInterfaceTypes;
             PreferredBundleType = preferredBundleType;
             PreferredResourcesType = preferredResourcesType;
+        }
+
+        /// <summary>
+        /// Find a concrete class implementing <paramref name="resourceInterface"/>
+        /// with a public parameterless constructor. Used by direct-link
+        /// emit's SourceGen-shape constructor path: the bindgen pattern
+        /// is `Activator.CreateInstance(impl)` followed by a
+        /// `void Create(args)` instance call, then
+        /// `Resources.AllocateResource(typeof(IFace), instance)`.
+        /// First match wins (stable order across HostPackages); cached.
+        /// Returns false if no such class exists.
+        /// </summary>
+        public bool TryFindResourceImpl(Type resourceInterface,
+            out Type implType)
+        {
+            var cached = _resourceImplCache.GetOrAdd(resourceInterface, t =>
+            {
+                foreach (var asm in HostPackages)
+                {
+                    Type[] types;
+                    try { types = asm.GetExportedTypes(); }
+                    catch (ReflectionTypeLoadException ex)
+                    {
+                        types = ex.Types
+                            .Where(x => x != null)
+                            .Select(x => x!)
+                            .ToArray();
+                    }
+                    foreach (var ct in types)
+                    {
+                        if (ct.IsInterface || ct.IsAbstract) continue;
+                        if (!t.IsAssignableFrom(ct)) continue;
+                        if (ct.GetConstructor(Type.EmptyTypes) == null) continue;
+                        return ct;
+                    }
+                }
+                return null;
+            });
+            implType = cached!;
+            return cached != null;
         }
 
         public bool TryResolve(string module, string entity,

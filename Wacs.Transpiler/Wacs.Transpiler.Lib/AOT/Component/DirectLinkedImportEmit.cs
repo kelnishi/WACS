@@ -98,15 +98,38 @@ namespace Wacs.Transpiler.AOT.Component
                         if (!method.IsStatic) return false;
                         break;
                     case HostPackageResolver.ResourceMethodKind.Constructor:
-                        if (!method.IsStatic) return false;
                         // Constructor: wasm returns exactly one i32
-                        // (the handle). The CLR factory returns the
-                        // instance; emit allocates the handle.
+                        // (the handle). Two CLR shapes are accepted:
+                        //   (a) Static factory returning the resource
+                        //       instance (test bindings + hand-written
+                        //       hosts that prefer static factories).
+                        //   (b) Instance method `void Create(args)` on
+                        //       the resource interface itself
+                        //       (Wacs.ComponentModel.Bindgen.SourceGen
+                        //       output — the resource class has a
+                        //       parameterless ctor + Create separation
+                        //       for exactly this lift). The IL emit
+                        //       discovers the impl type from the
+                        //       resolver's host packages.
                         if (wasmResults.Length != 1
                             || wasmResults[0] != ValType.I32) return false;
-                        if (method.ReturnType == typeof(void)) return false;
-                        if (!binding.InterfaceType.IsAssignableFrom(
-                            method.ReturnType)) return false;
+                        if (method.IsStatic)
+                        {
+                            if (method.ReturnType == typeof(void)) return false;
+                            if (!binding.InterfaceType.IsAssignableFrom(
+                                method.ReturnType)) return false;
+                        }
+                        else
+                        {
+                            // SourceGen shape — must be void return AND
+                            // resolver must be able to find a concrete
+                            // impl class with a parameterless ctor.
+                            if (method.ReturnType != typeof(void)) return false;
+                            if (resolver == null
+                                || !resolver.TryFindResourceImpl(
+                                    binding.InterfaceType, out _))
+                                return false;
+                        }
                         break;
                     default:
                         return false;
@@ -278,9 +301,37 @@ namespace Wacs.Transpiler.AOT.Component
 
             int wasmParamOffset = isInstance ? 1 : 0;
 
+            // SourceGen-shape constructor: instance `void Create(args)`
+            // method on the resource interface, with a separately-
+            // discovered impl class that has a public parameterless
+            // ctor. The IL `Newobj`s a fresh impl, stashes it for the
+            // post-call AllocateResource, and pushes it as `this` for
+            // the upcoming Callvirt.
+            bool isVoidInstanceCtor = isConstructor
+                && !method.IsStatic
+                && method.ReturnType == typeof(void);
+            LocalBuilder? voidCtorInstance = null;
+            if (isVoidInstanceCtor)
+            {
+                if (resolver == null
+                    || !resolver.TryFindResourceImpl(
+                        binding.InterfaceType, out var implType))
+                    return; // gate already validated this; defensive.
+                var implCtor = implType
+                    .GetConstructor(System.Type.EmptyTypes)!;
+                voidCtorInstance = il.DeclareLocal(binding.InterfaceType);
+                il.Emit(OpCodes.Newobj, implCtor);
+                il.Emit(OpCodes.Dup);                     // [inst, inst]
+                il.Emit(OpCodes.Stloc, voidCtorInstance); // [inst]
+                // Cast to interface for the upcoming Callvirt's
+                // method declaring-type.
+                il.Emit(OpCodes.Castclass, binding.InterfaceType);
+            }
+
             // Push the `this` arg for the callvirt — only for
             // free-function or instance-method calls. Static and
-            // constructor methods are static dispatch.
+            // constructor methods are static dispatch (except the
+            // void-instance ctor shape handled above).
             if (isInstance)
             {
                 il.Emit(OpCodes.Ldarg_0);
@@ -353,7 +404,11 @@ namespace Wacs.Transpiler.AOT.Component
             // Static and constructor methods use static dispatch.
             // Instance and free-function methods use callvirt
             // (free fns go through a typed-interface property).
-            if (isStatic || isConstructor)
+            // Static + static-factory constructor → static dispatch.
+            // Void-instance constructor → callvirt against the
+            // freshly-created impl pushed earlier.
+            // Instance / free-function → callvirt.
+            if ((isStatic || isConstructor) && !isVoidInstanceCtor)
                 il.Emit(OpCodes.Call, method);
             else
                 il.Emit(OpCodes.Callvirt, method);
@@ -557,23 +612,28 @@ namespace Wacs.Transpiler.AOT.Component
             }
             else if (isConstructor)
             {
-                // Constructor's CLR factory just left the new
-                // instance on the stack. Allocate a handle for it
-                // via the resources class's
-                // `int AllocateResource(Type, object)` convention,
-                // then leave the handle as the wasm i32 return.
-                //
-                //   stack: [instance]
-                // emit:  ldarg_0; ldfld Resources; castclass <Res>;
-                //        ldtoken <IFace>; call typeof; <swap>;
-                //        callvirt AllocateResource(Type, object) → int
+                // Allocate a handle for the constructed instance via
+                // `Resources.AllocateResource(Type, object) → int`.
+                // For the static-factory shape the instance is on the
+                // stack from the call we just emitted; for the void-
+                // instance-method shape the call returned void and we
+                // saved the instance to a local before the call.
                 var allocate = ResolveAllocateResourceMethod(
                     resourcesType!);
 
-                // Stash the instance, then build the call args in
-                // order: resources, type, instance. Then callvirt.
-                var instLocal = il.DeclareLocal(binding.InterfaceType);
-                il.Emit(OpCodes.Stloc, instLocal);
+                LocalBuilder instLocal;
+                if (isVoidInstanceCtor)
+                {
+                    // Stack is empty (Create returned void); reuse
+                    // the local we stashed pre-call.
+                    instLocal = voidCtorInstance!;
+                }
+                else
+                {
+                    // Stack: [instance from static factory] — stash.
+                    instLocal = il.DeclareLocal(binding.InterfaceType);
+                    il.Emit(OpCodes.Stloc, instLocal);
+                }
 
                 il.Emit(OpCodes.Ldarg_0);
                 il.Emit(OpCodes.Ldfld, ResourcesField);

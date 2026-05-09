@@ -240,6 +240,45 @@ namespace Wacs.Transpiler.Test
             public uint Read() => _v;
         }
 
+        // ====== SourceGen-shape constructor surface ===============
+        // Wacs.ComponentModel.Bindgen.SourceGen emits resource
+        // constructors as `void Create(args)` instance methods on the
+        // resource interface (rather than static factories returning
+        // the interface). The transpiler's direct-link emit accepts
+        // both shapes; the SourceGen shape requires an impl class
+        // with a public parameterless ctor — same convention as
+        // `Wacs.WASI.NN.DependencyInjection.Tensor`.
+        [WitSource(@"resource widget {
+    constructor();
+    read: func() -> u32;
+}",
+            Package = "my:test@1.0.0", Interface = "sg-env",
+            Item = "widget")]
+        public interface ISgWidget
+        {
+            [WitSource(@"constructor();",
+                Package = "my:test@1.0.0", Interface = "sg-env",
+                Item = "[constructor]widget")]
+            void Create();
+
+            [WitSource(@"read: func() -> u32;",
+                Package = "my:test@1.0.0", Interface = "sg-env",
+                Item = "[method]widget.read")]
+            uint Read();
+        }
+
+        // Concrete impl class with public parameterless ctor — the
+        // resolver discovers this as the impl for ISgWidget. Mirrors
+        // the Tensor / GraphExecutionContext pattern in
+        // Wacs.WASI.NN.DependencyInjection.
+        public sealed class TestSgWidget : ISgWidget
+        {
+            private uint _v;
+            public TestSgWidget() { /* parameterless */ }
+            public void Create() { _v = 42u; }
+            public uint Read() => _v;
+        }
+
         // ====== Resource constructor with own<R> arg surface =====
         // [constructor]bag(seed: own<widget>) → bag — same shape as
         // wasi:http/types.outgoing-request(headers: own<fields>).
@@ -7543,6 +7582,168 @@ namespace Wacs.Transpiler.Test
             // Get-by-handle path round-trip cleanly.
             Assert.IsType<int>(raw);
             Assert.Equal(99, (int)raw);
+        }
+
+        // (module
+        //   (type $t0 (func (result i32)))           ;; constructor + export
+        //   (type $t1 (func (param i32) (result i32))) ;; read
+        //   (import "my:test/sg-env@1.0.0" "[constructor]widget"
+        //     (func $imp_ctor (type $t0)))
+        //   (import "my:test/sg-env@1.0.0" "[method]widget.read"
+        //     (func $imp_read (type $t1)))
+        //   (func (export "call_create_read") (result i32)
+        //     call $imp_ctor          ;; leaves handle on stack
+        //     call $imp_read))         ;; consumes handle, returns value
+        //
+        // Same shape as BuildConstructorAndInstanceFixtureWasm but in
+        // the "sg-env" package — exercises the SourceGen-shape
+        // constructor (instance void Create() on ISgWidget) instead of
+        // the static-factory shape (static IWidget Create() on IWidget).
+        // Module string is "my:test/sg-env@1.0.0" (20 bytes) vs the
+        // existing "my:test/res-env@1.0.0" (21).
+        private static byte[] BuildSgConstructorAndInstanceFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types
+            0x01, 0x0A, 0x02,
+            0x60, 0x00, 0x01, 0x7F,            // type 0: () → i32
+            0x60, 0x01, 0x7F, 0x01, 0x7F,      // type 1: (i32) → i32
+            // Import section: 2 imports
+            // size = count(1) + import0(43) + import1(43) = 87 = 0x57
+            0x02, 0x57, 0x02,
+            // Import 0: "my:test/sg-env@1.0.0" "[constructor]widget" : type 0
+            0x14,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x73, 0x67, 0x2D, 0x65, 0x6E, 0x76, 0x40,
+            0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x13,
+            0x5B, 0x63, 0x6F, 0x6E, 0x73, 0x74, 0x72, 0x75,
+            0x63, 0x74, 0x6F, 0x72, 0x5D, 0x77, 0x69, 0x64,
+            0x67, 0x65, 0x74,
+            0x00, 0x00,
+            // Import 1: "my:test/sg-env@1.0.0" "[method]widget.read" : type 1
+            0x14,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x73, 0x67, 0x2D, 0x65, 0x6E, 0x76, 0x40,
+            0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x13,
+            0x5B, 0x6D, 0x65, 0x74, 0x68, 0x6F, 0x64, 0x5D,
+            0x77, 0x69, 0x64, 0x67, 0x65, 0x74, 0x2E, 0x72,
+            0x65, 0x61, 0x64,
+            0x00, 0x01,
+            // Function section: 1 func of type 0 (() → i32)
+            0x03, 0x02, 0x01, 0x00,
+            // Export section: "call_create_read" (16) → func 2
+            0x07, 0x14, 0x01,
+            0x10,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x63, 0x72, 0x65,
+            0x61, 0x74, 0x65, 0x5F, 0x72, 0x65, 0x61, 0x64,
+            0x00, 0x02,
+            // Code section: locals=0, call 0, call 1, end
+            0x0A, 0x08, 0x01, 0x06,
+            0x00, 0x10, 0x00, 0x10, 0x01, 0x0B,
+        };
+
+        [Fact]
+        public void DirectLinkedImport_SourceGenCtorThenInstance_AllocatesAndResolves()
+        {
+            // SourceGen-shape constructor: instance void Create() on
+            // ISgWidget, with TestSgWidget as the discovered impl
+            // (parameterless ctor). The IL emit must `Newobj`
+            // TestSgWidget, callvirt the void Create on it, then
+            // Resources.AllocateResource(typeof(ISgWidget), instance)
+            // — leaving a non-zero handle as the wasm i32 return.
+            //
+            // Pre-fix the gate at line 101 of DirectLinkedImportEmit.cs
+            // rejected the SourceGen shape (`if (!method.IsStatic)
+            // return false`). The constructor fell through to delegate
+            // dispatch which never bound a handle for it; the guest
+            // received 0 (the canonical-ABI null sentinel) and the
+            // subsequent [method]widget.read AVs the host on
+            // Resources.GetResource(typeof(ISgWidget), 0).
+            //
+            // Post-fix: the gate accepts both shapes; the IL emit
+            // picks the void-instance branch and routes through
+            // Activator.CreateInstance(impl) → Create() → Allocate.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Func<int>>(
+                ("my:test/sg-env@1.0.0", "[constructor]widget"),
+                () => throw new InvalidOperationException(
+                    "stub for sg-ctor must not be invoked"));
+            runtime.BindHostFunction<Func<int, int>>(
+                ("my:test/sg-env@1.0.0", "[method]widget.read"),
+                _ => throw new InvalidOperationException(
+                    "stub for sg-read must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildSgConstructorAndInstanceFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(WidgetBundle),
+                resourcesType: typeof(TestResources));
+
+            // Sanity: resolver picked up the SourceGen-shape ctor and
+            // can find the impl class.
+            Assert.True(resolver.TryResolve(
+                "my:test/sg-env@1.0.0", "[constructor]widget",
+                out var ctorBinding));
+            Assert.Equal(HostPackageResolver.ResourceMethodKind.Constructor,
+                ctorBinding.ResourceKind);
+            Assert.True(resolver.TryFindResourceImpl(
+                typeof(ISgWidget), out var implType));
+            Assert.Equal(typeof(TestSgWidget), implType);
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.SgCtor", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Equal(2, options.ResolverImportBindings!.Count);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/sg-env@1.0.0_[constructor]widget")] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for sg-ctor must not be invoked"),
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/sg-env@1.0.0_[method]widget.read")] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for sg-read must not be invoked"),
+                });
+
+            var resources = new TestResources();
+            var bundle = new WidgetBundle(new FakeWidget(0));
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            var callCreateRead = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_create_read"))!;
+            object? raw = callCreateRead.Invoke(instance,
+                Array.Empty<object>());
+
+            // TestSgWidget.Create() sets _v = 42; Read() returns it.
+            // A non-zero round-trip value proves: Newobj fired, Create
+            // ran, AllocateResource minted a real handle, GetResource
+            // resolved it back, callvirt Read returned the recorded
+            // value.
+            Assert.IsType<int>(raw);
+            Assert.Equal(42, (int)raw);
         }
 
         [Fact]
