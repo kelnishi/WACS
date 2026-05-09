@@ -95,6 +95,18 @@ namespace Wacs.Transpiler.AOT.Component
 
         private readonly Dictionary<(string Module, string Entity), Binding>
             _bindings;
+        // Parallel index keyed by (module-without-@version, entity).
+        // Lets WASI guests built against a newer point release of the
+        // spec (e.g. wasi:io/error@0.2.6) resolve against a host
+        // package shipping an older one (wasi:io/error@0.2.3) — the
+        // wasm Component Model treats minor revisions of WASI as
+        // ABI-stable, so wasmtime / jco / wasmer all do the same
+        // version-tolerant match. Exact lookup wins; stripped is a
+        // fallback so a component declaring a specific version
+        // still binds to the matching host first when both are
+        // registered.
+        private readonly Dictionary<(string Module, string Entity), Binding>
+            _bindingsByStrippedModule;
         private readonly HashSet<Type> _resourceInterfaceTypes;
 
         private HostPackageResolver(
@@ -107,6 +119,7 @@ namespace Wacs.Transpiler.AOT.Component
         {
             HostPackages = hostPackages;
             _bindings = bindings;
+            _bindingsByStrippedModule = BuildStrippedIndex(bindings);
             InterfaceTypes = interfaceTypes;
             _resourceInterfaceTypes = resourceInterfaceTypes;
             ResourceInterfaceTypes = resourceInterfaceTypes;
@@ -117,7 +130,51 @@ namespace Wacs.Transpiler.AOT.Component
         public bool TryResolve(string module, string entity,
             out Binding binding)
         {
-            return _bindings.TryGetValue((module, entity), out binding!);
+            // Exact (module-with-@version, entity) match first.
+            if (_bindings.TryGetValue((module, entity), out binding!))
+                return true;
+            // Version-tolerant fallback: strip the trailing
+            // @<version> from the requested module and look up
+            // again. Honors wasm Component Model's stability
+            // contract for WASI minor revisions — the same
+            // (interface, function) is ABI-equivalent across patch
+            // versions of WASI 0.2.x.
+            string stripped = StripVersion(module);
+            if (stripped.Length != module.Length
+                && _bindingsByStrippedModule.TryGetValue(
+                    (stripped, entity), out binding!))
+                return true;
+            return false;
+        }
+
+        // Strip a trailing `@<version>` from a wire module string.
+        // The version is everything after the last `@` — wasm
+        // Component Model wire modules are `<ns>:<pkg>/<iface>@<ver>`,
+        // single `@`, no `@` inside any segment.
+        private static string StripVersion(string module)
+        {
+            int at = module.LastIndexOf('@');
+            return at < 0 ? module : module.Substring(0, at);
+        }
+
+        // Build the secondary lookup index. Multiple bindings sharing
+        // the same (stripped-module, entity) — e.g. when a host
+        // assembly registers both 0.2.3 and 0.2.6 versions of the
+        // same interface — collapse to the first registration; the
+        // exact-match path catches the other.
+        private static Dictionary<(string, string), Binding>
+            BuildStrippedIndex(
+                Dictionary<(string Module, string Entity), Binding> src)
+        {
+            var dst = new Dictionary<(string, string), Binding>(src.Count);
+            foreach (var kv in src)
+            {
+                var stripped = StripVersion(kv.Key.Module);
+                if (stripped.Length == kv.Key.Module.Length) continue;
+                var k = (stripped, kv.Key.Entity);
+                if (!dst.ContainsKey(k)) dst[k] = kv.Value;
+            }
+            return dst;
         }
 
         /// <summary>

@@ -603,8 +603,19 @@ namespace Wacs.Console.Verbs
             }
             catch (Exception ex)
             {
+                // Unwrap reflection-invoke wrappers so the diagnostic
+                // surfaces the actual cause (an unbound import, a
+                // canonical-ABI mismatch, etc.) instead of the
+                // useless "Exception has been thrown by the target
+                // of an invocation." outer message.
+                var inner = ex;
+                while (inner is System.Reflection.TargetInvocationException tie
+                       && tie.InnerException != null)
+                    inner = tie.InnerException;
                 System.Console.Error.WriteLine(
-                    $"error: component run failed: {ex.Message}");
+                    $"error: component run failed: {inner.Message}");
+                if (opts.Verbose)
+                    System.Console.Error.WriteLine(inner);
                 return 1;
             }
         }
