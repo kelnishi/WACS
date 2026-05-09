@@ -12,8 +12,8 @@
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.WASI.Preview2.DependencyInjection</AssemblyName>
-        <AssemblyVersion>0.1.0</AssemblyVersion>
-        <Version>0.1.0</Version>
+        <AssemblyVersion>0.1.1</AssemblyVersion>
+        <Version>0.1.1</Version>
         <RepositoryType>git</RepositoryType>
         <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
         <IsAotCompatible Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net7.0'))">true</IsAotCompatible>
@@ -24,6 +24,14 @@
         <ProjectReference Include="..\..\..\Wacs.ComponentModel\Wacs.ComponentModel\Wacs.ComponentModel.csproj" />
         <ProjectReference Include="..\..\..\Wacs.Core\Wacs.Core\Wacs.Core.csproj" />
         <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.0" />
+        <!-- The Abstractions package alone gives us IServiceCollection /
+             ServiceDescriptor / TryAdd*, but BuildServiceProvider lives
+             in the concrete Microsoft.Extensions.DependencyInjection
+             package. WasiPreview2RuntimeScope needs the concrete
+             implementation to spin up a scope from inside the library;
+             without this, every consumer would have to build the scope
+             themselves and pass it in. -->
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" />
     </ItemGroup>
 
 </Project>

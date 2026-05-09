@@ -424,7 +424,17 @@ namespace Wacs.Transpiler.AOT.Component
                     && (IsTupleOfPrimitives(
                             method.ReturnType.GetElementType()!)
                         || IsRecordOfPrimitives(
-                            method.ReturnType.GetElementType()!));
+                            method.ReturnType.GetElementType()!)
+                        // Resource-bearing tuple/record elements use
+                        // the same packed-stride layout but require
+                        // resolver + resourcesType for per-field
+                        // AllocateResource on store.
+                        || IsTupleOfFlatFields(
+                            method.ReturnType.GetElementType()!,
+                            resolver)
+                        || IsRecordOfFlatFields(
+                            method.ReturnType.GetElementType()!,
+                            resolver));
                 bool isResourceArrayReturn = method.ReturnType.IsArray
                     && method.ReturnType.GetArrayRank() == 1
                     && resolver != null
@@ -461,7 +471,8 @@ namespace Wacs.Transpiler.AOT.Component
                     EmitListOfRecordOrTupleReturn(il,
                         method.ReturnType.GetElementType()!,
                         returnLocal, temps[retAreaSlot],
-                        stringEncoding);
+                        stringEncoding,
+                        resolver, resourcesType);
                 }
                 else
                 if (isStringReturn || isByteArrayReturn
@@ -1318,6 +1329,16 @@ namespace Wacs.Transpiler.AOT.Component
                 // buffer; per-element fields written inline.
                 if (IsTupleOfPrimitives(elem)) return true;
                 if (IsRecordOfPrimitives(elem)) return true;
+                // list<tuple-of-flat-fields-with-resources> /
+                // list<record-of-flat-fields-with-resources>: same
+                // wire layout as the primitives variant, with per-
+                // resource-field allocation through
+                // ctx.Resources.AllocateResource on store. Closes
+                // the gap-9 shape (preopens.get-directories returns
+                // list&lt;tuple&lt;own&lt;descriptor&gt;, string&gt;&gt;).
+                if (IsTupleOfFlatFields(elem, resolver)
+                    || IsRecordOfFlatFields(elem, resolver))
+                    return true;
                 // list<own<R>>: per-element AllocateResource + i32
                 // handle write into the outer buffer.
                 if (resolver != null
@@ -1450,6 +1471,22 @@ namespace Wacs.Transpiler.AOT.Component
             return true;
         }
 
+        // Resolver-aware variant: also accepts tuples where one or
+        // more fields are resource interfaces (own&lt;R&gt; → i32
+        // handle). Used by IsAggregateReturnSupported to recognize
+        // list&lt;tuple&lt;own&lt;R&gt;, string&gt;&gt; — preopens.get-directories,
+        // http.headers.entries (when fields are resources), and the
+        // broader resource+label shape class.
+        private static bool IsTupleOfFlatFields(Type t,
+            HostPackageResolver? resolver)
+        {
+            if (!t.IsGenericType) return false;
+            if (!IsValueTupleType(t.GetGenericTypeDefinition())) return false;
+            foreach (var ta in t.GetGenericArguments())
+                if (!IsFlatField(ta, resolver)) return false;
+            return true;
+        }
+
         // True when t is a sealed POCO with all property types
         // being flat fields (primitives, strings, byte[]).
         private static bool IsRecordOfPrimitives(Type t)
@@ -1460,9 +1497,20 @@ namespace Wacs.Transpiler.AOT.Component
             return true;
         }
 
+        // Resolver-aware variant: see IsTupleOfFlatFields rationale.
+        private static bool IsRecordOfFlatFields(Type t,
+            HostPackageResolver? resolver)
+        {
+            if (!IsLikelyRecordType(t)) return false;
+            foreach (var p in GetRecordProperties(t))
+                if (!IsFlatField(p.PropertyType, resolver)) return false;
+            return true;
+        }
+
         // Max field alignment across a tuple/record. string/byte[]
         // contribute align 4 (i32 ptr); primitives use their own
-        // alignment.
+        // alignment; resource interfaces contribute align 4 (i32
+        // handle) when a resolver is supplied.
         private static int MaxFieldAlign(Type t)
         {
             int maxA = 1;
@@ -1511,7 +1559,9 @@ namespace Wacs.Transpiler.AOT.Component
             Action<ILGenerator> pushBaseAddress,
             LocalBuilder valueLocal,
             CanonOption.Kind stringEncoding =
-                CanonOption.Kind.StringUtf8)
+                CanonOption.Kind.StringUtf8,
+            HostPackageResolver? resolver = null,
+            Type? resourcesType = null)
         {
             int offsetSoFar = 0;
             bool isTuple = type.IsGenericType
@@ -1538,9 +1588,11 @@ namespace Wacs.Transpiler.AOT.Component
                             push.Emit(OpCodes.Ldloc, valueLocal);
                             push.Emit(OpCodes.Call, itemReader);
                         },
-                        stringEncoding);
+                        stringEncoding,
+                        resolver, resourcesType);
 
-                    offsetSoFar = fieldOffset + SizeOfFlatField(et);
+                    offsetSoFar = fieldOffset
+                        + SizeOfFlatField(et, resolver);
                 }
             }
             else
@@ -1557,28 +1609,35 @@ namespace Wacs.Transpiler.AOT.Component
                             push.Emit(OpCodes.Callvirt,
                                 p.GetGetMethod()!);
                         },
-                        stringEncoding);
+                        stringEncoding,
+                        resolver, resourcesType);
 
                     offsetSoFar = fieldOffset
-                        + SizeOfFlatField(p.PropertyType);
+                        + SizeOfFlatField(p.PropertyType, resolver);
                 }
             }
             return offsetSoFar;
         }
 
         // Per-field store helper: dispatches on the field type to
-        // either a plain primitive store (StoreXxx) or the
+        // either a plain primitive store (StoreXxx), the
         // cabi_realloc-backed variable-length store (StoreString /
-        // StoreByteArray) based on whether the field is primitive
-        // or a (ptr, len) pair-style flat field.
+        // StoreByteArray), or the resource-handle store
+        // (Resources.AllocateResource → i32 → StoreI32) when the
+        // field is a resource interface (own&lt;R&gt;).
         private static void EmitTupleOrRecordFieldStore(
             ILGenerator il, Type fieldType, int fieldOffset,
             Action<ILGenerator> pushBaseAddress,
             Action<ILGenerator> pushFieldValue,
-            CanonOption.Kind stringEncoding)
+            CanonOption.Kind stringEncoding,
+            HostPackageResolver? resolver = null,
+            Type? resourcesType = null)
         {
             bool isString = fieldType == typeof(string);
             bool isByteArray = fieldType == typeof(byte[]);
+            bool isResource = resolver != null
+                && resourcesType != null
+                && resolver.IsResourceInterface(fieldType);
 
             // dest_array
             il.Emit(OpCodes.Ldarg_0);
@@ -1606,6 +1665,20 @@ namespace Wacs.Transpiler.AOT.Component
                     ? ResolveStoreStringMethod(stringEncoding)
                     : StoreByteArrayMethod);
             }
+            else if (isResource)
+            {
+                // handle = ctx.Resources.AllocateResource(typeof(IRes), value)
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, ResourcesField);
+                il.Emit(OpCodes.Castclass, resourcesType!);
+                il.Emit(OpCodes.Ldtoken, fieldType);
+                il.Emit(OpCodes.Call, GetTypeFromHandleMethod);
+                pushFieldValue(il);
+                il.Emit(OpCodes.Callvirt,
+                    ResolveAllocateResourceMethod(resourcesType!));
+                // StoreI32(dest_array, dest_offset, handle)
+                il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(int)));
+            }
             else
             {
                 pushFieldValue(il);
@@ -1619,7 +1692,9 @@ namespace Wacs.Transpiler.AOT.Component
             ILGenerator il, Type type, LocalBuilder retAreaLocal,
             int baseOffset, LocalBuilder valueLocal,
             CanonOption.Kind stringEncoding =
-                CanonOption.Kind.StringUtf8)
+                CanonOption.Kind.StringUtf8,
+            HostPackageResolver? resolver = null,
+            Type? resourcesType = null)
         {
             return EmitInlineRecordOrTupleStore(il, type,
                 il2 =>
@@ -1631,7 +1706,8 @@ namespace Wacs.Transpiler.AOT.Component
                         il2.Emit(OpCodes.Add);
                     }
                 },
-                valueLocal, stringEncoding);
+                valueLocal, stringEncoding,
+                resolver, resourcesType);
         }
 
         // Emit IL for a list<tuple|record> top-level return.
@@ -1646,9 +1722,11 @@ namespace Wacs.Transpiler.AOT.Component
             ILGenerator il, Type elemType, LocalBuilder arrayLocal,
             LocalBuilder retAreaLocal,
             CanonOption.Kind stringEncoding =
-                CanonOption.Kind.StringUtf8)
+                CanonOption.Kind.StringUtf8,
+            HostPackageResolver? resolver = null,
+            Type? resourcesType = null)
         {
-            int elemSize = SizeOfRecordOrTuple(elemType);
+            int elemSize = SizeOfRecordOrTuple(elemType, resolver);
             int elemAlign = MaxFieldAlign(elemType);
 
             // count = arrayLocal.Length
@@ -1714,7 +1792,8 @@ namespace Wacs.Transpiler.AOT.Component
                     il2.Emit(OpCodes.Mul);
                     il2.Emit(OpCodes.Add);
                 },
-                elemLocal, stringEncoding);
+                elemLocal, stringEncoding,
+                resolver, resourcesType);
 
             // i++
             il.Emit(OpCodes.Ldloc, indexLocal);
@@ -2440,7 +2519,11 @@ namespace Wacs.Transpiler.AOT.Component
         // Total wire size of a tuple/record-of-primitives, accounting
         // for per-field alignment padding. Used to compute the
         // per-element stride in list<record>/list<tuple>.
-        private static int SizeOfRecordOrTuple(Type type)
+        // Resolver-aware: when a field is a resource interface, its
+        // wire size is 4 (i32 handle) rather than the 8-byte ptr+len
+        // default.
+        private static int SizeOfRecordOrTuple(Type type,
+            HostPackageResolver? resolver = null)
         {
             int offsetSoFar = 0;
             bool isTuple = type.IsGenericType
@@ -2451,7 +2534,7 @@ namespace Wacs.Transpiler.AOT.Component
                 {
                     int fa = AlignOfFlatField(et);
                     offsetSoFar = Align(offsetSoFar, fa)
-                        + SizeOfFlatField(et);
+                        + SizeOfFlatField(et, resolver);
                 }
             }
             else
@@ -2460,7 +2543,7 @@ namespace Wacs.Transpiler.AOT.Component
                 {
                     int fa = AlignOfFlatField(p.PropertyType);
                     offsetSoFar = Align(offsetSoFar, fa)
-                        + SizeOfFlatField(p.PropertyType);
+                        + SizeOfFlatField(p.PropertyType, resolver);
                 }
             }
             // canon-ABI: pad the total to the type's alignment so
@@ -2828,17 +2911,41 @@ namespace Wacs.Transpiler.AOT.Component
             return false;
         }
 
+        // Resolver-aware overload: also accepts resource interfaces
+        // (own&lt;R&gt; lowers to a single i32 handle, align 4) so the
+        // caller can recognize tuples like (own&lt;descriptor&gt;, string)
+        // — used by preopens.get-directories, http headers.entries,
+        // and other "list of (resource, label)" shapes.
+        private static bool IsFlatField(Type t,
+            HostPackageResolver? resolver)
+        {
+            if (IsFlatField(t)) return true;
+            if (resolver != null && resolver.IsResourceInterface(t)
+                && resolver.PreferredResourcesType != null)
+                return true;
+            return false;
+        }
+
         // Alignment for a flat field. string/byte[] = 4 (i32 ptr).
         private static int AlignOfFlatField(Type t)
         {
             if (IsStorablePrimitive(t)) return AlignOfPrimitive(t);
-            return 4;  // string / byte[] (ptr aligned)
+            // Both string/byte[] (ptr+len pair) and resource interfaces
+            // (i32 handle) are i32-aligned. The flat-field tier doesn't
+            // distinguish resource interfaces here because their wire
+            // alignment matches the (ptr-pair) default; the per-field
+            // store dispatches on type to pick the right encoding.
+            return 4;
         }
 
-        // Size for a flat field. string/byte[] = 8 (ptr + len).
-        private static int SizeOfFlatField(Type t)
+        // Size for a flat field. string/byte[] = 8 (ptr + len);
+        // resource interface = 4 (i32 handle).
+        private static int SizeOfFlatField(Type t,
+            HostPackageResolver? resolver = null)
         {
             if (IsStorablePrimitive(t)) return SizeOfPrimitive(t);
+            if (resolver != null && resolver.IsResourceInterface(t))
+                return 4;
             return 8;  // string / byte[] (ptr + len pair)
         }
 

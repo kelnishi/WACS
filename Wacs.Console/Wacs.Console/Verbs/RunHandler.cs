@@ -22,6 +22,7 @@ using Wacs.Transpiler.AOT.Component;
 using Wacs.Transpiler.Cli;          // HostedRunner (legacy ns inside Lib)
 using Wacs.Transpiler.Hosting;
 using Wacs.WASI.Preview1.Types;
+using Wacs.WASI.Preview2.DependencyInjection;
 
 namespace Wacs.Console.Verbs
 {
@@ -106,12 +107,16 @@ namespace Wacs.Console.Verbs
                 return 1;
             }
 
-            // Validate WASI directories.
+            // Validate WASI directories. Accepts both bare paths and
+            // wasmtime-style `host::guest` mount-pair syntax — the
+            // existence check applies to the host-path side only.
             foreach (var dir in opts.Directories ?? Enumerable.Empty<string>())
             {
-                if (!Directory.Exists(dir))
+                var (hostPath, _) = SplitMount(dir);
+                if (!Directory.Exists(hostPath))
                 {
-                    System.Console.Error.WriteLine($"Error: Directory not found: {dir}");
+                    System.Console.Error.WriteLine(
+                        $"Error: Directory not found: {hostPath}");
                     return 1;
                 }
             }
@@ -549,74 +554,109 @@ namespace Wacs.Console.Verbs
             var tOpts = BuildTranspilerOptions(opts);
             tOpts.HostPackages = hostPackages;
 
-            TranspilationResult result;
+            // The wasip2 DI scope is constructed inside
+            // configureImports (where the runtime first becomes
+            // available) and held across both transpile and
+            // dispatch. The scope's Linker resolution registers
+            // every *Bindings.BindToRuntime against the runtime
+            // so direct-link-emit-can't-handle-this-shape imports
+            // (e.g. wasi:filesystem/preopens.get-directories,
+            // wasi:cli/environment.get-environment, headers.entries,
+            // tcp-socket.accept) fall back to BindHostFunction
+            // dispatch instead of zero-filling silently.
+            WasiPreview2RuntimeScope? scope = null;
+            var preopens = ParsePreopenMounts(opts.Directories);
+
             try
             {
-                using var fs = new FileStream(componentPath, FileMode.Open,
-                    FileAccess.Read);
-                result = ComponentTranspiler.TranspileSingleModule(
-                    fs,
-                    assemblyNamespace: "WacsRunComponent",
-                    moduleName: "RunModule",
-                    options: tOpts,
-                    configureImports: rt =>
-                    {
-                        using var fs2 = new FileStream(componentPath,
-                            FileMode.Open, FileAccess.Read);
-                        var parsed = ComponentTranspiler.Parse(fs2);
-                        if (parsed.CoreModules.Count == 0) return;
-                        int primary = parsed.CoreModules.Count == 1 ? 0
-                            : (Wacs.ComponentModel.Runtime.ComponentInstance
-                                .FindPrimaryCoreModuleIdx(parsed.Component)
-                              ?? 0);
-                        ComponentImportStubs.RegisterAll(rt,
-                            parsed.CoreModules[primary]);
+                TranspilationResult result;
+                try
+                {
+                    using var fs = new FileStream(componentPath, FileMode.Open,
+                        FileAccess.Read);
+                    result = ComponentTranspiler.TranspileSingleModule(
+                        fs,
+                        assemblyNamespace: "WacsRunComponent",
+                        moduleName: "RunModule",
+                        options: tOpts,
+                        configureImports: rt =>
+                        {
+                            using var fs2 = new FileStream(componentPath,
+                                FileMode.Open, FileAccess.Read);
+                            var parsed = ComponentTranspiler.Parse(fs2);
+                            if (parsed.CoreModules.Count == 0) return;
+                            int primary = parsed.CoreModules.Count == 1 ? 0
+                                : (Wacs.ComponentModel.Runtime.ComponentInstance
+                                    .FindPrimaryCoreModuleIdx(parsed.Component)
+                                  ?? 0);
+                            ComponentImportStubs.RegisterAll(rt,
+                                parsed.CoreModules[primary]);
 
-                        // --bind runs AFTER the import stubs so an
-                        // explicit IBindable.BindHostFunction
-                        // overrides the default trap-stub for that
-                        // import. Custom shims (e.g. a wasi-nn
-                        // shim that constructs WasiNNHost +
-                        // OnnxBackend) plug in here.
-                        ApplyBindings(opts, rt);
-                    });
-            }
-            catch (Exception ex)
-            {
-                System.Console.Error.WriteLine(
-                    $"error: component transpilation failed: {ex.Message}");
-                return 1;
-            }
+                            // Build the wasip2 scope BEFORE
+                            // ApplyBindings so wasip2's
+                            // BindToRuntime registrations land
+                            // on top of the trap-stubs but BELOW
+                            // any `--bind` shim that wants to
+                            // override (last write wins via
+                            // BindHostFunction's normal
+                            // semantics).
+                            if (opts.Wasip2)
+                            {
+                                scope = new WasiPreview2RuntimeScope(
+                                    runtime: rt,
+                                    preopens: preopens);
+                            }
 
-            // Dispatch through the same machinery `wacs build --emit-main`
-            // would emit, so behavior matches the saved-and-loaded path.
-            // When `--call` is unset, ComponentMainHost auto-resolves
-            // the command-component entry (`wasi:cli/run@<version>#run`)
-            // before falling back to `_start`. Matches what wasmtime,
-            // jco, and wasmer do for stock command components.
-            string? entry = string.IsNullOrEmpty(opts.Call) ? null : opts.Call;
-            try
-            {
-                return ComponentMainHost.Run(result.ModuleClass!,
-                    (opts.Args ?? Enumerable.Empty<string>()).ToArray(),
-                    entry);
+                            // --bind runs AFTER scope construction
+                            // so an explicit IBindable.BindHostFunction
+                            // overrides the default trap-stub OR the
+                            // wasip2 binding for that import.
+                            ApplyBindings(opts, rt);
+                        });
+                }
+                catch (Exception ex)
+                {
+                    System.Console.Error.WriteLine(
+                        $"error: component transpilation failed: {ex.Message}");
+                    return 1;
+                }
+
+                // Dispatch through the same machinery `wacs build --emit-main`
+                // would emit, so behavior matches the saved-and-loaded path.
+                // When `--call` is unset, ComponentMainHost auto-resolves
+                // the command-component entry (`wasi:cli/run@<version>#run`)
+                // before falling back to `_start`. Matches what wasmtime,
+                // jco, and wasmer do for stock command components.
+                string? entry = string.IsNullOrEmpty(opts.Call) ? null : opts.Call;
+                try
+                {
+                    return ComponentMainHost.Run(result.ModuleClass!,
+                        (opts.Args ?? Enumerable.Empty<string>()).ToArray(),
+                        entry,
+                        prebuiltBundle: scope?.Bundle,
+                        prebuiltResources: scope?.Resources);
+                }
+                catch (Exception ex)
+                {
+                    // Unwrap reflection-invoke wrappers so the diagnostic
+                    // surfaces the actual cause (an unbound import, a
+                    // canonical-ABI mismatch, etc.) instead of the
+                    // useless "Exception has been thrown by the target
+                    // of an invocation." outer message.
+                    var inner = ex;
+                    while (inner is System.Reflection.TargetInvocationException tie
+                           && tie.InnerException != null)
+                        inner = tie.InnerException;
+                    System.Console.Error.WriteLine(
+                        $"error: component run failed: {inner.Message}");
+                    if (opts.Verbose)
+                        System.Console.Error.WriteLine(inner);
+                    return 1;
+                }
             }
-            catch (Exception ex)
+            finally
             {
-                // Unwrap reflection-invoke wrappers so the diagnostic
-                // surfaces the actual cause (an unbound import, a
-                // canonical-ABI mismatch, etc.) instead of the
-                // useless "Exception has been thrown by the target
-                // of an invocation." outer message.
-                var inner = ex;
-                while (inner is System.Reflection.TargetInvocationException tie
-                       && tie.InnerException != null)
-                    inner = tie.InnerException;
-                System.Console.Error.WriteLine(
-                    $"error: component run failed: {inner.Message}");
-                if (opts.Verbose)
-                    System.Console.Error.WriteLine(inner);
-                return 1;
+                scope?.Dispose();
             }
         }
 
@@ -708,6 +748,32 @@ namespace Wacs.Console.Verbs
                         "bind          " + asmPath + " -> "
                         + loaded.Count + " binding(s)");
             }
+        }
+
+        /// <summary>
+        /// Split a `--dir` entry into (hostPath, guestPath). Accepts
+        /// the wasmtime-style `host::guest` form; a bare path mounts
+        /// at `/<basename>` so a guest's canonical-absolute-path read
+        /// (`/models/x.txt`) works against `wacs run -d models`.
+        /// Matches Preview1's existing guest-path-rooting behavior so
+        /// the same flag form works on both engines.
+        /// </summary>
+        private static (string hostPath, string guestPath) SplitMount(string raw)
+        {
+            int sep = raw.IndexOf("::", StringComparison.Ordinal);
+            if (sep >= 0)
+                return (raw.Substring(0, sep), raw.Substring(sep + 2));
+            var trimmed = raw.TrimEnd('/', '\\');
+            if (trimmed.StartsWith("./", StringComparison.Ordinal))
+                trimmed = trimmed.Substring(2);
+            return (raw, "/" + Path.GetFileName(trimmed));
+        }
+
+        private static (string hostPath, string guestPath)[] ParsePreopenMounts(
+            IEnumerable<string>? dirs)
+        {
+            if (dirs == null) return Array.Empty<(string, string)>();
+            return dirs.Select(SplitMount).ToArray();
         }
 
         private static bool DetectComponent(string path)

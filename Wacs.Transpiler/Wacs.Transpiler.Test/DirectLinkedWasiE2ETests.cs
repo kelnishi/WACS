@@ -416,6 +416,180 @@ namespace Wacs.Transpiler.Test
                 unchecked((ulong)(long)raw));
         }
 
+        [Fact]
+        public void E2E_Preopens_GetDirectories_ListResourceStringTuple()
+        {
+            // wasi:filesystem/preopens.get-directories returns
+            // list&lt;tuple&lt;own&lt;descriptor&gt;, string&gt;&gt;. The fixture's
+            // exported `count` calls get-directories, drops every
+            // descriptor handle (i32.load at outerPtr + i*12), and
+            // returns the count.
+            //
+            // This test wires the production WasiPreview2Bundle with
+            // a stub preopens that hands back three (descriptor,
+            // path) pairs and verifies the transpiled, direct-linked
+            // emit lifts the list correctly: per-element
+            // AllocateResource for the own&lt;descriptor&gt; field plus
+            // cabi_realloc + UTF-8 encode for the string field, all
+            // packed into the 12-byte stride the wasm probes. Closes
+            // gap 9 from wasi-nn/WACS-GAPS.md (preopens not reaching
+            // the guest under the transpiler engine).
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            // Trap-stub the imports so runtime.InstantiateModule's
+            // import resolution succeeds. Direct-link IL bypasses
+            // these — they fire only if the path falls back.
+            runtime.BindHostFunction<Action<int>>(
+                ("wasi:filesystem/preopens@0.2.8", "get-directories"),
+                _ => throw new InvalidOperationException(
+                    "stub get-directories must not be invoked when "
+                    + "direct linking is in effect"));
+            runtime.BindHostFunction<Action<int>>(
+                ("wasi:filesystem/types@0.2.8",
+                    "[resource-drop]descriptor"),
+                _ => { /* drops are runtime-side; benign */ });
+
+            var fixturePath = FindFixturePath(
+                "wasi-preopens-component", "po.component.wasm");
+            // The fixture is a component; pull the embedded core
+            // module via ComponentTranspiler.ParseFile so we can
+            // transpile the core directly (the test exercises the
+            // core module path, not the full component-instantiate
+            // flow).
+            var parsed = ComponentTranspiler.ParseFile(fixturePath);
+            var module = parsed.CoreModules[0];
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(Wacs.WASI.Preview2.Filesystem
+                .IPreopens).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm });
+            Assert.Equal(typeof(WasiPreview2Bundle),
+                resolver.PreferredBundleType);
+            // get-directories MUST resolve through the bundle path
+            // — the resolver-aware aggregate predicate is what
+            // drives this test.
+            Assert.True(resolver.TryResolve(
+                "wasi:filesystem/preopens@0.2.8",
+                "get-directories", out _));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.PreopensE2E", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+
+            // get-directories at minimum lands in the binding map
+            // — that's the import this test cares about. Resource-
+            // drop intrinsics may or may not be resolver-tracked
+            // depending on host-package convention; we don't assert
+            // on it.
+            Assert.True(options.ResolverImportBindings!.Count >= 1);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    [InterfaceGenerator.SanitizeName(
+                        "wasi:filesystem/preopens@0.2.8_get-directories")]
+                        = _ => throw new InvalidOperationException(
+                            "IImports stub for get-directories must "
+                            + "not be invoked"),
+                });
+
+            var preopens = new FixedPreopens(new (
+                Wacs.WASI.Preview2.Filesystem.IDescriptor, string)[]
+                {
+                    (new Wacs.WASI.Preview2.Filesystem.Descriptor("/"),
+                        "/"),
+                    (new Wacs.WASI.Preview2.Filesystem.Descriptor(
+                        "/tmp"), "/tmp"),
+                    (new Wacs.WASI.Preview2.Filesystem.Descriptor(
+                        "/home"), "/home"),
+                });
+            var bundle = new WasiPreview2Bundle(
+                environment: new StubEnv(),
+                exit: new StubExit(),
+                stdin: new StubStdin(),
+                stdout: new StubStdout(),
+                stderr: new StubStderr(),
+                terminalStdin: new StubTermStdin(),
+                terminalStdout: new StubTermStdout(),
+                terminalStderr: new StubTermStderr(),
+                monotonicClock: new StubMonotonic(),
+                wallClock: new StubWall(),
+                timezone: new StubTimezone(),
+                random: new StubRandom(),
+                insecure: new StubInsecure(),
+                insecureSeed: new StubInsecureSeed(),
+                poll: new StubPoll(),
+                preopens: preopens,
+                filesystemErrorCode: new StubFsErr(),
+                instanceNetwork: new StubInstNet(),
+                tcpCreateSocket: new StubTcp(),
+                udpCreateSocket: new StubUdp(),
+                ipNameLookup: new StubDns(),
+                outgoingHandler: new StubHttpHandler());
+
+            var resources = new WasiPreview2Resources(
+                new Wacs.WASI.Preview2.HostBinding.ResourceContext());
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            var countMethod = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("count"))!;
+            object? raw = countMethod.Invoke(instance,
+                Array.Empty<object>());
+
+            // Three preopens lifted, count returned cleanly. The
+            // stub IImports throws if reached, so a non-zero return
+            // proves the direct-link emit assembled the list.
+            Assert.IsType<int>(raw);
+            Assert.Equal(3, (int)raw!);
+        }
+
+        private static string FindFixturePath(string fixtureDir,
+            string fileName)
+        {
+            var dir = new DirectoryInfo(
+                Directory.GetCurrentDirectory());
+            while (dir != null
+                && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test",
+                "components", "fixtures", fixtureDir, "wasm",
+                fileName);
+        }
+
+        private sealed class FixedPreopens
+            : Wacs.WASI.Preview2.Filesystem.IPreopens
+        {
+            private readonly (Wacs.WASI.Preview2.Filesystem.IDescriptor,
+                string)[] _entries;
+            public FixedPreopens((
+                Wacs.WASI.Preview2.Filesystem.IDescriptor, string)[] e)
+            { _entries = e; }
+            public (Wacs.WASI.Preview2.Filesystem.IDescriptor, string)[]
+                GetDirectories() => _entries;
+        }
+
+        private sealed class StubRandom
+            : Wacs.WASI.Preview2.Random.IRandom
+        {
+            public ulong GetRandomU64() =>
+                throw new NotImplementedException();
+            public byte[] GetRandomBytes(ulong len) =>
+                throw new NotImplementedException();
+        }
+
         // ---- Stub impls for the rest of the bundle interfaces ----
         // None of these are touched by the wasm-random fixture;
         // they exist only to satisfy WasiPreview2Bundle's ctor.
