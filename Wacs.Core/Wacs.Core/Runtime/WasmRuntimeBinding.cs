@@ -338,8 +338,50 @@ namespace Wacs.Core.Runtime
             GetExecContext().Store.ReplaceFunction(addr, replacement);
         }
 
-        private IAddress? GetBoundEntity((string module, string entity) id) =>
-            _entityBindings.GetValueOrDefault(id);
+        private IAddress? GetBoundEntity((string module, string entity) id)
+        {
+            if (_entityBindings.TryGetValue(id, out var direct))
+                return direct;
+
+            // Version-tolerant fallback: when the lookup misses,
+            // try with the trailing `@<version>` stripped from the
+            // module string. The wasm Component Model treats minor
+            // revisions of WASI as ABI-stable, so a guest built
+            // against `wasi:cli/stdout@0.2.6` should bind to a host
+            // package shipping `@0.2.8` — same shape, ABI-equivalent.
+            // wasmtime / jco / wasmer do the same fuzzy match.
+            //
+            // Stripped entries land in the same dict keyed by the
+            // stripped module name when BindHostFunction sees an
+            // `@<version>` suffix; this is a fallback when only one
+            // side carries the version annotation.
+            int at = id.module.LastIndexOf('@');
+            if (at < 0) return null;
+            string stripped = id.module.Substring(0, at);
+
+            // Try the stripped lookup directly (matches when host
+            // bound under the un-versioned name).
+            if (_entityBindings.TryGetValue((stripped, id.entity),
+                    out var strippedHit))
+                return strippedHit;
+
+            // Final pass: the host bound under a DIFFERENT
+            // @<version>. Scan keys for any that strip to the same
+            // module + match the entity. O(n) on miss only; the
+            // typical bound entity count is in the hundreds and
+            // this branch fires at most once per failed import.
+            foreach (var kv in _entityBindings)
+            {
+                if (kv.Key.Item2 != id.entity) continue;
+                int kvAt = kv.Key.Item1.LastIndexOf('@');
+                if (kvAt < 0) continue;
+                if (string.CompareOrdinal(
+                        kv.Key.Item1, 0, stripped, 0, stripped.Length) == 0
+                    && kvAt == stripped.Length)
+                    return kv.Value;
+            }
+            return null;
+        }
 
         /// <summary>
         /// Enumerate every <c>(module, entity)</c> import currently
