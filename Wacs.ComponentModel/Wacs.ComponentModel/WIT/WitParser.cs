@@ -287,8 +287,11 @@ namespace Wacs.ComponentModel.WIT
         private WitVersion ParseSemver()
         {
             // Sequence of Integer tokens separated by Dots, optional prerelease
-            // after '-', optional build after '+'. The lexer currently produces
-            // Integer and Dot separately; parse that shape.
+            // after '-', optional build after '+'. The lexer produces
+            // Integer / Dot / Dash / Plus / Ident separately; ParseSemverTag
+            // joins them back into the dot-separated identifier run that the
+            // semver grammar describes (e.g. `rc-2024-10-28`,
+            // `alpha.1`, `sha.abc123`).
             var startTok = Current;
             int major = ParseSemverNum();
             Expect(WitTokenKind.Dot, "'.' in semver");
@@ -297,13 +300,64 @@ namespace Wacs.ComponentModel.WIT
             int patch = ParseSemverNum();
             var v = new WitVersion { Span = SpanOf(startTok), Major = major, Minor = minor, Patch = patch };
 
-            // Prerelease / build lex as follow-on identifier runs — but the
-            // WIT lexer doesn't produce a '-' token, so for now we
-            // deliberately leave pre-release/build unsupported. Extending the
-            // lexer to recognize '-' and '+' in this context is a targeted
-            // follow-up if the grammar ever shows up in real WIT files we
-            // need to handle.
+            if (At(WitTokenKind.Dash))
+            {
+                Consume();
+                v.Prerelease = ParseSemverTag();
+            }
+            if (At(WitTokenKind.Plus))
+            {
+                Consume();
+                v.Build = ParseSemverTag();
+            }
+
             return v;
+        }
+
+        // Consume the dot-separated identifier run that follows `-` or `+`
+        // in a semver tag. Each segment is letters / digits / dash; segments
+        // are joined by `.`. Stops at the first token that can't fit
+        // (Semi, RBrace, whitespace handled by the lexer, …) so the tag
+        // grammar consumes maximally without overrunning into the next
+        // production. Returns the assembled string sans the leading
+        // separator (per WitVersion's stored format).
+        private string ParseSemverTag()
+        {
+            var sb = new System.Text.StringBuilder();
+            bool first = true;
+            while (true)
+            {
+                if (!first)
+                {
+                    if (!At(WitTokenKind.Dot)) break;
+                    Consume();
+                    sb.Append('.');
+                }
+                first = false;
+
+                // Each segment is either an Integer (numeric identifier) or
+                // an Ident (alphanumeric + dash). After consuming the head,
+                // we may see Dash + Ident/Integer chains
+                // (e.g. `rc-2024-10-28` lexes as Ident("rc"), Dash,
+                // Integer("2024"), Dash, Integer("10"), Dash, Integer("28")
+                // because the lexer already absorbed `rc` as an Ident
+                // up to the dash). Glue consecutive Dash/Ident/Integer
+                // tokens here.
+                if (!At(WitTokenKind.Ident) && !At(WitTokenKind.Integer))
+                    throw new FormatException(
+                        $"line {Current.Line}:{Current.Column}: "
+                        + "expected identifier or integer in semver tag");
+                while (At(WitTokenKind.Ident)
+                       || At(WitTokenKind.Integer)
+                       || At(WitTokenKind.Dash))
+                {
+                    var t = Current;
+                    if (t.Kind == WitTokenKind.Dash) sb.Append('-');
+                    else sb.Append(_lex.Slice(t));
+                    Consume();
+                }
+            }
+            return sb.ToString();
         }
 
         private int ParseSemverNum()

@@ -1,5 +1,30 @@
 # Changelog
 
+## [WACS.ComponentModel 0.2.0] — WIT parser accepts pre-release semver tags
+
+`WitLexer` now emits dedicated `Dash` and `Plus` tokens (only when
+not part of `->` or kebab-case identifiers). `WitParser.ParseSemver`
+consumes them as the optional pre-release / build suffixes per
+semver, populating `WitVersion.Prerelease` / `Build`.
+
+Closes the `wasi:nn@0.2.0-rc-2024-10-28` (and any future rc-tagged)
+WIT package's "unexpected character '-'" failure path. Unblocks the
+SourceGen-driven host-interface emission for wasi-nn (see
+WACS.WASI.NN 0.3.0).
+
+## [WACS.WASI.NN 0.3.0] — Source-gen [WitSource] interfaces
+
+Wires `Wacs.ComponentModel.Bindgen.SourceGen` against
+`wit/wasi-nn.wit`, producing `[WitSource]`-decorated interfaces
+under `Wacs.WASI.NN.Nn.{Errors, Graph, Inference, Tensor}`. The
+transpiler's `HostPackageResolver` discovers these to direct-link
+component-model wasi-nn imports — symmetric with how
+`Wacs.WASI.Preview2` wires its hand-migrated subsystems.
+
+The hand-written `WitBindings` continues to own the interpreter-
+side `BindHostFunction` wiring; the generated interfaces feed the
+transpiler-direct-link path on the wasip2 component path.
+
 ## [WACS.WASI.Preview2 0.2.0] — WasiPreview2Host composite + UseWasiPreview2 extension
 
 `WasiPreview2Host` is the interpreter-side composite that wires every
