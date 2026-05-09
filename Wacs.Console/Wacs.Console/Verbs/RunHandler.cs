@@ -98,6 +98,29 @@ namespace Wacs.Console.Verbs
 
         private static int ExecuteSingleCore(RunOptions opts, string wasmPath)
         {
+            // Phase C.5 / C.4c: a `wacs run --native-memory` invocation
+            // sets the storage mode for both the interpreter
+            // (RuntimeOptions.MemoryStorage on the InstantiateModule
+            // call below) and the transpiler-engine path (the static
+            // ModuleInit.CurrentMemoryStorage flag InitializationHelper
+            // reads when the transpiled module class is constructed).
+            // Reset to ManagedArray on exit so subsequent in-process
+            // calls (test harnesses, library hosts) aren't affected.
+            var prevStorage = ModuleInit.CurrentMemoryStorage;
+            if (opts.NativeMemory)
+                ModuleInit.CurrentMemoryStorage = MemoryStorageMode.NativePointer;
+            try
+            {
+                return ExecuteSingleCoreInner(opts, wasmPath);
+            }
+            finally
+            {
+                ModuleInit.CurrentMemoryStorage = prevStorage;
+            }
+        }
+
+        private static int ExecuteSingleCoreInner(RunOptions opts, string wasmPath)
+        {
             string fileExtension = Path.GetExtension(wasmPath).ToLowerInvariant();
             if (fileExtension != ".wasm" && fileExtension != ".wat")
             {
@@ -209,6 +232,9 @@ namespace Wacs.Console.Verbs
                 {
                     SkipModuleValidation = true,
                     TimeInstantiation = opts.Verbose,
+                    MemoryStorage = opts.NativeMemory
+                        ? MemoryStorageMode.NativePointer
+                        : MemoryStorageMode.ManagedArray,
                 });
             runtime.RegisterModule(moduleName, modInst);
 
@@ -422,7 +448,13 @@ namespace Wacs.Console.Verbs
                     using var fs = new FileStream(inputPath, FileMode.Open,
                         FileAccess.Read);
                     m = BinaryModuleParser.ParseWasm(fs);
-                    inst = runtime.InstantiateModule(m);
+                    inst = runtime.InstantiateModule(m,
+                        new RuntimeOptions
+                        {
+                            MemoryStorage = opts.NativeMemory
+                                ? MemoryStorageMode.NativePointer
+                                : MemoryStorageMode.ManagedArray,
+                        });
                     runtime.RegisterModule(name, inst);
                 }
                 catch (Exception ex)
@@ -497,6 +529,29 @@ namespace Wacs.Console.Verbs
         // ============================================================
 
         private static int ExecuteComponent(RunOptions opts, string componentPath)
+        {
+            // Phase C.5 / C.4c: pin the storage mode for the
+            // duration of the component run. Both the interpreter
+            // component path (Wacs.ComponentModel.Runtime.ComponentInstance
+            // .Instantiate) and the transpiled path
+            // (ExecuteComponentTranspiled → InitializationHelper)
+            // observe ModuleInit.CurrentMemoryStorage at memory-
+            // alloc time. Reset on return so other in-process
+            // callers aren't affected.
+            var prevStorage = ModuleInit.CurrentMemoryStorage;
+            if (opts.NativeMemory)
+                ModuleInit.CurrentMemoryStorage = MemoryStorageMode.NativePointer;
+            try
+            {
+                return ExecuteComponentInner(opts, componentPath);
+            }
+            finally
+            {
+                ModuleInit.CurrentMemoryStorage = prevStorage;
+            }
+        }
+
+        private static int ExecuteComponentInner(RunOptions opts, string componentPath)
         {
             // --wasip2 / --host-package implies the transpiler engine
             // for components — those flags route through the typed

@@ -1,5 +1,56 @@
 # Changelog
 
+## WACS.Cli 1.4.2 / WACS.Transpiler.Lib 0.7.5 — gap 12 phases C.4c + C.5: `wacs run --native-memory`
+
+End-to-end CLI plumbing for NativePointer storage. With this
+release, `wacs run --native-memory model.wasm` (or
+`--wasip2 --native-memory ...` for components) runs the entire
+guest — interpreter or transpiler engine, core or component
+module, wasip1 or wasip2 host bindings — against native-pointer-
+backed linear memory. The 2 GiB byte[] cap stops mattering for
+this invocation; the wasm32 spec's 4 GiB limit applies instead.
+
+### `Wacs.Console` — phase C.5 (the flag)
+
+`RunOptions.NativeMemory` (`--native-memory`) flips
+`RuntimeOptions.MemoryStorage` to `NativePointer` for the
+interpreter `InstantiateModule` call (single-core run) and pins
+`ModuleInit.CurrentMemoryStorage` for the duration of the run
+so transpiler/component paths observe it too.
+`ExecuteSingleCore` and `ExecuteComponent` wrap their
+implementations in a try/finally that sets and restores the
+static, so subsequent in-process callers (test harnesses,
+library hosts) see the original mode.
+
+### `Wacs.Transpiler.Lib` — phase C.4c (transpiled module ctor)
+
+`ModuleInit.CurrentMemoryStorage` (new public static field,
+default `MemoryStorageMode.ManagedArray`) is read by
+`InitializationHelper.InitializeCore` when the transpiled module
+class allocates each linear memory via `new MemoryInstance(memType,
+storage)`. Single-threaded transpile/dispatch sequence — the static
+flag is set just before module construction and not consulted
+afterwards, so no AsyncLocal&lt;T&gt; ceremony.
+
+### Tests
+
+Wacs.Core 391, Wacs.Transpiler 751, Wacs.ComponentModel 350,
+Wacs.WASI.Preview2 189, Wacs.WASI.Preview1 72, Wacs.HostBindings
+14 — all green. ManagedArray default keeps every existing test
+byte-stable; NativePointer path was already covered by
+`MemoryNativePointerEndToEndTests` (Wacs.Core) and
+`MemoryInstanceNativeStorageTests` from phases A/B.
+
+### Net effect for the SLM use case from `wasi-nn/WACS-GAPS.md`
+
+`wacs run --wasip2 --wasi-nn --native-memory -d models slm.wasm`
+now allocates >2 GiB of linear memory through every layer:
+component-transpiled module ctor (C.4c) → wasip2 host bindings
+(C.4b) → memory access in interpreter + transpiler emit (B + C.3).
+Gap 12 closed for the wasm32 4 GiB ceiling. memory64
+(`WasmMaxPages64 = 2^48`) still sits behind phase D's
+i64-address widening.
+
 ## WACS.WASI.Preview2 0.3.2 — gap 12 phase C.4b: wasip2 host-binding migration to MemoryInstance
 
 `MemoryReader` / `MemoryWriter` (~30 helpers), `ExecContextExtensions`,
