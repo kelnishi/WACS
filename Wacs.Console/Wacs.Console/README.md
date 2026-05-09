@@ -187,6 +187,7 @@ wacs run app.wasm --bind ./MyGameHost.dll
 | `--host-package <name>` | — | Component-mode `[WitSource]` host package(s). Accepts assembly name or file path. |
 | `--wasip2` | off | Shorthand `--host-package Wacs.WASI.Preview2`. |
 | `--wasi-nn` | off | Shorthand `--bind Wacs.WASI.NN.OnnxRuntime` (ONNX). For ML.NET / LlamaSharp / etc., use `--bind <package>` directly. |
+| `--wasi-threads` | off | Shorthand `--bind Wacs.WASI.Threads`. Wires `wasi:thread-spawn`; module must declare/import shared memory and export `wasi_thread_start (param i32 i32)`. |
 | `--profile` | off | JetBrains dotTrace measure-profiler session. |
 | `--log-gas` | off | Print total instructions executed. |
 | `--gas-limit <N>` | 0 (∞) | Trap if instructions exceed N. |

@@ -12,8 +12,8 @@
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.WASI.Threads</AssemblyName>
-        <AssemblyVersion>0.1.0</AssemblyVersion>
-        <Version>0.1.0</Version>
+        <AssemblyVersion>0.2.0</AssemblyVersion>
+        <Version>0.2.0</Version>
         <RepositoryType>git</RepositoryType>
         <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
         <IsAotCompatible>true</IsAotCompatible>
@@ -26,6 +26,10 @@
 
     <ItemGroup>
       <ProjectReference Include="..\..\..\Wacs.Core\Wacs.Core\Wacs.Core.csproj" />
+      <!-- For [assembly: WasiHostPackage] — lets
+           runtime.AutoDiscoverHostPackages() pick the threads
+           binding up from the loaded AppDomain. -->
+      <ProjectReference Include="..\..\..\Wacs.HostBindings\Wacs.HostBindings.Abstractions\Wacs.HostBindings.Abstractions.csproj" />
     </ItemGroup>
 
 </Project>

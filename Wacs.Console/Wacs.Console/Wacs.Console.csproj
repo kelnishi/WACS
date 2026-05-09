@@ -88,6 +88,12 @@
                       ExcludeAssets="compile" />
     <ProjectReference Include="..\..\Wacs.WASI\Wacs.WASI.NN\Wacs.WASI.NN.DependencyInjection\Wacs.WASI.NN.DependencyInjection.csproj"
                       ExcludeAssets="compile" />
+    <!-- Bundled so the wasi-threads flag resolves the DLL
+         via Assembly.Load without spelling out a filesystem
+         path. The Threads package is small (no native binaries)
+         and useful enough to ship by default. -->
+    <ProjectReference Include="..\..\Wacs.WASI\Wacs.WASI.Threads\Wacs.WASI.Threads\Wacs.WASI.Threads.csproj"
+                      ExcludeAssets="compile" />
   </ItemGroup>
 
   <ItemGroup>

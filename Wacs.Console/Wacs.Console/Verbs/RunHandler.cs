@@ -673,13 +673,14 @@ namespace Wacs.Console.Verbs
         private static void ApplyBindings(RunOptions opts,
             WasmRuntime runtime, List<IDisposable>? disposables = null)
         {
-            // Compose --wasi-nn (built-in shorthand) and --bind
-            // (explicit list). --wasi-nn loads first so an
-            // explicit --bind for the same package can override
-            // the default ONNX wiring (BindHostFunction's
+            // Compose built-in shorthands (--wasi-nn, --wasi-threads)
+            // with the explicit --bind list. Shorthands load first
+            // so an explicit --bind for the same package can override
+            // the default wiring (BindHostFunction's
             // last-write-wins semantics).
             var paths = new List<string>();
             if (opts.WasiNN) paths.Add("Wacs.WASI.NN.OnnxRuntime");
+            if (opts.WasiThreads) paths.Add("Wacs.WASI.Threads");
             if (opts.Bind != null) paths.AddRange(opts.Bind);
 
             foreach (var asmPath in paths)

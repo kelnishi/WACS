@@ -109,6 +109,13 @@ namespace Wacs.Console.Verbs
             + "package's name.")]
         public bool WasiNN { get; set; }
 
+        [Option("wasi-threads", HelpText =
+            "Wire wasi-threads (`wasi:thread-spawn`) host binding. "
+            + "Equivalent to `--bind Wacs.WASI.Threads`. Module must "
+            + "declare or import shared memory and export "
+            + "`wasi_thread_start (param i32 i32)`.")]
+        public bool WasiThreads { get; set; }
+
         // ---- Instrumentation (interpreter engine only) ----
 
         [Option("profile", HelpText =

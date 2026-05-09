@@ -129,6 +129,21 @@ extension method. Replaces the
 config → host → BindToRuntime sequence with the same shape we want
 across the WASI host family.
 
+## [WACS.WASI.Threads 0.2.0] — IBindable polish for symmetry
+
+- Tagged `[assembly: WasiHostPackage]` so
+  `runtime.AutoDiscoverHostPackages()` finds it alongside the
+  other tagged WASI packages.
+- New `runtime.UseWasiThreads()` extension method — one-liner
+  symmetric with `UseWasiPreview2` / `UseWasiNN`.
+- New `--wasi-threads` CLI flag (shorthand for
+  `--bind Wacs.WASI.Threads`); the package is bundled with the
+  CLI so the flag resolves out-of-box.
+
+`WasiThreads` already implemented `IBindable` with a parameterless
+ctor, so `--bind Wacs.WASI.Threads` worked before this change.
+This is consistency polish across the WASI host family.
+
 ## [WACS.WASI.NN.MLNet 0.2.0] — Parameterless WasiNNMLNetBindable for --bind
 
 Adapter exposing a parameterless ctor that pre-registers the
