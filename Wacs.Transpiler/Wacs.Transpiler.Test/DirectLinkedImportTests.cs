@@ -14,6 +14,7 @@ using Wacs.ComponentModel.Runtime;
 using Wacs.ComponentModel.Runtime.Parser;
 using Wacs.Core;
 using Wacs.Core.Runtime;
+using Wacs.Core.Text;
 using Wacs.Transpiler.AOT;
 using Wacs.Transpiler.AOT.Component;
 using Xunit;
@@ -277,6 +278,132 @@ namespace Wacs.Transpiler.Test
             public TestSgWidget() { /* parameterless */ }
             public void Create() { _v = 42u; }
             public uint Read() => _v;
+        }
+
+        // ====== Free-function returning result<own<R>, own<E>> ===
+        // Mirrors wasi:nn/graph-funcs.load's shape: a stateless
+        // interface (bundle-property typed) whose method returns
+        // Result<IResource, IError>. The SLM's first failure post-
+        // gap-17 was at this canonical-ABI return-lift surface; the
+        // test isolates whether the IL emit's Result-arm-with-
+        // resource path actually mints a handle (gap-18 candidate).
+        [WitSource(@"resource graph { ... }",
+            Package = "my:test@1.0.0", Interface = "loader-env",
+            Item = "graph")]
+        public interface ILoaderGraph
+        {
+            [WitSource(@"read: func() -> u32;",
+                Package = "my:test@1.0.0", Interface = "loader-env",
+                Item = "graph.read")]
+            uint Read();
+        }
+
+        [WitSource(@"resource error { ... }",
+            Package = "my:test@1.0.0", Interface = "loader-env",
+            Item = "error")]
+        public interface ILoaderError
+        {
+            [WitSource(@"message: func() -> string;",
+                Package = "my:test@1.0.0", Interface = "loader-env",
+                Item = "error.message")]
+            string Message();
+        }
+
+        public sealed class TestLoaderGraph : ILoaderGraph
+        {
+            public TestLoaderGraph() { }
+            public uint Read() => 7u;
+        }
+
+        public sealed class TestLoaderError : ILoaderError
+        {
+            public TestLoaderError() { }
+            public string Message() => "stub";
+        }
+
+        [WitSource(@"interface loader-env",
+            Package = "my:test@1.0.0", Interface = "loader-env")]
+        public interface ILoaderFuncs
+        {
+            [WitSource(@"load: func() -> result<graph, error>;",
+                Package = "my:test@1.0.0", Interface = "loader-env",
+                Item = "load")]
+            Result<ILoaderGraph, ILoaderError> Load();
+
+            // Mirrors wasi:nn/graph-funcs.load's full signature:
+            //   load: func(builder: list<list<u8>>, encoding: u8,
+            //              target: u8) -> result<graph, error>
+            // The list<list<u8>> param is the SLM-specific shape.
+            [WitSource(@"load-bytes: func(builder: list<list<u8>>, encoding: u8, target: u8) -> result<graph, error>;",
+                Package = "my:test@1.0.0", Interface = "loader-env",
+                Item = "load-bytes")]
+            Result<ILoaderGraph, ILoaderError> LoadBytes(
+                byte[][] builder, byte encoding, byte target);
+        }
+
+        public sealed class TestLoaderFuncs : ILoaderFuncs
+        {
+            public Result<ILoaderGraph, ILoaderError> Load()
+                => Result<ILoaderGraph, ILoaderError>.FromOk(
+                    new TestLoaderGraph());
+
+            public Result<ILoaderGraph, ILoaderError> LoadBytes(
+                byte[][] builder, byte encoding, byte target)
+                => Result<ILoaderGraph, ILoaderError>.FromOk(
+                    new TestLoaderGraph());
+        }
+
+        // Resource interface with a Result-of-resource method —
+        // mirrors wasi:nn/graph.init-execution-context: a `[method]
+        // X.foo(self) -> result<own<R>, own<E>>` shape. The user's
+        // diagnosis named this as a likely sibling of the free-fn
+        // case in gap 18.
+        [WitSource(@"resource graph2 { constructor(); init: func() -> result<graph2-ctx, error>; }",
+            Package = "my:test@1.0.0", Interface = "loader-env",
+            Item = "graph2")]
+        public interface ILoaderGraph2
+        {
+            [WitSource(@"constructor();",
+                Package = "my:test@1.0.0", Interface = "loader-env",
+                Item = "[constructor]graph2")]
+            void Create();
+            [WitSource(@"init: func() -> result<graph2-ctx, error>;",
+                Package = "my:test@1.0.0", Interface = "loader-env",
+                Item = "graph2.init")]
+            Result<ILoaderGraph2Ctx, ILoaderError> Init();
+        }
+
+        [WitSource(@"resource graph2-ctx { read: func() -> u32; }",
+            Package = "my:test@1.0.0", Interface = "loader-env",
+            Item = "graph2-ctx")]
+        public interface ILoaderGraph2Ctx
+        {
+            [WitSource(@"read: func() -> u32;",
+                Package = "my:test@1.0.0", Interface = "loader-env",
+                Item = "graph2-ctx.read")]
+            uint Read();
+        }
+
+        public sealed class TestLoaderGraph2 : ILoaderGraph2
+        {
+            public TestLoaderGraph2() { }
+            public void Create() { /* parameterless ctor sentinel */ }
+            public Result<ILoaderGraph2Ctx, ILoaderError> Init()
+                => Result<ILoaderGraph2Ctx, ILoaderError>.FromOk(
+                    new TestLoaderGraph2Ctx());
+        }
+
+        public sealed class TestLoaderGraph2Ctx : ILoaderGraph2Ctx
+        {
+            public TestLoaderGraph2Ctx() { }
+            public uint Read() => 13u;
+        }
+
+        public sealed class LoaderBundle
+        {
+            public ILoaderFuncs LoaderEnv { get; }
+            public LoaderBundle(ILoaderFuncs funcs)
+                { LoaderEnv = funcs; }
         }
 
         // ====== Resource constructor with own<R> arg surface =====
@@ -7744,6 +7871,284 @@ namespace Wacs.Transpiler.Test
             // value.
             Assert.IsType<int>(raw);
             Assert.Equal(42, (int)raw);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_FreeFnResultOwnReturn_AllocatesAndResolves()
+        {
+            // Mirrors wasi:nn/graph-funcs.load's wire shape:
+            //   load: () -> result<own<graph>, own<error>>
+            // canon-lowered to load(retArea_ptr: i32) -> () because the
+            // result is 8 bytes (u8 disc + i32 handle, aligned to 4).
+            // The host-side IL stores the disc + handle into the
+            // guest-supplied retArea; the guest reads (200, 204) to
+            // obtain (disc, handle).
+            //
+            // Pre-fix candidate (gap 18): if the IL emit's result-arm-
+            // resource path doesn't AllocateResource, the wire handle
+            // is 0 (default-init) and the subsequent graph.read trips.
+            // This test exercises that exact site at the unit level —
+            // if EmitResultArmStore's resource branch (line ~3016)
+            // really fires for free-function returns, this test
+            // already passes without code changes; if not, the gap
+            // is somewhere different from where it looks.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var wat = @"(module
+  (type $t0 (func (param i32)))
+  (type $t1 (func (param i32) (result i32)))
+  (import ""my:test/loader-env@1.0.0"" ""load""
+    (func $imp_load (type $t0)))
+  (import ""my:test/loader-env@1.0.0"" ""[method]graph.read""
+    (func $imp_read (type $t1)))
+  (memory (export ""memory"") 1)
+  (func (export ""call_load_read"") (result i32)
+    i32.const 200      ;; retArea ptr
+    call $imp_load     ;; populates memory[200..208] with disc+handle
+    i32.const 204      ;; offset of handle
+    i32.load           ;; read i32 handle from memory
+    call $imp_read))   ;; consume handle, return uint";
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/loader-env@1.0.0", "load"),
+                _ => throw new InvalidOperationException(
+                    "stub for loader load must not be invoked"));
+            runtime.BindHostFunction<Func<int, int>>(
+                ("my:test/loader-env@1.0.0", "[method]graph.read"),
+                _ => throw new InvalidOperationException(
+                    "stub for loader graph.read must not be invoked"));
+
+            var module = TextModuleParser.ParseWat(wat);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(LoaderBundle),
+                resourcesType: typeof(TestResources));
+
+            // Sanity: resolver picked up both bindings and the
+            // resource interfaces.
+            Assert.True(resolver.TryResolve(
+                "my:test/loader-env@1.0.0", "load", out _));
+            Assert.True(resolver.TryResolve(
+                "my:test/loader-env@1.0.0", "[method]graph.read", out _));
+            Assert.True(resolver.IsResourceInterface(typeof(ILoaderGraph)));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.LoaderRes", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+
+            // Both imports should have been resolved through the
+            // direct-link path. If `load`'s aggregate-return shape
+            // wasn't accepted by the gate, only one binding would
+            // appear here — that itself is a gap-18 signal.
+            Assert.Equal(2, options.ResolverImportBindings!.Count);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/loader-env@1.0.0_load")] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for loader load must not be invoked"),
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/loader-env@1.0.0_[method]graph.read")] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for loader read must not be invoked"),
+                });
+
+            var resources = new TestResources();
+            var bundle = new LoaderBundle(new TestLoaderFuncs());
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            var callLoadRead = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_load_read"))!;
+            object? raw = callLoadRead.Invoke(instance,
+                Array.Empty<object>());
+
+            // TestLoaderGraph.Read() returns 7. A non-zero round-trip
+            // proves the OK-arm resource lift Allocated a real handle
+            // (the SLM's gap-18 site) and graph.read resolved it.
+            Assert.IsType<int>(raw);
+            Assert.Equal(7, (int)raw);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_FreeFnByteJaggedParam_GateAccepts()
+        {
+            // Diagnoses where gap 18 actually lives. The SLM's
+            // `wasi:nn/graph-funcs.load` takes `list<list<u8>>` as
+            // its first parameter (the model bytes). If
+            // CanonicalSlotCount doesn't recognize `byte[][]` as a
+            // direct-link parameter, the gate rejects the binding
+            // and falls back to legacy delegate dispatch — which
+            // doesn't propagate resource-arm AllocateResource
+            // through the result-lift, surfacing as wire handle 0.
+            //
+            // This test asserts the SLM-shape load-bytes binding
+            // makes it through the direct-link gate (binding count
+            // would otherwise drop to 1 — only `load` would resolve,
+            // not `load-bytes`).
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var wat = @"(module
+  (type $t0 (func (param i32 i32 i32 i32 i32)))
+  (import ""my:test/loader-env@1.0.0"" ""load-bytes""
+    (func $imp_load (type $t0)))
+  (memory (export ""memory"") 1)
+  (func (export ""call_load_bytes"")
+    nop))";
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int, int, int, int, int>>(
+                ("my:test/loader-env@1.0.0", "load-bytes"),
+                (_, _, _, _, _) => throw new InvalidOperationException(
+                    "stub for load-bytes must not be invoked"));
+
+            var module = TextModuleParser.ParseWat(wat);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(LoaderBundle),
+                resourcesType: typeof(TestResources));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.LoaderJagged", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+
+            // If the gate rejects the byte[][] param shape, this is 0.
+            // Post-fix it should be 1.
+            Assert.Equal(1, options.ResolverImportBindings!.Count);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_MethodResultOwnReturn_AllocatesAndResolves()
+        {
+            // [method]X.foo(self) -> result<own<R>, own<E>> — the
+            // canonical-ABI shape user-diagnosis named as a likely
+            // sibling of the free-function gap 18 site
+            // (init-execution-context). A method's `self` handle is
+            // looked up via Resources.GetResource; the OK/Err arm's
+            // own<R> should be allocated via AllocateResource on the
+            // way out.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var wat = @"(module
+  (type $tc (func (result i32)))               ;; ctor → handle
+  (type $ti (func (param i32 i32)))            ;; init(self, retArea)
+  (type $tr (func (param i32) (result i32)))   ;; ctx.read(self)
+  (import ""my:test/loader-env@1.0.0"" ""[constructor]graph2""
+    (func $imp_ctor (type $tc)))
+  (import ""my:test/loader-env@1.0.0"" ""[method]graph2.init""
+    (func $imp_init (type $ti)))
+  (import ""my:test/loader-env@1.0.0"" ""[method]graph2-ctx.read""
+    (func $imp_read (type $tr)))
+  (memory (export ""memory"") 1)
+  (func (export ""call_method_init_read"") (result i32)
+    (local $g i32)
+    call $imp_ctor                ;; mint a graph handle
+    local.tee $g
+    i32.const 200                 ;; retArea
+    call $imp_init                ;; -> Result<own<ctx>, own<error>>
+    i32.const 204                 ;; offset of OK-arm value (handle)
+    i32.load                      ;; load ctx handle
+    call $imp_read))              ;; consume, return uint";
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Func<int>>(
+                ("my:test/loader-env@1.0.0", "[constructor]graph2"),
+                () => throw new InvalidOperationException("stub"));
+            runtime.BindHostFunction<Action<int, int>>(
+                ("my:test/loader-env@1.0.0", "[method]graph2.init"),
+                (_, _) => throw new InvalidOperationException("stub"));
+            runtime.BindHostFunction<Func<int, int>>(
+                ("my:test/loader-env@1.0.0", "[method]graph2-ctx.read"),
+                _ => throw new InvalidOperationException("stub"));
+
+            var module = TextModuleParser.ParseWat(wat);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(LoaderBundle),
+                resourcesType: typeof(TestResources));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.LoaderG2", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+
+            // Diagnose: how many of the three imports were
+            // direct-linked? If [method]graph2.init's Result-resource
+            // return is the gap, only the constructor + read make it
+            // through.
+            var bindingCount = options.ResolverImportBindings!.Count;
+            Assert.Equal(3, bindingCount);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/loader-env@1.0.0_[constructor]graph2")] = _ =>
+                        throw new InvalidOperationException("stub"),
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/loader-env@1.0.0_[method]graph2.init")] = _ =>
+                        throw new InvalidOperationException("stub"),
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/loader-env@1.0.0_[method]graph2-ctx.read")] = _ =>
+                        throw new InvalidOperationException("stub"),
+                });
+
+            var resources = new TestResources();
+            var bundle = new LoaderBundle(new TestLoaderFuncs());
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            var callMethodInitRead = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_method_init_read"))!;
+            object? raw = callMethodInitRead.Invoke(instance,
+                Array.Empty<object>());
+
+            // TestLoaderGraph2Ctx.Read() returns 13. A non-zero
+            // round-trip proves: ctor allocated graph handle, init
+            // resolved graph + allocated ctx handle, read resolved
+            // ctx and returned 13.
+            Assert.IsType<int>(raw);
+            Assert.Equal(13, (int)raw);
         }
 
         [Fact]
