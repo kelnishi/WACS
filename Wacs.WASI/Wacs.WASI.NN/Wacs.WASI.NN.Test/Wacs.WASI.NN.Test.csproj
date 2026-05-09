@@ -19,6 +19,7 @@
     <ItemGroup>
         <ProjectReference Include="..\..\..\Wacs.Core\Wacs.Core\Wacs.Core.csproj" />
         <ProjectReference Include="..\Wacs.WASI.NN\Wacs.WASI.NN.csproj" />
+        <ProjectReference Include="..\Wacs.WASI.NN.DependencyInjection\Wacs.WASI.NN.DependencyInjection.csproj" />
     </ItemGroup>
 
 </Project>
