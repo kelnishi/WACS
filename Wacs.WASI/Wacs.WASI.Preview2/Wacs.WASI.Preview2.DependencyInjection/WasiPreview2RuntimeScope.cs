@@ -192,6 +192,18 @@ namespace Wacs.WASI.Preview2.DependencyInjection
         // service-collection extensions so the composite bundle
         // and IGraphFuncs land in the scope. Mirrors what
         // ComponentMainHost did inline pre-refactor.
+        //
+        // The OnnxBackend registration runs INSIDE AddWasiNN's
+        // configure callback (instead of post-hoc mutating the
+        // singleton from `AutoRegisterOnnxBackend`) so the
+        // Configuration instance the singleton resolves is the
+        // SAME instance the backend was added to. Post-hoc
+        // mutation worked when descriptor.ImplementationInstance
+        // was reliably populated, but brittle to ordering — a
+        // pre-existing factory registration would silently put
+        // the mutated instance and the resolved instance out of
+        // sync. Configure-callback ordering avoids that class of
+        // bug entirely.
         private static void ReflectivelyAddWasiNN(IServiceCollection services)
         {
             var nnAsm = TryLoadAssembly("Wacs.WASI.NN.DependencyInjection");
@@ -199,12 +211,25 @@ namespace Wacs.WASI.Preview2.DependencyInjection
                 "Wacs.WASI.NN.DependencyInjection.WasiNNServiceCollectionExtensions");
             if (nnExtType == null) return;
 
-            // services.AddWasiNN(null) — null configure accepts
-            // defaults (no backends until the embedder explicitly
-            // calls AddBackend).
+            // Build a configure callback that wires the ONNX
+            // backend, if Wacs.WASI.NN.OnnxRuntime is loadable
+            // and OnnxBackend's parameterless ctor succeeds.
+            // Surfaces failures as stderr warnings instead of
+            // returning silently — the SLM's "InvalidEncoding:
+            // No backend registered for ONNX" symptom is a lot
+            // easier to root-cause when the underlying load /
+            // ctor failure shows up at startup time (round-13
+            // follow-up gap 20).
+            var configureDelegate = BuildOnnxConfigureCallback(nnAsm!);
+
+            // services.AddWasiNN(configure) — configure runs
+            // BEFORE TryAddSingleton(opts.Configuration), so the
+            // backend lands in opts.Configuration.Backends and
+            // gets registered as part of the same instance
+            // GraphFuncsImpl resolves later.
             nnExtType.GetMethod("AddWasiNN",
                     BindingFlags.Public | BindingFlags.Static)!
-                .Invoke(null, new object?[] { services, null });
+                .Invoke(null, new object?[] { services, configureDelegate });
 
             // services.AddWasiPreview2NNBundle() — registers the
             // composite that exposes both the Preview2 and
@@ -213,53 +238,96 @@ namespace Wacs.WASI.Preview2.DependencyInjection
             nnExtType.GetMethod("AddWasiPreview2NNBundle",
                     BindingFlags.Public | BindingFlags.Static)!
                 .Invoke(null, new object?[] { services });
-
-            // Auto-register the ONNX backend if Wacs.WASI.NN.OnnxRuntime
-            // is on the load path — saves the embedder the manual
-            // `b.AddBackend(GraphEncoding.ONNX, new OnnxBackend())`
-            // call for the common case.
-            AutoRegisterOnnxBackend(services, nnAsm!);
         }
 
-        private static void AutoRegisterOnnxBackend(
-            IServiceCollection services, Assembly nnAsm)
+        // Build an Action<WasiNNDependencyInjectionOptions>
+        // delegate (typed against the dynamically-loaded type)
+        // that calls opts.AddBackend(GraphEncoding.ONNX, new
+        // OnnxBackend()). Returns null when:
+        //   - Wacs.WASI.NN.OnnxRuntime isn't loadable
+        //   - the OnnxBackend type or its parameterless ctor
+        //     can't be resolved
+        //   - Activator.CreateInstance throws
+        // In each error case a stderr warning is emitted so the
+        // failure is diagnosable (vs the previous silent return
+        // that turned every error into "InvalidEncoding" at
+        // guest-call time).
+        private static Delegate? BuildOnnxConfigureCallback(Assembly nnAsm)
         {
-            // The configuration is a singleton registered by
-            // AddWasiNN; we mutate its Backends dictionary post-
-            // registration so the IGraphFuncs sees the entry.
-            var configType = nnAsm.GetType(
-                "Wacs.WASI.NN.WasiNNConfiguration");
-            if (configType == null) return;
+            var optsType = nnAsm.GetType(
+                "Wacs.WASI.NN.DependencyInjection.WasiNNDependencyInjectionOptions");
+            if (optsType == null) return null;
 
-            // Find the WasiNNConfiguration descriptor and grab
-            // its singleton instance from the post-Add factory.
-            var descriptor = services.FirstOrDefault(d =>
-                d.ServiceType == configType);
-            if (descriptor == null) return;
-            object? config = descriptor.ImplementationInstance
-                ?? descriptor.ImplementationFactory?.Invoke(null!);
-            if (config == null) return;
-
-            var backendsProp = configType.GetProperty("Backends");
-            var backends = backendsProp?.GetValue(config);
-            if (backends == null) return;
+            // AddBackend(GraphEncoding, IBackend) lives in
+            // Wacs.WASI.NN.DependencyInjection but its first
+            // parameter is Wacs.WASI.NN.Types.GraphEncoding from
+            // the Wacs.WASI.NN assembly. Pull the type from the
+            // method signature so we don't have to load the
+            // sibling assembly explicitly — and so we don't fail
+            // silently if the WASI.NN type namespace ever changes.
+            var addBackend = optsType.GetMethod("AddBackend");
+            if (addBackend == null) return null;
+            var addBackendParams = addBackend.GetParameters();
+            if (addBackendParams.Length != 2) return null;
+            var encodingType = addBackendParams[0].ParameterType;
+            var backendIfaceType = addBackendParams[1].ParameterType;
 
             var ortAsm = TryLoadAssembly("Wacs.WASI.NN.OnnxRuntime");
-            var onnxBackendType = ortAsm?.GetType(
+            if (ortAsm == null)
+            {
+                // Not necessarily an error — `--wasip2` without
+                // `--wasi-nn` doesn't load OnnxRuntime, and that's
+                // fine. Stay quiet here; only complain when the
+                // assembly IS loadable but its Activator step
+                // fails.
+                return null;
+            }
+
+            var onnxBackendType = ortAsm.GetType(
                 "Wacs.WASI.NN.OnnxRuntime.OnnxBackend");
-            if (onnxBackendType == null) return;
+            if (onnxBackendType == null)
+            {
+                System.Console.Error.WriteLine(
+                    "warn: Wacs.WASI.NN.OnnxRuntime is loadable but "
+                    + "OnnxBackend type wasn't found. wasi-nn ONNX "
+                    + "guests will see InvalidEncoding errors.");
+                return null;
+            }
+
             object? onnxBackend;
             try { onnxBackend = Activator.CreateInstance(onnxBackendType); }
-            catch { return; }
-            if (onnxBackend == null) return;
+            catch (Exception ex)
+            {
+                System.Console.Error.WriteLine(
+                    "warn: OnnxBackend instantiation failed: "
+                    + ex.GetType().Name + ": " + ex.Message
+                    + ". wasi-nn ONNX guests will see InvalidEncoding "
+                    + "errors. Check that the native ONNX Runtime "
+                    + "library is on the load path.");
+                return null;
+            }
+            if (onnxBackend == null) return null;
 
-            var encodingType = nnAsm.GetType(
-                "Wacs.WASI.NN.Types.GraphEncoding");
-            if (encodingType == null) return;
             object onnxEncoding = Enum.ToObject(encodingType, 1);
 
-            backends.GetType().GetMethod("set_Item")?
-                .Invoke(backends, new object?[] { onnxEncoding, onnxBackend });
+            // Use Linq.Expressions to build a strongly-typed
+            // Action<WasiNNDependencyInjectionOptions> at runtime.
+            // Captures onnxBackend + onnxEncoding via Constant
+            // expressions so the AddBackend call site doesn't
+            // need to redo any reflection at invocation time.
+            var optsParam = System.Linq.Expressions.Expression
+                .Parameter(optsType, "opts");
+            var call = System.Linq.Expressions.Expression.Call(
+                optsParam,
+                addBackend,
+                System.Linq.Expressions.Expression.Constant(
+                    onnxEncoding, encodingType),
+                System.Linq.Expressions.Expression.Constant(
+                    onnxBackend, backendIfaceType));
+            var actionType = typeof(Action<>).MakeGenericType(optsType);
+            var lambda = System.Linq.Expressions.Expression.Lambda(
+                actionType, call, optsParam);
+            return lambda.Compile();
         }
 
         private static Assembly? TryLoadAssembly(string name)

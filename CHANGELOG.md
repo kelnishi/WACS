@@ -1,5 +1,62 @@
 # Changelog
 
+## WACS.Cli 1.5.10 / WACS.WASI.Preview2.DependencyInjection 0.1.2 — wasi-nn ONNX backend wires through DI under `--wasi-nn`
+
+After round 13's `byte[][]` fix unblocked direct-link `graph.load`,
+the SLM still surfaced `InvalidEncoding: No backend registered for
+encoding ONNX`. Two layered bugs in
+`WasiPreview2RuntimeScope.ReflectivelyAddWasiNN`:
+
+1. **Wrong-instance mutation.** The legacy
+   `AutoRegisterOnnxBackend` post-hoc-mutated a
+   `WasiNNConfiguration` it pulled out of the descriptor's
+   `ImplementationInstance`. With WASI.NN's
+   `services.TryAddSingleton(opts.Configuration)` registration
+   landing the instance from `new WasiNNDependencyInjectionOptions()`,
+   `GraphFuncsImpl(sp.GetRequiredService<WasiNNConfiguration>())`
+   could resolve a different physical object — empty `Backends`,
+   `InvalidEncoding` at guest-call time.
+2. **Silent type lookup miss.** Even after switching to the
+   configure-callback approach, `nnAsm.GetType(
+   "Wacs.WASI.NN.Types.GraphEncoding")` was reading the
+   sibling-namespace type out of the
+   `Wacs.WASI.NN.DependencyInjection` assembly — the type lives
+   in `Wacs.WASI.NN`. `GetType` returned null, the early-return
+   short-circuited the configure delegate to null, and
+   `AddWasiNN(services, null)` ran with no backend wiring at all.
+
+Fix: `BuildOnnxConfigureCallback` now derives the encoding +
+backend interface types from `AddBackend`'s parameter
+signature (single source of truth), and `AddWasiNN` is invoked
+with a pre-built `Linq.Expressions.Compile()`'d delegate that
+runs INSIDE `AddWasiNN`'s own configure step — so the same
+`WasiNNConfiguration` instance the singleton resolves is the
+instance the backend was added to. Surfaces the failure modes
+that DO remain (OnnxBackend type missing, parameterless ctor
+throws) as stderr warnings so the next round of debugging
+isn't a guessing game.
+
+Test surface: new `WasiPreview2RuntimeScopeTests` in
+`Wacs.WASI.NN.OnnxRuntime.Test` (the only test project where
+WASI.Preview2.DI + WASI.NN.DI + WASI.NN.OnnxRuntime co-exist
+without a cycle). Constructs a real scope, reaches
+`IGraphFuncs` through the composite bundle, and asserts a
+`graph.load(_, GraphEncoding.Onnx, _)` does NOT short-circuit
+with `InvalidEncoding`. The test captures stderr from
+`WasiPreview2RuntimeScope` so a future regression's
+diagnostic warning shows up in the failure message.
+
+### Versions
+
+- `WACS.WASI.Preview2.DependencyInjection` 0.1.1 → **0.1.2**
+  (configure-callback wiring + diagnostic stderr)
+- `WACS.Cli` 1.5.9 → **1.5.10** (release event for the
+  Preview2.DI bump)
+
+(Untouched: `WACS`, `WASI.Preview1`, `.Preview2`,
+`.WASI.NN.*`, `WACS.Transpiler.Lib`, `WACS.ComponentModel`,
+`WACS.HostBindings.Abstractions`.)
+
 ## WACS.Cli 1.5.9 / WACS.Transpiler.Lib 0.8.8 / WACS.ComponentModel 0.3.3 — `byte[][]` PARAM direct-link (closes the wasi-nn SLM gap)
 
 The wasi-nn SLM's `wasi:nn/graph-funcs.load(builders: list<list<u8>>,
