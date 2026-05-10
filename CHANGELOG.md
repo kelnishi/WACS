@@ -1,5 +1,75 @@
 # Changelog
 
+## WACS.Cli 1.5.21 / WACS.Transpiler.Lib 0.8.14 — gap 30: `BindBackendLoadContext` for transitive-dep DllImports
+
+Round-25 verification (`wasi-nn/WACS-GAPS.md` round 25) found that the gap-28 fix —
+`NativeLibrary.SetDllImportResolver(asm, …)` keyed on the `--bind`'d assembly — only
+fires for DllImports declared **inside that assembly**. Real-world backends declare
+their `[DllImport]`s in a transitive NuGet (TorchSharp.dll, LLamaSharp.dll, …), not in
+the bind asm itself. So the per-asm resolver was a no-op for the actual hot-path,
+and the round-25 demo (`wacs run --wasip2 --bind <Wacs.WASI.NN.TorchSharp.dll>`) still
+required manual native staging into `Wacs.Console`'s `runtimes/<rid>/native/` to
+work — the documented one-line UX was broken.
+
+The proper fix is a load-context-level hook: `BindingLoader.LoadAssembly` now
+constructs a custom `BindBackendLoadContext : AssemblyLoadContext` whose
+`LoadUnmanagedDll(name)` override fires for every P/Invoke from any assembly in the
+context — bind asm, upstream NuGet wrappers, deep transitive deps. The override
+defers to `AssemblyDependencyResolver.ResolveUnmanagedDllToPath` first (deps.json-
+driven RID-aware lookup, the standard .NET 8 plugin pattern), then falls back to a
+bind-dir `runtimes/<rid>/native/` probe (with coarser-RID + flat-bin fallbacks).
+Empirically verified: `wacs run target/wasm32-wasip2/release/wasi-nn-torch.wasm
+--wasip2 --bind <Wacs.WASI.NN.TorchSharp.dll>` runs the XOR MLP end-to-end with no
+`DYLD_FALLBACK_LIBRARY_PATH` and no manual `runtimes/` staging.
+
+### What landed
+
+- **`BindingLoader.LoadAssembly`** — file-path branch now memoizes
+  `path -> Assembly` through a `ConcurrentDictionary` and uses
+  `BindBackendLoadContext` instead of `Assembly.LoadFrom`. Memoization ensures
+  the load-then-bind double-pass in `RunHandler.PreloadBindAssemblies` +
+  `ApplyBindings` returns the same `Assembly` instance both times — without it,
+  a fresh `AssemblyLoadContext` per call would yield distinct `Type` identities
+  and break `IBindable` matching against the host's interface.
+- **`BindBackendLoadContext.Load`** — defers to the default context for
+  any assembly already loaded by the host (host-shared types like `IBindable`,
+  `IBackend`, `Wacs.Core` runtime types). Without this short-circuit, the deps.json
+  resolver would happily return private paths for those assemblies (since
+  `EnableDynamicLoading=true` bundles them) and we'd load duplicates with split
+  `Type` identities.
+- **`BindBackendLoadContext.LoadUnmanagedDll`** — deps.json-driven resolution
+  first (handles the standard "managed library 'TorchSharp' P/Invokes
+  'LibTorchSharp', which lives at `runtimes/<rid>/native/libLibTorchSharp.dylib`"
+  case), then explicit probes of `<bind-dir>/runtimes/<rid>/native/` plus coarser
+  RIDs plus the flat bind dir.
+- **Per-asm `SetDllImportResolver`** retained as a complementary hook — still
+  useful when the bind asm itself declares direct `[DllImport]`s.
+
+### What this means for the wasi-nn family
+
+| Backend | Encoding | `wacs run --wasip2 --bind <…>` (no env, no manual staging) |
+|---|---|---|
+| `Wacs.WASI.NN.OnnxRuntime` | `Onnx` | already worked (CLI bundles ORT) |
+| `Wacs.WASI.NN.LlamaSharp` | `GGML` | works (LLamaSharp's own `NativeLibrary.Load` walks the LoadFrom dir's `runtimes/`) |
+| `Wacs.WASI.NN.TorchSharp` | `PyTorch` | **now works post-gap-30** — same one-line invocation |
+| `Wacs.WASI.NN.MLNet` | (TBD) | not exercised |
+
+### Verified
+
+- `Wacs.Transpiler.Test` 775/776 (1 skip)
+- `Wacs.WASI.NN.TorchSharp.Test` 8/8
+- `Wacs.WASI.NN.LlamaSharp.Test` 8/8 + 2 skip
+- `Wacs.WASI.NN.OnnxRuntime.Test` 10/10
+- `Wacs.WASI.NN.MLNet.Test` 7/7
+- End-to-end XOR MLP under `--bind` produces sigmoid outputs `0.0000 / 1.0000 /
+  0.9994 / 0.0000` — numerically identical to the round-24 verification, but with
+  no env-var workarounds and no manual staging.
+
+### Versions
+
+- `WACS.Transpiler.Lib` 0.8.13 → **0.8.14** (gap-30 `BindBackendLoadContext`)
+- `WACS.Cli` 1.5.20 → **1.5.21** (release event)
+
 ## WACS.Cli 1.5.20 / WACS.Transpiler.Lib 0.8.13 / WACS.WASI.NN.TorchSharp 0.1.1 / WACS.WASI.Preview2.DependencyInjection 0.1.6 — new wasi-nn backend: TorchSharp / PyTorch (+ gaps 28/29 native-lib ergonomics)
 
 A fourth wasi-nn backend covering `graph-encoding.pytorch`. Same packaging shape as
