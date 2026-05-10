@@ -228,8 +228,9 @@ namespace Wacs.WASI.Preview2.DependencyInjection
             // guest call.
             var onnxCallback = BuildOnnxConfigureCallback(nnAsm!);
             var llamaCallback = BuildLlamaSharpConfigureCallback(nnAsm!);
+            var torchCallback = BuildTorchSharpConfigureCallback(nnAsm!);
             var configureDelegate = CombineCallbacks(
-                onnxCallback, llamaCallback);
+                onnxCallback, llamaCallback, torchCallback);
 
             // services.AddWasiNN(configure) — configure runs
             // BEFORE TryAddSingleton(opts.Configuration), so each
@@ -479,6 +480,153 @@ namespace Wacs.WASI.Preview2.DependencyInjection
             var actionType = typeof(Action<>).MakeGenericType(optsType);
             return Expression.Lambda(actionType, block, optsParam)
                 .Compile();
+        }
+
+        // Sibling of BuildLlamaSharpConfigureCallback for the
+        // TorchSharp / PyTorch backend. Detects
+        // `Wacs.WASI.NN.TorchSharp.TorchSharpBackend`, builds an
+        // env-driven registry from $WACS_WASINN_TORCH_DIR
+        // (mirroring WasiNNTorchSharpBindable's scan), and wires
+        // the backend into BOTH `Backends[PyTorch]` AND
+        // `LoadByNameBackend` so guest `graph.load-by-name(...)`
+        // direct-links cleanly.
+        //
+        // Returns null when:
+        //   - Wacs.WASI.NN.TorchSharp isn't loadable (the common
+        //     `wacs run --wasip2 --wasi-nn` ONNX-default case;
+        //     stay quiet)
+        //   - the TorchSharpBackend type / FromPaths factory /
+        //     LoadByNameBackend property isn't resolvable
+        //   - FromPaths throws (libtorch native lib missing /
+        //     mismatch)
+        // Each non-quiet error path emits a stderr warning so the
+        // failure is discoverable at startup, not at first
+        // `compute(...)`.
+        private static Delegate? BuildTorchSharpConfigureCallback(
+            Assembly nnAsm)
+        {
+            var optsType = nnAsm.GetType(
+                "Wacs.WASI.NN.DependencyInjection.WasiNNDependencyInjectionOptions");
+            if (optsType == null) return null;
+
+            var addBackend = optsType.GetMethod("AddBackend");
+            if (addBackend == null) return null;
+            var addBackendParams = addBackend.GetParameters();
+            if (addBackendParams.Length != 2) return null;
+            var encodingType = addBackendParams[0].ParameterType;
+            var backendIfaceType = addBackendParams[1].ParameterType;
+
+            var torchAsm = TryLoadAssembly("Wacs.WASI.NN.TorchSharp");
+            if (torchAsm == null) return null;  // not an error.
+
+            var torchBackendType = torchAsm.GetType(
+                "Wacs.WASI.NN.TorchSharp.TorchSharpBackend");
+            if (torchBackendType == null)
+            {
+                System.Console.Error.WriteLine(
+                    "warn: Wacs.WASI.NN.TorchSharp is loadable but "
+                    + "TorchSharpBackend type wasn't found. wasi-nn "
+                    + "PyTorch guests will see NotFound errors.");
+                return null;
+            }
+
+            var fromPaths = torchBackendType.GetMethod("FromPaths",
+                BindingFlags.Public | BindingFlags.Static);
+            if (fromPaths == null)
+            {
+                System.Console.Error.WriteLine(
+                    "warn: TorchSharpBackend.FromPaths(IDictionary"
+                    + "<string,string>) static factory not found. "
+                    + "Cannot auto-wire TorchSharp; embedders should "
+                    + "construct TorchSharpBackend directly via "
+                    + "AddWasiNN(b => b.AddBackend(...)).");
+                return null;
+            }
+
+            var registry = BuildTorchScriptRegistryFromEnv();
+
+            object? torchBackend;
+            try { torchBackend = fromPaths.Invoke(null, new object?[] { registry }); }
+            catch (Exception ex)
+            {
+                System.Console.Error.WriteLine(
+                    "warn: TorchSharpBackend.FromPaths failed: "
+                    + ex.GetType().Name + ": " + ex.Message
+                    + ". wasi-nn PyTorch guests will see NotFound "
+                    + "errors. Check that the libtorch native "
+                    + "library is on the load path.");
+                return null;
+            }
+            if (torchBackend == null) return null;
+
+            var configProp = optsType.GetProperty("Configuration");
+            if (configProp == null) return null;
+            var configType = configProp.PropertyType;
+            var loadByNameProp = configType.GetProperty("LoadByNameBackend");
+            if (loadByNameProp == null
+                || loadByNameProp.GetSetMethod() == null)
+            {
+                System.Console.Error.WriteLine(
+                    "warn: WasiNNConfiguration.LoadByNameBackend "
+                    + "property missing or read-only; cannot route "
+                    + "PyTorch graph.load-by-name through TorchSharp.");
+                return null;
+            }
+
+            // PyTorch = 3 in both Nn.GraphEncoding and
+            // Types.GraphEncoding (cross-checked at file scope —
+            // OpenVINO=0, ONNX=1, TensorFlow=2, PyTorch=3).
+            object pytorchEncoding = Enum.ToObject(encodingType, 3);
+
+            // Build:
+            //   opts.AddBackend(GraphEncoding.PyTorch, backend);
+            //   opts.Configuration.LoadByNameBackend = backend;
+            var optsParam = Expression.Parameter(optsType, "opts");
+            var addCall = Expression.Call(
+                optsParam,
+                addBackend,
+                Expression.Constant(pytorchEncoding, encodingType),
+                Expression.Constant(torchBackend, backendIfaceType));
+            var configAccess = Expression.Property(optsParam, configProp);
+            var assign = Expression.Assign(
+                Expression.Property(configAccess, loadByNameProp),
+                Expression.Constant(torchBackend,
+                    loadByNameProp.PropertyType));
+            var block = Expression.Block(addCall, assign);
+            var actionType = typeof(Action<>).MakeGenericType(optsType);
+            return Expression.Lambda(actionType, block, optsParam)
+                .Compile();
+        }
+
+        // Mirrors WasiNNTorchSharpBindable's env-driven scan:
+        // read $WACS_WASINN_TORCH_DIR, enumerate *.pt + *.ts in
+        // the top-level dir, register each under filename-sans-
+        // extension. Fail-soft on IO error.
+        private static IDictionary<string, string>
+            BuildTorchScriptRegistryFromEnv()
+        {
+            var dir = Environment.GetEnvironmentVariable(
+                "WACS_WASINN_TORCH_DIR");
+            var registry = new Dictionary<string, string>(
+                StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrEmpty(dir)) return registry;
+            try
+            {
+                if (!Directory.Exists(dir)) return registry;
+                foreach (var pattern in new[] { "*.pt", "*.ts" })
+                {
+                    foreach (var path in Directory.EnumerateFiles(dir,
+                        pattern, SearchOption.TopDirectoryOnly))
+                    {
+                        var name = Path.GetFileNameWithoutExtension(path);
+                        if (!string.IsNullOrEmpty(name))
+                            registry[name!] = path;
+                    }
+                }
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            return registry;
         }
 
         // Mirrors WasiNNLlamaSharpBindable's env-driven scan:

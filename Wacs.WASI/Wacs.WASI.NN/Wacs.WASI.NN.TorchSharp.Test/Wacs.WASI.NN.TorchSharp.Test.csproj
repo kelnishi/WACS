@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net8.0</TargetFramework>
+        <LangVersion>9</LangVersion>
+        <Nullable>enable</Nullable>
+        <IsPackable>false</IsPackable>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.6.0" />
+        <PackageReference Include="xunit" Version="2.4.2" />
+        <PackageReference Include="xunit.runner.visualstudio" Version="2.4.5">
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+            <PrivateAssets>all</PrivateAssets>
+        </PackageReference>
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Wacs.WASI.NN\Wacs.WASI.NN.csproj" />
+        <ProjectReference Include="..\Wacs.WASI.NN.TorchSharp\Wacs.WASI.NN.TorchSharp.csproj" />
+        <!-- Cross-package test for the WasiPreview2RuntimeScope
+             auto-wire (mirrors the OnnxRuntime.Test +
+             LlamaSharp.Test setup; all four packages — typed
+             surface + DI sibling + Preview2.DI + this backend —
+             must co-exist without a cycle). -->
+        <ProjectReference Include="..\Wacs.WASI.NN.DependencyInjection\Wacs.WASI.NN.DependencyInjection.csproj" />
+        <ProjectReference Include="..\..\Wacs.WASI.Preview2\Wacs.WASI.Preview2.DependencyInjection\Wacs.WASI.Preview2.DependencyInjection.csproj" />
+    </ItemGroup>
+
+</Project>
