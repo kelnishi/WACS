@@ -18,24 +18,40 @@ namespace Wacs.WASI.NN.OnnxRuntime
     /// type is the ergonomic knob for the common case (pick an EP).
     ///
     /// <para>The default-constructed instance picks
-    /// <see cref="OnnxExecutionProvider.Auto"/> with
-    /// <see cref="FallbackToCpu"/>=true, which matches the
-    /// "hardware-accelerate when possible, never break inference"
-    /// behavior the WASI.NN family targets for out-of-box use.
-    /// To opt out of acceleration: set
-    /// <c>WACS_WASINN_ONNX_EP=cpu</c> in the environment or
-    /// construct <see cref="OnnxBackend"/> with
-    /// <c>new OnnxBackendOptions { ExecutionProvider = OnnxExecutionProvider.Cpu }</c>.</para>
+    /// <see cref="OnnxExecutionProvider.Cpu"/> — hardware
+    /// acceleration is explicit opt-in via either the
+    /// <see cref="ExecutionProvider"/> property or the
+    /// <c>WACS_WASINN_ONNX_EP</c> environment variable. CPU
+    /// default matches the previous wasi-nn ONNX behavior and
+    /// avoids the silent op-coverage issues seen with CoreML /
+    /// DirectML EPs against generative-LLM ops (the Gemma-3
+    /// SLM workflow specifically). To opt in:
+    /// <c>WACS_WASINN_ONNX_EP=auto</c> (platform-best),
+    /// <c>=coreml</c>, <c>=cuda</c>, <c>=dml</c>, or <c>=rocm</c>;
+    /// or construct <see cref="OnnxBackend"/> with
+    /// <c>new OnnxBackendOptions { ExecutionProvider = OnnxExecutionProvider.CoreML }</c>.</para>
     /// </summary>
     public sealed class OnnxBackendOptions
     {
         /// <summary>
         /// Which ORT execution provider to append before constructing
-        /// the inference session. <see cref="OnnxExecutionProvider.Auto"/>
-        /// resolves at session-construction time based on the running OS.
+        /// the inference session. Default is <see cref="OnnxExecutionProvider.Cpu"/>
+        /// — hardware acceleration is opt-in via this property or via
+        /// the <c>WACS_WASINN_ONNX_EP</c> environment variable. The
+        /// rationale is that ORT's EP partition-and-fallback for
+        /// generative-LLM ops (e.g., GroupQueryAttention) is uneven
+        /// across CoreML / DirectML, and a CoreML-by-default that
+        /// silently breaks Gemma-3-class inference is worse than a
+        /// CPU-by-default that requires an opt-in for acceleration.
+        /// Set this property (or
+        /// <c>WACS_WASINN_ONNX_EP=auto|coreml|cuda|dml|rocm</c>) when
+        /// you've verified your model works with the chosen EP.
+        /// <see cref="OnnxExecutionProvider.Auto"/> resolves at
+        /// session-construction time based on the running OS
+        /// (CoreML on macOS, DirectML on Windows, CUDA / ROCm on Linux).
         /// </summary>
         public OnnxExecutionProvider ExecutionProvider { get; set; }
-            = OnnxExecutionProvider.Auto;
+            = OnnxExecutionProvider.Cpu;
 
         /// <summary>
         /// Device index for the CUDA EP. Ignored for non-CUDA

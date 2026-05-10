@@ -65,29 +65,38 @@ path — no explicit `AddBackend` needed.)
 
 ## Hardware acceleration
 
-The parameterless `new OnnxBackend()` reads `WACS_WASINN_ONNX_EP` and picks a
-platform-appropriate execution provider out of the box. Failure to load an EP silently
-falls back to CPU — out-of-box behavior favors "inference still works" over "EP
-misconfiguration is loud".
+Default is **CPU** — hardware acceleration is **opt-in** via the
+`WACS_WASINN_ONNX_EP` env var or `OnnxBackendOptions.ExecutionProvider`. CPU
+default avoids the silent op-coverage issues seen with the CoreML / DirectML
+EPs against generative-LLM ops (e.g., GroupQueryAttention in Gemma 3): partition-
+and-fallback inside ORT can produce numerically wrong results without raising
+an error, which manifests as "the LLM doesn't respond" against the Gemma 3 270M
+SLM workflow. Pin the EP per-model after you've verified your model works with it.
 
-| OS              | Auto pick (default)          | Notes                                                            |
-|-----------------|------------------------------|------------------------------------------------------------------|
-| macOS (arm64/x64) | **CoreML** (CPU + GPU)     | EP symbol ships in stock `Microsoft.ML.OnnxRuntime` — no extra NuGet |
-| Windows         | **DirectML**                 | Add `Microsoft.ML.OnnxRuntime.DirectML` for full DML coverage    |
-| Linux           | **CUDA** then ROCm           | Requires CUDA toolkit / ROCm runtime on host                     |
-| Other           | CPU                          |                                                                  |
+| OS                | `WACS_WASINN_ONNX_EP=auto` resolves to | Notes                                                              |
+|-------------------|----------------------------------------|--------------------------------------------------------------------|
+| macOS (arm64/x64) | CoreML (CPU + GPU)                    | EP symbol ships in stock `Microsoft.ML.OnnxRuntime` — no NuGet swap |
+| Windows           | DirectML                              | Add `Microsoft.ML.OnnxRuntime.DirectML` for full DML coverage      |
+| Linux             | CUDA then ROCm                        | Requires CUDA toolkit / ROCm runtime on host                       |
+| Other             | CPU                                   |                                                                    |
 
-Override via environment:
+EP-append failure silently falls back to CPU regardless — out-of-box behavior
+favors "inference still works" over "EP misconfiguration is loud".
+
+Enable via environment:
 
 ```sh
-# Force CPU only (opt out of acceleration)
-WACS_WASINN_ONNX_EP=cpu wacs run my.wasm --wasip2 --wasi-nn
+# Platform-best pick (CoreML on macOS, DirectML on Windows, CUDA on Linux)
+WACS_WASINN_ONNX_EP=auto wacs run my.wasm --wasip2 --wasi-nn
 
 # Force a specific provider
 WACS_WASINN_ONNX_EP=coreml wacs run my.wasm --wasip2 --wasi-nn
 WACS_WASINN_ONNX_EP=cuda   WACS_WASINN_ONNX_CUDA_DEVICE=1 wacs run my.wasm --wasip2 --wasi-nn
 WACS_WASINN_ONNX_EP=dml    wacs run my.wasm --wasip2 --wasi-nn
 WACS_WASINN_ONNX_EP=rocm   wacs run my.wasm --wasip2 --wasi-nn
+
+# Explicitly stay on CPU (default — no env var also gets you CPU)
+WACS_WASINN_ONNX_EP=cpu wacs run my.wasm --wasip2 --wasi-nn
 ```
 
 Override via typed config (library embedders):

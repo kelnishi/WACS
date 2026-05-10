@@ -32,18 +32,17 @@ namespace Wacs.WASI.NN.OnnxRuntime
     /// <c>[resource-drop]graph</c> binding triggers when the
     /// guest releases the handle.</para>
     ///
-    /// <para>Hardware acceleration: the parameterless ctor reads
-    /// <see cref="OnnxBackendOptions.FromEnvironment"/> and picks
-    /// a platform-appropriate execution provider
-    /// (<see cref="OnnxExecutionProvider.Auto"/> →
-    /// <see cref="OnnxExecutionProvider.CoreML"/> on macOS,
-    /// <see cref="OnnxExecutionProvider.DirectML"/> on Windows,
-    /// <see cref="OnnxExecutionProvider.Cuda"/> then
-    /// <see cref="OnnxExecutionProvider.Rocm"/> on Linux),
-    /// silently falling back to CPU if the EP can't load. To opt
-    /// out: <c>WACS_WASINN_ONNX_EP=cpu</c> in the environment, or
-    /// pass <c>new OnnxBackendOptions { ExecutionProvider =
-    /// OnnxExecutionProvider.Cpu }</c> to the typed-options ctor.
+    /// <para>Hardware acceleration is opt-in via either the
+    /// <c>WACS_WASINN_ONNX_EP</c> environment variable
+    /// (<c>auto|coreml|cuda|dml|rocm</c>) or by passing an
+    /// <see cref="OnnxBackendOptions"/> with a non-CPU
+    /// <see cref="OnnxBackendOptions.ExecutionProvider"/>. The
+    /// CPU default matches the pre-v0.3.0 behavior and avoids the
+    /// silent op-coverage issues seen with CoreML / DirectML
+    /// against generative-LLM ops. <see cref="OnnxExecutionProvider.Auto"/>
+    /// resolves at session-construction time to the platform-best
+    /// EP (CoreML on macOS, DirectML on Windows, CUDA / ROCm on
+    /// Linux) and silently falls back to CPU on EP-append failure.
     /// Library embedders that need fine-grained
     /// <see cref="SessionOptions"/> control pass a
     /// <see cref="Func{SessionOptions}"/> factory instead — full
@@ -60,10 +59,10 @@ namespace Wacs.WASI.NN.OnnxRuntime
         /// <summary>
         /// Create the backend reading
         /// <see cref="OnnxBackendOptions.FromEnvironment"/> for
-        /// EP selection. Out-of-box behavior is
-        /// "auto-detect a hardware-accelerated EP, fall back to
-        /// CPU on failure" — see the class docs above for the
-        /// platform pick order.
+        /// EP selection. Default is CPU unless
+        /// <c>WACS_WASINN_ONNX_EP</c> is set — hardware
+        /// acceleration is opt-in. See the class docs above for
+        /// the Auto-resolution platform pick order.
         /// </summary>
         public OnnxBackend() : this(OnnxBackendOptions.FromEnvironment()) { }
 

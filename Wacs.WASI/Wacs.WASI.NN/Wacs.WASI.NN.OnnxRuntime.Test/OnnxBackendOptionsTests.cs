@@ -25,10 +25,15 @@ namespace Wacs.WASI.NN.OnnxRuntime.Test
     public sealed class OnnxBackendOptionsTests
     {
         [Fact]
-        public void Defaults_pick_auto_with_fallback_enabled()
+        public void Defaults_pick_cpu_with_fallback_enabled()
         {
             var opts = new OnnxBackendOptions();
-            Assert.Equal(OnnxExecutionProvider.Auto, opts.ExecutionProvider);
+            // CPU is the safe default — hardware acceleration is
+            // explicit opt-in via WACS_WASINN_ONNX_EP or the typed
+            // ExecutionProvider setter. The Auto enum value still
+            // exists for users who want platform-best-pick semantics
+            // but is no longer the default for OnnxBackendOptions.
+            Assert.Equal(OnnxExecutionProvider.Cpu, opts.ExecutionProvider);
             Assert.True(opts.FallbackToCpu);
         }
 
