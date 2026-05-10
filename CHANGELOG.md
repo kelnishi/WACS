@@ -1,5 +1,40 @@
 # Changelog
 
+## All NuGet packages — README included in published packages
+
+Eleven packages gain a `<PackageReadmeFile>README.md</PackageReadmeFile>` entry plus a
+local `README.md`. Eight of them got fresh consumer-facing READMEs; two (`WACS.WASI.NN`
+and `WACS.WASI.Preview2`) already had READMEs that just needed the csproj wiring; one
+(`WACS.Transpiler.Lib`) had its csproj packing the deprecated `WACS.Transpiler` CLI tool's
+README — the architecture doc previously at `Wacs.Transpiler.Lib/README.md` moved to
+`ARCHITECTURE.md` and a fresh embedder-focused README took its place.
+
+Each README covers: what the package is, who should install it, a minimal install +
+quick-start example, what's inside, and links to deeper docs (top-level README,
+[`docs/COMPONENT_CHAINING.md`](docs/COMPONENT_CHAINING.md)). NuGet.org now renders the
+package-specific README on every package's listing page.
+
+### Versions
+
+Patch-level bumps (README is metadata; no public-API or behavior change):
+
+- `WACS.ComponentModel` 0.3.4 → **0.3.5**
+- `WACS.ComponentModel.Bindgen.Lib` 0.1.0 → **0.1.1**
+- `WACS.WASI.NN` 0.3.0 → **0.3.1**
+- `WACS.WASI.NN.DependencyInjection` 0.2.1 → **0.2.2**
+- `WACS.WASI.NN.OnnxRuntime` 0.2.2 → **0.2.3**
+- `WACS.WASI.NN.LlamaSharp` 0.2.1 → **0.2.2**
+- `WACS.WASI.NN.MLNet` 0.2.1 → **0.2.2**
+- `WACS.WASI.Preview2` 0.4.0 → **0.4.1**
+- `WACS.WASI.Preview2.DependencyInjection` 0.1.4 → **0.1.5**
+- `WACS.WASI.Threads` 0.2.0 → **0.2.1**
+- `WACS.Transpiler.Lib` 0.8.11 → **0.8.12**
+
+(Untouched: `WACS`, `WASI.Preview1` (already had README + wiring),
+`WACS.HostBindings.{Abstractions,SourceGen}` (already had READMEs + wiring),
+`WACS.Cli` (already had README + wiring), `WACS.Transpiler` (deprecated; keeps its
+existing deprecation-notice README).)
+
 ## WACS.Cli 1.5.18 / WACS.Transpiler.Lib 0.8.11 / WACS.WASI.NN.DependencyInjection 0.2.1 / WACS.WASI.NN.LlamaSharp 0.2.1 / WACS.WASI.NN.MLNet 0.2.1 / WACS.WASI.Preview2.DependencyInjection 0.1.4 — gaps 24 + 25 + 26 + 27: LlamaSharp / GGUF on the transpiler-direct-link path (end-to-end)
 
 The wasi-nn LlamaSharp/GGUF harness (`guest-llm/`, Qwen2.5 0.5B

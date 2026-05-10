@@ -12,13 +12,21 @@
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.WASI.Threads</AssemblyName>
-        <AssemblyVersion>0.2.0</AssemblyVersion>
-        <Version>0.2.0</Version>
+        <AssemblyVersion>0.2.1</AssemblyVersion>
+        <Version>0.2.1</Version>
         <RepositoryType>git</RepositoryType>
         <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
         <IsAotCompatible>true</IsAotCompatible>
         <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
     </PropertyGroup>
+
+    <ItemGroup>
+      <None Include="README.md">
+        <Pack>true</Pack>
+        <PackagePath/>
+      </None>
+    </ItemGroup>
 
     <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
       <DebugSymbols>true</DebugSymbols>

@@ -12,11 +12,15 @@
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.WASI.Preview2</AssemblyName>
-        <AssemblyVersion>0.4.0</AssemblyVersion>
-        <Version>0.4.0</Version>
+        <AssemblyVersion>0.4.1</AssemblyVersion>
+        <Version>0.4.1</Version>
         <RepositoryType>git</RepositoryType>
         <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
         <IsAotCompatible Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net7.0'))">true</IsAotCompatible>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
         <!-- Persist source-gen output under obj/Generated for IDE
              navigation + debugging. Doesn't affect compilation. -->
         <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
@@ -94,6 +98,13 @@
     <ItemGroup>
         <EmbeddedResource Include="wit\**\*.wit"
                           LogicalName="wit/%(RecursiveDir)%(Filename)%(Extension)" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="README.md">
+            <Pack>true</Pack>
+            <PackagePath/>
+        </None>
     </ItemGroup>
 
 </Project>
