@@ -1,5 +1,77 @@
 # Changelog
 
+## WACS 0.13.7 / WACS.Cli 1.5.8 / WACS.Transpiler.Lib 0.8.7 — round-12 follow-up: predicate alignment + trap-stub-friendly shadow
+
+Round 12 introduced a runtime-level shadow rule for direct-link-
+covered entities. Two issues surfaced under SLM verification
+(round-12 follow-up):
+
+1. **Predicate mismatch.** The pre-pass marked everything the
+   resolver matched (interface granularity), but the IL emit only
+   direct-links shapes `CanEmitDirect` accepts (per-method).
+   Resolver-matched-but-emit-rejected entities (e.g.
+   `wasi:nn/errors.[method]error.code` when its emit gate
+   rejects, or any binding with an unsupported param shape) got
+   shadowed but never had IL emitted, leaving no fallback.
+
+2. **Trap-stub shadowing.** The shadow rule fired
+   unconditionally, blocking `ComponentImportStubs.RegisterAll`'s
+   first-call trap-stub registration too. Without that
+   placeholder in `_entityBindings`, the runtime's instantiation
+   pre-validation (`WasmRuntimeInstantiation.cs:169`) threw "The
+   imported Function was not provided by the environment" before
+   any user-level code ran.
+
+Two-line fix in each direction:
+
+**Predicate alignment.** `ComponentTranspiler`'s pre-pass now
+mirrors `CallEmitter.EmitImportCall`'s direct-link gate exactly:
+resolver match + `PreferredBundleType` set + `CanEmitDirect`
+accepts + (resource methods need `PreferredResourcesType`). Same
+predicate, same order — pre-pass and IL emit can't disagree on
+which entities are direct-link covered.
+
+**Trap-stub-friendly shadow.** `WasmRuntime.BindHostFunction`'s
+shadow check fires only when the entity is marked AND already has
+a binding. The first registration (typically the trap-stub) goes
+through; second-and-later registrations (the IBindable
+overrides) drop. The trap-stub stays in `_entityBindings` as a
+never-invoked placeholder while direct-link IL handles the
+actual dispatch.
+
+Test surface unchanged in count (still 3 [Fact]s in
+`Wacs.Core.Test.BindingTests`); semantics updated:
+
+- `BindHostFunction_DirectLinkCoverage_FirstRegisters_SecondShadows`
+  — first call goes through, second is dropped.
+- `BindHostFunction_NoCoverage_RegistersNormally` — sanity:
+  unmarked entities still bind on every call.
+- `BindHostFunction_PartialCoverage_SelectiveShadow` — covers
+  the SLM mixed-ABI scenario (WIT covered, WITX not).
+
+### Versions
+
+- `WACS` 0.13.6 → **0.13.7** (shadow rule semantics)
+- `WACS.Cli` 1.5.7 → **1.5.8** (no code change; same release event)
+- `WACS.Transpiler.Lib` 0.8.6 → **0.8.7** (pre-pass predicate)
+
+### Out of scope (separate gap if it surfaces)
+
+The wasi-nn SLM still hits a registry split when `load`'s
+`byte[][]` PARAM trips a `CanonicalSlotCount` rejection — the
+import falls back to delegate dispatch through the IBindable's
+WitBindings handler, allocating in `host.Graphs`, while
+`init-execution-context` direct-links and looks up in
+`WasiPreview2Resources`. Closing that requires either:
+
+- Adding `byte[][]` (and similar jagged-array) PARAM support to
+  `CanonicalSlotCount` + `DirectLinkedImportEmit`, or
+- Bridging the WitBindings resource registries
+  (`host.Graphs`/`Tensors`/`Errors`/`Contexts`) to share their
+  i32 namespace with `WasiPreview2Resources`.
+
+Either is a substantive change tracked as gap 19.
+
 ## WACS 0.13.6 / WACS.Cli 1.5.7 / WACS.Transpiler.Lib 0.8.6 — direct-link coverage shadows BindHostFunction registrations
 
 Replaces the round-11 CLI gating kludge (`if (opts.WasiNN &&

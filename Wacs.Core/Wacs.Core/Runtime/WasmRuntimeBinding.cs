@@ -460,20 +460,30 @@ namespace Wacs.Core.Runtime
         public void BindHostFunction<TDelegate>((string module, string entity) id, TDelegate func)
             where TDelegate : Delegate
         {
-            // Direct-link coverage shadow: the transpiler's IL emits
-            // a hardcoded call into the bundle's typed method for
-            // this entity, bypassing the runtime entity registry.
-            // Registering a handler here would put a delegate into
-            // _entityBindings that nobody reads back. Worse, if the
-            // handler runs anyway through some fallback (e.g. a
-            // legacy interpreter dispatch path), it allocates
-            // resource handles in the IBindable's separate registry
-            // — splitting the i32 namespace from the canonical
-            // direct-link registry. Silently dropping the
-            // registration here makes the runtime enforce the rule
-            // that one binding source provides each entity, no
-            // matter how the embedder wired the IBindables.
-            if (_directLinkProvidedEntities.Contains(id))
+            // Direct-link coverage shadow: the transpiler's IL
+            // bypasses the runtime entity registry for direct-link-
+            // covered entities, so subsequent attempts to override
+            // an existing entity binding for them would shadow
+            // nothing useful at the dispatch path AND risk aliasing
+            // the resource-handle namespace across two registries
+            // if the override IS still invoked through some
+            // fallback path (delegate dispatch into an IBindable
+            // handler that allocates in its own table).
+            //
+            // The rule fires only when the entity is marked AND
+            // already has a binding — i.e. on the second+ call.
+            // The first registration (typically the trap-stub
+            // placeholder from `ComponentImportStubs.RegisterAll`)
+            // goes through unchanged so the runtime's
+            // import-resolution validation
+            // (`WasmRuntimeInstantiation` line ~169) can find
+            // every import bound. Subsequent IBindable handlers
+            // that try to override the trap-stub for marked
+            // entities get dropped — the trap-stub stays as the
+            // never-invoked placeholder while the direct-link IL
+            // does the actual dispatch.
+            if (_directLinkProvidedEntities.Contains(id)
+                && _entityBindings.ContainsKey(id))
                 return;
 
             var funcType = func.GetType();
@@ -545,9 +555,12 @@ namespace Wacs.Core.Runtime
         // doesn't cover.
         public void BindHostFunction((string module, string entity) id, IFunctionInstance func)
         {
-            // Same shadow rule as the delegate overload: a direct-
-            // link bundle owns this entity's dispatch.
-            if (_directLinkProvidedEntities.Contains(id))
+            // Same shadow rule as the delegate overload — see the
+            // detailed comment there. Only fires after a trap-stub
+            // (or first-bound) placeholder is in `_entityBindings`,
+            // so the trap-stub registration itself goes through.
+            if (_directLinkProvidedEntities.Contains(id)
+                && _entityBindings.ContainsKey(id))
                 return;
 
             Store.OpenTransaction();

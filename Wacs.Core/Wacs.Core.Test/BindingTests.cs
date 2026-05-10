@@ -256,24 +256,20 @@ namespace Wacs.Core.Test
         delegate Task<int> HostAsyncInRet(int a);
 
         [Fact]
-        public void BindHostFunction_DirectLinkCoverage_SilentlyShadowsRegistration()
+        public void BindHostFunction_DirectLinkCoverage_FirstRegisters_SecondShadows()
         {
-            // The transpiler's import pre-pass calls
-            // MarkEntityProvidedByDirectLink for every (module,
-            // entity) pair the resolver matches. The IL it emits
-            // hardcodes the call into the bundle's typed interface
-            // and bypasses the runtime entity registry, so any
-            // subsequent BindHostFunction call for the same entity
-            // would shadow nothing useful — and for resource-
-            // returning host paths, would alias the resource-handle
-            // namespace across two independent registries (the
-            // SLM's gap-18 trip site).
-            //
-            // This test pins the runtime-level shadow rule directly:
-            // mark an entity as direct-link-provided, then
-            // BindHostFunction the same entity, and verify the
-            // entity registry shows no binding (i.e. the
-            // registration was silently dropped).
+            // The shadow rule only applies AFTER an entity already
+            // has a binding. The first call (typically the trap-stub
+            // placeholder from `ComponentImportStubs.RegisterAll`)
+            // goes through so the runtime's import-resolution
+            // validation can find every import bound. Subsequent
+            // IBindable BindHostFunction overrides for marked
+            // entities are dropped — the trap-stub stays as a
+            // never-invoked placeholder while direct-link IL does
+            // the actual dispatch. The handle-namespace registry
+            // split that gap 18 / round-10 surfaced is closed
+            // because the IBindable's real handler never runs to
+            // mint anything in its own registry.
 
             var runtime = new WasmRuntime();
             var id = ("wasi:nn/graph-funcs@0.2.0-rc-2024-10-28", "load");
@@ -283,16 +279,21 @@ namespace Wacs.Core.Test
             runtime.MarkEntityProvidedByDirectLink(id);
             Assert.True(runtime.IsEntityProvidedByDirectLink(id));
 
-            // Pre-shadow: no entity binding yet.
+            // First registration (e.g. trap-stub placeholder) goes
+            // through — instantiation needs every import bound.
             Assert.False(runtime.TryGetBoundHostFunctionType(id, out _));
-
-            // Now an IBindable would call BindHostFunction. The
-            // call should silently no-op.
             runtime.BindHostFunction<HostInOut>(id, BoundHost);
+            Assert.True(runtime.TryGetBoundHostFunctionType(id,
+                out var firstType));
 
-            // Post-call: still no entity binding. The shadow rule
-            // dropped the registration without throwing.
-            Assert.False(runtime.TryGetBoundHostFunctionType(id, out _));
+            // Second registration (e.g. IBindable override) is
+            // silently shadowed — the trap-stub stays.
+            runtime.BindHostFunction<HostInOut>(id, BoundHost);
+            Assert.True(runtime.TryGetBoundHostFunctionType(id,
+                out var secondType));
+            // Same address (no rebind). FunctionType structural
+            // equality is enough to assert "no second registration."
+            Assert.Equal(firstType.ToNotation(), secondType.ToNotation());
         }
 
         [Fact]
@@ -319,23 +320,32 @@ namespace Wacs.Core.Test
             // WITX ABIs (host.BindToRuntime calls WitxBindings.Bind
             // + WitBindings.Bind). The transpiler's bundle covers
             // the WIT entities (wasi:nn/graph-funcs.* etc.) but NOT
-            // the legacy WITX ones (wasi_ephemeral_nn::*). The
-            // shadow rule should drop the WIT registrations and
-            // pass the WITX ones through unchanged so an embedder
-            // running mixed-ABI guests doesn't lose the legacy
-            // path.
+            // the legacy WITX ones (wasi_ephemeral_nn::*). With a
+            // trap-stub placeholder registered for both, the WIT
+            // override gets shadowed (trap-stub remains, direct-
+            // link IL handles dispatch) and the WITX override goes
+            // through (replaces trap-stub since not direct-link
+            // covered).
             var runtime = new WasmRuntime();
             var witLoad = ("wasi:nn/graph-funcs@0.2.0-rc-2024-10-28", "load");
             var witxLoad = ("wasi_ephemeral_nn", "load");
 
-            // Cover the WIT entity only.
             runtime.MarkEntityProvidedByDirectLink(witLoad);
 
+            // First-call trap-stub placeholders for both.
             runtime.BindHostFunction<HostInOut>(witLoad, BoundHost);
             runtime.BindHostFunction<HostInOut>(witxLoad, BoundHost);
+            Assert.True(runtime.TryGetBoundHostFunctionType(witLoad, out _));
+            Assert.True(runtime.TryGetBoundHostFunctionType(witxLoad, out _));
 
-            // WIT: shadowed. WITX: registered normally.
-            Assert.False(runtime.TryGetBoundHostFunctionType(witLoad, out _));
+            // Second-call IBindable overrides for both. WIT is
+            // shadowed (no replacement), WITX replaces normally.
+            // Both still resolve — instantiation can find every
+            // import bound, regardless of whether the IL dispatches
+            // through direct-link or delegate.
+            runtime.BindHostFunction<HostInOut>(witLoad, BoundHost);
+            runtime.BindHostFunction<HostInOut>(witxLoad, BoundHost);
+            Assert.True(runtime.TryGetBoundHostFunctionType(witLoad, out _));
             Assert.True(runtime.TryGetBoundHostFunctionType(witxLoad, out _));
         }
     }
