@@ -1,5 +1,52 @@
 # Changelog
 
+## WACS.Cli 1.5.11 / WACS.WASI.NN.OnnxRuntime 0.2.1 — bundled ORT NuGet 1.20.1 → 1.21.0 (Gemma 3 GroupQueryAttention shape)
+
+The wasi-nn SLM (Gemma 3 270M ONNX export) loaded all the way to
+ORT's `InferenceSession` constructor after round 14 closed gap 20,
+then tripped graph validation:
+
+```
+[ErrorCode:InvalidGraph] This is an invalid model.
+In Node, ("/model/layers.0/attn/GroupQueryAttention",
+GroupQueryAttention, "com.microsoft", -1) ...
+Error Node has input size 11 not in range [min=7, max=9].
+```
+
+The contrib op `com.microsoft.GroupQueryAttention` widened its
+allowed input range from 7..9 to 7..11 across ORT 1.20→1.21 (added
+optional `attention_bias` + positional inputs). Gemma 3's export
+emits all 11 inputs, so it loads on 1.21+ and trips graph
+validation on 1.20.x.
+
+`Wacs.WASI.NN.OnnxRuntime/Wacs.WASI.NN.OnnxRuntime.csproj` now
+pins `Microsoft.ML.OnnxRuntime` at **1.21.0**. No public-API
+break for the surface this package uses (`SessionOptions`,
+`InferenceSession`, `OrtValue`); verified by the matching
+wasi-nn host's `ort 2.0.0-rc.10` Rust dependency loading the
+same model bytes successfully.
+
+Test surface: `Wacs.WASI.NN.OnnxRuntime.Test` (10/10) +
+`Wacs.WASI.NN.Test` (18/18) + `Wacs.WASI.NN.LlamaSharp.Test`
+(6/6, 2 skip) + `Wacs.WASI.NN.MLNet.Test` (7/7) all pass
+unchanged — no API drift visible from our consumer side.
+
+This is a downstream-dependency-version gap, not an
+architectural one: the canonical-ABI lift, DI bundle, backend
+registration, direct-link emit, and resource-handle path
+closed in rounds 13-14 are all correct. The bump just gives
+ORT enough op coverage to validate a real SLM graph.
+
+### Versions
+
+- `WACS.WASI.NN.OnnxRuntime` 0.2.0 → **0.2.1** (NuGet bump only)
+- `WACS.Cli` 1.5.10 → **1.5.11** (release event for the
+  bundled ORT bump)
+
+(Untouched: `WACS`, `WASI.Preview1`, `.Preview2`, `.Preview2.DI`,
+`.WASI.NN`, `.WASI.NN.DI`, `WACS.Transpiler.Lib`,
+`WACS.ComponentModel`, `WACS.HostBindings.Abstractions`.)
+
 ## WACS.Cli 1.5.10 / WACS.WASI.Preview2.DependencyInjection 0.1.2 — wasi-nn ONNX backend wires through DI under `--wasi-nn`
 
 After round 13's `byte[][]` fix unblocked direct-link `graph.load`,

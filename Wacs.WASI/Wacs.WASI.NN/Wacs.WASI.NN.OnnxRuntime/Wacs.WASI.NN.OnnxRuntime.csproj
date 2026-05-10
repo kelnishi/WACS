@@ -12,8 +12,8 @@
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.WASI.NN.OnnxRuntime</AssemblyName>
-        <AssemblyVersion>0.2.0</AssemblyVersion>
-        <Version>0.2.0</Version>
+        <AssemblyVersion>0.2.1</AssemblyVersion>
+        <Version>0.2.1</Version>
         <RepositoryType>git</RepositoryType>
         <!-- ONNX Runtime carries native binaries; restricting to
              net8.0 here is fine because ORT itself targets
@@ -28,7 +28,17 @@
 
     <ItemGroup>
         <ProjectReference Include="..\Wacs.WASI.NN\Wacs.WASI.NN.csproj" />
-        <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.20.1" />
+        <!-- 1.21.0+ widens com.microsoft.GroupQueryAttention's
+             allowed input range from [7..9] to [7..11], which the
+             Gemma 3 270M ONNX export needs. 1.20.1 trips graph
+             validation with "input size 11 not in range [min=7,
+             max=9]". No public-API break for the surface this
+             package uses (SessionOptions, InferenceSession,
+             OrtValue) between 1.20.1 and 1.21.0; verified by the
+             matching wasi-nn host's `ort 2.0.0-rc.10` Rust
+             dependency loading the same model bytes. Round-14
+             follow-up (gap 21). -->
+        <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.21.0" />
     </ItemGroup>
 
 </Project>
