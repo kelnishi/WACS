@@ -13,6 +13,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Runtime.Loader;
 using Wacs.Core.Runtime;
 
 namespace Wacs.Transpiler.Hosting
@@ -67,41 +68,151 @@ namespace Wacs.Transpiler.Hosting
         /// </summary>
         public static Assembly LoadAssembly(string nameOrPath)
         {
-            Assembly asm;
-            string? loadFromPath = null;
             if (File.Exists(nameOrPath))
             {
-                loadFromPath = Path.GetFullPath(nameOrPath);
-                asm = Assembly.LoadFrom(loadFromPath);
-            }
-            else
-            {
-                try { asm = Assembly.Load(nameOrPath); }
-                catch (Exception ex)
+                var fullPath = Path.GetFullPath(nameOrPath);
+                // Memoize by absolute path so repeat calls (e.g.,
+                // RunHandler's load-then-bind double-pass: preload
+                // for AppDomain visibility, then ApplyBindings
+                // re-resolves) return the same Assembly instance —
+                // a fresh AssemblyLoadContext per call would yield
+                // distinct Type identities and break IBindable
+                // matching against the host-loaded interface.
+                var asm = _bindContexts.GetOrAdd(fullPath, static p =>
                 {
-                    throw new FileNotFoundException(
-                        "binding assembly not found as file or name: "
-                        + nameOrPath + " (" + ex.Message + ")");
-                }
-                // Native-lib resolver also helps for assemblies
-                // resolved by name when their location is a real
-                // file path (e.g., side-by-side install).
-                if (!string.IsNullOrEmpty(asm.Location)
-                    && File.Exists(asm.Location))
-                    loadFromPath = asm.Location;
+                    var ctx = new BindBackendLoadContext(p);
+                    return ctx.LoadFromAssemblyPath(p);
+                });
+                // Per-assembly resolver is still useful when the
+                // bind asm itself has direct [DllImport] (rare, but
+                // costs nothing to register). LoadUnmanagedDll on
+                // BindBackendLoadContext is the catch-all for every
+                // DllImport from any assembly in the context —
+                // including transitive deps like TorchSharp.dll
+                // (gap 30 / round-25-verification).
+                RegisterNativeResolver(asm, fullPath);
+                return asm;
             }
-            // Register a P/Invoke resolver that probes the
-            // backend's own runtimes/<rid>/native/ subdir for
-            // DllImports issued by the loaded assembly. Without
-            // this, --bind <path-to-backend.dll> trips
-            // "Unable to load shared library 'X'" on the first
-            // DllImport because the standard resolver only probes
-            // the application's runtimes/ tree, not arbitrary
-            // LoadFrom'd assemblies' bundled natives. Gap 28 /
-            // round-24 verification.
-            if (loadFromPath != null)
-                RegisterNativeResolver(asm, loadFromPath);
-            return asm;
+            Assembly nameAsm;
+            try { nameAsm = Assembly.Load(nameOrPath); }
+            catch (Exception ex)
+            {
+                throw new FileNotFoundException(
+                    "binding assembly not found as file or name: "
+                    + nameOrPath + " (" + ex.Message + ")");
+            }
+            // Native-lib resolver also helps for assemblies
+            // resolved by name when their location is a real
+            // file path (e.g., side-by-side install). Name-loaded
+            // assemblies live in the default context, so the
+            // LoadContext-level hook isn't available — the
+            // per-assembly resolver is the best we can do.
+            if (!string.IsNullOrEmpty(nameAsm.Location)
+                && File.Exists(nameAsm.Location))
+                RegisterNativeResolver(nameAsm, nameAsm.Location);
+            return nameAsm;
+        }
+
+        // Memoize path -> Assembly so repeat LoadAssembly calls on
+        // the same path yield the same Assembly instance (same
+        // Type identities). Without this, the second LoadAssembly
+        // would create a new BindBackendLoadContext, load the
+        // assembly afresh, and IBindable types from the two loads
+        // wouldn't match the host's IBindable interface in a
+        // type-equality check.
+        private static readonly ConcurrentDictionary<string, Assembly>
+            _bindContexts = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Custom <see cref="AssemblyLoadContext"/> for backends
+        /// loaded via <c>--bind &lt;path&gt;</c>. The
+        /// <see cref="LoadUnmanagedDll"/> override probes the
+        /// backend's own <c>runtimes/&lt;rid&gt;/native/</c>
+        /// subdirectory for every P/Invoke from any assembly in
+        /// the context (the bind asm itself, the upstream NuGet
+        /// wrapper like <c>TorchSharp.dll</c>, and any deeper
+        /// transitive deps), then falls back to the default
+        /// resolver. This is the load-context-level hook that
+        /// gap 30 / round-25-verification identified as the
+        /// missing piece — per-assembly
+        /// <see cref="NativeLibrary.SetDllImportResolver"/>
+        /// only fires for DllImports declared in that one
+        /// assembly, but most real backends declare their
+        /// <c>[DllImport]</c>s in a transitive NuGet, not the
+        /// bind asm itself.
+        ///
+        /// <para><see cref="Load"/> defers to
+        /// <see cref="AssemblyDependencyResolver"/> which honors
+        /// the bind asm's <c>.deps.json</c>; managed deps not
+        /// covered by the resolver fall through to the default
+        /// load context (which handles host-shared assemblies
+        /// like Wacs.Core, Wacs.Transpiler.Lib, etc., preserving
+        /// type identity across the boundary).</para>
+        /// </summary>
+        private sealed class BindBackendLoadContext : AssemblyLoadContext
+        {
+            private readonly AssemblyDependencyResolver _depsResolver;
+            private readonly string _bindDir;
+            private readonly string _rid;
+
+            public BindBackendLoadContext(string assemblyPath)
+                : base(name: "WacsBind:" + Path.GetFileName(assemblyPath),
+                       isCollectible: false)
+            {
+                _depsResolver = new AssemblyDependencyResolver(assemblyPath);
+                _bindDir = Path.GetDirectoryName(assemblyPath)!;
+                _rid = RuntimeInformation.RuntimeIdentifier;
+            }
+
+            protected override Assembly? Load(AssemblyName assemblyName)
+            {
+                // Defer to the default context for assemblies the
+                // host has already loaded — preserves type identity
+                // across the boundary so IBindable/IBackend
+                // references in the bind asm match the host's
+                // copies. Without this, deps.json-driven
+                // ResolveAssemblyToPath would happily return a
+                // private path (since EnableDynamicLoading bundles
+                // host-shared deps too) and we'd load a duplicate.
+                foreach (var loaded in Default.Assemblies)
+                {
+                    if (loaded.GetName().Name == assemblyName.Name)
+                        return null;
+                }
+                var path = _depsResolver.ResolveAssemblyToPath(assemblyName);
+                return path != null ? LoadFromAssemblyPath(path) : null;
+            }
+
+            protected override IntPtr LoadUnmanagedDll(string unmanagedDllName)
+            {
+                // .deps.json-driven resolution first — handles the
+                // "managed library 'TorchSharp' P/Invokes
+                // 'LibTorchSharp', which lives at
+                // runtimes/<rid>/native/libLibTorchSharp.dylib"
+                // mapping that the NuGet RID story is built around.
+                var path = _depsResolver.ResolveUnmanagedDllToPath(
+                    unmanagedDllName);
+                if (path != null
+                    && NativeLibrary.TryLoad(path, out var h1))
+                    return h1;
+                // Fallback: explicit probe of the bind-dir's
+                // runtimes/<rid>/native/ subdirectory in case the
+                // deps.json doesn't list the lib (e.g., it's a
+                // dlopen target of a libtorch_cpu.dylib that .NET
+                // doesn't know about, or the project doesn't ship
+                // a deps.json). Walks coarser RIDs and the flat
+                // bind dir last.
+                var probes = new List<string>
+                {
+                    Path.Combine(_bindDir, "runtimes", _rid, "native"),
+                };
+                foreach (var coarser in CoarserRids(_rid))
+                    probes.Add(Path.Combine(_bindDir, "runtimes",
+                        coarser, "native"));
+                probes.Add(_bindDir);
+                var handle = ResolveFromProbes(unmanagedDllName, probes);
+                return handle != IntPtr.Zero ? handle : IntPtr.Zero;
+            }
         }
 
         // P/Invoke probe paths populated by EnableDynamicLoading
