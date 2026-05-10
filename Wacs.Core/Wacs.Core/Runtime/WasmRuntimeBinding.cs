@@ -420,9 +420,72 @@ namespace Wacs.Core.Runtime
             return false;
         }
 
+        /// <summary>
+        /// Mark <paramref name="id"/> as provided by a transpiler
+        /// direct-link bundle. Subsequent
+        /// <see cref="BindHostFunction{TDelegate}"/> calls for the
+        /// same <c>(module, entity)</c> pair silently no-op — the
+        /// emitted IL hardcodes the call into the bundle's typed
+        /// interface and bypasses the runtime entity registry, so
+        /// any IBindable-style registration would shadow nothing
+        /// and risk aliasing the resource-handle namespace across
+        /// two independent registries (one per binding source).
+        ///
+        /// <para>Called by <c>ComponentTranspiler.TranspileSingleModule</c>
+        /// during its import pre-pass: for every wasm import where
+        /// the resolver matches a binding, mark the entity. Then
+        /// the <c>configureImports</c> callback (which runs
+        /// <c>WasiPreview2RuntimeScope</c> + <c>ApplyBindings</c>)
+        /// can register handlers freely; coverage-overlapping
+        /// registrations drop silently instead of inducing the
+        /// registry-split observed in the wasi-nn SLM (round-10
+        /// follow-up bisection).</para>
+        /// </summary>
+        public void MarkEntityProvidedByDirectLink(
+            (string module, string entity) id)
+        {
+            _directLinkProvidedEntities.Add(id);
+        }
+
+        /// <summary>
+        /// True when <paramref name="id"/> was previously marked
+        /// via <see cref="MarkEntityProvidedByDirectLink"/>. Exposed
+        /// for diagnostics; the runtime checks this internally on
+        /// <see cref="BindHostFunction{TDelegate}"/>.
+        /// </summary>
+        public bool IsEntityProvidedByDirectLink(
+            (string module, string entity) id)
+            => _directLinkProvidedEntities.Contains(id);
+
         public void BindHostFunction<TDelegate>((string module, string entity) id, TDelegate func)
             where TDelegate : Delegate
         {
+            // Direct-link coverage shadow: the transpiler's IL
+            // bypasses the runtime entity registry for direct-link-
+            // covered entities, so subsequent attempts to override
+            // an existing entity binding for them would shadow
+            // nothing useful at the dispatch path AND risk aliasing
+            // the resource-handle namespace across two registries
+            // if the override IS still invoked through some
+            // fallback path (delegate dispatch into an IBindable
+            // handler that allocates in its own table).
+            //
+            // The rule fires only when the entity is marked AND
+            // already has a binding — i.e. on the second+ call.
+            // The first registration (typically the trap-stub
+            // placeholder from `ComponentImportStubs.RegisterAll`)
+            // goes through unchanged so the runtime's
+            // import-resolution validation
+            // (`WasmRuntimeInstantiation` line ~169) can find
+            // every import bound. Subsequent IBindable handlers
+            // that try to override the trap-stub for marked
+            // entities get dropped — the trap-stub stays as the
+            // never-invoked placeholder while the direct-link IL
+            // does the actual dispatch.
+            if (_directLinkProvidedEntities.Contains(id)
+                && _entityBindings.ContainsKey(id))
+                return;
+
             var funcType = func.GetType();
             var parameters = funcType.GetMethod("Invoke")?.GetParameters();
             var paramTypes = parameters?
@@ -492,6 +555,14 @@ namespace Wacs.Core.Runtime
         // doesn't cover.
         public void BindHostFunction((string module, string entity) id, IFunctionInstance func)
         {
+            // Same shadow rule as the delegate overload — see the
+            // detailed comment there. Only fires after a trap-stub
+            // (or first-bound) placeholder is in `_entityBindings`,
+            // so the trap-stub registration itself goes through.
+            if (_directLinkProvidedEntities.Contains(id)
+                && _entityBindings.ContainsKey(id))
+                return;
+
             Store.OpenTransaction();
             var funcAddr = Store.AddFunction(func);
             Store.CommitTransaction();

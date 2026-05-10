@@ -37,6 +37,21 @@ namespace Wacs.Core.Runtime
     {
         private readonly Dictionary<(string module, string entity), IAddress?> _entityBindings = new();
 
+        // Direct-link-coverage set: <c>(module, entity)</c> pairs that
+        // a transpiler-direct-link bundle resolves at IL-emit time. The
+        // emitted IL hardcodes the call into the bundle's typed
+        // interface and never reads back from <see cref="_entityBindings"/>;
+        // any subsequent <see cref="BindHostFunction{TDelegate}"/> call
+        // for the same entity would silently shadow nothing useful and
+        // risks aliasing the resource-handle namespace across two
+        // independent registries (the bundle's
+        // <c>WasiPreview2Resources</c> + the IBindable's per-host
+        // tables). When an entity is in this set, BindHostFunction
+        // no-ops the registration. Populated by the transpiler's
+        // import pre-pass before <c>configureImports</c> runs.
+        private readonly HashSet<(string module, string entity)>
+            _directLinkProvidedEntities = new();
+
         private readonly List<ModuleInstance> _moduleInstances = new();
         private readonly Dictionary<string, ModuleInstance> _registeredModules = new();
 

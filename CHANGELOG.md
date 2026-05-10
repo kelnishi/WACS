@@ -1,5 +1,841 @@
 # Changelog
 
+## WACS.Cli 1.5.14 / WACS.Transpiler.Lib 0.8.10 — `[constructor]X` SourceGen-shape impl-class discovery falls back to AppDomain (gap 23)
+
+The wasi-nn SLM's `Tensor::new(dimensions, ty, data)` returned
+handle 0 to the guest, tripping `[method]tensor.data(0)` with
+"Handle 0 is reserved as the null sentinel." Round-17
+verification surfaced this as gap 23, hypothesized as a regression
+in the round-9 constructor `AllocateResource` tail. The actual
+root cause was different — and round-9's emit IL was still
+correct.
+
+### Root cause
+
+`HostPackageResolver.TryFindResourceImpl` walked **only** the
+explicit `HostPackages` list when looking for a SourceGen-shape
+impl class (parameterless ctor + `void Create(args)`). The
+WASI-NN typed interfaces (`ITensor`, `IGraph`,
+`IGraphExecutionContext`) live in `Wacs.WASI.NN`, but the impl
+classes (`Tensor`, `Graph`, `GraphExecutionContext`) live in
+the **DI sibling** assembly `Wacs.WASI.NN.DependencyInjection`.
+
+When the CLI runs `wacs run --wasi-nn`, `ResolveHostPackages`
+historically added `Wacs.WASI.Preview2` + `Wacs.WASI.NN` —
+not the DI siblings. `TryFindResourceImpl(typeof(ITensor))`
+returned false → `CanEmitDirect`'s SourceGen-ctor gate
+rejected `[constructor]tensor` (line 128-131 of
+`DirectLinkedImportEmit`) → the call fell back to legacy
+delegate dispatch — whose generated handler doesn't allocate
+through `WasiPreview2Resources`, leaving 0 on the wasm side
+as the constructor's i32 result.
+
+Unit tests didn't catch this because every existing fixture
+defines the impl class in the same assembly as the test, so
+HostPackages always contained it.
+
+### Fixes (defense in depth)
+
+**Resolver fallback.** `TryFindResourceImpl` now walks
+HostPackages first (matching the existing contract), then falls
+back to AppDomain assemblies when the impl isn't found.
+`WasiPreview2RuntimeScope.ReflectivelyAddWasiNN` already
+`Assembly.Load`s the DI sibling at scope-construction time, so
+the assembly is present in AppDomain before transpilation
+runs — the fallback picks it up. Mirrors the three-tier
+search `FindBundleType` and `FindWasiPreview2Resources`
+already use for bundle/resources lookup. Catches via
+`SearchForImpl` to keep `ReflectionTypeLoadException` /
+`NotSupportedException` from blocking the search on a
+collectable / dynamic AppDomain assembly.
+
+**CLI host-package list.** `RunHandler.ResolveHostPackages`
+now explicitly adds `Wacs.WASI.Preview2.DependencyInjection`
+(when `--wasip2`) and `Wacs.WASI.NN.DependencyInjection`
+(when `--wasi-nn`). Symmetric in `BuildHandler`. Avoids the
+AppDomain-fallback round-trip for the common path and keeps
+the resolver's first-tier search complete.
+
+### Test surface
+
+- `HostPackageResolver_TryFindResourceImpl_FallsBackToAppDomain`
+  — passes empty HostPackages, asserts the resolver still
+  finds `TestSgWidget` via AppDomain (xunit loads the test
+  assembly into AppDomain).
+- `DirectLinkedImport_SourceGenCtorWithParam_AllocatesAndResolves`
+  — single-u32 SourceGen ctor + read; sanity check the
+  with-PARAM constructor path.
+- `DirectLinkedImport_SourceGenCtorWithListParams_AllocatesAndResolves`
+  — `(uint[], enum, byte[])` SourceGen ctor matching the
+  wasi-nn `Tensor::new` shape; checksum verification proves
+  both PARAM lift and `AllocateResource` fired.
+
+Wacs.Transpiler.Test went from 773 → 776 (+3).
+All other suites unchanged.
+
+### Versions
+
+- `WACS.Transpiler.Lib` 0.8.9 → **0.8.10** (TryFindResourceImpl
+  AppDomain fallback)
+- `WACS.Cli` 1.5.13 → **1.5.14** (DI siblings added to
+  ResolveHostPackages)
+
+(Untouched: `WACS`, `WASI.Preview1`, `.Preview2`, `.Preview2.DI`,
+`.WASI.NN`, `.WASI.NN.DI`, `.WASI.NN.OnnxRuntime`,
+`WACS.ComponentModel`, `WACS.HostBindings.Abstractions`.)
+
+## WACS.Cli 1.5.13 / WACS.Transpiler.Lib 0.8.9 / WACS.ComponentModel 0.3.4 — `list<tuple<string, own<R>>>` PARAM lift + Result-Ok arm store (closes wasi-nn SLM compute)
+
+The wasi-nn SLM's `wasi:nn/inference.compute(inputs:
+list<tuple<string, own<tensor>>>) -> result<list<tuple<string,
+own<tensor>>>, own<error>>` had two missing direct-link branches.
+Round-15-followup verification (gap 22) showed compute() reaching
+ORT and returning, but the guest finding no `"logits"` output —
+because the call wasn't direct-linking and the legacy delegate
+path was corrupting the per-tuple string field.
+
+### PARAM lift `(T1,...,Tn)[]`
+
+`CanonicalSlotCount` and `EmitLiftForType` didn't recognize an
+array-of-tuple-of-flat-fields. CanEmitDirect rejected compute,
+forcing the call onto the legacy IBindable handler whose
+list<tuple<string, own<R>>> lift mis-bound the string field.
+
+Fix:
+- `CanonicalSlotCount` adds a branch for `(T1,...,Tn)[]` where
+  each Ti is a flat field (primitive / string / byte[] / Option /
+  resource). Returns 2 slots: outer (i32 ptr, i32 count).
+- `EmitLiftForType` adds a branch dispatching to a new
+  `EmitLiftListOfRecordOrTuple` helper.
+- `EmitLiftListOfRecordOrTuple` allocates a `T[]` of size
+  `count`, walks per-element offsets, calls
+  `EmitInlineRecordOrTupleLift` for each element, stelems into
+  the array.
+- `EmitInlineRecordOrTupleLift` reads each tuple field at its
+  canon-ABI offset, dispatches via `EmitLiftFieldFromMem`
+  (string → ReadI32×2 + LiftUtf8; byte[] → ReadI32×2 +
+  LiftPrim<byte>; resource → ReadI32 + Resources.GetResource;
+  primitive → ReadXxxLE), constructs the ValueTuple via
+  `ResolveValueTupleCtor`.
+- New `ResolveLoadMethod` helper + `LoadMethodCache` map types
+  to `PrimitiveStore.ReadXxxLE` Methods.
+
+### RETURN store `Result<list<tuple<string, own<R>>>, own<error>>`'s Ok arm
+
+`IsResultArmStorable` accepted only primitive-element /
+string-element arrays in the variable-length branch; the
+list-of-tuple-of-flat-fields case fell through to the
+fixed-width fallback.
+
+Fix:
+- `IsResultArmStorable` extends the array branch to accept
+  `IsTupleOfPrimitives` / `IsTupleOfFlatFields` /
+  `IsRecordOf...` element types.
+- `EmitResultArmStore` adds an `isAggregateArray` branch
+  that dispatches to `EmitListOfRecordOrTupleReturn` at the
+  arm's `valueOffset` (so the (outer ptr, count) pair lands
+  at retArea+valueOffset+0/+4).
+- `EmitListOfRecordOrTupleReturn` refactored to take an
+  optional `baseOffset` parameter for the (ptr, count)
+  pair write — same approach as round-13's per-arm-offset
+  refactors.
+
+### PrimitiveStore additions
+
+`Wacs.ComponentModel.CanonicalABI.PrimitiveStore` gains seven
+read helpers: `ReadI8`, `ReadI16LE`, `ReadI64LE`, `ReadU64LE`,
+`ReadF32LE`, `ReadF64LE`, `ReadBool`. Mirrors the existing Store
+family. Used by direct-link's per-field-from-memory lift; the
+F32/F64 helpers bit-cast through Int32/Int64 for
+netstandard2.1 (matching the StoreF32/StoreF64 pattern, since
+`BinaryPrimitives.ReadSingle/DoubleLittleEndian` are .NET 5+).
+
+### Test surface
+
+New `DirectLinkedImport_FreeFnComputeRoundtrip_LiftsAndStoresListOfTupleStringOwn`
+in `Wacs.Transpiler.Test/DirectLinkedImportTests.cs`. The wat
+fixture stages 3 (string, IGraph) tuples in linear memory,
+calls compute, and reads back the OK-arm outer (ptr, count) +
+per-element fields. Verifies:
+
+1. `compute` direct-links (binding count = 1)
+2. PARAM lift: host stub captures lifted `(string, IGraph)[]`
+   with names "alpha", "beta", "gamma" matching what the guest
+   staged + the same IGraph instances resolved from the
+   pre-allocated handles
+3. RETURN store: disc=0, outer count=3; per-element name +
+   handle written at outer_ptr + i*12; handles round-trip
+   through `Resources.GetResource` to the same IGraph
+   instances the host returned
+4. The host echoes inputs with names prefixed `out_` — names
+   round-trip BOTH PARAM lift and RETURN store
+
+`TestLoaderFuncs.LastInputs` capture confirms the lift side;
+guest-readable memory probes via `read_u8` / `read_i32`
+exports confirm the store side.
+
+Wacs.Transpiler.Test went from 772 → 773 (1 added).
+All other suites unchanged.
+
+### Versions
+
+- `WACS.ComponentModel` 0.3.3 → **0.3.4** (PrimitiveStore Read*
+  helpers)
+- `WACS.Transpiler.Lib` 0.8.8 → **0.8.9** (PARAM lift +
+  RETURN store + ResolveLoadMethod)
+- `WACS.Cli` 1.5.12 → **1.5.13** (release event)
+
+(Untouched: `WACS`, `WASI.Preview1`, `.Preview2`,
+`.Preview2.DI`, `.WASI.NN`, `.WASI.NN.DI`, `.WASI.NN.OnnxRuntime`,
+`WACS.HostBindings.Abstractions`.)
+
+## WACS.Cli 1.5.12 / WACS.WASI.NN.OnnxRuntime 0.2.2 — bundled ORT NuGet 1.21.0 → 1.22.0 (the version that actually relaxes GroupQueryAttention)
+
+Round 15's bump to 1.21.0 was based on the round-14 hypothesis
+that the contrib-op input-range relaxation landed at 1.21. The
+user's round-15 verification disproved that — the actual
+binary-level check on the working wasmtime host
+(`strings target/release/wasi-nn-slm-host`) reports **1.22.0**,
+and 1.21.0 still rejects 11 inputs to
+`com.microsoft::GroupQueryAttention:1` with the same
+`[min=7, max=9]` range.
+
+Fix: pin `Microsoft.ML.OnnxRuntime` at **1.22.0** in
+`Wacs.WASI.NN.OnnxRuntime.csproj`. Native dylib in test bin
+verified at 1.22.0 via `strings runtimes/osx-x64/native/libonnxruntime.dylib`.
+
+Test surface: re-ran all four NN suites against 1.22.0 — same
+green pattern as 1.21.0 (10/10 + 18/18 + 6/6+2skip + 7/7). No
+public-API drift between 1.20.1 and 1.22.0 for the surface
+this package uses (`SessionOptions`, `InferenceSession`,
+`OrtValue`).
+
+The sibling shutdown crash (`libc++abi: mutex lock failed`
+after a guest panic on macOS-arm64) reproduced on 1.21.0;
+unverified at 1.22.0. Track separately if it persists past
+the user's next local repro.
+
+### Versions
+
+- `WACS.WASI.NN.OnnxRuntime` 0.2.1 → **0.2.2** (NuGet floor 1.22.0)
+- `WACS.Cli` 1.5.11 → **1.5.12** (release event)
+
+(Untouched: `WACS`, `WASI.Preview1`, `.Preview2`, `.Preview2.DI`,
+`.WASI.NN`, `.WASI.NN.DI`, `WACS.Transpiler.Lib`,
+`WACS.ComponentModel`, `WACS.HostBindings.Abstractions`.)
+
+## WACS.Cli 1.5.11 / WACS.WASI.NN.OnnxRuntime 0.2.1 — bundled ORT NuGet 1.20.1 → 1.21.0 (Gemma 3 GroupQueryAttention shape)
+
+The wasi-nn SLM (Gemma 3 270M ONNX export) loaded all the way to
+ORT's `InferenceSession` constructor after round 14 closed gap 20,
+then tripped graph validation:
+
+```
+[ErrorCode:InvalidGraph] This is an invalid model.
+In Node, ("/model/layers.0/attn/GroupQueryAttention",
+GroupQueryAttention, "com.microsoft", -1) ...
+Error Node has input size 11 not in range [min=7, max=9].
+```
+
+The contrib op `com.microsoft.GroupQueryAttention` widened its
+allowed input range from 7..9 to 7..11 across ORT 1.20→1.21 (added
+optional `attention_bias` + positional inputs). Gemma 3's export
+emits all 11 inputs, so it loads on 1.21+ and trips graph
+validation on 1.20.x.
+
+`Wacs.WASI.NN.OnnxRuntime/Wacs.WASI.NN.OnnxRuntime.csproj` now
+pins `Microsoft.ML.OnnxRuntime` at **1.21.0**. No public-API
+break for the surface this package uses (`SessionOptions`,
+`InferenceSession`, `OrtValue`); verified by the matching
+wasi-nn host's `ort 2.0.0-rc.10` Rust dependency loading the
+same model bytes successfully.
+
+Test surface: `Wacs.WASI.NN.OnnxRuntime.Test` (10/10) +
+`Wacs.WASI.NN.Test` (18/18) + `Wacs.WASI.NN.LlamaSharp.Test`
+(6/6, 2 skip) + `Wacs.WASI.NN.MLNet.Test` (7/7) all pass
+unchanged — no API drift visible from our consumer side.
+
+This is a downstream-dependency-version gap, not an
+architectural one: the canonical-ABI lift, DI bundle, backend
+registration, direct-link emit, and resource-handle path
+closed in rounds 13-14 are all correct. The bump just gives
+ORT enough op coverage to validate a real SLM graph.
+
+### Versions
+
+- `WACS.WASI.NN.OnnxRuntime` 0.2.0 → **0.2.1** (NuGet bump only)
+- `WACS.Cli` 1.5.10 → **1.5.11** (release event for the
+  bundled ORT bump)
+
+(Untouched: `WACS`, `WASI.Preview1`, `.Preview2`, `.Preview2.DI`,
+`.WASI.NN`, `.WASI.NN.DI`, `WACS.Transpiler.Lib`,
+`WACS.ComponentModel`, `WACS.HostBindings.Abstractions`.)
+
+## WACS.Cli 1.5.10 / WACS.WASI.Preview2.DependencyInjection 0.1.2 — wasi-nn ONNX backend wires through DI under `--wasi-nn`
+
+After round 13's `byte[][]` fix unblocked direct-link `graph.load`,
+the SLM still surfaced `InvalidEncoding: No backend registered for
+encoding ONNX`. Two layered bugs in
+`WasiPreview2RuntimeScope.ReflectivelyAddWasiNN`:
+
+1. **Wrong-instance mutation.** The legacy
+   `AutoRegisterOnnxBackend` post-hoc-mutated a
+   `WasiNNConfiguration` it pulled out of the descriptor's
+   `ImplementationInstance`. With WASI.NN's
+   `services.TryAddSingleton(opts.Configuration)` registration
+   landing the instance from `new WasiNNDependencyInjectionOptions()`,
+   `GraphFuncsImpl(sp.GetRequiredService<WasiNNConfiguration>())`
+   could resolve a different physical object — empty `Backends`,
+   `InvalidEncoding` at guest-call time.
+2. **Silent type lookup miss.** Even after switching to the
+   configure-callback approach, `nnAsm.GetType(
+   "Wacs.WASI.NN.Types.GraphEncoding")` was reading the
+   sibling-namespace type out of the
+   `Wacs.WASI.NN.DependencyInjection` assembly — the type lives
+   in `Wacs.WASI.NN`. `GetType` returned null, the early-return
+   short-circuited the configure delegate to null, and
+   `AddWasiNN(services, null)` ran with no backend wiring at all.
+
+Fix: `BuildOnnxConfigureCallback` now derives the encoding +
+backend interface types from `AddBackend`'s parameter
+signature (single source of truth), and `AddWasiNN` is invoked
+with a pre-built `Linq.Expressions.Compile()`'d delegate that
+runs INSIDE `AddWasiNN`'s own configure step — so the same
+`WasiNNConfiguration` instance the singleton resolves is the
+instance the backend was added to. Surfaces the failure modes
+that DO remain (OnnxBackend type missing, parameterless ctor
+throws) as stderr warnings so the next round of debugging
+isn't a guessing game.
+
+Test surface: new `WasiPreview2RuntimeScopeTests` in
+`Wacs.WASI.NN.OnnxRuntime.Test` (the only test project where
+WASI.Preview2.DI + WASI.NN.DI + WASI.NN.OnnxRuntime co-exist
+without a cycle). Constructs a real scope, reaches
+`IGraphFuncs` through the composite bundle, and asserts a
+`graph.load(_, GraphEncoding.Onnx, _)` does NOT short-circuit
+with `InvalidEncoding`. The test captures stderr from
+`WasiPreview2RuntimeScope` so a future regression's
+diagnostic warning shows up in the failure message.
+
+### Versions
+
+- `WACS.WASI.Preview2.DependencyInjection` 0.1.1 → **0.1.2**
+  (configure-callback wiring + diagnostic stderr)
+- `WACS.Cli` 1.5.9 → **1.5.10** (release event for the
+  Preview2.DI bump)
+
+(Untouched: `WACS`, `WASI.Preview1`, `.Preview2`,
+`.WASI.NN.*`, `WACS.Transpiler.Lib`, `WACS.ComponentModel`,
+`WACS.HostBindings.Abstractions`.)
+
+## WACS.Cli 1.5.9 / WACS.Transpiler.Lib 0.8.8 / WACS.ComponentModel 0.3.3 — `byte[][]` PARAM direct-link (closes the wasi-nn SLM gap)
+
+The wasi-nn SLM's `wasi:nn/graph-funcs.load(builders: list<list<u8>>,
+encoding, target) -> result<own<graph>, own<error>>` had a
+`byte[][]` parameter that `CanonicalSlotCount` didn't recognize.
+`CanEmitDirect` rejected the binding, the call fell back to
+delegate dispatch through the IBindable's WitBindings handler, and
+the OK-arm `IGraph` handle landed in `host.Graphs` (WitBindings's
+own resource registry) instead of `WasiPreview2Resources`. The
+subsequent `[method]graph.init-execution-context` direct-linked
+correctly and looked up the handle in `WasiPreview2Resources` —
+miss, "Resource handle 4 is not registered."
+
+Fix: thread `byte[][]` through the direct-link IL emit pipeline:
+
+- `Wacs.ComponentModel.CanonicalABI.ListMarshal.LiftByteArrayList(
+   MemoryInstance memory, int listPtr, int count) -> byte[][]`
+  walks the outer (inner_ptr, inner_len) pair table and copies
+  each inner buffer out via `mem.AsSpan(...).ToArray()`. Symmetric
+  with the existing `PrimitiveStore.StoreByteArrayList` on the
+  store/lower side.
+- `DirectLinkedImportEmit.CanonicalSlotCount` recognizes
+  `typeof(byte[][])` as a 2-i32-slot wire shape (outer ptr, count).
+- `EmitLiftForType` adds a `byte[][]` branch that emits IL calling
+  the new helper.
+- New cached `LiftByteArrayListMethod` `MethodInfo`.
+
+Side effect: the SLM's `load` now direct-links cleanly. The OK-arm
+IGraph allocates in `WasiPreview2Resources` (the same registry the
+direct-link IL looks up), so `init-execution-context`'s subsequent
+`Resources.GetResource(IGraph, handle)` resolves correctly. Closes
+the wasi-nn handle path.
+
+Test surface: replaces round-10's gate-only
+`DirectLinkedImport_FreeFnByteJaggedParam_GateAccepts` with a true
+end-to-end test
+`DirectLinkedImport_FreeFnByteJaggedParam_LiftsListOfBytes`. The
+wasm fixture writes the (outer_ptr, outer_count) header + per-
+element (inner_ptr, inner_len) pairs + inner buffers into memory,
+calls the import, and verifies:
+
+1. `load-bytes` direct-links (binding count = 1)
+2. The host stub captures the lifted `byte[][]` matching what the
+   guest staged (`{0x11, 0x22, 0x33}`, `{0xAA, 0xBB, 0xCC, 0xDD}`)
+3. Encoding and target args round-trip
+4. The OK-arm IGraph handle resolves through `WasiPreview2Resources`
+   (proves single-registry consistency post-fix)
+
+Wacs.Transpiler 771 unchanged in count (the test was renamed +
+upgraded, not added). All other suites unchanged.
+
+### Versions
+
+- `WACS.ComponentModel` 0.3.2 → **0.3.3** (LiftByteArrayList helper)
+- `WACS.Cli` 1.5.8 → **1.5.9** (release event)
+- `WACS.Transpiler.Lib` 0.8.7 → **0.8.8** (CanonicalSlotCount + emit)
+
+(Untouched: `WACS`, `WASI.Preview1`, `.Preview2`,
+`.HostBindings.Abstractions`, `WACS.WASI.NN`. The library mechanism
+is purely additive — `byte[][]` now joins `byte[]`, `string[]`,
+and `T[]`-of-primitives in the recognized PARAM shapes.)
+
+## WACS 0.13.7 / WACS.Cli 1.5.8 / WACS.Transpiler.Lib 0.8.7 — round-12 follow-up: predicate alignment + trap-stub-friendly shadow
+
+Round 12 introduced a runtime-level shadow rule for direct-link-
+covered entities. Two issues surfaced under SLM verification
+(round-12 follow-up):
+
+1. **Predicate mismatch.** The pre-pass marked everything the
+   resolver matched (interface granularity), but the IL emit only
+   direct-links shapes `CanEmitDirect` accepts (per-method).
+   Resolver-matched-but-emit-rejected entities (e.g.
+   `wasi:nn/errors.[method]error.code` when its emit gate
+   rejects, or any binding with an unsupported param shape) got
+   shadowed but never had IL emitted, leaving no fallback.
+
+2. **Trap-stub shadowing.** The shadow rule fired
+   unconditionally, blocking `ComponentImportStubs.RegisterAll`'s
+   first-call trap-stub registration too. Without that
+   placeholder in `_entityBindings`, the runtime's instantiation
+   pre-validation (`WasmRuntimeInstantiation.cs:169`) threw "The
+   imported Function was not provided by the environment" before
+   any user-level code ran.
+
+Two-line fix in each direction:
+
+**Predicate alignment.** `ComponentTranspiler`'s pre-pass now
+mirrors `CallEmitter.EmitImportCall`'s direct-link gate exactly:
+resolver match + `PreferredBundleType` set + `CanEmitDirect`
+accepts + (resource methods need `PreferredResourcesType`). Same
+predicate, same order — pre-pass and IL emit can't disagree on
+which entities are direct-link covered.
+
+**Trap-stub-friendly shadow.** `WasmRuntime.BindHostFunction`'s
+shadow check fires only when the entity is marked AND already has
+a binding. The first registration (typically the trap-stub) goes
+through; second-and-later registrations (the IBindable
+overrides) drop. The trap-stub stays in `_entityBindings` as a
+never-invoked placeholder while direct-link IL handles the
+actual dispatch.
+
+Test surface unchanged in count (still 3 [Fact]s in
+`Wacs.Core.Test.BindingTests`); semantics updated:
+
+- `BindHostFunction_DirectLinkCoverage_FirstRegisters_SecondShadows`
+  — first call goes through, second is dropped.
+- `BindHostFunction_NoCoverage_RegistersNormally` — sanity:
+  unmarked entities still bind on every call.
+- `BindHostFunction_PartialCoverage_SelectiveShadow` — covers
+  the SLM mixed-ABI scenario (WIT covered, WITX not).
+
+### Versions
+
+- `WACS` 0.13.6 → **0.13.7** (shadow rule semantics)
+- `WACS.Cli` 1.5.7 → **1.5.8** (no code change; same release event)
+- `WACS.Transpiler.Lib` 0.8.6 → **0.8.7** (pre-pass predicate)
+
+### Out of scope (separate gap if it surfaces)
+
+The wasi-nn SLM still hits a registry split when `load`'s
+`byte[][]` PARAM trips a `CanonicalSlotCount` rejection — the
+import falls back to delegate dispatch through the IBindable's
+WitBindings handler, allocating in `host.Graphs`, while
+`init-execution-context` direct-links and looks up in
+`WasiPreview2Resources`. Closing that requires either:
+
+- Adding `byte[][]` (and similar jagged-array) PARAM support to
+  `CanonicalSlotCount` + `DirectLinkedImportEmit`, or
+- Bridging the WitBindings resource registries
+  (`host.Graphs`/`Tensors`/`Errors`/`Contexts`) to share their
+  i32 namespace with `WasiPreview2Resources`.
+
+Either is a substantive change tracked as gap 19.
+
+## WACS 0.13.6 / WACS.Cli 1.5.7 / WACS.Transpiler.Lib 0.8.6 — direct-link coverage shadows BindHostFunction registrations
+
+Replaces the round-11 CLI gating kludge (`if (opts.WasiNN &&
+!opts.Wasip2)`) with a runtime-level architectural rule. The kludge
+was fragile in the ways the user called out — hardcoded the
+`Wacs.WASI.NN.OnnxRuntime` package name, tied the carve-out to
+specific CLI flag combinations, and didn't generalize to future
+wasi-* packages or programmatic embedders that wire both paths.
+
+### Architectural rule
+
+`WasmRuntime` tracks a set of `(module, entity)` pairs provided
+by transpiler-direct-link bundles:
+
+```csharp
+public void MarkEntityProvidedByDirectLink((string, string) id);
+public bool IsEntityProvidedByDirectLink((string, string) id);
+```
+
+`BindHostFunction` (both delegate and `IFunctionInstance`
+overloads) silently no-ops registrations for entities in this
+set. The emitted IL hardcodes the call into the bundle's typed
+interface and bypasses the runtime entity registry, so any
+later registration for the same entity would shadow nothing
+useful — and for resource-returning host paths, would alias the
+resource-handle namespace across two independent registries (the
+SLM gap-18 trip site).
+
+### Pre-pass
+
+`ComponentTranspiler.TranspileSingleModule` walks the primary
+core module's imports BEFORE invoking `configureImports`. For
+every import where the resolver matches a binding, it calls
+`runtime.MarkEntityProvidedByDirectLink`. So when `configureImports`
+later runs `WasiPreview2RuntimeScope` construction +
+`ApplyBindings` IBindables, every bundle-covered entity's
+registration silently drops.
+
+### Selective shadow
+
+The rule is per-entity, not per-package. An IBindable that
+covers BOTH bundle-covered and bundle-uncovered entities (e.g.
+`WasiNNHost.BindToRuntime` calls both `WitxBindings.Bind` for
+the legacy `wasi_ephemeral_nn` core-wasm ABI AND `WitBindings.Bind`
+for the WIT component-model ABI) gets its WIT registrations
+shadowed (covered by the bundle) and its WITX registrations
+through (not covered). Mixed-ABI guests don't lose the legacy
+path.
+
+### CLI revert
+
+`Wacs.Console/Verbs/RunHandler.cs::ApplyBindings` reverts the
+`opts.WasiNN && !opts.Wasip2` gating. The architectural rule
+now lives in the runtime; the CLI doesn't need to know which
+packages are direct-link-covered. Future wasi-* host packages
+(wasi-tls, wasi-keyvalue, etc.) automatically benefit — drop
+the package's `[WitSource]` interfaces into a bundle, and any
+matching IBindable's `BindHostFunction` calls drop without
+config.
+
+### Test surface
+
+3 new [Fact]s in `Wacs.Core.Test.BindingTests`:
+
+- `BindHostFunction_DirectLinkCoverage_SilentlyShadowsRegistration`
+  — mark, then BindHostFunction; entity registry stays empty.
+- `BindHostFunction_NoCoverage_RegistersNormally` — sanity:
+  unmarked entities still bind.
+- `BindHostFunction_PartialCoverage_SelectiveShadow` — mark only
+  the WIT entity; verify the WITX BindHostFunction still
+  registers (mixed-ABI safety).
+
+Total Wacs.Core 394 → **397** (+3). All other suites unchanged.
+
+### Versions
+
+- `WACS` 0.13.5 → **0.13.6** (new public API on `WasmRuntime`)
+- `WACS.Cli` 1.5.6 → **1.5.7** (revert kludge)
+- `WACS.Transpiler.Lib` 0.8.5 → **0.8.6** (pre-pass in
+  `TranspileSingleModule`)
+
+(Untouched: `WACS.ComponentModel`, `WASI.Preview1`, `.Preview2`,
+`.HostBindings.Abstractions`, `WACS.WASI.NN`. The library
+mechanism replaces the CLI workaround; no name-based carve-outs
+anywhere.)
+
+## WACS.Cli 1.5.6 — `--wasi-nn` skips legacy IBindable under `--wasip2` to close registry split
+
+Pre-fix, `wacs run --wasip2 --wasi-nn` registered the WASI.NN
+backend twice — once via `Wacs.WASI.NN.OnnxRuntime`'s `IBindable`
+(which calls `WitBindings.Bind` → registers BindHostFunction
+handlers + WASI.NN's internal `host.Graphs` / `host.Tensors` /
+`host.Errors` resource registries) and once via the wasip2
+RuntimeScope's `AutoRegisterOnnxBackend` (which wires the ONNX
+backend into the DI bundle's `WasiNNConfiguration`, surfaced
+through `WasiPreview2NNBundle`'s `IGraphFuncs` to the transpiler's
+direct-link emit, with handles minted in `WasiPreview2Resources`).
+
+The two registries hold the same `i32` handle namespace but no
+bridge between them. A guest minting `wasi:nn/graph-funcs.load`'s
+return handle through one path and looking it up later through
+the other gets either `Resource handle N is not registered` (if
+the lookup misses) or `Handle 0 is reserved as the null sentinel`
+(if a default-init slot leaked through). The `wasi-nn-slm.wasm`
+demo trips this between `load()` and
+`graph.init_execution_context()`.
+
+Fix per round-10's option (2): under `opts.Wasip2`, skip the
+WASI.NN IBindable from the `ApplyBindings` path. The
+`ReflectivelyAddWasiNN` flow already wires the ONNX backend to
+the direct-link side; the IBindable's `WasiNNHost` (separate
+`Graphs`/`Tensors`/`Errors`) is redundant and structurally
+incorrect under wasip2. Interpreter-only `--wasi --wasi-nn`
+(Preview 1 + WITX legacy ABI) keeps the IBindable since
+direct-link isn't on its path.
+
+```diff
+-if (opts.WasiNN) paths.Add("Wacs.WASI.NN.OnnxRuntime");
++if (opts.WasiNN && !opts.Wasip2)
++    paths.Add("Wacs.WASI.NN.OnnxRuntime");
+```
+
+Verified by the round-10 follow-up probe (`/tmp/nn-probe`): the
+30-line wasi-nn shim that calls `load()` then
+`graph.init_execution_context()` traps pre-fix at the second call
+("Resource handle 4 is not registered"); post-fix the
+WitBindings registration doesn't happen and the direct-link path
+mints the handle in `WasiPreview2Resources` where the lookup
+finds it.
+
+Out of scope (separate gap if it surfaces): a programmatic
+embedder that wires both paths explicitly (not via the CLI) hits
+the same registry split. A library-level `WasiNNHost
+.SuppressWitBindings` opt-out is the natural follow-up but not
+needed to close the SLM trip site.
+
+## WACS 0.13.5 / WACS.Cli 1.5.5 / WACS.Transpiler.Lib 0.8.5 — direct-link emit accepts SourceGen-shape resource constructors
+
+`Wacs.ComponentModel.Bindgen.SourceGen` emits resource constructors
+as `void Create(args)` instance methods on the resource interface
+(rather than static factories returning the interface). The
+`Wacs.WASI.NN.DependencyInjection.Tensor` impl class follows that
+contract — public parameterless ctor + `void Create(...)` for the
+two-step `Activator.CreateInstance` then `Create` lift the canonical
+ABI's `[constructor]X` calls into.
+
+Pre-fix, `DirectLinkedImportEmit.cs:101` rejected this shape
+(`if (!method.IsStatic) return false`). The constructor fell
+through to legacy delegate dispatch, which never bound a real
+handle for it, and the guest received 0 (the canonical-ABI null
+sentinel). The first downstream `[method]X.<x>` call AVs the host
+on `Resources.GetResource(typeof(IFace), 0)` — observed end-to-end
+in the `wasi-nn-slm.wasm` SLM after the round-7+8 high-address
+fixes unblocked it that far.
+
+`HostPackageResolver` adds `TryFindResourceImpl(Type
+resourceInterface, out Type implType)` that walks the loaded
+host-package assemblies for a public class implementing the
+interface with a public parameterless constructor. Cached per-
+interface; first match wins (stable order across host packages).
+
+`DirectLinkedImportEmit`'s constructor gate now accepts both
+shapes:
+
+- **Static factory** — existing path. Method is static, returns
+  the interface, IL emits `Call → AllocateResource`.
+- **Void instance method** — new path. Method is non-static and
+  returns void, resolver finds an impl class. IL emits
+  `Newobj <impl>; dup; stloc inst; castclass <iface>` before the
+  arg lift loop, then the lift loop pushes args, then `Callvirt
+  <Create>` (void), then `ldloc inst; ldarg ctx; ldfld Resources;
+  ldtoken <iface>; call typeof; ldloc inst; callvirt
+  AllocateResource → handle`.
+
+Test surface: new
+`DirectLinkedImportTests.DirectLinkedImport_SourceGenCtorThenInstance_AllocatesAndResolves`
+defines `ISgWidget` (SourceGen-shape, with `void Create();
+read: func() -> u32;`) plus `TestSgWidget` (parameterless ctor +
+sentinel-recording Create). Wasm imports `[constructor]widget` +
+`[method]widget.read`, calls them in sequence, asserts the
+sentinel value (42) round-trips. Pre-fix the gate rejects the
+SourceGen shape; post-fix the test passes.
+
+Out of scope (separate work): `wasi-nn-slm.wasm` end-to-end
+verification stays the user's call locally to avoid the round-4 /
+round-6 overclaim pattern.
+
+## WACS 0.13.4 / WACS.Cli 1.5.4 / WACS.Transpiler.Lib 0.8.4 — high-address bulk memory ops + MemSlice chokepoint
+
+Round 7 closed `(int)ea` truncation in the load/store helpers
+(`MemoryHelpers.{Load,Store}*`) but missed the bulk-op family and the
+`[OpHandler]`-dispatch chokepoint. Both had the same shape and the
+same crash mode — any guest writing to a memory address past
+`int.MaxValue` AVs the host process. Rust's release-mode `vec![0u8; N]`
+lowers to a single `memory.fill` after `cabi_realloc`, so non-trivial
+allocations past 2 GiB trip it.
+
+Migrated to the `nuint` overloads added in 0.13.3:
+
+- `Wacs.Transpiler.Lib/AOT/Emitters/BulkEmitter.cs`
+  `BulkHelpers.{MemoryCopy, MemoryFill, MemoryInit}` — widen
+  `dst` (and `src` for the dst-side memory in MemoryCopy) to
+  `nuint` at the start, route through `mem.AsSpan(nuint, int)`.
+  `MemoryInit`'s `src` stays `int` (data segment is byte[]-bounded).
+- `Wacs.Core/Wacs.Core/Instructions/MemoryHandlers.cs` `MemSlice`
+  — single chokepoint for every `[OpHandler]` load/store dispatch.
+  Last line `return mem.AsSpan((int)ea, width)` becomes
+  `return mem.AsSpan((nuint)ea, width)`. This site was missed in
+  round 7's per-instruction-file sweep.
+- `Wacs.Core/Wacs.Core/Instructions/MemoryBulk.cs` —
+  `InstMemoryInit.Execute` (line 235), `InstMemoryCopy.Execute`
+  (line 389), `InstMemoryFill.Execute` (line 459) all switch
+  guest-memory address args from `(int)x` to `(nuint)x`.
+
+Test surface: 3 new [Fact]s in
+`Wacs.Transpiler.Test.MemoryHelpersHighAddressTests` covering
+`BulkHelpers.MemoryFill / MemoryCopy / MemoryInit` at
+`addr = 0x80000400` (~2 GiB + 1 KiB) on a NativePointer
+33000-page memory. Pre-fix each AVs; post-fix bytes round-trip.
+Total in that suite: 8/8 (5 from gap 15 + 3 from gap 16).
+
+Out of scope: atomics still pin `int ea` through abstract
+`InstAtomicLoad.DoLoad` signatures. Same-shape gap, different
+cohort. Follow-up.
+
+## WACS 0.13.3 / WACS.Cli 1.5.3 / WACS.Transpiler.Lib 0.8.3 — high-address load/store on NativePointer memories
+
+`MemoryHelpers.StoreI32` / `LoadI32` (and every load/store/narrow/F32/F64
+sibling) cast the effective address to `int` on the final
+`mem.RefAs<byte>(...)` / `mem.AsSpan(...)` call. With ea > `int.MaxValue`
+— anything past 2 GiB into a NativePointer-backed linear memory —
+that cast wrapped to a negative pointer offset; the kernel signaled
+SIGSEGV and the .NET runtime aborted with `AccessViolationException`.
+Bypassed managed exception handling, so the wasm-trap-to-exit-1
+path didn't catch it.
+
+The bounds check itself was correct (`ea` is `long` and compared
+against `mem.ByteLength` which is `nuint`). Only the truncating cast
+on the access call was wrong.
+
+`MemoryInstance` adds `nuint` overloads alongside the existing `int`
+ones:
+- `RefAs<T>(nuint ea)` — `byte* + nuint` pointer arithmetic on
+  `NativeBase`; ManagedArray branch keeps the safe `(int)ea` cast
+  (Array.MaxLength bounds the byte[] backing ≤ 2 GiB).
+- `AsSpan(nuint offset, int length)` — same shape for narrow
+  load/store siblings (`StoreI32_8`, etc.).
+
+Migrated call sites:
+- `Wacs.Transpiler.Lib/AOT/Emitters/MemoryEmitter.cs`
+  `MemoryHelpers` — every `(int)ea` cast (59 sites across i32/i64
+  + every narrow variant + f32/f64) now passes `(nuint)ea`.
+- `Wacs.Core/Wacs.Core/Instructions/Memory/{I32,I64,F}MemoryLoad.cs`
+  + `Inst{I32,I64}Store.cs` + `FMemoryStore.cs` — interpreter
+  per-instruction handlers had the same shape; now route through
+  the `nuint` overloads.
+
+Test surface: new
+`Wacs.Transpiler.Test.MemoryHelpersHighAddressTests` covers
+`StoreI32` / `LoadI32` / `StoreI64` / `LoadI64` / `StoreI32_8` +
+`LoadI32_8U` / `StoreF32` / `LoadF32` / `StoreF64` / `LoadF64` at
+`ea = 0x80000000 + 1024` (~2 GiB into the memory) on a NativePointer
+33000-page (~2.0625 GiB) instance. Pre-fix every test AVs;
+post-fix all five round-trip cleanly. `NativeMemory.AllocZeroed`
+is lazy-zero on calloc so the 2 GiB virtual reservation does not
+commit physical pages.
+
+Out of scope (separate gap): atomics. `AtomicHelpers.CheckEa`
+still returns `int`, and the `int ea` parameter cascades through
+the abstract `InstAtomicLoad.DoLoad(ExecContext, int ea)` /
+`InstAtomicStore.DoStore` signatures. Same shape as gap 15 but a
+different cohort of guests (atomic-using shared-memory threading);
+follow-up.
+
+## WACS 0.13.2 / WACS.Cli 1.5.2 / WACS.Transpiler.Lib 0.8.2 / WACS.ComponentModel 0.3.2 — host paths route through MemoryInstance; retire byte[] pinning across canonical-ABI
+
+NativePointer-mode memories carry an empty sentinel `Array.Empty<byte>()`
+in `MemoryInstance.Data` so accidental `mem.Data[i]` access surfaces
+loudly. Pre-fix, every host-side canonical-ABI path pinned that field
+directly: the AotLinked active-data-segment install copied through
+`BulkHelpers.CopySegmentToMemory(byte[] dst, …)`; the canonical-ABI
+lower path called `Buffer.BlockCopy(value, 0, mem.Data, …)`; the lift
+path read `_memory.Data[disc]` and passed `_memory.Data` to
+`StringMarshal.LiftUtf8` and `ListMarshal.LiftPrim`. All AOORed in
+NativePointer mode.
+
+Routes every canonical-ABI host path through
+`MemoryInstance.AsSpan(int, int)` (the existing mode-aware accessor)
+so both `ManagedArray` and `NativePointer` backings work the same.
+Helper signatures migrated from `byte[]` to `MemoryInstance`:
+
+- `StringMarshal.LiftUtf8` / `LiftUtf16` / `LiftLatin1OrUtf16` / `CopyToGuest`
+- `ListMarshal.LiftPrim<T>` / `LiftStringList` / `LiftStringListUtf16` / `CopyArrayToGuest<T>`
+- `BulkHelpers.CopySegmentToMemory`
+- `ModuleInit.CopyDataSegment` (interpreter active-segment install)
+
+`PrimitiveStore` gains a reader sibling family — `ReadU8`, `ReadU16LE`,
+`ReadU32LE`, `ReadI32LE` — used at IL emit time to decode disc bytes
+and (ptr, len) header pairs. The scalar writer family
+(`StoreI8` / `StoreU8` / `StoreI16` / … / `StoreBool`) now takes
+`MemoryInstance` instead of `byte[]`.
+
+Transpiled module class's `Memory` property changes type from
+`byte[]` to `MemoryInstance`. Saved DLLs from v0.8.1 keep the old
+shape; v0.8.2 generates the new shape. Consumers that read
+`instance.Memory` directly need to update — `mem.Data` becomes
+`mem.AsSpan(...)` for byte access.
+
+IL emit sites in `DirectLinkedImportEmit` and `ComponentExportsEmit`
+drop the `Ldfld MemoryInstance.Data` instruction at every helper
+call site (the `MemoryInstance` is left on the stack instead) and
+replace `BitConverter.ToInt32(byte[], int)` lookups with
+`PrimitiveStore.ReadI32LE(MemoryInstance, int)`. Variant disc-byte
+reads use `PrimitiveStore.ReadU8/U16/U32` instead of `Ldelem_U1`.
+
+Test surface: new `data-segment-component` fixture (active data
+segment + string return). `ComponentInstanceTests
+.Component_data_segment_install_and_string_lift_under_storage`
+covers the interpreter component path × `MemoryStorageMode`;
+`ComponentTranspilerTests
+.TranspileSingleModule_data_segment_install_and_lift_honor_storage`
+covers `EmissionTarget × MemoryStorageMode` (4 cases). Both flavors
+of guest-memory shape are exercised: segment install at module ctor
++ string lift on call.
+
+Existing `StringMarshalTests` / `ListMarshalTests` updated to stage
+inputs in a `MemoryInstance` rather than a bare `byte[]`.
+
+Out of scope (separate gaps): `AtomicHelpers` (transpiler atomic
+ops still pin `mem.Data` for `ref byte` semantics), MemoryInstance's
+own `WriteInt32` / `WriteUtf8String` convenience methods (used by
+WASI Preview1), and `Wacs.WASI.NN`'s `ExecContextExtensions`. Each
+fails the grep'able `\.Data\b on MemoryInstance` invariant outside
+the `MemoryInstance.cs` file in domains independent of canonical-ABI.
+
+## WACS 0.13.1 / WACS.Cli 1.5.1 / WACS.Transpiler.Lib 0.8.1 / WACS.ComponentModel 0.3.1 — `--native-memory` honored on every component path
+
+`--native-memory` was silently no-oped for component-mode runs:
+the CLI pinned the storage mode but neither
+`Wacs.ComponentModel.Runtime.ComponentInstance.Instantiate` (the
+interpreter component path) nor
+`ModuleClassGenerator.EmitMemoryArray` (the AotLinked emission)
+read the pin. Components requesting more than the
+`ManagedArray` ~2 GiB cap got `memory.grow → -1` regardless of the
+flag.
+
+The pin migrates from `Wacs.Transpiler.AOT.ModuleInit.CurrentMemoryStorage`
+(only readable from the transpiler layer) to
+`Wacs.Core.Runtime.AmbientRuntime.MemoryStorage` so every layer
+above `Wacs.Core` shares one source of truth.
+
+Reads added:
+- `Wacs.ComponentModel.Runtime.ComponentInstance.Instantiate`
+  (single-core and multi-core paths) constructs `RuntimeOptions`
+  with `MemoryStorage = AmbientRuntime.MemoryStorage`.
+- `Wacs.Transpiler.AOT.ModuleClassGenerator.EmitMemoryArray` emits
+  `Ldsfld AmbientRuntime.MemoryStorage` before `Newobj` against
+  the 2-arg `MemoryInstance(MemoryType, MemoryStorageMode)` ctor,
+  so the runtime value of the pin reaches every memory the
+  AotLinked path constructs.
+
+Test surface: new `grow-memory-component` fixture (exports
+`grow-big: func() -> s32` whose core does `(memory.grow 50000)`).
+`Wacs.ComponentModel.Test.ComponentInstanceTests
+.Component_memory_honors_AmbientRuntime_storage` exercises the
+interpreter component path (returns -1 under ManagedArray, 1
+under NativePointer);
+`Wacs.Transpiler.Test.ComponentTranspilerTests
+.TranspileSingleModule_memory_init_honors_AmbientRuntime_storage`
+covers the cross-product of `EmissionTarget × MemoryStorageMode`.
+`NativeMemory.AllocZeroed` is lazy-zero (calloc on Unix,
+VirtualAlloc on Windows), so the 3 GiB virtual reservation does
+not commit physical pages.
+
 ## WACS 0.13.0 / WACS.Cli 1.5.0 / WACS.Transpiler.Lib 0.8.0 / WACS.ComponentModel 0.3.0 / WACS.WASI.Preview2 0.4.0 / WACS.WASI.Preview1 0.13.0 / WACS.HostBindings.Abstractions 0.3.0 — Linear-memory storage modes, memory64, and component-model lift fixes
 
 Lifts WACS's linear-memory backing to a host-selected mode and

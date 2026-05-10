@@ -7,6 +7,7 @@
 
 using System;
 using System.Runtime.InteropServices;
+using Wacs.Core.Runtime.Types;
 
 namespace Wacs.ComponentModel.CanonicalABI
 {
@@ -52,25 +53,18 @@ namespace Wacs.ComponentModel.CanonicalABI
         /// <summary>
         /// Lift a primitive-element list from a byte span of
         /// guest memory. <paramref name="source"/> is the core
-        /// module's linear memory snapshot,
-        /// <paramref name="byteOffset"/> is the pointer the
-        /// canon return-area surfaced, and
-        /// <paramref name="count"/> is the element count.
+        /// module's linear memory; the mode-aware
+        /// <see cref="MemoryInstance.AsSpan"/> returns the right
+        /// view regardless of <see cref="MemoryInstance.StorageMode"/>.
         /// </summary>
-        public static T[] LiftPrim<T>(byte[] source, int byteOffset, int count)
+        public static T[] LiftPrim<T>(MemoryInstance source, int byteOffset, int count)
             where T : unmanaged
         {
             var elemSize = global::System.Runtime.CompilerServices.Unsafe.SizeOf<T>();
-            var byteLen = (long)count * elemSize;
-            if (byteOffset < 0 || count < 0
-                || byteOffset + byteLen > source.Length)
-                throw new ArgumentOutOfRangeException(nameof(byteOffset),
-                    $"List span (offset={byteOffset}, count={count}, "
-                    + $"elemSize={elemSize}) out of range of provided "
-                    + "memory buffer.");
+            var byteLen = count * elemSize;
             var result = new T[count];
             var src = MemoryMarshal.Cast<byte, T>(
-                source.AsSpan(byteOffset, (int)byteLen));
+                source.AsSpan(byteOffset, byteLen));
             src.CopyTo(result);
             return result;
         }
@@ -104,14 +98,11 @@ namespace Wacs.ComponentModel.CanonicalABI
         /// reads back. Used by the transpiler's lower path after
         /// calling the guest's <c>cabi_realloc</c>.
         /// </summary>
-        public static void CopyArrayToGuest<T>(T[] values, byte[] memory, int dstPtr)
+        public static void CopyArrayToGuest<T>(T[] values, MemoryInstance memory, int dstPtr)
             where T : unmanaged
         {
             var elemSize = global::System.Runtime.CompilerServices.Unsafe.SizeOf<T>();
             var byteLen = values.Length * elemSize;
-            if (dstPtr < 0 || dstPtr + byteLen > memory.Length)
-                throw new ArgumentOutOfRangeException(nameof(dstPtr),
-                    "List copy span out of range of guest memory buffer.");
             var src = MemoryMarshal.AsBytes(values.AsSpan());
             src.CopyTo(memory.AsSpan(dstPtr, byteLen));
         }
@@ -127,20 +118,21 @@ namespace Wacs.ComponentModel.CanonicalABI
         /// intact so a future JS-string-externref path can swap
         /// in additively.
         /// </summary>
-        public static string[] LiftStringList(byte[] memory, int listPtr, int count)
+        public static string[] LiftStringList(MemoryInstance memory, int listPtr, int count)
         {
             if (count < 0)
                 throw new ArgumentOutOfRangeException(nameof(count),
                     "list<string> count must be non-negative.");
-            if (count > 0 && (listPtr < 0 || (long)listPtr + count * 8 > memory.Length))
-                throw new ArgumentOutOfRangeException(nameof(listPtr),
-                    "list<string> element span out of range of guest memory.");
             var result = new string[count];
+            if (count == 0) return result;
+            // Read the (ptr, len) pair table in one mode-aware span;
+            // each element is two consecutive i32s little-endian.
+            var pairs = MemoryMarshal.Cast<byte, int>(
+                memory.AsSpan(listPtr, count * 8));
             for (int i = 0; i < count; i++)
             {
-                var offset = listPtr + i * 8;
-                var strPtr = BitConverter.ToInt32(memory, offset);
-                var strLen = BitConverter.ToInt32(memory, offset + 4);
+                var strPtr = pairs[i * 2];
+                var strLen = pairs[i * 2 + 1];
                 result[i] = StringMarshal.LiftUtf8(memory, strPtr, strLen);
             }
             return result;
@@ -152,21 +144,67 @@ namespace Wacs.ComponentModel.CanonicalABI
         /// ABI rule for utf16 strings), so the per-element decode
         /// routes to <see cref="StringMarshal.LiftUtf16(byte[], int, int)"/>.
         /// </summary>
-        public static string[] LiftStringListUtf16(byte[] memory, int listPtr, int count)
+        public static string[] LiftStringListUtf16(MemoryInstance memory, int listPtr, int count)
         {
             if (count < 0)
                 throw new ArgumentOutOfRangeException(nameof(count),
                     "list<string> count must be non-negative.");
-            if (count > 0 && (listPtr < 0 || (long)listPtr + count * 8 > memory.Length))
-                throw new ArgumentOutOfRangeException(nameof(listPtr),
-                    "list<string> element span out of range of guest memory.");
             var result = new string[count];
+            if (count == 0) return result;
+            var pairs = MemoryMarshal.Cast<byte, int>(
+                memory.AsSpan(listPtr, count * 8));
             for (int i = 0; i < count; i++)
             {
-                var offset = listPtr + i * 8;
-                var strPtr = BitConverter.ToInt32(memory, offset);
-                var codeUnits = BitConverter.ToInt32(memory, offset + 4);
+                var strPtr = pairs[i * 2];
+                var codeUnits = pairs[i * 2 + 1];
                 result[i] = StringMarshal.LiftUtf16(memory, strPtr, codeUnits);
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Lift <c>list&lt;list&lt;u8&gt;&gt;</c> (jagged
+        /// <c>byte[][]</c>) from guest memory. Outer header is
+        /// (i32 outer_ptr, i32 outer_count) at <paramref name="listPtr"/>
+        /// — well, the caller already split it: this method takes
+        /// outer_ptr + outer_count directly. Each element at
+        /// <c>outer_ptr + i * 8</c> is an inner (i32 inner_ptr,
+        /// i32 inner_len) pair; the inner bytes live at
+        /// <c>inner_ptr</c> for <c>inner_len</c> bytes.
+        ///
+        /// <para>Symmetric with
+        /// <see cref="PrimitiveStore.StoreByteArrayList"/> on the
+        /// store/lower side. Used by direct-link emit when a wasm
+        /// import takes a <c>list&lt;list&lt;u8&gt;&gt;</c> param —
+        /// the SLM's <c>wasi:nn/graph-funcs.load</c> is the
+        /// canonical example, with each inner buffer being one of
+        /// the model's serialized chunks.</para>
+        /// </summary>
+        public static byte[][] LiftByteArrayList(MemoryInstance memory,
+            int listPtr, int count)
+        {
+            if (count < 0)
+                throw new ArgumentOutOfRangeException(nameof(count),
+                    "list<list<u8>> count must be non-negative.");
+            var result = new byte[count][];
+            if (count == 0) return result;
+            // Read all (inner_ptr, inner_len) pairs in one mode-aware
+            // span; the inner-data spans are read per-element.
+            var pairs = MemoryMarshal.Cast<byte, int>(
+                memory.AsSpan(listPtr, count * 8));
+            for (int i = 0; i < count; i++)
+            {
+                var innerPtr = pairs[i * 2];
+                var innerLen = pairs[i * 2 + 1];
+                if (innerLen < 0)
+                    throw new ArgumentOutOfRangeException(nameof(innerLen),
+                        "list<u8> length must be non-negative.");
+                if (innerLen == 0)
+                {
+                    result[i] = Array.Empty<byte>();
+                    continue;
+                }
+                result[i] = memory.AsSpan(innerPtr, innerLen).ToArray();
             }
             return result;
         }

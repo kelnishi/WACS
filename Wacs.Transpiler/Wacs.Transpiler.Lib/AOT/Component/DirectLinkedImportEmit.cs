@@ -98,15 +98,38 @@ namespace Wacs.Transpiler.AOT.Component
                         if (!method.IsStatic) return false;
                         break;
                     case HostPackageResolver.ResourceMethodKind.Constructor:
-                        if (!method.IsStatic) return false;
                         // Constructor: wasm returns exactly one i32
-                        // (the handle). The CLR factory returns the
-                        // instance; emit allocates the handle.
+                        // (the handle). Two CLR shapes are accepted:
+                        //   (a) Static factory returning the resource
+                        //       instance (test bindings + hand-written
+                        //       hosts that prefer static factories).
+                        //   (b) Instance method `void Create(args)` on
+                        //       the resource interface itself
+                        //       (Wacs.ComponentModel.Bindgen.SourceGen
+                        //       output — the resource class has a
+                        //       parameterless ctor + Create separation
+                        //       for exactly this lift). The IL emit
+                        //       discovers the impl type from the
+                        //       resolver's host packages.
                         if (wasmResults.Length != 1
                             || wasmResults[0] != ValType.I32) return false;
-                        if (method.ReturnType == typeof(void)) return false;
-                        if (!binding.InterfaceType.IsAssignableFrom(
-                            method.ReturnType)) return false;
+                        if (method.IsStatic)
+                        {
+                            if (method.ReturnType == typeof(void)) return false;
+                            if (!binding.InterfaceType.IsAssignableFrom(
+                                method.ReturnType)) return false;
+                        }
+                        else
+                        {
+                            // SourceGen shape — must be void return AND
+                            // resolver must be able to find a concrete
+                            // impl class with a parameterless ctor.
+                            if (method.ReturnType != typeof(void)) return false;
+                            if (resolver == null
+                                || !resolver.TryFindResourceImpl(
+                                    binding.InterfaceType, out _))
+                                return false;
+                        }
                         break;
                     default:
                         return false;
@@ -278,9 +301,37 @@ namespace Wacs.Transpiler.AOT.Component
 
             int wasmParamOffset = isInstance ? 1 : 0;
 
+            // SourceGen-shape constructor: instance `void Create(args)`
+            // method on the resource interface, with a separately-
+            // discovered impl class that has a public parameterless
+            // ctor. The IL `Newobj`s a fresh impl, stashes it for the
+            // post-call AllocateResource, and pushes it as `this` for
+            // the upcoming Callvirt.
+            bool isVoidInstanceCtor = isConstructor
+                && !method.IsStatic
+                && method.ReturnType == typeof(void);
+            LocalBuilder? voidCtorInstance = null;
+            if (isVoidInstanceCtor)
+            {
+                if (resolver == null
+                    || !resolver.TryFindResourceImpl(
+                        binding.InterfaceType, out var implType))
+                    return; // gate already validated this; defensive.
+                var implCtor = implType
+                    .GetConstructor(System.Type.EmptyTypes)!;
+                voidCtorInstance = il.DeclareLocal(binding.InterfaceType);
+                il.Emit(OpCodes.Newobj, implCtor);
+                il.Emit(OpCodes.Dup);                     // [inst, inst]
+                il.Emit(OpCodes.Stloc, voidCtorInstance); // [inst]
+                // Cast to interface for the upcoming Callvirt's
+                // method declaring-type.
+                il.Emit(OpCodes.Castclass, binding.InterfaceType);
+            }
+
             // Push the `this` arg for the callvirt — only for
             // free-function or instance-method calls. Static and
-            // constructor methods are static dispatch.
+            // constructor methods are static dispatch (except the
+            // void-instance ctor shape handled above).
             if (isInstance)
             {
                 il.Emit(OpCodes.Ldarg_0);
@@ -353,7 +404,11 @@ namespace Wacs.Transpiler.AOT.Component
             // Static and constructor methods use static dispatch.
             // Instance and free-function methods use callvirt
             // (free fns go through a typed-interface property).
-            if (isStatic || isConstructor)
+            // Static + static-factory constructor → static dispatch.
+            // Void-instance constructor → callvirt against the
+            // freshly-created impl pushed earlier.
+            // Instance / free-function → callvirt.
+            if ((isStatic || isConstructor) && !isVoidInstanceCtor)
                 il.Emit(OpCodes.Call, method);
             else
                 il.Emit(OpCodes.Callvirt, method);
@@ -557,23 +612,28 @@ namespace Wacs.Transpiler.AOT.Component
             }
             else if (isConstructor)
             {
-                // Constructor's CLR factory just left the new
-                // instance on the stack. Allocate a handle for it
-                // via the resources class's
-                // `int AllocateResource(Type, object)` convention,
-                // then leave the handle as the wasm i32 return.
-                //
-                //   stack: [instance]
-                // emit:  ldarg_0; ldfld Resources; castclass <Res>;
-                //        ldtoken <IFace>; call typeof; <swap>;
-                //        callvirt AllocateResource(Type, object) → int
+                // Allocate a handle for the constructed instance via
+                // `Resources.AllocateResource(Type, object) → int`.
+                // For the static-factory shape the instance is on the
+                // stack from the call we just emitted; for the void-
+                // instance-method shape the call returned void and we
+                // saved the instance to a local before the call.
                 var allocate = ResolveAllocateResourceMethod(
                     resourcesType!);
 
-                // Stash the instance, then build the call args in
-                // order: resources, type, instance. Then callvirt.
-                var instLocal = il.DeclareLocal(binding.InterfaceType);
-                il.Emit(OpCodes.Stloc, instLocal);
+                LocalBuilder instLocal;
+                if (isVoidInstanceCtor)
+                {
+                    // Stack is empty (Create returned void); reuse
+                    // the local we stashed pre-call.
+                    instLocal = voidCtorInstance!;
+                }
+                else
+                {
+                    // Stack: [instance from static factory] — stash.
+                    instLocal = il.DeclareLocal(binding.InterfaceType);
+                    il.Emit(OpCodes.Stloc, instLocal);
+                }
 
                 il.Emit(OpCodes.Ldarg_0);
                 il.Emit(OpCodes.Ldfld, ResourcesField);
@@ -649,7 +709,6 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Ldfld, MemoriesField);
                 il.Emit(OpCodes.Ldc_I4_0);
                 il.Emit(OpCodes.Ldelem_Ref);
-                il.Emit(OpCodes.Ldfld, MemoryDataField);
                 il.Emit(OpCodes.Ldloc, temps[wasmCursor]);     // ptr
                 il.Emit(OpCodes.Ldloc, temps[wasmCursor + 1]); // len
                 il.Emit(OpCodes.Call, ResolveLiftStringMethod(
@@ -664,7 +723,6 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Ldfld, MemoriesField);
                 il.Emit(OpCodes.Ldc_I4_0);
                 il.Emit(OpCodes.Ldelem_Ref);
-                il.Emit(OpCodes.Ldfld, MemoryDataField);
                 il.Emit(OpCodes.Ldloc, temps[wasmCursor]);     // ptr
                 il.Emit(OpCodes.Ldloc, temps[wasmCursor + 1]); // len
                 il.Emit(OpCodes.Call,
@@ -680,10 +738,45 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Ldfld, MemoriesField);
                 il.Emit(OpCodes.Ldc_I4_0);
                 il.Emit(OpCodes.Ldelem_Ref);
-                il.Emit(OpCodes.Ldfld, MemoryDataField);
                 il.Emit(OpCodes.Ldloc, temps[wasmCursor]);     // listPtr
                 il.Emit(OpCodes.Ldloc, temps[wasmCursor + 1]); // count
                 il.Emit(OpCodes.Call, LiftStringListMethod);
+                return;
+            }
+            if (clrType == typeof(byte[][]))
+            {
+                // ListMarshal.LiftByteArrayList(memory, listPtr, count)
+                // walks `count` (inner_ptr, inner_len) pairs starting
+                // at listPtr and copies each inner byte[] out of
+                // guest memory. The SLM's wasi:nn/graph-funcs.load
+                // takes `list<list<u8>>` for builders; this is the
+                // PARAM-side lift (gap 19).
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, MemoriesField);
+                il.Emit(OpCodes.Ldc_I4_0);
+                il.Emit(OpCodes.Ldelem_Ref);
+                il.Emit(OpCodes.Ldloc, temps[wasmCursor]);     // listPtr
+                il.Emit(OpCodes.Ldloc, temps[wasmCursor + 1]); // count
+                il.Emit(OpCodes.Call, LiftByteArrayListMethod);
+                return;
+            }
+            // (T1, T2, ..., Tn)[] — list<tuple-of-flat-fields>.
+            // Wire form: outer (i32 ptr, i32 count) + per-element
+            // tuple at i*elemSize. SLM compute's `inputs:
+            // list<tuple<string, own<tensor>>>` PARAM is the
+            // canonical example (gap 22 follow-up — the lift
+            // counterpart to round-13's byte[][] PARAM fix).
+            if (clrType.IsArray
+                && clrType.GetArrayRank() == 1
+                && (IsTupleOfPrimitives(clrType.GetElementType()!)
+                    || IsTupleOfFlatFields(
+                        clrType.GetElementType()!, resolver)))
+            {
+                EmitLiftListOfRecordOrTuple(il,
+                    clrType.GetElementType()!,
+                    temps[wasmCursor],     // listPtr
+                    temps[wasmCursor + 1], // count
+                    resolver, resourcesType, stringEncoding);
                 return;
             }
             if (clrType.IsGenericType
@@ -888,16 +981,12 @@ namespace Wacs.Transpiler.AOT.Component
             typeof(ThinContext).GetField(
                 nameof(ThinContext.Memories))!;
 
-        private static readonly FieldInfo MemoryDataField =
-            typeof(MemoryInstance).GetField(
-                nameof(MemoryInstance.Data))!;
-
         private static readonly MethodInfo LiftUtf8Method =
             typeof(StringMarshal).GetMethod(
                 nameof(StringMarshal.LiftUtf8),
                 BindingFlags.Public | BindingFlags.Static,
                 binder: null,
-                types: new[] { typeof(byte[]), typeof(int), typeof(int) },
+                types: new[] { typeof(MemoryInstance), typeof(int), typeof(int) },
                 modifiers: null)!;
 
         private static readonly MethodInfo LiftUtf16Method =
@@ -905,7 +994,7 @@ namespace Wacs.Transpiler.AOT.Component
                 nameof(StringMarshal.LiftUtf16),
                 BindingFlags.Public | BindingFlags.Static,
                 binder: null,
-                types: new[] { typeof(byte[]), typeof(int), typeof(int) },
+                types: new[] { typeof(MemoryInstance), typeof(int), typeof(int) },
                 modifiers: null)!;
 
         private static readonly MethodInfo LiftLatin1OrUtf16Method =
@@ -913,7 +1002,7 @@ namespace Wacs.Transpiler.AOT.Component
                 nameof(StringMarshal.LiftLatin1OrUtf16),
                 BindingFlags.Public | BindingFlags.Static,
                 binder: null,
-                types: new[] { typeof(byte[]), typeof(int), typeof(int) },
+                types: new[] { typeof(MemoryInstance), typeof(int), typeof(int) },
                 modifiers: null)!;
 
         // Resolve the LiftXxx for a string read at the binding's
@@ -936,7 +1025,7 @@ namespace Wacs.Transpiler.AOT.Component
                 nameof(ListMarshal.LiftPrim),
                 BindingFlags.Public | BindingFlags.Static,
                 binder: null,
-                types: new[] { typeof(byte[]), typeof(int), typeof(int) },
+                types: new[] { typeof(MemoryInstance), typeof(int), typeof(int) },
                 modifiers: null)!;
 
         private static readonly ConcurrentDictionary<Type, MethodInfo>
@@ -965,7 +1054,19 @@ namespace Wacs.Transpiler.AOT.Component
                 nameof(ListMarshal.LiftStringList),
                 BindingFlags.Public | BindingFlags.Static,
                 binder: null,
-                types: new[] { typeof(byte[]), typeof(int), typeof(int) },
+                types: new[] { typeof(MemoryInstance), typeof(int), typeof(int) },
+                modifiers: null)!;
+
+        // ListMarshal.LiftByteArrayList — list<list<u8>> param lift.
+        // Per-element (inner_ptr, inner_len) pairs in memory; each
+        // inner buffer is copied out to a byte[]. Closes the
+        // wasi-nn `graph-funcs.load(builders, ...)` PARAM gap.
+        private static readonly MethodInfo LiftByteArrayListMethod =
+            typeof(ListMarshal).GetMethod(
+                nameof(ListMarshal.LiftByteArrayList),
+                BindingFlags.Public | BindingFlags.Static,
+                binder: null,
+                types: new[] { typeof(MemoryInstance), typeof(int), typeof(int) },
                 modifiers: null)!;
 
         private static readonly FieldInfo CabiReallocField =
@@ -1718,7 +1819,6 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Ldfld, MemoriesField);
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ldelem_Ref);
-            il.Emit(OpCodes.Ldfld, MemoryDataField);
             // dest_offset = base + fieldOffset
             pushBaseAddress(il);
             if (fieldOffset != 0)
@@ -1786,7 +1886,8 @@ namespace Wacs.Transpiler.AOT.Component
             CanonOption.Kind stringEncoding =
                 CanonOption.Kind.StringUtf8,
             HostPackageResolver? resolver = null,
-            Type? resourcesType = null)
+            Type? resourcesType = null,
+            int baseOffset = 0)
         {
             int elemSize = SizeOfRecordOrTuple(elemType, resolver);
             int elemAlign = MaxFieldAlign(elemType, resolver);
@@ -1868,28 +1969,267 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Ldloc, countLocal);
             il.Emit(OpCodes.Blt, loopStart);
 
-            // Write (outerPtr, count) to retArea + 0 and + 4.
-            // ptr @0
+            // Write (outerPtr, count) to retArea + baseOffset+0 and
+            // +4. baseOffset != 0 when this list is the Ok arm of a
+            // Result wrapper (gap 22) — the arm's valueOffset shifts
+            // the (ptr, count) pair down to the joined-flat slot.
+            // ptr @ baseOffset+0
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldfld, MemoriesField);
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ldelem_Ref);
-            il.Emit(OpCodes.Ldfld, MemoryDataField);
             il.Emit(OpCodes.Ldloc, retAreaLocal);
+            if (baseOffset != 0)
+            {
+                il.Emit(OpCodes.Ldc_I4, baseOffset);
+                il.Emit(OpCodes.Add);
+            }
             il.Emit(OpCodes.Ldloc, outerPtrLocal);
             il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(int)));
 
-            // count @4
+            // count @ baseOffset+4
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldfld, MemoriesField);
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ldelem_Ref);
-            il.Emit(OpCodes.Ldfld, MemoryDataField);
             il.Emit(OpCodes.Ldloc, retAreaLocal);
-            il.Emit(OpCodes.Ldc_I4_4);
+            il.Emit(OpCodes.Ldc_I4, baseOffset + 4);
             il.Emit(OpCodes.Add);
             il.Emit(OpCodes.Ldloc, countLocal);
             il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(int)));
+        }
+
+        // Emit IL that lifts a (T1, T2, ..., Tn)[] PARAM from guest
+        // memory. Mirror of EmitListOfRecordOrTupleReturn on the
+        // store side. Wire form: outer (i32 ptr, i32 count) at the
+        // wasm slot pair; element area packs each tuple at
+        // i*elemSize. Used by direct-link for shapes like the SLM's
+        // wasi:nn/inference.compute(inputs: list<tuple<string,
+        // own<tensor>>>) PARAM (gap 22 follow-up).
+        //
+        // Emit shape:
+        //   result = new T[count]
+        //   for (int i = 0; i < count; i++):
+        //     elemBase = listPtr + i*elemSize
+        //     result[i] = <lift each field at elemBase+fieldOffset>
+        //                 <ctor ValueTuple<...>(field0, field1, ...)>
+        //   leave result on stack
+        private static void EmitLiftListOfRecordOrTuple(
+            ILGenerator il, Type elemType,
+            LocalBuilder listPtrLocal, LocalBuilder countLocal,
+            HostPackageResolver? resolver, Type? resourcesType,
+            CanonOption.Kind stringEncoding =
+                CanonOption.Kind.StringUtf8)
+        {
+            int elemSize = SizeOfRecordOrTuple(elemType, resolver);
+
+            // result = new T[count]
+            var resultLocal = il.DeclareLocal(elemType.MakeArrayType());
+            il.Emit(OpCodes.Ldloc, countLocal);
+            il.Emit(OpCodes.Newarr, elemType);
+            il.Emit(OpCodes.Stloc, resultLocal);
+
+            // for (int i = 0; i < count; i++)
+            var indexLocal = il.DeclareLocal(typeof(int));
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Stloc, indexLocal);
+
+            var loopStart = il.DefineLabel();
+            var loopCheck = il.DefineLabel();
+            il.Emit(OpCodes.Br, loopCheck);
+            il.MarkLabel(loopStart);
+
+            // elemBase = listPtr + i*elemSize
+            var elemBaseLocal = il.DeclareLocal(typeof(int));
+            il.Emit(OpCodes.Ldloc, listPtrLocal);
+            il.Emit(OpCodes.Ldloc, indexLocal);
+            il.Emit(OpCodes.Ldc_I4, elemSize);
+            il.Emit(OpCodes.Mul);
+            il.Emit(OpCodes.Add);
+            il.Emit(OpCodes.Stloc, elemBaseLocal);
+
+            // result[i] = <lifted tuple/record>
+            il.Emit(OpCodes.Ldloc, resultLocal);
+            il.Emit(OpCodes.Ldloc, indexLocal);
+
+            EmitInlineRecordOrTupleLift(il, elemType, elemBaseLocal,
+                resolver, resourcesType, stringEncoding);
+
+            // ValueTuple is a struct → Stelem with the type token.
+            // Records are reference types → Stelem_Ref.
+            if (elemType.IsValueType)
+                il.Emit(OpCodes.Stelem, elemType);
+            else
+                il.Emit(OpCodes.Stelem_Ref);
+
+            // i++
+            il.Emit(OpCodes.Ldloc, indexLocal);
+            il.Emit(OpCodes.Ldc_I4_1);
+            il.Emit(OpCodes.Add);
+            il.Emit(OpCodes.Stloc, indexLocal);
+
+            il.MarkLabel(loopCheck);
+            il.Emit(OpCodes.Ldloc, indexLocal);
+            il.Emit(OpCodes.Ldloc, countLocal);
+            il.Emit(OpCodes.Blt, loopStart);
+
+            il.Emit(OpCodes.Ldloc, resultLocal);
+        }
+
+        // Emit IL that reads each tuple field at its canon-ABI
+        // offset within the element area (base = elemBaseLocal),
+        // pushes the field values onto the stack in declaration
+        // order, then calls the matching ValueTuple ctor. Records
+        // are not yet supported in v0 (no test harness for shape
+        // of `record { string name; own<R> handle }`); throw if
+        // a record is passed in.
+        private static void EmitInlineRecordOrTupleLift(
+            ILGenerator il, Type type, LocalBuilder elemBaseLocal,
+            HostPackageResolver? resolver, Type? resourcesType,
+            CanonOption.Kind stringEncoding)
+        {
+            bool isTuple = type.IsGenericType
+                && IsValueTupleType(type.GetGenericTypeDefinition());
+            if (!isTuple)
+                throw new NotSupportedException(
+                    "PARAM-side per-element lift currently supports "
+                    + "ValueTuple<...> only. Record-of-flat-fields "
+                    + "(POCO) lift is unblocked by adding the "
+                    + "set-property emit path here. Type: "
+                    + type.FullName);
+
+            var elements = type.GetGenericArguments();
+            int offsetSoFar = 0;
+            for (int i = 0; i < elements.Length; i++)
+            {
+                var et = elements[i];
+                int fieldAlign = AlignOfFlatField(et, resolver);
+                int fieldOffset = Align(offsetSoFar, fieldAlign);
+
+                EmitLiftFieldFromMem(il, et, elemBaseLocal,
+                    fieldOffset, resolver, resourcesType,
+                    stringEncoding);
+
+                offsetSoFar = fieldOffset
+                    + SizeOfFlatField(et, resolver);
+            }
+
+            il.Emit(OpCodes.Newobj, ResolveValueTupleCtor(type));
+        }
+
+        // Per-field lift helper: dispatches on field type and
+        // pushes the lifted value onto the stack. Mirror of
+        // EmitTupleOrRecordFieldStore on the store side.
+        //   string  : LiftUtf8(memory, ReadI32(elemBase+off+0),
+        //                              ReadI32(elemBase+off+4))
+        //   byte[]  : LiftPrim<byte>(memory, ReadI32(elemBase+off+0),
+        //                                    ReadI32(elemBase+off+4))
+        //   own<R>  : ctx.Resources.GetResource(typeof(IR),
+        //                ReadI32(elemBase+off)) → cast
+        //   prim    : ReadXxxLE(memory, elemBase+off)
+        private static void EmitLiftFieldFromMem(ILGenerator il,
+            Type fieldType, LocalBuilder elemBaseLocal, int fieldOffset,
+            HostPackageResolver? resolver, Type? resourcesType,
+            CanonOption.Kind stringEncoding)
+        {
+            bool isString = fieldType == typeof(string);
+            bool isByteArray = fieldType == typeof(byte[]);
+            bool isResource = resolver != null
+                && resourcesType != null
+                && resolver.IsResourceInterface(fieldType);
+
+            if (isString || isByteArray)
+            {
+                // Lift sequence:
+                //   ptr = ReadI32(memory, elemBase+off+0)
+                //   len = ReadI32(memory, elemBase+off+4)
+                //   stack-result = LiftXxx(memory, ptr, len)
+                //
+                // We stash ptr/len in locals because (a) the
+                // ReadI32 Calls each consume their own (memory,
+                // offset) pair, so the values can't sit on the
+                // stack between reads, and (b) LiftXxx needs the
+                // (memory, ptr, len) triple in order.
+                LocalBuilder strPtrLocal = il.DeclareLocal(typeof(int));
+                LocalBuilder strLenLocal = il.DeclareLocal(typeof(int));
+                // ptr = ReadI32(memory, elemBase+off+0)
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, MemoriesField);
+                il.Emit(OpCodes.Ldc_I4_0);
+                il.Emit(OpCodes.Ldelem_Ref);
+                il.Emit(OpCodes.Ldloc, elemBaseLocal);
+                if (fieldOffset != 0)
+                {
+                    il.Emit(OpCodes.Ldc_I4, fieldOffset);
+                    il.Emit(OpCodes.Add);
+                }
+                il.Emit(OpCodes.Call, ResolveLoadMethod(typeof(int)));
+                il.Emit(OpCodes.Stloc, strPtrLocal);
+                // len = ReadI32(memory, elemBase+off+4)
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, MemoriesField);
+                il.Emit(OpCodes.Ldc_I4_0);
+                il.Emit(OpCodes.Ldelem_Ref);
+                il.Emit(OpCodes.Ldloc, elemBaseLocal);
+                il.Emit(OpCodes.Ldc_I4, fieldOffset + 4);
+                il.Emit(OpCodes.Add);
+                il.Emit(OpCodes.Call, ResolveLoadMethod(typeof(int)));
+                il.Emit(OpCodes.Stloc, strLenLocal);
+                // Lift call: (memory, ptr, len) → string / byte[]
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, MemoriesField);
+                il.Emit(OpCodes.Ldc_I4_0);
+                il.Emit(OpCodes.Ldelem_Ref);
+                il.Emit(OpCodes.Ldloc, strPtrLocal);
+                il.Emit(OpCodes.Ldloc, strLenLocal);
+                if (isString)
+                    il.Emit(OpCodes.Call, ResolveLiftStringMethod(
+                        stringEncoding));
+                else
+                    il.Emit(OpCodes.Call, ResolveLiftPrimMethod(
+                        typeof(byte)));
+                return;
+            }
+
+            if (isResource)
+            {
+                // ctx.Resources.GetResource(typeof(IR),
+                //     ReadI32(memory, elemBase+off)) → cast
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, ResourcesField);
+                il.Emit(OpCodes.Castclass, resourcesType!);
+                il.Emit(OpCodes.Ldtoken, fieldType);
+                il.Emit(OpCodes.Call, GetTypeFromHandleMethod);
+                // handle = ReadI32(memory, elemBase+off)
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, MemoriesField);
+                il.Emit(OpCodes.Ldc_I4_0);
+                il.Emit(OpCodes.Ldelem_Ref);
+                il.Emit(OpCodes.Ldloc, elemBaseLocal);
+                if (fieldOffset != 0)
+                {
+                    il.Emit(OpCodes.Ldc_I4, fieldOffset);
+                    il.Emit(OpCodes.Add);
+                }
+                il.Emit(OpCodes.Call, ResolveLoadMethod(typeof(int)));
+                il.Emit(OpCodes.Callvirt,
+                    ResolveGetResourceMethod(resourcesType!));
+                il.Emit(OpCodes.Castclass, fieldType);
+                return;
+            }
+
+            // Primitive: ReadXxxLE(memory, elemBase+off).
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, MemoriesField);
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Ldelem_Ref);
+            il.Emit(OpCodes.Ldloc, elemBaseLocal);
+            if (fieldOffset != 0)
+            {
+                il.Emit(OpCodes.Ldc_I4, fieldOffset);
+                il.Emit(OpCodes.Add);
+            }
+            il.Emit(OpCodes.Call, ResolveLoadMethod(fieldType));
         }
 
         // Emit IL that stores an Option<inner> at retArea+baseOffset.
@@ -2033,7 +2373,6 @@ namespace Wacs.Transpiler.AOT.Component
                     il.Emit(OpCodes.Ldfld, MemoriesField);
                     il.Emit(OpCodes.Ldc_I4_0);
                     il.Emit(OpCodes.Ldelem_Ref);
-                    il.Emit(OpCodes.Ldfld, MemoryDataField);
                     il.Emit(OpCodes.Ldloc, retAreaLocal);
                     if (totalOffset != 0)
                     {
@@ -2231,7 +2570,6 @@ namespace Wacs.Transpiler.AOT.Component
                             il.Emit(OpCodes.Ldfld, MemoriesField);
                             il.Emit(OpCodes.Ldc_I4_0);
                             il.Emit(OpCodes.Ldelem_Ref);
-                            il.Emit(OpCodes.Ldfld, MemoryDataField);
                             il.Emit(OpCodes.Ldloc, retAreaLocal);
                             if (payloadAddrOffset != 0)
                             {
@@ -2333,7 +2671,6 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Ldfld, MemoriesField);
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ldelem_Ref);
-            il.Emit(OpCodes.Ldfld, MemoryDataField);
             il.Emit(OpCodes.Ldloc, retAreaLocal);
             if (offset != 0)
             {
@@ -2437,7 +2774,6 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Ldfld, MemoriesField);
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ldelem_Ref);
-            il.Emit(OpCodes.Ldfld, MemoryDataField);
             il.Emit(OpCodes.Ldloc, outerPtrLocal);
             il.Emit(OpCodes.Ldloc, indexLocal);
             il.Emit(OpCodes.Ldc_I4_4);
@@ -2475,7 +2811,6 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Ldfld, MemoriesField);
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ldelem_Ref);
-            il.Emit(OpCodes.Ldfld, MemoryDataField);
             il.Emit(OpCodes.Ldloc, retAreaLocal);
             il.Emit(OpCodes.Ldloc, outerPtrLocal);
             il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(int)));
@@ -2484,7 +2819,6 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Ldfld, MemoriesField);
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ldelem_Ref);
-            il.Emit(OpCodes.Ldfld, MemoryDataField);
             il.Emit(OpCodes.Ldloc, retAreaLocal);
             il.Emit(OpCodes.Ldc_I4_4);
             il.Emit(OpCodes.Add);
@@ -2596,7 +2930,6 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Ldfld, MemoriesField);
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ldelem_Ref);
-            il.Emit(OpCodes.Ldfld, MemoryDataField);
             il.Emit(OpCodes.Ldloc, retAreaLocal);
             il.Emit(OpCodes.Ldloc, outerPtrLocal);
             il.Emit(OpCodes.Call, ResolveStoreMethod(typeof(int)));
@@ -2605,7 +2938,6 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Ldfld, MemoriesField);
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ldelem_Ref);
-            il.Emit(OpCodes.Ldfld, MemoryDataField);
             il.Emit(OpCodes.Ldloc, retAreaLocal);
             il.Emit(OpCodes.Ldc_I4_4);
             il.Emit(OpCodes.Add);
@@ -2776,6 +3108,19 @@ namespace Wacs.Transpiler.AOT.Component
                 var elem = t.GetElementType()!;
                 if (IsListPrimitiveElement(elem)) return true;
                 if (elem == typeof(string)) return true;
+                // list<tuple-of-flat-fields> / list<record-of-flat-fields>
+                // including the resource-bearing variant. SLM compute
+                // returns Result<list<tuple<string, own<tensor>>>,
+                // own<error>>; without this, the Ok arm fell through
+                // to the fixed-width fallback and stored garbage
+                // (gap 22). The emit side dispatches into
+                // EmitListOfRecordOrTupleReturn at the arm's
+                // valueOffset.
+                if (IsTupleOfPrimitives(elem)
+                    || IsRecordOfPrimitives(elem)
+                    || IsTupleOfFlatFields(elem, resolver)
+                    || IsRecordOfFlatFields(elem, resolver))
+                    return true;
             }
             if (allowVariableLength && t.IsGenericType)
             {
@@ -2879,6 +3224,14 @@ namespace Wacs.Transpiler.AOT.Component
             bool isStringArray = armType.IsArray
                 && armType.GetArrayRank() == 1
                 && armType.GetElementType() == typeof(string);
+            bool isAggregateArray = armType.IsArray
+                && armType.GetArrayRank() == 1
+                && (IsTupleOfPrimitives(armType.GetElementType()!)
+                    || IsRecordOfPrimitives(armType.GetElementType()!)
+                    || IsTupleOfFlatFields(armType.GetElementType()!,
+                        resolver)
+                    || IsRecordOfFlatFields(armType.GetElementType()!,
+                        resolver));
             bool isAggregate = IsTupleOfPrimitives(armType)
                 || IsRecordOfPrimitives(armType)
                 || IsTupleOfFlatFields(armType, resolver)
@@ -2929,6 +3282,25 @@ namespace Wacs.Transpiler.AOT.Component
                 return;
             }
 
+            // list<tuple-of-flat-fields> / list<record-of-flat-fields>
+            // arms (gap 22): cabi_realloc the outer buffer, walk the
+            // T[] writing each element field-by-field, then store the
+            // (outerPtr, count) pair at retArea + valueOffset. SLM
+            // compute returns Result<list<tuple<string, own<tensor>>>,
+            // own<error>> — this branch carries the Ok side.
+            if (isAggregateArray)
+            {
+                var armLocal = il.DeclareLocal(armType);
+                il.Emit(OpCodes.Ldloca, returnLocal);
+                il.Emit(OpCodes.Call, armGetter);
+                il.Emit(OpCodes.Stloc, armLocal);
+                EmitListOfRecordOrTupleReturn(il,
+                    armType.GetElementType()!,
+                    armLocal, retAreaLocal, stringEncoding,
+                    resolver, resourcesType, valueOffset);
+                return;
+            }
+
             if (isString || isByteArray
                 || isPrimArray || isStringArray)
             {
@@ -2965,7 +3337,6 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Ldfld, MemoriesField);
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ldelem_Ref);
-            il.Emit(OpCodes.Ldfld, MemoryDataField);
             il.Emit(OpCodes.Ldloc, retAreaLocal);
             if (valueOffset != 0)
             {
@@ -3105,6 +3476,39 @@ namespace Wacs.Transpiler.AOT.Component
         // emit reuses the lookup.
         private static readonly ConcurrentDictionary<Type, MethodInfo>
             StoreMethodCache = new();
+        private static readonly ConcurrentDictionary<Type, MethodInfo>
+            LoadMethodCache = new();
+
+        // Per-primitive-type ReadXxxLE MethodInfo on PrimitiveStore.
+        // Used by EmitInlineRecordOrTupleLift (gap 22, round-17
+        // follow-up) to read each tuple field at its canon-ABI
+        // offset within the per-element area on the PARAM lift
+        // side. Symmetric with ResolveStoreMethod.
+        private static MethodInfo ResolveLoadMethod(Type clrType)
+            => LoadMethodCache.GetOrAdd(clrType, t =>
+            {
+                var underlying = t.IsEnum
+                    ? Enum.GetUnderlyingType(t) : t;
+                string name;
+                if (underlying == typeof(byte)) name = "ReadU8";
+                else if (underlying == typeof(sbyte)) name = "ReadI8";
+                else if (underlying == typeof(short)) name = "ReadI16LE";
+                else if (underlying == typeof(ushort)) name = "ReadU16LE";
+                else if (underlying == typeof(int)) name = "ReadI32LE";
+                else if (underlying == typeof(uint)) name = "ReadU32LE";
+                else if (underlying == typeof(long)) name = "ReadI64LE";
+                else if (underlying == typeof(ulong)) name = "ReadU64LE";
+                else if (underlying == typeof(float)) name = "ReadF32LE";
+                else if (underlying == typeof(double)) name = "ReadF64LE";
+                else if (underlying == typeof(bool)) name = "ReadBool";
+                else throw new InvalidOperationException(
+                    "Direct-linked emit fell through to a primitive load "
+                    + "for an unsupported type: " + t.FullName + ". The "
+                    + "PARAM-side lift only handles canon-ABI-storable "
+                    + "primitives within tuple fields.");
+                return typeof(PrimitiveStore).GetMethod(name,
+                    BindingFlags.Public | BindingFlags.Static)!;
+            });
 
         private static MethodInfo ResolveStoreMethod(Type clrType)
             => StoreMethodCache.GetOrAdd(clrType, t =>
@@ -3186,6 +3590,34 @@ namespace Wacs.Transpiler.AOT.Component
             // per-element memory layout is (ptr, len) pairs that
             // StringMarshal/ListMarshal.LiftStringList handles.
             if (clrType == typeof(string[]))
+            {
+                wasmTypes = new[] { ValType.I32, ValType.I32 };
+                return 2;
+            }
+            // byte[][] — `list<list<u8>>` outer header (i32 ptr,
+            // i32 count); each element at outer_ptr+i*8 is a
+            // (inner_ptr, inner_len) pair. Lifted via
+            // ListMarshal.LiftByteArrayList. Closes the wasi-nn
+            // SLM `wasi:nn/graph-funcs.load(builders, ...)` PARAM
+            // direct-link gap (gap 19).
+            if (clrType == typeof(byte[][]))
+            {
+                wasmTypes = new[] { ValType.I32, ValType.I32 };
+                return 2;
+            }
+            // (T1, T2, ..., Tn)[] — `list<tuple-of-flat-fields>`
+            // PARAM. Outer (i32 ptr, i32 count) + per-element area.
+            // Recurse into element-type validation (resource +
+            // string + primitive fields supported via the lift
+            // emit; non-flat fields fall through). Closes the
+            // wasi-nn SLM `inference.compute(inputs:
+            // list<tuple<string, own<tensor>>>)` PARAM direct-link
+            // gap (gap 22 follow-up).
+            if (clrType.IsArray
+                && clrType.GetArrayRank() == 1
+                && (IsTupleOfPrimitives(clrType.GetElementType()!)
+                    || IsTupleOfFlatFields(
+                        clrType.GetElementType()!, resolver)))
             {
                 wasmTypes = new[] { ValType.I32, ValType.I32 };
                 return 2;

@@ -12,8 +12,8 @@
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.WASI.NN.OnnxRuntime</AssemblyName>
-        <AssemblyVersion>0.2.0</AssemblyVersion>
-        <Version>0.2.0</Version>
+        <AssemblyVersion>0.2.2</AssemblyVersion>
+        <Version>0.2.2</Version>
         <RepositoryType>git</RepositoryType>
         <!-- ONNX Runtime carries native binaries; restricting to
              net8.0 here is fine because ORT itself targets
@@ -28,7 +28,19 @@
 
     <ItemGroup>
         <ProjectReference Include="..\Wacs.WASI.NN\Wacs.WASI.NN.csproj" />
-        <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.20.1" />
+        <!-- 1.22.0 widens com.microsoft.GroupQueryAttention's
+             allowed input range to support the 11-input shape
+             Gemma 3 270M's ONNX export emits. Empirically
+             verified: `strings` on the matching wasi-nn host's
+             linked native dylib (the working `ort 2.0.0-rc.10`
+             Rust dependency) reports 1.22.0; 1.21.0 still
+             rejects with "input size 11 not in range [min=7,
+             max=9]" against the same model bytes. No public-API
+             break for the surface this package uses
+             (SessionOptions, InferenceSession, OrtValue) between
+             1.20.1 and 1.22.0. Round-15 follow-up (gap 21
+             follow-up). -->
+        <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.22.0" />
     </ItemGroup>
 
 </Project>

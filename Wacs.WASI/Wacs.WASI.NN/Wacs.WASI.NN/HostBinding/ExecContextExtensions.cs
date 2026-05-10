@@ -16,6 +16,14 @@ namespace Wacs.WASI.NN.HostBinding
     /// wasi-nn is independent of the WASI 0.2.x interface tree;
     /// embedders can wire one or the other or both without
     /// dragging in unrelated transitives.
+    ///
+    /// <para>NOTE: still pins <c>ctx.DefaultMemory.Data</c> (byte[]).
+    /// Will AOOR under <see cref="MemoryStorageMode.NativePointer"/>
+    /// because the sentinel <c>Array.Empty&lt;byte&gt;()</c> backing
+    /// is empty. wasi-nn is the only remaining package that violates
+    /// the "zero <c>\.Data\b</c> references on MemoryInstance"
+    /// invariant — migrating WitBindings + WitxBindings to the
+    /// MemoryInstance.AsSpan path is its own follow-up.</para>
     /// </summary>
     internal static class ExecContextExtensions
     {

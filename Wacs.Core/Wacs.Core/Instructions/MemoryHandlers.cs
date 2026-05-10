@@ -48,7 +48,11 @@ namespace Wacs.Core.Instructions
             if (ea < 0 || ea + width > len)
                 throw new Wacs.Core.Runtime.Types.TrapException(
                     $"{op}: out of bounds memory access (ea={ea}, width={width}, size={len})");
-            return mem.AsSpan((int)ea, width);
+            // (nuint)ea instead of (int)ea — keeps the full unsigned
+            // range so the AsSpan(nuint, int) overload fires and
+            // NativePointer memories past 2 GiB don't wrap to a
+            // negative pointer offset.
+            return mem.AsSpan((nuint)ea, width);
         }
 
         // ---- Loads ---------------------------------------------------------------------

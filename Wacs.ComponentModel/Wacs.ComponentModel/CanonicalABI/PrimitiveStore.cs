@@ -17,7 +17,10 @@ namespace Wacs.ComponentModel.CanonicalABI
     /// Primitive scalar writers for the canonical-ABI store
     /// direction. Each helper writes a single value at the given
     /// byte offset of <paramref name="dest"/> in little-endian
-    /// (the canonical-ABI byte order).
+    /// (the canonical-ABI byte order). Routes through
+    /// <see cref="MemoryInstance.AsSpan"/> so both
+    /// <see cref="MemoryStorageMode.ManagedArray"/> and
+    /// <see cref="MemoryStorageMode.NativePointer"/> backings work.
     ///
     /// <para>Used by direct-linked aggregate-return emit when the
     /// host returns a record / tuple / option / result whose
@@ -26,39 +29,103 @@ namespace Wacs.ComponentModel.CanonicalABI
     /// </summary>
     public static class PrimitiveStore
     {
-        public static void StoreI8(byte[] dest, int offset, sbyte v)
-            => dest[offset] = (byte)v;
-        public static void StoreU8(byte[] dest, int offset, byte v)
-            => dest[offset] = v;
-        public static void StoreI16(byte[] dest, int offset, short v)
+        public static void StoreI8(MemoryInstance dest, int offset, sbyte v)
+            => dest.AsSpan(offset, 1)[0] = (byte)v;
+        public static void StoreU8(MemoryInstance dest, int offset, byte v)
+            => dest.AsSpan(offset, 1)[0] = v;
+        public static void StoreI16(MemoryInstance dest, int offset, short v)
             => BinaryPrimitives.WriteInt16LittleEndian(
                 dest.AsSpan(offset, 2), v);
-        public static void StoreU16(byte[] dest, int offset, ushort v)
+        public static void StoreU16(MemoryInstance dest, int offset, ushort v)
             => BinaryPrimitives.WriteUInt16LittleEndian(
                 dest.AsSpan(offset, 2), v);
-        public static void StoreI32(byte[] dest, int offset, int v)
+        public static void StoreI32(MemoryInstance dest, int offset, int v)
             => BinaryPrimitives.WriteInt32LittleEndian(
                 dest.AsSpan(offset, 4), v);
-        public static void StoreU32(byte[] dest, int offset, uint v)
+        public static void StoreU32(MemoryInstance dest, int offset, uint v)
             => BinaryPrimitives.WriteUInt32LittleEndian(
                 dest.AsSpan(offset, 4), v);
-        public static void StoreI64(byte[] dest, int offset, long v)
+        public static void StoreI64(MemoryInstance dest, int offset, long v)
             => BinaryPrimitives.WriteInt64LittleEndian(
                 dest.AsSpan(offset, 8), v);
-        public static void StoreU64(byte[] dest, int offset, ulong v)
+        public static void StoreU64(MemoryInstance dest, int offset, ulong v)
             => BinaryPrimitives.WriteUInt64LittleEndian(
                 dest.AsSpan(offset, 8), v);
         // WriteSingleLittleEndian / WriteDoubleLittleEndian are
         // .NET 5+; bit-cast through int/long for netstandard2.1
         // compatibility.
-        public static void StoreF32(byte[] dest, int offset, float v)
+        public static void StoreF32(MemoryInstance dest, int offset, float v)
             => BinaryPrimitives.WriteInt32LittleEndian(
                 dest.AsSpan(offset, 4), BitConverter.SingleToInt32Bits(v));
-        public static void StoreF64(byte[] dest, int offset, double v)
+        public static void StoreF64(MemoryInstance dest, int offset, double v)
             => BinaryPrimitives.WriteInt64LittleEndian(
                 dest.AsSpan(offset, 8), BitConverter.DoubleToInt64Bits(v));
-        public static void StoreBool(byte[] dest, int offset, bool v)
-            => dest[offset] = v ? (byte)1 : (byte)0;
+        public static void StoreBool(MemoryInstance dest, int offset, bool v)
+            => dest.AsSpan(offset, 1)[0] = v ? (byte)1 : (byte)0;
+
+        // === Reader sibling family ===
+        // Used at IL-emit time wherever guest-memory bytes are decoded
+        // for the lift path (string ptrs, list lengths, variant disc
+        // bytes). Mode-agnostic — every method routes through
+        // MemoryInstance.AsSpan, which dispatches on storage mode.
+
+        /// <summary>Read a single byte from <paramref name="mem"/>
+        /// at <paramref name="offset"/>.</summary>
+        public static byte ReadU8(MemoryInstance mem, int offset)
+            => mem.AsSpan(offset, 1)[0];
+
+        /// <summary>Read a little-endian unsigned 16-bit integer
+        /// from <paramref name="mem"/> at <paramref name="offset"/>.</summary>
+        public static ushort ReadU16LE(MemoryInstance mem, int offset)
+            => BinaryPrimitives.ReadUInt16LittleEndian(
+                mem.AsSpan(offset, 2));
+
+        /// <summary>Read a little-endian unsigned 32-bit integer
+        /// from <paramref name="mem"/> at <paramref name="offset"/>.</summary>
+        public static uint ReadU32LE(MemoryInstance mem, int offset)
+            => BinaryPrimitives.ReadUInt32LittleEndian(
+                mem.AsSpan(offset, 4));
+
+        /// <summary>Read a little-endian signed 32-bit integer
+        /// from <paramref name="mem"/> at <paramref name="offset"/>.
+        /// Used wherever guest-memory pointer/length pairs are
+        /// decoded for the lift path.</summary>
+        public static int ReadI32LE(MemoryInstance mem, int offset)
+            => BinaryPrimitives.ReadInt32LittleEndian(
+                mem.AsSpan(offset, 4));
+
+        // === Per-field readers used by the list-of-tuple PARAM lift
+        // (gap 22, round-17 follow-up). DirectLinkedImportEmit's
+        // EmitLiftListOfRecordOrTuple resolves these via
+        // ResolveLoadMethod(fieldType); each tuple field is read at
+        // its canon-ABI offset within the per-element area in one
+        // pass and the constructed ValueTuple is stelem'd into the
+        // result array. Symmetric with the StoreXxx writers above.
+
+        public static sbyte ReadI8(MemoryInstance mem, int offset)
+            => (sbyte)mem.AsSpan(offset, 1)[0];
+        public static short ReadI16LE(MemoryInstance mem, int offset)
+            => BinaryPrimitives.ReadInt16LittleEndian(
+                mem.AsSpan(offset, 2));
+        public static long ReadI64LE(MemoryInstance mem, int offset)
+            => BinaryPrimitives.ReadInt64LittleEndian(
+                mem.AsSpan(offset, 8));
+        public static ulong ReadU64LE(MemoryInstance mem, int offset)
+            => BinaryPrimitives.ReadUInt64LittleEndian(
+                mem.AsSpan(offset, 8));
+        // ReadSingleLittleEndian / ReadDoubleLittleEndian are .NET 5+;
+        // bit-cast through int/long for netstandard2.1 compatibility,
+        // matching the StoreF32/StoreF64 pattern.
+        public static float ReadF32LE(MemoryInstance mem, int offset)
+            => BitConverter.Int32BitsToSingle(
+                BinaryPrimitives.ReadInt32LittleEndian(
+                    mem.AsSpan(offset, 4)));
+        public static double ReadF64LE(MemoryInstance mem, int offset)
+            => BitConverter.Int64BitsToDouble(
+                BinaryPrimitives.ReadInt64LittleEndian(
+                    mem.AsSpan(offset, 8)));
+        public static bool ReadBool(MemoryInstance mem, int offset)
+            => mem.AsSpan(offset, 1)[0] != 0;
 
         /// <summary>
         /// Store a UTF-8 string into wasm linear memory and write
@@ -66,12 +133,10 @@ namespace Wacs.ComponentModel.CanonicalABI
         /// guest-side buffer via the component's <c>cabi_realloc</c>
         /// export and copies the encoded bytes into it.
         ///
-        /// <para><paramref name="dest"/> is the wasm linear memory
-        /// (typically <c>ctx.Memories[0].Data</c>).
+        /// <para><paramref name="mem"/> is the wasm linear memory.
         /// <paramref name="retAreaOffset"/> is the absolute byte
-        /// offset in <paramref name="dest"/> where the (ptr, len)
-        /// pair should land — the IL has already done
-        /// <c>retArea + fieldOffset</c>.</para>
+        /// offset where the (ptr, len) pair should land — the IL
+        /// has already done <c>retArea + fieldOffset</c>.</para>
         ///
         /// <para>Used by direct-linked aggregate-RETURN emit when
         /// the host returns a string. The CLR-side string is
@@ -85,18 +150,16 @@ namespace Wacs.ComponentModel.CanonicalABI
                 throw new InvalidOperationException(
                     "String returns require the component to "
                     + "export `cabi_realloc`.");
-            // cabi_realloc can call memory.grow, which reassigns
-            // MemoryInstance.Data to a fresh, larger byte[].
-            // Reading mem.Data AFTER each cabi_realloc keeps the
-            // BlockCopy / WriteInt32 targets pointing at the live
-            // backing.
+            // cabi_realloc can call memory.grow; AsSpan reads the
+            // live backing each call so post-grow stale references
+            // can't form (round-4 gap-11 invariant, mode-aware).
             var bytes = Encoding.UTF8.GetBytes(value);
             var ptr = cabiRealloc(0, 0, 1, bytes.Length);
-            Buffer.BlockCopy(bytes, 0, mem.Data, ptr, bytes.Length);
+            bytes.AsSpan().CopyTo(mem.AsSpan(ptr, bytes.Length));
             BinaryPrimitives.WriteInt32LittleEndian(
-                mem.Data.AsSpan(retAreaOffset, 4), ptr);
+                mem.AsSpan(retAreaOffset, 4), ptr);
             BinaryPrimitives.WriteInt32LittleEndian(
-                mem.Data.AsSpan(retAreaOffset + 4, 4), bytes.Length);
+                mem.AsSpan(retAreaOffset + 4, 4), bytes.Length);
         }
 
         /// <summary>
@@ -117,11 +180,11 @@ namespace Wacs.ComponentModel.CanonicalABI
                     + "export `cabi_realloc`.");
             var bytes = Encoding.Unicode.GetBytes(value);
             var ptr = cabiRealloc(0, 0, 2, bytes.Length);
-            Buffer.BlockCopy(bytes, 0, mem.Data, ptr, bytes.Length);
+            bytes.AsSpan().CopyTo(mem.AsSpan(ptr, bytes.Length));
             BinaryPrimitives.WriteInt32LittleEndian(
-                mem.Data.AsSpan(retAreaOffset, 4), ptr);
+                mem.AsSpan(retAreaOffset, 4), ptr);
             BinaryPrimitives.WriteInt32LittleEndian(
-                mem.Data.AsSpan(retAreaOffset + 4, 4), bytes.Length / 2);
+                mem.AsSpan(retAreaOffset + 4, 4), bytes.Length / 2);
         }
 
         /// <summary>
@@ -143,14 +206,14 @@ namespace Wacs.ComponentModel.CanonicalABI
                     + "export `cabi_realloc`.");
             var bytes = Encoding.Unicode.GetBytes(value);
             var ptr = cabiRealloc(0, 0, 2, bytes.Length);
-            Buffer.BlockCopy(bytes, 0, mem.Data, ptr, bytes.Length);
+            bytes.AsSpan().CopyTo(mem.AsSpan(ptr, bytes.Length));
             int codeUnits = bytes.Length / 2;
             uint tagged = (uint)codeUnits
                 | StringMarshal.Latin1OrUtf16Tag;
             BinaryPrimitives.WriteInt32LittleEndian(
-                mem.Data.AsSpan(retAreaOffset, 4), ptr);
+                mem.AsSpan(retAreaOffset, 4), ptr);
             BinaryPrimitives.WriteUInt32LittleEndian(
-                mem.Data.AsSpan(retAreaOffset + 4, 4), tagged);
+                mem.AsSpan(retAreaOffset + 4, 4), tagged);
         }
 
         /// <summary>
@@ -169,14 +232,14 @@ namespace Wacs.ComponentModel.CanonicalABI
                     "byte[] returns require the component to "
                     + "export `cabi_realloc`.");
             var ptr = cabiRealloc(0, 0, 1, value.Length);
-            // Reference mem.Data AFTER cabi_realloc: a memory.grow
-            // inside cabi_realloc reassigns mem.Data to a new
-            // (larger) byte[], and any earlier reference is stale.
-            Buffer.BlockCopy(value, 0, mem.Data, ptr, value.Length);
+            // AsSpan re-reads the live backing post-cabi_realloc;
+            // any earlier reference would be stale after a
+            // memory.grow inside the realloc call.
+            value.AsSpan().CopyTo(mem.AsSpan(ptr, value.Length));
             BinaryPrimitives.WriteInt32LittleEndian(
-                mem.Data.AsSpan(retAreaOffset, 4), ptr);
+                mem.AsSpan(retAreaOffset, 4), ptr);
             BinaryPrimitives.WriteInt32LittleEndian(
-                mem.Data.AsSpan(retAreaOffset + 4, 4), value.Length);
+                mem.AsSpan(retAreaOffset + 4, 4), value.Length);
         }
 
         /// <summary>
@@ -210,11 +273,11 @@ namespace Wacs.ComponentModel.CanonicalABI
             var ptr = cabiRealloc(0, 0, elementSize, byteCount);
             var srcBytes = MemoryMarshal.AsBytes(
                 new ReadOnlySpan<T>(value));
-            srcBytes.CopyTo(mem.Data.AsSpan(ptr, byteCount));
+            srcBytes.CopyTo(mem.AsSpan(ptr, byteCount));
             BinaryPrimitives.WriteInt32LittleEndian(
-                mem.Data.AsSpan(retAreaOffset, 4), ptr);
+                mem.AsSpan(retAreaOffset, 4), ptr);
             BinaryPrimitives.WriteInt32LittleEndian(
-                mem.Data.AsSpan(retAreaOffset + 4, 4), value.Length);
+                mem.AsSpan(retAreaOffset + 4, 4), value.Length);
         }
 
         /// <summary>
@@ -243,16 +306,16 @@ namespace Wacs.ComponentModel.CanonicalABI
             {
                 var sub = value[i];
                 var subPtr = cabiRealloc(0, 0, 1, sub.Length);
-                Buffer.BlockCopy(sub, 0, mem.Data, subPtr, sub.Length);
+                sub.AsSpan().CopyTo(mem.AsSpan(subPtr, sub.Length));
                 BinaryPrimitives.WriteInt32LittleEndian(
-                    mem.Data.AsSpan(outerPtr + i * 8, 4), subPtr);
+                    mem.AsSpan(outerPtr + i * 8, 4), subPtr);
                 BinaryPrimitives.WriteInt32LittleEndian(
-                    mem.Data.AsSpan(outerPtr + i * 8 + 4, 4), sub.Length);
+                    mem.AsSpan(outerPtr + i * 8 + 4, 4), sub.Length);
             }
             BinaryPrimitives.WriteInt32LittleEndian(
-                mem.Data.AsSpan(retAreaOffset, 4), outerPtr);
+                mem.AsSpan(retAreaOffset, 4), outerPtr);
             BinaryPrimitives.WriteInt32LittleEndian(
-                mem.Data.AsSpan(retAreaOffset + 4, 4), count);
+                mem.AsSpan(retAreaOffset + 4, 4), count);
         }
 
         /// <summary>
@@ -289,16 +352,16 @@ namespace Wacs.ComponentModel.CanonicalABI
                 var subPtr = cabiRealloc(0, 0, elementSize, subByteCount);
                 var srcBytes = MemoryMarshal.AsBytes(
                     new ReadOnlySpan<T>(sub));
-                srcBytes.CopyTo(mem.Data.AsSpan(subPtr, subByteCount));
+                srcBytes.CopyTo(mem.AsSpan(subPtr, subByteCount));
                 BinaryPrimitives.WriteInt32LittleEndian(
-                    mem.Data.AsSpan(outerPtr + i * 8, 4), subPtr);
+                    mem.AsSpan(outerPtr + i * 8, 4), subPtr);
                 BinaryPrimitives.WriteInt32LittleEndian(
-                    mem.Data.AsSpan(outerPtr + i * 8 + 4, 4), sub.Length);
+                    mem.AsSpan(outerPtr + i * 8 + 4, 4), sub.Length);
             }
             BinaryPrimitives.WriteInt32LittleEndian(
-                mem.Data.AsSpan(retAreaOffset, 4), outerPtr);
+                mem.AsSpan(retAreaOffset, 4), outerPtr);
             BinaryPrimitives.WriteInt32LittleEndian(
-                mem.Data.AsSpan(retAreaOffset + 4, 4), count);
+                mem.AsSpan(retAreaOffset + 4, 4), count);
         }
 
         /// <summary>
@@ -329,17 +392,17 @@ namespace Wacs.ComponentModel.CanonicalABI
             {
                 var bytes = Encoding.UTF8.GetBytes(value[i]);
                 var sPtr = cabiRealloc(0, 0, 1, bytes.Length);
-                Buffer.BlockCopy(bytes, 0, mem.Data, sPtr, bytes.Length);
+                bytes.AsSpan().CopyTo(mem.AsSpan(sPtr, bytes.Length));
                 BinaryPrimitives.WriteInt32LittleEndian(
-                    mem.Data.AsSpan(outerPtr + i * 8, 4), sPtr);
+                    mem.AsSpan(outerPtr + i * 8, 4), sPtr);
                 BinaryPrimitives.WriteInt32LittleEndian(
-                    mem.Data.AsSpan(outerPtr + i * 8 + 4, 4),
+                    mem.AsSpan(outerPtr + i * 8 + 4, 4),
                     bytes.Length);
             }
             BinaryPrimitives.WriteInt32LittleEndian(
-                mem.Data.AsSpan(retAreaOffset, 4), outerPtr);
+                mem.AsSpan(retAreaOffset, 4), outerPtr);
             BinaryPrimitives.WriteInt32LittleEndian(
-                mem.Data.AsSpan(retAreaOffset + 4, 4), count);
+                mem.AsSpan(retAreaOffset + 4, 4), count);
         }
 
         /// <summary>
@@ -370,9 +433,9 @@ namespace Wacs.ComponentModel.CanonicalABI
                     cabiRealloc);
             }
             BinaryPrimitives.WriteInt32LittleEndian(
-                mem.Data.AsSpan(retAreaOffset, 4), outerPtr);
+                mem.AsSpan(retAreaOffset, 4), outerPtr);
             BinaryPrimitives.WriteInt32LittleEndian(
-                mem.Data.AsSpan(retAreaOffset + 4, 4), count);
+                mem.AsSpan(retAreaOffset + 4, 4), count);
         }
 
         /// <summary>
@@ -399,9 +462,9 @@ namespace Wacs.ComponentModel.CanonicalABI
                     cabiRealloc);
             }
             BinaryPrimitives.WriteInt32LittleEndian(
-                mem.Data.AsSpan(retAreaOffset, 4), outerPtr);
+                mem.AsSpan(retAreaOffset, 4), outerPtr);
             BinaryPrimitives.WriteInt32LittleEndian(
-                mem.Data.AsSpan(retAreaOffset + 4, 4), count);
+                mem.AsSpan(retAreaOffset + 4, 4), count);
         }
 
         // sizeof(T) requires unsafe; cache the per-T size once via

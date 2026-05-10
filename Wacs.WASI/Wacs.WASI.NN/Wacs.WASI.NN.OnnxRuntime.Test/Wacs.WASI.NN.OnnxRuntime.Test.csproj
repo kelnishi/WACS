@@ -19,6 +19,13 @@
     <ItemGroup>
         <ProjectReference Include="..\Wacs.WASI.NN\Wacs.WASI.NN.csproj" />
         <ProjectReference Include="..\Wacs.WASI.NN.OnnxRuntime\Wacs.WASI.NN.OnnxRuntime.csproj" />
+        <!-- gap-20 regression test: the Preview2 runtime scope's
+             reflective ONNX backend wiring crosses three packages
+             (Preview2.DI + WASI.NN.DI + WASI.NN.OnnxRuntime).
+             This is the only test project where all three
+             references co-exist without a cycle. -->
+        <ProjectReference Include="..\..\Wacs.WASI.Preview2\Wacs.WASI.Preview2.DependencyInjection\Wacs.WASI.Preview2.DependencyInjection.csproj" />
+        <ProjectReference Include="..\Wacs.WASI.NN.DependencyInjection\Wacs.WASI.NN.DependencyInjection.csproj" />
     </ItemGroup>
 
     <!-- Shared test fixture: hand-encoded minimal ONNX model.

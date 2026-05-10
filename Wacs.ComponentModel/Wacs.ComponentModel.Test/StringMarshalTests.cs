@@ -8,6 +8,8 @@
 using System;
 using System.Text;
 using Wacs.ComponentModel.CanonicalABI;
+using Wacs.Core.Runtime.Types;
+using Wacs.Core.Types;
 using Xunit;
 
 namespace Wacs.ComponentModel.Test
@@ -25,6 +27,16 @@ namespace Wacs.ComponentModel.Test
     /// </summary>
     public class StringMarshalTests
     {
+        // Helper: build a one-page MemoryInstance and copy `bytes`
+        // into it at offset 0. Tests want a guest-memory shape they
+        // can hand to the now-MemoryInstance-typed LiftXxx helpers.
+        private static MemoryInstance NewMemoryWith(byte[] bytes, int offset = 0)
+        {
+            var mem = new MemoryInstance(new MemoryType(1));
+            bytes.AsSpan().CopyTo(mem.AsSpan(offset, bytes.Length));
+            return mem;
+        }
+
         [Fact]
         public void LowerUtf8_roundtrips_ascii_via_lift()
         {
@@ -36,12 +48,14 @@ namespace Wacs.ComponentModel.Test
                 Assert.NotEqual(System.IntPtr.Zero, (System.IntPtr)addr);
 
                 // Copy out via the pinned address into a managed
-                // buffer, then lift. Simulates what the transpiler
-                // IL path does after the core call.
+                // buffer, then stage in a MemoryInstance and lift.
+                // Simulates what the transpiler IL path does after
+                // the core call.
                 var roundtrip = new byte[len];
                 System.Runtime.InteropServices.Marshal.Copy(
                     (System.IntPtr)addr, roundtrip, 0, len);
-                Assert.Equal(input, StringMarshal.LiftUtf8(roundtrip, 0, len));
+                var mem = NewMemoryWith(roundtrip);
+                Assert.Equal(input, StringMarshal.LiftUtf8(mem, 0, len));
             }
             finally
             {
@@ -71,25 +85,29 @@ namespace Wacs.ComponentModel.Test
         [Fact]
         public void LiftUtf8_byte_array_decodes_span_at_offset()
         {
-            // Simulates the transpiler/interpreter's guest
-            // memory access: bytes is the core module's linear
-            // memory, (ptr, len) locates the string within.
-            var memory = new byte[256];
+            // Simulates the transpiler/interpreter's guest memory
+            // access: mem is the core module's linear memory,
+            // (ptr, len) locates the string within.
             var payload = Encoding.UTF8.GetBytes("canonical");
-            Array.Copy(payload, 0, memory, 100, payload.Length);
+            var mem = NewMemoryWith(payload, offset: 100);
 
             Assert.Equal("canonical",
-                StringMarshal.LiftUtf8(memory, 100, payload.Length));
+                StringMarshal.LiftUtf8(mem, 100, payload.Length));
         }
 
         [Fact]
         public void LiftUtf8_rejects_out_of_range_span()
         {
-            var memory = new byte[16];
+            // MemoryInstance.AsSpan does the bounds check; for the
+            // out-of-range cases below it surfaces as
+            // ArgumentOutOfRangeException with a different paramName
+            // ("offset" vs StringMarshal's old "ptr"), so just match
+            // the type.
+            var mem = new MemoryInstance(new MemoryType(1));
             Assert.Throws<ArgumentOutOfRangeException>(
-                () => StringMarshal.LiftUtf8(memory, 10, 20));
+                () => StringMarshal.LiftUtf8(mem, 65530, 20));
             Assert.Throws<ArgumentOutOfRangeException>(
-                () => StringMarshal.LiftUtf8(memory, -1, 5));
+                () => StringMarshal.LiftUtf8(mem, -1, 5));
         }
 
         [Fact]

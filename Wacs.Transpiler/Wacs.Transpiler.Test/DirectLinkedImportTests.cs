@@ -10,10 +10,13 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using Wacs.ComponentModel.CanonicalABI;
 using Wacs.ComponentModel.Runtime;
 using Wacs.ComponentModel.Runtime.Parser;
+using Wacs.Core.Runtime.Types;
 using Wacs.Core;
 using Wacs.Core.Runtime;
+using Wacs.Core.Text;
 using Wacs.Transpiler.AOT;
 using Wacs.Transpiler.AOT.Component;
 using Xunit;
@@ -238,6 +241,310 @@ namespace Wacs.Transpiler.Test
             private readonly uint _v;
             public FakeWidget(uint v) { _v = v; }
             public uint Read() => _v;
+        }
+
+        // ====== SourceGen-shape constructor surface ===============
+        // Wacs.ComponentModel.Bindgen.SourceGen emits resource
+        // constructors as `void Create(args)` instance methods on the
+        // resource interface (rather than static factories returning
+        // the interface). The transpiler's direct-link emit accepts
+        // both shapes; the SourceGen shape requires an impl class
+        // with a public parameterless ctor — same convention as
+        // `Wacs.WASI.NN.DependencyInjection.Tensor`.
+        [WitSource(@"resource widget {
+    constructor();
+    read: func() -> u32;
+}",
+            Package = "my:test@1.0.0", Interface = "sg-env",
+            Item = "widget")]
+        public interface ISgWidget
+        {
+            [WitSource(@"constructor();",
+                Package = "my:test@1.0.0", Interface = "sg-env",
+                Item = "[constructor]widget")]
+            void Create();
+
+            [WitSource(@"read: func() -> u32;",
+                Package = "my:test@1.0.0", Interface = "sg-env",
+                Item = "[method]widget.read")]
+            uint Read();
+        }
+
+        // Concrete impl class with public parameterless ctor — the
+        // resolver discovers this as the impl for ISgWidget. Mirrors
+        // the Tensor / GraphExecutionContext pattern in
+        // Wacs.WASI.NN.DependencyInjection.
+        public sealed class TestSgWidget : ISgWidget
+        {
+            private uint _v;
+            public TestSgWidget() { /* parameterless */ }
+            public void Create() { _v = 42u; }
+            public uint Read() => _v;
+        }
+
+        // SourceGen-shape constructor with a single primitive PARAM
+        // — narrowest reproducer for the constructor + arg-lift
+        // happy path.
+        [WitSource(@"resource sg-tensor {
+    constructor(seed: u32);
+    read: func() -> u32;
+}",
+            Package = "my:test@1.0.0", Interface = "sg-env",
+            Item = "sg-tensor")]
+        public interface ISgTensor
+        {
+            [WitSource(@"constructor(seed: u32);",
+                Package = "my:test@1.0.0", Interface = "sg-env",
+                Item = "[constructor]sg-tensor")]
+            void Create(uint seed);
+
+            [WitSource(@"read: func() -> u32;",
+                Package = "my:test@1.0.0", Interface = "sg-env",
+                Item = "[method]sg-tensor.read")]
+            uint Read();
+        }
+
+        public sealed class TestSgTensor : ISgTensor
+        {
+            private uint _seed;
+            public TestSgTensor() { /* parameterless — resolver
+                requirement for SourceGen-shape impls. */ }
+            public void Create(uint seed) { _seed = seed; }
+            public uint Read() => _seed;
+        }
+
+        // SourceGen-shape constructor matching the wasi-nn
+        // `Tensor::new(dimensions: list<u32>, ty: enum, data:
+        // list<u8>)` shape — list PARAMs lifted via cabi-realloc'd
+        // buffers, plus an enum lowered as u8. The user-reported
+        // gap 23 fires on this shape (every realistic LLM /
+        // classifier workload calls compute with at least one such
+        // tensor).
+        [WitSource(@"enum sg-tensor-type { f32, i32, i64, u8 }")]
+        public enum SgTensorType : byte
+        {
+            F32 = 0,
+            I32 = 1,
+            I64 = 2,
+            U8 = 3,
+        }
+
+        [WitSource(@"resource sg-bigtensor {
+    constructor(dimensions: list<u32>, ty: sg-tensor-type, data: list<u8>);
+    sum: func() -> u32;
+}",
+            Package = "my:test@1.0.0", Interface = "sg-env",
+            Item = "sg-bigtensor")]
+        public interface ISgBigTensor
+        {
+            [WitSource(@"constructor(dimensions: list<u32>, ty: sg-tensor-type, data: list<u8>);",
+                Package = "my:test@1.0.0", Interface = "sg-env",
+                Item = "[constructor]sg-bigtensor")]
+            void Create(uint[] dimensions, SgTensorType ty, byte[] data);
+
+            // Returns a deterministic checksum of the constructor
+            // args so the test can confirm BOTH that AllocateResource
+            // fired (otherwise GetResource(0) traps before sum runs)
+            // AND that the lifted args matched what the guest
+            // staged.
+            [WitSource(@"sum: func() -> u32;",
+                Package = "my:test@1.0.0", Interface = "sg-env",
+                Item = "[method]sg-bigtensor.sum")]
+            uint Sum();
+        }
+
+        public sealed class TestSgBigTensor : ISgBigTensor
+        {
+            private uint _checksum;
+            public TestSgBigTensor() { }
+            public void Create(uint[] dimensions, SgTensorType ty, byte[] data)
+            {
+                // checksum = sum(dimensions) * 1000 + (byte)ty * 100 + sum(data)
+                uint dimsSum = 0;
+                if (dimensions != null)
+                    foreach (var d in dimensions) dimsSum += d;
+                uint dataSum = 0;
+                if (data != null)
+                    foreach (var b in data) dataSum += b;
+                _checksum = dimsSum * 1000 + (uint)((byte)ty * 100) + dataSum;
+            }
+            public uint Sum() => _checksum;
+        }
+
+        // ====== Free-function returning result<own<R>, own<E>> ===
+        // Mirrors wasi:nn/graph-funcs.load's shape: a stateless
+        // interface (bundle-property typed) whose method returns
+        // Result<IResource, IError>. The SLM's first failure post-
+        // gap-17 was at this canonical-ABI return-lift surface; the
+        // test isolates whether the IL emit's Result-arm-with-
+        // resource path actually mints a handle (gap-18 candidate).
+        [WitSource(@"resource graph { ... }",
+            Package = "my:test@1.0.0", Interface = "loader-env",
+            Item = "graph")]
+        public interface ILoaderGraph
+        {
+            [WitSource(@"read: func() -> u32;",
+                Package = "my:test@1.0.0", Interface = "loader-env",
+                Item = "graph.read")]
+            uint Read();
+        }
+
+        [WitSource(@"resource error { ... }",
+            Package = "my:test@1.0.0", Interface = "loader-env",
+            Item = "error")]
+        public interface ILoaderError
+        {
+            [WitSource(@"message: func() -> string;",
+                Package = "my:test@1.0.0", Interface = "loader-env",
+                Item = "error.message")]
+            string Message();
+        }
+
+        public sealed class TestLoaderGraph : ILoaderGraph
+        {
+            public TestLoaderGraph() { }
+            public uint Read() => 7u;
+        }
+
+        public sealed class TestLoaderError : ILoaderError
+        {
+            public TestLoaderError() { }
+            public string Message() => "stub";
+        }
+
+        [WitSource(@"interface loader-env",
+            Package = "my:test@1.0.0", Interface = "loader-env")]
+        public interface ILoaderFuncs
+        {
+            [WitSource(@"load: func() -> result<graph, error>;",
+                Package = "my:test@1.0.0", Interface = "loader-env",
+                Item = "load")]
+            Result<ILoaderGraph, ILoaderError> Load();
+
+            // Mirrors wasi:nn/graph-funcs.load's full signature:
+            //   load: func(builder: list<list<u8>>, encoding: u8,
+            //              target: u8) -> result<graph, error>
+            // The list<list<u8>> param is the SLM-specific shape.
+            [WitSource(@"load-bytes: func(builder: list<list<u8>>, encoding: u8, target: u8) -> result<graph, error>;",
+                Package = "my:test@1.0.0", Interface = "loader-env",
+                Item = "load-bytes")]
+            Result<ILoaderGraph, ILoaderError> LoadBytes(
+                byte[][] builder, byte encoding, byte target);
+
+            // Mirrors wasi:nn/inference.compute's shape:
+            //   compute: func(inputs: list<tuple<string, own<tensor>>>)
+            //     -> result<list<tuple<string, own<tensor>>>, own<error>>
+            // PARAM lift: list-of-tuple-with-string-and-resource (gap
+            // 22 follow-up — round-13's byte[][] PARAM lift was the
+            // sibling). RETURN: Result-wrapped list-of-tuple — Ok arm
+            // exercises EmitResultArmStore's aggregate-array branch
+            // at valueOffset != 0 (gap 22).
+            [WitSource(@"compute: func(inputs: list<tuple<string, own<graph>>>) -> result<list<tuple<string, own<graph>>>, own<error>>;",
+                Package = "my:test@1.0.0", Interface = "loader-env",
+                Item = "compute")]
+            Result<(string, ILoaderGraph)[], ILoaderError> Compute(
+                (string, ILoaderGraph)[] inputs);
+        }
+
+        public sealed class TestLoaderFuncs : ILoaderFuncs
+        {
+            // Last-call captures so the LoadBytes regression test
+            // can verify the lifted byte[][] matches what the guest
+            // wrote into memory before the call.
+            public byte[][]? LastBuilder { get; private set; }
+            public byte LastEncoding { get; private set; }
+            public byte LastTarget { get; private set; }
+
+            // Last-call capture for Compute (gap 22) — the lifted
+            // (string, IGraph)[] inputs the guest staged. The return
+            // value is built from these so the test can verify both
+            // PARAM lift (Compute receives correct names + handles)
+            // and RETURN store (guest reads back what we returned).
+            public (string, ILoaderGraph)[]? LastInputs { get; private set; }
+
+            public Result<ILoaderGraph, ILoaderError> Load()
+                => Result<ILoaderGraph, ILoaderError>.FromOk(
+                    new TestLoaderGraph());
+
+            public Result<ILoaderGraph, ILoaderError> LoadBytes(
+                byte[][] builder, byte encoding, byte target)
+            {
+                LastBuilder = builder;
+                LastEncoding = encoding;
+                LastTarget = target;
+                return Result<ILoaderGraph, ILoaderError>.FromOk(
+                    new TestLoaderGraph());
+            }
+
+            public Result<(string, ILoaderGraph)[], ILoaderError> Compute(
+                (string, ILoaderGraph)[] inputs)
+            {
+                LastInputs = inputs;
+                // Echo back the inputs with the names prefixed by
+                // "out_" — gives the test a deterministic check
+                // that names round-trip BOTH lift and store. Reuse
+                // the same IGraph instances so handles round-trip
+                // through the resource registry too.
+                var outputs = new (string, ILoaderGraph)[inputs.Length];
+                for (int i = 0; i < inputs.Length; i++)
+                    outputs[i] = ("out_" + inputs[i].Item1,
+                        inputs[i].Item2);
+                return Result<(string, ILoaderGraph)[], ILoaderError>
+                    .FromOk(outputs);
+            }
+        }
+
+        // Resource interface with a Result-of-resource method —
+        // mirrors wasi:nn/graph.init-execution-context: a `[method]
+        // X.foo(self) -> result<own<R>, own<E>>` shape. The user's
+        // diagnosis named this as a likely sibling of the free-fn
+        // case in gap 18.
+        [WitSource(@"resource graph2 { constructor(); init: func() -> result<graph2-ctx, error>; }",
+            Package = "my:test@1.0.0", Interface = "loader-env",
+            Item = "graph2")]
+        public interface ILoaderGraph2
+        {
+            [WitSource(@"constructor();",
+                Package = "my:test@1.0.0", Interface = "loader-env",
+                Item = "[constructor]graph2")]
+            void Create();
+            [WitSource(@"init: func() -> result<graph2-ctx, error>;",
+                Package = "my:test@1.0.0", Interface = "loader-env",
+                Item = "graph2.init")]
+            Result<ILoaderGraph2Ctx, ILoaderError> Init();
+        }
+
+        [WitSource(@"resource graph2-ctx { read: func() -> u32; }",
+            Package = "my:test@1.0.0", Interface = "loader-env",
+            Item = "graph2-ctx")]
+        public interface ILoaderGraph2Ctx
+        {
+            [WitSource(@"read: func() -> u32;",
+                Package = "my:test@1.0.0", Interface = "loader-env",
+                Item = "graph2-ctx.read")]
+            uint Read();
+        }
+
+        public sealed class TestLoaderGraph2 : ILoaderGraph2
+        {
+            public TestLoaderGraph2() { }
+            public void Create() { /* parameterless ctor sentinel */ }
+            public Result<ILoaderGraph2Ctx, ILoaderError> Init()
+                => Result<ILoaderGraph2Ctx, ILoaderError>.FromOk(
+                    new TestLoaderGraph2Ctx());
+        }
+
+        public sealed class TestLoaderGraph2Ctx : ILoaderGraph2Ctx
+        {
+            public TestLoaderGraph2Ctx() { }
+            public uint Read() => 13u;
+        }
+
+        public sealed class LoaderBundle
+        {
+            public ILoaderFuncs LoaderEnv { get; }
+            public LoaderBundle(ILoaderFuncs funcs)
+                { LoaderEnv = funcs; }
         }
 
         // ====== Resource constructor with own<R> arg surface =====
@@ -7543,6 +7850,1045 @@ namespace Wacs.Transpiler.Test
             // Get-by-handle path round-trip cleanly.
             Assert.IsType<int>(raw);
             Assert.Equal(99, (int)raw);
+        }
+
+        // (module
+        //   (type $t0 (func (result i32)))           ;; constructor + export
+        //   (type $t1 (func (param i32) (result i32))) ;; read
+        //   (import "my:test/sg-env@1.0.0" "[constructor]widget"
+        //     (func $imp_ctor (type $t0)))
+        //   (import "my:test/sg-env@1.0.0" "[method]widget.read"
+        //     (func $imp_read (type $t1)))
+        //   (func (export "call_create_read") (result i32)
+        //     call $imp_ctor          ;; leaves handle on stack
+        //     call $imp_read))         ;; consumes handle, returns value
+        //
+        // Same shape as BuildConstructorAndInstanceFixtureWasm but in
+        // the "sg-env" package — exercises the SourceGen-shape
+        // constructor (instance void Create() on ISgWidget) instead of
+        // the static-factory shape (static IWidget Create() on IWidget).
+        // Module string is "my:test/sg-env@1.0.0" (20 bytes) vs the
+        // existing "my:test/res-env@1.0.0" (21).
+        private static byte[] BuildSgConstructorAndInstanceFixtureWasm() => new byte[]
+        {
+            0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00,
+            // Type section: 2 types
+            0x01, 0x0A, 0x02,
+            0x60, 0x00, 0x01, 0x7F,            // type 0: () → i32
+            0x60, 0x01, 0x7F, 0x01, 0x7F,      // type 1: (i32) → i32
+            // Import section: 2 imports
+            // size = count(1) + import0(43) + import1(43) = 87 = 0x57
+            0x02, 0x57, 0x02,
+            // Import 0: "my:test/sg-env@1.0.0" "[constructor]widget" : type 0
+            0x14,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x73, 0x67, 0x2D, 0x65, 0x6E, 0x76, 0x40,
+            0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x13,
+            0x5B, 0x63, 0x6F, 0x6E, 0x73, 0x74, 0x72, 0x75,
+            0x63, 0x74, 0x6F, 0x72, 0x5D, 0x77, 0x69, 0x64,
+            0x67, 0x65, 0x74,
+            0x00, 0x00,
+            // Import 1: "my:test/sg-env@1.0.0" "[method]widget.read" : type 1
+            0x14,
+            0x6D, 0x79, 0x3A, 0x74, 0x65, 0x73, 0x74, 0x2F,
+            0x73, 0x67, 0x2D, 0x65, 0x6E, 0x76, 0x40,
+            0x31, 0x2E, 0x30, 0x2E, 0x30,
+            0x13,
+            0x5B, 0x6D, 0x65, 0x74, 0x68, 0x6F, 0x64, 0x5D,
+            0x77, 0x69, 0x64, 0x67, 0x65, 0x74, 0x2E, 0x72,
+            0x65, 0x61, 0x64,
+            0x00, 0x01,
+            // Function section: 1 func of type 0 (() → i32)
+            0x03, 0x02, 0x01, 0x00,
+            // Export section: "call_create_read" (16) → func 2
+            0x07, 0x14, 0x01,
+            0x10,
+            0x63, 0x61, 0x6C, 0x6C, 0x5F, 0x63, 0x72, 0x65,
+            0x61, 0x74, 0x65, 0x5F, 0x72, 0x65, 0x61, 0x64,
+            0x00, 0x02,
+            // Code section: locals=0, call 0, call 1, end
+            0x0A, 0x08, 0x01, 0x06,
+            0x00, 0x10, 0x00, 0x10, 0x01, 0x0B,
+        };
+
+        [Fact]
+        public void DirectLinkedImport_SourceGenCtorThenInstance_AllocatesAndResolves()
+        {
+            // SourceGen-shape constructor: instance void Create() on
+            // ISgWidget, with TestSgWidget as the discovered impl
+            // (parameterless ctor). The IL emit must `Newobj`
+            // TestSgWidget, callvirt the void Create on it, then
+            // Resources.AllocateResource(typeof(ISgWidget), instance)
+            // — leaving a non-zero handle as the wasm i32 return.
+            //
+            // Pre-fix the gate at line 101 of DirectLinkedImportEmit.cs
+            // rejected the SourceGen shape (`if (!method.IsStatic)
+            // return false`). The constructor fell through to delegate
+            // dispatch which never bound a handle for it; the guest
+            // received 0 (the canonical-ABI null sentinel) and the
+            // subsequent [method]widget.read AVs the host on
+            // Resources.GetResource(typeof(ISgWidget), 0).
+            //
+            // Post-fix: the gate accepts both shapes; the IL emit
+            // picks the void-instance branch and routes through
+            // Activator.CreateInstance(impl) → Create() → Allocate.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Func<int>>(
+                ("my:test/sg-env@1.0.0", "[constructor]widget"),
+                () => throw new InvalidOperationException(
+                    "stub for sg-ctor must not be invoked"));
+            runtime.BindHostFunction<Func<int, int>>(
+                ("my:test/sg-env@1.0.0", "[method]widget.read"),
+                _ => throw new InvalidOperationException(
+                    "stub for sg-read must not be invoked"));
+
+            using var ms = new MemoryStream(
+                BuildSgConstructorAndInstanceFixtureWasm());
+            var module = BinaryModuleParser.ParseWasm(ms);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(WidgetBundle),
+                resourcesType: typeof(TestResources));
+
+            // Sanity: resolver picked up the SourceGen-shape ctor and
+            // can find the impl class.
+            Assert.True(resolver.TryResolve(
+                "my:test/sg-env@1.0.0", "[constructor]widget",
+                out var ctorBinding));
+            Assert.Equal(HostPackageResolver.ResourceMethodKind.Constructor,
+                ctorBinding.ResourceKind);
+            Assert.True(resolver.TryFindResourceImpl(
+                typeof(ISgWidget), out var implType));
+            Assert.Equal(typeof(TestSgWidget), implType);
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.SgCtor", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Equal(2, options.ResolverImportBindings!.Count);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/sg-env@1.0.0_[constructor]widget")] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for sg-ctor must not be invoked"),
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/sg-env@1.0.0_[method]widget.read")] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for sg-read must not be invoked"),
+                });
+
+            var resources = new TestResources();
+            var bundle = new WidgetBundle(new FakeWidget(0));
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            var callCreateRead = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_create_read"))!;
+            object? raw = callCreateRead.Invoke(instance,
+                Array.Empty<object>());
+
+            // TestSgWidget.Create() sets _v = 42; Read() returns it.
+            // A non-zero round-trip value proves: Newobj fired, Create
+            // ran, AllocateResource minted a real handle, GetResource
+            // resolved it back, callvirt Read returned the recorded
+            // value.
+            Assert.IsType<int>(raw);
+            Assert.Equal(42, (int)raw);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_FreeFnResultOwnReturn_AllocatesAndResolves()
+        {
+            // Mirrors wasi:nn/graph-funcs.load's wire shape:
+            //   load: () -> result<own<graph>, own<error>>
+            // canon-lowered to load(retArea_ptr: i32) -> () because the
+            // result is 8 bytes (u8 disc + i32 handle, aligned to 4).
+            // The host-side IL stores the disc + handle into the
+            // guest-supplied retArea; the guest reads (200, 204) to
+            // obtain (disc, handle).
+            //
+            // Pre-fix candidate (gap 18): if the IL emit's result-arm-
+            // resource path doesn't AllocateResource, the wire handle
+            // is 0 (default-init) and the subsequent graph.read trips.
+            // This test exercises that exact site at the unit level —
+            // if EmitResultArmStore's resource branch (line ~3016)
+            // really fires for free-function returns, this test
+            // already passes without code changes; if not, the gap
+            // is somewhere different from where it looks.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var wat = @"(module
+  (type $t0 (func (param i32)))
+  (type $t1 (func (param i32) (result i32)))
+  (import ""my:test/loader-env@1.0.0"" ""load""
+    (func $imp_load (type $t0)))
+  (import ""my:test/loader-env@1.0.0"" ""[method]graph.read""
+    (func $imp_read (type $t1)))
+  (memory (export ""memory"") 1)
+  (func (export ""call_load_read"") (result i32)
+    i32.const 200      ;; retArea ptr
+    call $imp_load     ;; populates memory[200..208] with disc+handle
+    i32.const 204      ;; offset of handle
+    i32.load           ;; read i32 handle from memory
+    call $imp_read))   ;; consume handle, return uint";
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int>>(
+                ("my:test/loader-env@1.0.0", "load"),
+                _ => throw new InvalidOperationException(
+                    "stub for loader load must not be invoked"));
+            runtime.BindHostFunction<Func<int, int>>(
+                ("my:test/loader-env@1.0.0", "[method]graph.read"),
+                _ => throw new InvalidOperationException(
+                    "stub for loader graph.read must not be invoked"));
+
+            var module = TextModuleParser.ParseWat(wat);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(LoaderBundle),
+                resourcesType: typeof(TestResources));
+
+            // Sanity: resolver picked up both bindings and the
+            // resource interfaces.
+            Assert.True(resolver.TryResolve(
+                "my:test/loader-env@1.0.0", "load", out _));
+            Assert.True(resolver.TryResolve(
+                "my:test/loader-env@1.0.0", "[method]graph.read", out _));
+            Assert.True(resolver.IsResourceInterface(typeof(ILoaderGraph)));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.LoaderRes", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+
+            // Both imports should have been resolved through the
+            // direct-link path. If `load`'s aggregate-return shape
+            // wasn't accepted by the gate, only one binding would
+            // appear here — that itself is a gap-18 signal.
+            Assert.Equal(2, options.ResolverImportBindings!.Count);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/loader-env@1.0.0_load")] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for loader load must not be invoked"),
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/loader-env@1.0.0_[method]graph.read")] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for loader read must not be invoked"),
+                });
+
+            var resources = new TestResources();
+            var bundle = new LoaderBundle(new TestLoaderFuncs());
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            var callLoadRead = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_load_read"))!;
+            object? raw = callLoadRead.Invoke(instance,
+                Array.Empty<object>());
+
+            // TestLoaderGraph.Read() returns 7. A non-zero round-trip
+            // proves the OK-arm resource lift Allocated a real handle
+            // (the SLM's gap-18 site) and graph.read resolved it.
+            Assert.IsType<int>(raw);
+            Assert.Equal(7, (int)raw);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_FreeFnByteJaggedParam_LiftsListOfBytes()
+        {
+            // Closes gap 19. The SLM's `wasi:nn/graph-funcs.load`
+            // takes `list<list<u8>>` (i.e. byte[][]) as its first
+            // parameter — the model bytes. Pre-fix
+            // CanonicalSlotCount didn't recognize byte[][] as a
+            // direct-link param, so CanEmitDirect rejected the
+            // binding and load() fell back to delegate dispatch —
+            // which means the IBindable's WitBindings handler ran
+            // instead, allocating its OK-arm resource handle in a
+            // separate registry from the one the direct-link IL
+            // looks up against later (the SLM round-12-followup
+            // diagnosis).
+            //
+            // Post-fix: byte[][] is recognized + the lift IL emits
+            // ListMarshal.LiftByteArrayList. The wasm guest writes
+            // the outer (ptr, count) header + per-element
+            // (inner_ptr, inner_len) pairs + inner buffers into
+            // its memory and calls the import; the host-side stub
+            // captures the lifted byte[][] and verifies it matches.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            // Memory layout (bytes; little-endian i32s):
+            //   @0..16:   reserved
+            //   @16..24:  outer header (inner0_ptr=64, inner0_len=3)
+            //   @24..32:  outer header element 1 (inner1_ptr=80, inner1_len=4)
+            //   @64..67:  inner0 = 0x11 0x22 0x33
+            //   @80..84:  inner1 = 0xAA 0xBB 0xCC 0xDD
+            //
+            // call_load_bytes pushes:
+            //   builders_ptr = 16
+            //   builders_count = 2
+            //   encoding = 1
+            //   target = 0
+            //   retArea_ptr = 32  (8 bytes for disc + handle)
+            // and invokes load-bytes.
+            var wat = @"(module
+  (type $t0 (func (param i32 i32 i32 i32 i32)))
+  (import ""my:test/loader-env@1.0.0"" ""load-bytes""
+    (func $imp_load (type $t0)))
+  (memory (export ""memory"") 1)
+  (func (export ""prepare"")
+    ;; outer[0] = (64, 3)
+    i32.const 16   i32.const 64   i32.store
+    i32.const 20   i32.const 3    i32.store
+    ;; outer[1] = (80, 4)
+    i32.const 24   i32.const 80   i32.store
+    i32.const 28   i32.const 4    i32.store
+    ;; inner0 bytes
+    i32.const 64   i32.const 0x11 i32.store8
+    i32.const 65   i32.const 0x22 i32.store8
+    i32.const 66   i32.const 0x33 i32.store8
+    ;; inner1 bytes
+    i32.const 80   i32.const 0xAA i32.store8
+    i32.const 81   i32.const 0xBB i32.store8
+    i32.const 82   i32.const 0xCC i32.store8
+    i32.const 83   i32.const 0xDD i32.store8)
+  (func (export ""call_load_bytes"") (result i32)
+    i32.const 16     ;; builders_ptr
+    i32.const 2      ;; builders_count
+    i32.const 1      ;; encoding (Onnx)
+    i32.const 0      ;; target (Cpu)
+    i32.const 32     ;; retArea_ptr
+    call $imp_load
+    ;; Read the OK-arm handle from retArea+4 and return it.
+    i32.const 36
+    i32.load))";
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int, int, int, int, int>>(
+                ("my:test/loader-env@1.0.0", "load-bytes"),
+                (_, _, _, _, _) => throw new InvalidOperationException(
+                    "stub for load-bytes must not be invoked — direct-link "
+                    + "should bypass this handler entirely."));
+
+            var module = TextModuleParser.ParseWat(wat);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(LoaderBundle),
+                resourcesType: typeof(TestResources));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.LoaderJagged", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+
+            // load-bytes must direct-link.
+            Assert.Equal(1, options.ResolverImportBindings!.Count);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/loader-env@1.0.0_load-bytes")] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for load-bytes must not be invoked"),
+                });
+
+            var resources = new TestResources();
+            var loaderFuncs = new TestLoaderFuncs();
+            var bundle = new LoaderBundle(loaderFuncs);
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            // Stage memory.
+            var prepare = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("prepare"))!;
+            prepare.Invoke(instance, Array.Empty<object>());
+
+            // Call load-bytes; expect the OK-arm IGraph handle.
+            var callLoadBytes = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_load_bytes"))!;
+            object? raw = callLoadBytes.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<int>(raw);
+            int graphHandle = (int)raw;
+
+            // Host-side stub captured the lifted args.
+            Assert.NotNull(loaderFuncs.LastBuilder);
+            Assert.Equal(2, loaderFuncs.LastBuilder!.Length);
+            Assert.Equal(new byte[] { 0x11, 0x22, 0x33 },
+                loaderFuncs.LastBuilder[0]);
+            Assert.Equal(new byte[] { 0xAA, 0xBB, 0xCC, 0xDD },
+                loaderFuncs.LastBuilder[1]);
+            Assert.Equal((byte)1, loaderFuncs.LastEncoding);
+            Assert.Equal((byte)0, loaderFuncs.LastTarget);
+
+            // OK-arm handle came from WasiPreview2Resources (single
+            // registry, no split). Confirm by resolving it.
+            var resolved = resources.GetResource(typeof(ILoaderGraph),
+                graphHandle);
+            Assert.IsType<TestLoaderGraph>(resolved);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_SourceGenCtorWithParam_AllocatesAndResolves()
+        {
+            // Regression test for gap 23 (round-17 verification).
+            // The round-9 gap-17 fix exercised parameterless
+            // `Create()`; this test exercises the with-PARAM
+            // variant — the wasi-nn `Tensor::new(dimensions, ty,
+            // data)` shape. If the void-instance-ctor branch
+            // accidentally lost its `AllocateResource` tail
+            // (e.g. through a refactor that shared lift helpers
+            // between constructor-PARAM lift and free-fn
+            // aggregate-PARAM lift), the constructor returns
+            // handle 0 to the guest; the subsequent
+            // `[method]X.read(self)` traps with "Handle 0 is
+            // reserved as the null sentinel."
+            //
+            // Pre-fix expected (gap 23 reproducer): the
+            // call_create_read export returns 0 — the
+            // constructor's AllocateResource didn't fire and the
+            // guest's GetResource(0) traps.
+            //
+            // Post-fix expected: 7 — Create stored seed=7, Read
+            // returned it through the resource registry round-trip.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var wat = @"(module
+  (type $tc (func (param i32) (result i32)))
+  (type $tm (func (param i32) (result i32)))
+  (import ""my:test/sg-env@1.0.0"" ""[constructor]sg-tensor""
+    (func $imp_ctor (type $tc)))
+  (import ""my:test/sg-env@1.0.0"" ""[method]sg-tensor.read""
+    (func $imp_read (type $tm)))
+  (memory (export ""memory"") 1)
+  (func (export ""call_create_read"") (result i32)
+    i32.const 7         ;; seed
+    call $imp_ctor      ;; -> handle (NOT 0 if AllocateResource fires)
+    call $imp_read))    ;; -> stored seed (7) via Resources.GetResource";
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Func<int, int>>(
+                ("my:test/sg-env@1.0.0", "[constructor]sg-tensor"),
+                _ => throw new InvalidOperationException(
+                    "stub for sg-tensor ctor must not be invoked"));
+            runtime.BindHostFunction<Func<int, int>>(
+                ("my:test/sg-env@1.0.0", "[method]sg-tensor.read"),
+                _ => throw new InvalidOperationException(
+                    "stub for sg-tensor read must not be invoked"));
+
+            var module = TextModuleParser.ParseWat(wat);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(WidgetBundle),
+                resourcesType: typeof(TestResources));
+
+            // Sanity: resolver picked up both the SourceGen ctor
+            // and the impl class.
+            Assert.True(resolver.TryResolve(
+                "my:test/sg-env@1.0.0", "[constructor]sg-tensor",
+                out var ctorBinding));
+            Assert.Equal(HostPackageResolver.ResourceMethodKind.Constructor,
+                ctorBinding.ResourceKind);
+            Assert.True(resolver.TryFindResourceImpl(
+                typeof(ISgTensor), out var implType));
+            Assert.Equal(typeof(TestSgTensor), implType);
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.SgCtorWithParam", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Equal(2, options.ResolverImportBindings!.Count);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/sg-env@1.0.0_[constructor]sg-tensor")] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for sg-tensor ctor must not be invoked"),
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/sg-env@1.0.0_[method]sg-tensor.read")] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for sg-tensor read must not be invoked"),
+                });
+
+            var resources = new TestResources();
+            var bundle = new WidgetBundle(new FakeWidget(0));
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            var callCreateRead = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_create_read"))!;
+            object? raw = callCreateRead.Invoke(instance,
+                Array.Empty<object>());
+
+            // 7 round-trips through: ctor PARAM lift (u32 → uint),
+            // void Create(7) on TestSgTensor, AllocateResource
+            // mints a handle, GetResource resolves it, callvirt
+            // Read returns 7.
+            Assert.IsType<int>(raw);
+            Assert.Equal(7, (int)raw);
+        }
+
+        [Fact]
+        public void HostPackageResolver_TryFindResourceImpl_FallsBackToAppDomain()
+        {
+            // Gap 23 root cause: SourceGen-shape impl classes
+            // (Tensor, Graph, GraphExecutionContext) live in
+            // Wacs.WASI.NN.DependencyInjection — a sibling
+            // assembly to Wacs.WASI.NN, which is what the CLI
+            // historically passed in HostPackages for `--wasi-nn`.
+            // TryFindResourceImpl walked HostPackages only and
+            // missed the impl, so CanEmitDirect rejected
+            // [constructor]X for the SourceGen shape and the
+            // call fell back to delegate dispatch.
+            //
+            // Round-17-followup fix: TryFindResourceImpl now
+            // falls back to AppDomain assemblies when HostPackages
+            // doesn't carry the impl. This test simulates the SLM
+            // setup at the resolver-API level: pass HostPackages
+            // that DOESN'T include the test assembly (where
+            // ISgWidget + TestSgWidget live) and verify the
+            // resolver still finds TestSgWidget via AppDomain.
+            //
+            // The empty HostPackages list still picks up the
+            // impl IF this test assembly is in AppDomain — which
+            // it always is, since xunit just loaded it.
+
+            var resolver = HostPackageResolver.FromAssemblies(
+                Array.Empty<Assembly>(),
+                resourcesType: typeof(TestResources));
+
+            // Pre-fix: empty HostPackages → no walk path → null.
+            // Post-fix: AppDomain fallback finds TestSgWidget.
+            Assert.True(resolver.TryFindResourceImpl(
+                typeof(ISgWidget), out var implType));
+            Assert.Equal(typeof(TestSgWidget), implType);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_SourceGenCtorWithListParams_AllocatesAndResolves()
+        {
+            // Tighter regression test for gap 23 — exercises the
+            // exact shape the wasi-nn SLM uses:
+            //   constructor(dimensions: list<u32>, ty: u8, data: list<u8>)
+            // List PARAMs hit a different lift path (cabi-realloc
+            // pointer + count) than primitives. If round-17's
+            // refactor or its predecessors broke the
+            // void-instance-ctor branch's AllocateResource tail
+            // for list PARAMs specifically, this catches it.
+            //
+            // Wat:
+            //   prepare: stage dims=[2, 3] @128 (8 bytes), data=[1,
+            //     2, 3, 4] @144 (4 bytes)
+            //   call_create_sum: call ctor with (dims_ptr=128,
+            //     dims_count=2, ty=5, data_ptr=144, data_count=4),
+            //     receive handle, call sum(self), return checksum.
+            //
+            // Expected checksum = (2+3)*1000 + 5*100 + (1+2+3+4)
+            //                   = 5000 + 500 + 10 = 5510
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var wat = @"(module
+  (type $tc (func (param i32 i32 i32 i32 i32) (result i32)))
+  (type $tm (func (param i32) (result i32)))
+  (import ""my:test/sg-env@1.0.0"" ""[constructor]sg-bigtensor""
+    (func $imp_ctor (type $tc)))
+  (import ""my:test/sg-env@1.0.0"" ""[method]sg-bigtensor.sum""
+    (func $imp_sum (type $tm)))
+  (memory (export ""memory"") 1)
+  (func (export ""prepare"")
+    ;; dims = [2u32, 3u32] @128 (LE u32s)
+    i32.const 128 i32.const 2 i32.store
+    i32.const 132 i32.const 3 i32.store
+    ;; data = [1, 2, 3, 4] @144
+    i32.const 144 i32.const 1 i32.store8
+    i32.const 145 i32.const 2 i32.store8
+    i32.const 146 i32.const 3 i32.store8
+    i32.const 147 i32.const 4 i32.store8)
+  (func (export ""call_create_sum"") (result i32)
+    i32.const 128   ;; dims_ptr
+    i32.const 2     ;; dims_count
+    i32.const 5     ;; ty
+    i32.const 144   ;; data_ptr
+    i32.const 4     ;; data_count
+    call $imp_ctor  ;; -> handle (must be non-zero)
+    call $imp_sum)) ;; -> checksum";
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Func<int, int, int, int, int, int>>(
+                ("my:test/sg-env@1.0.0", "[constructor]sg-bigtensor"),
+                (_, _, _, _, _) => throw new InvalidOperationException(
+                    "stub for sg-bigtensor ctor must not be invoked"));
+            runtime.BindHostFunction<Func<int, int>>(
+                ("my:test/sg-env@1.0.0", "[method]sg-bigtensor.sum"),
+                _ => throw new InvalidOperationException(
+                    "stub for sg-bigtensor sum must not be invoked"));
+
+            var module = TextModuleParser.ParseWat(wat);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(WidgetBundle),
+                resourcesType: typeof(TestResources));
+            Assert.True(resolver.TryFindResourceImpl(
+                typeof(ISgBigTensor), out var implType));
+            Assert.Equal(typeof(TestSgBigTensor), implType);
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.SgCtorListParams", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Equal(2, options.ResolverImportBindings!.Count);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/sg-env@1.0.0_[constructor]sg-bigtensor")] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for ctor must not be invoked"),
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/sg-env@1.0.0_[method]sg-bigtensor.sum")] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for sum must not be invoked"),
+                });
+
+            var resources = new TestResources();
+            var bundle = new WidgetBundle(new FakeWidget(0));
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            var prepare = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("prepare"))!;
+            prepare.Invoke(instance, Array.Empty<object>());
+
+            var callCreateSum = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_create_sum"))!;
+            object? raw = callCreateSum.Invoke(instance,
+                Array.Empty<object>());
+
+            // Expected: (2+3)*1000 + 5*100 + (1+2+3+4) = 5510.
+            // If the constructor returned handle 0 (gap-23
+            // hypothesis), the subsequent sum() would have
+            // tripped GetResource(0) — `Handle 0 is reserved`.
+            // The fact that we get a non-zero result already
+            // proves AllocateResource fired; the EXACT value
+            // proves the list PARAMs were lifted correctly.
+            Assert.IsType<int>(raw);
+            Assert.Equal(5510, (int)raw);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_FreeFnComputeRoundtrip_LiftsAndStoresListOfTupleStringOwn()
+        {
+            // Closes gap 22 (round-15 follow-up). The wasi-nn SLM's
+            // `wasi:nn/inference.compute(inputs: list<tuple<string,
+            // own<tensor>>>) -> result<list<tuple<string, own<tensor>>>,
+            // own<error>>` had two missing direct-link branches:
+            //
+            // (a) PARAM lift `(string, IRes)[]` —
+            //     CanonicalSlotCount didn't recognize array-of-tuple-
+            //     of-flat-fields, so CanEmitDirect rejected the
+            //     binding; compute fell back to delegate dispatch
+            //     and the SLM saw mis-named outputs.
+            //
+            // (b) RETURN store `Result<list<tuple<...>>, IRes>`'s
+            //     Ok-arm — IsResultArmStorable accepted only
+            //     primitive-element / string-element arrays in the
+            //     variable-length branch; the tuple-of-flat-fields
+            //     element type fell through to the fixed-width
+            //     fallback that stores garbage at the arm offset.
+            //
+            // Post-fix this test exercises both:
+            //   PARAM: guest stages 3 (string, IGraph) tuples; the
+            //          host receives them with names + handles intact.
+            //   RETURN: host echoes the tuples with names prefixed
+            //           "out_"; guest reads the Ok-arm outer (ptr,
+            //           count) at retArea+4 (valueOffset != 0) +
+            //           per-element (str_ptr, str_len, handle) at
+            //           outer_ptr+i*12.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            // Memory layout (LE i32s):
+            //   @128: "alpha" (5 bytes)
+            //   @136: "beta"  (4 bytes)
+            //   @144: "gamma" (5 bytes)
+            //   @256..292: 3-element input list (12 bytes per element)
+            //              (str_ptr, str_len, handle)
+            //   @512..524: retArea (Result Ok layout: u8 disc + 8-byte
+            //              outer-list (ptr, count) at valueOffset=4)
+            //   @1024+: cabi_realloc bump area
+            var wat = @"(module
+  (type $tc (func (param i32 i32 i32)))
+  (type $tr (func (param i32 i32 i32 i32) (result i32)))
+  (import ""my:test/loader-env@1.0.0"" ""compute""
+    (func $imp_compute (type $tc)))
+
+  (memory (export ""memory"") 1)
+  (global $next (mut i32) (i32.const 1024))
+
+  ;; Bump allocator: ignore (orig_ptr, orig_size, align), grow by
+  ;; new_size, return the prior $next. Sufficient for one-shot
+  ;; tests that only allocate, never free.
+  (func $cabi_realloc (type $tr)
+    global.get $next
+    global.get $next
+    local.get 3
+    i32.add
+    global.set $next)
+  (export ""cabi_realloc"" (func $cabi_realloc))
+
+  (func (export ""prepare"")
+        (param $h0 i32) (param $h1 i32) (param $h2 i32)
+    ;; Stage UTF-8 bytes for the input names.
+    ;; ""alpha"" @128: a=0x61 l=0x6c p=0x70 h=0x68 a=0x61
+    i32.const 128 i32.const 0x68706c61 i32.store
+    i32.const 132 i32.const 0x61       i32.store8
+    ;; ""beta"" @136: b=0x62 e=0x65 t=0x74 a=0x61
+    i32.const 136 i32.const 0x61746562 i32.store
+    ;; ""gamma"" @144: g=0x67 a=0x61 m=0x6d m=0x6d a=0x61
+    i32.const 144 i32.const 0x6d6d6167 i32.store
+    i32.const 148 i32.const 0x61       i32.store8
+
+    ;; Build the input table at @256.
+    ;; element 0: (ptr=128, len=5, handle=$h0)
+    i32.const 256 i32.const 128 i32.store
+    i32.const 260 i32.const 5   i32.store
+    i32.const 264 local.get $h0 i32.store
+    ;; element 1: (ptr=136, len=4, handle=$h1)
+    i32.const 268 i32.const 136 i32.store
+    i32.const 272 i32.const 4   i32.store
+    i32.const 276 local.get $h1 i32.store
+    ;; element 2: (ptr=144, len=5, handle=$h2)
+    i32.const 280 i32.const 144 i32.store
+    i32.const 284 i32.const 5   i32.store
+    i32.const 288 local.get $h2 i32.store)
+
+  (func (export ""call_compute"") (result i32)
+    i32.const 256   ;; inputs_ptr
+    i32.const 3     ;; inputs_count
+    i32.const 512   ;; retArea
+    call $imp_compute
+    ;; Return retArea so the test can probe disc + Ok payload.
+    i32.const 512)
+
+  ;; --- Memory probes (avoid reflection into module-class fields) ---
+  (func (export ""read_u8"") (param $p i32) (result i32)
+    local.get $p i32.load8_u)
+  (func (export ""read_i32"") (param $p i32) (result i32)
+    local.get $p i32.load))";
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int, int, int>>(
+                ("my:test/loader-env@1.0.0", "compute"),
+                (_, _, _) => throw new InvalidOperationException(
+                    "stub for compute must not be invoked — "
+                    + "direct-link should bypass this handler."));
+
+            var module = TextModuleParser.ParseWat(wat);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(LoaderBundle),
+                resourcesType: typeof(TestResources));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.LoaderCompute", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+
+            // Compute MUST direct-link — that's the gap-22 fix.
+            Assert.Equal(1, options.ResolverImportBindings!.Count);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/loader-env@1.0.0_compute")] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for compute must not be invoked"),
+                });
+
+            var resources = new TestResources();
+            var loaderFuncs = new TestLoaderFuncs();
+            var bundle = new LoaderBundle(loaderFuncs);
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            // Pre-mint 3 input handles. The host's PARAM lift will
+            // call ctx.Resources.GetResource(typeof(ILoaderGraph),
+            // handle) per element to resolve them back into the
+            // typed C# tuple.
+            var graph0 = new TestLoaderGraph();
+            var graph1 = new TestLoaderGraph();
+            var graph2 = new TestLoaderGraph();
+            int h0 = resources.AllocateResource(typeof(ILoaderGraph), graph0);
+            int h1 = resources.AllocateResource(typeof(ILoaderGraph), graph1);
+            int h2 = resources.AllocateResource(typeof(ILoaderGraph), graph2);
+
+            var prepare = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("prepare"))!;
+            prepare.Invoke(instance, new object[] { h0, h1, h2 });
+
+            var callCompute = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_compute"))!;
+            object? raw = callCompute.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<int>(raw);
+            int retArea = (int)raw;
+            Assert.Equal(512, retArea);
+
+            // ---- PARAM-lift verification --------------------------
+            // The host stub captured what it received from direct-
+            // link. Lifted tuple shape: (lifted name, resolved IGraph).
+            Assert.NotNull(loaderFuncs.LastInputs);
+            Assert.Equal(3, loaderFuncs.LastInputs!.Length);
+            Assert.Equal("alpha", loaderFuncs.LastInputs[0].Item1);
+            Assert.Same(graph0, loaderFuncs.LastInputs[0].Item2);
+            Assert.Equal("beta", loaderFuncs.LastInputs[1].Item1);
+            Assert.Same(graph1, loaderFuncs.LastInputs[1].Item2);
+            Assert.Equal("gamma", loaderFuncs.LastInputs[2].Item1);
+            Assert.Same(graph2, loaderFuncs.LastInputs[2].Item2);
+
+            // ---- RETURN-store verification ------------------------
+            // Read disc + outer (ptr, count) + per-element fields
+            // through the wat's `read_u8` / `read_i32` exports.
+            // Cleaner than reflecting into the module's
+            // ThinContext.Memories[0] private state.
+            var readU8 = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("read_u8"))!;
+            var readI32 = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("read_i32"))!;
+            int Read8(int p) => (int)readU8.Invoke(instance,
+                new object[] { p })!;
+            int Read32(int p) => (int)readI32.Invoke(instance,
+                new object[] { p })!;
+
+            int disc = Read8(retArea);
+            Assert.Equal(0, disc);  // Ok arm
+
+            int outerPtr = Read32(retArea + 4);
+            int outerCount = Read32(retArea + 8);
+            Assert.Equal(3, outerCount);
+            // Bump allocator started at 1024; outer buffer is the
+            // first allocation at compute's call site.
+            Assert.True(outerPtr >= 1024,
+                "outer ptr should land in the bump-allocator's range, was "
+                + outerPtr);
+
+            var expectedNames = new[] { "out_alpha", "out_beta", "out_gamma" };
+            // The host echoed the same IGraph instances; the RETURN
+            // store calls AllocateResource per element, so the handle
+            // INTEGERS in guest memory are FRESH (not the input
+            // handles h0/h1/h2). What we assert is that the resolved
+            // instance matches the input C# object — that's the
+            // canonical-ABI ownership-transfer semantics.
+            var expectedInstances = new[] { graph0, graph1, graph2 };
+            for (int i = 0; i < 3; i++)
+            {
+                int strPtr = Read32(outerPtr + i * 12 + 0);
+                int strLen = Read32(outerPtr + i * 12 + 4);
+                int handle = Read32(outerPtr + i * 12 + 8);
+
+                Assert.Equal(expectedNames[i].Length, strLen);
+                var nameBytes = new byte[strLen];
+                for (int b = 0; b < strLen; b++)
+                    nameBytes[b] = (byte)Read8(strPtr + b);
+                Assert.Equal(expectedNames[i],
+                    System.Text.Encoding.UTF8.GetString(nameBytes));
+
+                Assert.NotEqual(0, handle);
+                var resolved = resources.GetResource(
+                    typeof(ILoaderGraph), handle);
+                Assert.Same(expectedInstances[i], resolved);
+            }
+        }
+
+        [Fact]
+        public void DirectLinkedImport_MethodResultOwnReturn_AllocatesAndResolves()
+        {
+            // [method]X.foo(self) -> result<own<R>, own<E>> — the
+            // canonical-ABI shape user-diagnosis named as a likely
+            // sibling of the free-function gap 18 site
+            // (init-execution-context). A method's `self` handle is
+            // looked up via Resources.GetResource; the OK/Err arm's
+            // own<R> should be allocated via AllocateResource on the
+            // way out.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var wat = @"(module
+  (type $tc (func (result i32)))               ;; ctor → handle
+  (type $ti (func (param i32 i32)))            ;; init(self, retArea)
+  (type $tr (func (param i32) (result i32)))   ;; ctx.read(self)
+  (import ""my:test/loader-env@1.0.0"" ""[constructor]graph2""
+    (func $imp_ctor (type $tc)))
+  (import ""my:test/loader-env@1.0.0"" ""[method]graph2.init""
+    (func $imp_init (type $ti)))
+  (import ""my:test/loader-env@1.0.0"" ""[method]graph2-ctx.read""
+    (func $imp_read (type $tr)))
+  (memory (export ""memory"") 1)
+  (func (export ""call_method_init_read"") (result i32)
+    (local $g i32)
+    call $imp_ctor                ;; mint a graph handle
+    local.tee $g
+    i32.const 200                 ;; retArea
+    call $imp_init                ;; -> Result<own<ctx>, own<error>>
+    i32.const 204                 ;; offset of OK-arm value (handle)
+    i32.load                      ;; load ctx handle
+    call $imp_read))              ;; consume, return uint";
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Func<int>>(
+                ("my:test/loader-env@1.0.0", "[constructor]graph2"),
+                () => throw new InvalidOperationException("stub"));
+            runtime.BindHostFunction<Action<int, int>>(
+                ("my:test/loader-env@1.0.0", "[method]graph2.init"),
+                (_, _) => throw new InvalidOperationException("stub"));
+            runtime.BindHostFunction<Func<int, int>>(
+                ("my:test/loader-env@1.0.0", "[method]graph2-ctx.read"),
+                _ => throw new InvalidOperationException("stub"));
+
+            var module = TextModuleParser.ParseWat(wat);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(LoaderBundle),
+                resourcesType: typeof(TestResources));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.LoaderG2", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+
+            // Diagnose: how many of the three imports were
+            // direct-linked? If [method]graph2.init's Result-resource
+            // return is the gap, only the constructor + read make it
+            // through.
+            var bindingCount = options.ResolverImportBindings!.Count;
+            Assert.Equal(3, bindingCount);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/loader-env@1.0.0_[constructor]graph2")] = _ =>
+                        throw new InvalidOperationException("stub"),
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/loader-env@1.0.0_[method]graph2.init")] = _ =>
+                        throw new InvalidOperationException("stub"),
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/loader-env@1.0.0_[method]graph2-ctx.read")] = _ =>
+                        throw new InvalidOperationException("stub"),
+                });
+
+            var resources = new TestResources();
+            var bundle = new LoaderBundle(new TestLoaderFuncs());
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            var callMethodInitRead = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_method_init_read"))!;
+            object? raw = callMethodInitRead.Invoke(instance,
+                Array.Empty<object>());
+
+            // TestLoaderGraph2Ctx.Read() returns 13. A non-zero
+            // round-trip proves: ctor allocated graph handle, init
+            // resolved graph + allocated ctx handle, read resolved
+            // ctx and returned 13.
+            Assert.IsType<int>(raw);
+            Assert.Equal(13, (int)raw);
         }
 
         [Fact]

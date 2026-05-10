@@ -409,7 +409,18 @@ namespace Wacs.Console.Verbs
         private static IReadOnlyList<Assembly> ResolveHostPackages(BuildOptions opts)
         {
             var names = new List<string>();
-            if (opts.Wasip2) names.Add("Wacs.WASI.Preview2");
+            if (opts.Wasip2)
+            {
+                names.Add("Wacs.WASI.Preview2");
+                // SourceGen-shape impl classes (WasiPreview2Bundle's
+                // resource impls) live in the DI sibling. Without
+                // this, TryFindResourceImpl returns false for any
+                // [constructor]X with the parameterless+Create
+                // shape, kicking the call to delegate dispatch.
+                // Symmetric with the RunHandler fix (gap 23 /
+                // round-17 verification).
+                names.Add("Wacs.WASI.Preview2.DependencyInjection");
+            }
             foreach (var n in opts.HostPackage ?? Enumerable.Empty<string>())
             {
                 if (string.IsNullOrWhiteSpace(n)) continue;

@@ -361,6 +361,9 @@ $@"<Project Sdk=""Microsoft.NET.Sdk"">
     <RootNamespace>{assemblyName}.Host</RootNamespace>
     <IsAotCompatible>true</IsAotCompatible>
     <PublishAot>true</PublishAot>
+    <!-- The MemoryProvider lambda casts MemoryInstance.NativeBase
+         (byte*) to IntPtr in NativePointer mode. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
@@ -425,7 +428,23 @@ var imports = new GeneratedHostImports();
 imports.State = state;
 imports.WasiConfiguration = config;
 Module module = null!;
-imports.MemoryProvider = () => new WacsHostMemory(module.Memory, module.Memory.Length);
+// Module.Memory returns the live MemoryInstance; mode-aware
+// dispatch into WacsHostMemory's two backings keeps the host
+// binding compatible with both ManagedArray and NativePointer
+// (>2 GiB) memory storage selectors.
+imports.MemoryProvider = () => {{
+    var m = module.Memory;
+    unsafe
+    {{
+        if (m.StorageMode == Wacs.Core.Runtime.MemoryStorageMode.NativePointer)
+        {{
+            int nlen = (int)System.Math.Min(
+                (ulong)m.NativeSize, (ulong)int.MaxValue);
+            return new WacsHostMemory((System.IntPtr)m.NativeBase, nlen);
+        }}
+    }}
+    return new WacsHostMemory(m.Data, m.Data.Length);
+}};
 module = new Module(imports);
 
 try

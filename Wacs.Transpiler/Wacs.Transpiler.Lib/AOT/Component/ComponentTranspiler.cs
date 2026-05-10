@@ -245,6 +245,78 @@ namespace Wacs.Transpiler.AOT.Component
                 parsed.Component);
 
             var runtime = new WasmRuntime();
+
+            // Direct-link coverage pre-pass: for every wasm import
+            // on the primary core module that BOTH (a) the resolver
+            // matches a binding for AND (b) DirectLinkedImportEmit's
+            // CanEmitDirect predicate accepts, mark the entity as
+            // direct-link covered. The runtime's BindHostFunction
+            // silently no-ops for entities in this set, letting
+            // configureImports below stack ComponentImportStubs /
+            // wasip2 scope / ApplyBindings IBindables without
+            // worrying about resource-handle namespace aliasing
+            // across two independent registries (the SLM gap-18
+            // trip site).
+            //
+            // Both predicates are required: the resolver matches at
+            // INTERFACE granularity (any [WitSource] type for the
+            // wit interface counts), but the IL emit can only
+            // emit bindings for SHAPES it explicitly supports
+            // (constructors, free-function returns, certain
+            // resource methods, etc.). Marking a resolver-matched
+            // but emit-rejected entity would shadow the IBindable's
+            // BindHostFunction fallback without filling in — round
+            // 12's over-shadow regression: the SLM tripped at
+            // transpile time on `wasi:nn/errors.[method]error.code`
+            // because the resolver matched `wasi:nn/errors` (via
+            // IError) but CanEmitDirect rejected the method's
+            // shape. Calling CanEmitDirect at mark-time keeps the
+            // mark-set congruent with what the IL emit will
+            // actually direct-link.
+            // The mark predicate must match `CallEmitter.EmitImportCall`'s
+            // direct-link gate exactly — same conditions, same order:
+            //   1. resolver matches (binding exists)
+            //   2. PreferredBundleType is set (bundle to dispatch through)
+            //   3. CanEmitDirect accepts the binding+wasmType shape
+            //   4. for resource methods, PreferredResourcesType is set
+            // Anything looser over-shadows entities the IL emit won't
+            // actually direct-link, leaving them with no fallback.
+            // Anything tighter under-shadows and lets the registry
+            // split (gap 18) re-occur.
+            if (effectiveOptions.Resolver != null
+                && effectiveOptions.Resolver.PreferredBundleType != null)
+            {
+                var primaryCore = parsed.CoreModules[primaryCoreIdx];
+                if (primaryCore.Imports != null)
+                {
+                    var defs = primaryCore.UnrollTypes();
+                    foreach (var imp in primaryCore.Imports)
+                    {
+                        if (!(imp.Desc is Wacs.Core.Module
+                                .ImportDesc.FuncDesc fd))
+                            continue;
+                        if (!effectiveOptions.Resolver.TryResolve(
+                                imp.ModuleName, imp.Name,
+                                out var binding))
+                            continue;
+                        var defType = defs[fd.TypeIndex.Value];
+                        if (!(defType.Expansion is
+                                Wacs.Core.Types.FunctionType funcType))
+                            continue;
+                        if (!DirectLinkedImportEmit.CanEmitDirect(
+                                binding, funcType,
+                                effectiveOptions.Resolver))
+                            continue;
+                        if (binding.IsResourceMethod
+                            && effectiveOptions.Resolver
+                                .PreferredResourcesType == null)
+                            continue;
+                        runtime.MarkEntityProvidedByDirectLink(
+                            (imp.ModuleName, imp.Name));
+                    }
+                }
+            }
+
             // The runtime's InstantiateModule throws on any unbound
             // import, so the caller must register stubs (or real
             // bindings) for every (module, entity) the core module
@@ -253,6 +325,10 @@ namespace Wacs.Transpiler.AOT.Component
             // satisfy the runtime's own validation. Mirrors the
             // ComponentInstance.Instantiate(component, configureImports)
             // pattern in the interpreter path.
+            //
+            // BindHostFunction calls inside configureImports for
+            // direct-link-covered entities silently no-op (see
+            // pre-pass above); other entities register normally.
             configureImports?.Invoke(runtime);
 
             var instance = runtime.InstantiateModule(

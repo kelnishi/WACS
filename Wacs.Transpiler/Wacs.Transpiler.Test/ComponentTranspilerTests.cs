@@ -1378,42 +1378,39 @@ namespace Wacs.Transpiler.Test
             // 4-byte data segment containing 0x2A (=42) at
             // offset 0. Its `ping` function returns that value
             // via i32.load. The Module class should expose a
-            // `Memory` property returning the byte[] — this is
-            // the hook canonical-ABI adapters (strings, lists,
-            // aggregates) read guest memory through.
+            // `Memory` property returning the live MemoryInstance —
+            // canonical-ABI adapters (strings, lists, aggregates)
+            // route through this to read guest memory mode-aware.
             using var fs = File.OpenRead(FindMemoryComponentPath());
             var result = ComponentTranspiler.TranspileSingleModule(fs);
 
             Assert.NotNull(result.ModuleClass);
             var memProp = result.ModuleClass!.GetProperty("Memory");
             Assert.NotNull(memProp);
-            Assert.Equal(typeof(byte[]), memProp!.PropertyType);
+            Assert.Equal(typeof(Wacs.Core.Runtime.Types.MemoryInstance),
+                memProp!.PropertyType);
 
             var ctor = result.ModuleClass.GetConstructor(System.Type.EmptyTypes);
             var instance = ctor!.Invoke(null);
-            var memory = (byte[])memProp.GetValue(instance)!;
+            var memory = (Wacs.Core.Runtime.Types.MemoryInstance)memProp.GetValue(instance)!;
             Assert.NotNull(memory);
-            // 64 KiB = one wasm page.
-            Assert.Equal(64 * 1024, memory.Length);
+            // 64 KiB = one wasm page; same byte length under both
+            // backings (default ManagedArray here).
+            Assert.Equal((nuint)(64 * 1024), memory.ByteLength);
             // Data segment wrote 0x2A at offset 0.
-            Assert.Equal(0x2A, memory[0]);
+            Assert.Equal(0x2A, memory.AsSpan(0, 1)[0]);
         }
 
         [Fact]
         public void TranspileSingleModule_module_exposes_memory_property()
         {
-            // The generated Module class emits a public
-            // `Memory` property of type byte[] that returns the
-            // core module's linear memory. This is the hook
-            // canonical-ABI adapters use to lift strings/lists/
-            // aggregates out of guest memory. Verify it's reachable
-            // end-to-end after transpilation of a simple component.
-            //
-            // tiny-component has no memory (no data segments, no
-            // memory ops), so `Memory` is null; but we can still
-            // verify the property exists with the right signature.
-            // A real-world component with declared memory will
-            // return the byte[].
+            // The generated Module class emits a public `Memory`
+            // property of type MemoryInstance that returns the
+            // core module's linear memory. Mode-agnostic: the
+            // returned instance dispatches reads/writes through
+            // AsSpan regardless of ManagedArray vs NativePointer
+            // backing, so canonical-ABI adapters work against
+            // either storage selector.
             using var fs = File.OpenRead(FindTinyComponentPath());
             var result = ComponentTranspiler.TranspileSingleModule(fs);
 
@@ -1424,7 +1421,8 @@ namespace Wacs.Transpiler.Test
             // components whose core modules do declare memory.
             if (memProp != null)
             {
-                Assert.Equal(typeof(byte[]), memProp.PropertyType);
+                Assert.Equal(typeof(Wacs.Core.Runtime.Types.MemoryInstance),
+                    memProp.PropertyType);
             }
         }
 
@@ -2046,6 +2044,120 @@ namespace Wacs.Transpiler.Test
             Assert.Equal(
                 typeof(System.ValueTuple<uint, uint>),
                 pick.ReturnType);
+        }
+
+        private static string FindGrowMemoryComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "grow-memory-component", "wasm",
+                                "grow.component.wasm");
+        }
+
+        private static string FindDataSegmentComponentPath()
+        {
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "WACS.sln")))
+                dir = dir.Parent;
+            return Path.Combine(dir!.FullName, "Spec.Test", "components",
+                                "fixtures", "data-segment-component", "wasm",
+                                "dseg.component.wasm");
+        }
+
+        [Theory]
+        [InlineData(EmissionTarget.AotLinked, MemoryStorageMode.ManagedArray)]
+        [InlineData(EmissionTarget.AotLinked, MemoryStorageMode.NativePointer)]
+        [InlineData(EmissionTarget.Standard, MemoryStorageMode.ManagedArray)]
+        [InlineData(EmissionTarget.Standard, MemoryStorageMode.NativePointer)]
+        public void TranspileSingleModule_data_segment_install_and_lift_honor_storage(
+            EmissionTarget emission, MemoryStorageMode mode)
+        {
+            // data-segment-component drops "hello world" into linear
+            // memory via an active data segment, then exports greet()
+            // → string. Pre-gap-14 the AotLinked emission emitted IL
+            // that pushed mem.Data (byte[]) to BulkHelpers.CopySegmentToMemory,
+            // which AOORed in NativePointer mode (the sentinel
+            // Array.Empty<byte>() backing). The lift path also pinned
+            // mem.Data via the StringMarshal byte[] overload.
+            //
+            // Post-fix: BulkHelpers takes MemoryInstance, the Module
+            // class's `Memory` getter returns the live MemoryInstance,
+            // and the StringMarshal/ListMarshal helpers read through
+            // mem.AsSpan. All four cells of the EmissionTarget ×
+            // MemoryStorageMode cross product return "hello world".
+            var prev = AmbientRuntime.MemoryStorage;
+            AmbientRuntime.MemoryStorage = mode;
+            try
+            {
+                using var fs = File.OpenRead(FindDataSegmentComponentPath());
+                var result = ComponentTranspiler.TranspileSingleModule(fs,
+                    options: new TranspilerOptions { Emission = emission });
+
+                var componentExports = result.Assembly
+                    .GetType("Wacs.Transpiled.Component.ComponentExports");
+                Assert.NotNull(componentExports);
+
+                var greet = componentExports!.GetMethod("Greet");
+                Assert.NotNull(greet);
+                Assert.Equal(typeof(string), greet!.ReturnType);
+
+                Assert.Equal("hello world", (string)greet.Invoke(null, null)!);
+            }
+            finally
+            {
+                AmbientRuntime.MemoryStorage = prev;
+            }
+        }
+
+        [Theory]
+        [InlineData(EmissionTarget.AotLinked, MemoryStorageMode.ManagedArray, -1)]
+        [InlineData(EmissionTarget.AotLinked, MemoryStorageMode.NativePointer, 1)]
+        [InlineData(EmissionTarget.Standard, MemoryStorageMode.ManagedArray, -1)]
+        [InlineData(EmissionTarget.Standard, MemoryStorageMode.NativePointer, 1)]
+        public void TranspileSingleModule_memory_init_honors_AmbientRuntime_storage(
+            EmissionTarget emission, MemoryStorageMode mode, int expected)
+        {
+            // grow-memory-component exports `grow-big: func() -> s32`
+            // whose core does `(memory.grow 50000)`. ManagedArray's
+            // HostMaxPages cap (~2 GiB) forces -1; NativePointer's
+            // WasmMaxPages cap (~4 GiB) accepts the grow and returns
+            // the previous size (1).
+            //
+            // Both transpiler emission paths must read
+            // AmbientRuntime.MemoryStorage at instantiation time —
+            // Standard via InitializationHelper, AotLinked via the
+            // Ldsfld emitted by ModuleClassGenerator.EmitMemoryArray.
+            // Prior to gap 13's fix, AotLinked hardcoded the
+            // 1-arg MemoryInstance ctor (defaulting to ManagedArray)
+            // and the NativePointer case would have returned -1.
+            //
+            // NativeMemory.AllocZeroed maps to lazy-zero calloc, so
+            // the 3 GiB virtual reservation does not commit physical
+            // pages.
+            var prev = AmbientRuntime.MemoryStorage;
+            AmbientRuntime.MemoryStorage = mode;
+            try
+            {
+                using var fs = File.OpenRead(FindGrowMemoryComponentPath());
+                var result = ComponentTranspiler.TranspileSingleModule(fs,
+                    options: new TranspilerOptions { Emission = emission });
+
+                var componentExports = result.Assembly
+                    .GetType("Wacs.Transpiled.Component.ComponentExports");
+                Assert.NotNull(componentExports);
+
+                var growBig = componentExports!.GetMethod("GrowBig");
+                Assert.NotNull(growBig);
+
+                var actual = (int)growBig!.Invoke(null, null)!;
+                Assert.Equal(expected, actual);
+            }
+            finally
+            {
+                AmbientRuntime.MemoryStorage = prev;
+            }
         }
     }
 }

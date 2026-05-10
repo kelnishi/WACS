@@ -109,6 +109,15 @@ namespace Wacs.Transpiler.AOT.Component
             _bindingsByStrippedModule;
         private readonly HashSet<Type> _resourceInterfaceTypes;
 
+        // Concrete impl class for each resource interface — used by
+        // direct-link emit's SourceGen-shape constructor path
+        // (interface-side `void Create(args)` instance method, no
+        // static factory). The bindgen contract is: the resource impl
+        // class implements the interface AND has a public parameter-
+        // less ctor. Discovered lazily on first lookup; cached.
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<Type, Type?>
+            _resourceImplCache = new();
+
         private HostPackageResolver(
             IReadOnlyList<Assembly> hostPackages,
             Dictionary<(string Module, string Entity), Binding> bindings,
@@ -125,6 +134,93 @@ namespace Wacs.Transpiler.AOT.Component
             ResourceInterfaceTypes = resourceInterfaceTypes;
             PreferredBundleType = preferredBundleType;
             PreferredResourcesType = preferredResourcesType;
+        }
+
+        /// <summary>
+        /// Find a concrete class implementing <paramref name="resourceInterface"/>
+        /// with a public parameterless constructor. Used by direct-link
+        /// emit's SourceGen-shape constructor path: the bindgen pattern
+        /// is `Activator.CreateInstance(impl)` followed by a
+        /// `void Create(args)` instance call, then
+        /// `Resources.AllocateResource(typeof(IFace), instance)`.
+        /// First match wins (stable order across HostPackages); cached.
+        /// Returns false if no such class exists.
+        /// </summary>
+        public bool TryFindResourceImpl(Type resourceInterface,
+            out Type implType)
+        {
+            var cached = _resourceImplCache.GetOrAdd(resourceInterface, t =>
+            {
+                // First: walk the explicit HostPackages list. Caller-
+                // supplied; matches the existing FromAssemblies
+                // contract.
+                var hit = SearchForImpl(t,
+                    HostPackages.Select(a => (a, true)));
+                if (hit != null) return hit;
+
+                // Fallback: walk the AppDomain. WACS.NN's typed
+                // resource interfaces live in `Wacs.WASI.NN`, but the
+                // SourceGen-shape impl classes (`Tensor`, `Graph`,
+                // `GraphExecutionContext`) live in
+                // `Wacs.WASI.NN.DependencyInjection` — a sibling
+                // assembly the embedder may not have explicitly
+                // listed in HostPackages. The DI assembly is loaded
+                // at runtime by WasiPreview2RuntimeScope's
+                // ReflectivelyAddWasiNN before transpilation runs,
+                // so it's present in AppDomain even if not in
+                // HostPackages. Mirrors FindBundleType's three-tier
+                // search (gap 23, round-17 verification).
+                hit = SearchForImpl(t,
+                    AppDomain.CurrentDomain.GetAssemblies()
+                        .Where(a => !a.IsDynamic)
+                        .Select(a => (a, false)));
+                return hit;
+            });
+            implType = cached!;
+            return cached != null;
+        }
+
+        // Walk an assembly stream looking for the first non-abstract
+        // class that implements `iface` and has a public
+        // parameterless ctor. The bool tag distinguishes
+        // HostPackages (where `GetExportedTypes` is the right call,
+        // matching the historical contract) from AppDomain
+        // assemblies (where `GetTypes` covers internal types we
+        // might still want to find — but we keep the same export
+        // filter for consistency with the cached behavior).
+        private static Type? SearchForImpl(Type iface,
+            IEnumerable<(Assembly Asm, bool _IsHostPackage)> source)
+        {
+            foreach (var (asm, _) in source)
+            {
+                Type[] types;
+                try { types = asm.GetExportedTypes(); }
+                catch (ReflectionTypeLoadException ex)
+                {
+                    types = ex.Types
+                        .Where(x => x != null)
+                        .Select(x => x!)
+                        .ToArray();
+                }
+                catch
+                {
+                    // AppDomain assemblies may throw NotSupportedException
+                    // (collectable assemblies, dynamic-but-not-flagged,
+                    // etc.). Skip them — the resolver's whole-AppDomain
+                    // search is a fallback, not a hard requirement, so a
+                    // few skips won't mask the impl class as long as the
+                    // DI assembly itself loads cleanly.
+                    continue;
+                }
+                foreach (var ct in types)
+                {
+                    if (ct.IsInterface || ct.IsAbstract) continue;
+                    if (!iface.IsAssignableFrom(ct)) continue;
+                    if (ct.GetConstructor(Type.EmptyTypes) == null) continue;
+                    return ct;
+                }
+            }
+            return null;
         }
 
         public bool TryResolve(string module, string entity,

@@ -98,24 +98,22 @@ namespace Wacs.Console.Verbs
 
         private static int ExecuteSingleCore(RunOptions opts, string wasmPath)
         {
-            // --native-memory pins the storage mode for both the
-            // interpreter (RuntimeOptions.MemoryStorage) and the
-            // transpiler-engine path (the static
-            // ModuleInit.CurrentMemoryStorage that
-            // InitializationHelper reads when the transpiled module
-            // class is constructed). Restored on exit so subsequent
+            // --native-memory pins the ambient storage mode read by
+            // every WACS instantiation path (interpreter core path,
+            // interpreter component path, transpiler Standard +
+            // AotLinked emission). Restored on exit so subsequent
             // in-process callers (test harnesses, library hosts)
             // aren't affected.
-            var prevStorage = ModuleInit.CurrentMemoryStorage;
+            var prevStorage = AmbientRuntime.MemoryStorage;
             if (opts.NativeMemory)
-                ModuleInit.CurrentMemoryStorage = MemoryStorageMode.NativePointer;
+                AmbientRuntime.MemoryStorage = MemoryStorageMode.NativePointer;
             try
             {
                 return ExecuteSingleCoreInner(opts, wasmPath);
             }
             finally
             {
-                ModuleInit.CurrentMemoryStorage = prevStorage;
+                AmbientRuntime.MemoryStorage = prevStorage;
             }
         }
 
@@ -534,20 +532,20 @@ namespace Wacs.Console.Verbs
             // Both the interpreter component path
             // (Wacs.ComponentModel.Runtime.ComponentInstance.Instantiate)
             // and the transpiled path (ExecuteComponentTranspiled →
-            // InitializationHelper) observe
-            // ModuleInit.CurrentMemoryStorage at memory-alloc time.
-            // Restored on return so other in-process callers
-            // aren't affected.
-            var prevStorage = ModuleInit.CurrentMemoryStorage;
+            // InitializationHelper, and the AotLinked emission's
+            // memory-array IL) observe AmbientRuntime.MemoryStorage at
+            // memory-alloc time. Restored on return so other in-process
+            // callers aren't affected.
+            var prevStorage = AmbientRuntime.MemoryStorage;
             if (opts.NativeMemory)
-                ModuleInit.CurrentMemoryStorage = MemoryStorageMode.NativePointer;
+                AmbientRuntime.MemoryStorage = MemoryStorageMode.NativePointer;
             try
             {
                 return ExecuteComponentInner(opts, componentPath);
             }
             finally
             {
-                ModuleInit.CurrentMemoryStorage = prevStorage;
+                AmbientRuntime.MemoryStorage = prevStorage;
             }
         }
 
@@ -784,6 +782,18 @@ namespace Wacs.Console.Verbs
             // so an explicit --bind for the same package can override
             // the default wiring (BindHostFunction's
             // last-write-wins semantics).
+            //
+            // No name-based carve-outs for direct-link-covered
+            // entities — `WasmRuntime.BindHostFunction` silently
+            // no-ops registrations for any (module, entity) pair the
+            // transpiler's pre-pass marked as provided by a
+            // direct-link bundle. So `--wasip2 --wasi-nn` can still
+            // load the WASI.NN IBindable; the WitBindings handlers
+            // for entities the bundle covers (graph-funcs,
+            // tensor.*, etc.) drop silently while handlers for
+            // bundle-uncovered entities (e.g. the legacy WITX ABI
+            // under wasi_ephemeral_nn) still register normally. The
+            // architectural rule lives in the runtime, not the CLI.
             var paths = new List<string>();
             if (opts.WasiNN) paths.Add("Wacs.WASI.NN.OnnxRuntime");
             if (opts.WasiThreads) paths.Add("Wacs.WASI.Threads");
@@ -851,8 +861,31 @@ namespace Wacs.Console.Verbs
             ResolveHostPackages(RunOptions opts)
         {
             var names = new List<string>();
-            if (opts.Wasip2) names.Add("Wacs.WASI.Preview2");
-            if (opts.WasiNN) names.Add("Wacs.WASI.NN");
+            if (opts.Wasip2)
+            {
+                names.Add("Wacs.WASI.Preview2");
+                // SourceGen-shape impl classes (WasiPreview2Bundle's
+                // resource impls) live in the DI sibling. The
+                // resolver's `TryFindResourceImpl` AppDomain fallback
+                // covers the case where DI isn't on this list, but
+                // listing it explicitly avoids a stale-cache window
+                // before the runtime scope loads the assembly. Gap 23
+                // (round-17 verification) traced to the same shape
+                // for the wasi-nn case.
+                names.Add("Wacs.WASI.Preview2.DependencyInjection");
+            }
+            if (opts.WasiNN)
+            {
+                names.Add("Wacs.WASI.NN");
+                // Tensor, Graph, GraphExecutionContext — the
+                // SourceGen-shape impl classes resolved by
+                // `TryFindResourceImpl` for [constructor]X direct-
+                // link emit. Without this, [constructor]tensor
+                // falls back to delegate dispatch and returns
+                // handle 0 to the guest (gap 23 / round-17
+                // verification).
+                names.Add("Wacs.WASI.NN.DependencyInjection");
+            }
             foreach (var n in opts.HostPackage ?? Enumerable.Empty<string>())
             {
                 if (string.IsNullOrWhiteSpace(n)) continue;
