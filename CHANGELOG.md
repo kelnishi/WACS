@@ -1,5 +1,40 @@
 # Changelog
 
+## WACS.Cli 1.5.12 / WACS.WASI.NN.OnnxRuntime 0.2.2 — bundled ORT NuGet 1.21.0 → 1.22.0 (the version that actually relaxes GroupQueryAttention)
+
+Round 15's bump to 1.21.0 was based on the round-14 hypothesis
+that the contrib-op input-range relaxation landed at 1.21. The
+user's round-15 verification disproved that — the actual
+binary-level check on the working wasmtime host
+(`strings target/release/wasi-nn-slm-host`) reports **1.22.0**,
+and 1.21.0 still rejects 11 inputs to
+`com.microsoft::GroupQueryAttention:1` with the same
+`[min=7, max=9]` range.
+
+Fix: pin `Microsoft.ML.OnnxRuntime` at **1.22.0** in
+`Wacs.WASI.NN.OnnxRuntime.csproj`. Native dylib in test bin
+verified at 1.22.0 via `strings runtimes/osx-x64/native/libonnxruntime.dylib`.
+
+Test surface: re-ran all four NN suites against 1.22.0 — same
+green pattern as 1.21.0 (10/10 + 18/18 + 6/6+2skip + 7/7). No
+public-API drift between 1.20.1 and 1.22.0 for the surface
+this package uses (`SessionOptions`, `InferenceSession`,
+`OrtValue`).
+
+The sibling shutdown crash (`libc++abi: mutex lock failed`
+after a guest panic on macOS-arm64) reproduced on 1.21.0;
+unverified at 1.22.0. Track separately if it persists past
+the user's next local repro.
+
+### Versions
+
+- `WACS.WASI.NN.OnnxRuntime` 0.2.1 → **0.2.2** (NuGet floor 1.22.0)
+- `WACS.Cli` 1.5.11 → **1.5.12** (release event)
+
+(Untouched: `WACS`, `WASI.Preview1`, `.Preview2`, `.Preview2.DI`,
+`.WASI.NN`, `.WASI.NN.DI`, `WACS.Transpiler.Lib`,
+`WACS.ComponentModel`, `WACS.HostBindings.Abstractions`.)
+
 ## WACS.Cli 1.5.11 / WACS.WASI.NN.OnnxRuntime 0.2.1 — bundled ORT NuGet 1.20.1 → 1.21.0 (Gemma 3 GroupQueryAttention shape)
 
 The wasi-nn SLM (Gemma 3 270M ONNX export) loaded all the way to
