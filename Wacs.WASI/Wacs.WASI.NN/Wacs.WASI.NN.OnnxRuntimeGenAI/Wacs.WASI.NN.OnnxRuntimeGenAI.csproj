@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <LangVersion>9</LangVersion>
+        <Nullable>enable</Nullable>
+        <Title>Wacs WASI-NN OnnxRuntime-GenAI backend</Title>
+        <PackageId>WACS.WASI.NN.OnnxRuntimeGenAI</PackageId>
+        <Authors>Kelvin Nishikawa</Authors>
+        <Description>OnnxRuntime-GenAI backend for WACS.WASI.NN. Wraps Microsoft.ML.OnnxRuntimeGenAI for first-class generative LLM inference (Gemma 3, Llama, Qwen, Phi families) through wasi-nn. Exposes two compute shapes selected by named-input convention: "prompt" (utf-8) runs full tokenize -> KV-cached decode -> detokenize in one call; "input_ids" (int64) runs a single forward pass returning logits for guests that drive their own decode loop. Linked against CoreML.framework on osx-arm64 for Metal-capable acceleration where the underlying ORT EP supports it.</Description>
+        <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
+        <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <AssemblyName>Wacs.WASI.NN.OnnxRuntimeGenAI</AssemblyName>
+        <AssemblyVersion>0.1.0</AssemblyVersion>
+        <Version>0.1.0</Version>
+        <RepositoryType>git</RepositoryType>
+        <TargetFramework>net8.0</TargetFramework>
+        <PackageTags>wasm;wasi;nn;ml;onnx;genai;llm;gemma;wacs</PackageTags>
+        <!-- Same packaging shape as the LlamaSharp / MLNet / TorchSharp
+             siblings: this assembly is loaded via `wacs run [bind] <path>`'s
+             Assembly.LoadFrom (the embedder-supplies-the-backend flow).
+             EnableDynamicLoading copies every transitive NuGet (ORT +
+             OnnxRuntimeGenAI's RID-specific natives) into the project's
+             bin so the LoadFromContext resolver can satisfy them locally. -->
+        <EnableDynamicLoading>true</EnableDynamicLoading>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="README.md">
+            <Pack>true</Pack>
+            <PackagePath/>
+        </None>
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Wacs.WASI.NN\Wacs.WASI.NN.csproj" />
+        <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.26.0" />
+        <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI" Version="0.13.2" />
+    </ItemGroup>
+
+</Project>
