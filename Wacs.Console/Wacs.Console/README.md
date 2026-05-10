@@ -197,8 +197,8 @@ wacs run app.wasm --bind ./MyGameHost.dll
 | `--wasi` | off | Bind WASI Preview 1 host imports. |
 | `--bind <asm>` | — | Load `IBindable` host packages. Accepts a file path (`Assembly.LoadFrom`) or assembly name (`Assembly.Load`). Repeat or comma-separate. |
 | `--host-package <name>` | — | Component-mode `[WitSource]` host package(s). Accepts assembly name or file path. |
-| `--wasip2` | off | Shorthand `--host-package Wacs.WASI.Preview2`. |
-| `--wasi-nn` | off | Shorthand `--bind Wacs.WASI.NN.OnnxRuntime` (ONNX). For ML.NET / LlamaSharp / etc., use `--bind <package>` directly. |
+| `--wasip2` | off | Shorthand: `--host-package Wacs.WASI.Preview2 + Wacs.WASI.Preview2.DependencyInjection`. The DI sibling carries the SourceGen-shape impl classes the transpiler instantiates for `[constructor]X`; both halves are needed for direct-link emit. See [`docs/COMPONENT_CHAINING.md`](../../docs/COMPONENT_CHAINING.md). |
+| `--wasi-nn` | off | Shorthand: adds `Wacs.WASI.NN + Wacs.WASI.NN.DependencyInjection + Wacs.WASI.NN.OnnxRuntime`. ONNX is the default backend; for ML.NET / LlamaSharp use `--bind <package>` directly. The composite `WasiPreview2NNBundle` is auto-discovered when both `--wasip2` and `--wasi-nn` are set. |
 | `--wasi-threads` | off | Shorthand `--bind Wacs.WASI.Threads`. Wires `wasi:thread-spawn`; module must declare/import shared memory and export `wasi_thread_start (param i32 i32)`. |
 | `--profile` | off | JetBrains dotTrace measure-profiler session. |
 | `--log-gas` | off | Print total instructions executed. |
@@ -269,7 +269,7 @@ wacs build app.wasm -o app.dll \
 | `--wasi` | off | Bake WASI Preview 1 bindings into the build runtime. |
 | `--bind <asm>` | — | Custom `IBindable` host libraries (build-time). |
 | `--host-package <name>` | — | Component-mode `[WitSource]` packages. |
-| `--wasip2` | off | Shorthand `--host-package Wacs.WASI.Preview2`. |
+| `--wasip2` | off | Shorthand: adds `Wacs.WASI.Preview2 + Wacs.WASI.Preview2.DependencyInjection`. See [`docs/COMPONENT_CHAINING.md`](../../docs/COMPONENT_CHAINING.md) for which packages each capability needs on the load path. |
 | `--emit-main` | off | Bake `Program.Main(string[])` into the output. |
 | `--entry-point <export>` | `_start` | Export Main invokes. |
 | `--main-class <name>` | `Program` | Generated Program class name. |
@@ -355,7 +355,7 @@ wacs aot fib.wasm --aot-linked -o fib
 | `--simd` | `scalar` | `interpreter \| scalar \| intrinsics`. |
 | `--aot-linked` | off | Use the `EmissionTarget.AotLinked` emission target — skips the codec wrapper for a smaller binary. Covers memory / data / globals / tables / element segments. |
 | `--wasi` | off | Bake `WACS.WASI.Preview1` bindings into the produced binary. |
-| `--wasip2` | off | Component-mode counterpart to `--wasi` — direct-links `wasi:*` imports against `WACS.WASI.Preview2`. |
+| `--wasip2` | off | Component-mode counterpart to `--wasi` — direct-links `wasi:*` imports against `WACS.WASI.Preview2 + .DependencyInjection`. See [`docs/COMPONENT_CHAINING.md`](../../docs/COMPONENT_CHAINING.md). |
 | `--preopen <H::G>` | — | WASI directory preopen `<host-path>::<guest-path>`. Repeat for multiple. Only with `--wasi`. |
 | `--keep-temp` | off | Don't delete the scaffolded build dir (useful for inspecting the generated csproj / Program.cs). |
 | `-v, --verbose` | off | Print each step (transpile, scaffold, publish, copy). |

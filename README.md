@@ -46,7 +46,7 @@ WACS supports the latest standardized webassembly feature extensions including *
 - [License](#license)
 
 **Latest releases** (see the [CHANGELOG](CHANGELOG.md) for details):
-WACS `0.12.1` · WACS.Cli `1.3.0` · WACS.WASI.Preview1 `0.12.0` · WACS.HostBindings.Abstractions `0.1.0` · WACS.HostBindings.SourceGen `0.1.0` · WACS.Transpiler.Lib `0.7.0` · WACS.ComponentModel `0.1.0` · WACS.WASI.Preview2 `0.1.0` · WACS.WASI.Preview2.DependencyInjection `0.1.0` · WACS.ComponentModel.Bindgen.Lib `0.1.0` · WACS.WASI.Threads `0.1.0`
+WACS `0.13.7` · WACS.Cli `1.5.14` · WACS.WASI.Preview1 `0.13.0` · WACS.HostBindings.Abstractions `0.3.0` · WACS.HostBindings.SourceGen `0.1.0` · WACS.Transpiler.Lib `0.8.10` · WACS.ComponentModel `0.3.4` · WACS.WASI.Preview2 `0.4.0` · WACS.WASI.Preview2.DependencyInjection `0.1.2` · WACS.ComponentModel.Bindgen.Lib `0.1.0` · WACS.WASI.Threads `0.2.0` · WACS.WASI.NN `0.3.0` · WACS.WASI.NN.OnnxRuntime `0.2.2` · WACS.WASI.NN.DependencyInjection `0.2.0`
 
 ## Features
 
@@ -117,11 +117,11 @@ WACS implements the [WebAssembly Component Model](https://github.com/WebAssembly
 - **Cross-engine composition** — `ComponentBridge.AsTypedInterface<T>` / `AsHostBundle` adapters let interpreted and transpiled components compose against the same typed contract.
 - **Contract validation** — `Linker.Validate(WitContract.FromAssembly(...))` cross-checks bound host implementations against the WIT contract embedded in the bindings assembly, catching drift at link time.
 
-### Components Quick start
+### Quick start
 
 ```bash
-# Run a component with the bundled WASI Preview 2 hosts
-wacs run hello.component.wasm --wasip2
+# Run a component with WASI Preview 2 + wasi-nn (ONNX) wired
+wacs run my.component.wasm --wasip2 --wasi-nn -d ./models::/models
 
 # Generate C# bindings from a WIT package
 wacs bindgen wit/cli/world.wit -o ./gen
@@ -130,9 +130,62 @@ wacs bindgen wit/cli/world.wit -o ./gen
 wacs bindgen app.dll -o ./regen
 ```
 
-### Embedding
+The CLI shorthands (`--wasip2`, `--wasi-nn`, `--wasi-threads`) load
+the matching host packages AND their DependencyInjection siblings —
+both are needed because typed `[WitSource]` interfaces and the
+SourceGen-shape impl classes the transpiler instantiates live in
+sibling assemblies.
 
-#### Interpreter — one-liner extensions
+### Runtime requirements at a glance
+
+| Capability | Packages on load path |
+|---|---|
+| `--wasip2` | `WACS.WASI.Preview2` + `WACS.WASI.Preview2.DependencyInjection` |
+| `--wasi-nn` | adds `WACS.WASI.NN` + `WACS.WASI.NN.DependencyInjection` + `WACS.WASI.NN.OnnxRuntime` |
+| `--wasi-threads` | adds `WACS.WASI.Threads` |
+| Custom imports | `--bind <Asm>` (any `IBindable`) |
+
+When a component imports multiple WASI packages, `HostPackageResolver`
+auto-discovers the **composite bundle** (`WasiPreview2NNBundle`) that
+forwards every `[WitSource]` interface through one CLR object, plus
+the single `WasiPreview2Resources` registry so resource handles
+share one namespace across all subsystems.
+
+See [`docs/COMPONENT_CHAINING.md`](docs/COMPONENT_CHAINING.md) for the
+full chaining model, the AppDomain-fallback contract for
+dynamically loaded DI siblings, and how to add a new WASI subsystem
+to the composite.
+
+### Embedding — one-shot scope
+
+For a programmatic embedder doing the same as `wacs run`,
+`WasiPreview2RuntimeScope` wraps the DI graph + composite-bundle
+discovery + Linker prebind into one disposable:
+
+```csharp
+using Wacs.Core.Runtime;
+using Wacs.WASI.Preview2.DependencyInjection;
+
+var runtime = new WasmRuntime();
+using var wasi = new WasiPreview2RuntimeScope(
+    runtime,
+    preopens: new[] { ("./models", "/models") });
+
+// wasi.Bundle      → composite hostBundle (Preview2 + WASI.NN
+//                     when WASI.NN.DependencyInjection is loadable)
+// wasi.Resources   → single resource registry shared across subsystems
+// wasi.Runtime     → runtime, with every wasi:* binding wired
+
+// Now instantiate the component — see docs/COMPONENT_CHAINING.md
+// for the full lift example.
+```
+
+For per-subsystem `IServiceCollection` wiring (selective overrides,
+ASP.NET-scoped execution, custom impls), see
+[`Wacs.WASI/Wacs.WASI.Preview2/Wacs.WASI.Preview2/README.md`](Wacs.WASI/Wacs.WASI.Preview2/Wacs.WASI.Preview2/README.md).
+
+For the interpreter-only embedding (one-line runtime extensions
+without DI):
 
 ```csharp
 using Wacs.Core.Runtime;
@@ -140,51 +193,14 @@ using Wacs.WASI.Preview2;
 using Wacs.WASI.NN;
 using Wacs.WASI.NN.OnnxRuntime;
 using Wacs.WASI.NN.Types;
-using Wacs.WASI.Threads;
 
 var runtime = new WasmRuntime();
 runtime.UseWasiPreview2(b => b.EnableSockets());
 runtime.UseWasiNN(b => b.AddBackend(GraphEncoding.ONNX, new OnnxBackend()));
-runtime.UseWasiThreads();
 
-// Or — discover whatever's loaded:
-runtime.AutoDiscoverHostPackages();   // walks AppDomain for [WasiHostPackage]
-runtime.UseHostPackages("Wacs.WASI.NN.OnnxRuntime", "MyGameHost.dll");
+// Or auto-discover any [WasiHostPackage]-tagged assembly already loaded:
+runtime.AutoDiscoverHostPackages();
 ```
-
-#### Transpiler-direct-link — Microsoft.Extensions.DependencyInjection
-
-For component-model perf-path embedding, `WACS.WASI.Preview2.DependencyInjection` registers every subsystem default and a pre-wired `Linker` in one call:
-
-```csharp
-using Microsoft.Extensions.DependencyInjection;
-using Wacs.WASI.Preview2.DependencyInjection;
-using Wacs.WASI.NN.DependencyInjection;
-
-var services = new ServiceCollection();
-services
-    .AddWasiPreview2()
-    .AddWasiNN(b => b.AddBackend(GraphEncoding.ONNX, new OnnxBackend()))
-    .AddWasiPreview2NNBundle();   // composite for components importing both
-
-using var sp = services.BuildServiceProvider();
-using var scope = sp.CreateScope();
-
-var linker = scope.ServiceProvider.GetRequiredService<Linker>();
-var runtime = linker.Runtime;
-// ... instantiate the component
-```
-
-The `WasiPreview2NNBundle` composite forwards both Preview 2 and
-WASI.NN `[WitSource]` interface properties through one CLR object,
-satisfying the transpiler's single `object hostBundle` ctor slot
-without any emit changes. `HostPackageResolver` auto-discovers it
-when both packages are loaded.
-
-Selective overrides use DI's normal `TryAdd` semantics — see
-[`Wacs.WASI/Wacs.WASI.Preview2/Wacs.WASI.Preview2/README.md`](Wacs.WASI/Wacs.WASI.Preview2/Wacs.WASI.Preview2/README.md) for
-manual wiring (no DI), per-subsystem impl hooks, and validation
-patterns.
 
 ### Packages
 
