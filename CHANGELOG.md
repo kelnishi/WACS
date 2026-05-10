@@ -1,6 +1,6 @@
 # Changelog
 
-## WACS.Cli 1.5.16 / WACS.WASI.NN.DependencyInjection 0.2.1 / WACS.WASI.Preview2.DependencyInjection 0.1.4 — gaps 24 + 25: LlamaSharp / GGUF on the transpiler-direct-link path
+## WACS.Cli 1.5.17 / WACS.Transpiler.Lib 0.8.11 / WACS.WASI.NN.DependencyInjection 0.2.1 / WACS.WASI.Preview2.DependencyInjection 0.1.4 — gaps 24 + 25 + 26: LlamaSharp / GGUF on the transpiler-direct-link path
 
 The wasi-nn LlamaSharp/GGUF harness (`guest-llm/`, Qwen2.5 0.5B
 Instruct Q4_K_M) tripped `"NotFound: no named-model resolver
@@ -61,6 +61,32 @@ with out-of-bounds memory access. The new `--wasi-nn-backend`
 flag suggested in round-19 isn't needed — the implicit
 `--bind` walk covers the same UX.
 
+### Pre-load `--bind` assemblies before scope construction (gap 26)
+
+Round-21 verification revealed that the `TryLoadAssembly`
+AppDomain fallback was correct — but the auto-wire ran during
+`WasiPreview2RuntimeScope` construction in
+`ExecuteComponentTranspiled`, which fires from
+`configureImports`. `--bind` doesn't run until later, in
+`ApplyBindings` (intentionally, so explicit `BindHostFunction`
+shims can override the wasip2 trap-stubs). At scope-construction
+time, `--bind`-supplied assemblies aren't in AppDomain yet —
+so the round-21 walk has nothing to find.
+
+Fix: split the load step from the bind step. New
+`BindingLoader.LoadAssembly(string)` returns just the resolved
+`Assembly` without activating any `IBindable` types; existing
+`LoadFromAssembly(string)` delegates to it. New
+`PreloadBindAssemblies` in `RunHandler` calls
+`BindingLoader.LoadAssembly` for every `--bind` / shorthand
+entry BEFORE scope construction. The actual `BindToRuntime`
+calls still defer to `ApplyBindings` (preserving override
+semantics); `Assembly.LoadFrom` is idempotent on path so the
+second pass is a no-op.
+
+The two-phase load-then-bind pattern matches what round 1 /
+round 7 already established for the IBindable lifecycle.
+
 ### `TryLoadAssembly` AppDomain fallback (gap 25)
 
 Round-20 verification surfaced gap 25: with the LoadByName
@@ -111,8 +137,11 @@ utility yet.
 - `WACS.WASI.Preview2.DependencyInjection` 0.1.2 → **0.1.4**
   (LlamaSharp auto-wire in `WasiPreview2RuntimeScope` +
   `TryLoadAssembly` AppDomain fallback)
-- `WACS.Cli` 1.5.14 → **1.5.16** (release event +
-  `--bind` → DI-sibling auto-pull)
+- `WACS.Transpiler.Lib` 0.8.10 → **0.8.11**
+  (`BindingLoader.LoadAssembly` load-only entry point)
+- `WACS.Cli` 1.5.14 → **1.5.17** (release event +
+  `--bind` → DI-sibling auto-pull +
+  `PreloadBindAssemblies` ordering fix)
 
 (Untouched: `WACS`, `WASI.Preview1`, `.Preview2`, `.WASI.NN`,
 `.WASI.NN.OnnxRuntime`, `.WASI.NN.LlamaSharp`,

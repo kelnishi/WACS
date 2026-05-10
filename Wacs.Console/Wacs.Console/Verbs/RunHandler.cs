@@ -645,6 +645,30 @@ namespace Wacs.Console.Verbs
                             ComponentImportStubs.RegisterAll(rt,
                                 parsed.CoreModules[primary]);
 
+                            // Pre-load `--bind` assemblies into
+                            // AppDomain BEFORE scope construction so
+                            // the wasip2 DI scope's reflective
+                            // backend auto-wire (which walks
+                            // AppDomain on `Assembly.Load(name)`
+                            // miss — round 21 fix) can discover
+                            // them. Without this preload the
+                            // auto-wire's `TryLoadAssembly` returns
+                            // null for `--bind <path-to-LlamaSharp.dll>`
+                            // because `ApplyBindings` (which fires
+                            // `Assembly.LoadFrom`) hasn't run yet.
+                            // Closes gap 26 (round-21 verification:
+                            // ordering bug).
+                            //
+                            // The actual `BindToRuntime` calls
+                            // still defer to `ApplyBindings` below
+                            // — the preload only populates
+                            // AppDomain. `BindingLoader.LoadAssembly`
+                            // is idempotent (`Assembly.LoadFrom` on
+                            // a path returns the cached Assembly
+                            // for that path) so the second-pass
+                            // load is a no-op.
+                            PreloadBindAssemblies(opts);
+
                             // Build the wasip2 scope BEFORE
                             // ApplyBindings so wasip2's
                             // BindToRuntime registrations land
@@ -774,6 +798,37 @@ namespace Wacs.Console.Verbs
         /// registration so they override the stubs for any imports
         /// they cover.</para>
         /// </summary>
+        // Pre-load `--bind` assemblies (and the shorthand-flag
+        // siblings) into AppDomain WITHOUT activating any
+        // `IBindable` types. Used by the component-transpiler
+        // path so the wasip2 DI scope's reflective backend
+        // auto-wire — which walks AppDomain when
+        // `Assembly.Load(name)` misses (round 21) — can discover
+        // `Assembly.LoadFrom`'d packages before scope
+        // construction (gap 26). The actual `BindToRuntime` calls
+        // still happen later via `ApplyBindings`; the load step
+        // is idempotent so the second-pass `LoadFromAssembly`
+        // doesn't reload.
+        //
+        // Failures here are silent — diagnostic / surface-area
+        // belongs to `ApplyBindings` (which surfaces a clear
+        // `binding assembly not found` if the path / name
+        // doesn't resolve). Catching here just avoids tearing
+        // down scope construction on a bad `--bind` entry.
+        private static void PreloadBindAssemblies(RunOptions opts)
+        {
+            var paths = new List<string>();
+            if (opts.WasiNN) paths.Add("Wacs.WASI.NN.OnnxRuntime");
+            if (opts.WasiThreads) paths.Add("Wacs.WASI.Threads");
+            if (opts.Bind != null) paths.AddRange(opts.Bind);
+            foreach (var p in paths)
+            {
+                if (string.IsNullOrWhiteSpace(p)) continue;
+                try { BindingLoader.LoadAssembly(p.Trim()); }
+                catch { /* surface via ApplyBindings */ }
+            }
+        }
+
         private static void ApplyBindings(RunOptions opts,
             WasmRuntime runtime, List<IDisposable>? disposables = null)
         {

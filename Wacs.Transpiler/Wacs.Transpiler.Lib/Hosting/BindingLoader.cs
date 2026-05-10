@@ -43,23 +43,37 @@ namespace Wacs.Transpiler.Hosting
         /// <c>--host-package</c>.</para>
         /// </summary>
         public static List<IBindable> LoadFromAssembly(string nameOrPath)
+            => LoadFromAssembly(LoadAssembly(nameOrPath));
+
+        /// <summary>
+        /// Resolve the assembly identified by
+        /// <paramref name="nameOrPath"/> WITHOUT activating any
+        /// <see cref="IBindable"/> types. A file path on disk is
+        /// loaded via <see cref="Assembly.LoadFrom(string)"/>;
+        /// otherwise the argument is treated as an assembly name
+        /// and resolved via <see cref="Assembly.Load(string)"/>.
+        ///
+        /// <para>Used by host CLIs that need the assembly in
+        /// AppDomain before triggering scope-construction-time
+        /// auto-discovery (gap 26: the wasi-nn DI scope's
+        /// reflective backend auto-wire walks AppDomain on miss,
+        /// but requires `--bind` paths to have been
+        /// `Assembly.LoadFrom`'d first). Callers wanting both
+        /// load and activate use <see cref="LoadFromAssembly(string)"/>;
+        /// the load step is idempotent so calling both with the
+        /// same path is fine.</para>
+        /// </summary>
+        public static Assembly LoadAssembly(string nameOrPath)
         {
-            Assembly asm;
             if (File.Exists(nameOrPath))
+                return Assembly.LoadFrom(Path.GetFullPath(nameOrPath));
+            try { return Assembly.Load(nameOrPath); }
+            catch (Exception ex)
             {
-                asm = Assembly.LoadFrom(Path.GetFullPath(nameOrPath));
+                throw new FileNotFoundException(
+                    "binding assembly not found as file or name: "
+                    + nameOrPath + " (" + ex.Message + ")");
             }
-            else
-            {
-                try { asm = Assembly.Load(nameOrPath); }
-                catch (Exception ex)
-                {
-                    throw new FileNotFoundException(
-                        "binding assembly not found as file or name: "
-                        + nameOrPath + " (" + ex.Message + ")");
-                }
-            }
-            return LoadFromAssembly(asm);
         }
 
         /// <summary>
