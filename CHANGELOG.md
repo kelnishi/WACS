@@ -1,5 +1,89 @@
 # Changelog
 
+## WACS.Cli 1.5.14 / WACS.Transpiler.Lib 0.8.10 — `[constructor]X` SourceGen-shape impl-class discovery falls back to AppDomain (gap 23)
+
+The wasi-nn SLM's `Tensor::new(dimensions, ty, data)` returned
+handle 0 to the guest, tripping `[method]tensor.data(0)` with
+"Handle 0 is reserved as the null sentinel." Round-17
+verification surfaced this as gap 23, hypothesized as a regression
+in the round-9 constructor `AllocateResource` tail. The actual
+root cause was different — and round-9's emit IL was still
+correct.
+
+### Root cause
+
+`HostPackageResolver.TryFindResourceImpl` walked **only** the
+explicit `HostPackages` list when looking for a SourceGen-shape
+impl class (parameterless ctor + `void Create(args)`). The
+WASI-NN typed interfaces (`ITensor`, `IGraph`,
+`IGraphExecutionContext`) live in `Wacs.WASI.NN`, but the impl
+classes (`Tensor`, `Graph`, `GraphExecutionContext`) live in
+the **DI sibling** assembly `Wacs.WASI.NN.DependencyInjection`.
+
+When the CLI runs `wacs run --wasi-nn`, `ResolveHostPackages`
+historically added `Wacs.WASI.Preview2` + `Wacs.WASI.NN` —
+not the DI siblings. `TryFindResourceImpl(typeof(ITensor))`
+returned false → `CanEmitDirect`'s SourceGen-ctor gate
+rejected `[constructor]tensor` (line 128-131 of
+`DirectLinkedImportEmit`) → the call fell back to legacy
+delegate dispatch — whose generated handler doesn't allocate
+through `WasiPreview2Resources`, leaving 0 on the wasm side
+as the constructor's i32 result.
+
+Unit tests didn't catch this because every existing fixture
+defines the impl class in the same assembly as the test, so
+HostPackages always contained it.
+
+### Fixes (defense in depth)
+
+**Resolver fallback.** `TryFindResourceImpl` now walks
+HostPackages first (matching the existing contract), then falls
+back to AppDomain assemblies when the impl isn't found.
+`WasiPreview2RuntimeScope.ReflectivelyAddWasiNN` already
+`Assembly.Load`s the DI sibling at scope-construction time, so
+the assembly is present in AppDomain before transpilation
+runs — the fallback picks it up. Mirrors the three-tier
+search `FindBundleType` and `FindWasiPreview2Resources`
+already use for bundle/resources lookup. Catches via
+`SearchForImpl` to keep `ReflectionTypeLoadException` /
+`NotSupportedException` from blocking the search on a
+collectable / dynamic AppDomain assembly.
+
+**CLI host-package list.** `RunHandler.ResolveHostPackages`
+now explicitly adds `Wacs.WASI.Preview2.DependencyInjection`
+(when `--wasip2`) and `Wacs.WASI.NN.DependencyInjection`
+(when `--wasi-nn`). Symmetric in `BuildHandler`. Avoids the
+AppDomain-fallback round-trip for the common path and keeps
+the resolver's first-tier search complete.
+
+### Test surface
+
+- `HostPackageResolver_TryFindResourceImpl_FallsBackToAppDomain`
+  — passes empty HostPackages, asserts the resolver still
+  finds `TestSgWidget` via AppDomain (xunit loads the test
+  assembly into AppDomain).
+- `DirectLinkedImport_SourceGenCtorWithParam_AllocatesAndResolves`
+  — single-u32 SourceGen ctor + read; sanity check the
+  with-PARAM constructor path.
+- `DirectLinkedImport_SourceGenCtorWithListParams_AllocatesAndResolves`
+  — `(uint[], enum, byte[])` SourceGen ctor matching the
+  wasi-nn `Tensor::new` shape; checksum verification proves
+  both PARAM lift and `AllocateResource` fired.
+
+Wacs.Transpiler.Test went from 773 → 776 (+3).
+All other suites unchanged.
+
+### Versions
+
+- `WACS.Transpiler.Lib` 0.8.9 → **0.8.10** (TryFindResourceImpl
+  AppDomain fallback)
+- `WACS.Cli` 1.5.13 → **1.5.14** (DI siblings added to
+  ResolveHostPackages)
+
+(Untouched: `WACS`, `WASI.Preview1`, `.Preview2`, `.Preview2.DI`,
+`.WASI.NN`, `.WASI.NN.DI`, `.WASI.NN.OnnxRuntime`,
+`WACS.ComponentModel`, `WACS.HostBindings.Abstractions`.)
+
 ## WACS.Cli 1.5.13 / WACS.Transpiler.Lib 0.8.9 / WACS.ComponentModel 0.3.4 — `list<tuple<string, own<R>>>` PARAM lift + Result-Ok arm store (closes wasi-nn SLM compute)
 
 The wasi-nn SLM's `wasi:nn/inference.compute(inputs:

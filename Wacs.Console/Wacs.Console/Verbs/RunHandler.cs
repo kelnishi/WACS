@@ -861,8 +861,31 @@ namespace Wacs.Console.Verbs
             ResolveHostPackages(RunOptions opts)
         {
             var names = new List<string>();
-            if (opts.Wasip2) names.Add("Wacs.WASI.Preview2");
-            if (opts.WasiNN) names.Add("Wacs.WASI.NN");
+            if (opts.Wasip2)
+            {
+                names.Add("Wacs.WASI.Preview2");
+                // SourceGen-shape impl classes (WasiPreview2Bundle's
+                // resource impls) live in the DI sibling. The
+                // resolver's `TryFindResourceImpl` AppDomain fallback
+                // covers the case where DI isn't on this list, but
+                // listing it explicitly avoids a stale-cache window
+                // before the runtime scope loads the assembly. Gap 23
+                // (round-17 verification) traced to the same shape
+                // for the wasi-nn case.
+                names.Add("Wacs.WASI.Preview2.DependencyInjection");
+            }
+            if (opts.WasiNN)
+            {
+                names.Add("Wacs.WASI.NN");
+                // Tensor, Graph, GraphExecutionContext — the
+                // SourceGen-shape impl classes resolved by
+                // `TryFindResourceImpl` for [constructor]X direct-
+                // link emit. Without this, [constructor]tensor
+                // falls back to delegate dispatch and returns
+                // handle 0 to the guest (gap 23 / round-17
+                // verification).
+                names.Add("Wacs.WASI.NN.DependencyInjection");
+            }
             foreach (var n in opts.HostPackage ?? Enumerable.Empty<string>())
             {
                 if (string.IsNullOrWhiteSpace(n)) continue;

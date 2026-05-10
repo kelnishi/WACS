@@ -282,6 +282,95 @@ namespace Wacs.Transpiler.Test
             public uint Read() => _v;
         }
 
+        // SourceGen-shape constructor with a single primitive PARAM
+        // — narrowest reproducer for the constructor + arg-lift
+        // happy path.
+        [WitSource(@"resource sg-tensor {
+    constructor(seed: u32);
+    read: func() -> u32;
+}",
+            Package = "my:test@1.0.0", Interface = "sg-env",
+            Item = "sg-tensor")]
+        public interface ISgTensor
+        {
+            [WitSource(@"constructor(seed: u32);",
+                Package = "my:test@1.0.0", Interface = "sg-env",
+                Item = "[constructor]sg-tensor")]
+            void Create(uint seed);
+
+            [WitSource(@"read: func() -> u32;",
+                Package = "my:test@1.0.0", Interface = "sg-env",
+                Item = "[method]sg-tensor.read")]
+            uint Read();
+        }
+
+        public sealed class TestSgTensor : ISgTensor
+        {
+            private uint _seed;
+            public TestSgTensor() { /* parameterless — resolver
+                requirement for SourceGen-shape impls. */ }
+            public void Create(uint seed) { _seed = seed; }
+            public uint Read() => _seed;
+        }
+
+        // SourceGen-shape constructor matching the wasi-nn
+        // `Tensor::new(dimensions: list<u32>, ty: enum, data:
+        // list<u8>)` shape — list PARAMs lifted via cabi-realloc'd
+        // buffers, plus an enum lowered as u8. The user-reported
+        // gap 23 fires on this shape (every realistic LLM /
+        // classifier workload calls compute with at least one such
+        // tensor).
+        [WitSource(@"enum sg-tensor-type { f32, i32, i64, u8 }")]
+        public enum SgTensorType : byte
+        {
+            F32 = 0,
+            I32 = 1,
+            I64 = 2,
+            U8 = 3,
+        }
+
+        [WitSource(@"resource sg-bigtensor {
+    constructor(dimensions: list<u32>, ty: sg-tensor-type, data: list<u8>);
+    sum: func() -> u32;
+}",
+            Package = "my:test@1.0.0", Interface = "sg-env",
+            Item = "sg-bigtensor")]
+        public interface ISgBigTensor
+        {
+            [WitSource(@"constructor(dimensions: list<u32>, ty: sg-tensor-type, data: list<u8>);",
+                Package = "my:test@1.0.0", Interface = "sg-env",
+                Item = "[constructor]sg-bigtensor")]
+            void Create(uint[] dimensions, SgTensorType ty, byte[] data);
+
+            // Returns a deterministic checksum of the constructor
+            // args so the test can confirm BOTH that AllocateResource
+            // fired (otherwise GetResource(0) traps before sum runs)
+            // AND that the lifted args matched what the guest
+            // staged.
+            [WitSource(@"sum: func() -> u32;",
+                Package = "my:test@1.0.0", Interface = "sg-env",
+                Item = "[method]sg-bigtensor.sum")]
+            uint Sum();
+        }
+
+        public sealed class TestSgBigTensor : ISgBigTensor
+        {
+            private uint _checksum;
+            public TestSgBigTensor() { }
+            public void Create(uint[] dimensions, SgTensorType ty, byte[] data)
+            {
+                // checksum = sum(dimensions) * 1000 + (byte)ty * 100 + sum(data)
+                uint dimsSum = 0;
+                if (dimensions != null)
+                    foreach (var d in dimensions) dimsSum += d;
+                uint dataSum = 0;
+                if (data != null)
+                    foreach (var b in data) dataSum += b;
+                _checksum = dimsSum * 1000 + (uint)((byte)ty * 100) + dataSum;
+            }
+            public uint Sum() => _checksum;
+        }
+
         // ====== Free-function returning result<own<R>, own<E>> ===
         // Mirrors wasi:nn/graph-funcs.load's shape: a stateless
         // interface (bundle-property typed) whose method returns
@@ -8183,6 +8272,280 @@ namespace Wacs.Transpiler.Test
             var resolved = resources.GetResource(typeof(ILoaderGraph),
                 graphHandle);
             Assert.IsType<TestLoaderGraph>(resolved);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_SourceGenCtorWithParam_AllocatesAndResolves()
+        {
+            // Regression test for gap 23 (round-17 verification).
+            // The round-9 gap-17 fix exercised parameterless
+            // `Create()`; this test exercises the with-PARAM
+            // variant — the wasi-nn `Tensor::new(dimensions, ty,
+            // data)` shape. If the void-instance-ctor branch
+            // accidentally lost its `AllocateResource` tail
+            // (e.g. through a refactor that shared lift helpers
+            // between constructor-PARAM lift and free-fn
+            // aggregate-PARAM lift), the constructor returns
+            // handle 0 to the guest; the subsequent
+            // `[method]X.read(self)` traps with "Handle 0 is
+            // reserved as the null sentinel."
+            //
+            // Pre-fix expected (gap 23 reproducer): the
+            // call_create_read export returns 0 — the
+            // constructor's AllocateResource didn't fire and the
+            // guest's GetResource(0) traps.
+            //
+            // Post-fix expected: 7 — Create stored seed=7, Read
+            // returned it through the resource registry round-trip.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var wat = @"(module
+  (type $tc (func (param i32) (result i32)))
+  (type $tm (func (param i32) (result i32)))
+  (import ""my:test/sg-env@1.0.0"" ""[constructor]sg-tensor""
+    (func $imp_ctor (type $tc)))
+  (import ""my:test/sg-env@1.0.0"" ""[method]sg-tensor.read""
+    (func $imp_read (type $tm)))
+  (memory (export ""memory"") 1)
+  (func (export ""call_create_read"") (result i32)
+    i32.const 7         ;; seed
+    call $imp_ctor      ;; -> handle (NOT 0 if AllocateResource fires)
+    call $imp_read))    ;; -> stored seed (7) via Resources.GetResource";
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Func<int, int>>(
+                ("my:test/sg-env@1.0.0", "[constructor]sg-tensor"),
+                _ => throw new InvalidOperationException(
+                    "stub for sg-tensor ctor must not be invoked"));
+            runtime.BindHostFunction<Func<int, int>>(
+                ("my:test/sg-env@1.0.0", "[method]sg-tensor.read"),
+                _ => throw new InvalidOperationException(
+                    "stub for sg-tensor read must not be invoked"));
+
+            var module = TextModuleParser.ParseWat(wat);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(WidgetBundle),
+                resourcesType: typeof(TestResources));
+
+            // Sanity: resolver picked up both the SourceGen ctor
+            // and the impl class.
+            Assert.True(resolver.TryResolve(
+                "my:test/sg-env@1.0.0", "[constructor]sg-tensor",
+                out var ctorBinding));
+            Assert.Equal(HostPackageResolver.ResourceMethodKind.Constructor,
+                ctorBinding.ResourceKind);
+            Assert.True(resolver.TryFindResourceImpl(
+                typeof(ISgTensor), out var implType));
+            Assert.Equal(typeof(TestSgTensor), implType);
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.SgCtorWithParam", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Equal(2, options.ResolverImportBindings!.Count);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/sg-env@1.0.0_[constructor]sg-tensor")] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for sg-tensor ctor must not be invoked"),
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/sg-env@1.0.0_[method]sg-tensor.read")] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for sg-tensor read must not be invoked"),
+                });
+
+            var resources = new TestResources();
+            var bundle = new WidgetBundle(new FakeWidget(0));
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            var callCreateRead = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_create_read"))!;
+            object? raw = callCreateRead.Invoke(instance,
+                Array.Empty<object>());
+
+            // 7 round-trips through: ctor PARAM lift (u32 → uint),
+            // void Create(7) on TestSgTensor, AllocateResource
+            // mints a handle, GetResource resolves it, callvirt
+            // Read returns 7.
+            Assert.IsType<int>(raw);
+            Assert.Equal(7, (int)raw);
+        }
+
+        [Fact]
+        public void HostPackageResolver_TryFindResourceImpl_FallsBackToAppDomain()
+        {
+            // Gap 23 root cause: SourceGen-shape impl classes
+            // (Tensor, Graph, GraphExecutionContext) live in
+            // Wacs.WASI.NN.DependencyInjection — a sibling
+            // assembly to Wacs.WASI.NN, which is what the CLI
+            // historically passed in HostPackages for `--wasi-nn`.
+            // TryFindResourceImpl walked HostPackages only and
+            // missed the impl, so CanEmitDirect rejected
+            // [constructor]X for the SourceGen shape and the
+            // call fell back to delegate dispatch.
+            //
+            // Round-17-followup fix: TryFindResourceImpl now
+            // falls back to AppDomain assemblies when HostPackages
+            // doesn't carry the impl. This test simulates the SLM
+            // setup at the resolver-API level: pass HostPackages
+            // that DOESN'T include the test assembly (where
+            // ISgWidget + TestSgWidget live) and verify the
+            // resolver still finds TestSgWidget via AppDomain.
+            //
+            // The empty HostPackages list still picks up the
+            // impl IF this test assembly is in AppDomain — which
+            // it always is, since xunit just loaded it.
+
+            var resolver = HostPackageResolver.FromAssemblies(
+                Array.Empty<Assembly>(),
+                resourcesType: typeof(TestResources));
+
+            // Pre-fix: empty HostPackages → no walk path → null.
+            // Post-fix: AppDomain fallback finds TestSgWidget.
+            Assert.True(resolver.TryFindResourceImpl(
+                typeof(ISgWidget), out var implType));
+            Assert.Equal(typeof(TestSgWidget), implType);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_SourceGenCtorWithListParams_AllocatesAndResolves()
+        {
+            // Tighter regression test for gap 23 — exercises the
+            // exact shape the wasi-nn SLM uses:
+            //   constructor(dimensions: list<u32>, ty: u8, data: list<u8>)
+            // List PARAMs hit a different lift path (cabi-realloc
+            // pointer + count) than primitives. If round-17's
+            // refactor or its predecessors broke the
+            // void-instance-ctor branch's AllocateResource tail
+            // for list PARAMs specifically, this catches it.
+            //
+            // Wat:
+            //   prepare: stage dims=[2, 3] @128 (8 bytes), data=[1,
+            //     2, 3, 4] @144 (4 bytes)
+            //   call_create_sum: call ctor with (dims_ptr=128,
+            //     dims_count=2, ty=5, data_ptr=144, data_count=4),
+            //     receive handle, call sum(self), return checksum.
+            //
+            // Expected checksum = (2+3)*1000 + 5*100 + (1+2+3+4)
+            //                   = 5000 + 500 + 10 = 5510
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            var wat = @"(module
+  (type $tc (func (param i32 i32 i32 i32 i32) (result i32)))
+  (type $tm (func (param i32) (result i32)))
+  (import ""my:test/sg-env@1.0.0"" ""[constructor]sg-bigtensor""
+    (func $imp_ctor (type $tc)))
+  (import ""my:test/sg-env@1.0.0"" ""[method]sg-bigtensor.sum""
+    (func $imp_sum (type $tm)))
+  (memory (export ""memory"") 1)
+  (func (export ""prepare"")
+    ;; dims = [2u32, 3u32] @128 (LE u32s)
+    i32.const 128 i32.const 2 i32.store
+    i32.const 132 i32.const 3 i32.store
+    ;; data = [1, 2, 3, 4] @144
+    i32.const 144 i32.const 1 i32.store8
+    i32.const 145 i32.const 2 i32.store8
+    i32.const 146 i32.const 3 i32.store8
+    i32.const 147 i32.const 4 i32.store8)
+  (func (export ""call_create_sum"") (result i32)
+    i32.const 128   ;; dims_ptr
+    i32.const 2     ;; dims_count
+    i32.const 5     ;; ty
+    i32.const 144   ;; data_ptr
+    i32.const 4     ;; data_count
+    call $imp_ctor  ;; -> handle (must be non-zero)
+    call $imp_sum)) ;; -> checksum";
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Func<int, int, int, int, int, int>>(
+                ("my:test/sg-env@1.0.0", "[constructor]sg-bigtensor"),
+                (_, _, _, _, _) => throw new InvalidOperationException(
+                    "stub for sg-bigtensor ctor must not be invoked"));
+            runtime.BindHostFunction<Func<int, int>>(
+                ("my:test/sg-env@1.0.0", "[method]sg-bigtensor.sum"),
+                _ => throw new InvalidOperationException(
+                    "stub for sg-bigtensor sum must not be invoked"));
+
+            var module = TextModuleParser.ParseWat(wat);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(WidgetBundle),
+                resourcesType: typeof(TestResources));
+            Assert.True(resolver.TryFindResourceImpl(
+                typeof(ISgBigTensor), out var implType));
+            Assert.Equal(typeof(TestSgBigTensor), implType);
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.SgCtorListParams", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+            Assert.Equal(2, options.ResolverImportBindings!.Count);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/sg-env@1.0.0_[constructor]sg-bigtensor")] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for ctor must not be invoked"),
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/sg-env@1.0.0_[method]sg-bigtensor.sum")] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for sum must not be invoked"),
+                });
+
+            var resources = new TestResources();
+            var bundle = new WidgetBundle(new FakeWidget(0));
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            var prepare = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("prepare"))!;
+            prepare.Invoke(instance, Array.Empty<object>());
+
+            var callCreateSum = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_create_sum"))!;
+            object? raw = callCreateSum.Invoke(instance,
+                Array.Empty<object>());
+
+            // Expected: (2+3)*1000 + 5*100 + (1+2+3+4) = 5510.
+            // If the constructor returned handle 0 (gap-23
+            // hypothesis), the subsequent sum() would have
+            // tripped GetResource(0) — `Handle 0 is reserved`.
+            // The fact that we get a non-zero result already
+            // proves AllocateResource fired; the EXACT value
+            // proves the list PARAMs were lifted correctly.
+            Assert.IsType<int>(raw);
+            Assert.Equal(5510, (int)raw);
         }
 
         [Fact]
