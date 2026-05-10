@@ -36,6 +36,18 @@ only models where CoreML's op coverage is complete).
   library embedders.
 - **`OnnxBackend(Func<SessionOptions>?)`** (preserved) — full escape hatch, wins over
   the typed-options path.
+- **`CoreMLFlags` env-var passthrough** — `WACS_WASINN_ONNX_COREML_FLAGS` accepts a
+  comma/pipe-separated list of CoreML flag names (`MLProgram`, `UseCpuAndGpu`,
+  `CpuOnly`, `ANE`, `Static`, `Subgraph`) so the **MLProgram** model format (CoreML 5+,
+  much broader op coverage for transformer ops) is reachable without recompiling.
+  Pair with `WACS_WASINN_ONNX_EP=coreml` to enable.
+- **`Microsoft.ML.OnnxRuntime` 1.22.0 → 1.26.0** — accumulated kernel improvements on
+  osx-arm64: top-level `RMSNorm` op (was contrib-only), `FusedQKRotaryEmbedding`,
+  `SplitPackedQKVWithRotaryEmbeddingAndCopyKV`, broader WebGPU EP coverage in the
+  underlying op-fusion pipeline. No public-API break for the surface this package
+  uses. **Note**: the CoreML EP itself sees iterative improvements but partition-and-
+  fallback semantics for generative-LLM ops on macOS are largely unchanged across
+  1.22 → 1.26.
 
 ### Out-of-box pick
 
