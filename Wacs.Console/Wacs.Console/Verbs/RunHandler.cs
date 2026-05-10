@@ -886,6 +886,21 @@ namespace Wacs.Console.Verbs
                 // verification).
                 names.Add("Wacs.WASI.NN.DependencyInjection");
             }
+            // --bind that resolves to a Wacs.WASI.NN.* sibling
+            // (LlamaSharp / MLNet) implicitly needs the same DI +
+            // typed-surface packages on host-packages — otherwise
+            // the resolver ends up with incomplete WitSource
+            // coverage and post-compute lifts trap with
+            // out-of-bounds memory access (gap 24a, round-19
+            // sibling observation). Mirrors the round-18 plumbing
+            // for `--wasi-nn` (the OnnxRuntime case).
+            if (BindReferencesWasiNNFamily(opts))
+            {
+                if (!names.Contains("Wacs.WASI.NN"))
+                    names.Add("Wacs.WASI.NN");
+                if (!names.Contains("Wacs.WASI.NN.DependencyInjection"))
+                    names.Add("Wacs.WASI.NN.DependencyInjection");
+            }
             foreach (var n in opts.HostPackage ?? Enumerable.Empty<string>())
             {
                 if (string.IsNullOrWhiteSpace(n)) continue;
@@ -914,6 +929,32 @@ namespace Wacs.Console.Verbs
                 asms.Add(asm);
             }
             return asms;
+        }
+
+        // True when any --bind entry references a
+        // `Wacs.WASI.NN.*` assembly — by name (`--bind
+        // Wacs.WASI.NN.LlamaSharp`) or by file path whose basename
+        // starts with that prefix (`--bind /.../Wacs.WASI.NN.MLNet.dll`).
+        // Used to auto-pull the WASI.NN typed-surface + DI sibling
+        // packages onto host-packages so the resolver has complete
+        // WitSource coverage for the family. Sub-gap 24a
+        // (round-19 sibling observation).
+        private static bool BindReferencesWasiNNFamily(RunOptions opts)
+        {
+            foreach (var entry in opts.Bind ?? Enumerable.Empty<string>())
+            {
+                if (string.IsNullOrWhiteSpace(entry)) continue;
+                var trimmed = entry.Trim();
+                // Path form: take basename without .dll suffix.
+                var ident = File.Exists(trimmed)
+                    ? Path.GetFileNameWithoutExtension(trimmed)
+                    : trimmed;
+                if (ident == null) continue;
+                if (ident.StartsWith("Wacs.WASI.NN.",
+                    StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
         }
 
         private static TranspilerOptions BuildTranspilerOptions(RunOptions opts)

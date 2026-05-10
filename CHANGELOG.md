@@ -1,5 +1,96 @@
 # Changelog
 
+## WACS.Cli 1.5.15 / WACS.WASI.NN.DependencyInjection 0.2.1 / WACS.WASI.Preview2.DependencyInjection 0.1.3 — gap 24: `LoadByName` honors `LoadByNameBackend`; LlamaSharp auto-wires; `--bind` pulls WASI.NN siblings
+
+The wasi-nn LlamaSharp/GGUF harness (`guest-llm/`, Qwen2.5 0.5B
+Instruct Q4_K_M) tripped `"NotFound: no named-model resolver
+configured"` at the first `compute(...)` even though
+`load_by_name(...)` had returned `Ok` upstream. The DI bundle's
+`GraphFuncsImpl.LoadByName` only checked `NamedModelResolver` +
+`Backends`, never the sibling `LoadByNameBackend` field that the
+WitBindings path (`WasiNNHost.LoadGraphByNameDispatch`) uses for
+backends with internal name registries.
+
+### `GraphFuncsImpl.LoadByName` parity with `WasiNNHost`
+
+`Wacs.WASI.NN.DependencyInjection/GraphFuncsImpl.cs` now mirrors
+`WasiNNHost.LoadGraphByNameDispatch`:
+
+```csharp
+if (_config.LoadByNameBackend != null)
+    return Result<...>.FromOk(new Graph(
+        _config.LoadByNameBackend.LoadGraphByName(name, ExecutionTarget.CPU)));
+// fall through to NamedModelResolver → bytes → backend
+```
+
+LlamaSharp's `LoadGraph(builders)` always traps
+`UnsupportedOperation` (a multi-GB GGUF passed through canonical-
+ABI lift would force a multi-GB host copy on every load); the
+direct `LoadByNameBackend` path lets the backend resolve models
+through its own registry without that round-trip. Closes gap 24
+architecturally.
+
+### LlamaSharp auto-wire in `WasiPreview2RuntimeScope`
+
+Round-14 added `BuildOnnxConfigureCallback` to wire
+`OnnxBackend` into the DI bundle's `WasiNNConfiguration` at
+scope-construction time. Round-20 generalizes the pattern: a
+sibling `BuildLlamaSharpConfigureCallback` detects
+`Wacs.WASI.NN.LlamaSharp.LlamaSharpBackend`, builds an
+env-driven registry from `WACS_WASINN_GGUF_DIR` (mirrors
+`WasiNNLlamaSharpBindable`'s scan), instantiates the backend
+via `FromPaths(registry)`, and wires it into BOTH
+`Backends[GGML]` AND `LoadByNameBackend`. The two callbacks
+combine via `Delegate.Combine` into one multicast configure that
+runs against the same options instance.
+
+`CombineCallbacks` is generic — adding a new wasi-nn backend
+auto-wire requires one new `BuildXxxConfigureCallback` plus a
+line in `ReflectivelyAddWasiNN`'s combine call.
+
+### `--bind` auto-pulls DI siblings for `Wacs.WASI.NN.*`
+
+Sub-gap 24a: when `--bind` resolves an assembly whose identity
+starts with `Wacs.WASI.NN.` (LlamaSharp / MLNet / future
+backends), `RunHandler.ResolveHostPackages` now adds
+`Wacs.WASI.NN` + `Wacs.WASI.NN.DependencyInjection` to
+host-packages automatically. Mirrors round-18's `--wasi-nn`
+plumbing for the OnnxRuntime case. Without it, the resolver had
+incomplete WitSource coverage and post-`compute` lifts trapped
+with out-of-bounds memory access. The new `--wasi-nn-backend`
+flag suggested in round-19 isn't needed — the implicit
+`--bind` walk covers the same UX.
+
+### Test surface
+
+- `Wacs.WASI.NN.Test/GraphFuncsImplLoadByNameTests` (3 tests):
+  `LoadByNameBackend` direct-path, byte-flow fallback when
+  `LoadByNameBackend` null, and the diagnostic NotFound when
+  neither is wired (asserts the error message mentions
+  `LoadByNameBackend` so the failure mode is discoverable).
+- `Wacs.WASI.NN.LlamaSharp.Test/WasiPreview2RuntimeScopeLlamaSharpTests`:
+  the auto-wire fires on a real `WasiPreview2RuntimeScope`
+  construction; `IGraphFuncs.LoadByName` no longer reports the
+  pre-fix "no named-model resolver" symptom. The test project
+  gains references to `Wacs.WASI.NN.DependencyInjection` and
+  `Wacs.WASI.Preview2.DependencyInjection` (the only test
+  project where all four needed packages co-exist without a
+  cycle).
+
+### Versions
+
+- `WACS.WASI.NN.DependencyInjection` 0.2.0 → **0.2.1**
+  (LoadByName routes through LoadByNameBackend)
+- `WACS.WASI.Preview2.DependencyInjection` 0.1.2 → **0.1.3**
+  (LlamaSharp auto-wire in `WasiPreview2RuntimeScope`)
+- `WACS.Cli` 1.5.14 → **1.5.15** (release event +
+  `--bind` → DI-sibling auto-pull)
+
+(Untouched: `WACS`, `WASI.Preview1`, `.Preview2`, `.WASI.NN`,
+`.WASI.NN.OnnxRuntime`, `.WASI.NN.LlamaSharp`,
+`.WASI.NN.MLNet`, `WACS.Transpiler.Lib`, `WACS.ComponentModel`,
+`WACS.HostBindings.Abstractions`.)
+
 ## WACS.Cli 1.5.14 / WACS.Transpiler.Lib 0.8.10 — `[constructor]X` SourceGen-shape impl-class discovery falls back to AppDomain (gap 23)
 
 The wasi-nn SLM's `Tensor::new(dimensions, ty, data)` returned

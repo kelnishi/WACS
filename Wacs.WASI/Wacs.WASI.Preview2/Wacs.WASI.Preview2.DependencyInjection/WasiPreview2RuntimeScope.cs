@@ -7,7 +7,9 @@
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using Wacs.ComponentModel.Validation;
@@ -211,21 +213,27 @@ namespace Wacs.WASI.Preview2.DependencyInjection
                 "Wacs.WASI.NN.DependencyInjection.WasiNNServiceCollectionExtensions");
             if (nnExtType == null) return;
 
-            // Build a configure callback that wires the ONNX
-            // backend, if Wacs.WASI.NN.OnnxRuntime is loadable
-            // and OnnxBackend's parameterless ctor succeeds.
-            // Surfaces failures as stderr warnings instead of
-            // returning silently — the SLM's "InvalidEncoding:
-            // No backend registered for ONNX" symptom is a lot
-            // easier to root-cause when the underlying load /
-            // ctor failure shows up at startup time (round-13
-            // follow-up gap 20).
-            var configureDelegate = BuildOnnxConfigureCallback(nnAsm!);
+            // Build per-backend configure callbacks for whatever
+            // wasi-nn backends are loadable. Each callback runs
+            // INSIDE AddWasiNN's configure step (before
+            // TryAddSingleton(opts.Configuration)), so the registered
+            // Configuration instance carries every wired backend in
+            // one go.
+            //
+            // Failures surface as stderr warnings (vs. silent
+            // returns) — the SLM's round-13 "InvalidEncoding"
+            // symptom and round-19's "no named-model resolver
+            // configured" both root-cause faster when the load /
+            // ctor failure shows up at startup time, not at first
+            // guest call.
+            var onnxCallback = BuildOnnxConfigureCallback(nnAsm!);
+            var llamaCallback = BuildLlamaSharpConfigureCallback(nnAsm!);
+            var configureDelegate = CombineCallbacks(
+                onnxCallback, llamaCallback);
 
             // services.AddWasiNN(configure) — configure runs
-            // BEFORE TryAddSingleton(opts.Configuration), so the
-            // backend lands in opts.Configuration.Backends and
-            // gets registered as part of the same instance
+            // BEFORE TryAddSingleton(opts.Configuration), so each
+            // backend lands on the same Configuration instance
             // GraphFuncsImpl resolves later.
             nnExtType.GetMethod("AddWasiNN",
                     BindingFlags.Public | BindingFlags.Static)!
@@ -328,6 +336,179 @@ namespace Wacs.WASI.Preview2.DependencyInjection
             var lambda = System.Linq.Expressions.Expression.Lambda(
                 actionType, call, optsParam);
             return lambda.Compile();
+        }
+
+        // Combine per-backend configure callbacks into one
+        // multicast Action<options>. Multicast invocation fires
+        // each subscriber in registration order against the same
+        // options instance — exactly what we need when
+        // AddWasiNN's `configure?.Invoke(opts)` runs. Returns
+        // null if every input is null (in which case AddWasiNN
+        // gets a null configure and runs with an empty
+        // Configuration, matching the no-backend-loadable
+        // behavior).
+        private static Delegate? CombineCallbacks(
+            params Delegate?[] callbacks)
+        {
+            Delegate? result = null;
+            foreach (var cb in callbacks)
+            {
+                if (cb == null) continue;
+                result = result == null
+                    ? cb
+                    : Delegate.Combine(result, cb);
+            }
+            return result;
+        }
+
+        // Build an Action<WasiNNDependencyInjectionOptions>
+        // delegate that wires the LlamaSharp backend, scanning
+        // <c>WACS_WASINN_GGUF_DIR</c> for *.gguf files (matches
+        // WasiNNLlamaSharpBindable's env-driven registry shape).
+        // Registers the backend under BOTH:
+        //   - opts.AddBackend(GraphEncoding.GGML, backend) — for
+        //     embedders that route through the encoding-keyed
+        //     Backends dict (currently unused for LlamaSharp
+        //     since its byte-loader path traps, but left wired
+        //     for symmetry with ONNX);
+        //   - opts.Configuration.LoadByNameBackend = backend —
+        //     the load-by-name path GraphFuncsImpl checks before
+        //     falling back to the byte-flow (gap 24).
+        //
+        // Returns null when:
+        //   - Wacs.WASI.NN.LlamaSharp isn't loadable (the common
+        //     case for `wacs run --wasip2 --wasi-nn` — only ONNX
+        //     ships bundled);
+        //   - the LlamaSharpBackend type / FromPaths factory /
+        //     LoadByNameBackend property can't be resolved;
+        //   - FromPaths throws.
+        // Each non-quiet error path emits a stderr warning so the
+        // failure mode is discoverable at startup time.
+        private static Delegate? BuildLlamaSharpConfigureCallback(
+            Assembly nnAsm)
+        {
+            var optsType = nnAsm.GetType(
+                "Wacs.WASI.NN.DependencyInjection.WasiNNDependencyInjectionOptions");
+            if (optsType == null) return null;
+
+            var addBackend = optsType.GetMethod("AddBackend");
+            if (addBackend == null) return null;
+            var addBackendParams = addBackend.GetParameters();
+            if (addBackendParams.Length != 2) return null;
+            var encodingType = addBackendParams[0].ParameterType;
+            var backendIfaceType = addBackendParams[1].ParameterType;
+
+            var llamaAsm = TryLoadAssembly("Wacs.WASI.NN.LlamaSharp");
+            if (llamaAsm == null) return null;  // not an error.
+
+            var llamaBackendType = llamaAsm.GetType(
+                "Wacs.WASI.NN.LlamaSharp.LlamaSharpBackend");
+            if (llamaBackendType == null)
+            {
+                System.Console.Error.WriteLine(
+                    "warn: Wacs.WASI.NN.LlamaSharp is loadable but "
+                    + "LlamaSharpBackend type wasn't found. wasi-nn "
+                    + "GGUF guests will see NotFound errors.");
+                return null;
+            }
+
+            var fromPaths = llamaBackendType.GetMethod("FromPaths",
+                BindingFlags.Public | BindingFlags.Static);
+            if (fromPaths == null)
+            {
+                System.Console.Error.WriteLine(
+                    "warn: LlamaSharpBackend.FromPaths(IDictionary"
+                    + "<string,string>) static factory not found. "
+                    + "Cannot auto-wire LlamaSharp; embedders should "
+                    + "construct LlamaSharpBackend directly via "
+                    + "AddWasiNN(b => b.AddBackend(...)).");
+                return null;
+            }
+
+            var registry = BuildGgufRegistryFromEnv();
+
+            object? llamaBackend;
+            try { llamaBackend = fromPaths.Invoke(null, new object?[] { registry }); }
+            catch (Exception ex)
+            {
+                System.Console.Error.WriteLine(
+                    "warn: LlamaSharpBackend.FromPaths failed: "
+                    + ex.GetType().Name + ": " + ex.Message
+                    + ". wasi-nn GGUF guests will see NotFound "
+                    + "errors. Check that the LLamaSharp native "
+                    + "library is on the load path.");
+                return null;
+            }
+            if (llamaBackend == null) return null;
+
+            // Resolve the LoadByNameBackend property on
+            // WasiNNConfiguration via opts.Configuration.
+            var configProp = optsType.GetProperty("Configuration");
+            if (configProp == null) return null;
+            var configType = configProp.PropertyType;
+            var loadByNameProp = configType.GetProperty("LoadByNameBackend");
+            if (loadByNameProp == null
+                || loadByNameProp.GetSetMethod() == null)
+            {
+                System.Console.Error.WriteLine(
+                    "warn: WasiNNConfiguration.LoadByNameBackend "
+                    + "property missing or read-only; cannot route "
+                    + "GGUF graph.load-by-name through LlamaSharp.");
+                return null;
+            }
+
+            // GGML = 5 in both Nn.GraphEncoding and
+            // Types.GraphEncoding (cross-checked at file scope).
+            object ggmlEncoding = Enum.ToObject(encodingType, 5);
+
+            // Build:
+            //   opts.AddBackend(GraphEncoding.GGML, backend);
+            //   opts.Configuration.LoadByNameBackend = backend;
+            var optsParam = Expression.Parameter(optsType, "opts");
+            var addCall = Expression.Call(
+                optsParam,
+                addBackend,
+                Expression.Constant(ggmlEncoding, encodingType),
+                Expression.Constant(llamaBackend, backendIfaceType));
+            var configAccess = Expression.Property(optsParam, configProp);
+            var assign = Expression.Assign(
+                Expression.Property(configAccess, loadByNameProp),
+                Expression.Constant(llamaBackend,
+                    loadByNameProp.PropertyType));
+            var block = Expression.Block(addCall, assign);
+            var actionType = typeof(Action<>).MakeGenericType(optsType);
+            return Expression.Lambda(actionType, block, optsParam)
+                .Compile();
+        }
+
+        // Mirrors WasiNNLlamaSharpBindable's env-driven scan:
+        // read $WACS_WASINN_GGUF_DIR, enumerate *.gguf files in
+        // the top-level dir, register each under its filename-
+        // sans-extension. Empty registry on miss / unset / IO
+        // error — matches the IBindable's fail-soft posture so
+        // the auto-wire never crashes scope construction.
+        private static IDictionary<string, string>
+            BuildGgufRegistryFromEnv()
+        {
+            var dir = Environment.GetEnvironmentVariable(
+                "WACS_WASINN_GGUF_DIR");
+            var registry = new Dictionary<string, string>(
+                StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrEmpty(dir)) return registry;
+            try
+            {
+                if (!Directory.Exists(dir)) return registry;
+                foreach (var path in Directory.EnumerateFiles(dir,
+                    "*.gguf", SearchOption.TopDirectoryOnly))
+                {
+                    var name = Path.GetFileNameWithoutExtension(path);
+                    if (!string.IsNullOrEmpty(name))
+                        registry[name!] = path;
+                }
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            return registry;
         }
 
         private static Assembly? TryLoadAssembly(string name)

@@ -73,11 +73,32 @@ namespace Wacs.WASI.NN.DependencyInjection
                     return Result<Nn.IGraph, Nn.IError>.FromErr(
                         new Error(Nn.ErrorCode.UnsupportedOperation,
                             "load-by-name is disabled for this configuration"));
+
+                // Direct path: backend with internal registry
+                // (LlamaSharp / GGUF, future LLM-serving stacks).
+                // Mirrors WasiNNHost.LoadGraphByNameDispatch — the
+                // LoadByNameBackend hook lets backends that resolve
+                // models by file path / handle skip the byte-loader
+                // indirection entirely (canonical-ABI lift would
+                // force a multi-GB host copy on every load
+                // otherwise). Closes gap 24 (round 19).
+                if (_config.LoadByNameBackend != null)
+                {
+                    var bg = _config.LoadByNameBackend.LoadGraphByName(
+                        name, TypesExecutionTarget.CPU);
+                    return Result<Nn.IGraph, Nn.IError>.FromOk(
+                        new Graph(bg));
+                }
+
+                // Byte-flow path: host registry returns bytes,
+                // routed through encoding-keyed Backends (the
+                // ONNX-style flow).
                 var resolver = _config.NamedModelResolver;
                 if (resolver == null)
                     return Result<Nn.IGraph, Nn.IError>.FromErr(
                         new Error(Nn.ErrorCode.NotFound,
-                            "no named-model resolver configured"));
+                            "no named-model resolver configured "
+                            + "and no LoadByNameBackend wired"));
                 var record = resolver(name);
                 if (record == null)
                     return Result<Nn.IGraph, Nn.IError>.FromErr(
@@ -88,8 +109,8 @@ namespace Wacs.WASI.NN.DependencyInjection
                         new Error(Nn.ErrorCode.InvalidEncoding,
                             "No backend registered for encoding "
                             + record.Value.Encoding));
-                var bg = backend.LoadGraph(record.Value.Builders, record.Value.Target);
-                return Result<Nn.IGraph, Nn.IError>.FromOk(new Graph(bg));
+                var bgBytes = backend.LoadGraph(record.Value.Builders, record.Value.Target);
+                return Result<Nn.IGraph, Nn.IError>.FromOk(new Graph(bgBytes));
             }
             catch (Types.WasiNNException ex)
             {
