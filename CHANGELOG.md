@@ -1,6 +1,6 @@
 # Changelog
 
-## WACS.Cli 1.5.17 / WACS.Transpiler.Lib 0.8.11 / WACS.WASI.NN.DependencyInjection 0.2.1 / WACS.WASI.Preview2.DependencyInjection 0.1.4 — gaps 24 + 25 + 26: LlamaSharp / GGUF on the transpiler-direct-link path
+## WACS.Cli 1.5.18 / WACS.Transpiler.Lib 0.8.11 / WACS.WASI.NN.DependencyInjection 0.2.1 / WACS.WASI.NN.LlamaSharp 0.2.1 / WACS.WASI.NN.MLNet 0.2.1 / WACS.WASI.Preview2.DependencyInjection 0.1.4 — gaps 24 + 25 + 26 + 27: LlamaSharp / GGUF on the transpiler-direct-link path (end-to-end)
 
 The wasi-nn LlamaSharp/GGUF harness (`guest-llm/`, Qwen2.5 0.5B
 Instruct Q4_K_M) tripped `"NotFound: no named-model resolver
@@ -60,6 +60,43 @@ incomplete WitSource coverage and post-`compute` lifts trapped
 with out-of-bounds memory access. The new `--wasi-nn-backend`
 flag suggested in round-19 isn't needed — the implicit
 `--bind` walk covers the same UX.
+
+### `EnableDynamicLoading` on backend csprojs (gap 27)
+
+Round-22 verification confirmed gaps 24-26 closed correctly —
+end-to-end Qwen2.5 0.5B GGUF inference produced real output
+through `wacs run --wasip2 --bind <LlamaSharp.dll>` after manual
+deps staging. The remaining hurdle was a packaging issue: the
+`Wacs.WASI.NN.LlamaSharp` library project's bin emitted only the
+backend assembly + project refs, NOT the upstream NuGet
+transitives (`LLamaSharp.dll`, `LLamaSharp.Backend.Cpu`'s
+RID-specific natives, `Microsoft.Extensions.*`). At
+`Assembly.LoadFrom(<path>)` time, the LoadFromContext resolver
+read deps.json but couldn't satisfy the deps from the runtime's
+TPA list (Wacs.Console doesn't carry LlamaSharp) or the empty
+LoadFromContext directory.
+
+Fix: `<EnableDynamicLoading>true</EnableDynamicLoading>` in
+`Wacs.WASI.NN.LlamaSharp.csproj` (and the symmetric
+`Wacs.WASI.NN.MLNet.csproj`). MSBuild now copies every NuGet
+managed dep + RID-specific native lib into the project's bin,
+and the deps.json points at them locally. Bin grows from
+~10 MB to ~150 MB (LlamaSharp's natives are chunky); acceptable
+for a backend whose entire purpose is loading multi-GB models.
+
+ONNX backend takes a different path — round-1 already bundles
+`Wacs.WASI.NN.OnnxRuntime` directly into `Wacs.Console`'s csproj
+via `ExcludeAssets="compile"`, which is why `--wasi-nn` works
+bare-name. Gap 27's fix is for the embedder-supplies-the-backend
+flow (`--bind <path>`), not the bundled-default-backend flow.
+
+Documentation: `docs/COMPONENT_CHAINING.md` gains a fully worked
+GGUF inference example walking through the build + run + how
+each prior fix participates. The Wacs.WASI.NN README's CLI
+quick-start now points at the explicit-path form (the bare-name
+`--bind Wacs.WASI.NN.LlamaSharp` only works when the assembly
+is on the CLI's TPA, which it isn't unless an embedder bundles
+it explicitly).
 
 ### Pre-load `--bind` assemblies before scope construction (gap 26)
 
@@ -134,12 +171,19 @@ utility yet.
 
 - `WACS.WASI.NN.DependencyInjection` 0.2.0 → **0.2.1**
   (LoadByName routes through LoadByNameBackend)
+- `WACS.WASI.NN.LlamaSharp` 0.2.0 → **0.2.1**
+  (EnableDynamicLoading: bin carries the backend's NuGet
+  transitives so `--bind <path>` LoadFromContext probes
+  resolve)
+- `WACS.WASI.NN.MLNet` 0.2.0 → **0.2.1**
+  (EnableDynamicLoading: same shape — symmetric prep for the
+  embedder-supplies-the-backend flow)
 - `WACS.WASI.Preview2.DependencyInjection` 0.1.2 → **0.1.4**
   (LlamaSharp auto-wire in `WasiPreview2RuntimeScope` +
   `TryLoadAssembly` AppDomain fallback)
 - `WACS.Transpiler.Lib` 0.8.10 → **0.8.11**
   (`BindingLoader.LoadAssembly` load-only entry point)
-- `WACS.Cli` 1.5.14 → **1.5.17** (release event +
+- `WACS.Cli` 1.5.14 → **1.5.18** (release event +
   `--bind` → DI-sibling auto-pull +
   `PreloadBindAssemblies` ordering fix)
 

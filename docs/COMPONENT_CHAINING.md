@@ -36,6 +36,7 @@ embedders bypassing the CLI need to either include them in
 | `--wasip2` | `WACS.WASI.Preview2`<br>`WACS.WASI.Preview2.DependencyInjection` | Typed `[WitSource]` interfaces (Preview 2)<br>Bundle + impl classes for direct-link emit |
 | `--wasi-nn` | adds `WACS.WASI.NN`<br>`WACS.WASI.NN.DependencyInjection`<br>`WACS.WASI.NN.OnnxRuntime` | wasi-nn typed surface<br>`Tensor` / `Graph` / `GraphExecutionContext` / `Error` impls + `WasiPreview2NNBundle` composite<br>ONNX backend (default; swap with `--bind` for other backends) |
 | `--wasi-threads` | adds `WACS.WASI.Threads` | `wasi:thread-spawn` |
+| `--bind <path-to-Wacs.WASI.NN.LlamaSharp.dll>` | auto-pulls `WACS.WASI.NN` + `WASI.NN.DependencyInjection`<br>(LoadFromContext: `LLamaSharp` + `LLamaSharp.Backend.Cpu` natives + `Microsoft.Extensions.*`) | GGUF / llama.cpp backend. The `--bind` walk resolves the typed-surface + DI siblings automatically; the LlamaSharp NuGet's transitive deps ride along via the project's `EnableDynamicLoading` bin layout. |
 | Custom host binding | `--bind <Asm>` | Any `IBindable` host package (game APIs, custom imports, etc.) |
 
 **Why both `WASI.NN` and `WASI.NN.DependencyInjection`?** Typed
@@ -120,16 +121,106 @@ What this does:
   the guest at `/models` (matching wasmtime's mount-pair syntax)
 
 For other wasi-nn backends, swap the ONNX default with
-`--bind`:
+`--bind`. Backends other than ONNX aren't bundled with the CLI
+(round-1 plumbing only ships `Wacs.WASI.NN.OnnxRuntime`); pass
+the explicit path to the backend assembly instead:
 
 ```bash
-# ML.NET-flavored ORT wrapping
-wacs run my.component.wasm --wasip2 --wasi-nn --bind Wacs.WASI.NN.MLNet
+# ML.NET-flavored ORT wrapping (path to the backend assembly's bin)
+wacs run my.component.wasm --wasip2 \
+    --bind <wacs-source>/Wacs.WASI/Wacs.WASI.NN/Wacs.WASI.NN.MLNet/bin/Release/net8.0/Wacs.WASI.NN.MLNet.dll
 
-# LlamaSharp / GGUF
+# LlamaSharp / GGUF (see GGUF section below for a fuller walkthrough)
 WACS_WASINN_GGUF_DIR=./models \
-  wacs run my.component.wasm --wasip2 --wasi-nn --bind Wacs.WASI.NN.LlamaSharp
+  wacs run my.component.wasm --wasip2 \
+    --bind <wacs-source>/Wacs.WASI/Wacs.WASI.NN/Wacs.WASI.NN.LlamaSharp/bin/Release/net8.0/Wacs.WASI.NN.LlamaSharp.dll
 ```
+
+`--bind` automatically pulls `WACS.WASI.NN` +
+`WACS.WASI.NN.DependencyInjection` onto host-packages when the
+bound assembly's identity starts with `Wacs.WASI.NN.` — same DI
+auto-wire, no extra flags. The backend csproj's
+`<EnableDynamicLoading>true</EnableDynamicLoading>` ships the
+NuGet transitive deps next to the assembly so the
+LoadFromContext probe satisfies them locally.
+
+### GGUF inference example (LlamaSharp backend)
+
+End-to-end run of a Qwen / Llama / Mistral / etc. GGUF through a
+wasip2 component that uses `wasi:nn/graph.load-by-name` (the
+WasmEdge convention: input + output U8 tensors carrying UTF-8
+prompt / response bytes; LlamaSharp does tokenization + chat
+templating + sampling host-side).
+
+**Setup** — drop GGUFs into a directory and tell the LlamaSharp
+backend where to find them. The backend scans `*.gguf` in the
+top-level dir at startup; each file registers under its
+filename-sans-extension as the load-by-name key:
+
+```sh
+mkdir -p ./models
+# Example: pull a small Qwen quant
+huggingface-cli download Qwen/Qwen2.5-0.5B-Instruct-GGUF \
+    qwen2.5-0.5b-instruct-q4_k_m.gguf \
+    --local-dir ./models
+
+export WACS_WASINN_GGUF_DIR="$(pwd)/models"
+```
+
+**Build the backend assembly** (the project's bin will carry
+LLamaSharp.dll, LLamaSharp.Backend.Cpu's RID-specific native
+dylibs / .so / .dll, and the Microsoft.Extensions.*
+transitives, all from `EnableDynamicLoading`):
+
+```sh
+dotnet build Wacs.WASI/Wacs.WASI.NN/Wacs.WASI.NN.LlamaSharp -c Release
+```
+
+**Run** — the guest calls `load_by_name("qwen2.5-0.5b-instruct-q4_k_m")`:
+
+```sh
+LLAMA=$(realpath Wacs.WASI/Wacs.WASI.NN/Wacs.WASI.NN.LlamaSharp/bin/Release/net8.0/Wacs.WASI.NN.LlamaSharp.dll)
+
+wacs run my-llm.component.wasm \
+    --wasip2 \
+    --bind "$LLAMA"
+```
+
+What happens under the hood:
+
+1. `--bind <path>` triggers `BindingLoader.LoadFromAssembly` →
+   the LlamaSharp backend assembly lands in `LoadFromContext`.
+   The deps.json sitting next to it (from
+   `EnableDynamicLoading`) tells the resolver where to find
+   `LLamaSharp.dll` + native runtimes.
+2. Sub-gap-24a auto-pull: the `--bind`'s
+   `Wacs.WASI.NN.LlamaSharp` identity matches the
+   `Wacs.WASI.NN.*` prefix → `WACS.WASI.NN` +
+   `WACS.WASI.NN.DependencyInjection` get added to
+   host-packages so the resolver has full WitSource coverage.
+3. CLI pre-loads all `--bind` paths into AppDomain BEFORE
+   constructing `WasiPreview2RuntimeScope` (gap-26 ordering
+   fix).
+4. Scope construction's `ReflectivelyAddWasiNN` walks AppDomain
+   (gap-25 fallback), finds `Wacs.WASI.NN.LlamaSharp`, calls
+   `LlamaSharpBackend.FromPaths(<env-driven-registry>)`,
+   wires the backend into BOTH `Backends[GGML]` AND
+   `LoadByNameBackend` on the DI's `WasiNNConfiguration`.
+5. Guest `load_by_name(...)` direct-links to
+   `GraphFuncsImpl.LoadByName` (gap-24 fix), which routes
+   through `LoadByNameBackend.LoadGraphByName` directly —
+   the byte-flow indirection is bypassed (a multi-GB GGUF
+   would otherwise force a multi-GB host copy on every load).
+6. `compute(...)` runs llama.cpp's generation loop host-side;
+   the U8 output tensor lifts back through the canonical-ABI
+   `list<tuple<string, own<tensor>>>` return (PR #128
+   gaps 22 + 24-26).
+
+For other backend NuGets / GPU runtimes, swap
+`LLamaSharp.Backend.Cpu` in `Wacs.WASI.NN.LlamaSharp.csproj`
+with `LLamaSharp.Backend.Cuda12` / `.Vulkan` / `.MacMetal` and
+rebuild. No source changes; the `EnableDynamicLoading` bin
+copies whichever backend NuGet's natives are pulled.
 
 ### Embedder (one-shot)
 
