@@ -18,6 +18,14 @@ on:
       # `WACS-HostBindings-v*` publishes the abstractions package
       # + the Roslyn source generator together (both 0.1.0 today).
       - 'WACS-HostBindings-v*.*.*'
+      # `WACS-WASI-NN-v*` publishes the wasi-nn family — the
+      # backend-agnostic core, the DI bundle (concrete resource
+      # impls + composite WasiPreview2NNBundle), and the three
+      # backend siblings (ONNX Runtime, ML.NET, LlamaSharp).
+      # Versioned together because the bundle's [WitSource]
+      # forwarding properties expose interfaces from the core
+      # package — a stale core breaks the composite.
+      - 'WACS-WASI-NN-v*.*.*'
 
 jobs:
   build-and-publish:
@@ -91,6 +99,28 @@ jobs:
           - path: Wacs.HostBindings/Wacs.HostBindings.SourceGen
             package_name: WACS.HostBindings.SourceGen
             tag_prefix: WACS-HostBindings-v
+
+          # `WACS-WASI-NN-v*` → wasi-nn family. Backend-agnostic
+          # core + DI bundle (resource impls + composite
+          # WasiPreview2NNBundle) + three backends. Each csproj
+          # carries its own <Version>; the tag value tracks the
+          # core package's version (the dependency floor for the
+          # rest).
+          - path: Wacs.WASI/Wacs.WASI.NN/Wacs.WASI.NN
+            package_name: WACS.WASI.NN
+            tag_prefix: WACS-WASI-NN-v
+          - path: Wacs.WASI/Wacs.WASI.NN/Wacs.WASI.NN.DependencyInjection
+            package_name: WACS.WASI.NN.DependencyInjection
+            tag_prefix: WACS-WASI-NN-v
+          - path: Wacs.WASI/Wacs.WASI.NN/Wacs.WASI.NN.OnnxRuntime
+            package_name: WACS.WASI.NN.OnnxRuntime
+            tag_prefix: WACS-WASI-NN-v
+          - path: Wacs.WASI/Wacs.WASI.NN/Wacs.WASI.NN.MLNet
+            package_name: WACS.WASI.NN.MLNet
+            tag_prefix: WACS-WASI-NN-v
+          - path: Wacs.WASI/Wacs.WASI.NN/Wacs.WASI.NN.LlamaSharp
+            package_name: WACS.WASI.NN.LlamaSharp
+            tag_prefix: WACS-WASI-NN-v
 
     steps:
       - name: Checkout code
