@@ -94,6 +94,39 @@ namespace Wacs.ComponentModel.CanonicalABI
             => BinaryPrimitives.ReadInt32LittleEndian(
                 mem.AsSpan(offset, 4));
 
+        // === Per-field readers used by the list-of-tuple PARAM lift
+        // (gap 22, round-17 follow-up). DirectLinkedImportEmit's
+        // EmitLiftListOfRecordOrTuple resolves these via
+        // ResolveLoadMethod(fieldType); each tuple field is read at
+        // its canon-ABI offset within the per-element area in one
+        // pass and the constructed ValueTuple is stelem'd into the
+        // result array. Symmetric with the StoreXxx writers above.
+
+        public static sbyte ReadI8(MemoryInstance mem, int offset)
+            => (sbyte)mem.AsSpan(offset, 1)[0];
+        public static short ReadI16LE(MemoryInstance mem, int offset)
+            => BinaryPrimitives.ReadInt16LittleEndian(
+                mem.AsSpan(offset, 2));
+        public static long ReadI64LE(MemoryInstance mem, int offset)
+            => BinaryPrimitives.ReadInt64LittleEndian(
+                mem.AsSpan(offset, 8));
+        public static ulong ReadU64LE(MemoryInstance mem, int offset)
+            => BinaryPrimitives.ReadUInt64LittleEndian(
+                mem.AsSpan(offset, 8));
+        // ReadSingleLittleEndian / ReadDoubleLittleEndian are .NET 5+;
+        // bit-cast through int/long for netstandard2.1 compatibility,
+        // matching the StoreF32/StoreF64 pattern.
+        public static float ReadF32LE(MemoryInstance mem, int offset)
+            => BitConverter.Int32BitsToSingle(
+                BinaryPrimitives.ReadInt32LittleEndian(
+                    mem.AsSpan(offset, 4)));
+        public static double ReadF64LE(MemoryInstance mem, int offset)
+            => BitConverter.Int64BitsToDouble(
+                BinaryPrimitives.ReadInt64LittleEndian(
+                    mem.AsSpan(offset, 8)));
+        public static bool ReadBool(MemoryInstance mem, int offset)
+            => mem.AsSpan(offset, 1)[0] != 0;
+
         /// <summary>
         /// Store a UTF-8 string into wasm linear memory and write
         /// the (ptr, len) pair to the retArea slot. Allocates a

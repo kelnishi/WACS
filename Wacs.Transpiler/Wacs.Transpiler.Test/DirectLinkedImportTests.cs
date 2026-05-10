@@ -10,8 +10,10 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using Wacs.ComponentModel.CanonicalABI;
 using Wacs.ComponentModel.Runtime;
 using Wacs.ComponentModel.Runtime.Parser;
+using Wacs.Core.Runtime.Types;
 using Wacs.Core;
 using Wacs.Core.Runtime;
 using Wacs.Core.Text;
@@ -339,6 +341,20 @@ namespace Wacs.Transpiler.Test
                 Item = "load-bytes")]
             Result<ILoaderGraph, ILoaderError> LoadBytes(
                 byte[][] builder, byte encoding, byte target);
+
+            // Mirrors wasi:nn/inference.compute's shape:
+            //   compute: func(inputs: list<tuple<string, own<tensor>>>)
+            //     -> result<list<tuple<string, own<tensor>>>, own<error>>
+            // PARAM lift: list-of-tuple-with-string-and-resource (gap
+            // 22 follow-up — round-13's byte[][] PARAM lift was the
+            // sibling). RETURN: Result-wrapped list-of-tuple — Ok arm
+            // exercises EmitResultArmStore's aggregate-array branch
+            // at valueOffset != 0 (gap 22).
+            [WitSource(@"compute: func(inputs: list<tuple<string, own<graph>>>) -> result<list<tuple<string, own<graph>>>, own<error>>;",
+                Package = "my:test@1.0.0", Interface = "loader-env",
+                Item = "compute")]
+            Result<(string, ILoaderGraph)[], ILoaderError> Compute(
+                (string, ILoaderGraph)[] inputs);
         }
 
         public sealed class TestLoaderFuncs : ILoaderFuncs
@@ -349,6 +365,13 @@ namespace Wacs.Transpiler.Test
             public byte[][]? LastBuilder { get; private set; }
             public byte LastEncoding { get; private set; }
             public byte LastTarget { get; private set; }
+
+            // Last-call capture for Compute (gap 22) — the lifted
+            // (string, IGraph)[] inputs the guest staged. The return
+            // value is built from these so the test can verify both
+            // PARAM lift (Compute receives correct names + handles)
+            // and RETURN store (guest reads back what we returned).
+            public (string, ILoaderGraph)[]? LastInputs { get; private set; }
 
             public Result<ILoaderGraph, ILoaderError> Load()
                 => Result<ILoaderGraph, ILoaderError>.FromOk(
@@ -362,6 +385,23 @@ namespace Wacs.Transpiler.Test
                 LastTarget = target;
                 return Result<ILoaderGraph, ILoaderError>.FromOk(
                     new TestLoaderGraph());
+            }
+
+            public Result<(string, ILoaderGraph)[], ILoaderError> Compute(
+                (string, ILoaderGraph)[] inputs)
+            {
+                LastInputs = inputs;
+                // Echo back the inputs with the names prefixed by
+                // "out_" — gives the test a deterministic check
+                // that names round-trip BOTH lift and store. Reuse
+                // the same IGraph instances so handles round-trip
+                // through the resource registry too.
+                var outputs = new (string, ILoaderGraph)[inputs.Length];
+                for (int i = 0; i < inputs.Length; i++)
+                    outputs[i] = ("out_" + inputs[i].Item1,
+                        inputs[i].Item2);
+                return Result<(string, ILoaderGraph)[], ILoaderError>
+                    .FromOk(outputs);
             }
         }
 
@@ -8143,6 +8183,243 @@ namespace Wacs.Transpiler.Test
             var resolved = resources.GetResource(typeof(ILoaderGraph),
                 graphHandle);
             Assert.IsType<TestLoaderGraph>(resolved);
+        }
+
+        [Fact]
+        public void DirectLinkedImport_FreeFnComputeRoundtrip_LiftsAndStoresListOfTupleStringOwn()
+        {
+            // Closes gap 22 (round-15 follow-up). The wasi-nn SLM's
+            // `wasi:nn/inference.compute(inputs: list<tuple<string,
+            // own<tensor>>>) -> result<list<tuple<string, own<tensor>>>,
+            // own<error>>` had two missing direct-link branches:
+            //
+            // (a) PARAM lift `(string, IRes)[]` —
+            //     CanonicalSlotCount didn't recognize array-of-tuple-
+            //     of-flat-fields, so CanEmitDirect rejected the
+            //     binding; compute fell back to delegate dispatch
+            //     and the SLM saw mis-named outputs.
+            //
+            // (b) RETURN store `Result<list<tuple<...>>, IRes>`'s
+            //     Ok-arm — IsResultArmStorable accepted only
+            //     primitive-element / string-element arrays in the
+            //     variable-length branch; the tuple-of-flat-fields
+            //     element type fell through to the fixed-width
+            //     fallback that stores garbage at the arm offset.
+            //
+            // Post-fix this test exercises both:
+            //   PARAM: guest stages 3 (string, IGraph) tuples; the
+            //          host receives them with names + handles intact.
+            //   RETURN: host echoes the tuples with names prefixed
+            //           "out_"; guest reads the Ok-arm outer (ptr,
+            //           count) at retArea+4 (valueOffset != 0) +
+            //           per-element (str_ptr, str_len, handle) at
+            //           outer_ptr+i*12.
+
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
+
+            // Memory layout (LE i32s):
+            //   @128: "alpha" (5 bytes)
+            //   @136: "beta"  (4 bytes)
+            //   @144: "gamma" (5 bytes)
+            //   @256..292: 3-element input list (12 bytes per element)
+            //              (str_ptr, str_len, handle)
+            //   @512..524: retArea (Result Ok layout: u8 disc + 8-byte
+            //              outer-list (ptr, count) at valueOffset=4)
+            //   @1024+: cabi_realloc bump area
+            var wat = @"(module
+  (type $tc (func (param i32 i32 i32)))
+  (type $tr (func (param i32 i32 i32 i32) (result i32)))
+  (import ""my:test/loader-env@1.0.0"" ""compute""
+    (func $imp_compute (type $tc)))
+
+  (memory (export ""memory"") 1)
+  (global $next (mut i32) (i32.const 1024))
+
+  ;; Bump allocator: ignore (orig_ptr, orig_size, align), grow by
+  ;; new_size, return the prior $next. Sufficient for one-shot
+  ;; tests that only allocate, never free.
+  (func $cabi_realloc (type $tr)
+    global.get $next
+    global.get $next
+    local.get 3
+    i32.add
+    global.set $next)
+  (export ""cabi_realloc"" (func $cabi_realloc))
+
+  (func (export ""prepare"")
+        (param $h0 i32) (param $h1 i32) (param $h2 i32)
+    ;; Stage UTF-8 bytes for the input names.
+    ;; ""alpha"" @128: a=0x61 l=0x6c p=0x70 h=0x68 a=0x61
+    i32.const 128 i32.const 0x68706c61 i32.store
+    i32.const 132 i32.const 0x61       i32.store8
+    ;; ""beta"" @136: b=0x62 e=0x65 t=0x74 a=0x61
+    i32.const 136 i32.const 0x61746562 i32.store
+    ;; ""gamma"" @144: g=0x67 a=0x61 m=0x6d m=0x6d a=0x61
+    i32.const 144 i32.const 0x6d6d6167 i32.store
+    i32.const 148 i32.const 0x61       i32.store8
+
+    ;; Build the input table at @256.
+    ;; element 0: (ptr=128, len=5, handle=$h0)
+    i32.const 256 i32.const 128 i32.store
+    i32.const 260 i32.const 5   i32.store
+    i32.const 264 local.get $h0 i32.store
+    ;; element 1: (ptr=136, len=4, handle=$h1)
+    i32.const 268 i32.const 136 i32.store
+    i32.const 272 i32.const 4   i32.store
+    i32.const 276 local.get $h1 i32.store
+    ;; element 2: (ptr=144, len=5, handle=$h2)
+    i32.const 280 i32.const 144 i32.store
+    i32.const 284 i32.const 5   i32.store
+    i32.const 288 local.get $h2 i32.store)
+
+  (func (export ""call_compute"") (result i32)
+    i32.const 256   ;; inputs_ptr
+    i32.const 3     ;; inputs_count
+    i32.const 512   ;; retArea
+    call $imp_compute
+    ;; Return retArea so the test can probe disc + Ok payload.
+    i32.const 512)
+
+  ;; --- Memory probes (avoid reflection into module-class fields) ---
+  (func (export ""read_u8"") (param $p i32) (result i32)
+    local.get $p i32.load8_u)
+  (func (export ""read_i32"") (param $p i32) (result i32)
+    local.get $p i32.load))";
+
+            var runtime = new WasmRuntime();
+            runtime.BindHostFunction<Action<int, int, int>>(
+                ("my:test/loader-env@1.0.0", "compute"),
+                (_, _, _) => throw new InvalidOperationException(
+                    "stub for compute must not be invoked — "
+                    + "direct-link should bypass this handler."));
+
+            var module = TextModuleParser.ParseWat(wat);
+            var moduleInst = runtime.InstantiateModule(module);
+
+            var hostAsm = typeof(IEnv).Assembly;
+            var resolver = HostPackageResolver.FromAssemblies(
+                new[] { hostAsm },
+                bundleType: typeof(LoaderBundle),
+                resourcesType: typeof(TestResources));
+
+            var options = new TranspilerOptions
+            {
+                Resolver = resolver,
+                HostPackages = new[] { hostAsm },
+            };
+            var transpiler = new ModuleTranspiler(
+                "Wacs.Test.LoaderCompute", options);
+            var result = transpiler.Transpile(moduleInst, runtime,
+                "WasmModule");
+
+            // Compute MUST direct-link — that's the gap-22 fix.
+            Assert.Equal(1, options.ResolverImportBindings!.Count);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/loader-env@1.0.0_compute")] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for compute must not be invoked"),
+                });
+
+            var resources = new TestResources();
+            var loaderFuncs = new TestLoaderFuncs();
+            var bundle = new LoaderBundle(loaderFuncs);
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            // Pre-mint 3 input handles. The host's PARAM lift will
+            // call ctx.Resources.GetResource(typeof(ILoaderGraph),
+            // handle) per element to resolve them back into the
+            // typed C# tuple.
+            var graph0 = new TestLoaderGraph();
+            var graph1 = new TestLoaderGraph();
+            var graph2 = new TestLoaderGraph();
+            int h0 = resources.AllocateResource(typeof(ILoaderGraph), graph0);
+            int h1 = resources.AllocateResource(typeof(ILoaderGraph), graph1);
+            int h2 = resources.AllocateResource(typeof(ILoaderGraph), graph2);
+
+            var prepare = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("prepare"))!;
+            prepare.Invoke(instance, new object[] { h0, h1, h2 });
+
+            var callCompute = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_compute"))!;
+            object? raw = callCompute.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<int>(raw);
+            int retArea = (int)raw;
+            Assert.Equal(512, retArea);
+
+            // ---- PARAM-lift verification --------------------------
+            // The host stub captured what it received from direct-
+            // link. Lifted tuple shape: (lifted name, resolved IGraph).
+            Assert.NotNull(loaderFuncs.LastInputs);
+            Assert.Equal(3, loaderFuncs.LastInputs!.Length);
+            Assert.Equal("alpha", loaderFuncs.LastInputs[0].Item1);
+            Assert.Same(graph0, loaderFuncs.LastInputs[0].Item2);
+            Assert.Equal("beta", loaderFuncs.LastInputs[1].Item1);
+            Assert.Same(graph1, loaderFuncs.LastInputs[1].Item2);
+            Assert.Equal("gamma", loaderFuncs.LastInputs[2].Item1);
+            Assert.Same(graph2, loaderFuncs.LastInputs[2].Item2);
+
+            // ---- RETURN-store verification ------------------------
+            // Read disc + outer (ptr, count) + per-element fields
+            // through the wat's `read_u8` / `read_i32` exports.
+            // Cleaner than reflecting into the module's
+            // ThinContext.Memories[0] private state.
+            var readU8 = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("read_u8"))!;
+            var readI32 = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("read_i32"))!;
+            int Read8(int p) => (int)readU8.Invoke(instance,
+                new object[] { p })!;
+            int Read32(int p) => (int)readI32.Invoke(instance,
+                new object[] { p })!;
+
+            int disc = Read8(retArea);
+            Assert.Equal(0, disc);  // Ok arm
+
+            int outerPtr = Read32(retArea + 4);
+            int outerCount = Read32(retArea + 8);
+            Assert.Equal(3, outerCount);
+            // Bump allocator started at 1024; outer buffer is the
+            // first allocation at compute's call site.
+            Assert.True(outerPtr >= 1024,
+                "outer ptr should land in the bump-allocator's range, was "
+                + outerPtr);
+
+            var expectedNames = new[] { "out_alpha", "out_beta", "out_gamma" };
+            // The host echoed the same IGraph instances; the RETURN
+            // store calls AllocateResource per element, so the handle
+            // INTEGERS in guest memory are FRESH (not the input
+            // handles h0/h1/h2). What we assert is that the resolved
+            // instance matches the input C# object — that's the
+            // canonical-ABI ownership-transfer semantics.
+            var expectedInstances = new[] { graph0, graph1, graph2 };
+            for (int i = 0; i < 3; i++)
+            {
+                int strPtr = Read32(outerPtr + i * 12 + 0);
+                int strLen = Read32(outerPtr + i * 12 + 4);
+                int handle = Read32(outerPtr + i * 12 + 8);
+
+                Assert.Equal(expectedNames[i].Length, strLen);
+                var nameBytes = new byte[strLen];
+                for (int b = 0; b < strLen; b++)
+                    nameBytes[b] = (byte)Read8(strPtr + b);
+                Assert.Equal(expectedNames[i],
+                    System.Text.Encoding.UTF8.GetString(nameBytes));
+
+                Assert.NotEqual(0, handle);
+                var resolved = resources.GetResource(
+                    typeof(ILoaderGraph), handle);
+                Assert.Same(expectedInstances[i], resolved);
+            }
         }
 
         [Fact]

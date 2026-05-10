@@ -1,5 +1,110 @@
 # Changelog
 
+## WACS.Cli 1.5.13 / WACS.Transpiler.Lib 0.8.9 / WACS.ComponentModel 0.3.4 — `list<tuple<string, own<R>>>` PARAM lift + Result-Ok arm store (closes wasi-nn SLM compute)
+
+The wasi-nn SLM's `wasi:nn/inference.compute(inputs:
+list<tuple<string, own<tensor>>>) -> result<list<tuple<string,
+own<tensor>>>, own<error>>` had two missing direct-link branches.
+Round-15-followup verification (gap 22) showed compute() reaching
+ORT and returning, but the guest finding no `"logits"` output —
+because the call wasn't direct-linking and the legacy delegate
+path was corrupting the per-tuple string field.
+
+### PARAM lift `(T1,...,Tn)[]`
+
+`CanonicalSlotCount` and `EmitLiftForType` didn't recognize an
+array-of-tuple-of-flat-fields. CanEmitDirect rejected compute,
+forcing the call onto the legacy IBindable handler whose
+list<tuple<string, own<R>>> lift mis-bound the string field.
+
+Fix:
+- `CanonicalSlotCount` adds a branch for `(T1,...,Tn)[]` where
+  each Ti is a flat field (primitive / string / byte[] / Option /
+  resource). Returns 2 slots: outer (i32 ptr, i32 count).
+- `EmitLiftForType` adds a branch dispatching to a new
+  `EmitLiftListOfRecordOrTuple` helper.
+- `EmitLiftListOfRecordOrTuple` allocates a `T[]` of size
+  `count`, walks per-element offsets, calls
+  `EmitInlineRecordOrTupleLift` for each element, stelems into
+  the array.
+- `EmitInlineRecordOrTupleLift` reads each tuple field at its
+  canon-ABI offset, dispatches via `EmitLiftFieldFromMem`
+  (string → ReadI32×2 + LiftUtf8; byte[] → ReadI32×2 +
+  LiftPrim<byte>; resource → ReadI32 + Resources.GetResource;
+  primitive → ReadXxxLE), constructs the ValueTuple via
+  `ResolveValueTupleCtor`.
+- New `ResolveLoadMethod` helper + `LoadMethodCache` map types
+  to `PrimitiveStore.ReadXxxLE` Methods.
+
+### RETURN store `Result<list<tuple<string, own<R>>>, own<error>>`'s Ok arm
+
+`IsResultArmStorable` accepted only primitive-element /
+string-element arrays in the variable-length branch; the
+list-of-tuple-of-flat-fields case fell through to the
+fixed-width fallback.
+
+Fix:
+- `IsResultArmStorable` extends the array branch to accept
+  `IsTupleOfPrimitives` / `IsTupleOfFlatFields` /
+  `IsRecordOf...` element types.
+- `EmitResultArmStore` adds an `isAggregateArray` branch
+  that dispatches to `EmitListOfRecordOrTupleReturn` at the
+  arm's `valueOffset` (so the (outer ptr, count) pair lands
+  at retArea+valueOffset+0/+4).
+- `EmitListOfRecordOrTupleReturn` refactored to take an
+  optional `baseOffset` parameter for the (ptr, count)
+  pair write — same approach as round-13's per-arm-offset
+  refactors.
+
+### PrimitiveStore additions
+
+`Wacs.ComponentModel.CanonicalABI.PrimitiveStore` gains seven
+read helpers: `ReadI8`, `ReadI16LE`, `ReadI64LE`, `ReadU64LE`,
+`ReadF32LE`, `ReadF64LE`, `ReadBool`. Mirrors the existing Store
+family. Used by direct-link's per-field-from-memory lift; the
+F32/F64 helpers bit-cast through Int32/Int64 for
+netstandard2.1 (matching the StoreF32/StoreF64 pattern, since
+`BinaryPrimitives.ReadSingle/DoubleLittleEndian` are .NET 5+).
+
+### Test surface
+
+New `DirectLinkedImport_FreeFnComputeRoundtrip_LiftsAndStoresListOfTupleStringOwn`
+in `Wacs.Transpiler.Test/DirectLinkedImportTests.cs`. The wat
+fixture stages 3 (string, IGraph) tuples in linear memory,
+calls compute, and reads back the OK-arm outer (ptr, count) +
+per-element fields. Verifies:
+
+1. `compute` direct-links (binding count = 1)
+2. PARAM lift: host stub captures lifted `(string, IGraph)[]`
+   with names "alpha", "beta", "gamma" matching what the guest
+   staged + the same IGraph instances resolved from the
+   pre-allocated handles
+3. RETURN store: disc=0, outer count=3; per-element name +
+   handle written at outer_ptr + i*12; handles round-trip
+   through `Resources.GetResource` to the same IGraph
+   instances the host returned
+4. The host echoes inputs with names prefixed `out_` — names
+   round-trip BOTH PARAM lift and RETURN store
+
+`TestLoaderFuncs.LastInputs` capture confirms the lift side;
+guest-readable memory probes via `read_u8` / `read_i32`
+exports confirm the store side.
+
+Wacs.Transpiler.Test went from 772 → 773 (1 added).
+All other suites unchanged.
+
+### Versions
+
+- `WACS.ComponentModel` 0.3.3 → **0.3.4** (PrimitiveStore Read*
+  helpers)
+- `WACS.Transpiler.Lib` 0.8.8 → **0.8.9** (PARAM lift +
+  RETURN store + ResolveLoadMethod)
+- `WACS.Cli` 1.5.12 → **1.5.13** (release event)
+
+(Untouched: `WACS`, `WASI.Preview1`, `.Preview2`,
+`.Preview2.DI`, `.WASI.NN`, `.WASI.NN.DI`, `.WASI.NN.OnnxRuntime`,
+`WACS.HostBindings.Abstractions`.)
+
 ## WACS.Cli 1.5.12 / WACS.WASI.NN.OnnxRuntime 0.2.2 — bundled ORT NuGet 1.21.0 → 1.22.0 (the version that actually relaxes GroupQueryAttention)
 
 Round 15's bump to 1.21.0 was based on the round-14 hypothesis
