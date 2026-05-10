@@ -57,9 +57,69 @@ path — no explicit `AddBackend` needed.)
 - **`OnnxBackend : IBackend`** — implements `LoadGraph(builders, target)` for byte-loaded
   ONNX models. Suitable for the SLM / inference workflow where the guest reads model
   bytes and passes them through `wasi:nn/graph.load`
+- **`OnnxBackendOptions` / `OnnxExecutionProvider`** — typed config for execution-provider
+  selection (CoreML / CUDA / DirectML / ROCm, with auto-detect + CPU fallback)
 - **`WasiNNOnnxBindable : IBindable`** — parameterless adapter for `--bind`. Auto-pulled
   by the CLI's `--wasi-nn` shorthand
 - `[assembly: WasiHostPackage]` — picked up by `runtime.AutoDiscoverHostPackages()`
+
+## Hardware acceleration
+
+The parameterless `new OnnxBackend()` reads `WACS_WASINN_ONNX_EP` and picks a
+platform-appropriate execution provider out of the box. Failure to load an EP silently
+falls back to CPU — out-of-box behavior favors "inference still works" over "EP
+misconfiguration is loud".
+
+| OS              | Auto pick (default)          | Notes                                                            |
+|-----------------|------------------------------|------------------------------------------------------------------|
+| macOS (arm64/x64) | **CoreML** (CPU + GPU)     | EP symbol ships in stock `Microsoft.ML.OnnxRuntime` — no extra NuGet |
+| Windows         | **DirectML**                 | Add `Microsoft.ML.OnnxRuntime.DirectML` for full DML coverage    |
+| Linux           | **CUDA** then ROCm           | Requires CUDA toolkit / ROCm runtime on host                     |
+| Other           | CPU                          |                                                                  |
+
+Override via environment:
+
+```sh
+# Force CPU only (opt out of acceleration)
+WACS_WASINN_ONNX_EP=cpu wacs run my.wasm --wasip2 --wasi-nn
+
+# Force a specific provider
+WACS_WASINN_ONNX_EP=coreml wacs run my.wasm --wasip2 --wasi-nn
+WACS_WASINN_ONNX_EP=cuda   WACS_WASINN_ONNX_CUDA_DEVICE=1 wacs run my.wasm --wasip2 --wasi-nn
+WACS_WASINN_ONNX_EP=dml    wacs run my.wasm --wasip2 --wasi-nn
+WACS_WASINN_ONNX_EP=rocm   wacs run my.wasm --wasip2 --wasi-nn
+```
+
+Override via typed config (library embedders):
+
+```csharp
+using Wacs.WASI.NN.OnnxRuntime;
+using Microsoft.ML.OnnxRuntime;
+
+var backend = new OnnxBackend(new OnnxBackendOptions
+{
+    ExecutionProvider = OnnxExecutionProvider.CoreML,
+    CoreMLFlags = CoreMLFlags.COREML_FLAG_USE_CPU_AND_GPU
+                | CoreMLFlags.COREML_FLAG_ONLY_ENABLE_DEVICE_WITH_ANE,
+    FallbackToCpu = true,
+});
+```
+
+Full escape hatch (custom `SessionOptions` factory):
+
+```csharp
+var backend = new OnnxBackend(() =>
+{
+    var opts = new SessionOptions();
+    opts.AppendExecutionProvider_CUDA(deviceId: 0);
+    opts.GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL;
+    return opts;  // factory wins over OnnxBackendOptions
+});
+```
+
+`OnnxBackendOptions.FallbackToCpu = false` propagates EP-append failures as
+`ErrorCode.RuntimeError` at `graph.load` time — useful for environments where silent CPU
+fallback would mask a misconfiguration.
 
 ## Backend choice
 
