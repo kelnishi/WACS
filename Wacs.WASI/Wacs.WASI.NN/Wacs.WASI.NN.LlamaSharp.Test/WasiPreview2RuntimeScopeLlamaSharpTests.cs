@@ -7,6 +7,8 @@
 
 using System;
 using System.IO;
+using System.Reflection;
+using System.Runtime.Loader;
 using Wacs.Core.Runtime;
 using Wacs.WASI.NN.DependencyInjection;
 using Wacs.WASI.NN.Types;
@@ -30,6 +32,49 @@ namespace Wacs.WASI.NN.LlamaSharp.Test
     // can actually load a model.
     public class WasiPreview2RuntimeScopeLlamaSharpTests
     {
+        // Round-21 / gap-25 regression: TryLoadAssembly must
+        // resolve Wacs.WASI.NN.LlamaSharp regardless of which load
+        // context placed it in AppDomain. Pre-fix used
+        // Assembly.Load(name) only — missed --bind <path>
+        // assemblies in LoadFromContext. Post-fix walks
+        // AppDomain.CurrentDomain.GetAssemblies() on miss.
+        //
+        // The pure LoadFromContext path is hard to set up in xunit
+        // (any project-referenced assembly lands in the default
+        // context, so Assembly.Load(name) succeeds before the
+        // fallback fires). What this test verifies:
+        //   1. TryLoadAssembly returns the right Assembly object
+        //      for a name that's loadable. Smoke check that the
+        //      OR-of-two-paths logic doesn't break the happy path.
+        //   2. TryLoadAssembly returns null for a clearly-bogus
+        //      name. Confirms the AppDomain walk's
+        //      `IsDynamic`/malformed-metadata guards don't crash.
+        // The full LoadFromContext case is verified empirically in
+        // wasi-nn/WACS-GAPS.md round 21 (the CLI's --bind <path>
+        // flow lands LlamaSharp in LoadFromContext; the fallback
+        // closes the auto-wire path).
+        [Fact]
+        public void TryLoadAssembly_ResolvesKnownAndReturnsNullForBogus()
+        {
+            var tryLoad = typeof(WasiPreview2RuntimeScope).GetMethod(
+                "TryLoadAssembly",
+                BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.NotNull(tryLoad);
+
+            // Happy path — a referenced assembly resolves.
+            var llama = (Assembly?)tryLoad!.Invoke(null,
+                new object?[] { "Wacs.WASI.NN.LlamaSharp" });
+            Assert.NotNull(llama);
+            Assert.Equal("Wacs.WASI.NN.LlamaSharp",
+                llama!.GetName().Name);
+
+            // Negative path — clearly-bogus name returns null
+            // (caller treats this as "not loadable, skip").
+            var miss = (Assembly?)tryLoad.Invoke(null,
+                new object?[] { "NonexistentAssemblyName_qZ9_" });
+            Assert.Null(miss);
+        }
+
         [Fact]
         public void LoadByNameBackend_AutoWiredFromLlamaSharpAssembly()
         {

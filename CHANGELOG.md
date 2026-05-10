@@ -1,6 +1,6 @@
 # Changelog
 
-## WACS.Cli 1.5.15 / WACS.WASI.NN.DependencyInjection 0.2.1 / WACS.WASI.Preview2.DependencyInjection 0.1.3 — gap 24: `LoadByName` honors `LoadByNameBackend`; LlamaSharp auto-wires; `--bind` pulls WASI.NN siblings
+## WACS.Cli 1.5.16 / WACS.WASI.NN.DependencyInjection 0.2.1 / WACS.WASI.Preview2.DependencyInjection 0.1.4 — gaps 24 + 25: LlamaSharp / GGUF on the transpiler-direct-link path
 
 The wasi-nn LlamaSharp/GGUF harness (`guest-llm/`, Qwen2.5 0.5B
 Instruct Q4_K_M) tripped `"NotFound: no named-model resolver
@@ -61,6 +61,33 @@ with out-of-bounds memory access. The new `--wasi-nn-backend`
 flag suggested in round-19 isn't needed — the implicit
 `--bind` walk covers the same UX.
 
+### `TryLoadAssembly` AppDomain fallback (gap 25)
+
+Round-20 verification surfaced gap 25: with the LoadByName
+parity fix in, the auto-wire still silently no-op'd for
+`--bind <path-to-LlamaSharp.dll>` because
+`WasiPreview2RuntimeScope.TryLoadAssembly` used
+`Assembly.Load(name)` only. `Assembly.Load` searches the
+default load context's by-name registry; `--bind <path>`
+lands the assembly via `Assembly.LoadFrom` into the
+`LoadFromContext`, where the by-name lookup misses.
+
+Same architectural shape as the round-18 fix in
+`HostPackageResolver.TryFindResourceImpl`. `TryLoadAssembly`
+now walks `AppDomain.CurrentDomain.GetAssemblies()` on miss,
+matching by `Assembly.GetName().Name` (case-insensitive). The
+fallback skips dynamic assemblies and catches malformed-
+metadata exceptions from collectable contexts so a single
+hiccup can't blank out the search.
+
+The `TryFindResourceImpl` AppDomain walk and the new
+`TryLoadAssembly` AppDomain walk are deliberately
+duplicated (both ~25 LOC) rather than extracted into a
+shared helper — they're in different assemblies (resolver in
+`Wacs.Transpiler.Lib`, scope in `Wacs.WASI.Preview2.DependencyInjection`)
+and the cross-package coupling isn't worth a shared
+utility yet.
+
 ### Test surface
 
 - `Wacs.WASI.NN.Test/GraphFuncsImplLoadByNameTests` (3 tests):
@@ -81,9 +108,10 @@ flag suggested in round-19 isn't needed — the implicit
 
 - `WACS.WASI.NN.DependencyInjection` 0.2.0 → **0.2.1**
   (LoadByName routes through LoadByNameBackend)
-- `WACS.WASI.Preview2.DependencyInjection` 0.1.2 → **0.1.3**
-  (LlamaSharp auto-wire in `WasiPreview2RuntimeScope`)
-- `WACS.Cli` 1.5.14 → **1.5.15** (release event +
+- `WACS.WASI.Preview2.DependencyInjection` 0.1.2 → **0.1.4**
+  (LlamaSharp auto-wire in `WasiPreview2RuntimeScope` +
+  `TryLoadAssembly` AppDomain fallback)
+- `WACS.Cli` 1.5.14 → **1.5.16** (release event +
   `--bind` → DI-sibling auto-pull)
 
 (Untouched: `WACS`, `WASI.Preview1`, `.Preview2`, `.WASI.NN`,

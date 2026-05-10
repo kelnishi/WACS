@@ -511,10 +511,49 @@ namespace Wacs.WASI.Preview2.DependencyInjection
             return registry;
         }
 
+        // Resolve a named assembly across both .NET load contexts.
+        // First tries `Assembly.Load(name)` (the default context —
+        // covers project-referenced and CLR-resolved-by-name
+        // dependencies). On miss, walks `AppDomain.CurrentDomain
+        // .GetAssemblies()` to catch assemblies already loaded into
+        // the LoadFromContext via `Assembly.LoadFrom(path)` — the
+        // path the CLI's `--bind <path>` walks. Without the fallback,
+        // `--bind /path/to/Wacs.WASI.NN.LlamaSharp.dll` populates
+        // AppDomain but the auto-wire's Assembly.Load(name) misses
+        // it, the LlamaSharp backend never registers in the DI's
+        // WasiNNConfiguration, and `compute(...)` trips NotFound at
+        // first guest call (gap 25, round-20 verification).
+        //
+        // Mirror of the round-18 fix in HostPackageResolver
+        // .TryFindResourceImpl — same AppDomain-vs-default-context
+        // split, same fallback shape.
         private static Assembly? TryLoadAssembly(string name)
         {
-            try { return Assembly.Load(name); }
-            catch { return null; }
+            try
+            {
+                var asm = Assembly.Load(name);
+                if (asm != null) return asm;
+            }
+            catch { /* fall through to AppDomain walk */ }
+
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                if (asm.IsDynamic) continue;
+                try
+                {
+                    if (string.Equals(asm.GetName().Name, name,
+                        StringComparison.OrdinalIgnoreCase))
+                        return asm;
+                }
+                catch
+                {
+                    // Malformed metadata on a collectable / dynamic-
+                    // but-not-flagged assembly. Skip and keep walking;
+                    // a single-asm hiccup must not blank out the
+                    // search.
+                }
+            }
+            return null;
         }
 
         public void Dispose()
