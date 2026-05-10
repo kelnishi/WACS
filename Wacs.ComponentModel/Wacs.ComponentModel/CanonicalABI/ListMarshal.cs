@@ -161,5 +161,52 @@ namespace Wacs.ComponentModel.CanonicalABI
             }
             return result;
         }
+
+        /// <summary>
+        /// Lift <c>list&lt;list&lt;u8&gt;&gt;</c> (jagged
+        /// <c>byte[][]</c>) from guest memory. Outer header is
+        /// (i32 outer_ptr, i32 outer_count) at <paramref name="listPtr"/>
+        /// — well, the caller already split it: this method takes
+        /// outer_ptr + outer_count directly. Each element at
+        /// <c>outer_ptr + i * 8</c> is an inner (i32 inner_ptr,
+        /// i32 inner_len) pair; the inner bytes live at
+        /// <c>inner_ptr</c> for <c>inner_len</c> bytes.
+        ///
+        /// <para>Symmetric with
+        /// <see cref="PrimitiveStore.StoreByteArrayList"/> on the
+        /// store/lower side. Used by direct-link emit when a wasm
+        /// import takes a <c>list&lt;list&lt;u8&gt;&gt;</c> param —
+        /// the SLM's <c>wasi:nn/graph-funcs.load</c> is the
+        /// canonical example, with each inner buffer being one of
+        /// the model's serialized chunks.</para>
+        /// </summary>
+        public static byte[][] LiftByteArrayList(MemoryInstance memory,
+            int listPtr, int count)
+        {
+            if (count < 0)
+                throw new ArgumentOutOfRangeException(nameof(count),
+                    "list<list<u8>> count must be non-negative.");
+            var result = new byte[count][];
+            if (count == 0) return result;
+            // Read all (inner_ptr, inner_len) pairs in one mode-aware
+            // span; the inner-data spans are read per-element.
+            var pairs = MemoryMarshal.Cast<byte, int>(
+                memory.AsSpan(listPtr, count * 8));
+            for (int i = 0; i < count; i++)
+            {
+                var innerPtr = pairs[i * 2];
+                var innerLen = pairs[i * 2 + 1];
+                if (innerLen < 0)
+                    throw new ArgumentOutOfRangeException(nameof(innerLen),
+                        "list<u8> length must be non-negative.");
+                if (innerLen == 0)
+                {
+                    result[i] = Array.Empty<byte>();
+                    continue;
+                }
+                result[i] = memory.AsSpan(innerPtr, innerLen).ToArray();
+            }
+            return result;
+        }
     }
 }

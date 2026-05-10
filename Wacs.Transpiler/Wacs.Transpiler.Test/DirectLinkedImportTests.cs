@@ -343,14 +343,26 @@ namespace Wacs.Transpiler.Test
 
         public sealed class TestLoaderFuncs : ILoaderFuncs
         {
+            // Last-call captures so the LoadBytes regression test
+            // can verify the lifted byte[][] matches what the guest
+            // wrote into memory before the call.
+            public byte[][]? LastBuilder { get; private set; }
+            public byte LastEncoding { get; private set; }
+            public byte LastTarget { get; private set; }
+
             public Result<ILoaderGraph, ILoaderError> Load()
                 => Result<ILoaderGraph, ILoaderError>.FromOk(
                     new TestLoaderGraph());
 
             public Result<ILoaderGraph, ILoaderError> LoadBytes(
                 byte[][] builder, byte encoding, byte target)
-                => Result<ILoaderGraph, ILoaderError>.FromOk(
+            {
+                LastBuilder = builder;
+                LastEncoding = encoding;
+                LastTarget = target;
+                return Result<ILoaderGraph, ILoaderError>.FromOk(
                     new TestLoaderGraph());
+            }
         }
 
         // Resource interface with a Result-of-resource method —
@@ -7987,39 +7999,83 @@ namespace Wacs.Transpiler.Test
         }
 
         [Fact]
-        public void DirectLinkedImport_FreeFnByteJaggedParam_GateAccepts()
+        public void DirectLinkedImport_FreeFnByteJaggedParam_LiftsListOfBytes()
         {
-            // Diagnoses where gap 18 actually lives. The SLM's
-            // `wasi:nn/graph-funcs.load` takes `list<list<u8>>` as
-            // its first parameter (the model bytes). If
-            // CanonicalSlotCount doesn't recognize `byte[][]` as a
-            // direct-link parameter, the gate rejects the binding
-            // and falls back to legacy delegate dispatch — which
-            // doesn't propagate resource-arm AllocateResource
-            // through the result-lift, surfacing as wire handle 0.
+            // Closes gap 19. The SLM's `wasi:nn/graph-funcs.load`
+            // takes `list<list<u8>>` (i.e. byte[][]) as its first
+            // parameter — the model bytes. Pre-fix
+            // CanonicalSlotCount didn't recognize byte[][] as a
+            // direct-link param, so CanEmitDirect rejected the
+            // binding and load() fell back to delegate dispatch —
+            // which means the IBindable's WitBindings handler ran
+            // instead, allocating its OK-arm resource handle in a
+            // separate registry from the one the direct-link IL
+            // looks up against later (the SLM round-12-followup
+            // diagnosis).
             //
-            // This test asserts the SLM-shape load-bytes binding
-            // makes it through the direct-link gate (binding count
-            // would otherwise drop to 1 — only `load` would resolve,
-            // not `load-bytes`).
+            // Post-fix: byte[][] is recognized + the lift IL emits
+            // ListMarshal.LiftByteArrayList. The wasm guest writes
+            // the outer (ptr, count) header + per-element
+            // (inner_ptr, inner_len) pairs + inner buffers into
+            // its memory and calls the import; the host-side stub
+            // captures the lifted byte[][] and verifies it matches.
 
             InitRegistry.Reset();
             ModuleInit.Reset();
             MultiReturnMethodRegistry.Reset();
 
+            // Memory layout (bytes; little-endian i32s):
+            //   @0..16:   reserved
+            //   @16..24:  outer header (inner0_ptr=64, inner0_len=3)
+            //   @24..32:  outer header element 1 (inner1_ptr=80, inner1_len=4)
+            //   @64..67:  inner0 = 0x11 0x22 0x33
+            //   @80..84:  inner1 = 0xAA 0xBB 0xCC 0xDD
+            //
+            // call_load_bytes pushes:
+            //   builders_ptr = 16
+            //   builders_count = 2
+            //   encoding = 1
+            //   target = 0
+            //   retArea_ptr = 32  (8 bytes for disc + handle)
+            // and invokes load-bytes.
             var wat = @"(module
   (type $t0 (func (param i32 i32 i32 i32 i32)))
   (import ""my:test/loader-env@1.0.0"" ""load-bytes""
     (func $imp_load (type $t0)))
   (memory (export ""memory"") 1)
-  (func (export ""call_load_bytes"")
-    nop))";
+  (func (export ""prepare"")
+    ;; outer[0] = (64, 3)
+    i32.const 16   i32.const 64   i32.store
+    i32.const 20   i32.const 3    i32.store
+    ;; outer[1] = (80, 4)
+    i32.const 24   i32.const 80   i32.store
+    i32.const 28   i32.const 4    i32.store
+    ;; inner0 bytes
+    i32.const 64   i32.const 0x11 i32.store8
+    i32.const 65   i32.const 0x22 i32.store8
+    i32.const 66   i32.const 0x33 i32.store8
+    ;; inner1 bytes
+    i32.const 80   i32.const 0xAA i32.store8
+    i32.const 81   i32.const 0xBB i32.store8
+    i32.const 82   i32.const 0xCC i32.store8
+    i32.const 83   i32.const 0xDD i32.store8)
+  (func (export ""call_load_bytes"") (result i32)
+    i32.const 16     ;; builders_ptr
+    i32.const 2      ;; builders_count
+    i32.const 1      ;; encoding (Onnx)
+    i32.const 0      ;; target (Cpu)
+    i32.const 32     ;; retArea_ptr
+    call $imp_load
+    ;; Read the OK-arm handle from retArea+4 and return it.
+    i32.const 36
+    i32.load))";
 
             var runtime = new WasmRuntime();
             runtime.BindHostFunction<Action<int, int, int, int, int>>(
                 ("my:test/loader-env@1.0.0", "load-bytes"),
                 (_, _, _, _, _) => throw new InvalidOperationException(
-                    "stub for load-bytes must not be invoked"));
+                    "stub for load-bytes must not be invoked — direct-link "
+                    + "should bypass this handler entirely."));
 
             var module = TextModuleParser.ParseWat(wat);
             var moduleInst = runtime.InstantiateModule(module);
@@ -8040,9 +8096,53 @@ namespace Wacs.Transpiler.Test
             var result = transpiler.Transpile(moduleInst, runtime,
                 "WasmModule");
 
-            // If the gate rejects the byte[][] param shape, this is 0.
-            // Post-fix it should be 1.
+            // load-bytes must direct-link.
             Assert.Equal(1, options.ResolverImportBindings!.Count);
+
+            var importsProxy = ImportDispatcher.Create(
+                result.ImportsInterface!,
+                new Dictionary<string, Func<object?[], object?>>
+                {
+                    [InterfaceGenerator.SanitizeName(
+                        "my:test/loader-env@1.0.0_load-bytes")] = _ =>
+                        throw new InvalidOperationException(
+                            "IImports stub for load-bytes must not be invoked"),
+                });
+
+            var resources = new TestResources();
+            var loaderFuncs = new TestLoaderFuncs();
+            var bundle = new LoaderBundle(loaderFuncs);
+            var instance = Activator.CreateInstance(result.ModuleClass!,
+                new object[] { importsProxy, bundle, resources })!;
+
+            // Stage memory.
+            var prepare = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("prepare"))!;
+            prepare.Invoke(instance, Array.Empty<object>());
+
+            // Call load-bytes; expect the OK-arm IGraph handle.
+            var callLoadBytes = result.ExportsInterface!.GetMethod(
+                InterfaceGenerator.SanitizeName("call_load_bytes"))!;
+            object? raw = callLoadBytes.Invoke(instance,
+                Array.Empty<object>());
+            Assert.IsType<int>(raw);
+            int graphHandle = (int)raw;
+
+            // Host-side stub captured the lifted args.
+            Assert.NotNull(loaderFuncs.LastBuilder);
+            Assert.Equal(2, loaderFuncs.LastBuilder!.Length);
+            Assert.Equal(new byte[] { 0x11, 0x22, 0x33 },
+                loaderFuncs.LastBuilder[0]);
+            Assert.Equal(new byte[] { 0xAA, 0xBB, 0xCC, 0xDD },
+                loaderFuncs.LastBuilder[1]);
+            Assert.Equal((byte)1, loaderFuncs.LastEncoding);
+            Assert.Equal((byte)0, loaderFuncs.LastTarget);
+
+            // OK-arm handle came from WasiPreview2Resources (single
+            // registry, no split). Confirm by resolving it.
+            var resolved = resources.GetResource(typeof(ILoaderGraph),
+                graphHandle);
+            Assert.IsType<TestLoaderGraph>(resolved);
         }
 
         [Fact]

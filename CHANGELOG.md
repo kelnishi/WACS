@@ -1,5 +1,67 @@
 # Changelog
 
+## WACS.Cli 1.5.9 / WACS.Transpiler.Lib 0.8.8 / WACS.ComponentModel 0.3.3 — `byte[][]` PARAM direct-link (closes the wasi-nn SLM gap)
+
+The wasi-nn SLM's `wasi:nn/graph-funcs.load(builders: list<list<u8>>,
+encoding, target) -> result<own<graph>, own<error>>` had a
+`byte[][]` parameter that `CanonicalSlotCount` didn't recognize.
+`CanEmitDirect` rejected the binding, the call fell back to
+delegate dispatch through the IBindable's WitBindings handler, and
+the OK-arm `IGraph` handle landed in `host.Graphs` (WitBindings's
+own resource registry) instead of `WasiPreview2Resources`. The
+subsequent `[method]graph.init-execution-context` direct-linked
+correctly and looked up the handle in `WasiPreview2Resources` —
+miss, "Resource handle 4 is not registered."
+
+Fix: thread `byte[][]` through the direct-link IL emit pipeline:
+
+- `Wacs.ComponentModel.CanonicalABI.ListMarshal.LiftByteArrayList(
+   MemoryInstance memory, int listPtr, int count) -> byte[][]`
+  walks the outer (inner_ptr, inner_len) pair table and copies
+  each inner buffer out via `mem.AsSpan(...).ToArray()`. Symmetric
+  with the existing `PrimitiveStore.StoreByteArrayList` on the
+  store/lower side.
+- `DirectLinkedImportEmit.CanonicalSlotCount` recognizes
+  `typeof(byte[][])` as a 2-i32-slot wire shape (outer ptr, count).
+- `EmitLiftForType` adds a `byte[][]` branch that emits IL calling
+  the new helper.
+- New cached `LiftByteArrayListMethod` `MethodInfo`.
+
+Side effect: the SLM's `load` now direct-links cleanly. The OK-arm
+IGraph allocates in `WasiPreview2Resources` (the same registry the
+direct-link IL looks up), so `init-execution-context`'s subsequent
+`Resources.GetResource(IGraph, handle)` resolves correctly. Closes
+the wasi-nn handle path.
+
+Test surface: replaces round-10's gate-only
+`DirectLinkedImport_FreeFnByteJaggedParam_GateAccepts` with a true
+end-to-end test
+`DirectLinkedImport_FreeFnByteJaggedParam_LiftsListOfBytes`. The
+wasm fixture writes the (outer_ptr, outer_count) header + per-
+element (inner_ptr, inner_len) pairs + inner buffers into memory,
+calls the import, and verifies:
+
+1. `load-bytes` direct-links (binding count = 1)
+2. The host stub captures the lifted `byte[][]` matching what the
+   guest staged (`{0x11, 0x22, 0x33}`, `{0xAA, 0xBB, 0xCC, 0xDD}`)
+3. Encoding and target args round-trip
+4. The OK-arm IGraph handle resolves through `WasiPreview2Resources`
+   (proves single-registry consistency post-fix)
+
+Wacs.Transpiler 771 unchanged in count (the test was renamed +
+upgraded, not added). All other suites unchanged.
+
+### Versions
+
+- `WACS.ComponentModel` 0.3.2 → **0.3.3** (LiftByteArrayList helper)
+- `WACS.Cli` 1.5.8 → **1.5.9** (release event)
+- `WACS.Transpiler.Lib` 0.8.7 → **0.8.8** (CanonicalSlotCount + emit)
+
+(Untouched: `WACS`, `WASI.Preview1`, `.Preview2`,
+`.HostBindings.Abstractions`, `WACS.WASI.NN`. The library mechanism
+is purely additive — `byte[][]` now joins `byte[]`, `string[]`,
+and `T[]`-of-primitives in the recognized PARAM shapes.)
+
 ## WACS 0.13.7 / WACS.Cli 1.5.8 / WACS.Transpiler.Lib 0.8.7 — round-12 follow-up: predicate alignment + trap-stub-friendly shadow
 
 Round 12 introduced a runtime-level shadow rule for direct-link-

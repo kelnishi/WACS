@@ -743,6 +743,23 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Call, LiftStringListMethod);
                 return;
             }
+            if (clrType == typeof(byte[][]))
+            {
+                // ListMarshal.LiftByteArrayList(memory, listPtr, count)
+                // walks `count` (inner_ptr, inner_len) pairs starting
+                // at listPtr and copies each inner byte[] out of
+                // guest memory. The SLM's wasi:nn/graph-funcs.load
+                // takes `list<list<u8>>` for builders; this is the
+                // PARAM-side lift (gap 19).
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, MemoriesField);
+                il.Emit(OpCodes.Ldc_I4_0);
+                il.Emit(OpCodes.Ldelem_Ref);
+                il.Emit(OpCodes.Ldloc, temps[wasmCursor]);     // listPtr
+                il.Emit(OpCodes.Ldloc, temps[wasmCursor + 1]); // count
+                il.Emit(OpCodes.Call, LiftByteArrayListMethod);
+                return;
+            }
             if (clrType.IsGenericType
                 && clrType.GetGenericTypeDefinition() == typeof(Option<>))
             {
@@ -1016,6 +1033,18 @@ namespace Wacs.Transpiler.AOT.Component
         private static readonly MethodInfo LiftStringListMethod =
             typeof(ListMarshal).GetMethod(
                 nameof(ListMarshal.LiftStringList),
+                BindingFlags.Public | BindingFlags.Static,
+                binder: null,
+                types: new[] { typeof(MemoryInstance), typeof(int), typeof(int) },
+                modifiers: null)!;
+
+        // ListMarshal.LiftByteArrayList — list<list<u8>> param lift.
+        // Per-element (inner_ptr, inner_len) pairs in memory; each
+        // inner buffer is copied out to a byte[]. Closes the
+        // wasi-nn `graph-funcs.load(builders, ...)` PARAM gap.
+        private static readonly MethodInfo LiftByteArrayListMethod =
+            typeof(ListMarshal).GetMethod(
+                nameof(ListMarshal.LiftByteArrayList),
                 BindingFlags.Public | BindingFlags.Static,
                 binder: null,
                 types: new[] { typeof(MemoryInstance), typeof(int), typeof(int) },
@@ -3227,6 +3256,17 @@ namespace Wacs.Transpiler.AOT.Component
             // per-element memory layout is (ptr, len) pairs that
             // StringMarshal/ListMarshal.LiftStringList handles.
             if (clrType == typeof(string[]))
+            {
+                wasmTypes = new[] { ValType.I32, ValType.I32 };
+                return 2;
+            }
+            // byte[][] — `list<list<u8>>` outer header (i32 ptr,
+            // i32 count); each element at outer_ptr+i*8 is a
+            // (inner_ptr, inner_len) pair. Lifted via
+            // ListMarshal.LiftByteArrayList. Closes the wasi-nn
+            // SLM `wasi:nn/graph-funcs.load(builders, ...)` PARAM
+            // direct-link gap (gap 19).
+            if (clrType == typeof(byte[][]))
             {
                 wasmTypes = new[] { ValType.I32, ValType.I32 };
                 return 2;
