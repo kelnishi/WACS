@@ -178,6 +178,69 @@ namespace Wacs.WASI.NN.OnnxRuntime.Test
             Assert.Equal(13.0f, outFloats[0]);
         }
 
+        [Theory]
+        [InlineData("MLProgram", "COREML_FLAG_CREATE_MLPROGRAM")]
+        [InlineData("create_mlprogram", "COREML_FLAG_CREATE_MLPROGRAM")]
+        [InlineData("UseCpuAndGpu", "COREML_FLAG_USE_CPU_AND_GPU")]
+        [InlineData("use_cpu_only", "COREML_FLAG_USE_CPU_ONLY")]
+        [InlineData("ANE", "COREML_FLAG_ONLY_ENABLE_DEVICE_WITH_ANE")]
+        [InlineData("Static", "COREML_FLAG_ONLY_ALLOW_STATIC_INPUT_SHAPES")]
+        [InlineData("subgraph", "COREML_FLAG_ENABLE_ON_SUBGRAPH")]
+        public void ParseCoreMLFlags_recognizes_single_names(
+            string name, string expectedFlagName)
+        {
+            var flags = OnnxBackendOptions.ParseCoreMLFlags(name);
+            var expected = (Microsoft.ML.OnnxRuntime.CoreMLFlags)Enum.Parse(
+                typeof(Microsoft.ML.OnnxRuntime.CoreMLFlags),
+                expectedFlagName);
+            Assert.True((flags & expected) == expected,
+                $"expected {expectedFlagName} to be set in {flags}");
+        }
+
+        [Fact]
+        public void ParseCoreMLFlags_combines_multiple_separators()
+        {
+            var combined = OnnxBackendOptions.ParseCoreMLFlags(
+                "MLProgram, UseCpuAndGpu | Static");
+            Assert.True((combined & Microsoft.ML.OnnxRuntime.CoreMLFlags
+                .COREML_FLAG_CREATE_MLPROGRAM) != 0);
+            Assert.True((combined & Microsoft.ML.OnnxRuntime.CoreMLFlags
+                .COREML_FLAG_USE_CPU_AND_GPU) != 0);
+            Assert.True((combined & Microsoft.ML.OnnxRuntime.CoreMLFlags
+                .COREML_FLAG_ONLY_ALLOW_STATIC_INPUT_SHAPES) != 0);
+        }
+
+        [Fact]
+        public void ParseCoreMLFlags_empty_returns_use_none()
+        {
+            Assert.Equal(
+                Microsoft.ML.OnnxRuntime.CoreMLFlags.COREML_FLAG_USE_NONE,
+                OnnxBackendOptions.ParseCoreMLFlags(""));
+            Assert.Equal(
+                Microsoft.ML.OnnxRuntime.CoreMLFlags.COREML_FLAG_USE_NONE,
+                OnnxBackendOptions.ParseCoreMLFlags(null));
+        }
+
+        [Fact]
+        public void FromEnvironment_reads_coreml_flags()
+        {
+            var prev = Environment.GetEnvironmentVariable(
+                "WACS_WASINN_ONNX_COREML_FLAGS");
+            try
+            {
+                Environment.SetEnvironmentVariable(
+                    "WACS_WASINN_ONNX_COREML_FLAGS", "MLProgram");
+                var opts = OnnxBackendOptions.FromEnvironment();
+                Assert.True((opts.CoreMLFlags & Microsoft.ML.OnnxRuntime
+                    .CoreMLFlags.COREML_FLAG_CREATE_MLPROGRAM) != 0);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(
+                    "WACS_WASINN_ONNX_COREML_FLAGS", prev);
+            }
+        }
+
         [Fact]
         public void Strict_mode_propagates_ep_append_failure_on_unsupported_platform()
         {

@@ -73,14 +73,19 @@ namespace Wacs.WASI.NN.OnnxRuntime
 
         /// <summary>
         /// Flags passed to <c>AppendExecutionProvider_CoreML</c>.
-        /// Defaults to <see cref="CoreMLFlags.COREML_FLAG_USE_CPU_AND_GPU"/>
-        /// which lets the EP route ops to CPU+GPU (ANE excluded by default
-        /// for numerical-stability reasons — set
-        /// <see cref="CoreMLFlags.COREML_FLAG_ONLY_ENABLE_DEVICE_WITH_ANE"/>
-        /// explicitly if your model is ANE-friendly).
+        /// Defaults to <see cref="CoreMLFlags.COREML_FLAG_USE_NONE"/>
+        /// which lets the CoreML framework pick the device (CPU + GPU
+        /// + ANE) and uses the older NeuralNetwork model format.
+        /// For transformer / generative-LLM workloads consider
+        /// <see cref="CoreMLFlags.COREML_FLAG_CREATE_MLPROGRAM"/> —
+        /// MLProgram (CoreML 5+) has much broader op coverage for
+        /// modern transformer ops (multi-head attention, RMSNorm,
+        /// rotary embeddings). Set via env var with
+        /// <c>WACS_WASINN_ONNX_COREML_FLAGS=MLProgram</c> (combine
+        /// with commas: <c>=MLProgram,UseCpuAndGpu</c>).
         /// </summary>
         public CoreMLFlags CoreMLFlags { get; set; }
-            = CoreMLFlags.COREML_FLAG_USE_CPU_AND_GPU;
+            = CoreMLFlags.COREML_FLAG_USE_NONE;
 
         /// <summary>
         /// When the chosen EP fails to append (driver missing, wrong
@@ -98,10 +103,13 @@ namespace Wacs.WASI.NN.OnnxRuntime
         /// Construct an options instance from environment variables.
         /// Reads <c>WACS_WASINN_ONNX_EP</c> for the EP name
         /// (case-insensitive: <c>auto</c>, <c>cpu</c>, <c>coreml</c>,
-        /// <c>cuda</c>, <c>dml</c>/<c>directml</c>, <c>rocm</c>), plus
-        /// <c>WACS_WASINN_ONNX_CUDA_DEVICE</c> / <c>_ROCM_DEVICE</c> /
-        /// <c>_DML_DEVICE</c> for device indices. Unrecognized values
-        /// fall through to <see cref="OnnxExecutionProvider.Auto"/>.
+        /// <c>cuda</c>, <c>dml</c>/<c>directml</c>, <c>rocm</c>),
+        /// <c>WACS_WASINN_ONNX_COREML_FLAGS</c> for a comma-separated
+        /// list of CoreML flag names (e.g.
+        /// <c>MLProgram,UseCpuAndGpu</c> — see <see cref="ParseCoreMLFlags"/>),
+        /// plus <c>WACS_WASINN_ONNX_CUDA_DEVICE</c> / <c>_ROCM_DEVICE</c> /
+        /// <c>_DML_DEVICE</c> for device indices. Unrecognized EP values
+        /// leave the default (<see cref="OnnxExecutionProvider.Cpu"/>).
         /// </summary>
         public static OnnxBackendOptions FromEnvironment()
         {
@@ -109,6 +117,11 @@ namespace Wacs.WASI.NN.OnnxRuntime
             var epStr = Environment.GetEnvironmentVariable("WACS_WASINN_ONNX_EP");
             if (!string.IsNullOrWhiteSpace(epStr))
                 opts.ExecutionProvider = ParseEp(epStr);
+
+            var coreMlFlagsStr = Environment.GetEnvironmentVariable(
+                "WACS_WASINN_ONNX_COREML_FLAGS");
+            if (!string.IsNullOrWhiteSpace(coreMlFlagsStr))
+                opts.CoreMLFlags = ParseCoreMLFlags(coreMlFlagsStr);
 
             if (int.TryParse(
                     Environment.GetEnvironmentVariable("WACS_WASINN_ONNX_CUDA_DEVICE"),
@@ -123,6 +136,66 @@ namespace Wacs.WASI.NN.OnnxRuntime
                     out var dml))
                 opts.DirectMLDeviceId = dml;
             return opts;
+        }
+
+        /// <summary>
+        /// Parse a comma- or pipe-separated list of CoreML flag
+        /// names into a combined <see cref="Microsoft.ML.OnnxRuntime.CoreMLFlags"/>
+        /// bitmask. Names are case-insensitive and recognized in
+        /// short and long forms — e.g. <c>"MLProgram"</c> and
+        /// <c>"CREATE_MLPROGRAM"</c> both set
+        /// <see cref="Microsoft.ML.OnnxRuntime.CoreMLFlags.COREML_FLAG_CREATE_MLPROGRAM"/>.
+        /// Unrecognized names are skipped. Empty / null input
+        /// returns <see cref="Microsoft.ML.OnnxRuntime.CoreMLFlags.COREML_FLAG_USE_NONE"/>
+        /// (let CoreML pick its default device + format).
+        /// </summary>
+        public static CoreMLFlags ParseCoreMLFlags(string? names)
+        {
+            if (string.IsNullOrWhiteSpace(names))
+                return CoreMLFlags.COREML_FLAG_USE_NONE;
+            var result = CoreMLFlags.COREML_FLAG_USE_NONE;
+            foreach (var raw in names!.Split(new[] { ',', '|', ' ' },
+                StringSplitOptions.RemoveEmptyEntries))
+            {
+                switch (raw.Trim().ToLowerInvariant())
+                {
+                    case "none":
+                    case "use_none":
+                        // Identity — preserved for explicitness.
+                        break;
+                    case "cpuonly":
+                    case "use_cpu_only":
+                        result |= CoreMLFlags.COREML_FLAG_USE_CPU_ONLY;
+                        break;
+                    case "cpuandgpu":
+                    case "usecpuandgpu":
+                    case "use_cpu_and_gpu":
+                        result |= CoreMLFlags.COREML_FLAG_USE_CPU_AND_GPU;
+                        break;
+                    case "ane":
+                    case "anyonly":
+                    case "only_enable_device_with_ane":
+                    case "enable_with_ane":
+                        result |= CoreMLFlags
+                            .COREML_FLAG_ONLY_ENABLE_DEVICE_WITH_ANE;
+                        break;
+                    case "subgraph":
+                    case "enable_on_subgraph":
+                        result |= CoreMLFlags.COREML_FLAG_ENABLE_ON_SUBGRAPH;
+                        break;
+                    case "static":
+                    case "static_input_shapes":
+                    case "only_allow_static_input_shapes":
+                        result |= CoreMLFlags
+                            .COREML_FLAG_ONLY_ALLOW_STATIC_INPUT_SHAPES;
+                        break;
+                    case "mlprogram":
+                    case "create_mlprogram":
+                        result |= CoreMLFlags.COREML_FLAG_CREATE_MLPROGRAM;
+                        break;
+                }
+            }
+            return result;
         }
 
         private static OnnxExecutionProvider ParseEp(string s)
