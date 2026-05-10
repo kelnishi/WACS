@@ -272,7 +272,8 @@ namespace Wacs.WASI.NN
                                 ErrorCode.InvalidArgument,
                                 $"invalid execution-context handle {ctxHandle}");
                         var inputs = ReadNamedTensorList(ctx, host, inPtr, inLen);
-                        var outputs = bctx.Compute(inputs);
+                        var outputs = MemoryDiagnostics.RunWithDiagnostics(
+                            bctx, inputs);
                         WriteResultNamedTensorListOk(ctx, host, alloc, retArea, outputs);
                     }
                     catch (WasiNNException e)

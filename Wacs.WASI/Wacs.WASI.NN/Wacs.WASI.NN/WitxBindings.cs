@@ -195,7 +195,8 @@ namespace Wacs.WASI.NN
                         var named = new List<NamedTensor>(state.Inputs.Count);
                         foreach (var kv in state.Inputs)
                             named.Add(new NamedTensor(kv.Key.ToString(), kv.Value));
-                        var outputs = state.Context.Compute(named);
+                        var outputs = MemoryDiagnostics.RunWithDiagnostics(
+                            state.Context, named);
                         state.Outputs.Clear();
                         for (int i = 0; i < outputs.Count; i++)
                         {

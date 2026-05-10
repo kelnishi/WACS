@@ -1,5 +1,41 @@
 # Changelog
 
+## WACS.Cli 1.5.22 / WACS.WASI.NN 0.3.2 — `WACS_DIAG_MEMORY` per-compute memory snapshots
+
+Diagnostic hook for the "RSS climbs across a long-running chat REPL" pattern.
+When `WACS_DIAG_MEMORY=1` is set in the environment, every guest-triggered
+`compute()` call writes a single stderr line with the process RSS, GC managed
+heap, GC collection counts, input/output byte totals, and wall-clock duration:
+
+```
+[wacs-diag-memory] turn=1 rss=523.4MiB (+0B) managed=18.2MiB (+0B) gc[g0=4 g1=2 g2=1] in=120B out=384B took=8.21s
+[wacs-diag-memory] turn=2 rss=541.7MiB (+18.3MiB) managed=18.4MiB (+0.2MiB) gc[g0=6 g1=3 g2=1] in=520B out=412B took=8.94s
+[wacs-diag-memory] turn=3 rss=560.1MiB (+36.7MiB) managed=18.6MiB (+0.4MiB) gc[g0=9 g1=4 g2=1] in=945B out=380B took=9.32s
+```
+
+The `(+X)` deltas are vs the first observed turn — fast visual scan for
+"which counter is climbing how fast". Distinguishing the three growth
+patterns:
+
+- **RSS grows with input** — expected; the guest is accumulating conversation
+  history and re-feeding it each turn. Cap via the guest's prompt-truncation
+  policy or, for the GenAI backend, `WACS_WASINN_GENAI_MAX_LENGTH`.
+- **Managed grows without input** — host-side reference retention (canonical-
+  ABI lift copying pinned somewhere). Open a bug with the snapshot.
+- **RSS grows without managed or input** — native fragmentation (macOS's
+  `libsystem_malloc` doesn't decommit freed regions back to the OS, common
+  with repeated large allocations + frees) or backend-internal native cache.
+
+Hooks both the WIT (`graph-execution-context.compute`) and the WITX (legacy
+preview1) binding compute call sites. Off by default — zero overhead in the
+negative path (Enabled is read once into a static readonly bool).
+
+### Versions
+
+- `WACS.WASI.NN` 0.3.1 → **0.3.2** (new `MemoryDiagnostics` internal helper +
+  per-compute hooks in `WitBindings` / `WitxBindings`)
+- `WACS.Cli` 1.5.21 → **1.5.22** (release event)
+
 ## WACS.Cli 1.5.21 / WACS.Transpiler.Lib 0.8.14 — gap 30: `BindBackendLoadContext` for transitive-dep DllImports
 
 Round-25 verification (`wasi-nn/WACS-GAPS.md` round 25) found that the gap-28 fix —
