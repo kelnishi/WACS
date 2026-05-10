@@ -26,6 +26,12 @@
     <ItemGroup>
         <ProjectReference Include="..\Wacs.WASI.NN\Wacs.WASI.NN.csproj" />
         <ProjectReference Include="..\Wacs.WASI.NN.LlamaSharp\Wacs.WASI.NN.LlamaSharp.csproj" />
+        <!-- Round-20 / gap-24 regression test cross-references the
+             Preview2 DI scope's reflective LlamaSharp auto-wire.
+             Equivalent to the WasiPreview2RuntimeScopeTests setup
+             in the OnnxRuntime.Test project (round-19/gap-20). -->
+        <ProjectReference Include="..\Wacs.WASI.NN.DependencyInjection\Wacs.WASI.NN.DependencyInjection.csproj" />
+        <ProjectReference Include="..\..\Wacs.WASI.Preview2\Wacs.WASI.Preview2.DependencyInjection\Wacs.WASI.Preview2.DependencyInjection.csproj" />
     </ItemGroup>
 
 </Project>

@@ -23,11 +23,33 @@ architecture deep-dive.
 
 ## Quick start
 
-**CLI** — `wacs run my.component.wasm --wasip2 --wasi-nn` (ONNX). The
-ONNX backend ships bundled with the CLI; resolves out-of-box. Other
-backends: `--bind Wacs.WASI.NN.MLNet` or `--bind Wacs.WASI.NN.LlamaSharp`
-(may require additional native binaries on the load path; for
-LlamaSharp set `WACS_WASINN_GGUF_DIR=/path/to/models`).
+**CLI — ONNX (bundled with the CLI):**
+
+```sh
+wacs run my.component.wasm --wasip2 --wasi-nn
+```
+
+**CLI — LlamaSharp (GGUF / llama.cpp):** the LlamaSharp backend
+isn't bundled with the CLI, so pass the project bin's path
+explicitly. The backend csproj uses `EnableDynamicLoading`, so
+its bin carries `LLamaSharp.dll` + native runtimes + transitive
+NuGets — the LoadFromContext probe satisfies them all locally:
+
+```sh
+export WACS_WASINN_GGUF_DIR=/path/to/models
+LLAMA=$(realpath Wacs.WASI/Wacs.WASI.NN/Wacs.WASI.NN.LlamaSharp/bin/Release/net8.0/Wacs.WASI.NN.LlamaSharp.dll)
+wacs run my.component.wasm --wasip2 --bind "$LLAMA"
+```
+
+`--bind` auto-pulls `WACS.WASI.NN` +
+`WACS.WASI.NN.DependencyInjection` onto host-packages when the
+identity starts with `Wacs.WASI.NN.`; the wasip2 DI scope's
+auto-wire registers the backend in BOTH `Backends[GGML]` AND
+`LoadByNameBackend`, so guests calling
+`wasi:nn/graph.load-by-name(name)` direct-link cleanly. See
+[`docs/COMPONENT_CHAINING.md#gguf-inference-example-llamasharp-backend`](../../docs/COMPONENT_CHAINING.md#gguf-inference-example-llamasharp-backend)
+for the full chain. ML.NET-flavored ORT works the same shape:
+`--bind <wacs-source>/Wacs.WASI/Wacs.WASI.NN/Wacs.WASI.NN.MLNet/bin/Release/net8.0/Wacs.WASI.NN.MLNet.dll`.
 
 **Embedder** — interpreter path:
 

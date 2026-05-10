@@ -1,5 +1,197 @@
 # Changelog
 
+## WACS.Cli 1.5.18 / WACS.Transpiler.Lib 0.8.11 / WACS.WASI.NN.DependencyInjection 0.2.1 / WACS.WASI.NN.LlamaSharp 0.2.1 / WACS.WASI.NN.MLNet 0.2.1 / WACS.WASI.Preview2.DependencyInjection 0.1.4 — gaps 24 + 25 + 26 + 27: LlamaSharp / GGUF on the transpiler-direct-link path (end-to-end)
+
+The wasi-nn LlamaSharp/GGUF harness (`guest-llm/`, Qwen2.5 0.5B
+Instruct Q4_K_M) tripped `"NotFound: no named-model resolver
+configured"` at the first `compute(...)` even though
+`load_by_name(...)` had returned `Ok` upstream. The DI bundle's
+`GraphFuncsImpl.LoadByName` only checked `NamedModelResolver` +
+`Backends`, never the sibling `LoadByNameBackend` field that the
+WitBindings path (`WasiNNHost.LoadGraphByNameDispatch`) uses for
+backends with internal name registries.
+
+### `GraphFuncsImpl.LoadByName` parity with `WasiNNHost`
+
+`Wacs.WASI.NN.DependencyInjection/GraphFuncsImpl.cs` now mirrors
+`WasiNNHost.LoadGraphByNameDispatch`:
+
+```csharp
+if (_config.LoadByNameBackend != null)
+    return Result<...>.FromOk(new Graph(
+        _config.LoadByNameBackend.LoadGraphByName(name, ExecutionTarget.CPU)));
+// fall through to NamedModelResolver → bytes → backend
+```
+
+LlamaSharp's `LoadGraph(builders)` always traps
+`UnsupportedOperation` (a multi-GB GGUF passed through canonical-
+ABI lift would force a multi-GB host copy on every load); the
+direct `LoadByNameBackend` path lets the backend resolve models
+through its own registry without that round-trip. Closes gap 24
+architecturally.
+
+### LlamaSharp auto-wire in `WasiPreview2RuntimeScope`
+
+Round-14 added `BuildOnnxConfigureCallback` to wire
+`OnnxBackend` into the DI bundle's `WasiNNConfiguration` at
+scope-construction time. Round-20 generalizes the pattern: a
+sibling `BuildLlamaSharpConfigureCallback` detects
+`Wacs.WASI.NN.LlamaSharp.LlamaSharpBackend`, builds an
+env-driven registry from `WACS_WASINN_GGUF_DIR` (mirrors
+`WasiNNLlamaSharpBindable`'s scan), instantiates the backend
+via `FromPaths(registry)`, and wires it into BOTH
+`Backends[GGML]` AND `LoadByNameBackend`. The two callbacks
+combine via `Delegate.Combine` into one multicast configure that
+runs against the same options instance.
+
+`CombineCallbacks` is generic — adding a new wasi-nn backend
+auto-wire requires one new `BuildXxxConfigureCallback` plus a
+line in `ReflectivelyAddWasiNN`'s combine call.
+
+### `--bind` auto-pulls DI siblings for `Wacs.WASI.NN.*`
+
+Sub-gap 24a: when `--bind` resolves an assembly whose identity
+starts with `Wacs.WASI.NN.` (LlamaSharp / MLNet / future
+backends), `RunHandler.ResolveHostPackages` now adds
+`Wacs.WASI.NN` + `Wacs.WASI.NN.DependencyInjection` to
+host-packages automatically. Mirrors round-18's `--wasi-nn`
+plumbing for the OnnxRuntime case. Without it, the resolver had
+incomplete WitSource coverage and post-`compute` lifts trapped
+with out-of-bounds memory access. The new `--wasi-nn-backend`
+flag suggested in round-19 isn't needed — the implicit
+`--bind` walk covers the same UX.
+
+### `EnableDynamicLoading` on backend csprojs (gap 27)
+
+Round-22 verification confirmed gaps 24-26 closed correctly —
+end-to-end Qwen2.5 0.5B GGUF inference produced real output
+through `wacs run --wasip2 --bind <LlamaSharp.dll>` after manual
+deps staging. The remaining hurdle was a packaging issue: the
+`Wacs.WASI.NN.LlamaSharp` library project's bin emitted only the
+backend assembly + project refs, NOT the upstream NuGet
+transitives (`LLamaSharp.dll`, `LLamaSharp.Backend.Cpu`'s
+RID-specific natives, `Microsoft.Extensions.*`). At
+`Assembly.LoadFrom(<path>)` time, the LoadFromContext resolver
+read deps.json but couldn't satisfy the deps from the runtime's
+TPA list (Wacs.Console doesn't carry LlamaSharp) or the empty
+LoadFromContext directory.
+
+Fix: `<EnableDynamicLoading>true</EnableDynamicLoading>` in
+`Wacs.WASI.NN.LlamaSharp.csproj` (and the symmetric
+`Wacs.WASI.NN.MLNet.csproj`). MSBuild now copies every NuGet
+managed dep + RID-specific native lib into the project's bin,
+and the deps.json points at them locally. Bin grows from
+~10 MB to ~150 MB (LlamaSharp's natives are chunky); acceptable
+for a backend whose entire purpose is loading multi-GB models.
+
+ONNX backend takes a different path — round-1 already bundles
+`Wacs.WASI.NN.OnnxRuntime` directly into `Wacs.Console`'s csproj
+via `ExcludeAssets="compile"`, which is why `--wasi-nn` works
+bare-name. Gap 27's fix is for the embedder-supplies-the-backend
+flow (`--bind <path>`), not the bundled-default-backend flow.
+
+Documentation: `docs/COMPONENT_CHAINING.md` gains a fully worked
+GGUF inference example walking through the build + run + how
+each prior fix participates. The Wacs.WASI.NN README's CLI
+quick-start now points at the explicit-path form (the bare-name
+`--bind Wacs.WASI.NN.LlamaSharp` only works when the assembly
+is on the CLI's TPA, which it isn't unless an embedder bundles
+it explicitly).
+
+### Pre-load `--bind` assemblies before scope construction (gap 26)
+
+Round-21 verification revealed that the `TryLoadAssembly`
+AppDomain fallback was correct — but the auto-wire ran during
+`WasiPreview2RuntimeScope` construction in
+`ExecuteComponentTranspiled`, which fires from
+`configureImports`. `--bind` doesn't run until later, in
+`ApplyBindings` (intentionally, so explicit `BindHostFunction`
+shims can override the wasip2 trap-stubs). At scope-construction
+time, `--bind`-supplied assemblies aren't in AppDomain yet —
+so the round-21 walk has nothing to find.
+
+Fix: split the load step from the bind step. New
+`BindingLoader.LoadAssembly(string)` returns just the resolved
+`Assembly` without activating any `IBindable` types; existing
+`LoadFromAssembly(string)` delegates to it. New
+`PreloadBindAssemblies` in `RunHandler` calls
+`BindingLoader.LoadAssembly` for every `--bind` / shorthand
+entry BEFORE scope construction. The actual `BindToRuntime`
+calls still defer to `ApplyBindings` (preserving override
+semantics); `Assembly.LoadFrom` is idempotent on path so the
+second pass is a no-op.
+
+The two-phase load-then-bind pattern matches what round 1 /
+round 7 already established for the IBindable lifecycle.
+
+### `TryLoadAssembly` AppDomain fallback (gap 25)
+
+Round-20 verification surfaced gap 25: with the LoadByName
+parity fix in, the auto-wire still silently no-op'd for
+`--bind <path-to-LlamaSharp.dll>` because
+`WasiPreview2RuntimeScope.TryLoadAssembly` used
+`Assembly.Load(name)` only. `Assembly.Load` searches the
+default load context's by-name registry; `--bind <path>`
+lands the assembly via `Assembly.LoadFrom` into the
+`LoadFromContext`, where the by-name lookup misses.
+
+Same architectural shape as the round-18 fix in
+`HostPackageResolver.TryFindResourceImpl`. `TryLoadAssembly`
+now walks `AppDomain.CurrentDomain.GetAssemblies()` on miss,
+matching by `Assembly.GetName().Name` (case-insensitive). The
+fallback skips dynamic assemblies and catches malformed-
+metadata exceptions from collectable contexts so a single
+hiccup can't blank out the search.
+
+The `TryFindResourceImpl` AppDomain walk and the new
+`TryLoadAssembly` AppDomain walk are deliberately
+duplicated (both ~25 LOC) rather than extracted into a
+shared helper — they're in different assemblies (resolver in
+`Wacs.Transpiler.Lib`, scope in `Wacs.WASI.Preview2.DependencyInjection`)
+and the cross-package coupling isn't worth a shared
+utility yet.
+
+### Test surface
+
+- `Wacs.WASI.NN.Test/GraphFuncsImplLoadByNameTests` (3 tests):
+  `LoadByNameBackend` direct-path, byte-flow fallback when
+  `LoadByNameBackend` null, and the diagnostic NotFound when
+  neither is wired (asserts the error message mentions
+  `LoadByNameBackend` so the failure mode is discoverable).
+- `Wacs.WASI.NN.LlamaSharp.Test/WasiPreview2RuntimeScopeLlamaSharpTests`:
+  the auto-wire fires on a real `WasiPreview2RuntimeScope`
+  construction; `IGraphFuncs.LoadByName` no longer reports the
+  pre-fix "no named-model resolver" symptom. The test project
+  gains references to `Wacs.WASI.NN.DependencyInjection` and
+  `Wacs.WASI.Preview2.DependencyInjection` (the only test
+  project where all four needed packages co-exist without a
+  cycle).
+
+### Versions
+
+- `WACS.WASI.NN.DependencyInjection` 0.2.0 → **0.2.1**
+  (LoadByName routes through LoadByNameBackend)
+- `WACS.WASI.NN.LlamaSharp` 0.2.0 → **0.2.1**
+  (EnableDynamicLoading: bin carries the backend's NuGet
+  transitives so `--bind <path>` LoadFromContext probes
+  resolve)
+- `WACS.WASI.NN.MLNet` 0.2.0 → **0.2.1**
+  (EnableDynamicLoading: same shape — symmetric prep for the
+  embedder-supplies-the-backend flow)
+- `WACS.WASI.Preview2.DependencyInjection` 0.1.2 → **0.1.4**
+  (LlamaSharp auto-wire in `WasiPreview2RuntimeScope` +
+  `TryLoadAssembly` AppDomain fallback)
+- `WACS.Transpiler.Lib` 0.8.10 → **0.8.11**
+  (`BindingLoader.LoadAssembly` load-only entry point)
+- `WACS.Cli` 1.5.14 → **1.5.18** (release event +
+  `--bind` → DI-sibling auto-pull +
+  `PreloadBindAssemblies` ordering fix)
+
+(Untouched: `WACS`, `WASI.Preview1`, `.Preview2`, `.WASI.NN`,
+`.WASI.NN.OnnxRuntime`, `.WASI.NN.LlamaSharp`,
+`.WASI.NN.MLNet`, `WACS.Transpiler.Lib`, `WACS.ComponentModel`,
+`WACS.HostBindings.Abstractions`.)
+
 ## WACS.Cli 1.5.14 / WACS.Transpiler.Lib 0.8.10 — `[constructor]X` SourceGen-shape impl-class discovery falls back to AppDomain (gap 23)
 
 The wasi-nn SLM's `Tensor::new(dimensions, ty, data)` returned

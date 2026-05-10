@@ -645,6 +645,30 @@ namespace Wacs.Console.Verbs
                             ComponentImportStubs.RegisterAll(rt,
                                 parsed.CoreModules[primary]);
 
+                            // Pre-load `--bind` assemblies into
+                            // AppDomain BEFORE scope construction so
+                            // the wasip2 DI scope's reflective
+                            // backend auto-wire (which walks
+                            // AppDomain on `Assembly.Load(name)`
+                            // miss — round 21 fix) can discover
+                            // them. Without this preload the
+                            // auto-wire's `TryLoadAssembly` returns
+                            // null for `--bind <path-to-LlamaSharp.dll>`
+                            // because `ApplyBindings` (which fires
+                            // `Assembly.LoadFrom`) hasn't run yet.
+                            // Closes gap 26 (round-21 verification:
+                            // ordering bug).
+                            //
+                            // The actual `BindToRuntime` calls
+                            // still defer to `ApplyBindings` below
+                            // — the preload only populates
+                            // AppDomain. `BindingLoader.LoadAssembly`
+                            // is idempotent (`Assembly.LoadFrom` on
+                            // a path returns the cached Assembly
+                            // for that path) so the second-pass
+                            // load is a no-op.
+                            PreloadBindAssemblies(opts);
+
                             // Build the wasip2 scope BEFORE
                             // ApplyBindings so wasip2's
                             // BindToRuntime registrations land
@@ -774,6 +798,37 @@ namespace Wacs.Console.Verbs
         /// registration so they override the stubs for any imports
         /// they cover.</para>
         /// </summary>
+        // Pre-load `--bind` assemblies (and the shorthand-flag
+        // siblings) into AppDomain WITHOUT activating any
+        // `IBindable` types. Used by the component-transpiler
+        // path so the wasip2 DI scope's reflective backend
+        // auto-wire — which walks AppDomain when
+        // `Assembly.Load(name)` misses (round 21) — can discover
+        // `Assembly.LoadFrom`'d packages before scope
+        // construction (gap 26). The actual `BindToRuntime` calls
+        // still happen later via `ApplyBindings`; the load step
+        // is idempotent so the second-pass `LoadFromAssembly`
+        // doesn't reload.
+        //
+        // Failures here are silent — diagnostic / surface-area
+        // belongs to `ApplyBindings` (which surfaces a clear
+        // `binding assembly not found` if the path / name
+        // doesn't resolve). Catching here just avoids tearing
+        // down scope construction on a bad `--bind` entry.
+        private static void PreloadBindAssemblies(RunOptions opts)
+        {
+            var paths = new List<string>();
+            if (opts.WasiNN) paths.Add("Wacs.WASI.NN.OnnxRuntime");
+            if (opts.WasiThreads) paths.Add("Wacs.WASI.Threads");
+            if (opts.Bind != null) paths.AddRange(opts.Bind);
+            foreach (var p in paths)
+            {
+                if (string.IsNullOrWhiteSpace(p)) continue;
+                try { BindingLoader.LoadAssembly(p.Trim()); }
+                catch { /* surface via ApplyBindings */ }
+            }
+        }
+
         private static void ApplyBindings(RunOptions opts,
             WasmRuntime runtime, List<IDisposable>? disposables = null)
         {
@@ -886,6 +941,21 @@ namespace Wacs.Console.Verbs
                 // verification).
                 names.Add("Wacs.WASI.NN.DependencyInjection");
             }
+            // --bind that resolves to a Wacs.WASI.NN.* sibling
+            // (LlamaSharp / MLNet) implicitly needs the same DI +
+            // typed-surface packages on host-packages — otherwise
+            // the resolver ends up with incomplete WitSource
+            // coverage and post-compute lifts trap with
+            // out-of-bounds memory access (gap 24a, round-19
+            // sibling observation). Mirrors the round-18 plumbing
+            // for `--wasi-nn` (the OnnxRuntime case).
+            if (BindReferencesWasiNNFamily(opts))
+            {
+                if (!names.Contains("Wacs.WASI.NN"))
+                    names.Add("Wacs.WASI.NN");
+                if (!names.Contains("Wacs.WASI.NN.DependencyInjection"))
+                    names.Add("Wacs.WASI.NN.DependencyInjection");
+            }
             foreach (var n in opts.HostPackage ?? Enumerable.Empty<string>())
             {
                 if (string.IsNullOrWhiteSpace(n)) continue;
@@ -914,6 +984,32 @@ namespace Wacs.Console.Verbs
                 asms.Add(asm);
             }
             return asms;
+        }
+
+        // True when any --bind entry references a
+        // `Wacs.WASI.NN.*` assembly — by name (`--bind
+        // Wacs.WASI.NN.LlamaSharp`) or by file path whose basename
+        // starts with that prefix (`--bind /.../Wacs.WASI.NN.MLNet.dll`).
+        // Used to auto-pull the WASI.NN typed-surface + DI sibling
+        // packages onto host-packages so the resolver has complete
+        // WitSource coverage for the family. Sub-gap 24a
+        // (round-19 sibling observation).
+        private static bool BindReferencesWasiNNFamily(RunOptions opts)
+        {
+            foreach (var entry in opts.Bind ?? Enumerable.Empty<string>())
+            {
+                if (string.IsNullOrWhiteSpace(entry)) continue;
+                var trimmed = entry.Trim();
+                // Path form: take basename without .dll suffix.
+                var ident = File.Exists(trimmed)
+                    ? Path.GetFileNameWithoutExtension(trimmed)
+                    : trimmed;
+                if (ident == null) continue;
+                if (ident.StartsWith("Wacs.WASI.NN.",
+                    StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
         }
 
         private static TranspilerOptions BuildTranspilerOptions(RunOptions opts)

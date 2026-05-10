@@ -12,11 +12,23 @@
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.WASI.NN.MLNet</AssemblyName>
-        <AssemblyVersion>0.2.0</AssemblyVersion>
-        <Version>0.2.0</Version>
+        <AssemblyVersion>0.2.1</AssemblyVersion>
+        <Version>0.2.1</Version>
         <RepositoryType>git</RepositoryType>
         <TargetFramework>net8.0</TargetFramework>
         <PackageTags>wasm;wasi;nn;ml;mlnet;wacs</PackageTags>
+        <!-- Carry every NuGet transitive (Microsoft.ML +
+             Microsoft.ML.OnnxTransformer + the OrtValue-native
+             ORT 1.20 + the System.Numerics.Tensors / Apache
+             Arrow / Newtonsoft.Json / etc. that ML.NET pulls)
+             into the project's bin so `wacs run [bind] <path>`
+             resolves the LoadFromContext deps without TPA
+             probing. Sibling LlamaSharp backend has the same
+             flag; ONNX backend takes a different path
+             (round-1 CLI csproj bundle). Gap 27 / round-22
+             verification: symmetric fix in case future
+             embedders bind this MLNet backend. -->
+        <EnableDynamicLoading>true</EnableDynamicLoading>
     </PropertyGroup>
 
     <ItemGroup>

@@ -12,11 +12,25 @@
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.WASI.NN.LlamaSharp</AssemblyName>
-        <AssemblyVersion>0.2.0</AssemblyVersion>
-        <Version>0.2.0</Version>
+        <AssemblyVersion>0.2.1</AssemblyVersion>
+        <Version>0.2.1</Version>
         <RepositoryType>git</RepositoryType>
         <TargetFramework>net8.0</TargetFramework>
         <PackageTags>wasm;wasi;nn;ml;llm;llama;gguf;wacs</PackageTags>
+        <!-- This backend is loaded via `wacs run [bind] <path>`'s
+             Assembly.LoadFrom: the wasi-nn embedder model where
+             a backend assembly is supplied by path, not bundled
+             with the CLI. EnableDynamicLoading copies every
+             transitive NuGet (LLamaSharp + LLamaSharp.Backend.Cpu's
+             RID-specific natives + the Microsoft.Extensions.*
+             stack LlamaSharp pulls transitively) into the
+             project's bin alongside the assembly, so the LoadFromContext
+             resolver can satisfy the deps without TPA / NuGet-cache
+             probing.
+             Sibling MLNet backend has the same pattern; ONNX
+             takes a different path (round-1 CLI csproj bundle).
+             Gap 27 / round-22 verification. -->
+        <EnableDynamicLoading>true</EnableDynamicLoading>
     </PropertyGroup>
 
     <ItemGroup>

@@ -12,8 +12,8 @@
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.WASI.Preview2.DependencyInjection</AssemblyName>
-        <AssemblyVersion>0.1.2</AssemblyVersion>
-        <Version>0.1.2</Version>
+        <AssemblyVersion>0.1.4</AssemblyVersion>
+        <Version>0.1.4</Version>
         <RepositoryType>git</RepositoryType>
         <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
         <IsAotCompatible Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net7.0'))">true</IsAotCompatible>
