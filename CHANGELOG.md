@@ -1,6 +1,6 @@
 # Changelog
 
-## WACS.Cli 1.5.19 / WACS.WASI.NN.TorchSharp 0.1.0 / WACS.WASI.Preview2.DependencyInjection 0.1.6 — new wasi-nn backend: TorchSharp / PyTorch
+## WACS.Cli 1.5.20 / WACS.Transpiler.Lib 0.8.13 / WACS.WASI.NN.TorchSharp 0.1.1 / WACS.WASI.Preview2.DependencyInjection 0.1.6 — new wasi-nn backend: TorchSharp / PyTorch (+ gaps 28/29 native-lib ergonomics)
 
 A fourth wasi-nn backend covering `graph-encoding.pytorch`. Same packaging shape as
 `WACS.WASI.NN.LlamaSharp` (load-by-name first-class via env-driven directory scan; byte-
@@ -46,11 +46,68 @@ wacs run my-pytorch.component.wasm --wasip2 --bind "$TORCH"
 For GPU swap `TorchSharp-cpu` for `TorchSharp-cuda-12.1` / `-macos-x64` etc. in the
 project's csproj.
 
+### Native-library ergonomics (gap 28 — `WACS.Transpiler.Lib`)
+
+Round-24 verification surfaced that P/Invoke from a `LoadFrom`'d
+backend assembly doesn't probe the assembly's own
+`runtimes/<rid>/native/` subdirectory — the `EnableDynamicLoading`
+bin layout populates it correctly, but the standard P/Invoke
+resolver only searches the **application's** runtimes tree, not
+arbitrary loaded assemblies'. So `--bind <path-to-backend.dll>`
+trapped at first DllImport on every backend with native deps
+(`Unable to load shared library 'LibTorchSharp'`).
+
+`BindingLoader.LoadAssembly` now registers a per-backend
+`NativeLibrary.SetDllImportResolver` that probes the loaded
+assembly's `runtimes/<rid>/native/` directory (plus a coarser-RID
+fallback like `runtimes/osx/native/`, plus the assembly's own
+flat dir) for DllImports issued by that assembly. ~80 LOC of
+new resolver logic; idempotent across the load-then-bind double-
+pass. The standard probe is preserved as a fallback (returning
+`IntPtr.Zero` from the resolver hands control back).
+
+Mirrors how .NET 8's `AssemblyDependencyResolver` is wired up
+for plugin scenarios — same problem, same shape of fix.
+
+### macOS-arm64 libomp rpath (gap 29 — `WACS.WASI.NN.TorchSharp`)
+
+Upstream `libtorch-cpu 2.10.0`'s `libtorch_cpu.dylib` on
+osx-arm64 has a hardcoded `LC_LOAD_DYLIB` entry pointing at
+`/opt/homebrew/opt/libomp/lib/libomp.dylib` (a Homebrew install
+path) instead of `@loader_path/libomp.dylib`. Bundled
+`libomp.dylib` from the same NuGet sits next to
+`libtorch_cpu.dylib`, but dyld resolves the absolute path first
+and misses it on hosts without Homebrew libomp installed (most
+CI machines, fresh dev installs).
+
+`Wacs.WASI.NN.TorchSharp.csproj` gains a
+`RewriteLibompRpathOnOsxArm64` MSBuild target (post-`Build`,
+Unix-conditional) that runs `install_name_tool -change` to
+rewrite the entry to `@loader_path/libomp.dylib`. Idempotent
+(re-runs are no-ops once the entry is rewritten). Verified via
+`otool -L` against the post-build dylib.
+
+### Worked-example documentation
+
+`Wacs.WASI.NN.TorchSharp/README.md` now covers a full XOR MLP
+worked example: a `build_xor_mlp.py` training + tracing script,
+the Rust guest excerpt (positional indexed-name dispatch
+convention), the bare `wacs run --wasip2 --bind <TORCH>`
+invocation, and the expected output. New Requirements section
+documents which native-lib gaps are addressed (28, 29) and
+which embedder-supplied artifacts are still required (the `.pt`
+file + `WACS_WASINN_TORCH_DIR`).
+
 ### Versions
 
-- `WACS.WASI.NN.TorchSharp` (new) — **0.1.0**
-- `WACS.WASI.Preview2.DependencyInjection` 0.1.5 → **0.1.6** (auto-wire extension)
-- `WACS.Cli` 1.5.18 → **1.5.19** (release event for the new backend)
+- `WACS.WASI.NN.TorchSharp` (new) — initial **0.1.0** plus
+  follow-up **0.1.1** carrying the gap-29 csproj target
+- `WACS.Transpiler.Lib` 0.8.12 → **0.8.13** (gap 28
+  `BindingLoader` resolver hook)
+- `WACS.WASI.Preview2.DependencyInjection` 0.1.5 → **0.1.6**
+  (TorchSharp auto-wire extension)
+- `WACS.Cli` 1.5.18 → **1.5.20** (release events for the new
+  backend + ergonomics fixes)
 
 (Untouched: `WACS.WASI.NN`, `.WASI.NN.DependencyInjection`, `.WASI.NN.OnnxRuntime`,
 `.WASI.NN.LlamaSharp`, `.WASI.NN.MLNet` — adding a new sibling backend doesn't change
