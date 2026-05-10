@@ -12,12 +12,23 @@
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.WASI.NN.DependencyInjection</AssemblyName>
-        <AssemblyVersion>0.2.1</AssemblyVersion>
-        <Version>0.2.1</Version>
+        <AssemblyVersion>0.2.2</AssemblyVersion>
+        <Version>0.2.2</Version>
         <RepositoryType>git</RepositoryType>
         <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
         <IsAotCompatible Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net7.0'))">true</IsAotCompatible>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="README.md">
+            <Pack>true</Pack>
+            <PackagePath/>
+        </None>
+    </ItemGroup>
 
     <ItemGroup>
         <ProjectReference Include="..\Wacs.WASI.NN\Wacs.WASI.NN.csproj" />

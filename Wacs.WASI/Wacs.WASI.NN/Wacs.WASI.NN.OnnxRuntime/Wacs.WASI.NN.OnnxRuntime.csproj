@@ -12,8 +12,8 @@
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.WASI.NN.OnnxRuntime</AssemblyName>
-        <AssemblyVersion>0.2.2</AssemblyVersion>
-        <Version>0.2.2</Version>
+        <AssemblyVersion>0.2.3</AssemblyVersion>
+        <Version>0.2.3</Version>
         <RepositoryType>git</RepositoryType>
         <!-- ONNX Runtime carries native binaries; restricting to
              net8.0 here is fine because ORT itself targets
@@ -24,7 +24,18 @@
              becomes important we can revisit. -->
         <TargetFramework>net8.0</TargetFramework>
         <PackageTags>wasm;wasi;nn;ml;onnx;wacs</PackageTags>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="README.md">
+            <Pack>true</Pack>
+            <PackagePath/>
+        </None>
+    </ItemGroup>
 
     <ItemGroup>
         <ProjectReference Include="..\Wacs.WASI.NN\Wacs.WASI.NN.csproj" />
