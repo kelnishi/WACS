@@ -20,6 +20,8 @@ architecture deep-dive.
 - **[Wacs.WASI.NN.MLNet.Test/](Wacs.WASI.NN.MLNet.Test/)** — ML.NET backend tests.
 - **[Wacs.WASI.NN.LlamaSharp/](Wacs.WASI.NN.LlamaSharp/)** — `LLamaSharp` backend for `graph-encoding.ggml` on the WasmEdge GGUF convention (U8 tensors carrying UTF-8 prompt / response). Ships `WasiNNLlamaSharpBindable` with `WACS_WASINN_GGUF_DIR`-driven name registry.
 - **[Wacs.WASI.NN.LlamaSharp.Test/](Wacs.WASI.NN.LlamaSharp.Test/)** — LlamaSharp backend SPI + load-by-name routing tests.
+- **[Wacs.WASI.NN.TorchSharp/](Wacs.WASI.NN.TorchSharp/)** — `TorchSharp` / libtorch backend for `graph-encoding.pytorch`. Loads TorchScript modules (`torch.jit.save` output) byte-loaded OR via `WACS_WASINN_TORCH_DIR`-driven name registry. Ships `WasiNNTorchSharpBindable`.
+- **[Wacs.WASI.NN.TorchSharp.Test/](Wacs.WASI.NN.TorchSharp.Test/)** — TorchSharp backend SPI + name-registry routing tests.
 
 ## Quick start
 

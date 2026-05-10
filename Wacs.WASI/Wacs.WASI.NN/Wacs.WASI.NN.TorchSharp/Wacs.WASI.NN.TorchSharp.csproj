@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <LangVersion>9</LangVersion>
+        <Nullable>enable</Nullable>
+        <Title>Wacs WASI-NN TorchSharp backend</Title>
+        <PackageId>WACS.WASI.NN.TorchSharp</PackageId>
+        <Authors>Kelvin Nishikawa</Authors>
+        <Description>TorchSharp / libtorch backend for WACS.WASI.NN. Implements GraphEncoding.PyTorch — load TorchScript modules from byte buffers (graph.load) or by name (graph.load-by-name), run inference through libtorch's C++ runtime. CPU default; swap LibTorch backend NuGets for CUDA / ROCm / MPS without source change.</Description>
+        <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
+        <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <AssemblyName>Wacs.WASI.NN.TorchSharp</AssemblyName>
+        <AssemblyVersion>0.1.0</AssemblyVersion>
+        <Version>0.1.0</Version>
+        <RepositoryType>git</RepositoryType>
+        <TargetFramework>net8.0</TargetFramework>
+        <PackageTags>wasm;wasi;nn;ml;pytorch;torchsharp;libtorch;wacs</PackageTags>
+        <!-- Same packaging shape as the LlamaSharp / MLNet backends:
+             this assembly is loaded via `wacs run [bind] <path>`'s
+             Assembly.LoadFrom (the embedder-supplies-the-backend
+             flow). EnableDynamicLoading copies every transitive
+             NuGet (TorchSharp + libtorch-cpu's RID-specific
+             ~700 MB native runtimes) into the project's bin so
+             the LoadFromContext resolver can satisfy them
+             locally without TPA / NuGet-cache probing. -->
+        <EnableDynamicLoading>true</EnableDynamicLoading>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="README.md">
+            <Pack>true</Pack>
+            <PackagePath/>
+        </None>
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Wacs.WASI.NN\Wacs.WASI.NN.csproj" />
+        <!-- TorchSharp-cpu is a meta-package that pulls both
+             TorchSharp (managed bindings) AND the matching
+             libtorch-cpu native runtime in one go. Embedders
+             that want CUDA / ROCm / MPS swap this for
+             TorchSharp-cuda-12.1 / -rocm / -macos-x64 — no
+             source change required. -->
+        <PackageReference Include="TorchSharp-cpu" Version="0.107.0" />
+    </ItemGroup>
+
+</Project>

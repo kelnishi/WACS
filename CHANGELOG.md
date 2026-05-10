@@ -1,5 +1,61 @@
 # Changelog
 
+## WACS.Cli 1.5.19 / WACS.WASI.NN.TorchSharp 0.1.0 / WACS.WASI.Preview2.DependencyInjection 0.1.6 — new wasi-nn backend: TorchSharp / PyTorch
+
+A fourth wasi-nn backend covering `graph-encoding.pytorch`. Same packaging shape as
+`WACS.WASI.NN.LlamaSharp` (load-by-name first-class via env-driven directory scan; byte-
+loaded fallback for smaller TorchScript modules; `EnableDynamicLoading` ships libtorch's
+~1 GB of native runtimes alongside the assembly so `--bind <path>` resolves the LoadFromContext
+deps locally).
+
+### What landed
+
+- **`Wacs.WASI.NN.TorchSharp`** (new package) — `IBackend` against
+  [`TorchSharp`](https://www.nuget.org/packages/TorchSharp). Loads TorchScript modules
+  via `torch.jit.load(byte[])` (byte-loaded path) or `torch.jit.load(path)` (name-keyed
+  path). `Compute(...)` switches the module to `eval()` mode, dispatches inputs by
+  positional indexed-name convention (`"0"`, `"1"`, …), and lifts outputs back through
+  the same indexed scheme. Single-Tensor + tuple-of-Tensors + list-of-Tensors return
+  shapes all unwrap to a flat indexed `NamedTensor[]`.
+- **`Wacs.WASI.NN.TorchSharp.Test`** (new test project) — 8 SPI smoke tests covering
+  `SupportedEncodings`, garbage-bytes → `RuntimeError`, name-registry round-trips,
+  `WasiNNTorchSharpBindable` parameterless ctor.
+- **`WasiPreview2RuntimeScope.BuildTorchSharpConfigureCallback`** — sibling of
+  `BuildLlamaSharpConfigureCallback`. Detects the TorchSharp assembly in AppDomain
+  (post-`--bind` LoadFromContext, via the round-21 fallback), instantiates
+  `TorchSharpBackend.FromPaths(<env-driven-registry>)`, wires it into BOTH
+  `Backends[PyTorch]` AND `LoadByNameBackend`. Combined with the ONNX + LlamaSharp
+  callbacks via the existing `Delegate.Combine` chain.
+- **`nuget.yml` matrix** gains `Wacs.WASI.NN.TorchSharp` under the existing
+  `WACS-WASI-NN-v*` tag prefix — versioned and published with the rest of the family.
+- **Docs**:
+  - [`Wacs.WASI/Wacs.WASI.NN/README.md`](Wacs.WASI/Wacs.WASI.NN/README.md) backend matrix
+  - [`docs/COMPONENT_CHAINING.md`](docs/COMPONENT_CHAINING.md) runtime-requirements row
+  - CLI README's `--wasi-nn` flag description mentions the four-backend matrix
+
+### Convention recap (matches LlamaSharp)
+
+```sh
+mkdir -p ./models     # drop *.pt / *.ts files in here
+export WACS_WASINN_TORCH_DIR="$(pwd)/models"
+
+TORCH=$(realpath Wacs.WASI/Wacs.WASI.NN/Wacs.WASI.NN.TorchSharp/bin/Release/net8.0/Wacs.WASI.NN.TorchSharp.dll)
+wacs run my-pytorch.component.wasm --wasip2 --bind "$TORCH"
+```
+
+For GPU swap `TorchSharp-cpu` for `TorchSharp-cuda-12.1` / `-macos-x64` etc. in the
+project's csproj.
+
+### Versions
+
+- `WACS.WASI.NN.TorchSharp` (new) — **0.1.0**
+- `WACS.WASI.Preview2.DependencyInjection` 0.1.5 → **0.1.6** (auto-wire extension)
+- `WACS.Cli` 1.5.18 → **1.5.19** (release event for the new backend)
+
+(Untouched: `WACS.WASI.NN`, `.WASI.NN.DependencyInjection`, `.WASI.NN.OnnxRuntime`,
+`.WASI.NN.LlamaSharp`, `.WASI.NN.MLNet` — adding a new sibling backend doesn't change
+the family core's surface.)
+
 ## All NuGet packages — README included in published packages
 
 Eleven packages gain a `<PackageReadmeFile>README.md</PackageReadmeFile>` entry plus a

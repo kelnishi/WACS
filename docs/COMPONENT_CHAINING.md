@@ -37,6 +37,7 @@ embedders bypassing the CLI need to either include them in
 | `--wasi-nn` | adds `WACS.WASI.NN`<br>`WACS.WASI.NN.DependencyInjection`<br>`WACS.WASI.NN.OnnxRuntime` | wasi-nn typed surface<br>`Tensor` / `Graph` / `GraphExecutionContext` / `Error` impls + `WasiPreview2NNBundle` composite<br>ONNX backend (default; swap with `--bind` for other backends) |
 | `--wasi-threads` | adds `WACS.WASI.Threads` | `wasi:thread-spawn` |
 | `--bind <path-to-Wacs.WASI.NN.LlamaSharp.dll>` | auto-pulls `WACS.WASI.NN` + `WASI.NN.DependencyInjection`<br>(LoadFromContext: `LLamaSharp` + `LLamaSharp.Backend.Cpu` natives + `Microsoft.Extensions.*`) | GGUF / llama.cpp backend. The `--bind` walk resolves the typed-surface + DI siblings automatically; the LlamaSharp NuGet's transitive deps ride along via the project's `EnableDynamicLoading` bin layout. |
+| `--bind <path-to-Wacs.WASI.NN.TorchSharp.dll>` | auto-pulls `WACS.WASI.NN` + `WASI.NN.DependencyInjection`<br>(LoadFromContext: `TorchSharp` + `libtorch-cpu` natives, ~1 GB across RIDs + `SkiaSharp` / `Google.Protobuf` transitives) | TorchScript / PyTorch backend. Same `--bind` UX as LlamaSharp — the auto-wire reads `$WACS_WASINN_TORCH_DIR`, scans `*.pt` + `*.ts`, registers each under filename-sans-extension. Swap `TorchSharp-cpu` for `TorchSharp-cuda-12.1` / `-macos-arm64` etc. in the consumer csproj for GPU. |
 | Custom host binding | `--bind <Asm>` | Any `IBindable` host package (game APIs, custom imports, etc.) |
 
 **Why both `WASI.NN` and `WASI.NN.DependencyInjection`?** Typed
