@@ -1,5 +1,90 @@
 # Changelog
 
+## WACS 0.14.0 — `Wacs.Core.Bin.BinaryModuleWriter`: round-trip binary serializer
+
+Inverse of `BinaryModuleParser`, symmetric with the existing
+`Wacs.Core.Text.TextModuleWriter`. A `Module` parsed from a wasm
+binary now writes back to a byte-identical canonical form on the
+second write — and after one parse/write/parse cycle the bytes
+stabilize, so the writer is the binary inverse of the parser modulo
+non-structural details the parser already drops (custom-section
+ordering, etc.).
+
+### Design
+
+`InstructionBase` gains a virtual `RenderBinary(BinaryWriter)` that's
+the inverse of `Parse(BinaryReader)`. Default is a no-op (covers
+opcodes with no immediates like `add` / `drop` / `end`); each
+immediate-bearing subclass overrides it to emit the same operands
+in the same order it would have read them. The pattern mirrors the
+existing `RenderText` virtual that the text writer leans on. Per-
+instruction encoding stays next to the instruction class, which
+keeps the dispatch open to extension when new opcodes land.
+
+`BinaryModuleWriter` composes those overrides with section-level
+encoders for every spec section in the canonical order (type / import
+/ function / table / memory / tag / global / export / start / element /
+data-count / code / data) plus the structured custom sections (`name`,
+`metadata.code.branch_hint`) when their parser-side capture flag was
+set and the module carries the parsed structure.
+
+### Coverage
+
+Round-trip stabilizes after one write across 21 fixtures spanning
+every wasm proposal WACS supports:
+
+- **Core / multi-value / sign-extensions / saturated-float-to-int**:
+  `binding`, `tailcalls`, `fib`, `HelloWorld`
+- **Feature exercisers** (Feature.Detect/generated-wasm): `bulk-memory`,
+  `extended-const`, `multi-memory`, `multi-value`, `mutable-globals`,
+  `reference-types`, `saturated-float-to-int`, `sign-extensions`,
+  `SIMD`, `relaxed-SIMD`, `tail-call`, `typed-function-references`,
+  `GC`, `exceptions-final`, `threads`, `memory64`, `js-string-builtins`
+
+Every section variant gets exercised end-to-end:
+
+- Type section: function / struct / array composites; rec-group with
+  multi-sub forms; sub / sub-final with super-type vectors
+- Element section: all 8 flag variants (active / passive / declarative ×
+  funcref-elemkind-shortcut / reftype-expr-vector)
+- Data section: active-default-mem / active-explicit-mem / passive
+- Code section: compressed-locals run-length grouping; block / loop /
+  if-else / try-table inner sequences emitted recursively with their
+  terminator instructions intact
+- Table types: legacy reftype+limits and GC-extended `0x40 0x00`
+  init-expr form
+- Limits / memarg / global flags: all bit variants including
+  shared / thread-local / 64-bit address / multi-memory flag
+- Heap types: abstract single-byte tokens and concrete s33 indices
+  for `ref.null`, `ref.cast`, `ref.test`, `br_on_cast`, `br_on_cast_fail`
+
+### Files
+
+- `Wacs.Core/Utilities/BinaryWriterExtension.cs` — LEB128 (u32/u64/s32/s64/s33),
+  F32/F64, UTF-8 string, vector, and length-prefixed-section helpers
+- `Wacs.Core/Types/Defs/ValTypeWriter.cs` — single-byte / `0x63`-`0x64` /
+  s33-index dispatch matching `ValTypeParser`
+- `Wacs.Core/BinaryFormat/TypeWriters.cs` — `Limits`, `GlobalType`,
+  `MemoryType`, `TagType`, `TableType`, `FunctionType`, `ResultType`,
+  `FieldType`, `CompositeType`, `SubType`, `RecursiveType`, `Expression`,
+  `InstructionSequence`, opcode-prefix encoder
+- `Wacs.Core/BinaryFormat/BinaryModuleWriter.cs` — `Write(Module)` /
+  `WriteTo(Stream, Module)`; section dispatch
+- `Wacs.Core/BinaryFormat/CustomSectionEncoders.cs` — `name` subsections
+  (10 kinds) and `metadata.code.branch_hint`, sorted ascending for
+  canonical output
+- `Wacs.Core.Test/BinaryModuleWriterTests.cs` — round-trip idempotence
+  across 21 fixtures
+- 22 instruction files + `MemArg.cs` + `InstructionBase.cs` — virtual
+  + ~75 overrides
+
+### Folder note
+
+Source files live in `Wacs.Core/BinaryFormat/` rather than `Wacs.Core/Bin/`
+because the .NET SDK's default `<DefaultItemExcludes>` excludes `bin/**`
+(it's where the build output lands). The C# namespace is `Wacs.Core.Bin`
+as designed; only the on-disk folder name differs.
+
 ## WACS.WASI.NN 0.3.5 — WITX retArea wire format: payload at offset 0, errno via return value
 
 PR #142 (0.3.4) aligned the `set_input` / `compute` arg count + errno
