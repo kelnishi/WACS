@@ -1,5 +1,84 @@
 # Changelog
 
+## WACS.Cli 1.5.22 / WACS.WASI.NN.OnnxRuntime 0.3.0 — ONNX hardware acceleration via execution-provider selection (opt-in)
+
+`Microsoft.ML.OnnxRuntime` 1.22.0 already ships the CoreML / CUDA / DirectML / ROCm
+managed API surface AND (on macOS-arm64) the CoreML EP symbol baked into the bundled
+native dylib — but `OnnxBackend` defaulted to CPU-only and didn't surface any knob to
+opt in. This release adds typed configuration + env-var-driven EP selection so wasi-nn
+ONNX guests can enable hardware acceleration without source changes.
+
+**Default stays CPU.** Empirically, CoreML's partition-and-fallback for generative-LLM
+ops (GroupQueryAttention specifically) produces silently wrong numerical output on
+Gemma 3 270M — the SLM REPL stops responding under `WACS_WASINN_ONNX_EP=auto`/`coreml`.
+DirectML on Windows has comparable op-coverage uneveness. Until ORT 1.22.0 closes
+those gaps, hardware acceleration is **explicit opt-in**: the parameterless
+`OnnxBackend()` and the CLI's `--wasi-nn` path default to CPU unless
+`WACS_WASINN_ONNX_EP` is set. Pin the EP per-model after you've verified your model
+works with it (e.g., `WACS_WASINN_ONNX_EP=coreml` for image-classification / encoder-
+only models where CoreML's op coverage is complete).
+
+### What landed
+
+- **`OnnxExecutionProvider`** (new enum) — `Auto`, `Cpu`, `CoreML`, `Cuda`, `DirectML`,
+  `Rocm`. `Auto` resolves at session-construction time to the platform-best EP (CoreML
+  on macOS, DirectML on Windows, CUDA / ROCm on Linux).
+- **`OnnxBackendOptions`** (new typed config) — `ExecutionProvider` (default
+  **`Cpu`**), per-EP device IDs, `CoreMLFlags` passthrough, `FallbackToCpu` (default
+  `true`). `FromEnvironment()` reads `WACS_WASINN_ONNX_EP` (case-insensitive: `auto` /
+  `cpu` / `coreml` / `cuda` / `dml` / `directml` / `rocm`) plus
+  `WACS_WASINN_ONNX_{CUDA,ROCM,DML}_DEVICE` for the device index. Unset env var → CPU.
+- **`OnnxBackend()`** (parameterless ctor) — now reads `OnnxBackendOptions.FromEnvironment()`.
+  CPU when `WACS_WASINN_ONNX_EP` is unset (the common case), the requested EP otherwise.
+  Strict mode (`FallbackToCpu = false`) propagates EP-append failures as
+  `WasiNNException(ErrorCode.RuntimeError)` at `graph.load` time.
+- **`OnnxBackend(OnnxBackendOptions)`** (new ctor) — explicit typed-config path for
+  library embedders.
+- **`OnnxBackend(Func<SessionOptions>?)`** (preserved) — full escape hatch, wins over
+  the typed-options path.
+- **`CoreMLFlags` env-var passthrough** — `WACS_WASINN_ONNX_COREML_FLAGS` accepts a
+  comma/pipe-separated list of CoreML flag names (`MLProgram`, `UseCpuAndGpu`,
+  `CpuOnly`, `ANE`, `Static`, `Subgraph`) so the **MLProgram** model format (CoreML 5+,
+  much broader op coverage for transformer ops) is reachable without recompiling.
+  Pair with `WACS_WASINN_ONNX_EP=coreml` to enable.
+- **`Microsoft.ML.OnnxRuntime` 1.22.0 → 1.26.0** — accumulated kernel improvements on
+  osx-arm64: top-level `RMSNorm` op (was contrib-only), `FusedQKRotaryEmbedding`,
+  `SplitPackedQKVWithRotaryEmbeddingAndCopyKV`, broader WebGPU EP coverage in the
+  underlying op-fusion pipeline. No public-API break for the surface this package
+  uses. **Note**: the CoreML EP itself sees iterative improvements but partition-and-
+  fallback semantics for generative-LLM ops on macOS are largely unchanged across
+  1.22 → 1.26.
+
+### Out-of-box pick
+
+| OS                | Auto resolves to | Notes                                                                       |
+|-------------------|------------------|-----------------------------------------------------------------------------|
+| macOS (arm64/x64) | CoreML           | Stock `Microsoft.ML.OnnxRuntime` ships the CoreML EP symbol — no NuGet swap |
+| Windows           | DirectML         | Add `Microsoft.ML.OnnxRuntime.DirectML` for full DML coverage               |
+| Linux             | CUDA → ROCm      | Requires CUDA toolkit / ROCm runtime on host                                |
+| Other             | CPU              |                                                                             |
+
+Silent CPU fallback covers the "EP picked, runtime not installed" case — the user gets
+inference, not a `DllNotFoundException`. To opt out of acceleration entirely:
+`WACS_WASINN_ONNX_EP=cpu`. To make EP misconfigurations loud (strict mode):
+`new OnnxBackend(new OnnxBackendOptions { FallbackToCpu = false })`.
+
+### Verified
+
+- `Wacs.WASI.NN.OnnxRuntime.Test` 26/26 (was 10/10 — 16 new tests covering env-var
+  parsing, every EP enum value, the typed-options ctor null guard, a real CoreML EP
+  round-trip on macOS-arm64 with the bundled native dylib, and strict-mode
+  `EntryPointNotFoundException` → `WasiNNException` wrapping for unsupported EPs)
+- `Wacs.WASI.NN.Test` 21/21 (orchestrator surface unchanged)
+- `Wacs.Transpiler.Test` 775/776 (1 skip, pre-existing)
+
+### Versions
+
+- `WACS.WASI.NN.OnnxRuntime` 0.2.3 → **0.3.0** (new public types:
+  `OnnxBackendOptions`, `OnnxExecutionProvider`; new `OnnxBackend(OnnxBackendOptions)`
+  ctor)
+- `WACS.Cli` 1.5.21 → **1.5.22** (release event)
+
 ## WACS.Cli 1.5.21 / WACS.Transpiler.Lib 0.8.14 — gap 30: `BindBackendLoadContext` for transitive-dep DllImports
 
 Round-25 verification (`wasi-nn/WACS-GAPS.md` round 25) found that the gap-28 fix —

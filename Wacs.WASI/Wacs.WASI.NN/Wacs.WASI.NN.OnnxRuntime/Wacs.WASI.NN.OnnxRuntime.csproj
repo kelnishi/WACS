@@ -12,8 +12,8 @@
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.WASI.NN.OnnxRuntime</AssemblyName>
-        <AssemblyVersion>0.2.3</AssemblyVersion>
-        <Version>0.2.3</Version>
+        <AssemblyVersion>0.3.0</AssemblyVersion>
+        <Version>0.3.0</Version>
         <RepositoryType>git</RepositoryType>
         <!-- ONNX Runtime carries native binaries; restricting to
              net8.0 here is fine because ORT itself targets
@@ -39,19 +39,22 @@
 
     <ItemGroup>
         <ProjectReference Include="..\Wacs.WASI.NN\Wacs.WASI.NN.csproj" />
-        <!-- 1.22.0 widens com.microsoft.GroupQueryAttention's
-             allowed input range to support the 11-input shape
-             Gemma 3 270M's ONNX export emits. Empirically
-             verified: `strings` on the matching wasi-nn host's
-             linked native dylib (the working `ort 2.0.0-rc.10`
-             Rust dependency) reports 1.22.0; 1.21.0 still
-             rejects with "input size 11 not in range [min=7,
-             max=9]" against the same model bytes. No public-API
-             break for the surface this package uses
-             (SessionOptions, InferenceSession, OrtValue) between
-             1.20.1 and 1.22.0. Round-15 follow-up (gap 21
-             follow-up). -->
-        <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.22.0" />
+        <!-- 1.26.0 ships accumulated kernel improvements over the
+             1.22.0 baseline that closed the GroupQueryAttention
+             input-range gap for Gemma 3 270M (round-15). New in
+             1.23-1.26 on osx-arm64 specifically: top-level RMSNorm
+             op (was contrib-only in 1.22), FusedQKRotaryEmbedding,
+             SplitPackedQKVWithRotaryEmbeddingAndCopyKV, broader
+             WebGPU EP coverage (not exposed to .NET, but feeds
+             into the ORT op-fusion pipeline). CoreML EP itself
+             remains the only Metal-adjacent EP on macOS; op
+             coverage for transformer ops is iteratively improved
+             but partition-and-fallback semantics are unchanged.
+             No public-API break for the surface this package uses
+             (SessionOptions, InferenceSession, OrtValue,
+             AppendExecutionProvider_CoreML / CUDA / DML / ROCm)
+             between 1.22.0 and 1.26.0. -->
+        <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.26.0" />
     </ItemGroup>
 
 </Project>
