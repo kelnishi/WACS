@@ -541,6 +541,11 @@ namespace Wacs.Core.Runtime
                         ue.WasmFrames = ctx.SnapshotCallStack(inst);
                         throw;
                     }
+                    catch (Wacs.Core.Runtime.Exceptions.WasmRuntimeException re) when (re.WasmFrames == null)
+                    {
+                        re.WasmFrames = ctx.SnapshotCallStack(inst);
+                        throw;
+                    }
                 }
             }
             else
@@ -570,6 +575,11 @@ namespace Wacs.Core.Runtime
                     catch (Wacs.Core.Runtime.Exceptions.UnhandledWasmException ue) when (ue.WasmFrames == null)
                     {
                         ue.WasmFrames = ctx.SnapshotCallStack(inst);
+                        throw;
+                    }
+                    catch (Wacs.Core.Runtime.Exceptions.WasmRuntimeException re) when (re.WasmFrames == null)
+                    {
+                        re.WasmFrames = ctx.SnapshotCallStack(inst);
                         throw;
                     }
 

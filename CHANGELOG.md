@@ -1,5 +1,70 @@
 # Changelog
 
+## WACS 0.15.13 / WACS.Cli 1.6.4 — WasmRuntimeException family + CLI handler (Stack-trace Pass E)
+
+Final pass of the stack-trace arc. Extends the in-dispatch-loop
+enrichment to `WasmRuntimeException` (host-API misuse, OpStack
+underflow, internal invariants violated during execution) and
+wires the CLI to print the WASM trace section for it too.
+
+### Public API additions (Wacs.Core 0.15.13)
+
+- `Wacs.Core.Runtime.Exceptions.WasmRuntimeException.WasmFrames`
+  property + `(message, frames)` overload constructor.
+- The dispatch loop in `WasmRuntime.ProcessThreadAsync` gains a
+  third parallel catch filter (alongside `TrapException` and
+  `UnhandledWasmException`):
+  ```csharp
+  catch (WasmRuntimeException re) when (re.WasmFrames == null)
+  {
+      re.WasmFrames = ctx.SnapshotCallStack(inst);
+      throw;
+  }
+  ```
+  Runtime exceptions thrown from inside an instruction's
+  `Execute` are retroactively populated. Exceptions thrown
+  *outside* the dispatch loop (instantiation, host binding,
+  type-system construction errors) leave `WasmFrames` null —
+  no call stack exists at those sites.
+
+### CLI wiring (WACS.Cli 1.6.4)
+
+- New `RunHandler.PrintRuntimeException(exc, module, runtime)`
+  helper, mirroring `PrintTrap` / `PrintUnhandledWasm`.
+- A fourth catch filter at each of the four invoker sites:
+  ```csharp
+  catch (System.Exception any) when (TryUnwrap<WasmRuntimeException>(any, out var rexc))
+  ```
+  Prints the WASM trace section when frames are available;
+  falls through to the .NET trace when they aren't.
+
+### Arc summary
+
+Five passes:
+- **B** (0.15.7): `Module.SourcePositions` — memoize WAT (line, col, offset) per instruction.
+- **A** (0.15.8): `WasmStackFrame` + `ExecContext.SnapshotCallStack` + exception fields.
+- **C** (0.15.9 / Cli 1.6.2): `WasmStackTrace.Format` + `FormatVerbose`; CLI wiring.
+- **C-followups** (0.15.10–0.15.11 / Cli 1.6.3):
+  unwrap `TargetInvocationException`; WAT `$name` → `FunctionInstance`.
+- **D** (0.15.12): dispatch-loop auto-enrichment;
+  `ComputePointerPath` removal; `ErrorFormattingTests`.
+- **E** (0.15.13 / Cli 1.6.4): `WasmRuntimeException` enrichment;
+  CLI handler.
+
+End-to-end behavior: any trap, unhandled exception, or runtime
+fault thrown from inside an instruction's `Execute` produces a
+two-section error output — the .NET stack trace followed by a
+"WASM stack trace:" section showing function names, throwing
+mnemonic + byte offset, and source `(line:col)` when available.
+
+Toward the debugger-support goal: every runtime fault now
+carries enough metadata to identify its source location and
+the call chain that led there. Next steps will likely be
+runtime-instrumentation oriented (breakpoints, single-step,
+local-variable inspection) rather than diagnostic.
+
+476/476 Wacs.Core.Test tests pass.
+
 ## WACS 0.15.12 — universal trap enrichment + ComputePointerPath removal (Stack-trace Pass D)
 
 Every trap that escapes the interpreter's dispatch loop now carries

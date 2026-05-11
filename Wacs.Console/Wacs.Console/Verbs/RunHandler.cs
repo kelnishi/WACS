@@ -293,6 +293,11 @@ namespace Wacs.Console.Verbs
                     PrintUnhandledWasm(exn, modInst.Repr, runtime);
                     return 1;
                 }
+                catch (System.Exception any) when (TryUnwrap<WasmRuntimeException>(any, out var rexc))
+                {
+                    PrintRuntimeException(rexc, modInst.Repr, runtime);
+                    return 1;
+                }
                 catch (SignalException exc)
                 {
                     if (opts.Verbose)
@@ -336,6 +341,11 @@ namespace Wacs.Console.Verbs
                     PrintUnhandledWasm(exn, modInst.Repr, runtime);
                     return 1;
                 }
+                catch (System.Exception any) when (TryUnwrap<WasmRuntimeException>(any, out var rexc))
+                {
+                    PrintRuntimeException(rexc, modInst.Repr, runtime);
+                    return 1;
+                }
                 catch (SignalException exc)
                 {
                     if (opts.Verbose)
@@ -362,6 +372,11 @@ namespace Wacs.Console.Verbs
                 catch (System.Exception any) when (TryUnwrap<UnhandledWasmException>(any, out var exn))
                 {
                     PrintUnhandledWasm(exn, modInst.Repr, runtime);
+                    return 1;
+                }
+                catch (System.Exception any) when (TryUnwrap<WasmRuntimeException>(any, out var rexc))
+                {
+                    PrintRuntimeException(rexc, modInst.Repr, runtime);
                     return 1;
                 }
                 catch (SignalException exc)
@@ -413,6 +428,11 @@ namespace Wacs.Console.Verbs
                 catch (System.Exception any) when (TryUnwrap<UnhandledWasmException>(any, out var exn))
                 {
                     PrintUnhandledWasm(exn, modInst.Repr, runtime);
+                    return 1;
+                }
+                catch (System.Exception any) when (TryUnwrap<WasmRuntimeException>(any, out var rexc))
+                {
+                    PrintRuntimeException(rexc, modInst.Repr, runtime);
                     return 1;
                 }
                 catch (SignalException exc)
@@ -1134,6 +1154,29 @@ namespace Wacs.Console.Verbs
         /// </summary>
         private static void PrintUnhandledWasm(
             Wacs.Core.Runtime.Exceptions.UnhandledWasmException exc,
+            Wacs.Core.Module module,
+            Wacs.Core.Runtime.WasmRuntime runtime)
+        {
+            System.Console.Error.WriteLine(exc);
+            if (exc.WasmFrames != null && exc.WasmFrames.Length > 0)
+            {
+                System.Console.Error.WriteLine();
+                System.Console.Error.WriteLine("WASM stack trace:");
+                System.Console.Error.WriteLine(
+                    Wacs.Core.Runtime.Exceptions.WasmStackTrace.FormatVerbose(
+                        exc.WasmFrames, module, runtime.RuntimeStore));
+            }
+        }
+
+        /// <summary>
+        /// Print a runtime exception (OpStack underflow / host
+        /// dispatch failure / etc.) with the WASM trace if the
+        /// dispatch loop captured one. Setup-time errors
+        /// (instantiation, host binding) have no frames and
+        /// surface as a plain .NET trace.
+        /// </summary>
+        private static void PrintRuntimeException(
+            Wacs.Core.Runtime.Exceptions.WasmRuntimeException exc,
             Wacs.Core.Module module,
             Wacs.Core.Runtime.WasmRuntime runtime)
         {
