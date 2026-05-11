@@ -18,19 +18,19 @@ namespace Wacs.WASI.NN
     /// Legacy core-module ABI binding for <c>wasi_ephemeral_nn</c>,
     /// targeting the bytecodealliance <c>wasi-nn 0.6</c> wire format
     /// that ships in the upstream Rust crate. Six imports, indexed
-    /// inputs / outputs, plain i32 handles, u16 errnos.
+    /// inputs / outputs, plain i32 handles.
     ///
-    /// <para>The errno encoding splits across two conventions, matching
-    /// what the 0.6 crate emits:
+    /// <para>Errno is uniformly the function's <c>i32</c> return value
+    /// across all six calls (matching what the 0.6 crate's generated
+    /// FFI shims read). Calls returning data take a trailing retArea
+    /// pointer that's sized exactly for the payload type — no errno
+    /// field; the crate reads the payload from retArea+0 via
+    /// <c>ptr::read</c> when errno==0:
     /// <list type="bullet">
-    /// <item>Data-returning calls (<c>load</c>, <c>load_by_name</c>,
-    /// <c>init_execution_context</c>, <c>get_output</c>) take a
-    /// trailing <c>retArea</c> i32 pointer. Host writes the errno
-    /// to retArea+0 and the payload to retArea+4; the function's
-    /// own i32 result is unused (always 0).</item>
-    /// <item>Void-Ok calls (<c>set_input</c>, <c>compute</c>) carry
-    /// no payload, so the errno collapses to the function's i32
-    /// return value — no retArea pointer.</item>
+    /// <item><c>load</c> / <c>load_by_name</c> → retArea is i32 graph handle</item>
+    /// <item><c>init_execution_context</c> → retArea is i32 execution-context handle</item>
+    /// <item><c>get_output</c> → retArea is i32 written-byte count</item>
+    /// <item><c>set_input</c> / <c>compute</c> → no retArea (void-Ok)</item>
     /// </list></para>
     ///
     /// <para>Memory layout helpers (all little-endian):
@@ -66,9 +66,13 @@ namespace Wacs.WASI.NN
 
         // load(builder: graph_builder_array, encoding: graph_encoding,
         //      target: execution_target) -> expected<graph, nn_errno>
-        // Wire form: (i32 builder_array_ptr, i32 builder_array_len,
-        //             i32 encoding, i32 target, i32 retArea) -> i32 errno
-        // retArea: u16 errno @0, then graph handle at +4 on success.
+        // bytecodealliance wasi-nn 0.6 ABI:
+        //   (i32 builder_array_ptr, i32 builder_array_len, i32 encoding,
+        //    i32 target, i32 retArea) -> i32 errno
+        // retArea is sized for a Graph handle (i32). On success (errno=0),
+        // the host writes the i32 handle to retArea+0. The crate reads
+        // the handle from retArea+0 via ptr::read; errno is the function
+        // return value, not in retArea.
         private static void BindLoad(WasmRuntime runtime, WasiNNHost host)
         {
             runtime.BindHostFunction<Func<ExecContext, int, int, int, int, int, int>>(
@@ -83,20 +87,19 @@ namespace Wacs.WASI.NN
                         var backend = host.ResolveBackend(enc);
                         var graph = backend.LoadGraph(builders, tgt);
                         var handle = host.Graphs.Allocate(graph);
-                        WriteWitxOk(ctx, retArea);
-                        ctx.WriteI32LE(retArea + 4, handle);
+                        ctx.WriteI32LE(retArea, handle);
                         return 0;
                     }
                     catch (WasiNNException e)
                     {
-                        WriteWitxErr(ctx, retArea, e.Code);
-                        return 0;
+                        return (int)(ushort)e.Code.ToWitx();
                     }
                 });
         }
 
         // load_by_name(name: string) -> expected<graph, nn_errno>
-        // Wire form: (i32 name_ptr, i32 name_len, i32 retArea) -> i32 errno
+        //   Wire: (i32 name_ptr, i32 name_len, i32 retArea) -> i32 errno
+        //   retArea+0: i32 graph handle on success.
         private static void BindLoadByName(WasmRuntime runtime, WasiNNHost host)
         {
             runtime.BindHostFunction<Func<ExecContext, int, int, int, int>>(
@@ -108,20 +111,20 @@ namespace Wacs.WASI.NN
                         var name = ReadString(ctx, namePtr, nameLen);
                         var graph = host.LoadGraphByNameDispatch(name);
                         var handle = host.Graphs.Allocate(graph);
-                        WriteWitxOk(ctx, retArea);
-                        ctx.WriteI32LE(retArea + 4, handle);
+                        ctx.WriteI32LE(retArea, handle);
                         return 0;
                     }
                     catch (WasiNNException e)
                     {
-                        WriteWitxErr(ctx, retArea, e.Code);
-                        return 0;
+                        return (int)(ushort)e.Code.ToWitx();
                     }
                 });
         }
 
         // init_execution_context(graph: graph)
         //   -> expected<graph_execution_context, nn_errno>
+        //   Wire: (i32 graph_handle, i32 retArea) -> i32 errno
+        //   retArea+0: i32 graph_execution_context handle on success.
         private static void BindInitExecutionContext(WasmRuntime runtime, WasiNNHost host)
         {
             runtime.BindHostFunction<Func<ExecContext, int, int, int>>(
@@ -137,14 +140,12 @@ namespace Wacs.WASI.NN
                         var bctx = graph.CreateContext();
                         var ctxHandle = host.Contexts.Allocate(bctx);
                         host.WitxContextState[ctxHandle] = new WitxContextState(bctx);
-                        WriteWitxOk(ctx, retArea);
-                        ctx.WriteI32LE(retArea + 4, ctxHandle);
+                        ctx.WriteI32LE(retArea, ctxHandle);
                         return 0;
                     }
                     catch (WasiNNException e)
                     {
-                        WriteWitxErr(ctx, retArea, e.Code);
-                        return 0;
+                        return (int)(ushort)e.Code.ToWitx();
                     }
                 });
         }
@@ -242,7 +243,9 @@ namespace Wacs.WASI.NN
         // get_output(context: graph_execution_context, index: u32,
         //            out_buffer: ptr<u8>, out_buffer_max_size: buffer_size)
         //   -> expected<buffer_size, nn_errno>
-        // retArea: u16 errno @0, written-byte-count u32 at +4.
+        //   Wire: (i32 ctx, i32 index, i32 out_buffer, i32 max_size,
+        //          i32 retArea) -> i32 errno
+        //   retArea+0: i32 written-byte count on success.
         private static void BindGetOutput(WasmRuntime runtime, WasiNNHost host)
         {
             runtime.BindHostFunction<Func<ExecContext, int, int, int, int, int, int>>(
@@ -271,14 +274,12 @@ namespace Wacs.WASI.NN
                         var mem = ctx.Memory();
                         for (int i = 0; i < span.Length; i++)
                             mem[outPtr + i] = span[i];
-                        WriteWitxOk(ctx, retArea);
-                        ctx.WriteI32LE(retArea + 4, span.Length);
+                        ctx.WriteI32LE(retArea, span.Length);
                         return 0;
                     }
                     catch (WasiNNException e)
                     {
-                        WriteWitxErr(ctx, retArea, e.Code);
-                        return 0;
+                        return (int)(ushort)e.Code.ToWitx();
                     }
                 });
         }
@@ -383,31 +384,6 @@ namespace Wacs.WASI.NN
                     ErrorCode.InvalidArgument,
                     $"unknown WITX tensor_type {wireValue}"),
             };
-        }
-
-        // ---- retArea writers ----
-
-        // expected<T, nn_errno> on success: errno=0 in the first
-        // u16 of the retArea. The actual T then sits at offset
-        // matching the result's payload alignment (max(2, align_of<T>)).
-        // For graph / context / buffer_size returns the payload
-        // alignment is 4, so the i32 sits at +4. Only the four
-        // data-returning calls use retArea — set_input and compute
-        // collapse the empty-Ok / errno case onto the function's
-        // i32 return value (no retArea pointer in their wire form).
-        private static void WriteWitxOk(ExecContext ctx, int retArea)
-        {
-            ctx.WriteI32LE(retArea, 0);
-        }
-
-        private static void WriteWitxErr(ExecContext ctx, int retArea, ErrorCode code)
-        {
-            // Witx errno discriminant goes in the first u16. We
-            // write 32 bits but only the low 16 are meaningful;
-            // the high 16 is reserved padding (some compilers
-            // would zero-fill it, others leave it undefined —
-            // we explicitly zero).
-            ctx.WriteI32LE(retArea, (int)(ushort)code.ToWitx());
         }
 
         private static int ReadI32LE(byte[] mem, int offset)

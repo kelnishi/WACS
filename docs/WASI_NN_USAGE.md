@@ -108,6 +108,22 @@ Not needed for `load-by-name` backends (the model never enters wasm linear memor
 
 The transpiler engine direct-links wasi-nn imports for ~10× lower per-call overhead. The interpreter engine uses delegate-dispatched `BindHostFunction` handlers — slower per call but no JIT warmup. Default is **transpiler** for `--wasip2`; both paths share the same backend implementations.
 
+### Plain core wasm (wasm32-wasip1 / WITX)
+
+Guests built against the legacy `wasi_ephemeral_nn` WITX ABI (typically Rust crates pinned to `wasi-nn = "0.6"` and compiled for `--target wasm32-wasip1`) drop the `--wasip2` flag entirely:
+
+```sh
+wacs run my-witx-guest.wasm \
+    --bind <path-to-Wacs.WASI.NN.X.dll> \
+    -e MODEL_NAME=my-model
+```
+
+The same `--bind` + backend env-var pattern works — WACS's `WasiNNHost.BindToRuntime` wires both ABIs (`wasi:nn/*` WIT and `wasi_ephemeral_nn` WITX) onto the runtime, so a WITX guest reaches the same backend the WIT guest would.
+
+> **Gotcha — pass guest env vars with `-e`, not `export`:** WASI Preview 1 has no host-env-inheritance convention, so `wacs run` does **not** auto-forward the host's process environment to the guest. Pass each var the guest needs to read via `std::env::var` with `-e KEY=VALUE` (or `--env`, comma-separated). The wasi-p2 dispatch path auto-forwards host env via `wasi:cli/environment.get-environment`, so on `--wasip2` an `export MODEL_NAME=...` is enough.
+
+Host-side env vars consumed by the backend itself (e.g. `WACS_WASINN_GGUF_DIR`, `WACS_WASINN_TORCH_DIR`, `WACS_WASINN_GENAI_DIR`) are read by the .NET process via `Environment.GetEnvironmentVariable` — those just need a plain shell `export` on either path.
+
 ---
 
 ## Environment variables

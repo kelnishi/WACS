@@ -1,5 +1,52 @@
 # Changelog
 
+## WACS.WASI.NN 0.3.5 — WITX retArea wire format: payload at offset 0, errno via return value
+
+PR #142 (0.3.4) aligned the `set_input` / `compute` arg count + errno
+convention to the bytecodealliance `wasi-nn 0.6` ABI, but missed a
+deeper retArea-layout mismatch in the four data-returning calls
+(`load`, `load_by_name`, `init_execution_context`, `get_output`).
+
+WACS was writing `errno @ retArea+0, payload @ retArea+4` and always
+returning `0` from the function. The 0.6 crate's generated FFI shim
+expects exactly the opposite: errno is the function's `i32` return
+value, and `retArea` is a buffer sized for the payload alone — the
+crate reads the payload from `retArea+0` via `ptr::read`.
+
+End-to-end consequence: the model loaded host-side, but the `Graph`
+handle returned to the guest was always 0 (the errno value sitting at
+retArea+0). Every subsequent call cascaded:
+
+- `load_by_name(name)` → returns `Graph { handle: 0 }`
+- `init_execution_context(graph=0)` → `InvalidArgument` (handle 0 is
+  the null sentinel in the WACS ResourceTable)
+- `set_input(ctx=junk, ...)` → `InvalidArgument` (ctx lookup miss)
+
+Now corrected. All four retArea-using calls write the payload at
+`retArea+0` and use the function's `i32` return value as the errno:
+
+| Call | Payload at retArea+0 | Errno |
+|---|---|---|
+| `load` | graph handle (i32) | return value |
+| `load_by_name` | graph handle (i32) | return value |
+| `init_execution_context` | graph-execution-context handle (i32) | return value |
+| `get_output` | written-byte count (i32) | return value |
+| `set_input` | — | return value (PR #142) |
+| `compute` | — | return value (PR #142) |
+
+`WriteWitxOk` / `WriteWitxErr` helpers deleted (no callers).
+
+### Verification
+
+Live witx guest (`wasi-nn-llm-witx`, built against `wasi-nn = "0.6"`,
+running through `wacs run --bind WACS.WASI.NN.LlamaSharp.dll`) now
+produces real LLM output on Qwen2.5 0.5B Instruct Q4_K_M GGUF —
+`load_by_name` → `init_execution_context` → `set_input` →
+`compute` → `get_output` all return errno=0, generated tokens stream
+back through the guest's REPL.
+
+`Wacs.WASI.NN.Test` suite: 21/21 pass.
+
 ## WACS.WASI.NN family — cascade bump to advertise the 0.3.4 WITX-ABI fix
 
 Repackages all six WASI.NN sibling backends so their `.nuspec` declares the
