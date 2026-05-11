@@ -1,5 +1,60 @@
 # Changelog
 
+## WACS.Cli 1.5.22 / WACS 0.13.8 / WACS.WASI.NN 0.3.3 / WACS.WASI.Preview2.DependencyInjection 0.1.7 — wasi-nn cross-table resource-drop fix (massive leak in transpiler + --wasi-nn)
+
+`WACS_DIAG_MEMORY=1` data from the SLM REPL revealed +12.67 GiB of managed
+heap growth across 106 token-generation steps, matching almost exactly the
+sum of returned logits-tensor byte sizes (~26 MiB → ~227 MiB per turn). The
+leak traces to a resource-table mismatch:
+
+- The transpiler / wasip2 direct-link path allocates host-imported tensor
+  handles through `WasiPreview2Resources.AllocateResource` →
+  `ResourceContext.TableFor(typeof(ITensor)).Allocate(...)`.
+- The interpreter binding's `[resource-drop]tensor` handler drops from
+  `WasiNNHost.Tensors` — a **different** table.
+- Result: every tensor allocated during a direct-link compute call stays
+  pinned in the direct-link table forever, holding its byte buffer alive.
+  For the Gemma 3 270M SLM that's ~26-230 MiB of FP32 logits per token, no
+  KV cache, multiplied by every token generated for the lifetime of the
+  process.
+
+### Fix shape
+
+- **`WasmRuntime.ExternalResourceDrop`** (new public `Action<Type, int>?`) —
+  cross-binding hook for releasing handles outside an `IBindable`'s own
+  resource tables.
+- **`WasiPreview2Resources.FreeResource(Type, int)`** (new method) —
+  drops a handle from `_context.TableFor(type)`. Idempotent.
+- **`WasiPreview2RuntimeScope` ctor** sets
+  `Runtime.ExternalResourceDrop = (t, h) => Resources.FreeResource(t, h)`
+  after `Resources` is resolved, so every wasi-nn `[resource-drop]X`
+  handler can release entries from the direct-link table too.
+- **`WitBindings.BindError` / `BindTensor` / `BindGraph` / `BindInference`**
+  augment the existing `host.X.Drop(h)` call with
+  `runtime.ExternalResourceDrop?.Invoke(typeof(Nn.IX), h)` — additive, so
+  the interpreter-only path is unchanged and the wrong-table call returns
+  false silently.
+
+Hook is per-runtime (not global), so different component instances don't
+share a drop hook.
+
+### Versions
+
+- `WACS` (Wacs.Core) 0.13.7 → **0.13.8** (new public `WasmRuntime.ExternalResourceDrop`)
+- `WACS.WASI.NN` 0.3.2 → **0.3.3** (drop handlers call the runtime hook)
+- `WACS.WASI.Preview2.DependencyInjection` 0.1.6 → **0.1.7** (new
+  `WasiPreview2Resources.FreeResource` + scope wires the hook)
+- `WACS.Cli` 1.5.22 (no version bump — already at this version from the
+  diag-memory PR)
+
+### Test plan
+
+- `Wacs.WASI.NN.Test` 21/21
+- `Wacs.WASI.NN.OnnxRuntime.Test` 10/10
+- `Wacs.WASI.Preview2.Test` 189/189
+- **Empirical verification**: re-run the SLM REPL with `WACS_DIAG_MEMORY=1`;
+  managed heap should plateau instead of climbing linearly with turn count.
+
 ## WACS.Cli 1.5.22 / WACS.WASI.NN 0.3.2 — `WACS_DIAG_MEMORY` per-compute memory snapshots
 
 Diagnostic hook for the "RSS climbs across a long-running chat REPL" pattern.

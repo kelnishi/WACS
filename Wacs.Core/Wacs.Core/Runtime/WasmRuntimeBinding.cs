@@ -27,6 +27,31 @@ namespace Wacs.Core.Runtime
 {
     public partial class WasmRuntime
     {
+        /// <summary>
+        /// Optional cross-binding hook for releasing resource
+        /// handles allocated outside an <c>IBindable</c>'s own
+        /// resource tables. Used by the transpiler / wasip2
+        /// direct-link path, where component-model resources
+        /// (e.g. wasi-nn tensors) get allocated in
+        /// <c>WasiPreview2Resources</c> / <c>ResourceContext</c>
+        /// but the interpreter binding's <c>[resource-drop]X</c>
+        /// only knows about the <c>IBindable</c>'s local table.
+        /// Without this hook, large host-owned resources allocated
+        /// during direct-link compute calls (e.g. multi-hundred-MiB
+        /// logits tensors in the SLM workflow) accumulate in the
+        /// direct-link table forever — the leak shows up as
+        /// unbounded managed-heap growth across compute calls.
+        ///
+        /// <para>Set by the runtime-scope construction
+        /// (<c>WasiPreview2RuntimeScope</c>) once the direct-link
+        /// resources object is available. <c>IBindable</c>-side
+        /// drop handlers call <c>ExternalResourceDrop?.Invoke(...)</c>
+        /// after dropping from their own table — whichever table
+        /// holds the entry actually releases it; the off-table
+        /// call returns false silently.</para>
+        /// </summary>
+        public Action<Type, int>? ExternalResourceDrop { get; set; }
+
         public void RegisterModule(string moduleName, ModuleInstance moduleInstance)
         {
             _registeredModules[moduleName] = moduleInstance;
