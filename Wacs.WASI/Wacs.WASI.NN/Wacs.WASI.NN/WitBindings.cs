@@ -107,8 +107,12 @@ namespace Wacs.WASI.NN
                 (_, h) =>
                 {
                     host.Errors.Drop(h);
-                    runtime.ExternalResourceDrop?.Invoke(
-                        typeof(Nn.IError), h);
+                    if (runtime.ExternalResourceDrop != null)
+                    {
+                        runtime.ExternalResourceDrop(typeof(Nn.IError), h);
+                        System.Threading.Interlocked.Increment(
+                            ref MemoryDiagnostics.ExternalDropInvocations);
+                    }
                 });
         }
 
@@ -176,8 +180,12 @@ namespace Wacs.WASI.NN
                 (_, h) =>
                 {
                     host.Tensors.Drop(h);
-                    runtime.ExternalResourceDrop?.Invoke(
-                        typeof(Nn.ITensor), h);
+                    if (runtime.ExternalResourceDrop != null)
+                    {
+                        runtime.ExternalResourceDrop(typeof(Nn.ITensor), h);
+                        System.Threading.Interlocked.Increment(
+                            ref MemoryDiagnostics.ExternalDropInvocations);
+                    }
                 });
         }
 
@@ -267,8 +275,12 @@ namespace Wacs.WASI.NN
                 (_, h) =>
                 {
                     host.Graphs.Drop(h);
-                    runtime.ExternalResourceDrop?.Invoke(
-                        typeof(Nn.IGraph), h);
+                    if (runtime.ExternalResourceDrop != null)
+                    {
+                        runtime.ExternalResourceDrop(typeof(Nn.IGraph), h);
+                        System.Threading.Interlocked.Increment(
+                            ref MemoryDiagnostics.ExternalDropInvocations);
+                    }
                 });
         }
 
@@ -315,8 +327,13 @@ namespace Wacs.WASI.NN
                 (_, h) =>
                 {
                     host.Contexts.Drop(h);
-                    runtime.ExternalResourceDrop?.Invoke(
-                        typeof(Nn.IGraphExecutionContext), h);
+                    if (runtime.ExternalResourceDrop != null)
+                    {
+                        runtime.ExternalResourceDrop(
+                            typeof(Nn.IGraphExecutionContext), h);
+                        System.Threading.Interlocked.Increment(
+                            ref MemoryDiagnostics.ExternalDropInvocations);
+                    }
                 });
         }
 
