@@ -1,5 +1,58 @@
 # Changelog
 
+## WACS 0.15.9 / WACS.Cli 1.6.2 — WasmStackTrace formatter + CLI wiring (Stack-trace Pass C)
+
+Third piece of the stack-trace arc. Formats captured
+`WasmStackFrame` chains into human-readable traces (cheap and
+verbose forms) and wires the CLI's trap-catch sites to surface
+them alongside the .NET stack trace.
+
+### Public API additions (Wacs.Core 0.15.9)
+
+- `Wacs.Core.Runtime.Exceptions.WasmStackTrace`:
+  - `Format(frames, module, store) → string` — cheap form. Single
+    line, `←`-separated frames. Uses `FunctionInstance.Id` for
+    function labels, `InstructionBase.ByteOffsetInFunc` + mnemonic
+    for the throwing instruction.
+  - `FormatVerbose(frames, module, store, lineMap?) → string` —
+    multi-line form. Adds `(line:col)` from
+    `Module.SourcePositions` when available (Pass B, WAT-parsed).
+    Optional `LineMap` parameter is plumbed for future re-render-
+    based fallback on binary-parsed modules.
+
+### CLI wiring (WACS.Cli 1.6.2)
+
+- New `RunHandler.PrintTrap(exc, module, runtime)` helper. The
+  four `catch (TrapException)` sites in `InvokeInterpreterEntry`
+  route through it. Output adds:
+  ```
+  WASM stack trace:
+    at $myfunc (unreachable @+0x4) (3:17)
+  ```
+  below the existing .NET trace, when the trap carries
+  `WasmFrames` (currently `unreachable` and unhandled exceptions —
+  Pass D batches the rest).
+
+### Behavior
+
+- Traps that haven't been migrated to the snapshotting constructor
+  still print the unchanged .NET-only trace. CLI output is purely
+  additive — existing scripts parsing the trap message keep working.
+
+### Tests
+
+`WasmStackTraceTests` (3 cases) covers cheap-form mnemonic + offset
+output, verbose-form source-line resolution from
+`Module.SourcePositions`, and the empty-frames sentinel.
+470/470 Wacs.Core.Test tests pass.
+
+### What's still ahead
+
+Pass D: bulk-migrate the ~100 trap throw sites to use the
+snapshotting constructor; delete the dead `ComputePointerPath`;
+add `ErrorFormattingTests` asserting on full trace structure.
+Pass E: same enrichment for `WasmRuntimeException`.
+
 ## WACS 0.15.8 — WasmStackFrame + exception enrichment foundations (Stack-trace Pass A)
 
 Second piece of the stack-trace arc. Adds the data shape and the

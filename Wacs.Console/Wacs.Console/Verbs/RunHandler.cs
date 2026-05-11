@@ -284,7 +284,7 @@ namespace Wacs.Console.Verbs
                 try { initCaller(); }
                 catch (TrapException exc)
                 {
-                    System.Console.Error.WriteLine(exc);
+                    PrintTrap(exc, modInst.Repr, runtime);
                     return 1;
                 }
                 catch (SignalException exc)
@@ -322,7 +322,7 @@ namespace Wacs.Console.Verbs
                 try { caller(); }
                 catch (TrapException exc)
                 {
-                    System.Console.Error.WriteLine(exc);
+                    PrintTrap(exc, modInst.Repr, runtime);
                     return 1;
                 }
                 catch (SignalException exc)
@@ -345,7 +345,7 @@ namespace Wacs.Console.Verbs
                 try { caller(); }
                 catch (TrapException exc)
                 {
-                    System.Console.Error.WriteLine(exc);
+                    PrintTrap(exc, modInst.Repr, runtime);
                     return 1;
                 }
                 catch (SignalException exc)
@@ -391,7 +391,7 @@ namespace Wacs.Console.Verbs
                 }
                 catch (TrapException exc)
                 {
-                    System.Console.Error.WriteLine(exc);
+                    PrintTrap(exc, modInst.Repr, runtime);
                     return 1;
                 }
                 catch (SignalException exc)
@@ -1081,6 +1081,30 @@ namespace Wacs.Console.Verbs
                 Wacs.Core.Types.Defs.ValType.F64 => v.Data.Float64.ToString(ic),
                 _ => v.ToString()!,
             };
+        }
+
+        /// <summary>
+        /// Print a trap with both the .NET stack trace (existing
+        /// behavior) and — when the trap carries a WASM-side
+        /// snapshot — a WASM trace from
+        /// <see cref="Wacs.Core.Runtime.Exceptions.WasmStackTrace"/>.
+        /// Verbose form when source positions are available so users
+        /// see <c>$func (inst @+0x42) (line:col)</c>.
+        /// </summary>
+        private static void PrintTrap(
+            Wacs.Core.Runtime.Types.TrapException exc,
+            Wacs.Core.Module module,
+            Wacs.Core.Runtime.WasmRuntime runtime)
+        {
+            System.Console.Error.WriteLine(exc);
+            if (exc.WasmFrames != null && exc.WasmFrames.Length > 0)
+            {
+                System.Console.Error.WriteLine();
+                System.Console.Error.WriteLine("WASM stack trace:");
+                System.Console.Error.WriteLine(
+                    Wacs.Core.Runtime.Exceptions.WasmStackTrace.FormatVerbose(
+                        exc.WasmFrames, module, runtime.RuntimeStore));
+            }
         }
 
         private static void EmitValidationDiagnostics(Wacs.Core.Module module,
