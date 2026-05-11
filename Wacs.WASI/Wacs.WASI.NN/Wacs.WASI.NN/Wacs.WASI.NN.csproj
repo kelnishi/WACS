@@ -77,6 +77,11 @@
         <InternalsVisibleTo Include="Wacs.WASI.NN.MLNet" />
         <InternalsVisibleTo Include="Wacs.WASI.NN.OnnxRuntime" />
         <InternalsVisibleTo Include="Wacs.WASI.NN.LlamaSharp" />
+        <!-- DependencyInjection's GraphExecutionContext wraps
+             IBackendContext.Compute for the transpiler / wasip2
+             direct-link path; it needs MemoryDiagnostics to emit
+             per-call snapshots from that path too. -->
+        <InternalsVisibleTo Include="Wacs.WASI.NN.DependencyInjection" />
     </ItemGroup>
 
     <ItemGroup>
