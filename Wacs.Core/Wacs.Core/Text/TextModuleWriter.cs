@@ -64,23 +64,12 @@ namespace Wacs.Core.Text
             // their own lines, before any sections.
             EmitAnnotations(w, module, ModuleElementRef.ModuleLevel, indent);
 
-            // Types
+            // Types — function, struct, array, plus sub-typed and
+            // rec-grouped variants.
             for (int t = 0; t < module.Types.Count; t++)
             {
                 EmitLeading(w, module, new ModuleElementRef(ModuleElementKind.Type, t), indent);
-                var ft = module.Types[t].SubTypes[0].Body as FunctionType;
-                if (ft == null)
-                {
-                    // GC struct/array — phase 2 scope doesn't cover these.
-                    // Emit a bare comment placeholder so the index still
-                    // lines up on round-trip.
-                    w.WriteLine($"{indent};; (type ...) (GC non-func body not supported by round-trip)");
-                    continue;
-                }
-                w.Write($"{indent}(type (func");
-                WriteParams(w, ft.ParameterTypes);
-                WriteResults(w, ft.ResultType);
-                w.WriteLine("))");
+                WriteRecursiveType(w, module.Types[t], indent);
             }
 
             // Imports
@@ -117,6 +106,15 @@ namespace Wacs.Core.Text
                 WriteGlobal(w, module, module.Globals[gi], indent);
             }
 
+            // Tags (exception-handling). Imported tags are surfaced via
+            // the import section; defined tags emit here in declaration
+            // order matching what the parser captured.
+            for (int tgi = 0; tgi < module.Tags.Count; tgi++)
+            {
+                EmitLeading(w, module, new ModuleElementRef(ModuleElementKind.Tag, tgi), indent);
+                WriteTag(w, module.Tags[tgi], indent);
+            }
+
             // Exports
             for (int ei = 0; ei < module.Exports.Length; ei++)
             {
@@ -131,17 +129,15 @@ namespace Wacs.Core.Text
                 w.WriteLine($"{indent}(start {module.StartIndex.Value})");
             }
 
-            // Elem / Data — phase 2 leaves these as comments since Phase 1
-            // doesn't fully populate them. Pass 4 fills these out.
             for (int eli = 0; eli < module.Elements.Length; eli++)
             {
                 EmitLeading(w, module, new ModuleElementRef(ModuleElementKind.Element, eli), indent);
-                w.WriteLine($"{indent};; (elem …) (round-trip not supported in phase 2)");
+                WriteElementSegment(w, module.Elements[eli], indent);
             }
             for (int di = 0; di < module.Datas.Length; di++)
             {
                 EmitLeading(w, module, new ModuleElementRef(ModuleElementKind.Data, di), indent);
-                w.WriteLine($"{indent};; (data …) (round-trip not supported in phase 2)");
+                WriteDataSegment(w, module.Datas[di], indent);
             }
 
             w.WriteLine(")");
@@ -549,6 +545,273 @@ namespace Wacs.Core.Text
                 }
             }
             return sb.ToString();
+        }
+
+        // ---- Pass 4 fidelity: full elem / data / tag / GC type ------------
+
+        /// <summary>
+        /// Emit a top-level <c>(tag …)</c> form for a defined tag.
+        /// The current TagType wraps a function-signature type index;
+        /// the canonical shape is <c>(tag (type N))</c>.
+        /// </summary>
+        private static void WriteTag(TextWriter w, TagType tag, string indent)
+        {
+            w.WriteLine($"{indent}(tag (type {tag.TypeIndex.Value}))");
+        }
+
+        /// <summary>
+        /// Emit a <see cref="RecursiveType"/>. Single sub with no super
+        /// types renders bare (<c>(type (func …))</c> / <c>(type
+        /// (struct …))</c> / <c>(type (array …))</c>). Multiple subs
+        /// or a non-final / supered sub renders inside a
+        /// <c>(rec …)</c> wrapper.
+        /// </summary>
+        private static void WriteRecursiveType(TextWriter w, RecursiveType rt, string indent)
+        {
+            // Single-sub, final, no supers: emit the bare (type …) form
+            // matching what the binary encoder produces.
+            if (rt.SubTypes.Length == 1
+                && rt.SubTypes[0].Final
+                && rt.SubTypes[0].SuperTypeIndexes.Length == 0)
+            {
+                w.Write($"{indent}(type ");
+                WriteCompositeBody(w, rt.SubTypes[0].Body);
+                w.WriteLine(")");
+                return;
+            }
+
+            // Otherwise wrap in a (rec …) group.
+            w.WriteLine($"{indent}(rec");
+            var sub = indent + Indent2Space;
+            foreach (var st in rt.SubTypes)
+            {
+                w.Write($"{sub}(type ");
+                WriteSubTypeBody(w, st);
+                w.WriteLine(")");
+            }
+            w.WriteLine($"{indent})");
+        }
+
+        /// <summary>
+        /// Emit the body of a <c>(type …)</c> form: either a bare
+        /// <c>(func …)</c> / <c>(struct …)</c> / <c>(array …)</c> when
+        /// the sub is final + no super, or a <c>(sub …)</c> wrapper
+        /// otherwise.
+        /// </summary>
+        private static void WriteSubTypeBody(TextWriter w, SubType st)
+        {
+            if (st.Final && st.SuperTypeIndexes.Length == 0)
+            {
+                WriteCompositeBody(w, st.Body);
+                return;
+            }
+            w.Write(st.Final ? "(sub final" : "(sub");
+            foreach (var sup in st.SuperTypeIndexes)
+                w.Write($" {sup.Value}");
+            w.Write(' ');
+            WriteCompositeBody(w, st.Body);
+            w.Write(')');
+        }
+
+        /// <summary>
+        /// Emit the inside of a <c>(type …)</c> body — one of the
+        /// three composite shapes: function, struct, or array.
+        /// </summary>
+        private static void WriteCompositeBody(TextWriter w, CompositeType body)
+        {
+            switch (body)
+            {
+                case FunctionType ft:
+                    w.Write("(func");
+                    WriteParams(w, ft.ParameterTypes);
+                    WriteResults(w, ft.ResultType);
+                    w.Write(')');
+                    break;
+                case StructType st:
+                    w.Write("(struct");
+                    foreach (var f in st.FieldTypes)
+                    {
+                        w.Write(" (field ");
+                        WriteFieldType(w, f);
+                        w.Write(')');
+                    }
+                    w.Write(')');
+                    break;
+                case ArrayType at:
+                    w.Write("(array ");
+                    WriteFieldType(w, at.ElementType);
+                    w.Write(')');
+                    break;
+                default:
+                    throw new InvalidDataException(
+                        $"Unknown CompositeType {body?.GetType().Name}");
+            }
+        }
+
+        /// <summary>
+        /// Emit a <see cref="FieldType"/>: <c>(mut T)</c> when mutable,
+        /// bare <c>T</c> when immutable. Packed storage types
+        /// (<c>i8</c>, <c>i16</c>) round-trip via <see cref="ToWatValType"/>.
+        /// </summary>
+        private static void WriteFieldType(TextWriter w, FieldType ft)
+        {
+            if (ft.Mut == Mutability.Mutable)
+                w.Write($"(mut {ToWatValType(ft.StorageType)})");
+            else
+                w.Write(ToWatValType(ft.StorageType));
+        }
+
+        // ---- Element segments ---------------------------------------------
+
+        /// <summary>
+        /// Emit a single <c>(elem …)</c> top-level form. Three modes
+        /// (active, passive, declarative) cross four representations
+        /// (func-shortcut vs reftype-expr-vector; default vs explicit
+        /// table index), giving the eight wire-form combinations the
+        /// binary parser handles. The text writer collapses to the
+        /// most concise WAT that re-parses to the same segment.
+        /// </summary>
+        private static void WriteElementSegment(
+            TextWriter w, Module.ElementSegment seg, string indent)
+        {
+            // Detect the func-shortcut subform: all initializers are a
+            // single ref.func, and the segment type is FuncRef-family.
+            // If yes, we can emit the compact `func 0 1 2` form.
+            bool useFuncShortcut = IsAllRefFunc(seg);
+
+            w.Write($"{indent}(elem");
+
+            switch (seg.Mode)
+            {
+                case Module.ElementMode.PassiveMode:
+                    // (elem reftype (item ...) (item ...))
+                    if (useFuncShortcut)
+                    {
+                        w.Write(" func");
+                        AppendFuncIdxList(w, seg);
+                    }
+                    else
+                    {
+                        w.Write(' ');
+                        w.Write(ToWatValType(seg.Type));
+                        AppendInitExprList(w, seg);
+                    }
+                    break;
+
+                case Module.ElementMode.DeclarativeMode:
+                    if (useFuncShortcut)
+                    {
+                        w.Write(" declare func");
+                        AppendFuncIdxList(w, seg);
+                    }
+                    else
+                    {
+                        w.Write(" declare ");
+                        w.Write(ToWatValType(seg.Type));
+                        AppendInitExprList(w, seg);
+                    }
+                    break;
+
+                case Module.ElementMode.ActiveMode am:
+                {
+                    if (am.TableIndex.Value != 0)
+                        w.Write($" (table {am.TableIndex.Value})");
+                    w.Write($" (offset{am.Offset.ToWat()})");
+                    if (useFuncShortcut)
+                    {
+                        w.Write(" func");
+                        AppendFuncIdxList(w, seg);
+                    }
+                    else
+                    {
+                        w.Write(' ');
+                        w.Write(ToWatValType(seg.Type));
+                        AppendInitExprList(w, seg);
+                    }
+                    break;
+                }
+
+                default:
+                    throw new InvalidDataException(
+                        $"Unknown ElementMode {seg.Mode?.GetType().Name}");
+            }
+
+            w.WriteLine(')');
+        }
+
+        private static bool IsAllRefFunc(Module.ElementSegment seg)
+        {
+            // Func-shortcut only applies to FuncRef-family element
+            // types; otherwise the reftype must be spelled explicitly.
+            if (seg.Type != ValType.Func && seg.Type != ValType.FuncRef)
+                return false;
+            foreach (var expr in seg.Initializers)
+            {
+                var insts = expr.Instructions;
+                if (insts.Count < 1) return false;
+                if (insts[0] is not Wacs.Core.Instructions.Reference.InstRefFunc)
+                    return false;
+            }
+            return true;
+        }
+
+        private static void AppendFuncIdxList(TextWriter w, Module.ElementSegment seg)
+        {
+            foreach (var expr in seg.Initializers)
+            {
+                var rf = expr.Instructions[0]
+                    as Wacs.Core.Instructions.Reference.InstRefFunc;
+                if (rf == null)
+                    throw new InvalidDataException(
+                        "Element initializer was expected to be ref.func");
+                w.Write($" {rf.FunctionIndex.Value}");
+            }
+        }
+
+        private static void AppendInitExprList(TextWriter w, Module.ElementSegment seg)
+        {
+            foreach (var expr in seg.Initializers)
+            {
+                // (item (instr…)) form.
+                w.Write(" (item");
+                w.Write(expr.ToWat());
+                w.Write(')');
+            }
+        }
+
+        // ---- Data segments ------------------------------------------------
+
+        /// <summary>
+        /// Emit a single <c>(data …)</c> top-level form. Three modes:
+        /// active-default-memory, active-explicit-memory, and passive.
+        /// The byte payload is emitted via
+        /// <see cref="Wacs.Core.Utilities.BytesEncoder.EncodeToWatString"/>
+        /// (the existing canonical escape).
+        /// </summary>
+        private static void WriteDataSegment(
+            TextWriter w, Module.Data data, string indent)
+        {
+            string bytes = Wacs.Core.Utilities.BytesEncoder
+                .EncodeToWatString(data.Init ?? System.Array.Empty<byte>());
+
+            w.Write($"{indent}(data");
+            switch (data.Mode)
+            {
+                case Module.DataMode.PassiveMode:
+                    w.Write(' ');
+                    w.Write(bytes);
+                    break;
+                case Module.DataMode.ActiveMode am:
+                    if (am.MemoryIndex.Value != 0)
+                        w.Write($" (memory {am.MemoryIndex.Value})");
+                    w.Write($" (offset{am.Offset.ToWat()}) ");
+                    w.Write(bytes);
+                    break;
+                default:
+                    throw new InvalidDataException(
+                        $"Unknown DataMode {data.Mode?.GetType().Name}");
+            }
+            w.WriteLine(')');
         }
     }
 }

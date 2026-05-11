@@ -1,5 +1,59 @@
 # Changelog
 
+## WACS 0.15.3 — fill TextModuleWriter structural gaps (Pass 4)
+
+Replaces the Phase-2 "round-trip not supported" placeholders with
+real WAT emission for every remaining structural section. After this
+pass, every section the parser produces re-emits to text that re-
+parses to a structurally-equivalent module — no more silent drops
+into comment stubs.
+
+### What's now emitted
+
+- **Tags**: `(tag (type N))` for defined tags. Imported tags surface
+  through the existing import-section path.
+- **GC types**: full struct / array / sub / rec coverage.
+  - Bare single-sub final final types: `(type (struct (field T) …))`,
+    `(type (array (mut T)))`, `(type (func …))`.
+  - `(sub …)` and `(sub final …)` with super-type indices.
+  - `(rec (type …) (type …) …)` wrappers for multi-sub recursion
+    groups and non-final / supered subs.
+  - Field types render `(mut T)` for mutable + bare `T` for
+    immutable; packed storage types (`i8` / `i16`) survive.
+- **Element segments**: full canonical form for all eight wire
+  shapes:
+  - Active default table: `(elem (offset (i32.const 0)) func 0 1)`
+    (func-shortcut) or `(elem (offset …) reftype (item …) …)`.
+  - Active explicit table: `(elem (table N) (offset …) …)`.
+  - Passive: `(elem func 0 1)` / `(elem reftype (item …) …)`.
+  - Declarative: `(elem declare func 0)` /
+    `(elem declare reftype (item …) …)`.
+  - Func-shortcut auto-selected when every initializer is a single
+    `ref.func` and the segment type is FuncRef-family.
+- **Data segments**: full canonical form:
+  - Active default mem 0: `(data (offset (i32.const 0)) "bytes")`.
+  - Active explicit: `(data (memory N) (offset …) "bytes")`.
+  - Passive: `(data "bytes")`.
+  - Byte payloads escape through the existing
+    `BytesEncoder.EncodeToWatString` helper, so non-ASCII / control
+    bytes round-trip via `\XX`.
+
+### Tests
+
+`StructuralEmissionTests` (9 cases) covers tags, all three data
+modes, the func-shortcut and declarative element forms, struct /
+array / rec GC types, plus a full-module multi-section round-trip
+(parse → write → re-parse with matching section counts).
+442/442 Wacs.Core.Test tests pass.
+
+### What's still ahead
+
+Pass 5 lights up the folded / S-expression instruction style (the
+per-opcode arity table + folder). Pass 6 returns a bidirectional
+`LineMap` from `Write`. Pass 7 is the broader test arc (full
+round-trip equivalence across the spec testsuite, folded↔flat
+parity, comment / annotation survival inside function bodies).
+
 ## WACS 0.15.2 — TextModuleParser captures comments + annotations; writer re-emits (Pass 3)
 
 Closes the round-trip loop for trivia from Pass 2. The parser now
