@@ -128,6 +128,48 @@ namespace Wacs.WASI.NN.OnnxRuntimeGenAI.Test
             }
         }
 
+        [Theory]
+        [InlineData("auto", OnnxGenAIExecutionProvider.Auto)]
+        [InlineData("AUTO", OnnxGenAIExecutionProvider.Auto)]
+        [InlineData("cpu", OnnxGenAIExecutionProvider.Cpu)]
+        [InlineData("CoreML", OnnxGenAIExecutionProvider.CoreML)]
+        [InlineData("cuda", OnnxGenAIExecutionProvider.Cuda)]
+        [InlineData("dml", OnnxGenAIExecutionProvider.DirectML)]
+        [InlineData("directml", OnnxGenAIExecutionProvider.DirectML)]
+        [InlineData("rocm", OnnxGenAIExecutionProvider.Rocm)]
+        [InlineData("not-a-real-ep", OnnxGenAIExecutionProvider.Cpu)]
+        public void Options_FromEnvironment_parses_ep_strings(
+            string envValue, OnnxGenAIExecutionProvider expected)
+        {
+            var prev = Environment.GetEnvironmentVariable(
+                "WACS_WASINN_GENAI_EP");
+            try
+            {
+                Environment.SetEnvironmentVariable(
+                    "WACS_WASINN_GENAI_EP", envValue);
+                var opts = OnnxGenAIBackendOptions.FromEnvironment();
+                Assert.Equal(expected, opts.ExecutionProvider);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(
+                    "WACS_WASINN_GENAI_EP", prev);
+            }
+        }
+
+        [Fact]
+        public void Options_default_ep_is_cpu()
+        {
+            // CPU default — hardware acceleration is opt-in. See
+            // OnnxGenAIBackendOptions docs for the empirical
+            // rationale (CoreML 3-5x slower on small models due
+            // to kernel-compile overhead).
+            var opts = new OnnxGenAIBackendOptions();
+            Assert.Equal(OnnxGenAIExecutionProvider.Cpu,
+                opts.ExecutionProvider);
+            Assert.True(opts.FallbackToCpu);
+        }
+
         [Fact]
         public void Bindable_parameterless_ctor_constructs()
         {

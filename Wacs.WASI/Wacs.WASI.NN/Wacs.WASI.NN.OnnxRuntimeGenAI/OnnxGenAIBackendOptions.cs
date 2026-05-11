@@ -69,6 +69,53 @@ namespace Wacs.WASI.NN.OnnxRuntimeGenAI
         public bool IncludePromptInResponse { get; set; } = false;
 
         /// <summary>
+        /// Which GenAI execution provider to append after
+        /// <c>Config.ClearProviders</c>. Default
+        /// <see cref="OnnxGenAIExecutionProvider.Cpu"/> — hardware
+        /// acceleration is opt-in via this property or via the
+        /// <c>WACS_WASINN_GENAI_EP</c> environment variable.
+        ///
+        /// <para>The default is CPU rather than
+        /// <see cref="OnnxGenAIExecutionProvider.Auto"/> because
+        /// on small models (e.g., gemma-3-270m-it-genai) the
+        /// CoreML kernel-compile + Metal-command-buffer overhead
+        /// runs 3-5× slower than CPU through GenAI's purpose-built
+        /// layer; auto-promotion would regress the common SLM
+        /// case. Large-model embedders opt in explicitly.</para>
+        /// </summary>
+        public OnnxGenAIExecutionProvider ExecutionProvider { get; set; }
+            = OnnxGenAIExecutionProvider.Cpu;
+
+        /// <summary>
+        /// Device index for the CUDA EP. Ignored for non-CUDA
+        /// providers. Default 0.
+        /// </summary>
+        public int CudaDeviceId { get; set; } = 0;
+
+        /// <summary>
+        /// Device index for the DirectML EP. Ignored for non-DML
+        /// providers. Default 0.
+        /// </summary>
+        public int DirectMLDeviceId { get; set; } = 0;
+
+        /// <summary>
+        /// Device index for the ROCm EP. Ignored for non-ROCm
+        /// providers. Default 0.
+        /// </summary>
+        public int RocmDeviceId { get; set; } = 0;
+
+        /// <summary>
+        /// When the chosen EP fails to append (provider not
+        /// compiled into the platform's GenAI dylib, driver
+        /// missing, etc.), build the Model with default options
+        /// (CPU). Default true. Set false for strict mode where
+        /// any EP failure surfaces as
+        /// <see cref="ErrorCode.RuntimeError"/> at
+        /// <c>graph.load-by-name</c> time.
+        /// </summary>
+        public bool FallbackToCpu { get; set; } = true;
+
+        /// <summary>
         /// Read options from the standard env-var set.
         /// </summary>
         public static OnnxGenAIBackendOptions FromEnvironment()
@@ -100,7 +147,39 @@ namespace Wacs.WASI.NN.OnnxRuntimeGenAI
             if (ParseBool(Environment.GetEnvironmentVariable(
                     "WACS_WASINN_GENAI_INCLUDE_PROMPT")))
                 opts.IncludePromptInResponse = true;
+
+            var epStr = Environment.GetEnvironmentVariable("WACS_WASINN_GENAI_EP");
+            if (!string.IsNullOrWhiteSpace(epStr))
+                opts.ExecutionProvider = ParseEp(epStr);
+
+            if (int.TryParse(
+                    Environment.GetEnvironmentVariable("WACS_WASINN_GENAI_CUDA_DEVICE"),
+                    out var cuda))
+                opts.CudaDeviceId = cuda;
+            if (int.TryParse(
+                    Environment.GetEnvironmentVariable("WACS_WASINN_GENAI_ROCM_DEVICE"),
+                    out var rocm))
+                opts.RocmDeviceId = rocm;
+            if (int.TryParse(
+                    Environment.GetEnvironmentVariable("WACS_WASINN_GENAI_DML_DEVICE"),
+                    out var dml))
+                opts.DirectMLDeviceId = dml;
             return opts;
+        }
+
+        private static OnnxGenAIExecutionProvider ParseEp(string s)
+        {
+            switch (s.Trim().ToLowerInvariant())
+            {
+                case "auto": return OnnxGenAIExecutionProvider.Auto;
+                case "cpu": return OnnxGenAIExecutionProvider.Cpu;
+                case "coreml": return OnnxGenAIExecutionProvider.CoreML;
+                case "cuda": return OnnxGenAIExecutionProvider.Cuda;
+                case "dml":
+                case "directml": return OnnxGenAIExecutionProvider.DirectML;
+                case "rocm": return OnnxGenAIExecutionProvider.Rocm;
+                default: return OnnxGenAIExecutionProvider.Cpu;
+            }
         }
 
         private static bool ParseBool(string? s)

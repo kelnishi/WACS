@@ -190,14 +190,13 @@ namespace Wacs.WASI.NN.OnnxRuntimeGenAI
                 // GenAI's Model(dir) ctor rejects the load with
                 // "Unknown provider name '<X>'" when an unsupported
                 // provider is hard-coded in genai_config.json.
-                // ClearProviders strips the model-declared list so
-                // GenAI picks the platform default — CPU on macOS,
-                // matching the OnnxBackend's opt-in posture for
-                // hardware acceleration. Embedders that want CoreML
-                // / CUDA / DirectML opt in explicitly through
-                // OnnxGenAIBackendOptions (follow-up).
+                // ClearProviders strips the model-declared list;
+                // optionally re-append a platform-appropriate one
+                // per OnnxGenAIBackendOptions.ExecutionProvider
+                // (default Cpu → no append → GenAI's CPU kernels).
                 config = new GenAI.Config(dir);
                 config.ClearProviders();
+                AppendSelectedProvider(config, _options);
                 model = new GenAI.Model(config);
                 tokenizer = new GenAI.Tokenizer(model);
                 // Config is owned by the Model after construction;
@@ -226,6 +225,80 @@ namespace Wacs.WASI.NN.OnnxRuntimeGenAI
         {
             if (_disposed) return;
             _disposed = true;
+        }
+
+        // Resolve Auto -> platform pick, then AppendProvider on the
+        // GenAI Config. On failure (provider not compiled into the
+        // platform dylib, etc.) silently no-ops when FallbackToCpu
+        // is true so the Model load falls through to GenAI's CPU
+        // kernels rather than throwing.
+        private static void AppendSelectedProvider(
+            GenAI.Config config,
+            OnnxGenAIBackendOptions opts)
+        {
+            var ep = opts.ExecutionProvider;
+            if (ep == OnnxGenAIExecutionProvider.Auto)
+                ep = ResolveAuto();
+            if (ep == OnnxGenAIExecutionProvider.Cpu) return;
+
+            try
+            {
+                switch (ep)
+                {
+                    case OnnxGenAIExecutionProvider.CoreML:
+                        config.AppendProvider("CoreML");
+                        break;
+                    case OnnxGenAIExecutionProvider.Cuda:
+                        config.AppendProvider("CUDA");
+                        if (opts.CudaDeviceId != 0)
+                            config.SetProviderOption("CUDA",
+                                "device_id",
+                                opts.CudaDeviceId.ToString());
+                        break;
+                    case OnnxGenAIExecutionProvider.DirectML:
+                        config.AppendProvider("DML");
+                        if (opts.DirectMLDeviceId != 0)
+                            config.SetProviderOption("DML",
+                                "device_id",
+                                opts.DirectMLDeviceId.ToString());
+                        break;
+                    case OnnxGenAIExecutionProvider.Rocm:
+                        // GenAI 0.13.x doesn't ship a ROCm provider
+                        // name; AppendProvider throws. Caller's
+                        // FallbackToCpu handles the trap.
+                        config.AppendProvider("ROCm");
+                        if (opts.RocmDeviceId != 0)
+                            config.SetProviderOption("ROCm",
+                                "device_id",
+                                opts.RocmDeviceId.ToString());
+                        break;
+                }
+            }
+            catch
+            {
+                if (!opts.FallbackToCpu) throw;
+                // Strip any partial provider state and fall through
+                // to CPU. ClearProviders is idempotent — safe to
+                // re-run after a half-applied AppendProvider.
+                config.ClearProviders();
+            }
+        }
+
+        // Map Auto -> first-choice EP for the running OS. The
+        // session-construction path catches append failures and
+        // falls back to CPU when FallbackToCpu=true.
+        private static OnnxGenAIExecutionProvider ResolveAuto()
+        {
+            if (System.Runtime.InteropServices.RuntimeInformation
+                    .IsOSPlatform(System.Runtime.InteropServices.OSPlatform.OSX))
+                return OnnxGenAIExecutionProvider.CoreML;
+            if (System.Runtime.InteropServices.RuntimeInformation
+                    .IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
+                return OnnxGenAIExecutionProvider.DirectML;
+            if (System.Runtime.InteropServices.RuntimeInformation
+                    .IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Linux))
+                return OnnxGenAIExecutionProvider.Cuda;
+            return OnnxGenAIExecutionProvider.Cpu;
         }
     }
 }
