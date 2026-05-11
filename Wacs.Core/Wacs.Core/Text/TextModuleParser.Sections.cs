@@ -167,6 +167,11 @@ namespace Wacs.Core.Text
                 Locals = fctx.LocalTypes.GetRange(ft.ParameterTypes.Arity,
                     fctx.LocalTypes.Count - ft.ParameterTypes.Arity).ToArray(),
                 Body = body,
+                // Carry the parsed `$name` (when present) onto the
+                // Function so runtime instantiation can propagate it
+                // to the FunctionInstance — used by the stack-trace
+                // formatter to label non-exported functions.
+                Id = name ?? string.Empty,
             };
             int funcIdx = ctx.Funcs.Declare(name);
             ctx.Module.Funcs.Add(fn);

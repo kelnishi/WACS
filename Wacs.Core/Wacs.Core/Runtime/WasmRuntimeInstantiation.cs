@@ -248,7 +248,22 @@ namespace Wacs.Core.Runtime
             //8. index ordered function addresses
             foreach (var func in module.Funcs)
             {
-                moduleInstance.FuncAddrs.Add(AllocateWasmFunc(Store, func, moduleInstance));
+                var addr = AllocateWasmFunc(Store, func, moduleInstance);
+                moduleInstance.FuncAddrs.Add(addr);
+                // Carry the parsed name (set by AnnotateWhileParsing
+                // — e.g. "$inner|2") onto the FunctionInstance so
+                // stack-trace formatting can label non-exported
+                // functions without falling back to "func@addr".
+                // Export-name overrides happen later in the
+                // instantiation flow and take precedence by
+                // intent: an export gives the function its public
+                // identity.
+                if (!string.IsNullOrEmpty(func.Id))
+                {
+                    var funcInst = Store[addr];
+                    if (string.IsNullOrEmpty(funcInst.Id))
+                        funcInst.SetName(func.Id);
+                }
             }
 
             //@Spec 4.5.4 Step 7

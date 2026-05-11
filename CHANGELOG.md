@@ -1,5 +1,47 @@
 # Changelog
 
+## WACS 0.15.11 — propagate WAT `$name` to FunctionInstance for stack-trace labels
+
+Cosmetic but useful: non-exported functions now appear in WASM
+stack traces by their WAT-declared `$name` rather than
+`func@<addr>`. Closes the most visible polish gap on the Pass C
+output.
+
+### Wiring
+
+- `TextModuleParser.ParseFuncForm` writes the parsed `$id` onto
+  `Module.Function.Id` (previously only the parallel
+  `ctx.Funcs.Declare(name)` index table got it).
+- `WasmRuntimeInstantiation` propagates `func.Id` onto the
+  `FunctionInstance.Id` during the allocate-functions step.
+  Export names still take precedence (they're written later in
+  the instantiation flow) — they're the function's public
+  identity, the parsed name is a fallback for non-exported
+  helpers.
+
+### Live behavior
+
+```
+;; Before this commit:
+WASM stack trace:
+  at func@47 (unreachable @+0x0) (3:5)
+  at func@48 (resume@4)
+  at $_._start
+
+;; After:
+WASM stack trace:
+  at $_.$inner (unreachable @+0x0) (3:5)
+  at $_.$outer (resume@4)
+  at $_._start
+```
+
+### Tests
+
+`TextModuleWriterPartialTests.WriteFunction_StackAnnotated_AddsStackComments`
+updated to expect `(;$b;)` (parsed name) instead of `(;0;)`
+(numeric index) on the header id comment. 470/470 Wacs.Core.Test
+tests pass.
+
 ## WACS 0.15.10 / WACS.Cli 1.6.3 — CLI sees the WASM trace (Pass C follow-up)
 
 Two bugs were preventing the freshly-landed `WasmStackTrace`

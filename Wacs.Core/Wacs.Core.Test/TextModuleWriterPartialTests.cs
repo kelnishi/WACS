@@ -79,9 +79,11 @@ namespace Wacs.Core.Test
             // diagnostic-mode signature.
             Assert.Contains("i32.add", text);
             Assert.Contains("(;", text);
-            // The header carries the implicit (;N;) id comment that the
-            // older ModuleRenderer always emitted in this mode.
-            Assert.Contains("(;0;)", text);
+            // The header carries an id comment. After Pass C
+            // follow-up, WAT-parsed funcs with `$name` propagate the
+            // name onto Function.Id, so the comment is `(;$b;)`
+            // rather than the index-only `(;0;)`.
+            Assert.Contains("(;$b;)", text);
         }
 
         [Fact]
