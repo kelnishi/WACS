@@ -652,7 +652,25 @@ namespace Wacs.Core.Text
                 return $"br_if {brIf.Label}";
 
             // Constants use RenderText overrides already.
-            return inst.RenderText(null);
+            // Strip the writer-generated `(;=value;)` diagnostic tail
+            // that InstF32Const / InstF64Const append for human
+            // readability — when canonical-mode round-tripping, that
+            // tail re-parses as a captured block-comment trivia, and
+            // emitting it AGAIN on the next write doubles the comment
+            // and breaks the fixed-point invariant.
+            return StripFloatDiagnostic(inst.RenderText(null));
+        }
+
+        private static string StripFloatDiagnostic(string text)
+        {
+            // The diagnostic shape is `... (;=N;)` at the end of the
+            // line. Cheap pattern test: ends in `;)` and the last
+            // `(;=` precedes it.
+            int closeIdx = text.LastIndexOf(";)", System.StringComparison.Ordinal);
+            if (closeIdx < 0 || closeIdx != text.Length - 2) return text;
+            int openIdx = text.LastIndexOf(" (;=", System.StringComparison.Ordinal);
+            if (openIdx < 0) return text;
+            return text.Substring(0, openIdx);
         }
 
         private static void WriteBlockForm(TextWriter w, IBlockInstruction blk, string keyword, string indent)

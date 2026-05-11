@@ -1,5 +1,55 @@
 # Changelog
 
+## WACS 0.15.6 — text round-trip equivalence tests + canonical fixed-point fix (Pass 7)
+
+Final pass of the text-emission consolidation arc. Adds the test
+matrix that proves the seven-pass refactor produces the round-trip
+equivalence the user asked for, and fixes one canonicalization bug
+the new tests surfaced.
+
+### Bug fixed
+
+- `InstF32Const` / `InstF64Const` `.RenderText` always appended a
+  diagnostic `(;= 2;)` style block-comment showing the source-form
+  value of the hex-formatted constant. That trailing comment
+  doubled on each round-trip — the comment-capture path (Pass 3)
+  treats it as user trivia and re-emits, while the next render
+  produces the same diagnostic again. `RenderInstruction` in
+  `TextModuleWriter` now strips the diagnostic tail for canonical-
+  mode emission so the round-trip is a stable fixed point.
+
+### Tests
+
+`TextRoundTripFixedPointTests` (6 cases):
+- Canonical fixed-point round-trip on three fixture .wat files
+  (`engine/binding.wat`, `engine/tailcalls.wat`,
+  `Wacs.Bench/fib.wat`) — parse → write → re-parse → re-write
+  produces byte-identical output.
+- Folded ↔ flat parity: the same module rendered in both styles
+  re-parses to a Module with the same section shape.
+- Comment survival across a round-trip (line comments at module
+  and section level).
+- Multi-section structural round-trip (types / funcs / memory /
+  table / elem / data all parse-write-parse with matching counts).
+
+459/459 Wacs.Core.Test tests pass.
+
+### Arc summary
+
+`TextModuleWriter` is now the sole text emitter, with three styles
+(canonical / stack-annotated / folded), full section coverage
+(types incl. GC, imports, funcs, tables, memories, tags, globals,
+exports, start, elems, datas), comment + `(@…)` annotation round-
+trip, partial-render entry points for tooling, and a bidirectional
+line map for IDE / source-map use. `ModuleRenderer` is gone.
+
+Known limitations after Pass 7:
+- Recursive folding inside `block` / `loop` / `if` bodies is still
+  flat in folded mode (operands inside blocks don't collapse).
+- Instruction-level comments / annotations attach to module-level
+  rather than to the precise instruction; section-level placement
+  is exact. Function-body trivia round-trip lands in a follow-up.
+
 ## WACS 0.15.5 — bidirectional LineMap from Write (Pass 6)
 
 Adds a debug / tooling-friendly entry point that returns both the
