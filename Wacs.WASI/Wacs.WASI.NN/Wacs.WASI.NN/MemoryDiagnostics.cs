@@ -51,15 +51,21 @@ namespace Wacs.WASI.NN
         private static long _baselineManaged = -1;
 
         /// <summary>
-        /// Counter incremented by the wasi-nn binding's
-        /// <c>[resource-drop]X</c> handler whenever the cross-table
+        /// Counter incremented every time a wasi-nn
+        /// <c>[resource-drop]X</c> interpreter binding fires
+        /// (regardless of whether the cross-table hook is wired).
+        /// A stuck zero proves the binding itself isn't being
+        /// invoked — i.e., the wasm component's resource-drop
+        /// import is being satisfied through some other code
+        /// path that bypasses the runtime's entity-binding table.
+        /// </summary>
+        internal static int InterpreterDropInvocations;
+
+        /// <summary>
+        /// Counter incremented when the cross-table
         /// <see cref="Wacs.Core.Runtime.WasmRuntime.ExternalResourceDrop"/>
-        /// hook actually fires. Logged with each per-compute
-        /// snapshot so a stuck zero proves the hook isn't wired
-        /// (build doesn't include the v0.3.3 fix, or
-        /// <c>WasiPreview2RuntimeScope</c> wasn't invoked); a
-        /// growing count proves drops are happening but maybe to
-        /// the wrong table.
+        /// hook actually fires (a subset of the above — only counts
+        /// when the binding fires AND ExternalResourceDrop is wired).
         /// </summary>
         internal static int ExternalDropInvocations;
 
@@ -132,12 +138,13 @@ namespace Wacs.WASI.NN
             // human-readable form except input/output (small,
             // exact byte counts are more useful for correlating
             // against guest prompt sizes).
+            int interpDrops = InterpreterDropInvocations;
             int extDrops = ExternalDropInvocations;
             var line = string.Format(
                 CultureInfo.InvariantCulture,
                 "[wacs-diag-memory] turn={0} rss={1} ({2}) managed={3} ({4}) "
                 + "gc[g0={5} g1={6} g2={7}] in={8}B out={9}B "
-                + "ext-drops={10} took={11:F2}s",
+                + "drops[interp={10} ext={11}] took={12:F2}s",
                 turn,
                 FormatBytes(rss),
                 FormatBytesDelta(rssDelta),
@@ -145,7 +152,7 @@ namespace Wacs.WASI.NN
                 FormatBytesDelta(managedDelta),
                 gen0, gen1, gen2,
                 inBytes, outBytes,
-                extDrops,
+                interpDrops, extDrops,
                 durationSec);
 
             try { Console.Error.WriteLine(line); }

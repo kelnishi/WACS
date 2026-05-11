@@ -106,6 +106,8 @@ namespace Wacs.WASI.NN
                 (ErrorsNs, "[resource-drop]error"),
                 (_, h) =>
                 {
+                    System.Threading.Interlocked.Increment(
+                        ref MemoryDiagnostics.InterpreterDropInvocations);
                     host.Errors.Drop(h);
                     if (runtime.ExternalResourceDrop != null)
                     {
@@ -179,6 +181,8 @@ namespace Wacs.WASI.NN
                 (TensorNs, "[resource-drop]tensor"),
                 (_, h) =>
                 {
+                    System.Threading.Interlocked.Increment(
+                        ref MemoryDiagnostics.InterpreterDropInvocations);
                     host.Tensors.Drop(h);
                     if (runtime.ExternalResourceDrop != null)
                     {
@@ -274,6 +278,8 @@ namespace Wacs.WASI.NN
                 (GraphNs, "[resource-drop]graph"),
                 (_, h) =>
                 {
+                    System.Threading.Interlocked.Increment(
+                        ref MemoryDiagnostics.InterpreterDropInvocations);
                     host.Graphs.Drop(h);
                     if (runtime.ExternalResourceDrop != null)
                     {
@@ -326,6 +332,8 @@ namespace Wacs.WASI.NN
                 (InferenceNs, "[resource-drop]graph-execution-context"),
                 (_, h) =>
                 {
+                    System.Threading.Interlocked.Increment(
+                        ref MemoryDiagnostics.InterpreterDropInvocations);
                     host.Contexts.Drop(h);
                     if (runtime.ExternalResourceDrop != null)
                     {
