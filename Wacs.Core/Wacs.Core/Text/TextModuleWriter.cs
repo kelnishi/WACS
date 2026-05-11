@@ -46,10 +46,40 @@ namespace Wacs.Core.Text
             return sb.ToString();
         }
 
-        public static void WriteTo(TextWriter w, Module module) =>
-            WriteTo(w, module, TextWriterOptions.Canonical);
+        /// <summary>
+        /// Render <paramref name="module"/> and return both the text
+        /// and a <see cref="LineMap"/> mapping each module element to
+        /// its line / column span in the output. Used by IDE / source-
+        /// map tooling that needs to navigate between WAT source and
+        /// module structure.
+        /// </summary>
+        public static (string text, LineMap lineMap) WriteWithLineMap(
+            Module module, TextWriterOptions? options = null)
+        {
+            options ??= TextWriterOptions.Canonical;
+            var sb = new StringBuilder();
+            using var inner = new StringWriter(sb);
+            using var tracking = new LineCountingTextWriter(inner);
+            var lineMap = new LineMap();
+            WriteTo(tracking, module, options, lineMap);
+            tracking.Flush();
+            return (sb.ToString(), lineMap);
+        }
 
-        public static void WriteTo(TextWriter w, Module module, TextWriterOptions options)
+        public static void WriteTo(TextWriter w, Module module) =>
+            WriteTo(w, module, TextWriterOptions.Canonical, lineMap: null);
+
+        public static void WriteTo(TextWriter w, Module module, TextWriterOptions options) =>
+            WriteTo(w, module, options, lineMap: null);
+
+        /// <summary>
+        /// Internal core: emits to <paramref name="w"/> and, when
+        /// <paramref name="lineMap"/> is non-null and <paramref name="w"/>
+        /// is a <see cref="LineCountingTextWriter"/>, records each
+        /// section element's line / column span as the writer emits.
+        /// </summary>
+        private static void WriteTo(
+            TextWriter w, Module module, TextWriterOptions options, LineMap? lineMap)
         {
             // Module-level LEADING comments (before the first section).
             // These appear at the very top of the round-tripped source,
@@ -68,42 +98,60 @@ namespace Wacs.Core.Text
             // rec-grouped variants.
             for (int t = 0; t < module.Types.Count; t++)
             {
-                EmitLeading(w, module, new ModuleElementRef(ModuleElementKind.Type, t), indent);
+                var key = new ModuleElementRef(ModuleElementKind.Type, t);
+                EmitLeading(w, module, key, indent);
+                BeginRecord(w, lineMap, out var snap);
                 WriteRecursiveType(w, module.Types[t], indent);
+                EndRecord(w, lineMap, key, snap);
             }
 
             // Imports
             for (int ii = 0; ii < module.Imports.Length; ii++)
             {
-                EmitLeading(w, module, new ModuleElementRef(ModuleElementKind.Import, ii), indent);
+                var key = new ModuleElementRef(ModuleElementKind.Import, ii);
+                EmitLeading(w, module, key, indent);
+                BeginRecord(w, lineMap, out var snap);
                 WriteImport(w, module, module.Imports[ii], indent);
+                EndRecord(w, lineMap, key, snap);
             }
 
             // Functions (defined; imports skipped — handled above)
             int fimportCount = module.ImportedFunctions.Count;
             for (int i = 0; i < module.Funcs.Count; i++)
             {
-                EmitLeading(w, module, new ModuleElementRef(ModuleElementKind.Function, i), indent);
+                var key = new ModuleElementRef(ModuleElementKind.Function, i);
+                EmitLeading(w, module, key, indent);
+                BeginRecord(w, lineMap, out var snap);
                 WriteFunc(w, module, module.Funcs[i], fimportCount + i, indent, options);
+                EndRecord(w, lineMap, key, snap);
             }
 
             // Tables / Memories / Globals (defined)
             for (int ti = 0; ti < module.Tables.Count; ti++)
             {
-                EmitLeading(w, module, new ModuleElementRef(ModuleElementKind.Table, ti), indent);
+                var key = new ModuleElementRef(ModuleElementKind.Table, ti);
+                EmitLeading(w, module, key, indent);
+                BeginRecord(w, lineMap, out var snap);
                 WriteTable(w, module.Tables[ti], indent);
+                EndRecord(w, lineMap, key, snap);
             }
 
             for (int mi = 0; mi < module.Memories.Count; mi++)
             {
-                EmitLeading(w, module, new ModuleElementRef(ModuleElementKind.Memory, mi), indent);
+                var key = new ModuleElementRef(ModuleElementKind.Memory, mi);
+                EmitLeading(w, module, key, indent);
+                BeginRecord(w, lineMap, out var snap);
                 WriteMemory(w, module.Memories[mi], indent);
+                EndRecord(w, lineMap, key, snap);
             }
 
             for (int gi = 0; gi < module.Globals.Count; gi++)
             {
-                EmitLeading(w, module, new ModuleElementRef(ModuleElementKind.Global, gi), indent);
+                var key = new ModuleElementRef(ModuleElementKind.Global, gi);
+                EmitLeading(w, module, key, indent);
+                BeginRecord(w, lineMap, out var snap);
                 WriteGlobal(w, module, module.Globals[gi], indent);
+                EndRecord(w, lineMap, key, snap);
             }
 
             // Tags (exception-handling). Imported tags are surfaced via
@@ -111,36 +159,79 @@ namespace Wacs.Core.Text
             // order matching what the parser captured.
             for (int tgi = 0; tgi < module.Tags.Count; tgi++)
             {
-                EmitLeading(w, module, new ModuleElementRef(ModuleElementKind.Tag, tgi), indent);
+                var key = new ModuleElementRef(ModuleElementKind.Tag, tgi);
+                EmitLeading(w, module, key, indent);
+                BeginRecord(w, lineMap, out var snap);
                 WriteTag(w, module.Tags[tgi], indent);
+                EndRecord(w, lineMap, key, snap);
             }
 
             // Exports
             for (int ei = 0; ei < module.Exports.Length; ei++)
             {
-                EmitLeading(w, module, new ModuleElementRef(ModuleElementKind.Export, ei), indent);
+                var key = new ModuleElementRef(ModuleElementKind.Export, ei);
+                EmitLeading(w, module, key, indent);
+                BeginRecord(w, lineMap, out var snap);
                 WriteExport(w, module.Exports[ei], indent);
+                EndRecord(w, lineMap, key, snap);
             }
 
             // Start
             if (module.StartIndex != FuncIdx.Default)
             {
-                EmitLeading(w, module, new ModuleElementRef(ModuleElementKind.Start), indent);
+                var key = new ModuleElementRef(ModuleElementKind.Start);
+                EmitLeading(w, module, key, indent);
+                BeginRecord(w, lineMap, out var snap);
                 w.WriteLine($"{indent}(start {module.StartIndex.Value})");
+                EndRecord(w, lineMap, key, snap);
             }
 
             for (int eli = 0; eli < module.Elements.Length; eli++)
             {
-                EmitLeading(w, module, new ModuleElementRef(ModuleElementKind.Element, eli), indent);
+                var key = new ModuleElementRef(ModuleElementKind.Element, eli);
+                EmitLeading(w, module, key, indent);
+                BeginRecord(w, lineMap, out var snap);
                 WriteElementSegment(w, module.Elements[eli], indent);
+                EndRecord(w, lineMap, key, snap);
             }
             for (int di = 0; di < module.Datas.Length; di++)
             {
-                EmitLeading(w, module, new ModuleElementRef(ModuleElementKind.Data, di), indent);
+                var key = new ModuleElementRef(ModuleElementKind.Data, di);
+                EmitLeading(w, module, key, indent);
+                BeginRecord(w, lineMap, out var snap);
                 WriteDataSegment(w, module.Datas[di], indent);
+                EndRecord(w, lineMap, key, snap);
             }
 
             w.WriteLine(")");
+        }
+
+        /// <summary>
+        /// Capture the (line, column) cursor before a section emit
+        /// begins. No-op when not in line-map mode.
+        /// </summary>
+        private static void BeginRecord(
+            TextWriter w, LineMap? lineMap, out (int line, int col) snap)
+        {
+            if (lineMap == null || w is not LineCountingTextWriter lc)
+            {
+                snap = (0, 0);
+                return;
+            }
+            snap = (lc.Line, lc.Column);
+        }
+
+        /// <summary>
+        /// Record the (start, end) span of a section emit on the
+        /// <paramref name="lineMap"/>. No-op when not in line-map mode.
+        /// </summary>
+        private static void EndRecord(
+            TextWriter w, LineMap? lineMap, ModuleElementRef element,
+            (int line, int col) snap)
+        {
+            if (lineMap == null || w is not LineCountingTextWriter lc) return;
+            lineMap.Record(element,
+                new LineMap.Span(snap.line, snap.col, lc.Line, lc.Column));
         }
 
         // ---- Trivia + annotation re-emission ------------------------------

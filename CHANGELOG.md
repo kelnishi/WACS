@@ -1,5 +1,43 @@
 # Changelog
 
+## WACS 0.15.5 — bidirectional LineMap from Write (Pass 6)
+
+Adds a debug / tooling-friendly entry point that returns both the
+rendered WAT and a line-and-column map between module elements and
+the text they produced.
+
+### Public API additions
+
+- `Wacs.Core.Text.LineMap` — bidirectional map.
+  - `LineMap.Span` — immutable struct: `(StartLine, StartCol, EndLine, EndCol)`,
+    1-based.
+  - `ByElement(ModuleElementRef) → Span?` — direct lookup.
+  - `ByLine(int line) → ModuleElementRef?` — finds the innermost
+    element whose span brackets the line.
+  - `All` — `IReadOnlyDictionary<ModuleElementRef, Span>` of every
+    recorded entry.
+- `Wacs.Core.Text.LineCountingTextWriter` — `TextWriter` wrapper
+  that tracks the running `(Line, Column)` cursor.
+- `TextModuleWriter.WriteWithLineMap(module, options?)` —
+  returns `(string text, LineMap map)`. The standard
+  `Write(module)` path is unchanged and still returns a bare
+  `string`.
+
+### Recorded sections
+
+Every top-level section element gets a span: types, imports,
+functions, tables, memories, globals, tags, exports, start, elems,
+datas. Instruction-level spans inside function bodies are
+deferred — a later pass can refine when there's a use case
+(source-map generation from WAT to bytecode for debugger support).
+
+### Tests
+
+`LineMapTests` (4 cases) covers per-section span recording,
+`ByLine` line→element lookup, backward-compatible `Write(module)`
+return type, and `All` enumeration. 453/453 Wacs.Core.Test tests
+pass.
+
 ## WACS 0.15.4 — folded / S-expression instruction style (Pass 5)
 
 Lights up `TextWriterStyle.Folded`. Function bodies that previously
