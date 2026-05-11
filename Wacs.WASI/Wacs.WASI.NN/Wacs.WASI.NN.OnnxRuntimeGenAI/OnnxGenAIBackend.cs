@@ -177,18 +177,42 @@ namespace Wacs.WASI.NN.OnnxRuntimeGenAI
                     + "model_builder.py script or fetch a pre-built "
                     + "ONNX directory from Hugging Face.");
 
+            GenAI.Config? config = null;
             GenAI.Model? model = null;
             GenAI.Tokenizer? tokenizer = null;
             try
             {
-                model = new GenAI.Model(dir);
+                // Load through Config so we can override the
+                // execution-provider list. Pre-built HuggingFace
+                // models often declare provider preferences (e.g.,
+                // `nnapi` on Android-targeted exports) that aren't
+                // compiled into every platform's GenAI native lib;
+                // GenAI's Model(dir) ctor rejects the load with
+                // "Unknown provider name '<X>'" when an unsupported
+                // provider is hard-coded in genai_config.json.
+                // ClearProviders strips the model-declared list so
+                // GenAI picks the platform default — CPU on macOS,
+                // matching the OnnxBackend's opt-in posture for
+                // hardware acceleration. Embedders that want CoreML
+                // / CUDA / DirectML opt in explicitly through
+                // OnnxGenAIBackendOptions (follow-up).
+                config = new GenAI.Config(dir);
+                config.ClearProviders();
+                model = new GenAI.Model(config);
                 tokenizer = new GenAI.Tokenizer(model);
-                return new OnnxGenAIGraph(model, tokenizer, _options);
+                // Config is owned by the Model after construction;
+                // dispose-on-success would yank state from under the
+                // generation loop. Keep it alive for the graph's
+                // lifetime by transferring ownership.
+                var owned = config;
+                config = null;
+                return new OnnxGenAIGraph(model, tokenizer, _options, owned);
             }
             catch (Exception ex)
             {
                 tokenizer?.Dispose();
                 model?.Dispose();
+                config?.Dispose();
                 throw new WasiNNException(
                     ErrorCode.RuntimeError,
                     $"OnnxGenAIBackend: failed to load model "
