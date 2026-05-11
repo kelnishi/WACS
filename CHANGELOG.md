@@ -1,5 +1,65 @@
 # Changelog
 
+## WACS 0.15.0 / WACS.Cli 1.6.1 — consolidate text emission onto TextModuleWriter; retire ModuleRenderer (Pass 1)
+
+First of seven planned passes to bring `TextModuleWriter` to full
+fidelity round-trip and retire the older `ModuleRenderer`. This pass
+is the structural consolidation: every text-emission caller now goes
+through `TextModuleWriter`, the legacy renderer is gone, and the
+debug / stack-annotated rendering it used to do is reachable as an
+option on the unified writer.
+
+### Public API changes
+
+- **Deleted:** `Wacs.Core.ModuleRenderer` (entire static class —
+  `RenderWatToStream`, `RenderFunctionWat`, `GetFuncIdx`,
+  `ChopFunctionId`, `Indent2Space`).
+- **Added:** `Wacs.Core.Text.TextWriterOptions` +
+  `Wacs.Core.Text.TextWriterStyle { Canonical, StackAnnotated, Folded }`.
+- **Added:** `TextModuleWriter.Write(module, options)`,
+  `WriteTo(writer, module, options)`, and partial-render
+  `WriteFunction(module, funcIdx, indent, options)`.
+- **Added:** `TextModuleWriter.Indent2Space` (the two-space module-
+  body indent — replaces `ModuleRenderer.Indent2Space`).
+- **Added:** `Wacs.Core.Text.TextDiagnostics.GetFuncIdx(path)` /
+  `ChopFunctionId(path)` — validation-path parsers split out of the
+  old renderer.
+- **Moved:** `Module.CalculateLine(...)` (validation-path → WAT-line
+  cache) — same method, same partial class, file relocated to
+  `Modules/ModuleValidationLines.cs`.
+
+### Behavior
+
+- `TextWriterStyle.Canonical` (the default) emits the same parser-
+  friendly flat WAT that `TextModuleWriter.Write(module)` produced
+  before — no on-the-wire change for existing callers.
+- `TextWriterStyle.StackAnnotated` reproduces what
+  `ModuleRenderer.RenderFunctionWat(module, idx, "", true)` did: the
+  per-function `(;N;)` id comment, `;; label = @N` block markers,
+  and left-margin stack-state side comments. Routes through the
+  existing `Function.RenderText` + `StackRenderer` machinery.
+- `TextWriterStyle.Folded` is a placeholder for Pass 5; it currently
+  falls back to canonical.
+
+### Migrations
+
+- `Wacs.Console/Verbs/RunHandler.cs` (the validation-error reporter)
+  now calls `TextModuleWriter.WriteFunction(module, idx, "",
+  TextWriterOptions.StackAnnotated)` and
+  `TextDiagnostics.{GetFuncIdx,ChopFunctionId}`. The on-disk
+  `<funcid>.part.wat` artifact is unchanged.
+- `Wacs.Core/Modules/Sections/FunctionSection.cs` references the
+  indent constant via `TextModuleWriter.Indent2Space`.
+
+### What's next
+
+Pass 2 adds `Module.Annotations` + `Module.Comments` plus lexer
+trivia-token support. Pass 3 wires the parser to attach trivia and
+the writer to re-emit it. Pass 4 fills the remaining structural
+gaps (element / data / GC types / tags / name-section idents). Pass
+5 lights up the folded / S-expression style. Pass 6 returns a
+bidirectional LineMap from `Write`. Pass 7 is the test arc.
+
 ## WACS 0.14.0 — `Wacs.Core.Bin.BinaryModuleWriter`: round-trip binary serializer
 
 Inverse of `BinaryModuleParser`, symmetric with the existing

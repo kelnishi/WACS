@@ -15,6 +15,7 @@ using Wacs.ComponentModel.Runtime.Parser;
 using Wacs.Core;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
+using Wacs.Core.Text;
 using Wacs.Core.Types;
 using Wacs.Core.WASIp1;
 using Wacs.Transpiler.AOT;
@@ -1111,8 +1112,8 @@ namespace Wacs.Console.Verbs
                         $"    at{code} in {wasmPath}:line {line} ({fline})");
                     System.Console.Error.WriteLine();
 
-                    FuncIdx fIdx = ModuleRenderer.GetFuncIdx(path);
-                    string funcId = ModuleRenderer.ChopFunctionId(path);
+                    FuncIdx fIdx = TextDiagnostics.GetFuncIdx(path);
+                    string funcId = TextDiagnostics.ChopFunctionId(path);
                     funcsToRender.Add((fIdx, funcId));
                 }
                 else
@@ -1124,8 +1125,8 @@ namespace Wacs.Console.Verbs
 
             foreach (var (fIdx, funcId) in funcsToRender)
             {
-                string funcString = ModuleRenderer.RenderFunctionWat(
-                    module, fIdx, "", true);
+                string funcString = TextModuleWriter.WriteFunction(
+                    module, fIdx, indent: "", TextWriterOptions.StackAnnotated);
                 using var outputFileStream = new FileStream(
                     $"{funcId}.part.wat", FileMode.Create);
                 using var outputStreamWriter = new StreamWriter(outputFileStream);

@@ -20,29 +20,39 @@ using Wacs.Core.Types.Defs;
 namespace Wacs.Core.Text
 {
     /// <summary>
-    /// Round-trip WAT renderer — emits a canonical, parser-friendly
-    /// representation of a <see cref="Module"/> that
-    /// <see cref="TextModuleParser"/> can re-parse to a structurally-
-    /// equivalent <see cref="Module"/>.
-    ///
-    /// <para>Distinct from <see cref="ModuleRenderer"/>, which is
-    /// debug/display-oriented (stack annotations, <c>(;id;)</c> comments,
-    /// etc.). This writer targets parseability, not visual polish.</para>
+    /// Consolidated WAT renderer for <see cref="Module"/>. Default
+    /// <see cref="TextWriterStyle.Canonical"/> emits a parser-friendly
+    /// flat form that <see cref="TextModuleParser"/> can re-parse to a
+    /// structurally equivalent <see cref="Module"/>.
+    /// <see cref="TextWriterStyle.StackAnnotated"/> layers on debug
+    /// annotations (per-function id, <c>;; label = @N</c>, left-margin
+    /// stack-state comments) — what the legacy <c>ModuleRenderer</c>
+    /// used to emit. Future passes will add a folded / S-expression
+    /// style and comment / annotation round-trip.
     /// </summary>
     public static class TextModuleWriter
     {
-        public static string Write(Module module)
+        /// <summary>Two-space module-body indent.</summary>
+        public const string Indent2Space = "  ";
+
+        public static string Write(Module module) =>
+            Write(module, TextWriterOptions.Canonical);
+
+        public static string Write(Module module, TextWriterOptions options)
         {
             var sb = new StringBuilder();
             using var w = new StringWriter(sb);
-            WriteTo(w, module);
+            WriteTo(w, module, options);
             return sb.ToString();
         }
 
-        public static void WriteTo(TextWriter w, Module module)
+        public static void WriteTo(TextWriter w, Module module) =>
+            WriteTo(w, module, TextWriterOptions.Canonical);
+
+        public static void WriteTo(TextWriter w, Module module, TextWriterOptions options)
         {
             w.WriteLine("(module");
-            var indent = "  ";
+            var indent = Indent2Space;
 
             // Types
             for (int t = 0; t < module.Types.Count; t++)
@@ -69,7 +79,7 @@ namespace Wacs.Core.Text
             // Functions (defined; imports skipped — handled above)
             int fimportCount = module.ImportedFunctions.Count;
             for (int i = 0; i < module.Funcs.Count; i++)
-                WriteFunc(w, module, module.Funcs[i], fimportCount + i, indent);
+                WriteFunc(w, module, module.Funcs[i], fimportCount + i, indent, options);
 
             // Tables / Memories / Globals (defined)
             int timportCount = module.ImportedTables.Count;
@@ -134,8 +144,38 @@ namespace Wacs.Core.Text
             w.WriteLine(")");
         }
 
-        private static void WriteFunc(TextWriter w, Module m, Module.Function fn, int absIdx, string indent)
+        private static void WriteFunc(
+            TextWriter w, Module m, Module.Function fn, int absIdx, string indent,
+            TextWriterOptions options)
         {
+            // Stack-annotated mode delegates to Function.RenderText —
+            // it walks the body with a StackRenderer to produce the
+            // left-margin stack-state comments and ;; label = @N
+            // annotations that the diagnostic dump expects. The
+            // StreamWriter wrap is necessary because that path was
+            // written against StreamWriter rather than the more
+            // general TextWriter abstraction we use everywhere else.
+            if (options.Style == TextWriterStyle.StackAnnotated)
+            {
+                bool prevRenderStack = fn.RenderStack;
+                fn.RenderStack = true;
+                try
+                {
+                    using var ms = new MemoryStream();
+                    using (var sw = new StreamWriter(ms, new UTF8Encoding(false), -1, leaveOpen: true))
+                    {
+                        fn.RenderText(sw, m, indent);
+                        sw.Flush();
+                    }
+                    w.Write(Encoding.UTF8.GetString(ms.ToArray()));
+                }
+                finally
+                {
+                    fn.RenderStack = prevRenderStack;
+                }
+                return;
+            }
+
             w.Write($"{indent}(func (type {fn.TypeIndex.Value})");
             if (fn.Locals != null && fn.Locals.Length > 0)
             {
@@ -146,8 +186,32 @@ namespace Wacs.Core.Text
             }
             w.WriteLine();
             // Body
-            WriteInstructionSeq(w, fn.Body.Instructions, indent + "  ", trimTrailingEnd: true);
+            WriteInstructionSeq(w, fn.Body.Instructions, indent + Indent2Space, trimTrailingEnd: true);
             w.WriteLine($"{indent})");
+        }
+
+        // ---- Partial-render entry points ----------------------------------
+
+        /// <summary>
+        /// Render a single function from <paramref name="module"/>. The
+        /// <paramref name="index"/> is the absolute function index
+        /// (imported functions are addressable too, but they have no
+        /// body — passing one returns the empty string).
+        /// </summary>
+        public static string WriteFunction(
+            Module module, FuncIdx index, string indent = "",
+            TextWriterOptions? options = null)
+        {
+            options ??= TextWriterOptions.Canonical;
+            int importCount = module.ImportedFunctions.Count;
+            int defIdx = (int)index.Value - importCount;
+            if (defIdx < 0 || defIdx >= module.Funcs.Count)
+                return string.Empty;
+
+            var sb = new StringBuilder();
+            using var w = new StringWriter(sb);
+            WriteFunc(w, module, module.Funcs[defIdx], (int)index.Value, indent, options);
+            return sb.ToString();
         }
 
         private static void WriteTable(TextWriter w, TableType t, string indent)
