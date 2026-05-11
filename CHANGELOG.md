@@ -1,5 +1,62 @@
 # Changelog
 
+## WACS 0.15.7 — memoize WAT source positions per instruction (Stack-trace Pass B)
+
+First substantive piece of the stack-trace plumbing arc. The text
+parser now records the originating `(Line, Column, SourceOffset)`
+for every instruction it constructs, so later trap / exception
+formatting can resolve a runtime frame to a WAT source location
+without re-rendering the module. This is the WAT-side counterpart
+to the existing `InstructionBase.ByteOffsetInFunc` (binary side).
+
+### Public API additions
+
+- `Wacs.Core.SourcePos { Line, Column, SourceOffset }` — immutable
+  struct, 1-based line/column. `SourceOffset` is the byte index into
+  the original WAT source string.
+- `Module.SourcePositions` — lazy
+  `Dictionary<InstructionBase, SourcePos>?`. Stays null on binary-
+  parsed modules and on WAT-parsed modules with no function bodies.
+- `Module.RecordSourcePosition(inst, pos)` — public append helper.
+
+### Wiring
+
+- `TextModuleParser.ParseInstrList` is the choke point — every
+  instruction emitted (flat or folded) gets stamped with the
+  outermost form's `(Line, Column, Start)` via the existing
+  `SExpr.Token`. Zero extra parse work: the lexer already produced
+  the position. For folded forms that emit multiple instructions
+  (operands + operator), all share the outer form's position —
+  accurate on a single line, a fair approximation otherwise.
+- Hot interpreter loop is untouched. Side-table lookup happens only
+  at trap-format time.
+
+### What's still ahead
+
+- **Pass A**: `WasmStackFrame` + `TrapException` / `UnhandledWasmException`
+  enrichment. Throw sites pass `(this, ctx)`; the exception captures
+  a frame chain at throw time.
+- **Pass C**: `WasmStackTrace.Format(module, verbose)` — cheap form
+  via `ByteOffsetInFunc` + mnemonic; verbose form resolves source
+  via `SourcePositions` (WAT) or `LineMap` (binary, lazy re-render).
+- **Pass D**: delete the stubbed `ExecContext.ComputePointerPath`;
+  add `ErrorFormattingTests`.
+- **Pass E**: same enrichment for the `WasmRuntimeException` family.
+
+### Ultimate target
+
+Debugger support — WACS modules carry enough metadata to surface
+WAT source lines (or via `LineMap`, generated text source lines)
+on every runtime fault, plus the call chain that led there.
+
+### Tests
+
+`SourcePositionTests` (5 cases) covers flat-instruction line
+capture, folded-form outer-position propagation, source-offset
+accuracy (slices back to "i32.const"), binary-parse null-safety,
+and the empty-body laziness invariant. 464/464 Wacs.Core.Test
+tests pass.
+
 ## WACS 0.15.6 — text round-trip equivalence tests + canonical fixed-point fix (Pass 7)
 
 Final pass of the text-emission consolidation arc. Adds the test
