@@ -410,6 +410,64 @@ namespace Wacs.Core.Text
             // Without this, every ref.func inside a function body fails
             // validation with "func N is not fully declared".
             BinaryModuleParser.PropagateRefFuncDeclarations(module);
+
+            // Synthesize the `name` custom section from per-function
+            // $name identifiers so binary serializers can round-trip
+            // the names back out. Without this, `wacs inspect
+            // --dump-wasm` strips every $name. The synthesis runs
+            // only when at least one function carries a name; pure-
+            // numeric modules leave Module.Names null.
+            SynthesizeNameSection(module);
+        }
+
+        /// <summary>
+        /// Populate <see cref="Module.Names"/> from per-function
+        /// <see cref="Module.Function.Id"/> so the binary writer can
+        /// emit a `name` custom section. The convention matches
+        /// what wabt / wasm-tools produces: names are stored without
+        /// the leading `$`. Indices include imported functions
+        /// (spec name-section index space).
+        /// </summary>
+        private static void SynthesizeNameSection(Module module)
+        {
+            // Walk imported + defined functions in spec order. For
+            // imports we don't have a Function.Id on the import
+            // descriptor (that's only on Module.Function objects),
+            // so they get the import's entity name as a name-section
+            // label — matches what tools emit for round-trip.
+            var funcNames = new System.Collections.Generic.Dictionary<uint, string>();
+            uint idx = 0;
+            foreach (var imp in module.Imports)
+            {
+                if (imp.Desc is Module.ImportDesc.FuncDesc)
+                {
+                    // Use the import's "name" half as the name-section
+                    // label for the imported function.
+                    if (!string.IsNullOrEmpty(imp.Name))
+                        funcNames[idx] = imp.Name;
+                    idx++;
+                }
+            }
+            foreach (var fn in module.Funcs)
+            {
+                // Strip the leading `$` (WAT identifier marker) so the
+                // emitted name section matches wabt-style output.
+                if (!string.IsNullOrEmpty(fn.Id))
+                {
+                    string raw = fn.Id;
+                    if (raw.Length > 1 && raw[0] == '$') raw = raw.Substring(1);
+                    funcNames[idx] = raw;
+                }
+                idx++;
+            }
+
+            if (funcNames.Count == 0) return;
+
+            module.Names ??= new Module.NameSection();
+            module.Names.FunctionNames = new Module.NameSubsection.FuncNameSubsection
+            {
+                Names = new Module.NameMap { NameAssocMap = funcNames },
+            };
         }
 
         // ---- Helpers shared across section parsers ------------------------

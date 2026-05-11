@@ -1,5 +1,69 @@
 # Changelog
 
+## WACS 0.15.14 / WACS.Cli 1.6.5 — name-section round-trip parity (Gap A closed)
+
+WAT-parsed and binary-parsed modules now produce stack traces
+with the same level of function-name detail. Previously, dumping
+WAT to binary via `wacs inspect --dump-wasm` and re-running the
+binary lost every `$name` — traces fell back to `func@<addr>`.
+
+### What changed
+
+- `TextModuleParser.FinalizeModule` synthesizes
+  `Module.Names.FunctionNames` from each `Function.Id` at the end
+  of parse. Conventionally the `name` custom section stores names
+  without the leading `$` (wabt / wasm-tools convention) so that's
+  what we emit. Imports surface their entity name as the label.
+  Modules with no `$names` leave `Module.Names` null — lazy-
+  allocation invariant preserved.
+- `BinaryModuleWriter` already serialized `Module.Names` when
+  populated (Wacs.Core 0.14.0); this commit just makes the WAT
+  path actually populate it.
+- `WACS.Cli` sets `BinaryModuleParser.ParseCustomNames = true`
+  in `RunHandler` so binary inputs surface function names in
+  traces without the caller needing to flip the flag manually.
+
+### Live behavior
+
+Same module, two parse paths — names survive both:
+
+```
+;; WAT direct
+WASM stack trace:
+  at $_.$inner (unreachable @+0x0) (3:5)
+  at $_.$outer (resume@4)
+  at $_._start
+
+;; WAT → BinaryModuleWriter → BinaryModuleParser
+WASM stack trace:
+  at $_.inner|0 (unreachable @+0x0)
+  at $_.outer|1 (resume@4)
+  at $_._start
+```
+
+The binary path's `inner|0` suffix is the existing `PatchNames`
+convention (`{name}|{idx}` to keep duplicates unique). Cosmetic
+asymmetry with the direct-WAT label format but the same
+information is there.
+
+### Remaining gaps
+
+- **Source line numbers for binary-parsed modules** (Gap B):
+  binary inputs still don't carry `(line:col)` in the verbose
+  trace because there's no source. Bridging via on-demand
+  `TextModuleWriter.WriteWithLineMap` is a follow-up.
+- **Byte offsets on WAT-parsed modules**: `ByteOffsetInFunc`
+  stays zero for WAT inputs. The verbose trace shows `(line:col)`
+  so this is less visible, but cheap-form output omits a useful
+  coordinate. Could be filled in by a parse-time accounting pass.
+
+### Tests
+
+`NameSectionRoundTripTests` (3 cases): WAT-parse synthesizes the
+name map, name-free modules stay lazy, full
+WAT → binary → re-parse loop preserves function ids.
+479/479 Wacs.Core.Test tests pass.
+
 ## WACS 0.15.13 / WACS.Cli 1.6.4 — WasmRuntimeException family + CLI handler (Stack-trace Pass E)
 
 Final pass of the stack-trace arc. Extends the in-dispatch-loop

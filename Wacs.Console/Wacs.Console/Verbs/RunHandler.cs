@@ -168,6 +168,13 @@ namespace Wacs.Console.Verbs
             Wacs.Core.BinaryModuleParser.ParseBranchHints = string.Equals(
                 opts.Engine, "transpiler", StringComparison.OrdinalIgnoreCase);
 
+            // Always parse `name` custom sections in the CLI so WASM
+            // stack traces surface function $names instead of bare
+            // store addresses. The cost is a one-time walk of the
+            // name section at parse, which is dwarfed by everything
+            // else `wacs run` does.
+            Wacs.Core.BinaryModuleParser.ParseCustomNames = true;
+
             Wacs.Core.Module module;
             using (var fileStream = new FileStream(wasmPath, FileMode.Open))
             {
