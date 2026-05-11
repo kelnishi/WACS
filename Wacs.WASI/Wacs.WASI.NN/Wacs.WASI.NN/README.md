@@ -23,13 +23,23 @@ LlamaSharp's llama.cpp runtime).
 
 ## Quick start
 
-**CLI (zero code):**
+**CLI (zero code) — wasi-p2 component path:**
 
 ```sh
 wacs run my.component.wasm --wasip2 --wasi-nn -d ./models
 # --wasi-nn loads Wacs.WASI.NN.OnnxRuntime; bundled with the CLI.
 # Component auto-dispatches wasi:cli/run@<version>#run.
 ```
+
+**CLI — wasi-p1 WITX core-wasm path** (guests built against `wasi-nn = "0.6"` for `wasm32-wasip1`):
+
+```sh
+wacs run my-witx-guest.wasm \
+    --bind /path/to/Wacs.WASI.NN.LlamaSharp.dll \
+    -e MODEL_NAME=qwen2.5-0.5b-instruct-q4_k_m
+```
+
+Drop `--wasip2`; WITX guests import `wasi_ephemeral_nn.*` directly. WASI Preview 1 does not auto-forward the host's process environment, so pass each var the guest reads via `std::env::var` with `-e KEY=VALUE`. (On `--wasip2`, host env auto-forwards through `wasi:cli/environment.get-environment`; a plain `export` is enough.) See [`docs/WASI_NN_USAGE.md`](https://github.com/kelnishi/WACS/blob/main/docs/WASI_NN_USAGE.md) for the full invocation reference.
 
 **Embedder one-liner (interpreter path):**
 

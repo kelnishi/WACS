@@ -46,6 +46,19 @@ identity starts with `Wacs.WASI.NN.`. The Preview 2 DI scope's auto-wire registe
 backend in BOTH `Backends[GGML]` AND `LoadByNameBackend`; guests calling
 `wasi:nn/graph.load-by-name(...)` direct-link cleanly.
 
+For **wasi-p1 WITX guests** (e.g. Rust `wasi-nn = "0.6"` compiled for `wasm32-wasip1`),
+drop `--wasip2` and pass the model name via `-e` since Preview 1 doesn't auto-forward
+host env vars:
+
+```sh
+wacs run my-witx-guest.wasm --bind "$LLAMA" \
+    -e MODEL_NAME=qwen2.5-0.5b-instruct-q4_k_m
+```
+
+`WACS_WASINN_GGUF_DIR` is read by the bindable on the .NET host side (via
+`Environment.GetEnvironmentVariable`), so a plain shell `export` for it is enough on
+either ABI path.
+
 The full chain (with under-the-hood walkthrough) lives at
 [`docs/COMPONENT_CHAINING.md#gguf-inference-example-llamasharp-backend`](https://github.com/kelnishi/WACS/blob/main/docs/COMPONENT_CHAINING.md#gguf-inference-example-llamasharp-backend).
 
