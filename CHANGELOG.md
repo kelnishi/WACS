@@ -1,5 +1,62 @@
 # Changelog
 
+## WACS 0.15.2 — TextModuleParser captures comments + annotations; writer re-emits (Pass 3)
+
+Closes the round-trip loop for trivia from Pass 2. The parser now
+populates `Module.Comments` and `Module.Annotations` as it walks the
+module body, and `TextModuleWriter` re-emits each entry at its
+attached position.
+
+### Parser changes
+
+- `SExprParser.ParseWithTrivia(source)` — new entry point returning
+  the lexer, the s-expression tree, and the side-band trivia list.
+- `TextModuleParser.ParseWat` switches to the trivia-aware entry
+  point. `ParseModule` gains an overload taking lexer + trivia.
+- `TextParseContext` tracks the trivia cursor and exposes
+  `DrainTriviaBefore(pos, owner)` / `DrainRemainingTrivia()` so the
+  section walk can stream comments to the right owner in O(N).
+- Top-of-file comments (before `(module`) attach to module-level;
+  comments between section forms attach to the *following* form;
+  trailing comments past the last section attach to module-level
+  with `IsTrailing = true`.
+- `(@name payload…)` annotations at module level are captured onto
+  `Module.Annotations` instead of being silently dropped. The
+  payload is the raw text between the name atom and the closing
+  paren, so the writer can re-emit it verbatim.
+
+### Writer changes
+
+- `TextModuleWriter.WriteTo` now calls `EmitLeading(...)` before
+  each section element and `EmitAnnotations(...)` after the
+  `(module` opener for module-level annotations.
+- Indentation matches the section the comment precedes — a comment
+  attached to a function emits at the function's indent.
+
+### Behavior
+
+- Comment-free / annotation-free modules still leave the side-
+  tables `null` (Pass 2's lazy-allocation invariant holds).
+- Nothing else changes: existing `(module …)` outputs are
+  byte-identical for sources without trivia.
+
+### Tests
+
+- `CommentAnnotationRoundTripTests` (4 cases) covers line / block
+  comment survival, `(@custom)` annotation capture + re-emit, and
+  the no-trivia laziness assertion. 433/433 Wacs.Core.Test tests
+  pass.
+
+### What's still ahead
+
+Pass 4 fills the remaining structural gaps in the writer
+(element/data segments full, GC struct/array bodies, tags,
+name-section idents). Pass 5 lights up the folded /
+S-expression style with the per-opcode arity table. Pass 6 returns
+a bidirectional `LineMap` from `Write`. Pass 7 is the test arc
+exercising parse → write → re-parse → re-write text-identity
+across the spec fixtures.
+
 ## WACS 0.15.1 — trivia-aware lexer + Module annotation side-tables (Pass 2)
 
 Foundation for round-tripping comments and `(@…)` annotations. Adds

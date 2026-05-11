@@ -51,12 +51,23 @@ namespace Wacs.Core.Text
 
         public static void WriteTo(TextWriter w, Module module, TextWriterOptions options)
         {
+            // Module-level LEADING comments (before the first section).
+            // These appear at the very top of the round-tripped source,
+            // matching where the parser captured them in module-level
+            // attachment.
+            EmitLeading(w, module, ModuleElementRef.ModuleLevel, indent: "");
+
             w.WriteLine("(module");
             var indent = Indent2Space;
+
+            // Module-level annotations sit at the top of the body, on
+            // their own lines, before any sections.
+            EmitAnnotations(w, module, ModuleElementRef.ModuleLevel, indent);
 
             // Types
             for (int t = 0; t < module.Types.Count; t++)
             {
+                EmitLeading(w, module, new ModuleElementRef(ModuleElementKind.Type, t), indent);
                 var ft = module.Types[t].SubTypes[0].Body as FunctionType;
                 if (ft == null)
                 {
@@ -73,43 +84,112 @@ namespace Wacs.Core.Text
             }
 
             // Imports
-            foreach (var import in module.Imports)
-                WriteImport(w, module, import, indent);
+            for (int ii = 0; ii < module.Imports.Length; ii++)
+            {
+                EmitLeading(w, module, new ModuleElementRef(ModuleElementKind.Import, ii), indent);
+                WriteImport(w, module, module.Imports[ii], indent);
+            }
 
             // Functions (defined; imports skipped — handled above)
             int fimportCount = module.ImportedFunctions.Count;
             for (int i = 0; i < module.Funcs.Count; i++)
+            {
+                EmitLeading(w, module, new ModuleElementRef(ModuleElementKind.Function, i), indent);
                 WriteFunc(w, module, module.Funcs[i], fimportCount + i, indent, options);
+            }
 
             // Tables / Memories / Globals (defined)
-            int timportCount = module.ImportedTables.Count;
-            foreach (var table in module.Tables)
-                WriteTable(w, table, indent);
+            for (int ti = 0; ti < module.Tables.Count; ti++)
+            {
+                EmitLeading(w, module, new ModuleElementRef(ModuleElementKind.Table, ti), indent);
+                WriteTable(w, module.Tables[ti], indent);
+            }
 
-            int mimportCount = module.ImportedMems.Count;
-            foreach (var mem in module.Memories)
-                WriteMemory(w, mem, indent);
+            for (int mi = 0; mi < module.Memories.Count; mi++)
+            {
+                EmitLeading(w, module, new ModuleElementRef(ModuleElementKind.Memory, mi), indent);
+                WriteMemory(w, module.Memories[mi], indent);
+            }
 
-            int gimportCount = module.ImportedGlobals.Count;
-            foreach (var g in module.Globals)
-                WriteGlobal(w, module, g, indent);
+            for (int gi = 0; gi < module.Globals.Count; gi++)
+            {
+                EmitLeading(w, module, new ModuleElementRef(ModuleElementKind.Global, gi), indent);
+                WriteGlobal(w, module, module.Globals[gi], indent);
+            }
 
             // Exports
-            foreach (var e in module.Exports)
-                WriteExport(w, e, indent);
+            for (int ei = 0; ei < module.Exports.Length; ei++)
+            {
+                EmitLeading(w, module, new ModuleElementRef(ModuleElementKind.Export, ei), indent);
+                WriteExport(w, module.Exports[ei], indent);
+            }
 
             // Start
             if (module.StartIndex != FuncIdx.Default)
+            {
+                EmitLeading(w, module, new ModuleElementRef(ModuleElementKind.Start), indent);
                 w.WriteLine($"{indent}(start {module.StartIndex.Value})");
+            }
 
             // Elem / Data — phase 2 leaves these as comments since Phase 1
-            // doesn't fully populate them.
-            foreach (var _ in module.Elements)
+            // doesn't fully populate them. Pass 4 fills these out.
+            for (int eli = 0; eli < module.Elements.Length; eli++)
+            {
+                EmitLeading(w, module, new ModuleElementRef(ModuleElementKind.Element, eli), indent);
                 w.WriteLine($"{indent};; (elem …) (round-trip not supported in phase 2)");
-            foreach (var _ in module.Datas)
+            }
+            for (int di = 0; di < module.Datas.Length; di++)
+            {
+                EmitLeading(w, module, new ModuleElementRef(ModuleElementKind.Data, di), indent);
                 w.WriteLine($"{indent};; (data …) (round-trip not supported in phase 2)");
+            }
 
             w.WriteLine(")");
+        }
+
+        // ---- Trivia + annotation re-emission ------------------------------
+
+        /// <summary>
+        /// Emit any leading comments attached to <paramref name="owner"/>
+        /// — each on its own line, indented to match the element about
+        /// to follow. Comments are emitted in source order. No-op when
+        /// the module carries no <c>Comments</c> table or no entries
+        /// for this owner.
+        /// </summary>
+        private static void EmitLeading(
+            TextWriter w, Module module, ModuleElementRef owner, string indent)
+        {
+            if (module.Comments == null) return;
+            if (!module.Comments.TryGetValue(owner, out var list) || list.Count == 0)
+                return;
+            foreach (var c in list)
+            {
+                // Re-emit with original delimiters intact. Trailing
+                // comments would land on the same line as their anchor
+                // — Pass 3 attaches everything as leading; the
+                // distinction is exercised in later passes.
+                w.WriteLine($"{indent}{c.Text}");
+            }
+        }
+
+        /// <summary>
+        /// Emit any <c>(@name payload…)</c> annotations attached to
+        /// <paramref name="owner"/>. Each annotation re-emits on its
+        /// own line.
+        /// </summary>
+        private static void EmitAnnotations(
+            TextWriter w, Module module, ModuleElementRef owner, string indent)
+        {
+            if (module.Annotations == null) return;
+            if (!module.Annotations.TryGetValue(owner, out var list) || list.Count == 0)
+                return;
+            foreach (var a in list)
+            {
+                if (string.IsNullOrEmpty(a.Payload))
+                    w.WriteLine($"{indent}(@{a.Name})");
+                else
+                    w.WriteLine($"{indent}(@{a.Name} {a.Payload})");
+            }
         }
 
         // ---- Section writers ---------------------------------------------
