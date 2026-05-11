@@ -1,5 +1,49 @@
 # Changelog
 
+## WACS 0.15.1 — trivia-aware lexer + Module annotation side-tables (Pass 2)
+
+Foundation for round-tripping comments and `(@…)` annotations. Adds
+the data shape and the lexer hook; no parser or writer changes yet
+(those land in Pass 3).
+
+### Public API additions
+
+- `Wacs.Core.Text.TriviaKind { LineComment, BlockComment }` and
+  `Wacs.Core.Text.TriviaToken` (immutable struct: kind, source
+  span, line, column).
+- `Lexer.TokenizeWithTrivia()` — returns the same tokens as
+  `Tokenize()` plus a side-band `List<TriviaToken>` of every
+  `;;` and `(;…;)` comment seen, in source order with their
+  original delimiters intact.
+- `Lexer.SliceTrivia(TriviaToken) → string` — materializes the
+  raw comment text.
+- `Wacs.Core.ModuleElementRef` (immutable struct: `Kind`, `Index`,
+  `InstructionIndex`) + `ModuleElementKind` enum — stable handle
+  used to key the new side-tables.
+- `Wacs.Core.WatAnnotation` (name + payload + position) and
+  `Wacs.Core.WatComment` (kind + text + position + is-trailing).
+- `Module.Annotations` and `Module.Comments` —
+  `Dictionary<ModuleElementRef, List<…>>?`, lazy-allocated so
+  comment-free modules pay no extra memory. `AddAnnotation` /
+  `AddComment` helpers append + lazy-init.
+
+### Behavior
+
+- The default `Tokenize()` path is unchanged — `SkipTrivia` still
+  drops comments, the existing parser sees the same token stream.
+  The new `_capturedTrivia` field is `null` outside
+  `TokenizeWithTrivia`, so the hot path stays allocation-free.
+- Module instances loaded from a comment-free source leave the
+  side-tables null (no allocation). Pass 3 wires the parser to
+  populate them.
+
+### Tests
+
+`LexerTriviaTests` (6 cases) covers default-strip, line-comment
+capture, block-comment capture, nested-block depth tracking,
+EOF-terminated line comments, and lazy-allocation behavior of
+the module side-tables. 429/429 Wacs.Core.Test tests pass.
+
 ## WACS 0.15.0 / WACS.Cli 1.6.1 — consolidate text emission onto TextModuleWriter; retire ModuleRenderer (Pass 1)
 
 First of seven planned passes to bring `TextModuleWriter` to full
