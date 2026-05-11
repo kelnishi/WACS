@@ -184,6 +184,14 @@ wacs run --wasip2 --wasi-nn \
 | Generative LLMs in GGUF format (llama.cpp models — Metal on Apple Silicon works out of the box) | [`WACS.WASI.NN.LlamaSharp`](https://www.nuget.org/packages/WACS.WASI.NN.LlamaSharp) |
 | TorchScript modules (`.pt` / `.ts`, PyTorch ecosystem) | [`WACS.WASI.NN.TorchSharp`](https://www.nuget.org/packages/WACS.WASI.NN.TorchSharp) |
 
+## Documentation
+
+- **[`docs/WASI_NN_USAGE.md`](https://github.com/kelnishi/WACS/blob/main/docs/WASI_NN_USAGE.md)** —
+  unified usage guide (CLI flags, env vars, programmatic embedding, worked examples)
+- [`docs/COMPONENT_CHAINING.md`](https://github.com/kelnishi/WACS/blob/main/docs/COMPONENT_CHAINING.md)
+- [`Wacs.WASI/Wacs.WASI.NN/README.md`](https://github.com/kelnishi/WACS/blob/main/Wacs.WASI/Wacs.WASI.NN/README.md)
+  — backend matrix + package layout
+
 ## License
 
 Apache-2.0

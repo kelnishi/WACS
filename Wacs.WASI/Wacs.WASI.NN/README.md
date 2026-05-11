@@ -6,8 +6,11 @@ wasi-nn host bindings — both the component-model WIT
 implementations ship as sibling NuGets so consumers wiring only one
 skip the others' native binaries.
 
-See [Wacs.WASI.NN/README.md](Wacs.WASI.NN/README.md) for the
-architecture deep-dive.
+**👉 New here? Read [`docs/WASI_NN_USAGE.md`](../../docs/WASI_NN_USAGE.md)** — the
+unified usage guide covering CLI flags, environment variables, programmatic
+embedding, and worked examples for every backend.
+
+This README is the architecture / package map.
 
 ## Contents
 
