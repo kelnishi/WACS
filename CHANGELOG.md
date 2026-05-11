@@ -1,5 +1,68 @@
 # Changelog
 
+## WACS 0.15.10 / WACS.Cli 1.6.3 — CLI sees the WASM trace (Pass C follow-up)
+
+Two bugs were preventing the freshly-landed `WasmStackTrace`
+output from actually reaching the user. Both surfaced when we
+ran a trapping WAT through the CLI for the first time.
+
+### Bug 1: trap path swallowed by TargetInvocationException
+
+The CLI's `CreateInvokerAction` path calls into the parsed module
+via `Delegate.DynamicInvoke`, which wraps any thrown exception
+inside `System.Reflection.TargetInvocationException`. The
+existing `catch (TrapException)` blocks in `RunHandler` never
+fired — they were dead code. Every trap bubbled up to `Main`'s
+last-resort handler and printed only the .NET stack trace.
+
+Fix: `RunHandler.TryUnwrap<T>(exc)` walks the InnerException chain;
+the four trap catch sites are now exception-filter-based:
+`catch (System.Exception any) when (TryUnwrap<TrapException>(any, out var exc))`.
+A parallel filter catches `UnhandledWasmException` and routes
+through a new `PrintUnhandledWasm` helper. Existing
+`SignalException` handling is unchanged.
+
+### Bug 2: unhandled-throw snapshot taken after the unwind
+
+`InstThrowRef.ExecuteInstruction` searches for a matching catch
+clause by walking the control stack and calling
+`context.FunctionReturn()` to pop unmatched frames. The previous
+code snapshotted the call chain *after* the search loop, when
+the stack was already empty.
+
+Fix: snapshot before the search. Plus, thread a `throwingInstruction`
+parameter through `InstThrow.Execute` → `InstThrowRef.ExecuteInstruction`
+so the top frame's `Instruction` is the source-level `throw`
+(not the throw_ref dispatcher).
+
+### Live behavior
+
+A WAT that traps now produces (CLI output):
+
+```
+Wacs.Core.Runtime.Types.TrapException: unreachable
+   at Wacs.Core.Instructions.InstUnreachable.Execute(...)
+   …
+
+WASM stack trace:
+  at func@47 (unreachable @+0x0) (3:5)
+  at func@48 (resume@4)
+  at $_._start
+```
+
+A WAT that throws an unhandled exception produces:
+
+```
+Wacs.Core.Runtime.Exceptions.UnhandledWasmException: Unhandled exception ExnInstance
+   at Wacs.Core.Instructions.InstThrowRef.ExecuteInstruction(...)
+   …
+
+WASM stack trace:
+  at $_._start (throw @+0x0) (5:5)
+```
+
+470/470 Wacs.Core.Test tests pass.
+
 ## WACS 0.15.9 / WACS.Cli 1.6.2 — WasmStackTrace formatter + CLI wiring (Stack-trace Pass C)
 
 Third piece of the stack-trace arc. Formats captured

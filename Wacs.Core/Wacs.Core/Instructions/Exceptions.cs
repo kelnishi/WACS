@@ -234,8 +234,12 @@ namespace Wacs.Core.Instructions
             var exn = context.Store[ea];
             //11.
             context.OpStack.PushValue(new Value(ValType.Exn, exn));
-            
-            InstThrowRef.ExecuteInstruction(context);
+
+            // Pass `this` as the throwing instruction so the
+            // unhandled-exception frame chain identifies the source
+            // `throw` site (not the implementation-detail
+            // throw_ref) at the top frame.
+            InstThrowRef.ExecuteInstruction(context, this);
         }
 
         public override InstructionBase Parse(BinaryReader reader)
@@ -266,10 +270,11 @@ namespace Wacs.Core.Instructions
 
         public override void Execute(ExecContext context)
         {
-            ExecuteInstruction(context);
+            ExecuteInstruction(context, throwingInstruction: this);
         }
 
-        public static void ExecuteInstruction(ExecContext context)
+        public static void ExecuteInstruction(
+            ExecContext context, InstructionBase? throwingInstruction = null)
         {
             //1.
             context.Assert(context.OpStack.Peek().IsType(ValType.Exn),
@@ -285,6 +290,17 @@ namespace Wacs.Core.Instructions
             //8.
             var a = exn.Tag;
             //9.
+
+            // Snapshot the WASM call stack BEFORE the unwind search
+            // below — context.FunctionReturn() inside the loop pops
+            // frames, so a snapshot taken after the search wouldn't
+            // reflect where the exception originated. Captured
+            // unconditionally; only used when no handler matches.
+            // throwingInstruction (when supplied by the caller) is
+            // the source-level `throw` / `throw_ref` site, threaded
+            // through so the top frame's Instruction is the
+            // user-visible op, not the dispatcher.
+            var preUnwindFrames = context.SnapshotCallStack(throwingInstruction);
 
             //Traverse the control stack
             while (context.StackHeight > 0)
@@ -331,16 +347,13 @@ namespace Wacs.Core.Instructions
                 context.FunctionReturn();
             }
 
-            // Capture the call-stack snapshot for later trace
-            // formatting. Note `context` has already been unwound via
-            // FunctionReturn() in the search loop above, so by the
-            // time we reach here the snapshot is empty — the wasm
-            // exception escaped the entire chain. That's still
-            // useful information (zero-frame stack means "uncaught
-            // at the entry point").
+            // Report the captured pre-unwind frame chain. The search
+            // loop above has emptied context's call stack via
+            // repeated FunctionReturn() — so we have to use the
+            // snapshot taken before the loop.
             throw new UnhandledWasmException(
                 $"Unhandled exception {exn}",
-                context.SnapshotCallStack());
+                preUnwindFrames);
         }
     }
 }

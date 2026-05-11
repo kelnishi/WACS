@@ -14,6 +14,7 @@ using FluentValidation;
 using Wacs.ComponentModel.Runtime.Parser;
 using Wacs.Core;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Text;
 using Wacs.Core.Types;
@@ -282,9 +283,14 @@ namespace Wacs.Console.Verbs
                         "Calling _initialize (reactor module per BasicModuleABI)");
                 var initCaller = runtime.CreateInvokerAction(initAddr, callOptions);
                 try { initCaller(); }
-                catch (TrapException exc)
+                catch (System.Exception any) when (TryUnwrap<TrapException>(any, out var exc))
                 {
                     PrintTrap(exc, modInst.Repr, runtime);
+                    return 1;
+                }
+                catch (System.Exception any) when (TryUnwrap<UnhandledWasmException>(any, out var exn))
+                {
+                    PrintUnhandledWasm(exn, modInst.Repr, runtime);
                     return 1;
                 }
                 catch (SignalException exc)
@@ -320,9 +326,14 @@ namespace Wacs.Console.Verbs
                 using IDisposable _ = opts.Profile
                     ? new ProfilingSession() : new NoOpProfilingSession();
                 try { caller(); }
-                catch (TrapException exc)
+                catch (System.Exception any) when (TryUnwrap<TrapException>(any, out var exc))
                 {
                     PrintTrap(exc, modInst.Repr, runtime);
+                    return 1;
+                }
+                catch (System.Exception any) when (TryUnwrap<UnhandledWasmException>(any, out var exn))
+                {
+                    PrintUnhandledWasm(exn, modInst.Repr, runtime);
                     return 1;
                 }
                 catch (SignalException exc)
@@ -343,9 +354,14 @@ namespace Wacs.Console.Verbs
                 using IDisposable _ = opts.Profile
                     ? new ProfilingSession() : new NoOpProfilingSession();
                 try { caller(); }
-                catch (TrapException exc)
+                catch (System.Exception any) when (TryUnwrap<TrapException>(any, out var exc))
                 {
                     PrintTrap(exc, modInst.Repr, runtime);
+                    return 1;
+                }
+                catch (System.Exception any) when (TryUnwrap<UnhandledWasmException>(any, out var exn))
+                {
+                    PrintUnhandledWasm(exn, modInst.Repr, runtime);
                     return 1;
                 }
                 catch (SignalException exc)
@@ -389,9 +405,14 @@ namespace Wacs.Console.Verbs
                     System.Console.WriteLine(
                         $"Result:[{string.Join(" ", result)}]");
                 }
-                catch (TrapException exc)
+                catch (System.Exception any) when (TryUnwrap<TrapException>(any, out var exc))
                 {
                     PrintTrap(exc, modInst.Repr, runtime);
+                    return 1;
+                }
+                catch (System.Exception any) when (TryUnwrap<UnhandledWasmException>(any, out var exn))
+                {
+                    PrintUnhandledWasm(exn, modInst.Repr, runtime);
                     return 1;
                 }
                 catch (SignalException exc)
@@ -1105,6 +1126,51 @@ namespace Wacs.Console.Verbs
                     Wacs.Core.Runtime.Exceptions.WasmStackTrace.FormatVerbose(
                         exc.WasmFrames, module, runtime.RuntimeStore));
             }
+        }
+
+        /// <summary>
+        /// Print an unhandled WASM exception with the WASM trace if
+        /// the runtime captured one. Same shape as <see cref="PrintTrap"/>.
+        /// </summary>
+        private static void PrintUnhandledWasm(
+            Wacs.Core.Runtime.Exceptions.UnhandledWasmException exc,
+            Wacs.Core.Module module,
+            Wacs.Core.Runtime.WasmRuntime runtime)
+        {
+            System.Console.Error.WriteLine(exc);
+            if (exc.WasmFrames != null && exc.WasmFrames.Length > 0)
+            {
+                System.Console.Error.WriteLine();
+                System.Console.Error.WriteLine("WASM stack trace:");
+                System.Console.Error.WriteLine(
+                    Wacs.Core.Runtime.Exceptions.WasmStackTrace.FormatVerbose(
+                        exc.WasmFrames, module, runtime.RuntimeStore));
+            }
+        }
+
+        /// <summary>
+        /// Reflection-based invokers (the CLI's `CreateInvokerAction`
+        /// path goes through <c>Delegate.DynamicInvoke</c>) wrap
+        /// target exceptions in <see cref="System.Reflection.TargetInvocationException"/>.
+        /// Walk the InnerException chain to find a WACS-relevant
+        /// exception type so the catch sites can act on it.
+        /// Returns true and the unwrapped exception when found.
+        /// </summary>
+        private static bool TryUnwrap<T>(System.Exception exc, out T unwrapped)
+            where T : System.Exception
+        {
+            var current = exc;
+            while (current != null)
+            {
+                if (current is T t)
+                {
+                    unwrapped = t;
+                    return true;
+                }
+                current = current.InnerException;
+            }
+            unwrapped = null!;
+            return false;
         }
 
         private static void EmitValidationDiagnostics(Wacs.Core.Module module,
