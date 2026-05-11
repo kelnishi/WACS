@@ -1,5 +1,86 @@
 # Changelog
 
+## WACS 0.15.12 — universal trap enrichment + ComputePointerPath removal (Stack-trace Pass D)
+
+Every trap that escapes the interpreter's dispatch loop now carries
+a `WasmFrames` snapshot, regardless of whether the originating
+throw site was migrated to the snapshot constructor. This is the
+broad-coverage equivalent of migrating each of the ~170 trap
+throw sites manually — without touching any of them.
+
+### How it works
+
+`WasmRuntime.ProcessThreadAsync` wraps each `inst.Execute(ctx)` /
+`inst.ExecuteAsync(ctx)` dispatch step in a try/catch whose
+filter fires only when the escaping exception lacks `WasmFrames`:
+
+```csharp
+try { /* execute */ }
+catch (TrapException te) when (te.WasmFrames == null)
+{
+    te.WasmFrames = ctx.SnapshotCallStack(inst);
+    throw;
+}
+```
+
+.NET's "zero-cost exception handling" model means the wrap pays
+nothing on the happy path — the hot interpreter loop is
+unchanged in steady state. The `inst` reference is exactly the
+instruction that was about to execute when the trap fired, so
+the top frame's `Instruction` is always the source-level
+throwing op (no migration needed at each throw site).
+
+`UnhandledWasmException` gets the same treatment in parallel
+catch filters.
+
+### Cleanup
+
+- `ExecContext.ComputePointerPath()` deleted. It was a stub
+  returning an empty list (entire implementation commented out),
+  used by 8 sites in `WasmRuntimeExecution.cs` that wrapped trap
+  messages with an "empty path" suffix — all dead code.
+- The 8 callers in `WasmRuntimeExecution.cs` removed. The
+  `--calculate-lines` CLI option still parses; source-line
+  enrichment now flows through `WasmStackTrace.FormatVerbose`
+  (Pass C).
+- `TrapException.WasmFrames` and `UnhandledWasmException.WasmFrames`
+  setters became `internal` so the dispatch loop can enrich
+  in-place. Public API surface unchanged (the getter behavior
+  is identical).
+
+### Tests
+
+`ErrorFormattingTests` (6 cases):
+- `unreachable` — migrated-constructor path still works.
+- `i32.div_s` divide-by-zero — non-migrated throw site,
+  auto-enriched by the dispatch loop.
+- `i32.load` out-of-bounds memory — same.
+- Call chain — three-frame snapshot with the trap site's
+  instruction at the top and resume PCs on caller frames.
+- `FormatVerbose` source-line resolution.
+- Function-label `$name` from the WAT parser.
+
+476/476 Wacs.Core.Test tests pass.
+
+### Live behavior across error kinds
+
+```
+;; before Pass D — only migrated sites had frames:
+TrapException: Cannot divide by zero
+   at Wacs.Core.Instructions.Numeric.InstI32BinOp.ExecuteI32DivS(...)
+   …
+
+;; after Pass D — every trap is enriched:
+WASM stack trace:
+  at $_.div_by_zero (i32.div_s @+0x0) (5:5)
+```
+
+### What's still ahead
+
+Pass E: same enrichment treatment for `WasmRuntimeException`
+(host-API misuse — typically thrown before the dispatch loop
+starts, so a different mechanism applies).
+
 ## WACS 0.15.11 — propagate WAT `$name` to FunctionInstance for stack-trace labels
 
 Cosmetic but useful: non-exported functions now appear in WASM

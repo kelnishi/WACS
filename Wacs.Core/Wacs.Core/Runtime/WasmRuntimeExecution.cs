@@ -202,14 +202,13 @@ namespace Wacs.Core.Runtime
                     if (options.LogGas)
                         Console.Error.WriteLine($"Process used {ctx.steps} gas. {ctx.ProcessTimer.Elapsed}");
 
-                    if (options.CalculateLineNumbers)
-                    {
-                        var ptr = ctx.ComputePointerPath();
-                        var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
-                        (int line, string instruction) = ctx.Frame.Module.Repr.CalculateLine(path);
-
-                        ExceptionDispatchInfo.Throw(new TrapException(exc.Message + $":line {line} instruction #{ctx.steps}\n{path}"));
-                    }
+                    // Trap source-line enrichment now flows through
+                    // TrapException.WasmFrames (populated by the
+                    // dispatch loop's outer try/catch). The legacy
+                    // ComputePointerPath path here used to wrap the
+                    // exception message with "line N instruction #M"
+                    // but ComputePointerPath was stubbed and the
+                    // wrap was always empty. Removed.
 
                     //Flush the stack before throwing...
                     ctx.FlushCallStack();
@@ -226,14 +225,13 @@ namespace Wacs.Core.Runtime
                     if (options.LogGas)
                         Console.Error.WriteLine($"Process used {ctx.steps} gas. {ctx.ProcessTimer.Elapsed}");
 
-                    if (options.CalculateLineNumbers)
-                    {
-                        var ptr = ctx.ComputePointerPath();
-                        var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
-                        (int line, string instruction) = ctx.Frame.Module.Repr.CalculateLine(path);
-
-                        ExceptionDispatchInfo.Throw(new TrapException(exc.Message + $":line {line} instruction #{ctx.steps}\n{path}"));
-                    }
+                    // Trap source-line enrichment now flows through
+                    // TrapException.WasmFrames (populated by the
+                    // dispatch loop's outer try/catch). The legacy
+                    // ComputePointerPath path here used to wrap the
+                    // exception message with "line N instruction #M"
+                    // but ComputePointerPath was stubbed and the
+                    // wrap was always empty. Removed.
 
                     //Flush the stack before throwing...
                     ctx.FlushCallStack();
@@ -250,14 +248,12 @@ namespace Wacs.Core.Runtime
                     if (options.LogGas)
                         Console.Error.WriteLine($"Process used {ctx.steps} gas. {ctx.ProcessTimer.Elapsed}");
 
+                    // Source-line enrichment is now WasmStackTrace's
+                    // job. The legacy CalculateLineNumbers branch
+                    // wrapped messages using a stubbed
+                    // ComputePointerPath that always returned an
+                    // empty list — removed.
                     string message = exc.Message;
-                    if (options.CalculateLineNumbers)
-                    {
-                        var ptr = ctx.ComputePointerPath();
-                        var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
-                        (int line, string instruction) = ctx.Frame.Module.Repr.CalculateLine(path);
-                        message = exc.Message + $":line {line} instruction #{ctx.steps}\n{path}";
-                    }
 
                     //Flush the stack before throwing...
                     ctx.FlushCallStack();
@@ -368,14 +364,11 @@ namespace Wacs.Core.Runtime
                     if (options.LogGas)
                         Console.Error.WriteLine($"Process used {ctx.steps} gas. {ctx.ProcessTimer.Elapsed}");
 
-                    if (options.CalculateLineNumbers)
-                    {
-                        var ptr = ctx.ComputePointerPath();
-                        var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
-                        (int line, string instruction) = ctx.Frame.Module.Repr.CalculateLine(path);
-
-                        ExceptionDispatchInfo.Throw(new TrapException(exc.Message + $":line {line} instruction #{ctx.steps}\n{path}"));
-                    }
+                    // Source-line enrichment is now WasmStackTrace's
+                    // job (via TrapException.WasmFrames). Legacy
+                    // CalculateLineNumbers wrap removed — it relied
+                    // on the stubbed ComputePointerPath which always
+                    // returned an empty list.
 
                     // For nested calls, restore state; for top-level, flush
                     if (isNestedCall)
@@ -399,14 +392,11 @@ namespace Wacs.Core.Runtime
                     if (options.LogGas)
                         Console.Error.WriteLine($"Process used {ctx.steps} gas. {ctx.ProcessTimer.Elapsed}");
 
-                    if (options.CalculateLineNumbers)
-                    {
-                        var ptr = ctx.ComputePointerPath();
-                        var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
-                        (int line, string instruction) = ctx.Frame.Module.Repr.CalculateLine(path);
-
-                        ExceptionDispatchInfo.Throw(new TrapException(exc.Message + $":line {line} instruction #{ctx.steps}\n{path}"));
-                    }
+                    // Source-line enrichment is now WasmStackTrace's
+                    // job (via TrapException.WasmFrames). Legacy
+                    // CalculateLineNumbers wrap removed — it relied
+                    // on the stubbed ComputePointerPath which always
+                    // returned an empty list.
 
                     if (isNestedCall)
                     {
@@ -429,14 +419,12 @@ namespace Wacs.Core.Runtime
                     if (options.LogGas)
                         Console.Error.WriteLine($"Process used {ctx.steps} gas. {ctx.ProcessTimer.Elapsed}");
 
+                    // Source-line enrichment is now WasmStackTrace's
+                    // job. The legacy CalculateLineNumbers branch
+                    // wrapped messages using a stubbed
+                    // ComputePointerPath that always returned an
+                    // empty list — removed.
                     string message = exc.Message;
-                    if (options.CalculateLineNumbers)
-                    {
-                        var ptr = ctx.ComputePointerPath();
-                        var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
-                        (int line, string instruction) = ctx.Frame.Module.Repr.CalculateLine(path);
-                        message = exc.Message + $":line {line} instruction #{ctx.steps}\n{path}";
-                    }
 
                     if (isNestedCall)
                     {
@@ -528,13 +516,30 @@ namespace Wacs.Core.Runtime
                     if (inst.Nop)
                         continue;
 
-                    if (inst.IsAsync)
+                    // The try/catch wraps a single dispatch step
+                    // because .NET's "zero-cost EH" model only pays
+                    // when the catch actually fires — so the hot
+                    // path stays free, and any TrapException that
+                    // escapes without WasmFrames already populated
+                    // gets retroactively enriched here. This is the
+                    // generic-coverage equivalent to migrating each
+                    // of the ~170 trap throw sites individually.
+                    try
                     {
-                        await inst.ExecuteAsync(ctx);
+                        if (inst.IsAsync)
+                            await inst.ExecuteAsync(ctx);
+                        else
+                            inst.Execute(ctx);
                     }
-                    else
+                    catch (Wacs.Core.Runtime.Types.TrapException te) when (te.WasmFrames == null)
                     {
-                        inst.Execute(ctx);
+                        te.WasmFrames = ctx.SnapshotCallStack(inst);
+                        throw;
+                    }
+                    catch (Wacs.Core.Runtime.Exceptions.UnhandledWasmException ue) when (ue.WasmFrames == null)
+                    {
+                        ue.WasmFrames = ctx.SnapshotCallStack(inst);
+                        throw;
                     }
                 }
             }
@@ -550,13 +555,22 @@ namespace Wacs.Core.Runtime
                     if (inst.Nop)
                         continue;
 
-                    if (inst.IsAsync)
+                    try
                     {
-                        await inst.ExecuteAsync(ctx);
+                        if (inst.IsAsync)
+                            await inst.ExecuteAsync(ctx);
+                        else
+                            inst.Execute(ctx);
                     }
-                    else
+                    catch (Wacs.Core.Runtime.Types.TrapException te) when (te.WasmFrames == null)
                     {
-                        inst.Execute(ctx);
+                        te.WasmFrames = ctx.SnapshotCallStack(inst);
+                        throw;
+                    }
+                    catch (Wacs.Core.Runtime.Exceptions.UnhandledWasmException ue) when (ue.WasmFrames == null)
+                    {
+                        ue.WasmFrames = ctx.SnapshotCallStack(inst);
+                        throw;
                     }
 
                     if (ctx.steps >= gasLimit)
@@ -705,14 +719,14 @@ namespace Wacs.Core.Runtime
                     string location = "";
                     if (options.CalculateLineNumbers)
                     {
-                        var ptr = Context.ComputePointerPath();
-                        var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
-                        (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
-                        location = $"line {line.ToString().PadLeft(7,' ')}";
-                        if (options.ShowPath)
-                            location += $":{path}";
-                            
-                        var log = $"{location}: {inst.RenderText(Context)}".PadRight(40, ' ');
+                        // The instruction-execution logger used to
+                        // resolve source line numbers per
+                        // instruction via ComputePointerPath (now
+                        // gone). The Pass-D refactor replaced that
+                        // with WasmStackTrace, which only formats on
+                        // trap rather than per-instruction; here we
+                        // fall back to the instruction-pointer log.
+                        var log = $"Inst[0x{Context.InstructionPointer:x8}]: {inst.RenderText(Context)}".PadRight(40, ' ');
                         Console.Error.WriteLine(log);
                     }
                     else
@@ -737,14 +751,14 @@ namespace Wacs.Core.Runtime
                     string location = "";
                     if (options.CalculateLineNumbers)
                     {
-                        var ptr = Context.ComputePointerPath();
-                        var path = string.Join(".", ptr.Select(t => $"{t.Item1.Capitalize()}[{t.Item2}]"));
-                        (int line, string instruction) = Context.Frame.Module.Repr.CalculateLine(path);
-                        location = $"line {line.ToString().PadLeft(7,' ')}";
-                        if (options.ShowPath)
-                            location += $":{path}";
-                            
-                        var log = $"{location}: {inst.RenderText(Context)}".PadRight(40, ' ');
+                        // The instruction-execution logger used to
+                        // resolve source line numbers per
+                        // instruction via ComputePointerPath (now
+                        // gone). The Pass-D refactor replaced that
+                        // with WasmStackTrace, which only formats on
+                        // trap rather than per-instruction; here we
+                        // fall back to the instruction-pointer log.
+                        var log = $"Inst[0x{Context.InstructionPointer:x8}]: {inst.RenderText(Context)}".PadRight(40, ' ');
                         Console.Error.WriteLine(log);
                     }
                     else

@@ -28,7 +28,7 @@ namespace Wacs.Core.Runtime.Exceptions
         /// in scope. Pass C's formatter reads this for verbose
         /// stack traces.
         /// </summary>
-        public WasmStackFrame[]? WasmFrames { get; }
+        public WasmStackFrame[]? WasmFrames { get; internal set; }
 
         public UnhandledWasmException(string message) : base(message) { }
 

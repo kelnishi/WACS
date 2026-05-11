@@ -580,37 +580,6 @@ namespace Wacs.Core.Runtime
             InstructionPointer = address;
         }
 
-        public List<(string, int)> ComputePointerPath()
-        {
-            Stack<(string, int)> ascent = new();
-            int idx = InstructionPointer;
-            
-            // foreach (var label in Frame.EnumerateLabels().Select(target => target.Label))
-            // {
-            //     var pointer = (label.Instruction.GetMnemonic(), idx);
-            //     ascent.Push(pointer);
-            //
-            //     idx = label.ContinuationAddress;
-            //     
-            //     switch ((OpCode)label.Instruction)
-            //     {
-            //         case OpCode.If: ascent.Push(("InstIf", 0));
-            //             break;
-            //         case OpCode.Else: ascent.Push(("InstElse", 1));
-            //             break;
-            //         case OpCode.Block: ascent.Push(("InstBlock", 0));
-            //             break;
-            //         case OpCode.Loop: ascent.Push(("InstLoop", 0));
-            //             break;
-            //     }
-            //     
-            // }
-            //
-            // ascent.Push(("Function", (int)Frame.Index.Value));
-
-            return ascent.Select(a => a).ToList();
-        }
-
         public void ResetStats()
         {
             Stats.Clear();

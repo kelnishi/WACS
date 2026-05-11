@@ -19,15 +19,14 @@ namespace Wacs.Core.Runtime.Types
     public class TrapException : Exception
     {
         /// <summary>
-        /// WASM-side call-stack snapshot at the moment this trap was
-        /// constructed. Null when the trap site didn't pass an
-        /// <see cref="ExecContext"/> (the cheap path) — most existing
-        /// sites still do, and migration is incremental. Pass C's
-        /// formatter reads this when present and falls back to the
-        /// trap's <see cref="Exception.Message"/> + .NET stack trace
-        /// when null.
+        /// WASM-side call-stack snapshot. Set either at construction
+        /// (sites that pass an <see cref="ExecContext"/> directly) or
+        /// retroactively by the dispatch loop's outer catch in
+        /// <c>WasmRuntime.ProcessThreadAsync</c> — that catch
+        /// enriches null-framed traps in-place so the great majority
+        /// of unmigrated throw sites still surface a useful trace.
         /// </summary>
-        public WasmStackFrame[]? WasmFrames { get; }
+        public WasmStackFrame[]? WasmFrames { get; internal set; }
 
         public TrapException(string message) : base(message)
         {
