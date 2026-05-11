@@ -272,10 +272,12 @@ Other torch dtypes that show up in model outputs (e.g., `Bool`, `QInt8` quantize
 
 ## Documentation
 
+- **[`docs/WASI_NN_USAGE.md`](https://github.com/kelnishi/WACS/blob/main/docs/WASI_NN_USAGE.md)** —
+  unified usage guide (CLI flags, env vars, programmatic embedding, worked examples)
 - [`docs/COMPONENT_CHAINING.md`](https://github.com/kelnishi/WACS/blob/main/docs/COMPONENT_CHAINING.md)
   — runtime requirements + chaining model
 - [`Wacs.WASI/Wacs.WASI.NN/README.md`](https://github.com/kelnishi/WACS/blob/main/Wacs.WASI/Wacs.WASI.NN/README.md)
-  — backend matrix
+  — backend matrix + package layout
 
 ## License
 

@@ -1,5 +1,22 @@
 # Changelog
 
+## Documentation — unified wasi-nn usage guide
+
+New canonical entry point at [`docs/WASI_NN_USAGE.md`](docs/WASI_NN_USAGE.md):
+
+- Backend matrix with capability + verification status across every shipped sibling
+- CLI invocation reference: `--wasi-nn` shorthand, `--bind <path>`, `-d <preopen>`, `--native-memory`, engine choice
+- Per-backend environment-variable cheat sheet (one table each for `OnnxRuntime` / `LlamaSharp` / `TorchSharp` / `OnnxRuntimeGenAI` / `MLNet`)
+- Programmatic embedding for both engines (interpreter `runtime.UseWasiNN(...)` and transpiler DI-scope path)
+- Worked examples for each backend (ONNX SLM, GGUF chat, TorchScript inference, GenAI generative, ONNX + GenAI composed)
+- Diagnostics (`WACS_DIAG_MEMORY`) + troubleshooting matrix mapping symptoms to fixes
+
+Per-backend READMEs gain a pointer to the unified guide so embedders landing
+on a NuGet page reach the full picture in one click.
+
+No package version bumps — README cross-links ride along with the next
+legitimate release of each backend.
+
 ## WACS.Cli 1.5.26 / WACS.WASI.NN.OnnxRuntimeGenAI 0.1.3 — opt-in EP selection for the GenAI backend
 
 Mirrors the EP-selection surface that ships on `WACS.WASI.NN.OnnxRuntime`
