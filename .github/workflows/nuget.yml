@@ -124,6 +124,9 @@ jobs:
           - path: Wacs.WASI/Wacs.WASI.NN/Wacs.WASI.NN.TorchSharp
             package_name: WACS.WASI.NN.TorchSharp
             tag_prefix: WACS-WASI-NN-v
+          - path: Wacs.WASI/Wacs.WASI.NN/Wacs.WASI.NN.OnnxRuntimeGenAI
+            package_name: WACS.WASI.NN.OnnxRuntimeGenAI
+            tag_prefix: WACS-WASI-NN-v
 
     steps:
       - name: Checkout code

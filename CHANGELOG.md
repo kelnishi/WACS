@@ -125,6 +125,78 @@ released.
 - **Empirical**: SLM REPL ran 193 turns clean; managed heap plateaued
   near 1 GiB instead of climbing past 27 GiB.
 
+## WACS.Cli 1.5.22 / WACS.WASI.NN.OnnxRuntimeGenAI 0.1.0 — new wasi-nn backend: OnnxRuntime-GenAI
+
+A fifth wasi-nn backend, slotting alongside `OnnxRuntime` / `MLNet` /
+`LlamaSharp` / `TorchSharp`. Wraps Microsoft's
+[OnnxRuntime-GenAI](https://github.com/microsoft/onnxruntime-genai) — the
+generative-LLM runtime built on top of ONNX Runtime — and surfaces it through
+wasi-nn as a `load-by-name` backend for Gemma 3, Llama 3, Qwen 2.5, Phi 4,
+and any other model that `onnxruntime-genai`'s `model_builder.py` can produce.
+
+Where the plain `WACS.WASI.NN.OnnxRuntime` backend serves single-shot
+tensor-in / tensor-out inference (image classification, embeddings, encoder-
+only models), this backend serves the **generative** workflow: first-class
+tokenizer + KV cache + sampling, all inside the host. The osx-arm64 native
+dylib links directly against `CoreML.framework`, giving Metal-capable
+acceleration where the underlying ORT CoreML EP supports the ops.
+
+### What landed
+
+- **`OnnxGenAIBackend`** — `IBackend` against
+  [`Microsoft.ML.OnnxRuntimeGenAI`](https://www.nuget.org/packages/Microsoft.ML.OnnxRuntimeGenAI)
+  0.13.2 + `Microsoft.ML.OnnxRuntime` 1.26.0. `LoadGraphByName` resolves
+  through an injected name→directory delegate (the bindable wires that to a
+  `WACS_WASINN_GENAI_DIR` scan).
+- **Two compute shapes, dispatched by named-input convention**:
+  - `compute(["prompt" → utf-8 bytes])` → `["response" → utf-8 bytes]` —
+    tokenize → KV-cached decode loop → detokenize. Hits GenAI's optimized
+    kernels; recommended for new generative-LLM guests.
+  - `compute(["input_ids" → int64])` → `["logits" → float32]` — single
+    forward pass with a fresh stateless generator. Drop-in replacement for
+    existing wasi-nn ONNX guests that drive their own decode loop.
+- **`OnnxGenAIBackendOptions`** — `MaxLength`, `DoSample`, `Temperature`,
+  `TopP`, `TopK`, `IncludePromptInResponse`. `FromEnvironment()` reads
+  `WACS_WASINN_GENAI_{MAX_LENGTH,DO_SAMPLE,TEMPERATURE,TOP_P,TOP_K,INCLUDE_PROMPT}`.
+- **`WasiNNOnnxGenAIBindable`** — parameterless `IBindable` for `--bind`.
+  Scans `$WACS_WASINN_GENAI_DIR` first-level subdirectories for
+  `genai_config.json` and registers each by directory name. Wires through
+  `LoadByNameBackend` only — composes alongside the regular `OnnxBackend`
+  which keeps the `Backends[ONNX]` slot for byte-loaded `graph.load`.
+- **`nuget.yml` matrix** gains the new package under the existing
+  `WACS-WASI-NN-v*` tag prefix.
+
+### How model resolution works
+
+Models ship as **directories**, not single ONNX files. Build one with the
+upstream `model_builder.py` or pull a pre-built variant from Hugging Face:
+
+```sh
+huggingface-cli download onnx-community/gemma-3-270m-it-ONNX \
+    --local-dir ./models/gemma-3-270m-it
+
+export WACS_WASINN_GENAI_DIR=./models
+wacs run --wasip2 --bind Wacs.WASI.NN.OnnxRuntimeGenAI.dll my.wasm
+```
+
+A guest call to `graph.load-by-name("gemma-3-270m-it")` resolves to the
+`./models/gemma-3-270m-it/` directory.
+
+### Test plan
+
+- `Wacs.WASI.NN.OnnxRuntimeGenAI.Test` 8/8 — SPI surface, byte-load rejection,
+  TPU rejection, NotFound on missing model, InvalidArgument on missing
+  `genai_config.json`, options defaults, env-var passthrough,
+  bindable parameterless ctor.
+- Empirical end-to-end against a real GenAI Gemma 3 (or Qwen / Phi / Llama)
+  is a user-driven verification step gated on having a GB-scale GenAI
+  model directory in hand.
+
+### Versions
+
+- `WACS.WASI.NN.OnnxRuntimeGenAI` (new) — **0.1.0**
+- `WACS.Cli` 1.5.21 → **1.5.22** (release event)
+
 
 ## WACS.Cli 1.5.22 / WACS.WASI.NN.OnnxRuntime 0.3.0 — ONNX hardware acceleration via execution-provider selection (opt-in)
 
