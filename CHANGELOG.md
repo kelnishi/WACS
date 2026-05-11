@@ -1,5 +1,203 @@
 # Changelog
 
+## WACS.Cli 1.5.23 / WACS.Transpiler.Lib 0.8.15 / WACS 0.13.8 / WACS.WASI.NN 0.3.3 / WACS.WASI.Preview2.DependencyInjection 0.1.7 — fix unbounded leak: `[resource-drop]X` was a silent no-op under `--engine transpiler`
+
+User-reported regression: the wasi-nn SLM REPL grew the host process to
+~40 GiB before crashing with `mutex lock failed`. `WACS_DIAG_MEMORY=1`
+(added below) showed +12.67 GiB managed-heap growth across 106 token
+steps, matching almost exactly the sum of per-call output sizes
+(~26 MiB → ~227 MiB FP32 logits per token, autoregressive, no KV cache).
+
+### What was actually leaking
+
+Each `ctx.compute()` returned a `list<(string, own<tensor>)>` that the
+transpiler lowered into resource handles allocated through
+`WasiPreview2Resources.AllocateResource(typeof(Nn.ITensor), …)`. When
+the guest dropped the handles at end-of-turn the host should have
+released them, but they piled up forever.
+
+### Two-stage diagnosis (recorded in the diag.log lineage)
+
+**Stage 1 — cross-table mismatch hypothesis.** Initial theory:
+the interpreter binding `[resource-drop]tensor` drops from
+`WasiNNHost.Tensors` (one resource table), but the transpiler
+direct-link path allocates into
+`ResourceContext.TableFor(typeof(ITensor))` (a different table). Wired
+a cross-binding hook (`WasmRuntime.ExternalResourceDrop` →
+`WasiPreview2Resources.FreeResource`) so the interpreter `[resource-
+drop]X` handler dropped from both tables. **Result: leak rate roughly
+unchanged**. The hook was right; the binding it bridged from was the
+wrong layer.
+
+**Stage 2 — the binding was never invoked.** Added split counters
+(`drops[interp=X ext=Y]`) to the diag output. Result: `interp=0` across
+130 turns. The WitBindings `[resource-drop]X` delegate **never fires**
+under `--engine transpiler`. Traced into the transpiler:
+
+```csharp
+// ComponentMainHost.cs (before this PR):
+var importsStub = ImportDispatcher.Create(importsType,
+    new Dictionary<string, Func<object?[], object?>>(),  // EMPTY
+    lenient: true);                                       // silent no-op
+```
+
+Every `[resource-drop]X` call from the guest hit an empty handler
+dictionary, fell through `lenient: true`, and returned `default(void)`
+without touching the host. The runtime's entity-binding table — where
+WitBindings registered the drop handlers — was bypassed entirely. The
+wasm thought drops succeeded; the host never saw them.
+
+### The fix
+
+`ComponentMainHost` now walks the imports interface's
+`[WacsImportNames]` assembly metadata and auto-registers a handler for
+every `[resource-drop]X` import:
+
+1. For each entry whose name starts with `[resource-drop]`, split the
+   module name into `(package, interface)` and the entity name into
+   the bare resource name.
+2. Resolve the CLR resource interface type by scanning loaded
+   assemblies for one whose `[WitSource]` attribute matches
+   `(Package, Interface, Item)`.
+3. Register a handler that calls
+   `WasiPreview2Resources.FreeResource(typeof(IX), handle)` on the
+   dropped handle.
+
+Generic across **all** host-imported resources — wasi-nn (tensor,
+graph, context, error), wasi:io/streams, wasi:filesystem/types, wasi:io/poll,
+and anything else the transpiler emits a stub for. No per-resource code.
+
+The stage-1 hook (`WasmRuntime.ExternalResourceDrop`,
+`WasiPreview2Resources.FreeResource`) stays — it's now defense-in-depth
+for the rare case where an `IBindable` other than the transpiler
+direct-link path allocates into one table and routes drops through
+another.
+
+### What the SLM REPL looks like now
+
+193 token-generation steps, no crash. Per-turn output: 14 MiB → 332 MiB
+(autoregressive prompt growth is unchanged; that's a guest decode-loop
+property, not a leak). Per-turn managed-heap and RSS:
+
+| | Before fix (turn 130) | After fix (turn 193) |
+|---|---|---|
+| Managed heap | **27.07 GiB** (+24.83 GiB from turn 1) | **1.03 GiB** (−1.21 GiB) |
+| RSS | 6.60 GiB | 6.57 GiB |
+| Gen2 collections | 12 (stalled — heap was rooted) | 164 (healthy) |
+| Outcome | crashed | still running |
+
+Managed heap is now smaller than the turn-1 baseline because Gen2
+finally reclaims the LOH allocations once the resource-table roots are
+released.
+
+### What also landed in this PR
+
+- **`WACS_DIAG_MEMORY=1` instrumentation** — per-compute stderr snapshot
+  (`rss`, `managed`, `gc[g0/g1/g2]`, `in`/`out` bytes, `drops[interp,ext]`,
+  duration). The diagnostic surface that found this; useful for any
+  future "RSS climbs across a long-running REPL" report. Hooks both the
+  interpreter (`WitBindings.compute`, `WitxBindings.compute`) and the
+  direct-link path (`GraphExecutionContext.Compute`). Off by default,
+  zero overhead in the negative path.
+- **Stage-1 cross-table hook** — `WasmRuntime.ExternalResourceDrop` +
+  `WasiPreview2Resources.FreeResource` + `WitBindings.[resource-drop]X`
+  handlers wired through both tables. Architecturally correct even
+  though it didn't fire for the SLM workload.
+
+### Versions
+
+- `WACS.Cli` 1.5.22 → **1.5.23**
+- `WACS.Transpiler.Lib` 0.8.14 → **0.8.15** (`ComponentMainHost` auto-
+  registers `[resource-drop]X` handlers — the actual fix)
+- `WACS` (Wacs.Core) 0.13.7 → **0.13.8** (`WasmRuntime.ExternalResourceDrop`
+  cross-binding hook)
+- `WACS.WASI.NN` 0.3.2 → **0.3.3** (WitBindings drop handlers call the
+  cross-binding hook + `WACS_DIAG_MEMORY` instrumentation)
+- `WACS.WASI.Preview2.DependencyInjection` 0.1.6 → **0.1.7**
+  (`WasiPreview2Resources.FreeResource` + scope wires the hook)
+
+### Test plan
+
+- `Wacs.WASI.NN.Test` 21/21
+- `Wacs.WASI.NN.OnnxRuntime.Test` 10/10
+- `Wacs.WASI.Preview2.Test` 189/189
+- `Wacs.Transpiler.Test` 775/776 (1 pre-existing skip)
+- **Empirical**: SLM REPL ran 193 turns clean; managed heap plateaued
+  near 1 GiB instead of climbing past 27 GiB.
+
+## WACS.Cli 1.5.22 / WACS.WASI.NN.OnnxRuntimeGenAI 0.1.0 — new wasi-nn backend: OnnxRuntime-GenAI
+
+A fifth wasi-nn backend, slotting alongside `OnnxRuntime` / `MLNet` /
+`LlamaSharp` / `TorchSharp`. Wraps Microsoft's
+[OnnxRuntime-GenAI](https://github.com/microsoft/onnxruntime-genai) — the
+generative-LLM runtime built on top of ONNX Runtime — and surfaces it through
+wasi-nn as a `load-by-name` backend for Gemma 3, Llama 3, Qwen 2.5, Phi 4,
+and any other model that `onnxruntime-genai`'s `model_builder.py` can produce.
+
+Where the plain `WACS.WASI.NN.OnnxRuntime` backend serves single-shot
+tensor-in / tensor-out inference (image classification, embeddings, encoder-
+only models), this backend serves the **generative** workflow: first-class
+tokenizer + KV cache + sampling, all inside the host. The osx-arm64 native
+dylib links directly against `CoreML.framework`, giving Metal-capable
+acceleration where the underlying ORT CoreML EP supports the ops.
+
+### What landed
+
+- **`OnnxGenAIBackend`** — `IBackend` against
+  [`Microsoft.ML.OnnxRuntimeGenAI`](https://www.nuget.org/packages/Microsoft.ML.OnnxRuntimeGenAI)
+  0.13.2 + `Microsoft.ML.OnnxRuntime` 1.26.0. `LoadGraphByName` resolves
+  through an injected name→directory delegate (the bindable wires that to a
+  `WACS_WASINN_GENAI_DIR` scan).
+- **Two compute shapes, dispatched by named-input convention**:
+  - `compute(["prompt" → utf-8 bytes])` → `["response" → utf-8 bytes]` —
+    tokenize → KV-cached decode loop → detokenize. Hits GenAI's optimized
+    kernels; recommended for new generative-LLM guests.
+  - `compute(["input_ids" → int64])` → `["logits" → float32]` — single
+    forward pass with a fresh stateless generator. Drop-in replacement for
+    existing wasi-nn ONNX guests that drive their own decode loop.
+- **`OnnxGenAIBackendOptions`** — `MaxLength`, `DoSample`, `Temperature`,
+  `TopP`, `TopK`, `IncludePromptInResponse`. `FromEnvironment()` reads
+  `WACS_WASINN_GENAI_{MAX_LENGTH,DO_SAMPLE,TEMPERATURE,TOP_P,TOP_K,INCLUDE_PROMPT}`.
+- **`WasiNNOnnxGenAIBindable`** — parameterless `IBindable` for `--bind`.
+  Scans `$WACS_WASINN_GENAI_DIR` first-level subdirectories for
+  `genai_config.json` and registers each by directory name. Wires through
+  `LoadByNameBackend` only — composes alongside the regular `OnnxBackend`
+  which keeps the `Backends[ONNX]` slot for byte-loaded `graph.load`.
+- **`nuget.yml` matrix** gains the new package under the existing
+  `WACS-WASI-NN-v*` tag prefix.
+
+### How model resolution works
+
+Models ship as **directories**, not single ONNX files. Build one with the
+upstream `model_builder.py` or pull a pre-built variant from Hugging Face:
+
+```sh
+huggingface-cli download onnx-community/gemma-3-270m-it-ONNX \
+    --local-dir ./models/gemma-3-270m-it
+
+export WACS_WASINN_GENAI_DIR=./models
+wacs run --wasip2 --bind Wacs.WASI.NN.OnnxRuntimeGenAI.dll my.wasm
+```
+
+A guest call to `graph.load-by-name("gemma-3-270m-it")` resolves to the
+`./models/gemma-3-270m-it/` directory.
+
+### Test plan
+
+- `Wacs.WASI.NN.OnnxRuntimeGenAI.Test` 8/8 — SPI surface, byte-load rejection,
+  TPU rejection, NotFound on missing model, InvalidArgument on missing
+  `genai_config.json`, options defaults, env-var passthrough,
+  bindable parameterless ctor.
+- Empirical end-to-end against a real GenAI Gemma 3 (or Qwen / Phi / Llama)
+  is a user-driven verification step gated on having a GB-scale GenAI
+  model directory in hand.
+
+### Versions
+
+- `WACS.WASI.NN.OnnxRuntimeGenAI` (new) — **0.1.0**
+- `WACS.Cli` 1.5.21 → **1.5.22** (release event)
+
+
 ## WACS.Cli 1.5.22 / WACS.WASI.NN.OnnxRuntime 0.3.0 — ONNX hardware acceleration via execution-provider selection (opt-in)
 
 `Microsoft.ML.OnnxRuntime` 1.22.0 already ships the CoreML / CUDA / DirectML / ROCm
