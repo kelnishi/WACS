@@ -6,11 +6,80 @@
 &nbsp;[![License](https://img.shields.io/github/license/kelnishi/WACS)](LICENSE)
 
 **NuGet packages**
-&nbsp;[![WACS](https://img.shields.io/nuget/v/WACS?label=WACS)](https://www.nuget.org/packages/WACS)
-&nbsp;[![WACS.Cli](https://img.shields.io/nuget/v/WACS.Cli?label=WACS.Cli)](https://www.nuget.org/packages/WACS.Cli)
-&nbsp;[![WACS.WASI.Preview1](https://img.shields.io/nuget/v/WACS.WASI.Preview1?label=WACS.WASI.Preview1)](https://www.nuget.org/packages/WACS.WASI.Preview1)
-&nbsp;[![WACS.Transpiler.Lib](https://img.shields.io/nuget/v/WACS.Transpiler.Lib?label=WACS.Transpiler.Lib)](https://www.nuget.org/packages/WACS.Transpiler.Lib)
 &nbsp;[![Downloads](https://img.shields.io/nuget/dt/WACS?label=WACS%20downloads)](https://www.nuget.org/packages/WACS)
+
+<table>
+  <tr>
+    <td><b>Core runtime</b></td>
+    <td>
+      <a href="https://www.nuget.org/packages/WACS"><img src="https://img.shields.io/nuget/v/WACS?label=WACS"/></a>
+    </td>
+  </tr>
+  <tr>
+    <td><b>CLI</b></td>
+    <td>
+      <a href="https://www.nuget.org/packages/WACS.Cli"><img src="https://img.shields.io/nuget/v/WACS.Cli?label=WACS.Cli"/></a>
+    </td>
+  </tr>
+  <tr>
+    <td><b>Transpiler</b></td>
+    <td>
+      <a href="https://www.nuget.org/packages/WACS.Transpiler"><img src="https://img.shields.io/nuget/v/WACS.Transpiler?label=WACS.Transpiler"/></a>
+      <a href="https://www.nuget.org/packages/WACS.Transpiler.Lib"><img src="https://img.shields.io/nuget/v/WACS.Transpiler.Lib?label=WACS.Transpiler.Lib"/></a>
+    </td>
+  </tr>
+  <tr>
+    <td><b>Component Model</b></td>
+    <td>
+      <a href="https://www.nuget.org/packages/WACS.ComponentModel"><img src="https://img.shields.io/nuget/v/WACS.ComponentModel?label=WACS.ComponentModel"/></a>
+      <a href="https://www.nuget.org/packages/WACS.ComponentModel.Bindgen.Lib"><img src="https://img.shields.io/nuget/v/WACS.ComponentModel.Bindgen.Lib?label=WACS.ComponentModel.Bindgen.Lib"/></a>
+    </td>
+  </tr>
+  <tr>
+    <td><b>Host bindings</b></td>
+    <td>
+      <a href="https://www.nuget.org/packages/WACS.HostBindings.Abstractions"><img src="https://img.shields.io/nuget/v/WACS.HostBindings.Abstractions?label=WACS.HostBindings.Abstractions"/></a>
+      <a href="https://www.nuget.org/packages/WACS.HostBindings.SourceGen"><img src="https://img.shields.io/nuget/v/WACS.HostBindings.SourceGen?label=WACS.HostBindings.SourceGen"/></a>
+    </td>
+  </tr>
+  <tr>
+    <td><b>WASI Preview&nbsp;1</b></td>
+    <td>
+      <a href="https://www.nuget.org/packages/WACS.WASI.Preview1"><img src="https://img.shields.io/nuget/v/WACS.WASI.Preview1?label=WACS.WASI.Preview1"/></a>
+      <a href="https://www.nuget.org/packages/WACS.WASIp1"><img src="https://img.shields.io/nuget/v/WACS.WASIp1?label=WACS.WASIp1%20(legacy)"/></a>
+    </td>
+  </tr>
+  <tr>
+    <td><b>WASI Preview&nbsp;2</b></td>
+    <td>
+      <a href="https://www.nuget.org/packages/WACS.WASI.Preview2"><img src="https://img.shields.io/nuget/v/WACS.WASI.Preview2?label=WACS.WASI.Preview2"/></a>
+      <a href="https://www.nuget.org/packages/WACS.WASI.Preview2.DependencyInjection"><img src="https://img.shields.io/nuget/v/WACS.WASI.Preview2.DependencyInjection?label=WACS.WASI.Preview2.DependencyInjection"/></a>
+    </td>
+  </tr>
+  <tr>
+    <td><b>WASI Threads</b></td>
+    <td>
+      <a href="https://www.nuget.org/packages/WACS.WASI.Threads"><img src="https://img.shields.io/nuget/v/WACS.WASI.Threads?label=WACS.WASI.Threads"/></a>
+    </td>
+  </tr>
+  <tr>
+    <td><b>wasi-nn (core)</b></td>
+    <td>
+      <a href="https://www.nuget.org/packages/WACS.WASI.NN"><img src="https://img.shields.io/nuget/v/WACS.WASI.NN?label=WACS.WASI.NN"/></a>
+      <a href="https://www.nuget.org/packages/WACS.WASI.NN.DependencyInjection"><img src="https://img.shields.io/nuget/v/WACS.WASI.NN.DependencyInjection?label=WACS.WASI.NN.DependencyInjection"/></a>
+    </td>
+  </tr>
+  <tr>
+    <td><b>wasi-nn backends</b></td>
+    <td>
+      <a href="https://www.nuget.org/packages/WACS.WASI.NN.OnnxRuntime"><img src="https://img.shields.io/nuget/v/WACS.WASI.NN.OnnxRuntime?label=WACS.WASI.NN.OnnxRuntime"/></a>
+      <a href="https://www.nuget.org/packages/WACS.WASI.NN.OnnxRuntimeGenAI"><img src="https://img.shields.io/nuget/v/WACS.WASI.NN.OnnxRuntimeGenAI?label=WACS.WASI.NN.OnnxRuntimeGenAI"/></a>
+      <a href="https://www.nuget.org/packages/WACS.WASI.NN.LlamaSharp"><img src="https://img.shields.io/nuget/v/WACS.WASI.NN.LlamaSharp?label=WACS.WASI.NN.LlamaSharp"/></a>
+      <a href="https://www.nuget.org/packages/WACS.WASI.NN.MLNet"><img src="https://img.shields.io/nuget/v/WACS.WASI.NN.MLNet?label=WACS.WASI.NN.MLNet"/></a>
+      <a href="https://www.nuget.org/packages/WACS.WASI.NN.TorchSharp"><img src="https://img.shields.io/nuget/v/WACS.WASI.NN.TorchSharp?label=WACS.WASI.NN.TorchSharp"/></a>
+    </td>
+  </tr>
+</table>
 
 ## Overview
 
