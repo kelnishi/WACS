@@ -261,9 +261,120 @@ namespace Wacs.Core.Text
                 w.Write(")");
             }
             w.WriteLine();
-            // Body
-            WriteInstructionSeq(w, fn.Body.Instructions, indent + Indent2Space, trimTrailingEnd: true);
+            // Body — folded vs flat depends on the requested style.
+            // Folded mode currently folds at the top level only;
+            // instructions inside block / loop / if bodies render flat
+            // (recursive folding lands in a follow-up pass).
+            if (options.Style == TextWriterStyle.Folded)
+                WriteFoldedInstructionSeq(w, fn.Body.Instructions, indent + Indent2Space);
+            else
+                WriteInstructionSeq(w, fn.Body.Instructions, indent + Indent2Space, trimTrailingEnd: true);
             w.WriteLine($"{indent})");
+        }
+
+        /// <summary>
+        /// Fold an instruction sequence into S-expression form where
+        /// possible. Operates as a single linear pass with a stack of
+        /// rendered operand fragments:
+        ///   1. Leaves (consume=0, produce=1) — e.g. <c>i32.const N</c>,
+        ///      <c>local.get N</c> — push their rendered form onto the
+        ///      pending stack.
+        ///   2. Operators (consume&gt;0, produce&gt;0) pop their operands
+        ///      and wrap as <c>(op (operand1) (operand2))</c>.
+        ///   3. Effectful ops (produce=0) emit the folded form as a
+        ///      stand-alone line.
+        ///   4. Anything the folder can't handle (control flow, block
+        ///      shapes, opcodes outside <see cref="OpcodeArity"/>'s
+        ///      table) flushes the pending stack as flat lines and
+        ///      emits the instruction flat.
+        ///
+        /// <para>Inner block bodies are emitted flat in this pass —
+        /// folding into nested blocks is a follow-up.</para>
+        /// </summary>
+        private static void WriteFoldedInstructionSeq(
+            TextWriter w, InstructionSequence seq, string indent)
+        {
+            int count = seq.Count;
+            if (count > 0 && seq[count - 1] is InstEnd) count--;
+
+            var pending = new System.Collections.Generic.Stack<string>();
+            for (int i = 0; i < count; i++)
+            {
+                var inst = seq[i]!;
+                if (IsChainBreaker(inst)
+                    || !OpCodes.OpcodeArity.TryGet(inst, out int consume, out int produce))
+                {
+                    DrainPendingAsFlat(w, pending, indent);
+                    // Block bodies stay flat — falls back through the
+                    // existing flat-emit machinery, which recurses.
+                    WriteInstruction(w, inst, indent);
+                    continue;
+                }
+                if (pending.Count < consume)
+                {
+                    // Not enough operands to fold this op — drain and
+                    // emit flat. Happens when a value comes from a
+                    // chain-breaker earlier (e.g. a call result that
+                    // we couldn't fold into).
+                    DrainPendingAsFlat(w, pending, indent);
+                    WriteInstruction(w, inst, indent);
+                    continue;
+                }
+
+                // Pop `consume` operands; the topmost stack entry is
+                // the LAST operand in source-order (right-hand side).
+                var ops = new string[consume];
+                for (int k = consume - 1; k >= 0; k--) ops[k] = pending.Pop();
+                string opText = RenderInstruction(inst);
+                string folded = consume == 0
+                    ? $"({opText})"
+                    : $"({opText} {string.Join(" ", ops)})";
+
+                if (produce > 0)
+                {
+                    pending.Push(folded);
+                }
+                else
+                {
+                    // Effectful instruction — emit on its own line.
+                    w.WriteLine($"{indent}{folded}");
+                }
+            }
+
+            DrainPendingAsFlat(w, pending, indent);
+        }
+
+        /// <summary>
+        /// Instructions whose presence forces a chain break in folded
+        /// mode: block-shaped forms, branches, returns, calls,
+        /// unreachable, throw — anything whose result the folder
+        /// can't safely treat as a pure operand.
+        /// </summary>
+        private static bool IsChainBreaker(InstructionBase inst) =>
+            inst is InstBlock or InstLoop or InstIf or InstElse or InstEnd
+                 or InstTryTable
+                 or InstBranch or InstBranchIf or InstBranchTable
+                 or InstReturn or InstUnreachable
+                 or InstCall or InstCallIndirect
+                 or InstThrow or InstThrowRef
+                 or Wacs.Core.Instructions.InstReturnCall
+                 or Wacs.Core.Instructions.InstReturnCallIndirect
+                 or Wacs.Core.Instructions.Reference.InstCallRef
+                 or Wacs.Core.Instructions.InstReturnCallRef;
+
+        /// <summary>
+        /// Emit any operands still on the pending stack as standalone
+        /// flat lines, in source order (oldest first). Used at chain
+        /// boundaries and at the end of a function body.
+        /// </summary>
+        private static void DrainPendingAsFlat(
+            TextWriter w, System.Collections.Generic.Stack<string> pending, string indent)
+        {
+            if (pending.Count == 0) return;
+            var arr = pending.ToArray();
+            System.Array.Reverse(arr);
+            foreach (var s in arr) w.WriteLine($"{indent}{s}");
+            pending.Clear();
         }
 
         // ---- Partial-render entry points ----------------------------------

@@ -1,5 +1,44 @@
 # Changelog
 
+## WACS 0.15.4 — folded / S-expression instruction style (Pass 5)
+
+Lights up `TextWriterStyle.Folded`. Function bodies that previously
+emitted as flat stack-machine lines now collapse into S-expression
+form when the option is enabled — round-trips of WAT originally
+written in folded shape can now return to that style.
+
+### Public API additions
+
+- `Wacs.Core.OpCodes.OpcodeArity.TryGet(inst, out consume, out produce)`
+  — per-opcode arity table for the "pure" subset (numeric consts,
+  unary / binary ops, locals, globals, ref-leaves, loads / stores,
+  drop, memory.size / memory.grow). Anything outside this table
+  (call, branch, block, etc.) returns false and forces a chain
+  break.
+
+### Folder behavior
+
+- Single linear pass with a stack of rendered operand fragments.
+  Leaves push; operators pop their operands and wrap as
+  `(op (operand1) (operand2) …)`; effectful ops (produce=0) emit
+  the folded form as a stand-alone line.
+- Chain breakers — branches, returns, calls, throws, block shapes,
+  unreachable — flush the pending stack as flat lines and emit
+  the instruction flat. The folder cannot safely treat their
+  result as a pure operand without per-call signature lookup.
+- Block bodies emit flat in this pass. Recursive folding inside
+  `block` / `loop` / `if` lands in a follow-up.
+- `TextWriterStyle.Canonical` (the default) is unchanged — no
+  on-the-wire difference for callers of
+  `TextModuleWriter.Write(module)`.
+
+### Tests
+
+`FoldedEmissionTests` (7 cases) covers binary add nesting, local-set
+operand pull, two-operand stores, block fallback, call chain-break,
+canonical-mode invariance, and folded-output reparse. 449/449
+Wacs.Core.Test tests pass.
+
 ## WACS 0.15.3 — fill TextModuleWriter structural gaps (Pass 4)
 
 Replaces the Phase-2 "round-trip not supported" placeholders with
