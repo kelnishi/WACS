@@ -1,5 +1,72 @@
 # Changelog
 
+## WACS 0.15.8 — WasmStackFrame + exception enrichment foundations (Stack-trace Pass A)
+
+Second piece of the stack-trace arc. Adds the data shape and the
+ExecContext snapshot API for capturing the WASM-side call stack at
+trap / uncaught-exception time. Exception types gain an optional
+`WasmFrames` field; two proof-of-concept throw sites are migrated
+to populate it. The bulk migration of remaining throw sites
+batches with Pass D.
+
+### Public API additions
+
+- `Wacs.Core.Runtime.WasmStackFrame { uint FuncAddr, InstructionBase? Instruction, int ResumeContinuationAddress }`
+  — immutable struct, single snapshot frame.
+- `ExecContext.SnapshotCallStack(InstructionBase? topInstruction = null)`
+  → `WasmStackFrame[]`. Walks the polymorphic `_callStack` top-
+  first; the top frame's `Instruction` is the supplied throwing
+  instruction; caller frames carry their resume PC for lazy
+  resolution later. O(call-depth) and allocation-free beyond the
+  returned array.
+- `TrapException(message, WasmStackFrame[] wasmFrames)` — overload
+  carrying the snapshot. Existing `TrapException(message)`
+  constructor unchanged.
+- `OutOfBoundsTableAccessException` gains the same overload.
+- `UnhandledWasmException` gains the same overload.
+- `TrapException.WasmFrames` / `UnhandledWasmException.WasmFrames`
+  read-only properties — null when the throw site didn't snapshot
+  (most still don't; migration is incremental).
+
+### Behavior
+
+- `unreachable` (`InstUnreachable.Execute`) now throws with the
+  snapshot.
+- The unhandled-wasm-exception path in `InstThrowRef.ExecuteInstruction`
+  snapshots before throwing (call stack has already unwound, so the
+  snapshot is empty — that's still useful information: "uncaught at
+  the entry point").
+- Every other trap site remains on the legacy bare-string
+  constructor and leaves `WasmFrames` null. Pass D migrates them in
+  bulk along with the formatting tests.
+
+### What's still ahead
+
+- **Pass C**: `WasmStackTrace.Format(module, verbose)` consumes
+  `WasmFrames` and emits human-readable traces. Cheap form uses
+  `InstructionBase.ByteOffsetInFunc` + `Op.GetMnemonic`. Verbose
+  form resolves source coords via `Module.SourcePositions` (Pass B,
+  WAT-parsed) or lazy `TextModuleWriter.WriteWithLineMap` (Pass 6,
+  binary-parsed).
+- **Pass D**: bulk-migrate the remaining ~100 trap throw sites to
+  pass `(message, ctx.SnapshotCallStack(this))`. Delete the
+  stubbed `ExecContext.ComputePointerPath`. Add `ErrorFormattingTests`
+  asserting on full trace structure.
+- **Pass E**: same enrichment for `WasmRuntimeException` (host-API
+  misuse) and siblings.
+
+### Ultimate target
+
+Debugger support — every runtime fault carries enough metadata to
+surface the WAT source line plus the call chain that led there,
+on demand and without execution-time bloat.
+
+### Tests
+
+`WasmStackFrameTests` (3 cases) covers live `unreachable` trap
+capture, legacy-constructor null-frames invariant, and the empty-
+stack snapshot path. 467/467 Wacs.Core.Test tests pass.
+
 ## WACS 0.15.7 — memoize WAT source positions per instruction (Stack-trace Pass B)
 
 First substantive piece of the stack-trace plumbing arc. The text

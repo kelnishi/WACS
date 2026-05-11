@@ -21,6 +21,21 @@ namespace Wacs.Core.Runtime.Exceptions
     /// </summary>
     public class UnhandledWasmException : Exception
     {
+        /// <summary>
+        /// WASM-side call-stack snapshot at the throw site, when the
+        /// runtime captured it. Null when the path that constructed
+        /// this exception didn't have an <see cref="ExecContext"/>
+        /// in scope. Pass C's formatter reads this for verbose
+        /// stack traces.
+        /// </summary>
+        public WasmStackFrame[]? WasmFrames { get; }
+
         public UnhandledWasmException(string message) : base(message) { }
+
+        public UnhandledWasmException(string message, WasmStackFrame[] wasmFrames)
+            : base(message)
+        {
+            WasmFrames = wasmFrames;
+        }
     }
 }

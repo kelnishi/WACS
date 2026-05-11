@@ -331,7 +331,16 @@ namespace Wacs.Core.Instructions
                 context.FunctionReturn();
             }
 
-            throw new UnhandledWasmException($"Unhandled exception {exn}");
+            // Capture the call-stack snapshot for later trace
+            // formatting. Note `context` has already been unwound via
+            // FunctionReturn() in the search loop above, so by the
+            // time we reach here the snapshot is empty — the wasm
+            // exception escaped the entire chain. That's still
+            // useful information (zero-frame stack means "uncaught
+            // at the entry point").
+            throw new UnhandledWasmException(
+                $"Unhandled exception {exn}",
+                context.SnapshotCallStack());
         }
     }
 }
