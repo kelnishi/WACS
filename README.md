@@ -713,11 +713,12 @@ ships:
 For the absolute cold-start floor — both startup *and* steady-state on
 a single machine — there's a fifth path worth knowing about: link the
 transpiled `.dll` statically into a NativeAOT-published consumer (501 µs
-cold and ~100 ns per fib(100) call, in a 4.3 MB native binary). Today
-this requires hand-wired csproj plumbing; a future `wacs aot` workflow
-will automate it. Full breakdown, methodology, and the four-runtime ×
-three-build-flag matrix in
-[`docs/COLDSTART.md`](docs/COLDSTART.md).
+cold and ~100 ns per fib(100) call, in a 4.3 MB native binary). The
+`wacs aot` verb automates the whole pipeline end-to-end today
+(`wacs aot module.wasm -o module` → transpile → scaffold consumer
+csproj → `dotnet publish -p:PublishAot=true` → copy native binary
+out). Full breakdown, methodology, and the four-runtime ×
+three-build-flag matrix in [`docs/COLDSTART.md`](docs/COLDSTART.md).
 
 ### Running `wacs`
 
