@@ -25,18 +25,28 @@ namespace Wacs.WASI.NN.OnnxRuntimeGenAI
         internal GenAI.Tokenizer Tokenizer { get; }
         internal OnnxGenAIBackendOptions Options { get; }
 
+        // Config is held when the graph was loaded through the
+        // override-providers path (Config(dir) -> ClearProviders ->
+        // Model(config)). GenAI's Model copies the Config state at
+        // construction but the underlying native handle is shared
+        // with the Model in some 0.x builds; keep the Config alive
+        // for the Model's lifetime to be safe. Null when the graph
+        // was loaded via the simpler Model(dir) path.
+        private readonly GenAI.Config? _config;
         private bool _disposed;
 
         public OnnxGenAIGraph(
             GenAI.Model model,
             GenAI.Tokenizer tokenizer,
-            OnnxGenAIBackendOptions options)
+            OnnxGenAIBackendOptions options,
+            GenAI.Config? config = null)
         {
             Model = model ?? throw new ArgumentNullException(nameof(model));
             Tokenizer = tokenizer
                 ?? throw new ArgumentNullException(nameof(tokenizer));
             Options = options
                 ?? throw new ArgumentNullException(nameof(options));
+            _config = config;
         }
 
         public IBackendContext CreateContext()
@@ -52,6 +62,7 @@ namespace Wacs.WASI.NN.OnnxRuntimeGenAI
             _disposed = true;
             Tokenizer.Dispose();
             Model.Dispose();
+            _config?.Dispose();
         }
     }
 }

@@ -1,5 +1,83 @@
 # Changelog
 
+## WACS.Cli 1.5.25 / WACS.WASI.NN.OnnxRuntimeGenAI 0.1.2 — first end-to-end verified GenAI run
+
+The first empirical end-to-end pass through `WACS.WASI.NN.OnnxRuntimeGenAI`
+on osx-arm64 against `gemma-3-270m-it-genai` surfaced two real gaps. Both
+closed; the model now generates coherent output through the documented
+`--bind` invocation.
+
+```
+$ echo -e "What is 2+2?\n/bye" | scripts/run-llm.sh
+>>> 2 + 2 = 4
+```
+
+### Gap 32 — `genai_config.json` declares an unsupported provider
+
+`Model(dir)` rejects model directories whose `genai_config.json` lists
+provider names not compiled into the platform's GenAI dylib. Pre-built
+HuggingFace exports often declare `nnapi` (Android NNAPI) by default —
+on macOS this trips:
+
+```
+Unknown provider name 'nnapi'. Currently supported values are
+'DML' / 'QNN' / 'OpenVINO' / 'SNPE' / 'XNNPACK' / 'WEBNN' / 'WebGPU'
+/ 'AZURE' / 'JS' / 'VitisAI' / 'CoreML' / 'NvTensorRtRtx' / 'MIGraphX'.
+```
+
+**Fix:** `OnnxGenAIBackend.LoadGraphByName` now loads via
+`Config(dir)` → `ClearProviders()` → `Model(config)` (instead of the
+direct `Model(dir)` ctor). The model-declared provider list is stripped
+and GenAI falls back to its platform default — CPU on macOS, matching
+the regular `OnnxBackend`'s opt-in posture for hardware acceleration.
+The `Config` is held for the `OnnxGenAIGraph`'s lifetime (some 0.x
+GenAI builds share native state between `Model` and its source
+`Config`). Embedders that want CoreML / CUDA / DirectML opt in
+explicitly via a future `OnnxGenAIBackendOptions` provider knob.
+
+### Gap 33 — instruction-tuned models need their chat template
+
+`OnnxGenAIContext.GenerateFromPrompt` was passing the raw UTF-8 prompt
+straight into `Tokenizer.Encode`. For instruction-tuned models
+(Gemma 3 IT, Llama 3 Instruct, Qwen 2.5 Instruct, Phi-4 Mini Instruct,
+…) the prompt needs to be wrapped in the model's turn markers
+(`<start_of_turn>user\n...<end_of_turn>\n<start_of_turn>model\n` for
+Gemma) for the decode loop to produce coherent text. Without it,
+gemma-3-270m-it generated ~500 tokens of `2?2?2?2? just once? essen??…`
+gibberish.
+
+**Fix:** `GenerateFromPrompt` now calls
+`Tokenizer.ApplyChatTemplate(null, messages, null, add_generation_prompt: true)`
+before `Tokenizer.Encode`. Passing `null` for the template string makes
+GenAI consume the model's bundled `chat_template.jinja`. `messages` is
+a JSON array of `{role, content}` records built via
+`System.Text.Json.JsonSerializer.Serialize` (an earlier attempt with
+`JsonEncodedText.Encode` produced unquoted content fields → invalid
+JSON → silent fallback to raw prompt → gibberish; documented inline so
+the regression doesn't recur). Falls back to the raw prompt only if
+`ApplyChatTemplate` throws — base (non-instruct) models work fine
+without a template and we don't want to break them.
+
+### Versions
+
+- `WACS.Cli` 1.5.24 → **1.5.25** (release event)
+- `WACS.WASI.NN.OnnxRuntimeGenAI` 0.1.1 → **0.1.2** (gap 32 +
+  gap 33 fixes)
+
+### Verified
+
+- Direct probe through `Microsoft.ML.OnnxRuntimeGenAI` (no WACS layer)
+  confirms `Config(dir).ClearProviders()` + `ApplyChatTemplate(null, …)`
+  is the right sequence; replicated in `OnnxGenAIBackend.LoadGraphByName`
+  and `OnnxGenAIContext.GenerateFromPrompt`.
+- `wacs run --wasip2 --bind Wacs.WASI.NN.OnnxRuntimeGenAI.dll` end-to-end
+  against `gemma-3-270m-it-genai`:
+  - `What is 2+2?` → `2 + 2 = 4`
+  - `What is the capital of France?` → `The capital of France is Paris.`
+  - `Write a haiku about WebAssembly.` → coherent multi-stanza output
+    (small model loops near `max_length` with greedy decoding, expected)
+- `Wacs.WASI.NN.OnnxRuntimeGenAI.Test` 8/8
+
 ## WACS.Cli 1.5.24 / WACS.WASI.NN.OnnxRuntimeGenAI 0.1.1 / WACS.WASI.Preview2.DependencyInjection 0.1.8 — gap 31: `BuildOnnxGenAIConfigureCallback` auto-wires the GenAI backend via `--bind`
 
 `wasi-nn/WACS-GAPS.md` gap 31: the new `OnnxRuntimeGenAI` backend's

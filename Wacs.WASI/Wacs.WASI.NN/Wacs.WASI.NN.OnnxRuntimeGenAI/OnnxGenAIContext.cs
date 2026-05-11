@@ -83,10 +83,59 @@ namespace Wacs.WASI.NN.OnnxRuntimeGenAI
             string prompt = Encoding.UTF8.GetString(
                 input.Tensor.Data.Span);
 
+            // Apply the model's chat template before tokenizing.
+            // Instruction-tuned chat models (Gemma 3 IT, Llama 3
+            // Instruct, Qwen Instruct, Phi-4 Mini Instruct, …)
+            // need the prompt wrapped in their turn markers
+            // (e.g., `<start_of_turn>user\n...<end_of_turn>\n<start_of_turn>model\n`)
+            // for the decode loop to produce coherent output. Raw
+            // text input produces gibberish.
+            //
+            // GenAI's Tokenizer.ApplyChatTemplate(template, messages,
+            // tools, add_generation_prompt) consumes the model's
+            // chat_template.jinja when the first arg is null and the
+            // model directory has one. Messages is a JSON array of
+            // {role, content}; we send a single user turn here.
+            // add_generation_prompt=true appends the assistant-turn
+            // opener so the model continues into a reply rather
+            // than starting a fresh user turn.
+            //
+            // If ApplyChatTemplate fails (model dir lacks a
+            // template, or the template uses Jinja features GenAI
+            // can't render), fall back to the raw prompt — base
+            // (non-instruct) models work fine without templating
+            // and we don't want to break them.
+            string templated;
+            try
+            {
+                // Build the messages JSON via JsonSerializer.Serialize
+                // so the prompt string is properly quoted and escaped
+                // (including embedded quotes / newlines / control
+                // chars). Earlier hand-built JSON via JsonEncodedText
+                // produced unquoted content fields, which silently
+                // failed ApplyChatTemplate inside GenAI and dropped
+                // us through the catch into the raw-prompt fallback —
+                // gemma-3 IT then generated several hundred tokens of
+                // ?-pattern gibberish because no chat template framed
+                // the user turn.
+                var messages = new[] { new { role = "user", content = prompt } };
+                var messagesJson = System.Text.Json.JsonSerializer
+                    .Serialize(messages);
+                templated = _graph.Tokenizer.ApplyChatTemplate(
+                    template_str: null!,
+                    messages: messagesJson,
+                    tools: null!,
+                    add_generation_prompt: true);
+            }
+            catch
+            {
+                templated = prompt;
+            }
+
             int[] promptTokens;
             try
             {
-                using var promptSeqs = _graph.Tokenizer.Encode(prompt);
+                using var promptSeqs = _graph.Tokenizer.Encode(templated);
                 // Tokenizer.Encode returns Sequences indexed by
                 // batch — we always send one prompt, so [0] is it.
                 promptTokens = promptSeqs[0].ToArray();
