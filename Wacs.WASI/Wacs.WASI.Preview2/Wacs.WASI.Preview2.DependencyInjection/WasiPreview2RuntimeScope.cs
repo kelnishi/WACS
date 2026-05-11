@@ -245,9 +245,8 @@ namespace Wacs.WASI.Preview2.DependencyInjection
             var onnxCallback = BuildOnnxConfigureCallback(nnAsm!);
             var llamaCallback = BuildLlamaSharpConfigureCallback(nnAsm!);
             var torchCallback = BuildTorchSharpConfigureCallback(nnAsm!);
-            var genaiCallback = BuildOnnxGenAIConfigureCallback(nnAsm!);
             var configureDelegate = CombineCallbacks(
-                onnxCallback, llamaCallback, torchCallback, genaiCallback);
+                onnxCallback, llamaCallback, torchCallback);
 
             // services.AddWasiNN(configure) — configure runs
             // BEFORE TryAddSingleton(opts.Configuration), so each
@@ -613,145 +612,6 @@ namespace Wacs.WASI.Preview2.DependencyInjection
             var actionType = typeof(Action<>).MakeGenericType(optsType);
             return Expression.Lambda(actionType, block, optsParam)
                 .Compile();
-        }
-
-        // Sibling of BuildLlamaSharpConfigureCallback /
-        // BuildTorchSharpConfigureCallback for the
-        // OnnxRuntime-GenAI backend (generative LLMs in GenAI
-        // directory format: genai_config.json + tokenizer.json +
-        // model.onnx + weights). Detects
-        // `Wacs.WASI.NN.OnnxRuntimeGenAI.OnnxGenAIBackend`, builds
-        // an env-driven registry from $WACS_WASINN_GENAI_DIR
-        // (mirroring WasiNNOnnxGenAIBindable's subdirectory scan
-        // for genai_config.json), and wires the backend into
-        // `LoadByNameBackend` ONLY — leaves `Backends[ONNX]` to
-        // the regular OnnxBackend so `graph.load(bytes)` and
-        // `graph.load-by-name(directory)` route to the right
-        // place when both packages are present.
-        //
-        // Returns null when:
-        //   - Wacs.WASI.NN.OnnxRuntimeGenAI isn't loadable (the
-        //     common `wacs run --wasip2 --wasi-nn` case);
-        //   - OnnxGenAIBackend / FromDirectories factory /
-        //     LoadByNameBackend property can't be resolved;
-        //   - FromDirectories throws.
-        // Closes gap 31 (wasi-nn/WACS-GAPS.md).
-        private static Delegate? BuildOnnxGenAIConfigureCallback(
-            Assembly nnAsm)
-        {
-            var optsType = nnAsm.GetType(
-                "Wacs.WASI.NN.DependencyInjection.WasiNNDependencyInjectionOptions");
-            if (optsType == null) return null;
-
-            var addBackend = optsType.GetMethod("AddBackend");
-            if (addBackend == null) return null;
-            var addBackendParams = addBackend.GetParameters();
-            if (addBackendParams.Length != 2) return null;
-            var backendIfaceType = addBackendParams[1].ParameterType;
-
-            var genaiAsm = TryLoadAssembly(
-                "Wacs.WASI.NN.OnnxRuntimeGenAI");
-            if (genaiAsm == null) return null;  // not an error.
-
-            var genaiBackendType = genaiAsm.GetType(
-                "Wacs.WASI.NN.OnnxRuntimeGenAI.OnnxGenAIBackend");
-            if (genaiBackendType == null)
-            {
-                System.Console.Error.WriteLine(
-                    "warn: Wacs.WASI.NN.OnnxRuntimeGenAI is loadable "
-                    + "but OnnxGenAIBackend type wasn't found. "
-                    + "wasi-nn GenAI guests will see NotFound errors.");
-                return null;
-            }
-
-            var fromDirs = genaiBackendType.GetMethod(
-                "FromDirectories",
-                BindingFlags.Public | BindingFlags.Static);
-            if (fromDirs == null)
-            {
-                System.Console.Error.WriteLine(
-                    "warn: OnnxGenAIBackend.FromDirectories(IDictionary"
-                    + "<string,string>) static factory not found. "
-                    + "Cannot auto-wire OnnxRuntimeGenAI; embedders "
-                    + "should construct OnnxGenAIBackend directly "
-                    + "via AddWasiNN(b => b.AddBackend(...)).");
-                return null;
-            }
-
-            var registry = BuildGenAIRegistryFromEnv();
-
-            object? genaiBackend;
-            try { genaiBackend = fromDirs.Invoke(null, new object?[] { registry }); }
-            catch (Exception ex)
-            {
-                System.Console.Error.WriteLine(
-                    "warn: OnnxGenAIBackend.FromDirectories failed: "
-                    + ex.GetType().Name + ": " + ex.Message
-                    + ". wasi-nn GenAI guests will see NotFound "
-                    + "errors. Check that the Microsoft.ML.OnnxRuntimeGenAI "
-                    + "native library is on the load path.");
-                return null;
-            }
-            if (genaiBackend == null) return null;
-
-            var configProp = optsType.GetProperty("Configuration");
-            if (configProp == null) return null;
-            var configType = configProp.PropertyType;
-            var loadByNameProp = configType.GetProperty("LoadByNameBackend");
-            if (loadByNameProp == null
-                || loadByNameProp.GetSetMethod() == null)
-            {
-                System.Console.Error.WriteLine(
-                    "warn: WasiNNConfiguration.LoadByNameBackend "
-                    + "property missing or read-only; cannot route "
-                    + "GenAI graph.load-by-name through OnnxGenAIBackend.");
-                return null;
-            }
-
-            // GenAI backend takes the LoadByNameBackend slot only —
-            // leaves Backends[ONNX] for the regular OnnxBackend so
-            // `graph.load(bytes)` keeps its byte-tensor I/O path
-            // while `graph.load-by-name(<dir>)` routes to GenAI's
-            // KV-cached decode loop.
-            var optsParam = Expression.Parameter(optsType, "opts");
-            var configAccess = Expression.Property(optsParam, configProp);
-            var assign = Expression.Assign(
-                Expression.Property(configAccess, loadByNameProp),
-                Expression.Constant(genaiBackend,
-                    loadByNameProp.PropertyType));
-            var actionType = typeof(Action<>).MakeGenericType(optsType);
-            return Expression.Lambda(actionType, assign, optsParam)
-                .Compile();
-        }
-
-        // Mirrors WasiNNOnnxGenAIBindable's env-driven scan:
-        // read $WACS_WASINN_GENAI_DIR, enumerate first-level
-        // subdirectories containing `genai_config.json`, register
-        // each under its directory name. Fail-soft on IO error.
-        private static IDictionary<string, string>
-            BuildGenAIRegistryFromEnv()
-        {
-            var dir = Environment.GetEnvironmentVariable(
-                "WACS_WASINN_GENAI_DIR");
-            var registry = new Dictionary<string, string>(
-                StringComparer.OrdinalIgnoreCase);
-            if (string.IsNullOrEmpty(dir)) return registry;
-            try
-            {
-                if (!Directory.Exists(dir)) return registry;
-                foreach (var modelDir in Directory.EnumerateDirectories(dir))
-                {
-                    var configPath = Path.Combine(
-                        modelDir, "genai_config.json");
-                    if (!File.Exists(configPath)) continue;
-                    var name = Path.GetFileName(modelDir);
-                    if (!string.IsNullOrEmpty(name))
-                        registry[name!] = modelDir;
-                }
-            }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
-            return registry;
         }
 
         // Mirrors WasiNNTorchSharpBindable's env-driven scan:
