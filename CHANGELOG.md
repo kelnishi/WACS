@@ -1,5 +1,30 @@
 # Changelog
 
+## WACS.WASI.NN family — cascade bump to advertise the 0.3.4 WITX-ABI fix
+
+Repackages all six WASI.NN sibling backends so their `.nuspec` declares the
+fixed `WACS.WASI.NN >= 0.3.4` dependency floor. The previous release tag
+(`WACS-WASI-NN-v0.3.5` → `WACS.WASI.NN 0.3.4`) shipped the WITX-ABI fix on
+the top-level package but skip-dup'd every sibling, so each sibling's
+live manifest still advertised a pre-0.3.4 floor. Consumers were
+silently protected by NuGet's range-resolution picking the latest 0.3.4,
+but anyone pinning a sibling exactly would have stayed on the stale
+floor. Point-bumping each sibling makes the cascade explicit.
+
+| Sibling                            | Before | After |
+|------------------------------------|-------:|------:|
+| `WACS.WASI.NN.DependencyInjection` |  0.2.2 | 0.2.3 |
+| `WACS.WASI.NN.LlamaSharp`          |  0.2.2 | 0.2.3 |
+| `WACS.WASI.NN.MLNet`               |  0.2.2 | 0.2.3 |
+| `WACS.WASI.NN.OnnxRuntime`         |  0.3.0 | 0.3.1 |
+| `WACS.WASI.NN.OnnxRuntimeGenAI`    |  0.1.3 | 0.1.4 |
+| `WACS.WASI.NN.TorchSharp`          |  0.1.1 | 0.1.2 |
+
+No code changes — each sibling re-packs with the new
+`WACS.WASI.NN 0.3.4` `ProjectReference` already on `main` and inherits
+the WITX 0.6 ABI fix transparently. See the prior changelog entry for
+the actual `set_input` / `compute` signature change.
+
 ## WACS.WASI.NN 0.3.4 — align WITX `set_input` / `compute` with bytecodealliance wasi-nn 0.6 ABI
 
 The legacy `wasi_ephemeral_nn` core-module binding in `WitxBindings.cs`
