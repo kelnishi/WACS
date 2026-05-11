@@ -1,4 +1,4 @@
-# WACS (C# WebAssembly Interpreter)
+# WACS (WebAssembly CSharp Toolchain)
 
 **Project status**
 &nbsp;![CI](https://github.com/kelnishi/WACS/actions/workflows/ci.yml/badge.svg?branch=main)
