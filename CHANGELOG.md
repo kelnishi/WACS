@@ -85,6 +85,31 @@ because the .NET SDK's default `<DefaultItemExcludes>` excludes `bin/**`
 (it's where the build output lands). The C# namespace is `Wacs.Core.Bin`
 as designed; only the on-disk folder name differs.
 
+## WACS.Cli 1.6.0 — `wacs inspect --dump-wasm`: binary output
+
+Lights up the inverse direction of `--dump-wat`. The `inspect` verb's
+input parser already auto-detects WAT vs binary, so the new flag makes
+both round-trips bidirectional from the CLI:
+
+```
+wacs inspect foo.wasm --dump-wat  --output-dir out/   # binary → text
+wacs inspect foo.wat  --dump-wasm --output-dir out/   # text   → binary
+wacs inspect foo.wasm --dump-wasm --output-dir out/   # binary → canonical binary
+```
+
+Without `--output-dir`, raw bytes stream through stdout via
+`OpenStandardOutput()` — bypassing the console's text-encoding wrapper
+so the output stays byte-clean for shell piping (e.g.
+`wacs inspect foo.wat --dump-wasm | sha256sum`).
+
+The output uses `Wacs.Core.Bin.BinaryModuleWriter` (Wacs.Core 0.14.0),
+so the canonical form is byte-identical across repeat passes. Verified
+end-to-end on Feature.Detect fixtures — `multi-value.wasm → wat → wasm`
+reproduces the canonical wasm byte-for-byte. Coverage is bounded by
+the upstream `TextModuleWriter`: features where the text writer emits
+comment placeholders (notably GC type bodies, elem / data segments)
+still round-trip on the binary side but lose information through WAT.
+
 ## WACS.WASI.NN 0.3.5 — WITX retArea wire format: payload at offset 0, errno via return value
 
 PR #142 (0.3.4) aligned the `set_input` / `compute` arg count + errno

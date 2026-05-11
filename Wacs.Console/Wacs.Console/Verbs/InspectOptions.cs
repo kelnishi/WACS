@@ -29,9 +29,16 @@ namespace Wacs.Console.Verbs
             + "through the text parser.")]
         public bool DumpWat { get; set; }
 
+        [Option("dump-wasm", HelpText =
+            "Render canonical wasm binary. With --output-dir writes "
+            + "<basename>.wasm; without it streams raw bytes to "
+            + "stdout (pipe target). Combined with a .wat input, "
+            + "this is the WAT→binary direction.")]
+        public bool DumpWasm { get; set; }
+
         [Option("output-dir", HelpText =
-            "When --dump-wat is set, write the .wat file into this "
-            + "directory instead of stdout.")]
+            "When --dump-wat / --dump-wasm is set, write the output "
+            + "file into this directory instead of stdout.")]
         public string OutputDir { get; set; } = "";
 
         [Option("stats", HelpText =
