@@ -9,6 +9,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using Wacs.ComponentModel.Runtime;
+using Wacs.HostBindings;
 using Wacs.HostBindings.Abstractions;
 using Wacs.Transpiler.Cli;
 
@@ -80,8 +82,21 @@ namespace Wacs.Transpiler.AOT.Component
                 // dispatcher's default loud-throw behavior because we
                 // intentionally want fall-through here.
                 var importsType = ctorParams[0].ParameterType;
+                // Auto-register handlers for every wasm import named
+                // `[resource-drop]X` so host-owned resources allocated
+                // through the direct-link path actually get released
+                // when the guest drops the handle. Without these
+                // handlers the dispatcher's `lenient: true` swallows
+                // every drop call, the host's resource table never
+                // shrinks, and large host resources (e.g. wasi-nn
+                // tensor byte buffers) accumulate for the lifetime
+                // of the component instance. Empirically: the SLM
+                // workflow's per-token logits tensors leak GiB of
+                // managed heap; see wasi-nn/WACS-GAPS.md round 27.
+                var dropHandlers = BuildResourceDropHandlers(
+                    importsType, prebuiltResources);
                 var importsStub = ImportDispatcher.Create(importsType,
-                    new Dictionary<string, Func<object?[], object?>>(),
+                    dropHandlers,
                     lenient: true);
 
                 // Bundle (host functions) + resources (handle
@@ -517,6 +532,145 @@ namespace Wacs.Transpiler.AOT.Component
         {
             try { return Assembly.Load(name); }
             catch { return null; }
+        }
+
+        /// <summary>
+        /// Walk the imports interface's assembly-level
+        /// <c>WacsImportNames</c> for every <c>[resource-drop]X</c>
+        /// import; resolve the CLR resource interface type via
+        /// <c>[WitSource]</c>; register a handler that routes the
+        /// dropped handle through
+        /// <c>WasiPreview2Resources.FreeResource(typeof(IX), handle)</c>.
+        /// Without this, the dispatcher's <c>lenient: true</c> path
+        /// silently no-ops every drop call and host-owned resources
+        /// (wasi-nn tensors, wasi:io streams, …) leak.
+        ///
+        /// <para>The handler is reflective on
+        /// <see cref="WasiPreview2Resources"/> because this assembly
+        /// (Wacs.Transpiler.Lib) doesn't reference Preview2.DI. The
+        /// caller already has it in <paramref name="resources"/> via
+        /// the same reflective path that resolves the bundle.</para>
+        /// </summary>
+        private static Dictionary<string, Func<object?[], object?>>
+            BuildResourceDropHandlers(
+                Type importsInterface, object? resources)
+        {
+            var result = new Dictionary<string, Func<object?[], object?>>();
+            if (resources == null) return result;
+
+            // FreeResource(Type, int) is the entry point. Resolve
+            // once; the handlers below close over the MethodInfo.
+            var freeResource = resources.GetType().GetMethod(
+                "FreeResource",
+                new[] { typeof(Type), typeof(int) });
+            if (freeResource == null) return result;
+
+            var asm = importsInterface.Assembly;
+
+            // Decode every [WacsImportNames] attribute on the assembly
+            // into (methodName, module, name) entries.
+            var entries = new List<(string MethodName, string Module, string Name)>();
+            foreach (var attr in asm.GetCustomAttributes<WacsImportNamesAttribute>())
+                entries.AddRange(WacsImportNamesAttribute.Decode(attr.Mapping));
+
+            // Resolver cache so we don't re-scan AppDomain for every
+            // resource (some components have ~8 [resource-drop]s).
+            var typeCache = new Dictionary<string, Type?>(
+                StringComparer.Ordinal);
+
+            foreach (var (methodName, module, name) in entries)
+            {
+                if (!name.StartsWith("[resource-drop]",
+                        StringComparison.Ordinal))
+                    continue;
+                var resourceName = name.Substring(
+                    "[resource-drop]".Length);
+
+                if (!TrySplitModule(module,
+                        out var package, out var ifaceName))
+                    continue;
+
+                var cacheKey = package + "::" + ifaceName + "::" + resourceName;
+                if (!typeCache.TryGetValue(cacheKey, out var resourceType))
+                {
+                    resourceType = FindResourceType(
+                        package, ifaceName!, resourceName);
+                    typeCache[cacheKey] = resourceType;
+                }
+                if (resourceType == null) continue;
+
+                var capturedType = resourceType;
+                result[methodName] = args =>
+                {
+                    if (args == null || args.Length == 0
+                        || args[0] is not int h)
+                        return null;
+                    freeResource.Invoke(resources,
+                        new object[] { capturedType, h });
+                    return null;
+                };
+            }
+            return result;
+        }
+
+        // Split a wasm import-module name into (package, interface).
+        // `wasi:nn/tensor@0.2.0-rc-2024-10-28` →
+        //   package = "wasi:nn@0.2.0-rc-2024-10-28"
+        //   iface   = "tensor"
+        private static bool TrySplitModule(string module,
+            out string? package, out string? iface)
+        {
+            package = null; iface = null;
+            int slash = module.IndexOf('/');
+            if (slash <= 0 || slash == module.Length - 1) return false;
+            int at = module.IndexOf('@', slash);
+            string ns = module.Substring(0, slash);
+            string ifaceLocal, version;
+            if (at < 0)
+            {
+                ifaceLocal = module.Substring(slash + 1);
+                version = "";
+            }
+            else
+            {
+                ifaceLocal = module.Substring(
+                    slash + 1, at - slash - 1);
+                version = module.Substring(at);
+            }
+            package = ns + version;
+            iface = ifaceLocal;
+            return true;
+        }
+
+        // Find the CLR interface type whose [WitSource] matches the
+        // given (package, interface, resource) triple. Walks loaded
+        // assemblies because the resource interface lives in a
+        // different assembly than the transpiled module (typically
+        // a Wacs.WASI.NN.* or Wacs.WASI.Preview2 sibling).
+        private static Type? FindResourceType(
+            string package, string iface, string resource)
+        {
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type[] types;
+                try { types = asm.GetTypes(); }
+                catch (ReflectionTypeLoadException ex)
+                {
+                    types = ex.Types.Where(t => t != null)!
+                        .Cast<Type>().ToArray();
+                }
+                foreach (var t in types)
+                {
+                    if (!t.IsInterface) continue;
+                    var attr = t.GetCustomAttribute<WitSourceAttribute>();
+                    if (attr == null) continue;
+                    if (attr.Package == package
+                        && attr.Interface == iface
+                        && attr.Item == resource)
+                        return t;
+                }
+            }
+            return null;
         }
 
         // Reflectively register an OnnxBackend for graph-encoding.onnx
