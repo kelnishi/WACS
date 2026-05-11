@@ -100,6 +100,28 @@ namespace Wacs.WASI.NN.OnnxRuntimeGenAI
         }
 
         /// <summary>
+        /// Static factory matching the
+        /// <c>WasiPreview2RuntimeScope</c> auto-wire shape
+        /// (mirror of <c>TorchSharpBackend.FromPaths</c>):
+        /// take a name→directory map, build a resolver that looks
+        /// up by name. Lets the DI scope's reflective auto-wire
+        /// construct the backend without needing to thread a
+        /// <see cref="Func{T,TResult}"/> through Linq.Expressions
+        /// IL emission.
+        /// </summary>
+        public static OnnxGenAIBackend FromDirectories(
+            IDictionary<string, string> nameToDirectory)
+        {
+            if (nameToDirectory == null)
+                throw new ArgumentNullException(nameof(nameToDirectory));
+            var registry = new Dictionary<string, string>(
+                nameToDirectory, StringComparer.OrdinalIgnoreCase);
+            return new OnnxGenAIBackend(
+                name => registry.TryGetValue(name, out var dir)
+                    ? dir : null);
+        }
+
+        /// <summary>
         /// Exposes <see cref="GraphEncoding.ONNX"/> since the
         /// underlying model is in ONNX format (just packaged with
         /// GenAI's directory layout). The bindable wires this
