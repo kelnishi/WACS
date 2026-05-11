@@ -1,5 +1,66 @@
 # Changelog
 
+## WACS.Cli 1.5.26 / WACS.WASI.NN.OnnxRuntimeGenAI 0.1.3 — opt-in EP selection for the GenAI backend
+
+Mirrors the EP-selection surface that ships on `WACS.WASI.NN.OnnxRuntime`
+(0.3.0). After the gaps 32+33 fix, GenAI loaded under `Config.ClearProviders`
+and ran CPU-only. This change adds an opt-in path to swap in CoreML / CUDA
+/ DirectML / ROCm.
+
+### Empirical: why CPU stays the default
+
+Direct probe through `Microsoft.ML.OnnxRuntimeGenAI` on osx-arm64 against
+`gemma-3-270m-it-genai`:
+
+| EP | Load | "What is 2+2?" | "Capital of France?" |
+|----|------|----------------|----------------------|
+| CPU (cleared) | 927ms | 128ms / 8 tok | 84ms / 8 tok |
+| CoreML | 4517ms | 427ms / 8 tok | 270ms / 8 tok |
+
+Both EPs produce identical, correct output. CoreML is **3-5× slower** for
+this 270M-param model — kernel-compile + Metal-command-buffer setup
+dominates the actual compute. CoreML's win typically kicks in at 1B+
+params, so auto-promotion as the default would regress the common SLM
+case. Symmetric with `OnnxBackend`'s opt-in posture (the regular ORT
+backend also defaults to CPU after PR #132).
+
+### What landed
+
+- **`OnnxGenAIExecutionProvider`** (new enum) — `Auto`, `Cpu`, `CoreML`,
+  `Cuda`, `DirectML`, `Rocm`. Parallel to
+  `Wacs.WASI.NN.OnnxRuntime.OnnxExecutionProvider`.
+- **`OnnxGenAIBackendOptions.ExecutionProvider`** (new property, default
+  `Cpu`) — plus per-EP device IDs (`CudaDeviceId`, `DirectMLDeviceId`,
+  `RocmDeviceId`) and `FallbackToCpu` (default `true`).
+- **`OnnxGenAIBackendOptions.FromEnvironment()`** — reads
+  `WACS_WASINN_GENAI_EP` (case-insensitive: `auto` / `cpu` / `coreml` /
+  `cuda` / `dml` / `directml` / `rocm`) plus
+  `WACS_WASINN_GENAI_{CUDA,DML,ROCM}_DEVICE`.
+- **`OnnxGenAIBackend.LoadGraphByName`** — after the existing
+  `Config.ClearProviders` call, appends the selected provider via
+  `Config.AppendProvider` (with optional device-id via
+  `Config.SetProviderOption`). `Auto` resolves at session-construction
+  time per OS. On EP-append failure with `FallbackToCpu=true` (the
+  default), strips the partial provider state and falls through to CPU.
+- **End-to-end verified** against `gemma-3-270m-it-genai`:
+  - default (no env var): `>>> 2 + 2 = 4` ✓
+  - `WACS_WASINN_GENAI_EP=coreml`: `>>> 2 + 2 = 4` ✓
+  - `WACS_WASINN_GENAI_EP=auto`: `>>> 2 + 2 = 4` ✓
+
+### Versions
+
+- `WACS.Cli` 1.5.25 → **1.5.26** (release event)
+- `WACS.WASI.NN.OnnxRuntimeGenAI` 0.1.2 → **0.1.3** (new public types:
+  `OnnxGenAIExecutionProvider`; new options on
+  `OnnxGenAIBackendOptions`)
+
+### Test plan
+
+- `Wacs.WASI.NN.OnnxRuntimeGenAI.Test` 18/18 (was 8/8 — 10 new tests
+  covering env-var parsing for every EP value + the default check)
+- End-to-end via `scripts/run-llm.sh` against all three modes (default
+  CPU, `WACS_WASINN_GENAI_EP=coreml`, `WACS_WASINN_GENAI_EP=auto`)
+
 ## WACS.Cli 1.5.25 / WACS.WASI.NN.OnnxRuntimeGenAI 0.1.2 — first end-to-end verified GenAI run
 
 The first empirical end-to-end pass through `WACS.WASI.NN.OnnxRuntimeGenAI`

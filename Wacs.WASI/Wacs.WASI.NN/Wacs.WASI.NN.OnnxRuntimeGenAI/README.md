@@ -107,24 +107,59 @@ replacement that uses GenAI's kernels.
 | `WACS_WASINN_GENAI_TOP_P`            | 1.0     | Nucleus sampling cutoff                                    |
 | `WACS_WASINN_GENAI_TOP_K`            | 50      | Top-k truncation                                           |
 | `WACS_WASINN_GENAI_INCLUDE_PROMPT`   | 0       | `1` returns prompt+response; default returns response only |
+| `WACS_WASINN_GENAI_EP`               | `cpu`   | Execution provider: `auto` / `cpu` / `coreml` / `cuda` / `dml` / `rocm` |
+| `WACS_WASINN_GENAI_CUDA_DEVICE`      | 0       | CUDA device index (when `EP=cuda`)                         |
+| `WACS_WASINN_GENAI_DML_DEVICE`       | 0       | DirectML device index (when `EP=dml`)                      |
+| `WACS_WASINN_GENAI_ROCM_DEVICE`      | 0       | ROCm device index (when `EP=rocm`)                         |
 
 Library embedders pass an `OnnxGenAIBackendOptions` to the ctor instead.
 
 ## Hardware acceleration
 
-The osx-arm64 GenAI native dylib **links directly against `CoreML.framework`**
-— the path to Metal acceleration runs through CoreML's partition-and-fallback.
-Op coverage for transformer ops is bounded by what the underlying ORT CoreML
-EP supports. Pin per-model:
+Default is **CPU** — hardware acceleration is **opt-in** via
+`WACS_WASINN_GENAI_EP` or `OnnxGenAIBackendOptions.ExecutionProvider`. CPU
+default is empirical: on osx-arm64 against `gemma-3-270m-it-genai`,
+CoreML produces correct output but runs **3-5× slower** than CPU because
+kernel-compile + Metal-command-buffer overhead dominates the actual
+compute for small models. CoreML's win typically kicks in at 1B+ params.
 
-- Image-classification / encoder-only models: CoreML usually works
-- Generative LLMs (Gemma 3, Llama, Qwen): test carefully; if generation
-  produces incoherent output, set `WACS_WASINN_GENAI_DO_SAMPLE=0` and try
-  CPU first
+| OS                | `WACS_WASINN_GENAI_EP=auto` resolves to | Notes                                                          |
+|-------------------|-----------------------------------------|----------------------------------------------------------------|
+| macOS (arm64/x64) | CoreML                                  | osx-arm64 GenAI dylib links `CoreML.framework` — no NuGet swap |
+| Windows           | DirectML                                | Substitute `Microsoft.ML.OnnxRuntimeGenAI.DirectML` for full coverage |
+| Linux             | CUDA then ROCm                          | Substitute `.Cuda` / `.Rocm` variants for native deps          |
+| Other             | CPU                                     |                                                                |
 
-Windows: Microsoft ships `Microsoft.ML.OnnxRuntimeGenAI.DirectML` as a sibling
-NuGet (substitute that for the default in your csproj). Linux:
-`.Cuda` variant.
+EP-append failure silently falls back to CPU (`FallbackToCpu = true` by
+default) — embedders that want strict-mode set it false to surface
+EP-misconfiguration as `WasiNNException(RuntimeError)`.
+
+Enable via environment:
+
+```sh
+# Platform-best pick (CoreML on macOS, DirectML on Windows, CUDA on Linux)
+WACS_WASINN_GENAI_EP=auto wacs run my.wasm --wasip2 --bind <...>
+
+# Force a specific provider
+WACS_WASINN_GENAI_EP=coreml wacs run my.wasm --wasip2 --bind <...>
+WACS_WASINN_GENAI_EP=cuda WACS_WASINN_GENAI_CUDA_DEVICE=1 \
+    wacs run my.wasm --wasip2 --bind <...>
+
+# Explicitly stay on CPU (the default — no env var also gets you CPU)
+WACS_WASINN_GENAI_EP=cpu wacs run my.wasm --wasip2 --bind <...>
+```
+
+Library embedder (typed config):
+
+```csharp
+var backend = new OnnxGenAIBackend(
+    name => Directory.Exists($"./models/{name}") ? $"./models/{name}" : null,
+    new OnnxGenAIBackendOptions
+    {
+        ExecutionProvider = OnnxGenAIExecutionProvider.CoreML,
+        FallbackToCpu = true,
+    });
+```
 
 ## Composes with WACS.WASI.NN.OnnxRuntime
 
