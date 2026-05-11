@@ -12,8 +12,8 @@
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.WASI.NN.LlamaSharp</AssemblyName>
-        <AssemblyVersion>0.2.2</AssemblyVersion>
-        <Version>0.2.2</Version>
+        <AssemblyVersion>0.2.3</AssemblyVersion>
+        <Version>0.2.3</Version>
         <RepositoryType>git</RepositoryType>
         <TargetFramework>net8.0</TargetFramework>
         <PackageTags>wasm;wasi;nn;ml;llm;llama;gguf;wacs</PackageTags>
