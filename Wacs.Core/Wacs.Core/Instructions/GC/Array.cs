@@ -97,6 +97,9 @@ namespace Wacs.Core.Instructions.GC
             X = (TypeIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32((uint)X.Value);
     }
 
     public class InstArrayNewDefault : InstructionBase, IConstInstruction
@@ -158,6 +161,9 @@ namespace Wacs.Core.Instructions.GC
             X = (TypeIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32((uint)X.Value);
     }
     
     public class InstArrayNewFixed : InstructionBase, IConstInstruction
@@ -232,6 +238,12 @@ namespace Wacs.Core.Instructions.GC
             X = (TypeIdx)reader.ReadLeb128_u32();
             N = reader.ReadLeb128_u32();
             return this;
+        }
+
+        public override void RenderBinary(BinaryWriter writer)
+        {
+            writer.WriteLeb128_u32((uint)X.Value);
+            writer.WriteLeb128_u32(N);
         }
     }
     
@@ -335,8 +347,14 @@ namespace Wacs.Core.Instructions.GC
             Y = (DataIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer)
+        {
+            writer.WriteLeb128_u32((uint)X.Value);
+            writer.WriteLeb128_u32(Y.Value);
+        }
     }
-    
+
     public class InstArrayNewElem : InstructionBase
     {
         public InstArrayNewElem() : base(ByteCode.ArrayNewElem, -1) { }
@@ -424,8 +442,14 @@ namespace Wacs.Core.Instructions.GC
             Y = (ElemIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer)
+        {
+            writer.WriteLeb128_u32((uint)X.Value);
+            writer.WriteLeb128_u32(Y.Value);
+        }
     }
-    
+
     public class InstArrayGet : InstructionBase
     {
         private readonly PackedExt Sx;
@@ -534,6 +558,9 @@ namespace Wacs.Core.Instructions.GC
             X = (TypeIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32((uint)X.Value);
     }
     
     public class InstArraySet : InstructionBase
@@ -620,6 +647,9 @@ namespace Wacs.Core.Instructions.GC
             X = (TypeIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32((uint)X.Value);
     }
 
     public class InstArrayLen : InstructionBase
@@ -739,6 +769,9 @@ namespace Wacs.Core.Instructions.GC
             X = (TypeIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32((uint)X.Value);
     }
     
     public class InstArrayCopy : InstructionBase
@@ -870,8 +903,14 @@ namespace Wacs.Core.Instructions.GC
             Y = (TypeIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer)
+        {
+            writer.WriteLeb128_u32((uint)X.Value);
+            writer.WriteLeb128_u32((uint)Y.Value);
+        }
     }
-    
+
     public class InstArrayInitData : InstructionBase
     {
         public InstArrayInitData() : base(ByteCode.ArrayInitData, -4) { }
@@ -1003,8 +1042,14 @@ namespace Wacs.Core.Instructions.GC
             Y = (DataIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer)
+        {
+            writer.WriteLeb128_u32((uint)X.Value);
+            writer.WriteLeb128_u32(Y.Value);
+        }
     }
-    
+
     public class InstArrayInitElem : InstructionBase
     {
         public InstArrayInitElem() : base(ByteCode.ArrayInitElem, -4) { }
@@ -1126,6 +1171,12 @@ namespace Wacs.Core.Instructions.GC
             X = (TypeIdx)reader.ReadLeb128_u32();
             Y = (ElemIdx)reader.ReadLeb128_u32();
             return this;
+        }
+
+        public override void RenderBinary(BinaryWriter writer)
+        {
+            writer.WriteLeb128_u32((uint)X.Value);
+            writer.WriteLeb128_u32(Y.Value);
         }
     }
 }

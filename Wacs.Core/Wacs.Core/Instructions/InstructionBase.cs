@@ -99,6 +99,25 @@ namespace Wacs.Core.Instructions
         public virtual InstructionBase Parse(BinaryReader reader) => this;
 
         /// <summary>
+        /// Emit this instruction's immediates to the binary stream — the
+        /// inverse of <see cref="Parse(BinaryReader)"/>. Called by
+        /// <c>Wacs.Core.Bin.BinaryModuleWriter</c> immediately after it
+        /// writes the opcode bytes (and any 0xFB/0xFC/0xFD/0xFE
+        /// LEB128-encoded sub-opcode).
+        ///
+        /// <para>Default is a no-op: instructions with no immediates
+        /// (drop, add, end, etc.) inherit it as-is. Every subclass that
+        /// overrides <see cref="Parse(BinaryReader)"/> to consume
+        /// operands also overrides this method to emit them.</para>
+        ///
+        /// <para>Block-shaped instructions (Block/Loop/If/TryTable) emit
+        /// only their block-type prefix here; the writer walks their
+        /// inner sequences afterwards and recursively encodes each
+        /// instruction.</para>
+        /// </summary>
+        public virtual void RenderBinary(BinaryWriter writer) { }
+
+        /// <summary>
         /// Render the instruction at a given label stack depth
         /// </summary>
         public virtual string RenderText(ExecContext? context) => Op.GetMnemonic();

@@ -64,6 +64,9 @@ namespace Wacs.Core.Instructions.Numeric
             return Immediate(reader.ReadLeb128_s32());
         }
 
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_s32(Value);
+
         public InstructionBase Immediate(int value)
         {
             return LookupCache.GetOrAdd(value, static v =>
@@ -104,6 +107,9 @@ namespace Wacs.Core.Instructions.Numeric
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_s64(Value);
+
         public long FetchImmediate(ExecContext _) => Value;
 
         public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {Value}";
@@ -138,6 +144,9 @@ namespace Wacs.Core.Instructions.Numeric
             Value = reader.Read_f32();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.Write_f32(Value);
 
         public float FetchImmediate(ExecContext _) => Value;
 
@@ -181,6 +190,9 @@ namespace Wacs.Core.Instructions.Numeric
             Value = reader.Read_f64();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.Write_f64(Value);
 
         public double FetchImmediate(ExecContext _) => Value;
 

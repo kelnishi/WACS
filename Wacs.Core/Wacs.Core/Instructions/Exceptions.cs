@@ -126,6 +126,34 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer)
+        {
+            // Same shape as Parse: blocktype + catches-vector. The
+            // inner instruction sequence is emitted by the surrounding
+            // BinaryModuleWriter walk.
+            ValTypeWriter.WriteBlockType(writer, Block.BlockType);
+            writer.WriteLeb128_u32((uint)Catches.Length);
+            foreach (var c in Catches)
+                WriteCatchType(writer, c);
+        }
+
+        private static void WriteCatchType(BinaryWriter writer, CatchType c)
+        {
+            writer.Write((byte)c.Mode);
+            switch (c.Mode)
+            {
+                case CatchFlags.None:
+                case CatchFlags.CatchRef:
+                    writer.WriteLeb128_u32(c.X.Value);
+                    writer.WriteLeb128_u32(c.L.Value);
+                    break;
+                case CatchFlags.CatchAll:
+                case CatchFlags.CatchAllRef:
+                    writer.WriteLeb128_u32(c.L.Value);
+                    break;
+            }
+        }
+
         /// <summary>
         /// Internal factory for the text parser. Populates Block + Catches
         /// directly so the try_table keyword round-trips as an
@@ -215,8 +243,11 @@ namespace Wacs.Core.Instructions
             X = (TagIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32(X.Value);
     }
-    
+
     public class InstThrowRef : InstructionBase
     {
         public InstThrowRef() : base(ByteCode.ThrowRef, -1) { }

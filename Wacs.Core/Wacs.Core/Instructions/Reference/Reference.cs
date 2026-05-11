@@ -39,6 +39,16 @@ namespace Wacs.Core.Instructions.Reference
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer)
+        {
+            // The parser reads a single byte and OR-decorates with
+            // NullableRef. Abstract heap types map to their token byte
+            // (0x70 func, 0x6F extern, etc.); concrete type indices map
+            // to an s33-encoded heap-type index. WriteHeapType handles
+            // both — it inspects IsDefType on the ValType.
+            ValTypeWriter.WriteHeapType(writer, Type);
+        }
+
         public InstructionBase Immediate(ValType type)
         {
             Type = type;
@@ -118,7 +128,10 @@ namespace Wacs.Core.Instructions.Reference
             FunctionIndex = (FuncIdx)reader.ReadLeb128_u32();
             return this;
         }
-        
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32(FunctionIndex.Value);
+
         public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {FunctionIndex.Value}";
     }
 

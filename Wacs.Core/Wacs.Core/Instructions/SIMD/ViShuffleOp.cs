@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System.IO;
+using System.Runtime.InteropServices;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Validation;
@@ -63,6 +64,15 @@ namespace Wacs.Core.Instructions
         {
             X = ParseLanes(reader);
             return this;
+        }
+
+        public override void RenderBinary(BinaryWriter writer)
+        {
+            V128 v = X;
+            var span = MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref v, 1));
+            byte[] tmp = new byte[16];
+            span.CopyTo(tmp);
+            writer.Write(tmp);
         }
     }
 }

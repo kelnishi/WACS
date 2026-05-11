@@ -68,6 +68,9 @@ namespace Wacs.Core.Instructions
             M = (MemIdx)reader.ReadByte();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.Write((byte)M.Value);
     }
 
     //0x40
@@ -147,6 +150,9 @@ namespace Wacs.Core.Instructions
             M = (MemIdx)reader.ReadByte();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.Write((byte)M.Value);
     }
 
     //0xFC_08
@@ -246,6 +252,12 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer)
+        {
+            writer.WriteLeb128_u32(X.Value);
+            writer.Write((byte)Y.Value);
+        }
+
         public InstructionBase Immediate(DataIdx x, MemIdx y)
         {
             X = x;
@@ -293,6 +305,9 @@ namespace Wacs.Core.Instructions
             X = (DataIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32(X.Value);
 
         public InstructionBase Immediate(DataIdx x)
         {
@@ -401,6 +416,12 @@ namespace Wacs.Core.Instructions
             SrcY = (MemIdx)reader.ReadByte();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer)
+        {
+            writer.Write((byte)DstX.Value);
+            writer.Write((byte)SrcY.Value);
+        }
     }
 
     //0xFC_0B
@@ -472,5 +493,8 @@ namespace Wacs.Core.Instructions
             X = (MemIdx)reader.ReadByte();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.Write((byte)X.Value);
     }
 }

@@ -166,6 +166,9 @@ namespace Wacs.Core.Instructions.Numeric
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.Write(X);
+
 
         // @Spec 3.3.3.9. shape.extract_lane_sx
         private static ValidationDelegate ValidateFromLane(V128Shape shape) =>

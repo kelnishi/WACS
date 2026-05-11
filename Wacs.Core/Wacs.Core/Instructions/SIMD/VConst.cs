@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System.IO;
+using System.Runtime.InteropServices;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
 using Wacs.Core.Validation;
@@ -46,6 +47,17 @@ namespace Wacs.Core.Instructions.Simd
         {
             V128 = new V128(reader.ReadBytes(16));
             return this;
+        }
+
+        public override void RenderBinary(BinaryWriter writer)
+        {
+            // V128 has explicit FieldOffset layout; reinterpret as 16
+            // contiguous bytes and write them through.
+            V128 v = V128;
+            var span = MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref v, 1));
+            byte[] tmp = new byte[16];
+            span.CopyTo(tmp);
+            writer.Write(tmp);
         }
 
         public InstructionBase Immediate(V128 value)

@@ -63,6 +63,9 @@ namespace Wacs.Core.Instructions
             return Immediate((int)reader.ReadLeb128_u32());
         }
 
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32((uint)Index);
+
         public InstructionBase Immediate(int index)
         {
             return LookupCache.GetOrAdd(index, static i =>
@@ -113,6 +116,9 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32((uint)Index);
+
         public override string RenderText(ExecContext? context)
         {
             if (context == null)
@@ -121,7 +127,7 @@ namespace Wacs.Core.Instructions
                 return $"{base.RenderText(context)} {Index}";
             if (!context.Frame.Locals.ContainsIndex(Index))
                 return $"{base.RenderText(context)} {Index}";
-            
+
             var value = context.Frame.Locals.Span[Index];
             string valStr = $" (;>{value}<;)";
             return $"{base.RenderText(context)} {Index}{valStr}";
@@ -182,6 +188,9 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32((uint)Index);
+
         public override string RenderText(ExecContext? context)
         {
             if (context == null)
@@ -190,7 +199,7 @@ namespace Wacs.Core.Instructions
                 return $"{base.RenderText(context)} {Index}";
             if (!context.Frame.Locals.ContainsIndex(Index))
                 return $"{base.RenderText(context)} {Index}";
-            
+
             var value = context.Frame.Locals.Span[Index];
             string valStr = $" (;>{value}<;)";
             return $"{base.RenderText(context)} {Index}{valStr}";

@@ -63,5 +63,19 @@ namespace Wacs.Core.Types
             var align = Align.LinearSize() != naturalAlign.ByteSize() ? $" align={Align}" : "";
             return $"{offset}{align}";
         }
+
+        /// <summary>
+        /// Inverse of <see cref="Parse"/>: emit the alignment-flags byte,
+        /// the optional MemIdx (when the multi-memory flag bit is set),
+        /// and the u64 offset.
+        /// </summary>
+        public void RenderBinary(BinaryWriter writer)
+        {
+            uint bits = (uint)Align;
+            writer.WriteLeb128_u32(bits);
+            if ((bits & (uint)Alignment.MemIdxSet) != 0)
+                writer.WriteLeb128_s32((int)M.Value);
+            writer.WriteLeb128_u64((ulong)Offset);
+        }
     }
 }

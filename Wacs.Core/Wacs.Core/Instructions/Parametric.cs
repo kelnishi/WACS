@@ -122,6 +122,14 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer)
+        {
+            if (!WithTypes) return;
+            writer.WriteLeb128_u32((uint)Types.Length);
+            foreach (var t in Types)
+                ValTypeWriter.WriteValType(writer, t, parseStorageType: false);
+        }
+
         public override string RenderText(ExecContext? context) => $"{base.RenderText(context)}{(WithTypes ? $" {new ResultType(Types).ToResults()}" : "")}";
     }
     

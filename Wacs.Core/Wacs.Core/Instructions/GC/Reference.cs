@@ -73,6 +73,9 @@ namespace Wacs.Core.Instructions.GC
             Ht = ValTypeParser.ParseHeapType(reader, Nullable);
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            ValTypeWriter.WriteHeapType(writer, Ht);
     }
     
     public class InstRefTest : InstructionBase
@@ -122,6 +125,9 @@ namespace Wacs.Core.Instructions.GC
             Ht = ValTypeParser.ParseHeapType(reader, Nullable);
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            ValTypeWriter.WriteHeapType(writer, Ht);
     }
     
 }

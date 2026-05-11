@@ -78,8 +78,11 @@ namespace Wacs.Core.Instructions.Reference
             L = (LabelIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32(L.Value);
     }
-    
+
     public class InstBrOnNonNull : InstructionBase
     {
         public InstBrOnNonNull() : base(ByteCode.BrOnNonNull, -1) { }
@@ -133,8 +136,11 @@ namespace Wacs.Core.Instructions.Reference
             L = (LabelIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32(L.Value);
     }
-    
+
     public class InstCallRef : InstructionBase, ICallInstruction
     {
         public TypeIdx X;
@@ -225,6 +231,9 @@ namespace Wacs.Core.Instructions.Reference
             X = (TypeIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32((uint)X.Value);
 
         public InstructionBase Immediate(TypeIdx value)
         {

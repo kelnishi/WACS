@@ -60,6 +60,8 @@ namespace Wacs.Core.Instructions.Atomic
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer) => M.RenderBinary(writer);
+
         public InstructionBase Immediate(MemArg m)
         {
             M = m;

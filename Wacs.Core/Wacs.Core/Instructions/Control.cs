@@ -135,6 +135,12 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
+        // BinaryModuleWriter emits the inner instructions (including the
+        // trailing End) by walking GetBlock(0) directly; here we just
+        // emit the block-type immediate.
+        public override void RenderBinary(BinaryWriter writer) =>
+            ValTypeWriter.WriteBlockType(writer, Block.BlockType);
+
         public BlockTarget Immediate(ValType blockType, InstructionSequence sequence)
         {
             Block = new Block(
@@ -207,6 +213,9 @@ namespace Wacs.Core.Instructions
             );
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            ValTypeWriter.WriteBlockType(writer, Block.BlockType);
 
         public BlockTarget Immediate(ValType blockType, InstructionSequence sequence)
         {
@@ -320,6 +329,9 @@ namespace Wacs.Core.Instructions
             }
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            ValTypeWriter.WriteBlockType(writer, IfBlock.BlockType);
 
         public BlockTarget Immediate(ValType blockType, InstructionSequence ifSeq, InstructionSequence elseSeq)
         {
@@ -585,6 +597,9 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32(L.Value);
+
         // public override string RenderText(ExecContext? context)
         // {
         //     if (context == null) return $"{base.RenderText(context)} {L.Value}";
@@ -654,10 +669,13 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32(L.Value);
+
         // public override string RenderText(ExecContext? context)
         // {
         //     if (context == null) return $"{base.RenderText(context)} {L.Value}";
-        //     
+        //
         //     int depth = context.Frame.TopLabel.LabelHeight - 1;
         //     string taken = "";
         //     if (context.Attributes.Live)
@@ -767,6 +785,13 @@ namespace Wacs.Core.Instructions
             Ls = reader.ParseVector(ParseLabelIndex);
             Ln = (LabelIdx)reader.ReadLeb128_u32();
             return this;
+        }
+
+        public override void RenderBinary(BinaryWriter writer)
+        {
+            writer.WriteLeb128_u32((uint)Ls.Length);
+            foreach (var l in Ls) writer.WriteLeb128_u32(l.Value);
+            writer.WriteLeb128_u32(Ln.Value);
         }
 
         // public override string RenderText(ExecContext? context)
@@ -954,6 +979,9 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32(X.Value);
+
         public InstructionBase Immediate(FuncIdx value)
         {
             X = value;
@@ -984,7 +1012,7 @@ namespace Wacs.Core.Instructions
                         }
                         sb.Append("]");
                     }
-                    
+
                     return $"{base.RenderText(context)} {X.Value} (; -> {func.Id}{sb};)";
                 }
             }
@@ -1204,6 +1232,13 @@ namespace Wacs.Core.Instructions
             Y = (TypeIdx)reader.ReadLeb128_u32();
             X = (TableIdx)reader.ReadLeb128_u32();
             return this;
+        }
+
+        public override void RenderBinary(BinaryWriter writer)
+        {
+            // Wire order: y (typeidx) then x (tableidx) — matches Parse.
+            writer.WriteLeb128_u32((uint)Y.Value);
+            writer.WriteLeb128_u32(X.Value);
         }
 
         public override string RenderText(ExecContext? context)
