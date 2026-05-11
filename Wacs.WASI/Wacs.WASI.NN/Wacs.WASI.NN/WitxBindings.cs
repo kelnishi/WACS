@@ -15,31 +15,38 @@ using Wacs.WASI.NN.Types;
 namespace Wacs.WASI.NN
 {
     /// <summary>
-    /// Legacy core-module ABI binding for <c>wasi_ephemeral_nn</c>.
-    /// Wire format from <c>wit/wasi-nn.witx</c> — six imports,
-    /// indexed inputs / outputs, plain i32 handles, u16 errno
-    /// returns. The same <see cref="IBackend"/> SPI that the
-    /// WIT resource layer consumes; this binding handles the
-    /// stateful set_input / compute / get_output lifecycle by
-    /// stashing tensors per-context in
-    /// <see cref="WasiNNHost.WitxContextState"/>.
+    /// Legacy core-module ABI binding for <c>wasi_ephemeral_nn</c>,
+    /// targeting the bytecodealliance <c>wasi-nn 0.6</c> wire format
+    /// that ships in the upstream Rust crate. Six imports, indexed
+    /// inputs / outputs, plain i32 handles, u16 errnos.
     ///
-    /// <para>Memory layout from the WITX (all little-endian):
+    /// <para>The errno encoding splits across two conventions, matching
+    /// what the 0.6 crate emits:
+    /// <list type="bullet">
+    /// <item>Data-returning calls (<c>load</c>, <c>load_by_name</c>,
+    /// <c>init_execution_context</c>, <c>get_output</c>) take a
+    /// trailing <c>retArea</c> i32 pointer. Host writes the errno
+    /// to retArea+0 and the payload to retArea+4; the function's
+    /// own i32 result is unused (always 0).</item>
+    /// <item>Void-Ok calls (<c>set_input</c>, <c>compute</c>) carry
+    /// no payload, so the errno collapses to the function's i32
+    /// return value — no retArea pointer.</item>
+    /// </list></para>
+    ///
+    /// <para>Memory layout helpers (all little-endian):
     /// <list type="bullet">
     /// <item><c>graph_builder_array</c> = (ptr, len) where each
     /// element is itself (ptr, len) describing one
     /// <c>graph_builder</c> blob.</item>
-    /// <item><c>tensor</c> = (dimensions ptr, dimensions len, type u8,
-    /// 3 padding, data ptr, data len).</item>
-    /// <item>Result <c>expected T (error nn_errno)</c> writes the
-    /// errno to the return-area's first u16; on success the
-    /// value at offset matches the witx's payload alignment.</item>
+    /// <item><c>set_input</c>'s tensor arg is a single i32 pointer
+    /// to a 20-byte packed record: (dims_ptr i32, dims_len i32,
+    /// type u8 + 3 padding, data_ptr i32, data_len i32).</item>
     /// </list></para>
     ///
-    /// <para>Per-call canonical-ABI lift/lower lives inline in
-    /// each handler. This is verbose vs. the WIT path's typed
-    /// binders, but the WITX shape is fixed (no version churn)
-    /// so duplication isn't a future-cost issue.</para>
+    /// <para>The same <see cref="IBackend"/> SPI the WIT resource
+    /// layer consumes drives this binding; per-context tensors
+    /// stash in <see cref="WasiNNHost.WitxContextState"/> across
+    /// the stateful set_input / compute / get_output lifecycle.</para>
     /// </summary>
     internal static class WitxBindings
     {
@@ -142,17 +149,23 @@ namespace Wacs.WASI.NN
                 });
         }
 
-        // set_input(context: graph_execution_context, index: u32, tensor: $tensor)
-        //   -> expected<_, nn_errno>
-        // The $tensor record is 24 bytes flat: (dims_ptr i32, dims_len i32,
-        //   type u8, 3 padding, data_ptr i32, data_len i32). The wire passes
-        //   the record by-value, expanded into 6 i32s (dims_ptr, dims_len,
-        //   type-padded-as-i32, data_ptr, data_len, retArea).
+        // set_input(context: graph_execution_context, index: u32, tensor: *const Tensor)
+        //   -> nn_errno
+        // bytecodealliance wasi-nn 0.6 ABI: the tensor record is passed
+        // by-pointer, not by-value-expanded. Guest writes a 20-byte
+        // packed struct into linear memory and passes its address:
+        //   offset 0:  dims_ptr   i32  (*const usize — wasm32 usize = u32)
+        //   offset 4:  dims_len   i32  (slice len)
+        //   offset 8:  type       u8   (TensorType, low byte of i32 cell)
+        //   offset 9:  padding    3    (to 4-byte align)
+        //   offset 12: data_ptr   i32  (*const u8)
+        //   offset 16: data_len   i32  (slice len)
+        // The errno is the function's i32 return value; there is no retArea.
         private static void BindSetInput(WasmRuntime runtime, WasiNNHost host)
         {
-            runtime.BindHostFunction<Func<ExecContext, int, int, int, int, int, int, int, int, int>>(
+            runtime.BindHostFunction<Func<ExecContext, int, int, int, int>>(
                 (Module, "set_input"),
-                (ctx, ctxHandle, index, dimsPtr, dimsLen, type, dataPtr, dataLen, retArea) =>
+                (ctx, ctxHandle, index, tensorPtr) =>
                 {
                     try
                     {
@@ -160,28 +173,34 @@ namespace Wacs.WASI.NN
                             throw new WasiNNException(
                                 ErrorCode.InvalidArgument,
                                 $"invalid execution-context handle {ctxHandle}");
+                        var mem = ctx.Memory();
+                        int dimsPtr  = ReadI32LE(mem, tensorPtr + 0);
+                        int dimsLen  = ReadI32LE(mem, tensorPtr + 4);
+                        byte typeTag = mem[tensorPtr + 8];
+                        int dataPtr  = ReadI32LE(mem, tensorPtr + 12);
+                        int dataLen  = ReadI32LE(mem, tensorPtr + 16);
                         var tensor = LiftTensor(ctx, dimsPtr, dimsLen,
-                            ParseWitxTensorType((byte)type), dataPtr, dataLen);
+                            ParseWitxTensorType(typeTag), dataPtr, dataLen);
                         state.Inputs[(uint)index] = tensor;
                         // Recompute on next compute() call.
                         state.HasComputed = false;
-                        WriteWitxOk(ctx, retArea);
                         return 0;
                     }
                     catch (WasiNNException e)
                     {
-                        WriteWitxErr(ctx, retArea, e.Code);
-                        return 0;
+                        return (int)(ushort)e.Code.ToWitx();
                     }
                 });
         }
 
-        // compute(context: graph_execution_context) -> expected<_, nn_errno>
+        // compute(context: graph_execution_context) -> nn_errno
+        // bytecodealliance wasi-nn 0.6 ABI: errno is the i32 return value,
+        // no retArea pointer (the void-Ok case carries no payload).
         private static void BindCompute(WasmRuntime runtime, WasiNNHost host)
         {
-            runtime.BindHostFunction<Func<ExecContext, int, int, int>>(
+            runtime.BindHostFunction<Func<ExecContext, int, int>>(
                 (Module, "compute"),
-                (ctx, ctxHandle, retArea) =>
+                (ctx, ctxHandle) =>
                 {
                     try
                     {
@@ -211,13 +230,11 @@ namespace Wacs.WASI.NN
                             state.Outputs[idx] = outputs[i].Tensor;
                         }
                         state.HasComputed = true;
-                        WriteWitxOk(ctx, retArea);
                         return 0;
                     }
                     catch (WasiNNException e)
                     {
-                        WriteWitxErr(ctx, retArea, e.Code);
-                        return 0;
+                        return (int)(ushort)e.Code.ToWitx();
                     }
                 });
         }
@@ -373,9 +390,11 @@ namespace Wacs.WASI.NN
         // expected<T, nn_errno> on success: errno=0 in the first
         // u16 of the retArea. The actual T then sits at offset
         // matching the result's payload alignment (max(2, align_of<T>)).
-        // For graph / context returns the payload alignment is 4, so
-        // the i32 sits at +4. For empty Ok (set_input/compute) the
-        // retArea is just the errno.
+        // For graph / context / buffer_size returns the payload
+        // alignment is 4, so the i32 sits at +4. Only the four
+        // data-returning calls use retArea — set_input and compute
+        // collapse the empty-Ok / errno case onto the function's
+        // i32 return value (no retArea pointer in their wire form).
         private static void WriteWitxOk(ExecContext ctx, int retArea)
         {
             ctx.WriteI32LE(retArea, 0);

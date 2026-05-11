@@ -1,5 +1,62 @@
 # Changelog
 
+## WACS.WASI.NN 0.3.4 — align WITX `set_input` / `compute` with bytecodealliance wasi-nn 0.6 ABI
+
+The legacy `wasi_ephemeral_nn` core-module binding in `WitxBindings.cs`
+matched a stale interpretation of the WITX where every result lifted
+through a `retArea` pointer. Real bytecodealliance `wasi-nn` 0.6
+guests (`wasi-nn` crate 0.6 on crates.io) ship a different wire shape
+for the two void-Ok calls: the errno collapses to the function's i32
+return value, no retArea pointer.
+
+Two signature changes against the previously-bound WACS shape:
+
+| Function    | Args before                                      | Args now (0.6)                | Errno encoding       |
+|-------------|--------------------------------------------------|-------------------------------|----------------------|
+| `set_input` | `(ctx, idx, dimsPtr, dimsLen, type, dataPtr, dataLen, retArea) → i32` | `(ctx, idx, tensorPtr) → i32` | i32 return value     |
+| `compute`   | `(ctx, retArea) → i32`                           | `(ctx) → i32`                 | i32 return value     |
+
+`set_input`'s `tensorPtr` points at a 20-byte packed record matching
+the upstream `wasi-nn` crate's `Tensor<'t>` `#[repr(C)]` layout:
+
+```
+offset 0:  dims_ptr   i32  (*const usize — usize = u32 on wasm32)
+offset 4:  dims_len   i32  (slice len)
+offset 8:  type       u8   (TensorType enum, low byte of i32 cell)
+offset 9:  padding    3    (to 4-byte align)
+offset 12: data_ptr   i32  (*const u8)
+offset 16: data_len   i32  (slice len)
+```
+
+The four data-returning calls (`load`, `load_by_name`,
+`init_execution_context`, `get_output`) keep their `retArea`
+convention — they carry actual payload, so the crate continues to
+write `(errno, T)` into the caller-supplied buffer. Only the two
+void-Ok calls move to direct-i32-errno.
+
+### Verification
+
+`wasm-objdump` on the compiled `wasi-nn = "0.6"` guest's import section
+confirms the wire signatures:
+
+```
+- func[0] sig=0 (i32, i32, i32) -> i32   <- wasi_ephemeral_nn.set_input
+- func[1] sig=0 (i32, i32, i32) -> i32   <- wasi_ephemeral_nn.load_by_name
+- func[2] sig=1 (i32, i32)      -> i32   <- wasi_ephemeral_nn.init_execution_context
+- func[3] sig=5 (i32)           -> i32   <- wasi_ephemeral_nn.compute
+- func[4] sig=6 (i32, i32, i32, i32, i32) -> i32   <- wasi_ephemeral_nn.get_output
+```
+
+All five match the bound signatures after this change. `Wacs.WASI.NN.Test`
+suite passes (18/18); the existing `DualAbiBindingsTests` covers
+name-level binding registration so the rename-free signature change
+doesn't perturb the dual-ABI manifest.
+
+WasmEdge's downstream fork (`wasmedge-wasi-nn` 0.7+) adds a GGML
+encoding variant and a 2-arg `compute(ctx, options)` shape —
+incompatible with the bytecodealliance ABI we now target. Cross-fork
+support is a separate task if/when WasmEdge interop becomes a goal.
+
 ## Documentation — unified wasi-nn usage guide
 
 New canonical entry point at [`docs/WASI_NN_USAGE.md`](docs/WASI_NN_USAGE.md):
