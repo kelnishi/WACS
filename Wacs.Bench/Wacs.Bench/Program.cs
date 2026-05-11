@@ -12,6 +12,8 @@ using Wacs.Core.Runtime;
 
 if (args.Length > 0 && args[0] == "coldstart")
     return Coldstart.Run(args);
+if (args.Length > 0 && args[0] == "fib30")
+    return Fib30.Run(args);
 
 static long RunOne(string wasmPath, bool useSwitch, bool superInst, bool useMinimal, bool switchSuper, Bench b)
 {
