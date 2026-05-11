@@ -1,5 +1,35 @@
 # Changelog
 
+## WACS 0.15.15 — WAT byte-offset annotation (Pass F)
+
+WAT-parsed modules now carry `InstructionBase.ByteOffsetInFunc`
+stamps that match what the binary parser records natively, so
+stack-trace formatting surfaces `@+0xXX` coordinates regardless
+of which parser produced the module.
+
+### What changed
+
+- New `Wacs.Core.Bin.ByteOffsetAnnotator` walks every defined
+  function body through a counting `Stream` wrapper that
+  swallows writes and only tracks position, then stamps each
+  instruction's body-relative byte offset using the existing
+  `BinaryModuleWriter` encoder machinery. Block-shaped
+  instructions (`block`/`loop`/`if`/`try_table`) recurse into
+  their inner sequences.
+- `TextModuleParser.FinalizeModule` invokes the annotator
+  immediately after `SynthesizeNameSection`. One extra body-
+  shaped walk per module load — no per-instruction allocations
+  — amortized over every subsequent trap-format call.
+- Closes the byte-offset half of the binary-vs-text parity gap
+  called out in 0.15.14. The source-line bridge for binary
+  inputs (Pass G) remains the last item.
+
+### Tests
+
+`ByteOffsetAnnotatorTests` (4 cases): flat-body, WAT/binary
+agreement on flat and on nested `block`/`loop` shapes, and
+`if`/`else` branch coverage. Full suite: 483/483.
+
 ## WACS 0.15.14 / WACS.Cli 1.6.5 — name-section round-trip parity (Gap A closed)
 
 WAT-parsed and binary-parsed modules now produce stack traces

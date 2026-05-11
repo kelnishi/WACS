@@ -418,6 +418,15 @@ namespace Wacs.Core.Text
             // only when at least one function carries a name; pure-
             // numeric modules leave Module.Names null.
             SynthesizeNameSection(module);
+
+            // Populate ByteOffsetInFunc on every instruction so
+            // stack-trace formatting can surface `@+0xXX`
+            // coordinates for WAT-parsed modules, matching what the
+            // binary parser stamps natively. Walks each function
+            // body through a counting stream — no allocations per
+            // instruction. One-time cost at parse, amortized over
+            // every subsequent trap-format call.
+            Wacs.Core.Bin.ByteOffsetAnnotator.Annotate(module);
         }
 
         /// <summary>
