@@ -1,5 +1,73 @@
 # Changelog
 
+## WACS.Cli 1.5.24 / WACS.WASI.NN.OnnxRuntimeGenAI 0.1.1 / WACS.WASI.Preview2.DependencyInjection 0.1.8 — gap 31: `BuildOnnxGenAIConfigureCallback` auto-wires the GenAI backend via `--bind`
+
+`wasi-nn/WACS-GAPS.md` gap 31: the new `OnnxRuntimeGenAI` backend's
+`IBindable` was wiring its backend into a per-host
+`WasiNNConfiguration.LoadByNameBackend`, but the DI bundle's shared
+`WasiNNConfiguration` — the one `GraphFuncsImpl.LoadByName` consults
+under `--engine transpiler --wasip2` — stayed null because
+`WasiPreview2RuntimeScope.ReflectivelyAddWasiNN` had no auto-wire
+callback for GenAI. Same shape as gap 20 (LlamaSharp's registry-split,
+closed at round 14) and its TorchSharp sibling.
+
+Symptom from `run-llm.sh -v`:
+
+```
+loading model 'gemma-3-270m-it-genai' via wasi-nn graph.load-by-name…
+Error: "wasi-nn ErrorCode::NotFound: no named-model resolver
+       configured and no LoadByNameBackend wired"
+```
+
+### Fix
+
+- **`OnnxGenAIBackend.FromDirectories(IDictionary<string, string>)`**
+  (new static factory) — mirror of `TorchSharpBackend.FromPaths`. Takes
+  a name→directory map and constructs a backend with a lookup
+  resolver. Lets the scope's reflective auto-wire emit Linq.Expression
+  IL without threading a `Func<string, string?>` delegate type across
+  the assembly boundary.
+- **`WasiPreview2RuntimeScope.BuildOnnxGenAIConfigureCallback`** —
+  mirror of `BuildTorchSharpConfigureCallback`. Detects
+  `Wacs.WASI.NN.OnnxRuntimeGenAI.OnnxGenAIBackend`, builds an
+  env-driven registry from `$WACS_WASINN_GENAI_DIR` (subdirectory
+  scan for `genai_config.json`, matching `WasiNNOnnxGenAIBindable`'s
+  shape), and wires the backend into `LoadByNameBackend` ONLY —
+  leaves `Backends[ONNX]` for the regular `OnnxBackend` so
+  `graph.load(bytes)` keeps its byte-tensor I/O path and
+  `graph.load-by-name(<dir>)` routes to GenAI's KV-cached decode loop.
+- Plumbed into the existing `CombineCallbacks` chain alongside the
+  ONNX / LlamaSharp / TorchSharp callbacks.
+
+### Co-existence with the regular OnnxBackend
+
+Both backends register for `GraphEncoding.ONNX`. The GenAI backend
+claims `LoadByNameBackend` only, leaving `Backends[ONNX]` for the raw
+`OnnxBackend`. With both loaded:
+
+- `graph.load(bytes, ONNX)` → `OnnxBackend` (byte-loaded single-shot
+  tensor I/O)
+- `graph.load-by-name("model-dir")` → `OnnxGenAIBackend` (KV-cached
+  generative decoding)
+
+### Versions
+
+- `WACS.Cli` 1.5.23 → **1.5.24** (release event)
+- `WACS.WASI.NN.OnnxRuntimeGenAI` 0.1.0 → **0.1.1** (new
+  `FromDirectories` factory)
+- `WACS.WASI.Preview2.DependencyInjection` 0.1.7 → **0.1.8** (new
+  auto-wire callback)
+
+### Test plan
+
+- `Wacs.WASI.NN.OnnxRuntimeGenAI.Test` 8/8
+- `Wacs.WASI.Preview2.Test` 189/189
+- **Empirical** (user verification):
+  `BACKEND_DLL=Wacs.WASI.NN.OnnxRuntimeGenAI.dll
+  MODEL_NAME=gemma-3-270m-it-genai scripts/run-llm.sh` should resolve
+  the model directory and route through `GraphFuncsImpl.LoadByName` →
+  `OnnxGenAIBackend.LoadGraphByName` instead of returning NotFound.
+
 ## WACS.Cli 1.5.23 / WACS.Transpiler.Lib 0.8.15 / WACS 0.13.8 / WACS.WASI.NN 0.3.3 / WACS.WASI.Preview2.DependencyInjection 0.1.7 — fix unbounded leak: `[resource-drop]X` was a silent no-op under `--engine transpiler`
 
 User-reported regression: the wasi-nn SLM REPL grew the host process to
