@@ -61,7 +61,15 @@ namespace Wacs.WASI.NN.DependencyInjection
                         new Wacs.WASI.NN.Types.Tensor(dims, ty, data));
                 }
 
-                var outputs = _backendCtx.Compute(bridged);
+                // Goes through MemoryDiagnostics so the transpiler
+                // / wasip2 direct-link path emits per-call snapshots
+                // when WACS_DIAG_MEMORY=1 — matches the interpreter
+                // WIT / WITX hooks in Wacs.WASI.NN. Without this the
+                // direct-link path silently skips the diagnostics
+                // (it bypasses the interpreter's BindHostFunction
+                // wiring entirely).
+                var outputs = MemoryDiagnostics.RunWithDiagnostics(
+                    _backendCtx, bridged);
                 var result = new (string, Nn.ITensor)[outputs.Count];
                 for (int i = 0; i < outputs.Count; i++)
                 {

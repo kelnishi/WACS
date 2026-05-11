@@ -168,6 +168,22 @@ namespace Wacs.WASI.Preview2.DependencyInjection
 
             Resources = sp.GetRequiredService<WasiPreview2Resources>();
             Bundle = ResolveBundle(sp);
+
+            // Wire the cross-binding resource-drop hook so the
+            // interpreter's [resource-drop]X handlers (registered
+            // earlier when IBindable BindToRuntime calls fired)
+            // also release handles allocated through the
+            // direct-link path's WasiPreview2Resources table. The
+            // SLM workflow allocates ~26-230 MiB logits tensors
+            // per token through the direct-link compute call; the
+            // interpreter binding's host.Tensors.Drop is a no-op
+            // for those handles, so without this hook every token
+            // leaks its logits tensor for the lifetime of the
+            // component instance. Setter is idempotent — repeat
+            // scope construction (typically one per component
+            // instance) just rewires to the latest Resources.
+            Runtime.ExternalResourceDrop =
+                (t, h) => Resources.FreeResource(t, h);
         }
 
         private static object ResolveBundle(IServiceProvider sp)

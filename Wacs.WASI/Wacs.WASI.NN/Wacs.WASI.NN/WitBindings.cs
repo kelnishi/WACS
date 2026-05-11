@@ -97,9 +97,25 @@ namespace Wacs.WASI.NN
                 });
 
             // [resource-drop]error(self: own<error>)
+            // The transpiler-direct-link path allocates handles in
+            // WasiPreview2Resources.AllocateResource(typeof(IError),
+            // ...) rather than host.Errors — different table. Drop
+            // from both so whichever table holds the entry actually
+            // releases it. Off-table drops return false silently.
             runtime.BindHostFunction<Action<ExecContext, int>>(
                 (ErrorsNs, "[resource-drop]error"),
-                (_, h) => host.Errors.Drop(h));
+                (_, h) =>
+                {
+                    System.Threading.Interlocked.Increment(
+                        ref MemoryDiagnostics.InterpreterDropInvocations);
+                    host.Errors.Drop(h);
+                    if (runtime.ExternalResourceDrop != null)
+                    {
+                        runtime.ExternalResourceDrop(typeof(Nn.IError), h);
+                        System.Threading.Interlocked.Increment(
+                            ref MemoryDiagnostics.ExternalDropInvocations);
+                    }
+                });
         }
 
         // ----------------------------------------------------
@@ -156,10 +172,25 @@ namespace Wacs.WASI.NN
                     WriteU8List(ctx, alloc, retArea, t.Data.Span);
                 });
 
-            // [resource-drop]tensor(self)
+            // [resource-drop]tensor(self) — see [resource-drop]error
+            // comment above re: drop-from-both-tables rationale.
+            // For the SLM workflow this is the critical hook:
+            // logits tensors are ~26-230 MiB each, allocated on the
+            // direct-link path, and never freed without it.
             runtime.BindHostFunction<Action<ExecContext, int>>(
                 (TensorNs, "[resource-drop]tensor"),
-                (_, h) => host.Tensors.Drop(h));
+                (_, h) =>
+                {
+                    System.Threading.Interlocked.Increment(
+                        ref MemoryDiagnostics.InterpreterDropInvocations);
+                    host.Tensors.Drop(h);
+                    if (runtime.ExternalResourceDrop != null)
+                    {
+                        runtime.ExternalResourceDrop(typeof(Nn.ITensor), h);
+                        System.Threading.Interlocked.Increment(
+                            ref MemoryDiagnostics.ExternalDropInvocations);
+                    }
+                });
         }
 
         // ----------------------------------------------------
@@ -241,10 +272,22 @@ namespace Wacs.WASI.NN
                     }
                 });
 
-            // [resource-drop]graph(self)
+            // [resource-drop]graph(self) — see [resource-drop]error
+            // comment re: drop-from-both-tables rationale.
             runtime.BindHostFunction<Action<ExecContext, int>>(
                 (GraphNs, "[resource-drop]graph"),
-                (_, h) => host.Graphs.Drop(h));
+                (_, h) =>
+                {
+                    System.Threading.Interlocked.Increment(
+                        ref MemoryDiagnostics.InterpreterDropInvocations);
+                    host.Graphs.Drop(h);
+                    if (runtime.ExternalResourceDrop != null)
+                    {
+                        runtime.ExternalResourceDrop(typeof(Nn.IGraph), h);
+                        System.Threading.Interlocked.Increment(
+                            ref MemoryDiagnostics.ExternalDropInvocations);
+                    }
+                });
         }
 
         // ----------------------------------------------------
@@ -272,7 +315,8 @@ namespace Wacs.WASI.NN
                                 ErrorCode.InvalidArgument,
                                 $"invalid execution-context handle {ctxHandle}");
                         var inputs = ReadNamedTensorList(ctx, host, inPtr, inLen);
-                        var outputs = bctx.Compute(inputs);
+                        var outputs = MemoryDiagnostics.RunWithDiagnostics(
+                            bctx, inputs);
                         WriteResultNamedTensorListOk(ctx, host, alloc, retArea, outputs);
                     }
                     catch (WasiNNException e)
@@ -282,10 +326,23 @@ namespace Wacs.WASI.NN
                     }
                 });
 
-            // [resource-drop]graph-execution-context(self)
+            // [resource-drop]graph-execution-context(self) — see
+            // [resource-drop]error comment re: drop-from-both-tables.
             runtime.BindHostFunction<Action<ExecContext, int>>(
                 (InferenceNs, "[resource-drop]graph-execution-context"),
-                (_, h) => host.Contexts.Drop(h));
+                (_, h) =>
+                {
+                    System.Threading.Interlocked.Increment(
+                        ref MemoryDiagnostics.InterpreterDropInvocations);
+                    host.Contexts.Drop(h);
+                    if (runtime.ExternalResourceDrop != null)
+                    {
+                        runtime.ExternalResourceDrop(
+                            typeof(Nn.IGraphExecutionContext), h);
+                        System.Threading.Interlocked.Increment(
+                            ref MemoryDiagnostics.ExternalDropInvocations);
+                    }
+                });
         }
 
         // ====================================================

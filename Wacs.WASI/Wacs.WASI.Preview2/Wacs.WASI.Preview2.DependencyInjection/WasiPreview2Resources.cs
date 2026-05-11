@@ -78,5 +78,30 @@ namespace Wacs.WASI.Preview2.DependencyInjection
             var table = _context.TableFor(resourceInterface);
             return table.Allocate(instance);
         }
+
+        /// <summary>
+        /// Release a handle previously returned by
+        /// <see cref="AllocateResource"/>. Disposes the held
+        /// instance if it implements <see cref="IDisposable"/>.
+        /// Returns true when the handle was registered. Idempotent
+        /// — re-dropping returns false rather than throwing,
+        /// matching the canonical-ABI semantics.
+        ///
+        /// <para>Cross-package wiring: the wasi-nn DI scope
+        /// hooks this into <c>WasiNNHost.ExternalResourceDrop</c>
+        /// so the interpreter's <c>[resource-drop]X</c> binding
+        /// can release entries the direct-link path put here.
+        /// Without that bridge, host-imported resources allocated
+        /// during a transpiler-direct-link compute pile up in the
+        /// table forever — for the SLM workflow that's GBs of
+        /// per-token logits tensors.</para>
+        /// </summary>
+        public bool FreeResource(Type resourceInterface, int handle)
+        {
+            if (resourceInterface == null)
+                throw new ArgumentNullException(nameof(resourceInterface));
+            var table = _context.TableFor(resourceInterface);
+            return table.Drop(handle);
+        }
     }
 }
