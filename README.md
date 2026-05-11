@@ -6,33 +6,7 @@
 &nbsp;[![License](https://img.shields.io/github/license/kelnishi/WACS)](LICENSE)
 &nbsp;[![Downloads](https://img.shields.io/nuget/dt/WACS?label=WACS%20downloads)](https://www.nuget.org/packages/WACS)
 
-**NuGet packages**
-
-**Core runtime** &nbsp; <a href="https://www.nuget.org/packages/WACS"><img src="https://img.shields.io/nuget/v/WACS?label=WACS&style=flat-square" width="180"/></a> <a href="https://www.nuget.org/packages/WACS.Cli"><img src="https://img.shields.io/nuget/v/WACS.Cli?label=Cli&style=flat-square" width="180"/></a> <a href="https://www.nuget.org/packages/WACS.Transpiler.Lib"><img src="https://img.shields.io/nuget/v/WACS.Transpiler.Lib?label=Transpiler.Lib&style=flat-square" width="180"/></a>
-
-**Component Model** &nbsp; <a href="https://www.nuget.org/packages/WACS.ComponentModel"><img src="https://img.shields.io/nuget/v/WACS.ComponentModel?label=ComponentModel&style=flat-square" width="180"/></a> <a href="https://www.nuget.org/packages/WACS.ComponentModel.Bindgen.Lib"><img src="https://img.shields.io/nuget/v/WACS.ComponentModel.Bindgen.Lib?label=Bindgen.Lib&style=flat-square" width="180"/></a>
-
-**Host bindings** &nbsp; <a href="https://www.nuget.org/packages/WACS.HostBindings.Abstractions"><img src="https://img.shields.io/nuget/v/WACS.HostBindings.Abstractions?label=Abstractions&style=flat-square" width="180"/></a> <a href="https://www.nuget.org/packages/WACS.HostBindings.SourceGen"><img src="https://img.shields.io/nuget/v/WACS.HostBindings.SourceGen?label=SourceGen&style=flat-square" width="180"/></a>
-
-**WASI Preview 1** &nbsp; <a href="https://www.nuget.org/packages/WACS.WASI.Preview1"><img src="https://img.shields.io/nuget/v/WACS.WASI.Preview1?label=WASI.Preview1&style=flat-square" width="180"/></a>
-
-**WASI Preview 2** &nbsp; <a href="https://www.nuget.org/packages/WACS.WASI.Preview2"><img src="https://img.shields.io/nuget/v/WACS.WASI.Preview2?label=WASI.Preview2&style=flat-square" width="180"/></a> <a href="https://www.nuget.org/packages/WACS.WASI.Preview2.DependencyInjection"><img src="https://img.shields.io/nuget/v/WACS.WASI.Preview2.DependencyInjection?label=Preview2.DI&style=flat-square" width="180"/></a>
-
-**WASI Threads** &nbsp; <a href="https://www.nuget.org/packages/WACS.WASI.Threads"><img src="https://img.shields.io/nuget/v/WACS.WASI.Threads?label=WASI.Threads&style=flat-square" width="180"/></a>
-
-**wasi-nn** &nbsp; <a href="https://www.nuget.org/packages/WACS.WASI.NN"><img src="https://img.shields.io/nuget/v/WACS.WASI.NN?label=WASI.NN&style=flat-square" width="180"/></a> <a href="https://www.nuget.org/packages/WACS.WASI.NN.DependencyInjection"><img src="https://img.shields.io/nuget/v/WACS.WASI.NN.DependencyInjection?label=NN.DI&style=flat-square" width="180"/></a>
-
-**wasi-nn backends** &nbsp; <a href="https://www.nuget.org/packages/WACS.WASI.NN.OnnxRuntime"><img src="https://img.shields.io/nuget/v/WACS.WASI.NN.OnnxRuntime?label=OnnxRuntime&style=flat-square" width="180"/></a> <a href="https://www.nuget.org/packages/WACS.WASI.NN.OnnxRuntimeGenAI"><img src="https://img.shields.io/nuget/v/WACS.WASI.NN.OnnxRuntimeGenAI?label=OnnxRuntimeGenAI&style=flat-square" width="180"/></a> <a href="https://www.nuget.org/packages/WACS.WASI.NN.LlamaSharp"><img src="https://img.shields.io/nuget/v/WACS.WASI.NN.LlamaSharp?label=LlamaSharp&style=flat-square" width="180"/></a> <a href="https://www.nuget.org/packages/WACS.WASI.NN.MLNet"><img src="https://img.shields.io/nuget/v/WACS.WASI.NN.MLNet?label=MLNet&style=flat-square" width="180"/></a> <a href="https://www.nuget.org/packages/WACS.WASI.NN.TorchSharp"><img src="https://img.shields.io/nuget/v/WACS.WASI.NN.TorchSharp?label=TorchSharp&style=flat-square" width="180"/></a>
-
 ## Overview
-
-> **Renaming notice (0.11.0):** the `WACS.WASIp1` package has been renamed to `WACS.WASI.Preview1` to make room for `WACS.WASI.Preview2` / `.Preview3` under one prefix. The old id still restores (it's now a metapackage) but emits a build-time warning. See [docs/MIGRATION_WASIp1_to_WASI.md](docs/MIGRATION_WASIp1_to_WASI.md) for the one-shot sed.
-
-> **CLI:** install the unified `wacs` global tool with
-> `dotnet tool install -g WACS.Cli`. The legacy `WACS.Transpiler`
-> (`wasm-transpile`) is deprecated and superseded — see
-> [`Wacs.Console/Wacs.Console/README.md`](Wacs.Console/Wacs.Console/README.md) for the
-> verb-based subcommand reference.
 
 **WACS** is a pure C# WebAssembly Interpreter for running WASM modules in .NET environments, including Godot and AOT environments like Unity's IL2CPP.
 
@@ -42,6 +16,7 @@ WACS supports the latest standardized webassembly feature extensions including *
 
 ## Table of Contents
 
+- [Packages](#packages)
 - [Features](#features)
 - [WebAssembly Feature Extensions](#webassembly-feature-extensions)
 - [Component Model & WASI Preview 2](#component-model--wasi-preview-2)
@@ -57,8 +32,38 @@ WACS supports the latest standardized webassembly feature extensions including *
 - [WebAssembly Text Format (WAT / WAST)](#webassembly-text-format-wat--wast)
 - [License](#license)
 
-**Latest releases** (see the [CHANGELOG](CHANGELOG.md) for details):
-WACS `0.13.7` · WACS.Cli `1.5.14` · WACS.WASI.Preview1 `0.13.0` · WACS.HostBindings.Abstractions `0.3.0` · WACS.HostBindings.SourceGen `0.1.0` · WACS.Transpiler.Lib `0.8.10` · WACS.ComponentModel `0.3.4` · WACS.WASI.Preview2 `0.4.0` · WACS.WASI.Preview2.DependencyInjection `0.1.2` · WACS.ComponentModel.Bindgen.Lib `0.1.0` · WACS.WASI.Threads `0.2.0` · WACS.WASI.NN `0.3.0` · WACS.WASI.NN.OnnxRuntime `0.2.2` · WACS.WASI.NN.DependencyInjection `0.2.0`
+## Packages
+
+Versions auto-update from NuGet. See the [CHANGELOG](CHANGELOG.md) for release notes.
+
+> **Renaming notice (0.11.0):** the `WACS.WASIp1` package has been renamed to `WACS.WASI.Preview1` to make room for `WACS.WASI.Preview2` / `.Preview3` under one prefix. The old id still restores (it's now a metapackage) but emits a build-time warning. See [docs/MIGRATION_WASIp1_to_WASI.md](docs/MIGRATION_WASIp1_to_WASI.md) for the one-shot sed.
+
+> **CLI:** install the unified `wacs` global tool with
+> `dotnet tool install -g WACS.Cli`. The legacy `WACS.Transpiler`
+> (`wasm-transpile`) is deprecated and superseded — see
+> [`Wacs.Console/Wacs.Console/README.md`](Wacs.Console/Wacs.Console/README.md) for the
+> verb-based subcommand reference.
+
+| Package | Version | Notes |
+|---|---|---|
+| [`WACS`](https://www.nuget.org/packages/WACS) | [![](https://img.shields.io/nuget/v/WACS?label=&style=flat-square)](https://www.nuget.org/packages/WACS) | Core interpreter runtime |
+| [`WACS.Cli`](https://www.nuget.org/packages/WACS.Cli) | [![](https://img.shields.io/nuget/v/WACS.Cli?label=&style=flat-square)](https://www.nuget.org/packages/WACS.Cli) | Unified `wacs` global CLI (`run` / `build` / `aot` / `inspect` / `bindgen`) |
+| [`WACS.Transpiler.Lib`](https://www.nuget.org/packages/WACS.Transpiler.Lib) | [![](https://img.shields.io/nuget/v/WACS.Transpiler.Lib?label=&style=flat-square)](https://www.nuget.org/packages/WACS.Transpiler.Lib) | AOT transpiler: WASM → .NET IL, JIT or NativeAOT |
+| [`WACS.ComponentModel`](https://www.nuget.org/packages/WACS.ComponentModel) | [![](https://img.shields.io/nuget/v/WACS.ComponentModel?label=&style=flat-square)](https://www.nuget.org/packages/WACS.ComponentModel) | Component runtime, canonical-ABI lift/lower, `ComponentBridge` |
+| [`WACS.ComponentModel.Bindgen.Lib`](https://www.nuget.org/packages/WACS.ComponentModel.Bindgen.Lib) | [![](https://img.shields.io/nuget/v/WACS.ComponentModel.Bindgen.Lib?label=&style=flat-square)](https://www.nuget.org/packages/WACS.ComponentModel.Bindgen.Lib) | Programmatic forward / reverse bindgen (used by `wacs bindgen`) |
+| [`WACS.HostBindings.Abstractions`](https://www.nuget.org/packages/WACS.HostBindings.Abstractions) | [![](https://img.shields.io/nuget/v/WACS.HostBindings.Abstractions?label=&style=flat-square)](https://www.nuget.org/packages/WACS.HostBindings.Abstractions) | `[WacsImport]` attribute surface for typed host bindings |
+| [`WACS.HostBindings.SourceGen`](https://www.nuget.org/packages/WACS.HostBindings.SourceGen) | [![](https://img.shields.io/nuget/v/WACS.HostBindings.SourceGen?label=&style=flat-square)](https://www.nuget.org/packages/WACS.HostBindings.SourceGen) | Source generator emitting `IImports` adapters from `[WacsImport]` |
+| [`WACS.WASI.Preview1`](https://www.nuget.org/packages/WACS.WASI.Preview1) | [![](https://img.shields.io/nuget/v/WACS.WASI.Preview1?label=&style=flat-square)](https://www.nuget.org/packages/WACS.WASI.Preview1) | `wasi_snapshot_preview1` host implementation |
+| [`WACS.WASI.Preview2`](https://www.nuget.org/packages/WACS.WASI.Preview2) | [![](https://img.shields.io/nuget/v/WACS.WASI.Preview2?label=&style=flat-square)](https://www.nuget.org/packages/WACS.WASI.Preview2) | Typed host impls for every WASI 0.2.3 subsystem + `IBindable` composite |
+| [`WACS.WASI.Preview2.DependencyInjection`](https://www.nuget.org/packages/WACS.WASI.Preview2.DependencyInjection) | [![](https://img.shields.io/nuget/v/WACS.WASI.Preview2.DependencyInjection?label=&style=flat-square)](https://www.nuget.org/packages/WACS.WASI.Preview2.DependencyInjection) | One-call DI registration of the WASI Preview 2 bundle |
+| [`WACS.WASI.Threads`](https://www.nuget.org/packages/WACS.WASI.Threads) | [![](https://img.shields.io/nuget/v/WACS.WASI.Threads?label=&style=flat-square)](https://www.nuget.org/packages/WACS.WASI.Threads) | `wasi:thread-spawn` host adapter |
+| [`WACS.WASI.NN`](https://www.nuget.org/packages/WACS.WASI.NN) | [![](https://img.shields.io/nuget/v/WACS.WASI.NN?label=&style=flat-square)](https://www.nuget.org/packages/WACS.WASI.NN) | wasi-nn host bindings (WIT + WITX), backend-agnostic core |
+| [`WACS.WASI.NN.DependencyInjection`](https://www.nuget.org/packages/WACS.WASI.NN.DependencyInjection) | [![](https://img.shields.io/nuget/v/WACS.WASI.NN.DependencyInjection?label=&style=flat-square)](https://www.nuget.org/packages/WACS.WASI.NN.DependencyInjection) | DI scope + `WasiNNBundle` for the transpiler's direct-link emit |
+| [`WACS.WASI.NN.OnnxRuntime`](https://www.nuget.org/packages/WACS.WASI.NN.OnnxRuntime) | [![](https://img.shields.io/nuget/v/WACS.WASI.NN.OnnxRuntime?label=&style=flat-square)](https://www.nuget.org/packages/WACS.WASI.NN.OnnxRuntime) | wasi-nn ONNX backend (Microsoft.ML.OnnxRuntime, EP-selectable) |
+| [`WACS.WASI.NN.OnnxRuntimeGenAI`](https://www.nuget.org/packages/WACS.WASI.NN.OnnxRuntimeGenAI) | [![](https://img.shields.io/nuget/v/WACS.WASI.NN.OnnxRuntimeGenAI?label=&style=flat-square)](https://www.nuget.org/packages/WACS.WASI.NN.OnnxRuntimeGenAI) | wasi-nn generative-LLM backend (Gemma / Llama / Qwen / Phi) |
+| [`WACS.WASI.NN.LlamaSharp`](https://www.nuget.org/packages/WACS.WASI.NN.LlamaSharp) | [![](https://img.shields.io/nuget/v/WACS.WASI.NN.LlamaSharp?label=&style=flat-square)](https://www.nuget.org/packages/WACS.WASI.NN.LlamaSharp) | wasi-nn GGUF / llama.cpp backend (Metal on Apple Silicon) |
+| [`WACS.WASI.NN.MLNet`](https://www.nuget.org/packages/WACS.WASI.NN.MLNet) | [![](https://img.shields.io/nuget/v/WACS.WASI.NN.MLNet?label=&style=flat-square)](https://www.nuget.org/packages/WACS.WASI.NN.MLNet) | wasi-nn ML.NET-flavored ONNX backend |
+| [`WACS.WASI.NN.TorchSharp`](https://www.nuget.org/packages/WACS.WASI.NN.TorchSharp) | [![](https://img.shields.io/nuget/v/WACS.WASI.NN.TorchSharp?label=&style=flat-square)](https://www.nuget.org/packages/WACS.WASI.NN.TorchSharp) | wasi-nn TorchScript backend (PyTorch ecosystem) |
 
 ## Features
 
