@@ -246,8 +246,10 @@ namespace Wacs.WASI.Preview2.DependencyInjection
             var llamaCallback = BuildLlamaSharpConfigureCallback(nnAsm!);
             var torchCallback = BuildTorchSharpConfigureCallback(nnAsm!);
             var genaiCallback = BuildOnnxGenAIConfigureCallback(nnAsm!);
+            var openVinoCallback = BuildOpenVinoConfigureCallback(nnAsm!);
             var configureDelegate = CombineCallbacks(
-                onnxCallback, llamaCallback, torchCallback, genaiCallback);
+                onnxCallback, llamaCallback, torchCallback,
+                genaiCallback, openVinoCallback);
 
             // services.AddWasiNN(configure) — configure runs
             // BEFORE TryAddSingleton(opts.Configuration), so each
@@ -722,6 +724,80 @@ namespace Wacs.WASI.Preview2.DependencyInjection
             var actionType = typeof(Action<>).MakeGenericType(optsType);
             return Expression.Lambda(actionType, assign, optsParam)
                 .Compile();
+        }
+
+        // Sibling of BuildOnnxConfigureCallback for the OpenVINO
+        // backend. Closest analog of the four (both register via
+        // the encoding-keyed Backends dict; neither uses
+        // LoadByNameBackend or a directory-registry factory).
+        // Closes the gap where the IBindable's BindHostFunction
+        // registrations get silently shadowed under --wasip2 by
+        // the direct-link path: the WitBindings handlers drop,
+        // GraphFuncsImpl reads the DI-bundle's WasiNNConfiguration,
+        // and without an auto-wire callback Backends[OpenVINO]
+        // stays empty → InvalidEncoding at guest call time.
+        //
+        // Returns null when:
+        //   - Wacs.WASI.NN.OpenVino isn't loadable (the common
+        //     `wacs run --wasip2` case without the OpenVINO
+        //     backend installed);
+        //   - OpenVinoBackend type / parameterless ctor can't be
+        //     resolved;
+        //   - Activator.CreateInstance throws (typically because
+        //     the OpenVINO native runtime isn't on the load
+        //     path — `OpenVINO.runtime.<rid>` not installed).
+        private static Delegate? BuildOpenVinoConfigureCallback(
+            Assembly nnAsm)
+        {
+            var optsType = nnAsm.GetType(
+                "Wacs.WASI.NN.DependencyInjection.WasiNNDependencyInjectionOptions");
+            if (optsType == null) return null;
+
+            var addBackend = optsType.GetMethod("AddBackend");
+            if (addBackend == null) return null;
+            var addBackendParams = addBackend.GetParameters();
+            if (addBackendParams.Length != 2) return null;
+            var encodingType = addBackendParams[0].ParameterType;
+            var backendIfaceType = addBackendParams[1].ParameterType;
+
+            var ovAsm = TryLoadAssembly("Wacs.WASI.NN.OpenVino");
+            if (ovAsm == null) return null;  // not an error.
+
+            var openVinoBackendType = ovAsm.GetType(
+                "Wacs.WASI.NN.OpenVino.OpenVinoBackend");
+            if (openVinoBackendType == null)
+            {
+                System.Console.Error.WriteLine(
+                    "warn: Wacs.WASI.NN.OpenVino is loadable but "
+                    + "OpenVinoBackend type wasn't found. wasi-nn "
+                    + "OpenVINO guests will see InvalidEncoding errors.");
+                return null;
+            }
+
+            object? openVinoBackend;
+            try { openVinoBackend = Activator.CreateInstance(openVinoBackendType); }
+            catch (Exception ex)
+            {
+                System.Console.Error.WriteLine(
+                    "warn: OpenVinoBackend instantiation failed: "
+                    + ex.GetType().Name + ": " + ex.Message
+                    + ". wasi-nn OpenVINO guests will see InvalidEncoding "
+                    + "errors. Check that the OpenVINO native runtime "
+                    + "(`OpenVINO.runtime.<rid>` NuGet) is on the load "
+                    + "path.");
+                return null;
+            }
+            if (openVinoBackend == null) return null;
+
+            // GraphEncoding.OpenVINO = 0 in the WIT enum.
+            object openVinoEncoding = Enum.ToObject(encodingType, 0);
+
+            var optsParam = Expression.Parameter(optsType, "opts");
+            var call = Expression.Call(optsParam, addBackend,
+                Expression.Constant(openVinoEncoding, encodingType),
+                Expression.Constant(openVinoBackend, backendIfaceType));
+            var actionType = typeof(Action<>).MakeGenericType(optsType);
+            return Expression.Lambda(actionType, call, optsParam).Compile();
         }
 
         // Mirrors WasiNNOnnxGenAIBindable's env-driven scan:
