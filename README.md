@@ -804,6 +804,22 @@ a `wacs.trivia` custom section. The `wacs.trivia` section is
 WACS-specific (no spec) and ignored by other engines — strippable
 when shipping a release binary.
 
+**Spec-test bundle (`wast2json` verb):**
+
+```bash
+wacs wast2json forward.wast -o out/
+# wrote out/forward.json (5 commands, 1 side-car modules)
+
+wacs wast2json i32.wast -o out/
+# wrote out/i32.json (460 commands, 86 side-car modules)
+```
+
+Mirrors `wabt`'s `wast2json` output shape — one `.json` file
+listing commands plus one side-car `.wasm` per referenced module.
+Consumable by any spec-test runner that reads the format,
+including WACS's own `Spec.Test` (previously required `wast2json`
+from the upstream `wabt` toolchain).
+
 **Sampled CoreMark performance** (M3 Max, .NET 8, `Wacs.Console/Wacs.Console/Data/coremark.wasm`, default 6000 iterations; single run each):
 
 | Mode | CoreMark (iter/s) | Relative |

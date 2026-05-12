@@ -1,5 +1,60 @@
 # Changelog
 
+## WACS.Cli 1.7.0 — `wacs wast2json` verb
+
+New verb that converts a `.wast` spec-test script into the
+canonical wast2json bundle: one `.json` file listing commands +
+one side-car `.wasm` per referenced module. Mirrors `wabt`'s
+`wast2json` output shape, so the resulting directory is
+consumable by any tooling that reads the spec-test format —
+notably WACS's own `Spec.Test` runner, which previously needed
+the upstream tool installed.
+
+### Usage
+
+```bash
+wacs wast2json forward.wast -o out/
+# wrote out/forward.json (5 commands, 1 side-car modules)
+
+ls out/
+# forward.0.wasm  forward.json
+
+wacs wast2json i32.wast -o out/
+# wrote out/i32.json (460 commands, 86 side-car modules)
+```
+
+### Output shape
+
+Top-level: `{ "source_filename": "...", "commands": [...] }`. Each
+command carries `"line"` for traceability back to the source
+position. Module-bearing commands point at a `<basename>.<n>.wasm`
+side-car; assertion-with-module forms also carry `"text"` and
+`"module_type"`. Action arguments and expected values use the
+typed-value shape (`{"type": "i32", "value": "..."}`); floats
+serialize as their unsigned IEEE-754 bit-pattern decimal so the
+runner reconstructs exact NaN payloads.
+
+### Coverage
+
+All spec-test commands the WAST parser produces:
+
+| .wast form | JSON output |
+|---|---|
+| `(module …)` | `type: "module"`, side-car `.wasm` |
+| `(module binary "…")` | `type: "module"`, raw bytes |
+| `(module quote "…")` | `type: "module"`, `.wat` side-car |
+| `(module instance $a $b)` | `type: "module_instance"` |
+| `(register "name" $id?)` | `type: "register"` |
+| `(invoke …)` / `(get …)` | `type: "action"` |
+| `(assert_return …)` | `type: "assert_return"` |
+| `(assert_trap (invoke …) …)` | `type: "assert_trap"` |
+| `(assert_trap (module …) …)` | `type: "assert_uninstantiable"` |
+| `(assert_exhaustion …)` | `type: "assert_exhaustion"` |
+| `(assert_invalid …)` | `type: "assert_invalid"` |
+| `(assert_malformed …)` | `type: "assert_malformed"` |
+| `(assert_unlinkable …)` | `type: "assert_unlinkable"` |
+| `(assert_exception …)` | `type: "assert_exception"` |
+
 ## WACS 0.15.19 / WACS.Cli 1.6.7 — `wacs.trivia` custom section
 
 Optimistic in-band carrier for WAT comments (`;;` line + `(;…;)`

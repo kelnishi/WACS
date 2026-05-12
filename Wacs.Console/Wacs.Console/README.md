@@ -36,6 +36,7 @@ wacs --help
 | `aot` | Build a self-contained NativeAOT native binary (transpile + scaffold + `dotnet publish`) | transpiler + ILC |
 | `inspect` | Diagnostics + WAT ↔ wasm format conversion | parse-only |
 | `bindgen` | Generate C# bindings from WIT (forward) or regenerate WIT + bindings from a transpiled `.dll` (reverse) | parse-only |
+| `wast2json` | Convert a `.wast` spec-test script into a `wast2json` bundle (one `.json` + side-car `.wasm` per module) | parse-only |
 
 ### Direct-run shortcut
 
@@ -521,6 +522,64 @@ wacs bindgen ./app.dll -o ./regen --write-wit
 | `--namespace <name>` | Root C# namespace override. Currently a warning — Phase 1d uses pinned `wit-bindgen-csharp` conventions; explicit override is a follow-up. |
 | `--write-wit` | Reverse mode only. Persist the raw extracted component-type bytes alongside the `.cs` files. |
 | `-v, --verbose` | Per-file emission progress. |
+
+## `wacs wast2json` — spec-test bundle
+
+```
+wacs wast2json <input.wast> -o <output-dir> [options]
+```
+
+Convert a `.wast` spec-test script into the canonical wast2json
+bundle: a `.json` file listing commands plus one side-car `.wasm`
+per referenced module. Mirrors `wabt`'s `wast2json` shape, so the
+resulting directory is consumable by any spec-test runner that
+reads the format (WACS's own `Spec.Test` runner included).
+
+```bash
+# Smallest spec testcase:
+$ wacs wast2json Spec.Test/spec/test/core/forward.wast -o out/
+wrote out/forward.json (5 commands, 1 side-car modules)
+
+$ ls out/
+forward.0.wasm  forward.json
+
+# Larger fixture exercising assert_invalid / assert_trap:
+$ wacs wast2json Spec.Test/spec/test/core/i32.wast -o out/
+wrote out/i32.json (460 commands, 86 side-car modules)
+```
+
+### `wast2json` flag reference
+
+| Flag | Notes |
+|---|---|
+| `-o, --output-dir <path>` | **Required.** Directory to write the `.json` + side-car `.wasm` files into. Created if it doesn't exist. |
+| `--base-name <stem>` | Stem for the generated files (default: the input file's name without extension). Produces `<stem>.json` plus `<stem>.0.wasm`, `<stem>.1.wasm`, … for each module. |
+
+### Output shape (excerpt)
+
+```json
+{
+  "source_filename": "forward.wast",
+  "commands": [
+    { "type": "module", "line": 1, "filename": "forward.0.wasm" },
+    {
+      "type": "assert_return",
+      "line": 17,
+      "action": {
+        "type": "invoke",
+        "field": "even",
+        "args": [{ "type": "i32", "value": "13" }]
+      },
+      "expected": [{ "type": "i32", "value": "0" }]
+    }
+  ]
+}
+```
+
+Floats are emitted as their unsigned IEEE-754 bit pattern in
+decimal (e.g. `1.0` → `"value": "1065353216"`) so NaN payloads
+round-trip exactly. `nan:canonical` / `nan:arithmetic` ride along
+as string sentinels in expected-value position.
 
 ## Migration from `wasm-transpile`
 
