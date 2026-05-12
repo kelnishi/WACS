@@ -36,8 +36,8 @@ namespace Wacs.Core.Instructions
             OpCode.FE                => CreateInstruction(opcode.xFE),
             
             //Control Instructions
-            OpCode.Unreachable       => InstUnreachable.Inst,
-            OpCode.Nop               => InstNop.Inst,
+            OpCode.Unreachable       => new InstUnreachable(),
+            OpCode.Nop               => new InstNop(),
             OpCode.Block             => new InstBlock(),
             OpCode.Loop              => new InstLoop(),
             OpCode.If                => new InstIf(),
@@ -52,7 +52,7 @@ namespace Wacs.Core.Instructions
             OpCode.BrIf              => new InstBranchIf(),
             OpCode.BrTable           => new InstBranchTable(),
                  
-            OpCode.Return            => InstReturn.Inst,
+            OpCode.Return            => new InstReturn(),
             OpCode.Call              => new InstCall(),
             OpCode.CallIndirect      => new InstCallIndirect(),
             OpCode.CallRef           => new InstCallRef(),
@@ -63,22 +63,22 @@ namespace Wacs.Core.Instructions
                  
             // Reference Types 
             OpCode.RefNull           => new InstRefNull(),
-            OpCode.RefIsNull         => InstRefIsNull.Inst,
+            OpCode.RefIsNull         => new InstRefIsNull(),
             OpCode.RefFunc           => new InstRefFunc(),
-            
-            OpCode.RefEq             => InstRefEq.Inst,
-            OpCode.RefAsNonNull      => InstRefAsNonNull.Inst,
+
+            OpCode.RefEq             => new InstRefEq(),
+            OpCode.RefAsNonNull      => new InstRefAsNonNull(),
             
             OpCode.BrOnNull          => new InstBrOnNull(),
             OpCode.BrOnNonNull       => new InstBrOnNonNull(),
                 
             //Parametric Instructions
-            OpCode.Drop              => InstDrop.Inst,
-            OpCode.Select            => InstSelect.InstWithoutTypes,
+            OpCode.Drop              => new InstDrop(),
+            OpCode.Select            => new InstSelect(),
             OpCode.SelectT           => new InstSelect(true),
-                
+
             //Variable Instructions
-            OpCode.LocalGet         => InstLocalGet.Inst,
+            OpCode.LocalGet         => new InstLocalGet(),
             OpCode.LocalSet         => new InstLocalSet(),
             OpCode.LocalTee         => new InstLocalTee(),
             OpCode.GlobalGet        => new InstGlobalGet(),
@@ -117,8 +117,8 @@ namespace Wacs.Core.Instructions
             OpCode.MemorySize        => new InstMemorySize(),
             OpCode.MemoryGrow        => new InstMemoryGrow(),
                  
-            // Numeric Instructions 
-            OpCode.I32Const          => InstI32Const.Inst,
+            // Numeric Instructions
+            OpCode.I32Const          => new InstI32Const(),
             OpCode.I64Const          => new InstI64Const(),
             OpCode.F32Const          => new InstF32Const(),
             OpCode.F64Const          => new InstF64Const(),

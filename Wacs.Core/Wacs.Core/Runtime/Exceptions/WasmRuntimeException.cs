@@ -18,6 +18,22 @@ namespace Wacs.Core.Runtime.Exceptions
 {
     public class WasmRuntimeException : Exception
     {
+        /// <summary>
+        /// WASM-side call-stack snapshot — populated retroactively
+        /// by the dispatch loop's outer catch when the exception was
+        /// thrown from inside an instruction's <c>Execute</c>. Null
+        /// for setup-time failures (module instantiation, host
+        /// binding, type-system errors at construction) where no
+        /// call stack exists yet.
+        /// </summary>
+        public WasmStackFrame[]? WasmFrames { get; internal set; }
+
         public WasmRuntimeException(string message) : base(message) { }
+
+        public WasmRuntimeException(string message, WasmStackFrame[] wasmFrames)
+            : base(message)
+        {
+            WasmFrames = wasmFrames;
+        }
     }
 }

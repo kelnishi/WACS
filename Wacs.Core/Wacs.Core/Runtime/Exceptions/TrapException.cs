@@ -18,14 +18,42 @@ namespace Wacs.Core.Runtime.Types
 {
     public class TrapException : Exception
     {
+        /// <summary>
+        /// WASM-side call-stack snapshot. Set either at construction
+        /// (sites that pass an <see cref="ExecContext"/> directly) or
+        /// retroactively by the dispatch loop's outer catch in
+        /// <c>WasmRuntime.ProcessThreadAsync</c> — that catch
+        /// enriches null-framed traps in-place so the great majority
+        /// of unmigrated throw sites still surface a useful trace.
+        /// </summary>
+        public WasmStackFrame[]? WasmFrames { get; internal set; }
+
         public TrapException(string message) : base(message)
         {
+        }
+
+        /// <summary>
+        /// Construct with an attached WASM-side stack snapshot.
+        /// Throw sites that have an <see cref="ExecContext"/> in
+        /// scope (i.e. almost all of them) can opt in by calling
+        /// <c>ctx.SnapshotCallStack(this)</c> at throw time and
+        /// passing the result here.
+        /// </summary>
+        public TrapException(string message, WasmStackFrame[] wasmFrames)
+            : base(message)
+        {
+            WasmFrames = wasmFrames;
         }
     }
 
     public class OutOfBoundsTableAccessException : TrapException
     {
         public OutOfBoundsTableAccessException(string message) : base(message)
+        {
+        }
+
+        public OutOfBoundsTableAccessException(string message, WasmStackFrame[] wasmFrames)
+            : base(message, wasmFrames)
         {
         }
     }

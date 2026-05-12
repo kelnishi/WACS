@@ -34,7 +34,7 @@ wacs --help
 | `run` | Execute a `.wasm` module | interpreter (default) or transpiler |
 | `build` | Transpile to a `.dll` | transpiler |
 | `aot` | Build a self-contained NativeAOT native binary (transpile + scaffold + `dotnet publish`) | transpiler + ILC |
-| `inspect` | Diagnostics: WAT dump, stats, exports/imports | parse-only |
+| `inspect` | Diagnostics + WAT ↔ wasm format conversion | parse-only |
 | `bindgen` | Generate C# bindings from WIT (forward) or regenerate WIT + bindings from a transpiled `.dll` (reverse) | parse-only |
 
 ### Direct-run shortcut
@@ -363,7 +363,7 @@ wacs aot fib.wasm --aot-linked -o fib
 Trailing positional args after the input file are forwarded to the
 guest as `argv` when `--wasi` is set.
 
-## `wacs inspect` — diagnostics
+## `wacs inspect` — diagnostics + format conversion
 
 ```
 wacs inspect <file> [options]
@@ -431,12 +431,24 @@ needs `--wasip2`. Version mismatches (e.g. component compiled against
 `wasi:cli/stdout@0.2.9` but `Wacs.WASI.Preview2` ships `0.2.0`) surface
 as direct-link resolution failures at instantiation.
 
-**Dump WAT (round-trips back through the text parser):**
+**WAT ↔ wasm round-trip:**
 
 ```bash
-wacs inspect module.wasm --dump-wat                 # to stdout
+# binary → text
+wacs inspect module.wasm --dump-wat                 # WAT to stdout
 wacs inspect module.wasm --dump-wat --output-dir .  # writes module.wat
+
+# text → binary
+wacs inspect module.wat  --dump-wasm                # raw bytes to stdout (pipe target)
+wacs inspect module.wat  --dump-wasm --output-dir . # writes module.wasm
 ```
+
+Round-trips preserve function `$names` via the standard `name`
+custom section and preserve WAT comments / `(@…)` annotations via
+a `wacs.trivia` custom section (WACS-specific, ignored by other
+engines). A WAT → wasm → WAT cycle recovers identifiers and
+trivia; the canonical re-render is line-stable but doesn't
+preserve original whitespace exactly.
 
 ### `inspect` flag reference
 
@@ -445,8 +457,9 @@ wacs inspect module.wasm --dump-wat --output-dir .  # writes module.wat
 | `--stats` | Default when no other flag is given. |
 | `--exports` | List exports (kind + name). |
 | `--imports` | List imports (kind + module.name). |
-| `--dump-wat` | Render parser-friendly WAT (core only — components route to their embedded core modules). |
-| `--output-dir <path>` | Write `<basename>.wat` here instead of stdout. |
+| `--dump-wat` | Render parser-friendly WAT from a `.wat` or `.wasm` input (core only — components route to their embedded core modules). |
+| `--dump-wasm` | Render canonical wasm binary from a `.wat` or `.wasm` input. WAT inputs propagate `$names` + comments / annotations into the binary's custom sections. |
+| `--output-dir <path>` | Write `<basename>.wat` / `<basename>.wasm` here instead of stdout. |
 
 ## `wacs bindgen` — WIT ↔ C# bindings
 

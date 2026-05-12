@@ -126,6 +126,34 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer)
+        {
+            // Same shape as Parse: blocktype + catches-vector. The
+            // inner instruction sequence is emitted by the surrounding
+            // BinaryModuleWriter walk.
+            ValTypeWriter.WriteBlockType(writer, Block.BlockType);
+            writer.WriteLeb128_u32((uint)Catches.Length);
+            foreach (var c in Catches)
+                WriteCatchType(writer, c);
+        }
+
+        private static void WriteCatchType(BinaryWriter writer, CatchType c)
+        {
+            writer.Write((byte)c.Mode);
+            switch (c.Mode)
+            {
+                case CatchFlags.None:
+                case CatchFlags.CatchRef:
+                    writer.WriteLeb128_u32(c.X.Value);
+                    writer.WriteLeb128_u32(c.L.Value);
+                    break;
+                case CatchFlags.CatchAll:
+                case CatchFlags.CatchAllRef:
+                    writer.WriteLeb128_u32(c.L.Value);
+                    break;
+            }
+        }
+
         /// <summary>
         /// Internal factory for the text parser. Populates Block + Catches
         /// directly so the try_table keyword round-trips as an
@@ -206,8 +234,12 @@ namespace Wacs.Core.Instructions
             var exn = context.Store[ea];
             //11.
             context.OpStack.PushValue(new Value(ValType.Exn, exn));
-            
-            InstThrowRef.ExecuteInstruction(context);
+
+            // Pass `this` as the throwing instruction so the
+            // unhandled-exception frame chain identifies the source
+            // `throw` site (not the implementation-detail
+            // throw_ref) at the top frame.
+            InstThrowRef.ExecuteInstruction(context, this);
         }
 
         public override InstructionBase Parse(BinaryReader reader)
@@ -215,8 +247,11 @@ namespace Wacs.Core.Instructions
             X = (TagIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32(X.Value);
     }
-    
+
     public class InstThrowRef : InstructionBase
     {
         public InstThrowRef() : base(ByteCode.ThrowRef, -1) { }
@@ -235,10 +270,11 @@ namespace Wacs.Core.Instructions
 
         public override void Execute(ExecContext context)
         {
-            ExecuteInstruction(context);
+            ExecuteInstruction(context, throwingInstruction: this);
         }
 
-        public static void ExecuteInstruction(ExecContext context)
+        public static void ExecuteInstruction(
+            ExecContext context, InstructionBase? throwingInstruction = null)
         {
             //1.
             context.Assert(context.OpStack.Peek().IsType(ValType.Exn),
@@ -254,6 +290,17 @@ namespace Wacs.Core.Instructions
             //8.
             var a = exn.Tag;
             //9.
+
+            // Snapshot the WASM call stack BEFORE the unwind search
+            // below — context.FunctionReturn() inside the loop pops
+            // frames, so a snapshot taken after the search wouldn't
+            // reflect where the exception originated. Captured
+            // unconditionally; only used when no handler matches.
+            // throwingInstruction (when supplied by the caller) is
+            // the source-level `throw` / `throw_ref` site, threaded
+            // through so the top frame's Instruction is the
+            // user-visible op, not the dispatcher.
+            var preUnwindFrames = context.SnapshotCallStack(throwingInstruction);
 
             //Traverse the control stack
             while (context.StackHeight > 0)
@@ -300,7 +347,13 @@ namespace Wacs.Core.Instructions
                 context.FunctionReturn();
             }
 
-            throw new UnhandledWasmException($"Unhandled exception {exn}");
+            // Report the captured pre-unwind frame chain. The search
+            // loop above has emptied context's call stack via
+            // repeated FunctionReturn() — so we have to use the
+            // snapshot taken before the loop.
+            throw new UnhandledWasmException(
+                $"Unhandled exception {exn}",
+                preUnwindFrames);
         }
     }
 }

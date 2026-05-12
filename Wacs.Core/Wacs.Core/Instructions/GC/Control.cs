@@ -94,6 +94,18 @@ namespace Wacs.Core.Instructions.GC
             Rt2 = ValTypeParser.ParseHeapType(reader, Flags.HasFlag(CastFlags.EmptyNull));
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer)
+        {
+            writer.Write((byte)Flags);
+            writer.WriteLeb128_u32(L.Value);
+            // ParseHeapType OR-s in Ref+Nullable (or just Ref) onto the
+            // raw heap-type token. WriteHeapType inspects IsDefType to
+            // dispatch on s33-index vs abstract-byte; the Ref/Nullable
+            // bits don't affect either path.
+            ValTypeWriter.WriteHeapType(writer, Rt1);
+            ValTypeWriter.WriteHeapType(writer, Rt2);
+        }
     } 
     
     public class InstBrOnCastFail : InstructionBase
@@ -165,6 +177,18 @@ namespace Wacs.Core.Instructions.GC
             Rt1 = ValTypeParser.ParseHeapType(reader, Flags.HasFlag(CastFlags.NullEmpty));
             Rt2 = ValTypeParser.ParseHeapType(reader, Flags.HasFlag(CastFlags.EmptyNull));
             return this;
+        }
+
+        public override void RenderBinary(BinaryWriter writer)
+        {
+            writer.Write((byte)Flags);
+            writer.WriteLeb128_u32(L.Value);
+            // ParseHeapType OR-s in Ref+Nullable (or just Ref) onto the
+            // raw heap-type token. WriteHeapType inspects IsDefType to
+            // dispatch on s33-index vs abstract-byte; the Ref/Nullable
+            // bits don't affect either path.
+            ValTypeWriter.WriteHeapType(writer, Rt1);
+            ValTypeWriter.WriteHeapType(writer, Rt2);
         }
     }
 }

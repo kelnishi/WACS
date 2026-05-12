@@ -35,6 +35,9 @@ namespace Wacs.Core.Instructions.Atomic
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.Write((byte)0x00);
+
         public override void Validate(IWasmValidationContext context) { /* no-op */ }
 
         public override void Execute(ExecContext context) => Interlocked.MemoryBarrier();

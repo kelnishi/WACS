@@ -221,6 +221,8 @@ namespace Wacs.Core.Instructions.SIMD
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer) => M.RenderBinary(writer);
+
         public override string RenderText(ExecContext? context)
         {
             if (context != null)
@@ -234,7 +236,7 @@ namespace Wacs.Core.Instructions.SIMD
             return $"{base.RenderText(context)}{M.ToWat(WidthT)}";
         }
     }
-    
+
     public class InstMemoryLoadSplat : InstructionBase
     {
         private readonly BitWidth WidthN;
@@ -328,6 +330,8 @@ namespace Wacs.Core.Instructions.SIMD
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer) => M.RenderBinary(writer);
+
         public override string RenderText(ExecContext? context)
         {
             if (context != null)
@@ -341,7 +345,7 @@ namespace Wacs.Core.Instructions.SIMD
             return $"{base.RenderText(context)}{M.ToWat(WidthN)}";
         }
     }
-    
+
     public class InstMemoryLoadZero : InstructionBase
     {
         private readonly BitWidth WidthN;
@@ -428,6 +432,8 @@ namespace Wacs.Core.Instructions.SIMD
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer) => M.RenderBinary(writer);
+
         public override string RenderText(ExecContext? context)
         {
             if (context != null)
@@ -441,7 +447,7 @@ namespace Wacs.Core.Instructions.SIMD
             return $"{base.RenderText(context)}{M.ToWat(WidthN)}";
         }
     }
-    
+
     public class InstMemoryLoadLane : InstructionBase
     {
         private readonly BitWidth WidthN;
@@ -539,6 +545,12 @@ namespace Wacs.Core.Instructions.SIMD
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer)
+        {
+            M.RenderBinary(writer);
+            writer.Write(X);
+        }
+
         public override string RenderText(ExecContext? context)
         {
             if (context != null)
@@ -552,7 +564,7 @@ namespace Wacs.Core.Instructions.SIMD
             return $"{base.RenderText(context)}{M.ToWat(WidthN)} {X}";
         }
     }
-        
+
     public class InstMemoryStoreLane : InstructionBase
     {
         private readonly BitWidth WidthN;
@@ -654,6 +666,12 @@ namespace Wacs.Core.Instructions.SIMD
             M = MemArg.Parse(reader);
             X = reader.ReadByte();
             return this;
+        }
+
+        public override void RenderBinary(BinaryWriter writer)
+        {
+            M.RenderBinary(writer);
+            writer.Write(X);
         }
 
         public override string RenderText(ExecContext? context)

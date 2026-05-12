@@ -105,8 +105,12 @@ namespace Wacs.Core.Instructions.GC
             X = (TypeIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32((uint)X.Value);
     }
-    
+
+
     public class InstStructNewDefault : InstructionBase, IConstInstruction
     {
         public InstStructNewDefault() : base(ByteCode.StructNewDefault, +1) { }
@@ -167,8 +171,12 @@ namespace Wacs.Core.Instructions.GC
             X = (TypeIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32((uint)X.Value);
     }
-    
+
+
     public class InstStructGet : InstructionBase
     {
         private readonly PackedExt Sx;
@@ -275,6 +283,12 @@ namespace Wacs.Core.Instructions.GC
             Y = (FieldIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer)
+        {
+            writer.WriteLeb128_u32((uint)X.Value);
+            writer.WriteLeb128_u32((uint)Y.Value);
+        }
     }
 
     public class InstStructSet : InstructionBase
@@ -358,6 +372,12 @@ namespace Wacs.Core.Instructions.GC
             X = (TypeIdx)reader.ReadLeb128_u32();
             Y = (FieldIdx)reader.ReadLeb128_u32();
             return this;
+        }
+
+        public override void RenderBinary(BinaryWriter writer)
+        {
+            writer.WriteLeb128_u32((uint)X.Value);
+            writer.WriteLeb128_u32((uint)Y.Value);
         }
     }
 }

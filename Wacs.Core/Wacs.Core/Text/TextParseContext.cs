@@ -79,6 +79,78 @@ namespace Wacs.Core.Text
     {
         public Module Module { get; } = new Module();
 
+        /// <summary>
+        /// Lexer that produced the s-expression tree being parsed.
+        /// Required when materializing trivia (raw comment text) or
+        /// resolving annotation payload spans onto the source. Stays
+        /// null when the parse path doesn't carry a Lexer (legacy
+        /// API entry points without trivia capture).
+        /// </summary>
+        public Lexer? Lexer { get; set; }
+
+        /// <summary>
+        /// Trivia tokens (comments) captured by the lexer, in source
+        /// order. The module-form walker drains this list, attaching
+        /// each comment to the module element whose opening token
+        /// follows it in source order. Empty when the parser path
+        /// didn't request trivia capture.
+        /// </summary>
+        public List<TriviaToken> Trivia { get; set; } = new();
+
+        /// <summary>
+        /// Current index into <see cref="Trivia"/>. The attach helper
+        /// scans forward from here so the algorithm is linear in
+        /// trivia count rather than quadratic.
+        /// </summary>
+        public int TriviaCursor { get; set; }
+
+        /// <summary>
+        /// Drain trivia whose source start lies before
+        /// <paramref name="beforeSourcePos"/> and attach each to
+        /// <paramref name="owner"/> as a comment. Comments on the
+        /// same line as the closing token of the previous element
+        /// are marked trailing.
+        /// </summary>
+        public void DrainTriviaBefore(int beforeSourcePos, ModuleElementRef owner)
+        {
+            if (Trivia.Count == 0 || Lexer == null) return;
+            while (TriviaCursor < Trivia.Count
+                   && Trivia[TriviaCursor].Start < beforeSourcePos)
+            {
+                var t = Trivia[TriviaCursor++];
+                Module.AddComment(owner, new WatComment
+                {
+                    Kind = t.Kind,
+                    Text = Lexer.SliceTrivia(t),
+                    Line = t.Line,
+                    Column = t.Column,
+                    IsTrailing = false,
+                });
+            }
+        }
+
+        /// <summary>
+        /// Drain any remaining trivia and attach it to module-level.
+        /// Called at the end of <c>ParseModule</c> so comments past
+        /// the last section don't go missing.
+        /// </summary>
+        public void DrainRemainingTrivia()
+        {
+            if (Trivia.Count == 0 || Lexer == null) return;
+            while (TriviaCursor < Trivia.Count)
+            {
+                var t = Trivia[TriviaCursor++];
+                Module.AddComment(ModuleElementRef.ModuleLevel, new WatComment
+                {
+                    Kind = t.Kind,
+                    Text = Lexer.SliceTrivia(t),
+                    Line = t.Line,
+                    Column = t.Column,
+                    IsTrailing = true,
+                });
+            }
+        }
+
         public NameTable Types    { get; } = new NameTable();
         public NameTable Funcs    { get; } = new NameTable();
         public NameTable Tables   { get; } = new NameTable();

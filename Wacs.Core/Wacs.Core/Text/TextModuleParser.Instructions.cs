@@ -82,6 +82,20 @@ namespace Wacs.Core.Text
                 }
 
                 int beforeCount = result.Count;
+                // Capture source position of the form we're about to
+                // parse. After ParsePlainInstruction / ParseFoldedInstruction
+                // returns, every newly-added InstructionBase in
+                // result[beforeCount..] is stamped with this token's
+                // (line, col, offset). For folded forms that emit
+                // multiple instructions (operands + operator), they
+                // share the outermost form's source position —
+                // accurate when on a single line, a fair approximation
+                // otherwise. Consumed by `WasmStackTrace` to resolve
+                // traps to source coords without re-rendering the
+                // module.
+                int sourceLine = node.Token.Line;
+                int sourceCol = node.Token.Column;
+                int sourceOffset = node.Token.Start;
                 if (node.Kind == SExprKind.Atom)
                 {
                     if (node.Token.Kind == TokenKind.Keyword)
@@ -125,6 +139,18 @@ namespace Wacs.Core.Text
                     // Folded form
                     ParseFoldedInstruction(fctx, node, result);
                     i++;
+                }
+
+                // Memoize source positions on every instruction the
+                // form emitted. Lazy-allocates Module.SourcePositions
+                // on first call; later look-ups via the side-table
+                // give O(1) resolution from inst → source coords.
+                if (result.Count > beforeCount)
+                {
+                    var pos = new SourcePos(sourceLine, sourceCol, sourceOffset);
+                    var module = fctx.Module.Module;
+                    for (int k = beforeCount; k < result.Count; k++)
+                        module.RecordSourcePosition(result[k], pos);
                 }
 
                 // If a hint is pending, attach it to the if/br_if among

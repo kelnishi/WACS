@@ -352,6 +352,50 @@ namespace Wacs.Core.Runtime
             }
         }
 
+        /// <summary>
+        /// Snapshot the polymorphic call stack as a flat
+        /// <see cref="WasmStackFrame"/> array for trap / exception
+        /// enrichment. The top of the chain is the currently-
+        /// executing frame and carries <paramref name="topInstruction"/>
+        /// directly when supplied (e.g. <c>this</c> from a throwing
+        /// instruction). Caller frames carry their resume PC instead;
+        /// resolution to the call-site instruction is deferred to the
+        /// trace formatter so cost stays out of the throw path.
+        ///
+        /// <para>Cheap: O(call-depth) reads, no allocations beyond
+        /// the returned array. Returns an empty array when the call
+        /// stack is empty (no module currently executing).</para>
+        /// </summary>
+        public WasmStackFrame[] SnapshotCallStack(Wacs.Core.Instructions.InstructionBase? topInstruction = null)
+        {
+            int n = _callStack.Count;
+            if (n == 0) return System.Array.Empty<WasmStackFrame>();
+
+            var frames = new WasmStackFrame[n];
+            // `_callStack` enumerates top-first (the Stack<T>
+            // contract). Each frame's ReturnLabel.ContinuationAddress
+            // is the PC the *caller above this frame* will resume at;
+            // for the top frame that's effectively where execution
+            // would resume if nothing trapped. To make the array
+            // intuitive — index 0 = top of stack, index n-1 = root —
+            // we walk top-first.
+            int idx = 0;
+            foreach (var frame in _callStack)
+            {
+                // Only the top frame is the one currently executing,
+                // so it gets the directly-passed throwing instruction
+                // reference. Lower frames are resolved lazily by the
+                // formatter from ResumeContinuationAddress.
+                var instr = idx == 0 ? topInstruction : null;
+                frames[idx] = new WasmStackFrame(
+                    funcAddr: frame.FuncAddr,
+                    instruction: instr,
+                    resumeContinuationAddress: frame.ReturnLabel.ContinuationAddress);
+                idx++;
+            }
+            return frames;
+        }
+
         public Frame ReuseFrame()
         {
             return _callStack.Peek();
@@ -533,37 +577,6 @@ namespace Wacs.Core.Runtime
 #endif
             var address = PopFrame();
             InstructionPointer = address;
-        }
-
-        public List<(string, int)> ComputePointerPath()
-        {
-            Stack<(string, int)> ascent = new();
-            int idx = InstructionPointer;
-            
-            // foreach (var label in Frame.EnumerateLabels().Select(target => target.Label))
-            // {
-            //     var pointer = (label.Instruction.GetMnemonic(), idx);
-            //     ascent.Push(pointer);
-            //
-            //     idx = label.ContinuationAddress;
-            //     
-            //     switch ((OpCode)label.Instruction)
-            //     {
-            //         case OpCode.If: ascent.Push(("InstIf", 0));
-            //             break;
-            //         case OpCode.Else: ascent.Push(("InstElse", 1));
-            //             break;
-            //         case OpCode.Block: ascent.Push(("InstBlock", 0));
-            //             break;
-            //         case OpCode.Loop: ascent.Push(("InstLoop", 0));
-            //             break;
-            //     }
-            //     
-            // }
-            //
-            // ascent.Push(("Function", (int)Frame.Index.Value));
-
-            return ascent.Select(a => a).ToList();
         }
 
         public void ResetStats()

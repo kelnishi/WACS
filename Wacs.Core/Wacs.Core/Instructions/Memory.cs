@@ -71,6 +71,8 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer) => M.RenderBinary(writer);
+
         public InstructionBase Immediate(MemArg m)
         {
             M = m;
@@ -139,6 +141,8 @@ namespace Wacs.Core.Instructions
             M = MemArg.Parse(reader);
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer) => M.RenderBinary(writer);
 
         public InstructionBase Immediate(MemArg m)
         {

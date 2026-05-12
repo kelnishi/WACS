@@ -39,6 +39,16 @@ namespace Wacs.Core.Instructions.Reference
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer)
+        {
+            // The parser reads a single byte and OR-decorates with
+            // NullableRef. Abstract heap types map to their token byte
+            // (0x70 func, 0x6F extern, etc.); concrete type indices map
+            // to an s33-encoded heap-type index. WriteHeapType handles
+            // both — it inspects IsDefType on the ValType.
+            ValTypeWriter.WriteHeapType(writer, Type);
+        }
+
         public InstructionBase Immediate(ValType type)
         {
             Type = type;
@@ -69,8 +79,6 @@ namespace Wacs.Core.Instructions.Reference
             int booleanResult = val.IsNullRef ? 1 : 0;
             context.OpStack.PushI32(booleanResult);
         }
-
-        public static readonly InstRefIsNull Inst = new InstRefIsNull();
     }
     
     //0xD2
@@ -118,7 +126,10 @@ namespace Wacs.Core.Instructions.Reference
             FunctionIndex = (FuncIdx)reader.ReadLeb128_u32();
             return this;
         }
-        
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32(FunctionIndex.Value);
+
         public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {FunctionIndex.Value}";
     }
 
@@ -148,8 +159,6 @@ namespace Wacs.Core.Instructions.Reference
             int c = v1.RefEquals(v2, context.Frame.Module.Types) ? 1 : 0;
             context.OpStack.PushI32(c);
         }
-
-        public static readonly InstRefEq Inst = new InstRefEq();
     }
     
     /// <summary>
@@ -172,10 +181,8 @@ namespace Wacs.Core.Instructions.Reference
             Value vRef = context.OpStack.PopRefType();
             if (vRef.IsNullRef)
                 throw new TrapException("Ref was null.");
-            
+
             context.OpStack.PushRef(vRef);
         }
-
-        public static readonly InstRefAsNonNull Inst = new InstRefAsNonNull();
     }
 }

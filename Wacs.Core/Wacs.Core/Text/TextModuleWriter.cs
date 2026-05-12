@@ -20,86 +20,263 @@ using Wacs.Core.Types.Defs;
 namespace Wacs.Core.Text
 {
     /// <summary>
-    /// Round-trip WAT renderer — emits a canonical, parser-friendly
-    /// representation of a <see cref="Module"/> that
-    /// <see cref="TextModuleParser"/> can re-parse to a structurally-
-    /// equivalent <see cref="Module"/>.
-    ///
-    /// <para>Distinct from <see cref="ModuleRenderer"/>, which is
-    /// debug/display-oriented (stack annotations, <c>(;id;)</c> comments,
-    /// etc.). This writer targets parseability, not visual polish.</para>
+    /// Consolidated WAT renderer for <see cref="Module"/>. Default
+    /// <see cref="TextWriterStyle.Canonical"/> emits a parser-friendly
+    /// flat form that <see cref="TextModuleParser"/> can re-parse to a
+    /// structurally equivalent <see cref="Module"/>.
+    /// <see cref="TextWriterStyle.StackAnnotated"/> layers on debug
+    /// annotations (per-function id, <c>;; label = @N</c>, left-margin
+    /// stack-state comments) — what the legacy <c>ModuleRenderer</c>
+    /// used to emit. Future passes will add a folded / S-expression
+    /// style and comment / annotation round-trip.
     /// </summary>
     public static class TextModuleWriter
     {
-        public static string Write(Module module)
+        /// <summary>Two-space module-body indent.</summary>
+        public const string Indent2Space = "  ";
+
+        public static string Write(Module module) =>
+            Write(module, TextWriterOptions.Canonical);
+
+        public static string Write(Module module, TextWriterOptions options)
         {
             var sb = new StringBuilder();
             using var w = new StringWriter(sb);
-            WriteTo(w, module);
+            WriteTo(w, module, options);
             return sb.ToString();
         }
 
-        public static void WriteTo(TextWriter w, Module module)
+        /// <summary>
+        /// Render <paramref name="module"/> and return both the text
+        /// and a <see cref="LineMap"/> mapping each module element to
+        /// its line / column span in the output. Used by IDE / source-
+        /// map tooling that needs to navigate between WAT source and
+        /// module structure.
+        /// </summary>
+        public static (string text, LineMap lineMap) WriteWithLineMap(
+            Module module, TextWriterOptions? options = null)
         {
-            w.WriteLine("(module");
-            var indent = "  ";
+            options ??= TextWriterOptions.Canonical;
+            var sb = new StringBuilder();
+            using var inner = new StringWriter(sb);
+            using var tracking = new LineCountingTextWriter(inner);
+            var lineMap = new LineMap();
+            WriteTo(tracking, module, options, lineMap);
+            tracking.Flush();
+            return (sb.ToString(), lineMap);
+        }
 
-            // Types
+        public static void WriteTo(TextWriter w, Module module) =>
+            WriteTo(w, module, TextWriterOptions.Canonical, lineMap: null);
+
+        public static void WriteTo(TextWriter w, Module module, TextWriterOptions options) =>
+            WriteTo(w, module, options, lineMap: null);
+
+        /// <summary>
+        /// Internal core: emits to <paramref name="w"/> and, when
+        /// <paramref name="lineMap"/> is non-null and <paramref name="w"/>
+        /// is a <see cref="LineCountingTextWriter"/>, records each
+        /// section element's line / column span as the writer emits.
+        /// </summary>
+        private static void WriteTo(
+            TextWriter w, Module module, TextWriterOptions options, LineMap? lineMap)
+        {
+            // Module-level LEADING comments (before the first section).
+            // These appear at the very top of the round-tripped source,
+            // matching where the parser captured them in module-level
+            // attachment.
+            EmitLeading(w, module, ModuleElementRef.ModuleLevel, indent: "");
+
+            w.WriteLine("(module");
+            var indent = Indent2Space;
+
+            // Module-level annotations sit at the top of the body, on
+            // their own lines, before any sections.
+            EmitAnnotations(w, module, ModuleElementRef.ModuleLevel, indent);
+
+            // Types — function, struct, array, plus sub-typed and
+            // rec-grouped variants.
             for (int t = 0; t < module.Types.Count; t++)
             {
-                var ft = module.Types[t].SubTypes[0].Body as FunctionType;
-                if (ft == null)
-                {
-                    // GC struct/array — phase 2 scope doesn't cover these.
-                    // Emit a bare comment placeholder so the index still
-                    // lines up on round-trip.
-                    w.WriteLine($"{indent};; (type ...) (GC non-func body not supported by round-trip)");
-                    continue;
-                }
-                w.Write($"{indent}(type (func");
-                WriteParams(w, ft.ParameterTypes);
-                WriteResults(w, ft.ResultType);
-                w.WriteLine("))");
+                var key = new ModuleElementRef(ModuleElementKind.Type, t);
+                EmitLeading(w, module, key, indent);
+                BeginRecord(w, lineMap, out var snap);
+                WriteRecursiveType(w, module.Types[t], indent);
+                EndRecord(w, lineMap, key, snap);
             }
 
             // Imports
-            foreach (var import in module.Imports)
-                WriteImport(w, module, import, indent);
+            for (int ii = 0; ii < module.Imports.Length; ii++)
+            {
+                var key = new ModuleElementRef(ModuleElementKind.Import, ii);
+                EmitLeading(w, module, key, indent);
+                BeginRecord(w, lineMap, out var snap);
+                WriteImport(w, module, module.Imports[ii], indent);
+                EndRecord(w, lineMap, key, snap);
+            }
 
             // Functions (defined; imports skipped — handled above)
             int fimportCount = module.ImportedFunctions.Count;
             for (int i = 0; i < module.Funcs.Count; i++)
-                WriteFunc(w, module, module.Funcs[i], fimportCount + i, indent);
+            {
+                var key = new ModuleElementRef(ModuleElementKind.Function, i);
+                EmitLeading(w, module, key, indent);
+                BeginRecord(w, lineMap, out var snap);
+                WriteFunc(w, module, module.Funcs[i], fimportCount + i, indent, options, lineMap);
+                EndRecord(w, lineMap, key, snap);
+            }
 
             // Tables / Memories / Globals (defined)
-            int timportCount = module.ImportedTables.Count;
-            foreach (var table in module.Tables)
-                WriteTable(w, table, indent);
+            for (int ti = 0; ti < module.Tables.Count; ti++)
+            {
+                var key = new ModuleElementRef(ModuleElementKind.Table, ti);
+                EmitLeading(w, module, key, indent);
+                BeginRecord(w, lineMap, out var snap);
+                WriteTable(w, module.Tables[ti], indent);
+                EndRecord(w, lineMap, key, snap);
+            }
 
-            int mimportCount = module.ImportedMems.Count;
-            foreach (var mem in module.Memories)
-                WriteMemory(w, mem, indent);
+            for (int mi = 0; mi < module.Memories.Count; mi++)
+            {
+                var key = new ModuleElementRef(ModuleElementKind.Memory, mi);
+                EmitLeading(w, module, key, indent);
+                BeginRecord(w, lineMap, out var snap);
+                WriteMemory(w, module.Memories[mi], indent);
+                EndRecord(w, lineMap, key, snap);
+            }
 
-            int gimportCount = module.ImportedGlobals.Count;
-            foreach (var g in module.Globals)
-                WriteGlobal(w, module, g, indent);
+            for (int gi = 0; gi < module.Globals.Count; gi++)
+            {
+                var key = new ModuleElementRef(ModuleElementKind.Global, gi);
+                EmitLeading(w, module, key, indent);
+                BeginRecord(w, lineMap, out var snap);
+                WriteGlobal(w, module, module.Globals[gi], indent);
+                EndRecord(w, lineMap, key, snap);
+            }
+
+            // Tags (exception-handling). Imported tags are surfaced via
+            // the import section; defined tags emit here in declaration
+            // order matching what the parser captured.
+            for (int tgi = 0; tgi < module.Tags.Count; tgi++)
+            {
+                var key = new ModuleElementRef(ModuleElementKind.Tag, tgi);
+                EmitLeading(w, module, key, indent);
+                BeginRecord(w, lineMap, out var snap);
+                WriteTag(w, module.Tags[tgi], indent);
+                EndRecord(w, lineMap, key, snap);
+            }
 
             // Exports
-            foreach (var e in module.Exports)
-                WriteExport(w, e, indent);
+            for (int ei = 0; ei < module.Exports.Length; ei++)
+            {
+                var key = new ModuleElementRef(ModuleElementKind.Export, ei);
+                EmitLeading(w, module, key, indent);
+                BeginRecord(w, lineMap, out var snap);
+                WriteExport(w, module.Exports[ei], indent);
+                EndRecord(w, lineMap, key, snap);
+            }
 
             // Start
             if (module.StartIndex != FuncIdx.Default)
+            {
+                var key = new ModuleElementRef(ModuleElementKind.Start);
+                EmitLeading(w, module, key, indent);
+                BeginRecord(w, lineMap, out var snap);
                 w.WriteLine($"{indent}(start {module.StartIndex.Value})");
+                EndRecord(w, lineMap, key, snap);
+            }
 
-            // Elem / Data — phase 2 leaves these as comments since Phase 1
-            // doesn't fully populate them.
-            foreach (var _ in module.Elements)
-                w.WriteLine($"{indent};; (elem …) (round-trip not supported in phase 2)");
-            foreach (var _ in module.Datas)
-                w.WriteLine($"{indent};; (data …) (round-trip not supported in phase 2)");
+            for (int eli = 0; eli < module.Elements.Length; eli++)
+            {
+                var key = new ModuleElementRef(ModuleElementKind.Element, eli);
+                EmitLeading(w, module, key, indent);
+                BeginRecord(w, lineMap, out var snap);
+                WriteElementSegment(w, module.Elements[eli], indent);
+                EndRecord(w, lineMap, key, snap);
+            }
+            for (int di = 0; di < module.Datas.Length; di++)
+            {
+                var key = new ModuleElementRef(ModuleElementKind.Data, di);
+                EmitLeading(w, module, key, indent);
+                BeginRecord(w, lineMap, out var snap);
+                WriteDataSegment(w, module.Datas[di], indent);
+                EndRecord(w, lineMap, key, snap);
+            }
 
             w.WriteLine(")");
+        }
+
+        /// <summary>
+        /// Capture the (line, column) cursor before a section emit
+        /// begins. No-op when not in line-map mode.
+        /// </summary>
+        private static void BeginRecord(
+            TextWriter w, LineMap? lineMap, out (int line, int col) snap)
+        {
+            if (lineMap == null || w is not LineCountingTextWriter lc)
+            {
+                snap = (0, 0);
+                return;
+            }
+            snap = (lc.Line, lc.Column);
+        }
+
+        /// <summary>
+        /// Record the (start, end) span of a section emit on the
+        /// <paramref name="lineMap"/>. No-op when not in line-map mode.
+        /// </summary>
+        private static void EndRecord(
+            TextWriter w, LineMap? lineMap, ModuleElementRef element,
+            (int line, int col) snap)
+        {
+            if (lineMap == null || w is not LineCountingTextWriter lc) return;
+            lineMap.Record(element,
+                new LineMap.Span(snap.line, snap.col, lc.Line, lc.Column));
+        }
+
+        // ---- Trivia + annotation re-emission ------------------------------
+
+        /// <summary>
+        /// Emit any leading comments attached to <paramref name="owner"/>
+        /// — each on its own line, indented to match the element about
+        /// to follow. Comments are emitted in source order. No-op when
+        /// the module carries no <c>Comments</c> table or no entries
+        /// for this owner.
+        /// </summary>
+        private static void EmitLeading(
+            TextWriter w, Module module, ModuleElementRef owner, string indent)
+        {
+            if (module.Comments == null) return;
+            if (!module.Comments.TryGetValue(owner, out var list) || list.Count == 0)
+                return;
+            foreach (var c in list)
+            {
+                // Re-emit with original delimiters intact. Trailing
+                // comments would land on the same line as their anchor
+                // — Pass 3 attaches everything as leading; the
+                // distinction is exercised in later passes.
+                w.WriteLine($"{indent}{c.Text}");
+            }
+        }
+
+        /// <summary>
+        /// Emit any <c>(@name payload…)</c> annotations attached to
+        /// <paramref name="owner"/>. Each annotation re-emits on its
+        /// own line.
+        /// </summary>
+        private static void EmitAnnotations(
+            TextWriter w, Module module, ModuleElementRef owner, string indent)
+        {
+            if (module.Annotations == null) return;
+            if (!module.Annotations.TryGetValue(owner, out var list) || list.Count == 0)
+                return;
+            foreach (var a in list)
+            {
+                if (string.IsNullOrEmpty(a.Payload))
+                    w.WriteLine($"{indent}(@{a.Name})");
+                else
+                    w.WriteLine($"{indent}(@{a.Name} {a.Payload})");
+            }
         }
 
         // ---- Section writers ---------------------------------------------
@@ -134,8 +311,38 @@ namespace Wacs.Core.Text
             w.WriteLine(")");
         }
 
-        private static void WriteFunc(TextWriter w, Module m, Module.Function fn, int absIdx, string indent)
+        private static void WriteFunc(
+            TextWriter w, Module m, Module.Function fn, int absIdx, string indent,
+            TextWriterOptions options, LineMap? lineMap)
         {
+            // Stack-annotated mode delegates to Function.RenderText —
+            // it walks the body with a StackRenderer to produce the
+            // left-margin stack-state comments and ;; label = @N
+            // annotations that the diagnostic dump expects. The
+            // StreamWriter wrap is necessary because that path was
+            // written against StreamWriter rather than the more
+            // general TextWriter abstraction we use everywhere else.
+            if (options.Style == TextWriterStyle.StackAnnotated)
+            {
+                bool prevRenderStack = fn.RenderStack;
+                fn.RenderStack = true;
+                try
+                {
+                    using var ms = new MemoryStream();
+                    using (var sw = new StreamWriter(ms, new UTF8Encoding(false), -1, leaveOpen: true))
+                    {
+                        fn.RenderText(sw, m, indent);
+                        sw.Flush();
+                    }
+                    w.Write(Encoding.UTF8.GetString(ms.ToArray()));
+                }
+                finally
+                {
+                    fn.RenderStack = prevRenderStack;
+                }
+                return;
+            }
+
             w.Write($"{indent}(func (type {fn.TypeIndex.Value})");
             if (fn.Locals != null && fn.Locals.Length > 0)
             {
@@ -145,9 +352,165 @@ namespace Wacs.Core.Text
                 w.Write(")");
             }
             w.WriteLine();
-            // Body
-            WriteInstructionSeq(w, fn.Body.Instructions, indent + "  ", trimTrailingEnd: true);
+            // Body — folded vs flat depends on the requested style.
+            // Folded mode currently folds at the top level only;
+            // instructions inside block / loop / if bodies render flat.
+            //
+            // For LineMap recording: pre-walk the body once with
+            // ByteOffsetWalker to compute body-relative byte offsets
+            // per instruction reference. The LineMap key is (absolute
+            // funcIdx, byteOffset); WasmStackTrace's trap-time walker
+            // computes the trap's offset by the same walk so both
+            // sides agree (first-match for shared singletons).
+            int recordFuncIdx = lineMap != null ? (int)fn.Index.Value : -1;
+            Dictionary<InstructionBase, uint>? instOffsets = null;
+            if (lineMap != null)
+            {
+                instOffsets = new Dictionary<InstructionBase, uint>();
+                Wacs.Core.Bin.ByteOffsetWalker.Walk(
+                    fn.Body.Instructions,
+                    (inst, off) =>
+                    {
+                        if (!instOffsets.ContainsKey(inst))
+                            instOffsets[inst] = off;
+                        return false;
+                    });
+            }
+            if (options.Style == TextWriterStyle.Folded)
+                WriteFoldedInstructionSeq(w, fn.Body.Instructions, indent + Indent2Space);
+            else
+                WriteInstructionSeq(w, fn.Body.Instructions, indent + Indent2Space,
+                    trimTrailingEnd: true, lineMap, recordFuncIdx, instOffsets);
             w.WriteLine($"{indent})");
+        }
+
+        /// <summary>
+        /// Fold an instruction sequence into S-expression form where
+        /// possible. Operates as a single linear pass with a stack of
+        /// rendered operand fragments:
+        ///   1. Leaves (consume=0, produce=1) — e.g. <c>i32.const N</c>,
+        ///      <c>local.get N</c> — push their rendered form onto the
+        ///      pending stack.
+        ///   2. Operators (consume&gt;0, produce&gt;0) pop their operands
+        ///      and wrap as <c>(op (operand1) (operand2))</c>.
+        ///   3. Effectful ops (produce=0) emit the folded form as a
+        ///      stand-alone line.
+        ///   4. Anything the folder can't handle (control flow, block
+        ///      shapes, opcodes outside <see cref="OpcodeArity"/>'s
+        ///      table) flushes the pending stack as flat lines and
+        ///      emits the instruction flat.
+        ///
+        /// <para>Inner block bodies are emitted flat in this pass —
+        /// folding into nested blocks is a follow-up.</para>
+        /// </summary>
+        private static void WriteFoldedInstructionSeq(
+            TextWriter w, InstructionSequence seq, string indent)
+        {
+            int count = seq.Count;
+            if (count > 0 && seq[count - 1] is InstEnd) count--;
+
+            var pending = new System.Collections.Generic.Stack<string>();
+            for (int i = 0; i < count; i++)
+            {
+                var inst = seq[i]!;
+                if (IsChainBreaker(inst)
+                    || !OpCodes.OpcodeArity.TryGet(inst, out int consume, out int produce))
+                {
+                    DrainPendingAsFlat(w, pending, indent);
+                    // Block bodies stay flat — falls back through the
+                    // existing flat-emit machinery, which recurses.
+                    WriteInstruction(w, inst, indent);
+                    continue;
+                }
+                if (pending.Count < consume)
+                {
+                    // Not enough operands to fold this op — drain and
+                    // emit flat. Happens when a value comes from a
+                    // chain-breaker earlier (e.g. a call result that
+                    // we couldn't fold into).
+                    DrainPendingAsFlat(w, pending, indent);
+                    WriteInstruction(w, inst, indent);
+                    continue;
+                }
+
+                // Pop `consume` operands; the topmost stack entry is
+                // the LAST operand in source-order (right-hand side).
+                var ops = new string[consume];
+                for (int k = consume - 1; k >= 0; k--) ops[k] = pending.Pop();
+                string opText = RenderInstruction(inst);
+                string folded = consume == 0
+                    ? $"({opText})"
+                    : $"({opText} {string.Join(" ", ops)})";
+
+                if (produce > 0)
+                {
+                    pending.Push(folded);
+                }
+                else
+                {
+                    // Effectful instruction — emit on its own line.
+                    w.WriteLine($"{indent}{folded}");
+                }
+            }
+
+            DrainPendingAsFlat(w, pending, indent);
+        }
+
+        /// <summary>
+        /// Instructions whose presence forces a chain break in folded
+        /// mode: block-shaped forms, branches, returns, calls,
+        /// unreachable, throw — anything whose result the folder
+        /// can't safely treat as a pure operand.
+        /// </summary>
+        private static bool IsChainBreaker(InstructionBase inst) =>
+            inst is InstBlock or InstLoop or InstIf or InstElse or InstEnd
+                 or InstTryTable
+                 or InstBranch or InstBranchIf or InstBranchTable
+                 or InstReturn or InstUnreachable
+                 or InstCall or InstCallIndirect
+                 or InstThrow or InstThrowRef
+                 or Wacs.Core.Instructions.InstReturnCall
+                 or Wacs.Core.Instructions.InstReturnCallIndirect
+                 or Wacs.Core.Instructions.Reference.InstCallRef
+                 or Wacs.Core.Instructions.InstReturnCallRef;
+
+        /// <summary>
+        /// Emit any operands still on the pending stack as standalone
+        /// flat lines, in source order (oldest first). Used at chain
+        /// boundaries and at the end of a function body.
+        /// </summary>
+        private static void DrainPendingAsFlat(
+            TextWriter w, System.Collections.Generic.Stack<string> pending, string indent)
+        {
+            if (pending.Count == 0) return;
+            var arr = pending.ToArray();
+            System.Array.Reverse(arr);
+            foreach (var s in arr) w.WriteLine($"{indent}{s}");
+            pending.Clear();
+        }
+
+        // ---- Partial-render entry points ----------------------------------
+
+        /// <summary>
+        /// Render a single function from <paramref name="module"/>. The
+        /// <paramref name="index"/> is the absolute function index
+        /// (imported functions are addressable too, but they have no
+        /// body — passing one returns the empty string).
+        /// </summary>
+        public static string WriteFunction(
+            Module module, FuncIdx index, string indent = "",
+            TextWriterOptions? options = null)
+        {
+            options ??= TextWriterOptions.Canonical;
+            int importCount = module.ImportedFunctions.Count;
+            int defIdx = (int)index.Value - importCount;
+            if (defIdx < 0 || defIdx >= module.Funcs.Count)
+                return string.Empty;
+
+            var sb = new StringBuilder();
+            using var w = new StringWriter(sb);
+            WriteFunc(w, module, module.Funcs[defIdx], (int)index.Value, indent, options, lineMap: null);
+            return sb.ToString();
         }
 
         private static void WriteTable(TextWriter w, TableType t, string indent)
@@ -265,23 +628,47 @@ namespace Wacs.Core.Text
         // ---- Instructions -------------------------------------------------
 
         private static void WriteInstructionSeq(
-            TextWriter w, InstructionSequence seq, string indent, bool trimTrailingEnd)
+            TextWriter w, InstructionSequence seq, string indent, bool trimTrailingEnd) =>
+            WriteInstructionSeq(w, seq, indent, trimTrailingEnd,
+                lineMap: null, funcIdx: -1, instOffsets: null);
+
+        private static void WriteInstructionSeq(
+            TextWriter w, InstructionSequence seq, string indent, bool trimTrailingEnd,
+            LineMap? lineMap, int funcIdx,
+            Dictionary<InstructionBase, uint>? instOffsets)
         {
             int count = seq.Count;
             if (trimTrailingEnd && count > 0 && seq[count - 1] is InstEnd)
                 count--;
             for (int i = 0; i < count; i++)
-                WriteInstruction(w, seq[i]!, indent);
+                WriteInstruction(w, seq[i]!, indent, lineMap, funcIdx, instOffsets);
         }
 
-        private static void WriteInstruction(TextWriter w, InstructionBase inst, string indent)
+        private static void WriteInstruction(TextWriter w, InstructionBase inst, string indent) =>
+            WriteInstruction(w, inst, indent, lineMap: null, funcIdx: -1, instOffsets: null);
+
+        private static void WriteInstruction(
+            TextWriter w, InstructionBase inst, string indent,
+            LineMap? lineMap, int funcIdx,
+            Dictionary<InstructionBase, uint>? instOffsets)
         {
+            BeginRecord(w, lineMap, out var instSnap);
+
             // Block instructions recursively render their inner sequences.
             switch (inst)
             {
-                case InstBlock ib: WriteBlockForm(w, ib, "block", indent); return;
-                case InstLoop il:  WriteBlockForm(w, il, "loop", indent); return;
-                case InstIf iif:   WriteIfForm(w, iif, indent); return;
+                case InstBlock ib:
+                    WriteBlockForm(w, ib, "block", indent, lineMap, funcIdx, instOffsets);
+                    RecordInstructionSpan(w, lineMap, funcIdx, inst, instSnap, instOffsets);
+                    return;
+                case InstLoop il:
+                    WriteBlockForm(w, il, "loop", indent, lineMap, funcIdx, instOffsets);
+                    RecordInstructionSpan(w, lineMap, funcIdx, inst, instSnap, instOffsets);
+                    return;
+                case InstIf iif:
+                    WriteIfForm(w, iif, indent, lineMap, funcIdx, instOffsets);
+                    RecordInstructionSpan(w, lineMap, funcIdx, inst, instSnap, instOffsets);
+                    return;
                 case InstElse: return;  // handled inside InstIf
                 case InstEnd:   return; // trailing end already trimmed
             }
@@ -292,6 +679,34 @@ namespace Wacs.Core.Text
             // not. Render those by their public accessors; fall back to
             // RenderText otherwise.
             w.WriteLine($"{indent}{RenderInstruction(inst)}");
+
+            RecordInstructionSpan(w, lineMap, funcIdx, inst, instSnap, instOffsets);
+        }
+
+        /// <summary>
+        /// Record a per-instruction LineMap entry keyed by
+        /// <see cref="ModuleElementKind.Instruction"/> with the
+        /// function's absolute index and the instruction's
+        /// body-relative byte offset (looked up from
+        /// <paramref name="instOffsets"/>, pre-computed via
+        /// <see cref="Wacs.Core.Bin.ByteOffsetWalker"/>). Lets
+        /// <see cref="WasmStackTrace"/> resolve binary-parsed frames
+        /// (which have no <c>SourcePositions</c>) to a source line
+        /// through a re-rendered LineMap.
+        /// </summary>
+        private static void RecordInstructionSpan(
+            TextWriter w, LineMap? lineMap, int funcIdx,
+            InstructionBase inst, (int line, int col) snap,
+            Dictionary<InstructionBase, uint>? instOffsets)
+        {
+            if (lineMap == null || funcIdx < 0 || instOffsets == null) return;
+            if (w is not LineCountingTextWriter lc) return;
+            if (!instOffsets.TryGetValue(inst, out var off)) return;
+            var key = new ModuleElementRef(
+                ModuleElementKind.Instruction,
+                funcIdx,
+                (int)off);
+            lineMap.Record(key, new LineMap.Span(snap.line, snap.col, lc.Line, lc.Column));
         }
 
         private static string RenderInstruction(InstructionBase inst)
@@ -310,20 +725,51 @@ namespace Wacs.Core.Text
                 return $"br_if {brIf.Label}";
 
             // Constants use RenderText overrides already.
-            return inst.RenderText(null);
+            // Strip the writer-generated `(;=value;)` diagnostic tail
+            // that InstF32Const / InstF64Const append for human
+            // readability — when canonical-mode round-tripping, that
+            // tail re-parses as a captured block-comment trivia, and
+            // emitting it AGAIN on the next write doubles the comment
+            // and breaks the fixed-point invariant.
+            return StripFloatDiagnostic(inst.RenderText(null));
         }
 
-        private static void WriteBlockForm(TextWriter w, IBlockInstruction blk, string keyword, string indent)
+        private static string StripFloatDiagnostic(string text)
+        {
+            // The diagnostic shape is `... (;=N;)` at the end of the
+            // line. Cheap pattern test: ends in `;)` and the last
+            // `(;=` precedes it.
+            int closeIdx = text.LastIndexOf(";)", System.StringComparison.Ordinal);
+            if (closeIdx < 0 || closeIdx != text.Length - 2) return text;
+            int openIdx = text.LastIndexOf(" (;=", System.StringComparison.Ordinal);
+            if (openIdx < 0) return text;
+            return text.Substring(0, openIdx);
+        }
+
+        private static void WriteBlockForm(TextWriter w, IBlockInstruction blk, string keyword, string indent) =>
+            WriteBlockForm(w, blk, keyword, indent, lineMap: null, funcIdx: -1, instOffsets: null);
+
+        private static void WriteBlockForm(
+            TextWriter w, IBlockInstruction blk, string keyword, string indent,
+            LineMap? lineMap, int funcIdx,
+            Dictionary<InstructionBase, uint>? instOffsets)
         {
             w.Write($"{indent}{keyword}");
             WriteBlockType(w, blk.BlockType);
             w.WriteLine();
             var body = blk.GetBlock(0).Instructions;
-            WriteInstructionSeq(w, body, indent + "  ", trimTrailingEnd: true);
+            WriteInstructionSeq(w, body, indent + "  ", trimTrailingEnd: true,
+                lineMap, funcIdx, instOffsets);
             w.WriteLine($"{indent}end");
         }
 
-        private static void WriteIfForm(TextWriter w, InstIf iif, string indent)
+        private static void WriteIfForm(TextWriter w, InstIf iif, string indent) =>
+            WriteIfForm(w, iif, indent, lineMap: null, funcIdx: -1, instOffsets: null);
+
+        private static void WriteIfForm(
+            TextWriter w, InstIf iif, string indent,
+            LineMap? lineMap, int funcIdx,
+            Dictionary<InstructionBase, uint>? instOffsets)
         {
             w.Write($"{indent}if");
             WriteBlockType(w, iif.BlockType);
@@ -336,7 +782,7 @@ namespace Wacs.Core.Text
             if (thenCount > 0 && (thenSeq[thenCount - 1] is InstElse || thenSeq[thenCount - 1] is InstEnd))
                 thenCount--;
             for (int i = 0; i < thenCount; i++)
-                WriteInstruction(w, thenSeq[i]!, indent + "  ");
+                WriteInstruction(w, thenSeq[i]!, indent + "  ", lineMap, funcIdx, instOffsets);
             if (hasElse)
             {
                 w.WriteLine($"{indent}else");
@@ -344,7 +790,7 @@ namespace Wacs.Core.Text
                 int elseCount = elseSeq.Count;
                 if (elseCount > 0 && elseSeq[elseCount - 1] is InstEnd) elseCount--;
                 for (int i = 0; i < elseCount; i++)
-                    WriteInstruction(w, elseSeq[i]!, indent + "  ");
+                    WriteInstruction(w, elseSeq[i]!, indent + "  ", lineMap, funcIdx, instOffsets);
             }
             w.WriteLine($"{indent}end");
         }
@@ -405,6 +851,273 @@ namespace Wacs.Core.Text
                 }
             }
             return sb.ToString();
+        }
+
+        // ---- Pass 4 fidelity: full elem / data / tag / GC type ------------
+
+        /// <summary>
+        /// Emit a top-level <c>(tag …)</c> form for a defined tag.
+        /// The current TagType wraps a function-signature type index;
+        /// the canonical shape is <c>(tag (type N))</c>.
+        /// </summary>
+        private static void WriteTag(TextWriter w, TagType tag, string indent)
+        {
+            w.WriteLine($"{indent}(tag (type {tag.TypeIndex.Value}))");
+        }
+
+        /// <summary>
+        /// Emit a <see cref="RecursiveType"/>. Single sub with no super
+        /// types renders bare (<c>(type (func …))</c> / <c>(type
+        /// (struct …))</c> / <c>(type (array …))</c>). Multiple subs
+        /// or a non-final / supered sub renders inside a
+        /// <c>(rec …)</c> wrapper.
+        /// </summary>
+        private static void WriteRecursiveType(TextWriter w, RecursiveType rt, string indent)
+        {
+            // Single-sub, final, no supers: emit the bare (type …) form
+            // matching what the binary encoder produces.
+            if (rt.SubTypes.Length == 1
+                && rt.SubTypes[0].Final
+                && rt.SubTypes[0].SuperTypeIndexes.Length == 0)
+            {
+                w.Write($"{indent}(type ");
+                WriteCompositeBody(w, rt.SubTypes[0].Body);
+                w.WriteLine(")");
+                return;
+            }
+
+            // Otherwise wrap in a (rec …) group.
+            w.WriteLine($"{indent}(rec");
+            var sub = indent + Indent2Space;
+            foreach (var st in rt.SubTypes)
+            {
+                w.Write($"{sub}(type ");
+                WriteSubTypeBody(w, st);
+                w.WriteLine(")");
+            }
+            w.WriteLine($"{indent})");
+        }
+
+        /// <summary>
+        /// Emit the body of a <c>(type …)</c> form: either a bare
+        /// <c>(func …)</c> / <c>(struct …)</c> / <c>(array …)</c> when
+        /// the sub is final + no super, or a <c>(sub …)</c> wrapper
+        /// otherwise.
+        /// </summary>
+        private static void WriteSubTypeBody(TextWriter w, SubType st)
+        {
+            if (st.Final && st.SuperTypeIndexes.Length == 0)
+            {
+                WriteCompositeBody(w, st.Body);
+                return;
+            }
+            w.Write(st.Final ? "(sub final" : "(sub");
+            foreach (var sup in st.SuperTypeIndexes)
+                w.Write($" {sup.Value}");
+            w.Write(' ');
+            WriteCompositeBody(w, st.Body);
+            w.Write(')');
+        }
+
+        /// <summary>
+        /// Emit the inside of a <c>(type …)</c> body — one of the
+        /// three composite shapes: function, struct, or array.
+        /// </summary>
+        private static void WriteCompositeBody(TextWriter w, CompositeType body)
+        {
+            switch (body)
+            {
+                case FunctionType ft:
+                    w.Write("(func");
+                    WriteParams(w, ft.ParameterTypes);
+                    WriteResults(w, ft.ResultType);
+                    w.Write(')');
+                    break;
+                case StructType st:
+                    w.Write("(struct");
+                    foreach (var f in st.FieldTypes)
+                    {
+                        w.Write(" (field ");
+                        WriteFieldType(w, f);
+                        w.Write(')');
+                    }
+                    w.Write(')');
+                    break;
+                case ArrayType at:
+                    w.Write("(array ");
+                    WriteFieldType(w, at.ElementType);
+                    w.Write(')');
+                    break;
+                default:
+                    throw new InvalidDataException(
+                        $"Unknown CompositeType {body?.GetType().Name}");
+            }
+        }
+
+        /// <summary>
+        /// Emit a <see cref="FieldType"/>: <c>(mut T)</c> when mutable,
+        /// bare <c>T</c> when immutable. Packed storage types
+        /// (<c>i8</c>, <c>i16</c>) round-trip via <see cref="ToWatValType"/>.
+        /// </summary>
+        private static void WriteFieldType(TextWriter w, FieldType ft)
+        {
+            if (ft.Mut == Mutability.Mutable)
+                w.Write($"(mut {ToWatValType(ft.StorageType)})");
+            else
+                w.Write(ToWatValType(ft.StorageType));
+        }
+
+        // ---- Element segments ---------------------------------------------
+
+        /// <summary>
+        /// Emit a single <c>(elem …)</c> top-level form. Three modes
+        /// (active, passive, declarative) cross four representations
+        /// (func-shortcut vs reftype-expr-vector; default vs explicit
+        /// table index), giving the eight wire-form combinations the
+        /// binary parser handles. The text writer collapses to the
+        /// most concise WAT that re-parses to the same segment.
+        /// </summary>
+        private static void WriteElementSegment(
+            TextWriter w, Module.ElementSegment seg, string indent)
+        {
+            // Detect the func-shortcut subform: all initializers are a
+            // single ref.func, and the segment type is FuncRef-family.
+            // If yes, we can emit the compact `func 0 1 2` form.
+            bool useFuncShortcut = IsAllRefFunc(seg);
+
+            w.Write($"{indent}(elem");
+
+            switch (seg.Mode)
+            {
+                case Module.ElementMode.PassiveMode:
+                    // (elem reftype (item ...) (item ...))
+                    if (useFuncShortcut)
+                    {
+                        w.Write(" func");
+                        AppendFuncIdxList(w, seg);
+                    }
+                    else
+                    {
+                        w.Write(' ');
+                        w.Write(ToWatValType(seg.Type));
+                        AppendInitExprList(w, seg);
+                    }
+                    break;
+
+                case Module.ElementMode.DeclarativeMode:
+                    if (useFuncShortcut)
+                    {
+                        w.Write(" declare func");
+                        AppendFuncIdxList(w, seg);
+                    }
+                    else
+                    {
+                        w.Write(" declare ");
+                        w.Write(ToWatValType(seg.Type));
+                        AppendInitExprList(w, seg);
+                    }
+                    break;
+
+                case Module.ElementMode.ActiveMode am:
+                {
+                    if (am.TableIndex.Value != 0)
+                        w.Write($" (table {am.TableIndex.Value})");
+                    w.Write($" (offset{am.Offset.ToWat()})");
+                    if (useFuncShortcut)
+                    {
+                        w.Write(" func");
+                        AppendFuncIdxList(w, seg);
+                    }
+                    else
+                    {
+                        w.Write(' ');
+                        w.Write(ToWatValType(seg.Type));
+                        AppendInitExprList(w, seg);
+                    }
+                    break;
+                }
+
+                default:
+                    throw new InvalidDataException(
+                        $"Unknown ElementMode {seg.Mode?.GetType().Name}");
+            }
+
+            w.WriteLine(')');
+        }
+
+        private static bool IsAllRefFunc(Module.ElementSegment seg)
+        {
+            // Func-shortcut only applies to FuncRef-family element
+            // types; otherwise the reftype must be spelled explicitly.
+            if (seg.Type != ValType.Func && seg.Type != ValType.FuncRef)
+                return false;
+            foreach (var expr in seg.Initializers)
+            {
+                var insts = expr.Instructions;
+                if (insts.Count < 1) return false;
+                if (insts[0] is not Wacs.Core.Instructions.Reference.InstRefFunc)
+                    return false;
+            }
+            return true;
+        }
+
+        private static void AppendFuncIdxList(TextWriter w, Module.ElementSegment seg)
+        {
+            foreach (var expr in seg.Initializers)
+            {
+                var rf = expr.Instructions[0]
+                    as Wacs.Core.Instructions.Reference.InstRefFunc;
+                if (rf == null)
+                    throw new InvalidDataException(
+                        "Element initializer was expected to be ref.func");
+                w.Write($" {rf.FunctionIndex.Value}");
+            }
+        }
+
+        private static void AppendInitExprList(TextWriter w, Module.ElementSegment seg)
+        {
+            foreach (var expr in seg.Initializers)
+            {
+                // (item (instr…)) form.
+                w.Write(" (item");
+                w.Write(expr.ToWat());
+                w.Write(')');
+            }
+        }
+
+        // ---- Data segments ------------------------------------------------
+
+        /// <summary>
+        /// Emit a single <c>(data …)</c> top-level form. Three modes:
+        /// active-default-memory, active-explicit-memory, and passive.
+        /// The byte payload is emitted via
+        /// <see cref="Wacs.Core.Utilities.BytesEncoder.EncodeToWatString"/>
+        /// (the existing canonical escape).
+        /// </summary>
+        private static void WriteDataSegment(
+            TextWriter w, Module.Data data, string indent)
+        {
+            string bytes = Wacs.Core.Utilities.BytesEncoder
+                .EncodeToWatString(data.Init ?? System.Array.Empty<byte>());
+
+            w.Write($"{indent}(data");
+            switch (data.Mode)
+            {
+                case Module.DataMode.PassiveMode:
+                    w.Write(' ');
+                    w.Write(bytes);
+                    break;
+                case Module.DataMode.ActiveMode am:
+                    if (am.MemoryIndex.Value != 0)
+                        w.Write($" (memory {am.MemoryIndex.Value})");
+                    w.Write($" (offset{am.Offset.ToWat()}) ");
+                    w.Write(bytes);
+                    break;
+                default:
+                    throw new InvalidDataException(
+                        $"Unknown DataMode {data.Mode?.GetType().Name}");
+            }
+            w.WriteLine(')');
         }
     }
 }

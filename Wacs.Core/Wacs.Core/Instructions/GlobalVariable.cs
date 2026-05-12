@@ -75,6 +75,9 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32(Index.Value);
+
         public override string RenderText(ExecContext? context)
         {
             if (context == null)
@@ -155,6 +158,9 @@ namespace Wacs.Core.Instructions
             Index = (GlobalIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32(Index.Value);
 
         public override string RenderText(ExecContext? context)
         {

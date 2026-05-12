@@ -122,6 +122,9 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32(X.Value);
+
         public InstructionBase Immediate(FuncIdx value)
         {
             X = value;
@@ -379,6 +382,12 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer)
+        {
+            writer.WriteLeb128_u32((uint)Y.Value);
+            writer.WriteLeb128_u32(X.Value);
+        }
+
         public override string RenderText(ExecContext? context)
         {
             if (context != null && context.Attributes.Live)
@@ -549,6 +558,9 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32((uint)X.Value);
+
         public InstructionBase Immediate(TypeIdx value)
         {
             X = value;
@@ -560,7 +572,7 @@ namespace Wacs.Core.Instructions
             if (context != null)
             {
                 var type = context.Frame.Module.Types[X];
-                return $"{base.RenderText(context)} {type} {X.Value}";    
+                return $"{base.RenderText(context)} {type} {X.Value}";
             }
             return $"{base.RenderText(context)} {X.Value}";
         }

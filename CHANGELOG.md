@@ -1,5 +1,1238 @@
 # Changelog
 
+## WACS 0.15.19 / WACS.Cli 1.6.7 — `wacs.trivia` custom section
+
+Optimistic in-band carrier for WAT comments (`;;` line + `(;…;)`
+block) and `(@name …)` annotations so round-tripping WAT → wasm
+→ WAT keeps human-authored trivia. WACS-specific, ignored by
+other engines; no spec.
+
+### What changed
+
+- `BinaryModuleWriter` emits a `wacs.trivia` custom section
+  when `Module.Comments` or `Module.Annotations` is populated.
+- `BinaryModuleParser` parses the section when
+  `BinaryModuleParser.ParseTrivia = true` (off by default, like
+  the other opt-in custom sections).
+- `wacs inspect` flips both `ParseCustomNames` and
+  `ParseTrivia` on so `--dump-wat` from a binary input recovers
+  comments and names, and `--dump-wasm` from WAT serializes
+  them into the section.
+
+### Wire format
+
+```
+custom section "wacs.trivia":
+  comments:    vec(entry<vec(comment)>)
+  annotations: vec(entry<vec(annotation)>)
+entry<T> ::= kind:u8  index:s32  instructionIndex:s32  payload:T
+comment    ::= trivia_kind:u8  is_trailing:u8  text:utf8-str
+annotation ::= name:utf8-str  payload:utf8-str
+```
+
+### Live behavior
+
+```bash
+$ cat /tmp/commented.wat
+;; top-level header comment
+(module
+  ;; the boom function does the deed
+  (func $boom
+    i32.const 1
+    drop
+    unreachable))
+
+$ wacs inspect --dump-wasm /tmp/commented.wat --output-dir /tmp/d
+wrote /tmp/d/commented.wasm (135 bytes)
+$ wacs inspect --dump-wat /tmp/d/commented.wasm
+;; top-level header comment
+(module
+  (type (func))
+  ;; the boom function does the deed
+  (func (type 0)
+    i32.const 1
+    drop
+    unreachable
+  )
+)
+```
+
+### Lossy by design
+
+- Source line/col aren't serialized (the binary form has no
+  source positions; trivia is keyed by `ModuleElementRef`
+  only).
+- Comment positions on re-parse are best-effort — comments
+  attach to the same `ModuleElementRef` they came from, but
+  the renderer doesn't try to preserve "this comment was on
+  line 7 column 12" inside the WAT body.
+- Trailing-vs-leading distinction is preserved (the
+  `IsTrailing` flag rides along).
+
+### Tests
+
+`TriviaSectionRoundTripTests` (4 cases): top-level line
+comment, module-level annotation, opt-in gating, and zero-
+emit-when-empty. Full suite 488/488.
+
+## WACS 0.15.18 — uninternify parse-time instruction singletons
+
+Pairs with 0.15.17. Removes the ten process-wide singletons that
+the binary / text parsers used to hand out as shared instances,
+making every parsed occurrence its own `InstructionBase`.
+Resolves the first-match ambiguity that 0.15.17's
+`ByteOffsetWalker` was unable to disambiguate.
+
+### What changed
+
+- `InstI32Const` and `InstLocalGet`: deleted the static
+  `ConcurrentDictionary<int, T> LookupCache` fields and the
+  `.Inst` statics. `Immediate(N)` now always allocates a fresh
+  instance; `Parse(reader)` does the same directly.
+- Removed the `.Inst` static fields from `InstUnreachable`,
+  `InstNop`, `InstReturn`, `InstDrop`, `InstRefIsNull`,
+  `InstRefEq`, `InstRefAsNonNull`. Removed
+  `InstSelect.InstWithoutTypes`. Constructors for
+  `InstUnreachable`/`InstNop` flipped from private to public so
+  the factory can allocate them. `SpecFactory` calls `new InstX()`
+  for each opcode.
+- Test sites updated to use `new InstX().Immediate(N)` or
+  `new InstReturn()` instead of `InstX.Inst.…`.
+
+### What didn't change
+
+ALU / relop / test ops (`InstI32BinOp.I32Add`,
+`InstI32RelOp.I32Eq`, `InstI32TestOp.I32Eqz`, …) are still
+per-opcode statics referenced directly in `SpecFactory`. They
+have no per-occurrence state today, so sharing is harmless. The
+`StackAnalysis` queue-per-instance trick is kept in place to
+give those still-shared singletons per-site info. If anyone
+later attaches per-site state to ALU ops, those classes must
+also be uninterned.
+
+### Memory / runtime impact
+
+For a typical wasm module, a few extra MB of `InstructionBase`
+subclass instances at parse time. Dispatch is virtual-by-
+reference and the CLR JIT de-virtualizes the same way regardless
+of instance count, so no measurable runtime cost. Memory is
+rooted by the `Module` and lives in Gen2 for the program
+lifetime — no GC pressure.
+
+### Tests
+
+484/484 stable across 10 parallel runs (0.15.17 was also
+stable; this confirms the uninterning didn't regress
+anything). The two pre-existing `CallIndirect_dispatches_via_funcref_table`
+failures in `Wacs.Compilation.Test` are unrelated and pre-date
+this branch.
+
+## WACS 0.15.17 — on-demand byte-offset walker
+
+Replaces the parse-time `ByteOffsetInFunc` stamping (binary
+parser + Pass F annotator) with a single on-demand
+`Wacs.Core.Bin.ByteOffsetWalker`. The `ByteOffsetInFunc` field
+on `InstructionBase` is gone; consumers (stack-trace formatter,
+branch-hint join, LineMap writer) call `ByteOffsetWalker.Find`
+or `Walk` when they need an offset.
+
+### Why
+
+The deleted field was a mutable per-occurrence value living on
+instances that the rest of WACS interns process-wide
+(`InstI32Const`, `InstLocalGet`, `InstDrop`, `InstNop`, …). The
+last parse to stamp the singleton won, so:
+
+- Two functions with the same `drop` got the same offset
+  (whichever parsed last).
+- Concurrent parses (xUnit parallel collections, embedder
+  loading multiple modules) clobbered each other, producing
+  flaky test failures in Pass F/G assertions.
+
+Pass F made the surface area worse by stamping every WAT-parsed
+instruction. Rather than chase down where the race manifests,
+we deleted the storage altogether and compute offsets on demand
+through the existing `BinaryModuleWriter` + `CountingStream`
+machinery.
+
+### What changed
+
+- New `Wacs.Core.Bin.ByteOffsetWalker` (`Walk` for visitor-
+  style traversal, `Find` for first-match lookup).
+- Deleted `InstructionBase.ByteOffsetInFunc`, the parser
+  stamping at `Module.ParseInstruction`, the `BinaryParseContext`
+  thread-static and the `FunctionBodyStart` plumbing in
+  `CodeSection`, and `ByteOffsetAnnotator` (with its
+  `TextModuleParser.FinalizeModule` hook).
+- `WasmStackTrace.AppendFrame` now walks the trap function's
+  body to resolve the `@+0xXX` display and the LineMap lookup
+  key.
+- `BranchHintSection.JoinByInstruction` walks once per function
+  to map offset-keyed parse data to the instance-keyed lookup.
+- `TextModuleWriter.WriteFunc` (LineMap path) pre-walks the
+  body once to build a `Dictionary<InstructionBase, uint>` of
+  first-match offsets; `RecordInstructionSpan` looks up by
+  reference.
+
+### Remaining limitation
+
+Interned singletons (`drop`, `i32.const N`, `local.get N`, …)
+still ambiguate among occurrences — `ByteOffsetWalker.Find`
+returns the first reference match. A trap at the second `drop`
+in a function reports the first `drop`'s offset. Same
+ambiguity as 0.15.16; resolving it needs a per-occurrence
+handle in `WasmStackFrame` (body-index or linker-PC). Deferred.
+
+### Tests
+
+Removed `ByteOffsetAnnotatorTests` (now redundant — both ends
+of the walker would tautologically agree). Updated
+`BranchHintParsingTests.InstructionsCarryFuncRelativeByteOffset`
+and `NoBranchHintsWhenSectionAbsent` to call
+`ByteOffsetWalker.Find` instead of reading
+`inst.ByteOffsetInFunc`. Full suite: 484/484, stable across 10
+parallel runs (no flake).
+
+## WACS 0.15.16 / WACS.Cli 1.6.6 — binary-source line bridge (Pass G)
+
+Binary-parsed modules now resolve to source coordinates in trap
+traces via a canonical re-render, closing the last Pass-C gap.
+The CLI lazily builds a `LineMap` on first trap and surfaces
+`(line:col)` against the re-rendered WAT, matching what WAT
+direct-parse already produced via `Module.SourcePositions`.
+
+### What changed
+
+- `TextModuleWriter.WriteWithLineMap` now records a
+  `ModuleElementKind.Instruction`-kinded `ModuleElementRef` for
+  every emitted instruction, keyed by
+  `(absolute funcIdx, ByteOffsetInFunc)`. Plumbed through
+  `WriteInstructionSeq` / `WriteInstruction` / `WriteBlockForm` /
+  `WriteIfForm`. The previous overloads (without a `LineMap`)
+  remain available for the non-tracking callers.
+- `WasmStackTrace.TryResolveSourceCoord` consults the LineMap
+  when `Module.SourcePositions` is absent — falls back to the
+  recorded span's start line / column. Resolves the
+  frame's `FuncAddr` through the `Store` to its absolute
+  `FuncIdx` (via `FunctionInstance.Index`) so the lookup key
+  matches what the writer recorded.
+- `RunHandler.BuildLineMapIfNeeded` in WACS.Cli lazily computes
+  the LineMap on demand (only when `SourcePositions` is null);
+  WAT-parsed modules skip the re-render. Wired into
+  `PrintTrap` / `PrintUnhandledWasm` / `PrintRuntimeException`.
+
+### Live behavior
+
+```bash
+# Binary input (no source) — Pass G surfaces (line:col) from
+# a canonical re-render.
+$ wacs run trap.wasm --invoke _start
+WASM stack trace:
+  at $_.boom|0 (unreachable @+0x3) (6:1)
+  at $_._start
+
+# Same WAT direct — resolves via Module.SourcePositions
+# (unchanged behavior).
+$ wacs run trap.wat --invoke _start
+WASM stack trace:
+  at $_.$boom (unreachable @+0x3) (5:5)
+  at $_._start
+```
+
+### Known limitation
+
+`ByteOffsetInFunc` is a mutable field on `InstructionBase`, but
+several instruction classes (`InstI32Const`, `InstLocalGet`,
+`InstDrop`, `InstNop`, …) intern process-wide. The latest parse
+to stamp the singleton wins, so the displayed `@+0xXX` can be
+the wrong function's offset when the same opcode/value shows up
+in multiple functions or modules. The mechanism is sound in
+serial production use; tests for Pass F/G use looser assertions
+that survive the race. The architectural fix (per-occurrence
+offset side-table + body-index in `WasmStackFrame`) is deferred.
+
+### Tests
+
+`BinarySourceLineBridgeTests` (4 cases) covering the LineMap
+recording for binary-parsed modules and WAT round-trips, plus
+`WasmStackTraceTests.FormatVerbose_BinaryParsedModule_ResolvesViaLineMap`
+exercising the full trap → re-render → format path. Full suite:
+487/487.
+
+## WACS 0.15.15 — WAT byte-offset annotation (Pass F)
+
+WAT-parsed modules now carry `InstructionBase.ByteOffsetInFunc`
+stamps that match what the binary parser records natively, so
+stack-trace formatting surfaces `@+0xXX` coordinates regardless
+of which parser produced the module.
+
+### What changed
+
+- New `Wacs.Core.Bin.ByteOffsetAnnotator` walks every defined
+  function body through a counting `Stream` wrapper that
+  swallows writes and only tracks position, then stamps each
+  instruction's body-relative byte offset using the existing
+  `BinaryModuleWriter` encoder machinery. Block-shaped
+  instructions (`block`/`loop`/`if`/`try_table`) recurse into
+  their inner sequences.
+- `TextModuleParser.FinalizeModule` invokes the annotator
+  immediately after `SynthesizeNameSection`. One extra body-
+  shaped walk per module load — no per-instruction allocations
+  — amortized over every subsequent trap-format call.
+- Closes the byte-offset half of the binary-vs-text parity gap
+  called out in 0.15.14. The source-line bridge for binary
+  inputs (Pass G) remains the last item.
+
+### Tests
+
+`ByteOffsetAnnotatorTests` (4 cases): flat-body, WAT/binary
+agreement on flat and on nested `block`/`loop` shapes, and
+`if`/`else` branch coverage. Full suite: 483/483.
+
+## WACS 0.15.14 / WACS.Cli 1.6.5 — name-section round-trip parity (Gap A closed)
+
+WAT-parsed and binary-parsed modules now produce stack traces
+with the same level of function-name detail. Previously, dumping
+WAT to binary via `wacs inspect --dump-wasm` and re-running the
+binary lost every `$name` — traces fell back to `func@<addr>`.
+
+### What changed
+
+- `TextModuleParser.FinalizeModule` synthesizes
+  `Module.Names.FunctionNames` from each `Function.Id` at the end
+  of parse. Conventionally the `name` custom section stores names
+  without the leading `$` (wabt / wasm-tools convention) so that's
+  what we emit. Imports surface their entity name as the label.
+  Modules with no `$names` leave `Module.Names` null — lazy-
+  allocation invariant preserved.
+- `BinaryModuleWriter` already serialized `Module.Names` when
+  populated (Wacs.Core 0.14.0); this commit just makes the WAT
+  path actually populate it.
+- `WACS.Cli` sets `BinaryModuleParser.ParseCustomNames = true`
+  in `RunHandler` so binary inputs surface function names in
+  traces without the caller needing to flip the flag manually.
+
+### Live behavior
+
+Same module, two parse paths — names survive both:
+
+```
+;; WAT direct
+WASM stack trace:
+  at $_.$inner (unreachable @+0x0) (3:5)
+  at $_.$outer (resume@4)
+  at $_._start
+
+;; WAT → BinaryModuleWriter → BinaryModuleParser
+WASM stack trace:
+  at $_.inner|0 (unreachable @+0x0)
+  at $_.outer|1 (resume@4)
+  at $_._start
+```
+
+The binary path's `inner|0` suffix is the existing `PatchNames`
+convention (`{name}|{idx}` to keep duplicates unique). Cosmetic
+asymmetry with the direct-WAT label format but the same
+information is there.
+
+### Remaining gaps
+
+- **Source line numbers for binary-parsed modules** (Gap B):
+  binary inputs still don't carry `(line:col)` in the verbose
+  trace because there's no source. Bridging via on-demand
+  `TextModuleWriter.WriteWithLineMap` is a follow-up.
+- **Byte offsets on WAT-parsed modules**: `ByteOffsetInFunc`
+  stays zero for WAT inputs. The verbose trace shows `(line:col)`
+  so this is less visible, but cheap-form output omits a useful
+  coordinate. Could be filled in by a parse-time accounting pass.
+
+### Tests
+
+`NameSectionRoundTripTests` (3 cases): WAT-parse synthesizes the
+name map, name-free modules stay lazy, full
+WAT → binary → re-parse loop preserves function ids.
+479/479 Wacs.Core.Test tests pass.
+
+## WACS 0.15.13 / WACS.Cli 1.6.4 — WasmRuntimeException family + CLI handler (Stack-trace Pass E)
+
+Final pass of the stack-trace arc. Extends the in-dispatch-loop
+enrichment to `WasmRuntimeException` (host-API misuse, OpStack
+underflow, internal invariants violated during execution) and
+wires the CLI to print the WASM trace section for it too.
+
+### Public API additions (Wacs.Core 0.15.13)
+
+- `Wacs.Core.Runtime.Exceptions.WasmRuntimeException.WasmFrames`
+  property + `(message, frames)` overload constructor.
+- The dispatch loop in `WasmRuntime.ProcessThreadAsync` gains a
+  third parallel catch filter (alongside `TrapException` and
+  `UnhandledWasmException`):
+  ```csharp
+  catch (WasmRuntimeException re) when (re.WasmFrames == null)
+  {
+      re.WasmFrames = ctx.SnapshotCallStack(inst);
+      throw;
+  }
+  ```
+  Runtime exceptions thrown from inside an instruction's
+  `Execute` are retroactively populated. Exceptions thrown
+  *outside* the dispatch loop (instantiation, host binding,
+  type-system construction errors) leave `WasmFrames` null —
+  no call stack exists at those sites.
+
+### CLI wiring (WACS.Cli 1.6.4)
+
+- New `RunHandler.PrintRuntimeException(exc, module, runtime)`
+  helper, mirroring `PrintTrap` / `PrintUnhandledWasm`.
+- A fourth catch filter at each of the four invoker sites:
+  ```csharp
+  catch (System.Exception any) when (TryUnwrap<WasmRuntimeException>(any, out var rexc))
+  ```
+  Prints the WASM trace section when frames are available;
+  falls through to the .NET trace when they aren't.
+
+### Arc summary
+
+Five passes:
+- **B** (0.15.7): `Module.SourcePositions` — memoize WAT (line, col, offset) per instruction.
+- **A** (0.15.8): `WasmStackFrame` + `ExecContext.SnapshotCallStack` + exception fields.
+- **C** (0.15.9 / Cli 1.6.2): `WasmStackTrace.Format` + `FormatVerbose`; CLI wiring.
+- **C-followups** (0.15.10–0.15.11 / Cli 1.6.3):
+  unwrap `TargetInvocationException`; WAT `$name` → `FunctionInstance`.
+- **D** (0.15.12): dispatch-loop auto-enrichment;
+  `ComputePointerPath` removal; `ErrorFormattingTests`.
+- **E** (0.15.13 / Cli 1.6.4): `WasmRuntimeException` enrichment;
+  CLI handler.
+
+End-to-end behavior: any trap, unhandled exception, or runtime
+fault thrown from inside an instruction's `Execute` produces a
+two-section error output — the .NET stack trace followed by a
+"WASM stack trace:" section showing function names, throwing
+mnemonic + byte offset, and source `(line:col)` when available.
+
+Toward the debugger-support goal: every runtime fault now
+carries enough metadata to identify its source location and
+the call chain that led there. Next steps will likely be
+runtime-instrumentation oriented (breakpoints, single-step,
+local-variable inspection) rather than diagnostic.
+
+476/476 Wacs.Core.Test tests pass.
+
+## WACS 0.15.12 — universal trap enrichment + ComputePointerPath removal (Stack-trace Pass D)
+
+Every trap that escapes the interpreter's dispatch loop now carries
+a `WasmFrames` snapshot, regardless of whether the originating
+throw site was migrated to the snapshot constructor. This is the
+broad-coverage equivalent of migrating each of the ~170 trap
+throw sites manually — without touching any of them.
+
+### How it works
+
+`WasmRuntime.ProcessThreadAsync` wraps each `inst.Execute(ctx)` /
+`inst.ExecuteAsync(ctx)` dispatch step in a try/catch whose
+filter fires only when the escaping exception lacks `WasmFrames`:
+
+```csharp
+try { /* execute */ }
+catch (TrapException te) when (te.WasmFrames == null)
+{
+    te.WasmFrames = ctx.SnapshotCallStack(inst);
+    throw;
+}
+```
+
+.NET's "zero-cost exception handling" model means the wrap pays
+nothing on the happy path — the hot interpreter loop is
+unchanged in steady state. The `inst` reference is exactly the
+instruction that was about to execute when the trap fired, so
+the top frame's `Instruction` is always the source-level
+throwing op (no migration needed at each throw site).
+
+`UnhandledWasmException` gets the same treatment in parallel
+catch filters.
+
+### Cleanup
+
+- `ExecContext.ComputePointerPath()` deleted. It was a stub
+  returning an empty list (entire implementation commented out),
+  used by 8 sites in `WasmRuntimeExecution.cs` that wrapped trap
+  messages with an "empty path" suffix — all dead code.
+- The 8 callers in `WasmRuntimeExecution.cs` removed. The
+  `--calculate-lines` CLI option still parses; source-line
+  enrichment now flows through `WasmStackTrace.FormatVerbose`
+  (Pass C).
+- `TrapException.WasmFrames` and `UnhandledWasmException.WasmFrames`
+  setters became `internal` so the dispatch loop can enrich
+  in-place. Public API surface unchanged (the getter behavior
+  is identical).
+
+### Tests
+
+`ErrorFormattingTests` (6 cases):
+- `unreachable` — migrated-constructor path still works.
+- `i32.div_s` divide-by-zero — non-migrated throw site,
+  auto-enriched by the dispatch loop.
+- `i32.load` out-of-bounds memory — same.
+- Call chain — three-frame snapshot with the trap site's
+  instruction at the top and resume PCs on caller frames.
+- `FormatVerbose` source-line resolution.
+- Function-label `$name` from the WAT parser.
+
+476/476 Wacs.Core.Test tests pass.
+
+### Live behavior across error kinds
+
+```
+;; before Pass D — only migrated sites had frames:
+TrapException: Cannot divide by zero
+   at Wacs.Core.Instructions.Numeric.InstI32BinOp.ExecuteI32DivS(...)
+   …
+
+;; after Pass D — every trap is enriched:
+WASM stack trace:
+  at $_.div_by_zero (i32.div_s @+0x0) (5:5)
+```
+
+### What's still ahead
+
+Pass E: same enrichment treatment for `WasmRuntimeException`
+(host-API misuse — typically thrown before the dispatch loop
+starts, so a different mechanism applies).
+
+## WACS 0.15.11 — propagate WAT `$name` to FunctionInstance for stack-trace labels
+
+Cosmetic but useful: non-exported functions now appear in WASM
+stack traces by their WAT-declared `$name` rather than
+`func@<addr>`. Closes the most visible polish gap on the Pass C
+output.
+
+### Wiring
+
+- `TextModuleParser.ParseFuncForm` writes the parsed `$id` onto
+  `Module.Function.Id` (previously only the parallel
+  `ctx.Funcs.Declare(name)` index table got it).
+- `WasmRuntimeInstantiation` propagates `func.Id` onto the
+  `FunctionInstance.Id` during the allocate-functions step.
+  Export names still take precedence (they're written later in
+  the instantiation flow) — they're the function's public
+  identity, the parsed name is a fallback for non-exported
+  helpers.
+
+### Live behavior
+
+```
+;; Before this commit:
+WASM stack trace:
+  at func@47 (unreachable @+0x0) (3:5)
+  at func@48 (resume@4)
+  at $_._start
+
+;; After:
+WASM stack trace:
+  at $_.$inner (unreachable @+0x0) (3:5)
+  at $_.$outer (resume@4)
+  at $_._start
+```
+
+### Tests
+
+`TextModuleWriterPartialTests.WriteFunction_StackAnnotated_AddsStackComments`
+updated to expect `(;$b;)` (parsed name) instead of `(;0;)`
+(numeric index) on the header id comment. 470/470 Wacs.Core.Test
+tests pass.
+
+## WACS 0.15.10 / WACS.Cli 1.6.3 — CLI sees the WASM trace (Pass C follow-up)
+
+Two bugs were preventing the freshly-landed `WasmStackTrace`
+output from actually reaching the user. Both surfaced when we
+ran a trapping WAT through the CLI for the first time.
+
+### Bug 1: trap path swallowed by TargetInvocationException
+
+The CLI's `CreateInvokerAction` path calls into the parsed module
+via `Delegate.DynamicInvoke`, which wraps any thrown exception
+inside `System.Reflection.TargetInvocationException`. The
+existing `catch (TrapException)` blocks in `RunHandler` never
+fired — they were dead code. Every trap bubbled up to `Main`'s
+last-resort handler and printed only the .NET stack trace.
+
+Fix: `RunHandler.TryUnwrap<T>(exc)` walks the InnerException chain;
+the four trap catch sites are now exception-filter-based:
+`catch (System.Exception any) when (TryUnwrap<TrapException>(any, out var exc))`.
+A parallel filter catches `UnhandledWasmException` and routes
+through a new `PrintUnhandledWasm` helper. Existing
+`SignalException` handling is unchanged.
+
+### Bug 2: unhandled-throw snapshot taken after the unwind
+
+`InstThrowRef.ExecuteInstruction` searches for a matching catch
+clause by walking the control stack and calling
+`context.FunctionReturn()` to pop unmatched frames. The previous
+code snapshotted the call chain *after* the search loop, when
+the stack was already empty.
+
+Fix: snapshot before the search. Plus, thread a `throwingInstruction`
+parameter through `InstThrow.Execute` → `InstThrowRef.ExecuteInstruction`
+so the top frame's `Instruction` is the source-level `throw`
+(not the throw_ref dispatcher).
+
+### Live behavior
+
+A WAT that traps now produces (CLI output):
+
+```
+Wacs.Core.Runtime.Types.TrapException: unreachable
+   at Wacs.Core.Instructions.InstUnreachable.Execute(...)
+   …
+
+WASM stack trace:
+  at func@47 (unreachable @+0x0) (3:5)
+  at func@48 (resume@4)
+  at $_._start
+```
+
+A WAT that throws an unhandled exception produces:
+
+```
+Wacs.Core.Runtime.Exceptions.UnhandledWasmException: Unhandled exception ExnInstance
+   at Wacs.Core.Instructions.InstThrowRef.ExecuteInstruction(...)
+   …
+
+WASM stack trace:
+  at $_._start (throw @+0x0) (5:5)
+```
+
+470/470 Wacs.Core.Test tests pass.
+
+## WACS 0.15.9 / WACS.Cli 1.6.2 — WasmStackTrace formatter + CLI wiring (Stack-trace Pass C)
+
+Third piece of the stack-trace arc. Formats captured
+`WasmStackFrame` chains into human-readable traces (cheap and
+verbose forms) and wires the CLI's trap-catch sites to surface
+them alongside the .NET stack trace.
+
+### Public API additions (Wacs.Core 0.15.9)
+
+- `Wacs.Core.Runtime.Exceptions.WasmStackTrace`:
+  - `Format(frames, module, store) → string` — cheap form. Single
+    line, `←`-separated frames. Uses `FunctionInstance.Id` for
+    function labels, `InstructionBase.ByteOffsetInFunc` + mnemonic
+    for the throwing instruction.
+  - `FormatVerbose(frames, module, store, lineMap?) → string` —
+    multi-line form. Adds `(line:col)` from
+    `Module.SourcePositions` when available (Pass B, WAT-parsed).
+    Optional `LineMap` parameter is plumbed for future re-render-
+    based fallback on binary-parsed modules.
+
+### CLI wiring (WACS.Cli 1.6.2)
+
+- New `RunHandler.PrintTrap(exc, module, runtime)` helper. The
+  four `catch (TrapException)` sites in `InvokeInterpreterEntry`
+  route through it. Output adds:
+  ```
+  WASM stack trace:
+    at $myfunc (unreachable @+0x4) (3:17)
+  ```
+  below the existing .NET trace, when the trap carries
+  `WasmFrames` (currently `unreachable` and unhandled exceptions —
+  Pass D batches the rest).
+
+### Behavior
+
+- Traps that haven't been migrated to the snapshotting constructor
+  still print the unchanged .NET-only trace. CLI output is purely
+  additive — existing scripts parsing the trap message keep working.
+
+### Tests
+
+`WasmStackTraceTests` (3 cases) covers cheap-form mnemonic + offset
+output, verbose-form source-line resolution from
+`Module.SourcePositions`, and the empty-frames sentinel.
+470/470 Wacs.Core.Test tests pass.
+
+### What's still ahead
+
+Pass D: bulk-migrate the ~100 trap throw sites to use the
+snapshotting constructor; delete the dead `ComputePointerPath`;
+add `ErrorFormattingTests` asserting on full trace structure.
+Pass E: same enrichment for `WasmRuntimeException`.
+
+## WACS 0.15.8 — WasmStackFrame + exception enrichment foundations (Stack-trace Pass A)
+
+Second piece of the stack-trace arc. Adds the data shape and the
+ExecContext snapshot API for capturing the WASM-side call stack at
+trap / uncaught-exception time. Exception types gain an optional
+`WasmFrames` field; two proof-of-concept throw sites are migrated
+to populate it. The bulk migration of remaining throw sites
+batches with Pass D.
+
+### Public API additions
+
+- `Wacs.Core.Runtime.WasmStackFrame { uint FuncAddr, InstructionBase? Instruction, int ResumeContinuationAddress }`
+  — immutable struct, single snapshot frame.
+- `ExecContext.SnapshotCallStack(InstructionBase? topInstruction = null)`
+  → `WasmStackFrame[]`. Walks the polymorphic `_callStack` top-
+  first; the top frame's `Instruction` is the supplied throwing
+  instruction; caller frames carry their resume PC for lazy
+  resolution later. O(call-depth) and allocation-free beyond the
+  returned array.
+- `TrapException(message, WasmStackFrame[] wasmFrames)` — overload
+  carrying the snapshot. Existing `TrapException(message)`
+  constructor unchanged.
+- `OutOfBoundsTableAccessException` gains the same overload.
+- `UnhandledWasmException` gains the same overload.
+- `TrapException.WasmFrames` / `UnhandledWasmException.WasmFrames`
+  read-only properties — null when the throw site didn't snapshot
+  (most still don't; migration is incremental).
+
+### Behavior
+
+- `unreachable` (`InstUnreachable.Execute`) now throws with the
+  snapshot.
+- The unhandled-wasm-exception path in `InstThrowRef.ExecuteInstruction`
+  snapshots before throwing (call stack has already unwound, so the
+  snapshot is empty — that's still useful information: "uncaught at
+  the entry point").
+- Every other trap site remains on the legacy bare-string
+  constructor and leaves `WasmFrames` null. Pass D migrates them in
+  bulk along with the formatting tests.
+
+### What's still ahead
+
+- **Pass C**: `WasmStackTrace.Format(module, verbose)` consumes
+  `WasmFrames` and emits human-readable traces. Cheap form uses
+  `InstructionBase.ByteOffsetInFunc` + `Op.GetMnemonic`. Verbose
+  form resolves source coords via `Module.SourcePositions` (Pass B,
+  WAT-parsed) or lazy `TextModuleWriter.WriteWithLineMap` (Pass 6,
+  binary-parsed).
+- **Pass D**: bulk-migrate the remaining ~100 trap throw sites to
+  pass `(message, ctx.SnapshotCallStack(this))`. Delete the
+  stubbed `ExecContext.ComputePointerPath`. Add `ErrorFormattingTests`
+  asserting on full trace structure.
+- **Pass E**: same enrichment for `WasmRuntimeException` (host-API
+  misuse) and siblings.
+
+### Ultimate target
+
+Debugger support — every runtime fault carries enough metadata to
+surface the WAT source line plus the call chain that led there,
+on demand and without execution-time bloat.
+
+### Tests
+
+`WasmStackFrameTests` (3 cases) covers live `unreachable` trap
+capture, legacy-constructor null-frames invariant, and the empty-
+stack snapshot path. 467/467 Wacs.Core.Test tests pass.
+
+## WACS 0.15.7 — memoize WAT source positions per instruction (Stack-trace Pass B)
+
+First substantive piece of the stack-trace plumbing arc. The text
+parser now records the originating `(Line, Column, SourceOffset)`
+for every instruction it constructs, so later trap / exception
+formatting can resolve a runtime frame to a WAT source location
+without re-rendering the module. This is the WAT-side counterpart
+to the existing `InstructionBase.ByteOffsetInFunc` (binary side).
+
+### Public API additions
+
+- `Wacs.Core.SourcePos { Line, Column, SourceOffset }` — immutable
+  struct, 1-based line/column. `SourceOffset` is the byte index into
+  the original WAT source string.
+- `Module.SourcePositions` — lazy
+  `Dictionary<InstructionBase, SourcePos>?`. Stays null on binary-
+  parsed modules and on WAT-parsed modules with no function bodies.
+- `Module.RecordSourcePosition(inst, pos)` — public append helper.
+
+### Wiring
+
+- `TextModuleParser.ParseInstrList` is the choke point — every
+  instruction emitted (flat or folded) gets stamped with the
+  outermost form's `(Line, Column, Start)` via the existing
+  `SExpr.Token`. Zero extra parse work: the lexer already produced
+  the position. For folded forms that emit multiple instructions
+  (operands + operator), all share the outer form's position —
+  accurate on a single line, a fair approximation otherwise.
+- Hot interpreter loop is untouched. Side-table lookup happens only
+  at trap-format time.
+
+### What's still ahead
+
+- **Pass A**: `WasmStackFrame` + `TrapException` / `UnhandledWasmException`
+  enrichment. Throw sites pass `(this, ctx)`; the exception captures
+  a frame chain at throw time.
+- **Pass C**: `WasmStackTrace.Format(module, verbose)` — cheap form
+  via `ByteOffsetInFunc` + mnemonic; verbose form resolves source
+  via `SourcePositions` (WAT) or `LineMap` (binary, lazy re-render).
+- **Pass D**: delete the stubbed `ExecContext.ComputePointerPath`;
+  add `ErrorFormattingTests`.
+- **Pass E**: same enrichment for the `WasmRuntimeException` family.
+
+### Ultimate target
+
+Debugger support — WACS modules carry enough metadata to surface
+WAT source lines (or via `LineMap`, generated text source lines)
+on every runtime fault, plus the call chain that led there.
+
+### Tests
+
+`SourcePositionTests` (5 cases) covers flat-instruction line
+capture, folded-form outer-position propagation, source-offset
+accuracy (slices back to "i32.const"), binary-parse null-safety,
+and the empty-body laziness invariant. 464/464 Wacs.Core.Test
+tests pass.
+
+## WACS 0.15.6 — text round-trip equivalence tests + canonical fixed-point fix (Pass 7)
+
+Final pass of the text-emission consolidation arc. Adds the test
+matrix that proves the seven-pass refactor produces the round-trip
+equivalence the user asked for, and fixes one canonicalization bug
+the new tests surfaced.
+
+### Bug fixed
+
+- `InstF32Const` / `InstF64Const` `.RenderText` always appended a
+  diagnostic `(;= 2;)` style block-comment showing the source-form
+  value of the hex-formatted constant. That trailing comment
+  doubled on each round-trip — the comment-capture path (Pass 3)
+  treats it as user trivia and re-emits, while the next render
+  produces the same diagnostic again. `RenderInstruction` in
+  `TextModuleWriter` now strips the diagnostic tail for canonical-
+  mode emission so the round-trip is a stable fixed point.
+
+### Tests
+
+`TextRoundTripFixedPointTests` (6 cases):
+- Canonical fixed-point round-trip on three fixture .wat files
+  (`engine/binding.wat`, `engine/tailcalls.wat`,
+  `Wacs.Bench/fib.wat`) — parse → write → re-parse → re-write
+  produces byte-identical output.
+- Folded ↔ flat parity: the same module rendered in both styles
+  re-parses to a Module with the same section shape.
+- Comment survival across a round-trip (line comments at module
+  and section level).
+- Multi-section structural round-trip (types / funcs / memory /
+  table / elem / data all parse-write-parse with matching counts).
+
+459/459 Wacs.Core.Test tests pass.
+
+### Arc summary
+
+`TextModuleWriter` is now the sole text emitter, with three styles
+(canonical / stack-annotated / folded), full section coverage
+(types incl. GC, imports, funcs, tables, memories, tags, globals,
+exports, start, elems, datas), comment + `(@…)` annotation round-
+trip, partial-render entry points for tooling, and a bidirectional
+line map for IDE / source-map use. `ModuleRenderer` is gone.
+
+Known limitations after Pass 7:
+- Recursive folding inside `block` / `loop` / `if` bodies is still
+  flat in folded mode (operands inside blocks don't collapse).
+- Instruction-level comments / annotations attach to module-level
+  rather than to the precise instruction; section-level placement
+  is exact. Function-body trivia round-trip lands in a follow-up.
+
+## WACS 0.15.5 — bidirectional LineMap from Write (Pass 6)
+
+Adds a debug / tooling-friendly entry point that returns both the
+rendered WAT and a line-and-column map between module elements and
+the text they produced.
+
+### Public API additions
+
+- `Wacs.Core.Text.LineMap` — bidirectional map.
+  - `LineMap.Span` — immutable struct: `(StartLine, StartCol, EndLine, EndCol)`,
+    1-based.
+  - `ByElement(ModuleElementRef) → Span?` — direct lookup.
+  - `ByLine(int line) → ModuleElementRef?` — finds the innermost
+    element whose span brackets the line.
+  - `All` — `IReadOnlyDictionary<ModuleElementRef, Span>` of every
+    recorded entry.
+- `Wacs.Core.Text.LineCountingTextWriter` — `TextWriter` wrapper
+  that tracks the running `(Line, Column)` cursor.
+- `TextModuleWriter.WriteWithLineMap(module, options?)` —
+  returns `(string text, LineMap map)`. The standard
+  `Write(module)` path is unchanged and still returns a bare
+  `string`.
+
+### Recorded sections
+
+Every top-level section element gets a span: types, imports,
+functions, tables, memories, globals, tags, exports, start, elems,
+datas. Instruction-level spans inside function bodies are
+deferred — a later pass can refine when there's a use case
+(source-map generation from WAT to bytecode for debugger support).
+
+### Tests
+
+`LineMapTests` (4 cases) covers per-section span recording,
+`ByLine` line→element lookup, backward-compatible `Write(module)`
+return type, and `All` enumeration. 453/453 Wacs.Core.Test tests
+pass.
+
+## WACS 0.15.4 — folded / S-expression instruction style (Pass 5)
+
+Lights up `TextWriterStyle.Folded`. Function bodies that previously
+emitted as flat stack-machine lines now collapse into S-expression
+form when the option is enabled — round-trips of WAT originally
+written in folded shape can now return to that style.
+
+### Public API additions
+
+- `Wacs.Core.OpCodes.OpcodeArity.TryGet(inst, out consume, out produce)`
+  — per-opcode arity table for the "pure" subset (numeric consts,
+  unary / binary ops, locals, globals, ref-leaves, loads / stores,
+  drop, memory.size / memory.grow). Anything outside this table
+  (call, branch, block, etc.) returns false and forces a chain
+  break.
+
+### Folder behavior
+
+- Single linear pass with a stack of rendered operand fragments.
+  Leaves push; operators pop their operands and wrap as
+  `(op (operand1) (operand2) …)`; effectful ops (produce=0) emit
+  the folded form as a stand-alone line.
+- Chain breakers — branches, returns, calls, throws, block shapes,
+  unreachable — flush the pending stack as flat lines and emit
+  the instruction flat. The folder cannot safely treat their
+  result as a pure operand without per-call signature lookup.
+- Block bodies emit flat in this pass. Recursive folding inside
+  `block` / `loop` / `if` lands in a follow-up.
+- `TextWriterStyle.Canonical` (the default) is unchanged — no
+  on-the-wire difference for callers of
+  `TextModuleWriter.Write(module)`.
+
+### Tests
+
+`FoldedEmissionTests` (7 cases) covers binary add nesting, local-set
+operand pull, two-operand stores, block fallback, call chain-break,
+canonical-mode invariance, and folded-output reparse. 449/449
+Wacs.Core.Test tests pass.
+
+## WACS 0.15.3 — fill TextModuleWriter structural gaps (Pass 4)
+
+Replaces the Phase-2 "round-trip not supported" placeholders with
+real WAT emission for every remaining structural section. After this
+pass, every section the parser produces re-emits to text that re-
+parses to a structurally-equivalent module — no more silent drops
+into comment stubs.
+
+### What's now emitted
+
+- **Tags**: `(tag (type N))` for defined tags. Imported tags surface
+  through the existing import-section path.
+- **GC types**: full struct / array / sub / rec coverage.
+  - Bare single-sub final final types: `(type (struct (field T) …))`,
+    `(type (array (mut T)))`, `(type (func …))`.
+  - `(sub …)` and `(sub final …)` with super-type indices.
+  - `(rec (type …) (type …) …)` wrappers for multi-sub recursion
+    groups and non-final / supered subs.
+  - Field types render `(mut T)` for mutable + bare `T` for
+    immutable; packed storage types (`i8` / `i16`) survive.
+- **Element segments**: full canonical form for all eight wire
+  shapes:
+  - Active default table: `(elem (offset (i32.const 0)) func 0 1)`
+    (func-shortcut) or `(elem (offset …) reftype (item …) …)`.
+  - Active explicit table: `(elem (table N) (offset …) …)`.
+  - Passive: `(elem func 0 1)` / `(elem reftype (item …) …)`.
+  - Declarative: `(elem declare func 0)` /
+    `(elem declare reftype (item …) …)`.
+  - Func-shortcut auto-selected when every initializer is a single
+    `ref.func` and the segment type is FuncRef-family.
+- **Data segments**: full canonical form:
+  - Active default mem 0: `(data (offset (i32.const 0)) "bytes")`.
+  - Active explicit: `(data (memory N) (offset …) "bytes")`.
+  - Passive: `(data "bytes")`.
+  - Byte payloads escape through the existing
+    `BytesEncoder.EncodeToWatString` helper, so non-ASCII / control
+    bytes round-trip via `\XX`.
+
+### Tests
+
+`StructuralEmissionTests` (9 cases) covers tags, all three data
+modes, the func-shortcut and declarative element forms, struct /
+array / rec GC types, plus a full-module multi-section round-trip
+(parse → write → re-parse with matching section counts).
+442/442 Wacs.Core.Test tests pass.
+
+### What's still ahead
+
+Pass 5 lights up the folded / S-expression instruction style (the
+per-opcode arity table + folder). Pass 6 returns a bidirectional
+`LineMap` from `Write`. Pass 7 is the broader test arc (full
+round-trip equivalence across the spec testsuite, folded↔flat
+parity, comment / annotation survival inside function bodies).
+
+## WACS 0.15.2 — TextModuleParser captures comments + annotations; writer re-emits (Pass 3)
+
+Closes the round-trip loop for trivia from Pass 2. The parser now
+populates `Module.Comments` and `Module.Annotations` as it walks the
+module body, and `TextModuleWriter` re-emits each entry at its
+attached position.
+
+### Parser changes
+
+- `SExprParser.ParseWithTrivia(source)` — new entry point returning
+  the lexer, the s-expression tree, and the side-band trivia list.
+- `TextModuleParser.ParseWat` switches to the trivia-aware entry
+  point. `ParseModule` gains an overload taking lexer + trivia.
+- `TextParseContext` tracks the trivia cursor and exposes
+  `DrainTriviaBefore(pos, owner)` / `DrainRemainingTrivia()` so the
+  section walk can stream comments to the right owner in O(N).
+- Top-of-file comments (before `(module`) attach to module-level;
+  comments between section forms attach to the *following* form;
+  trailing comments past the last section attach to module-level
+  with `IsTrailing = true`.
+- `(@name payload…)` annotations at module level are captured onto
+  `Module.Annotations` instead of being silently dropped. The
+  payload is the raw text between the name atom and the closing
+  paren, so the writer can re-emit it verbatim.
+
+### Writer changes
+
+- `TextModuleWriter.WriteTo` now calls `EmitLeading(...)` before
+  each section element and `EmitAnnotations(...)` after the
+  `(module` opener for module-level annotations.
+- Indentation matches the section the comment precedes — a comment
+  attached to a function emits at the function's indent.
+
+### Behavior
+
+- Comment-free / annotation-free modules still leave the side-
+  tables `null` (Pass 2's lazy-allocation invariant holds).
+- Nothing else changes: existing `(module …)` outputs are
+  byte-identical for sources without trivia.
+
+### Tests
+
+- `CommentAnnotationRoundTripTests` (4 cases) covers line / block
+  comment survival, `(@custom)` annotation capture + re-emit, and
+  the no-trivia laziness assertion. 433/433 Wacs.Core.Test tests
+  pass.
+
+### What's still ahead
+
+Pass 4 fills the remaining structural gaps in the writer
+(element/data segments full, GC struct/array bodies, tags,
+name-section idents). Pass 5 lights up the folded /
+S-expression style with the per-opcode arity table. Pass 6 returns
+a bidirectional `LineMap` from `Write`. Pass 7 is the test arc
+exercising parse → write → re-parse → re-write text-identity
+across the spec fixtures.
+
+## WACS 0.15.1 — trivia-aware lexer + Module annotation side-tables (Pass 2)
+
+Foundation for round-tripping comments and `(@…)` annotations. Adds
+the data shape and the lexer hook; no parser or writer changes yet
+(those land in Pass 3).
+
+### Public API additions
+
+- `Wacs.Core.Text.TriviaKind { LineComment, BlockComment }` and
+  `Wacs.Core.Text.TriviaToken` (immutable struct: kind, source
+  span, line, column).
+- `Lexer.TokenizeWithTrivia()` — returns the same tokens as
+  `Tokenize()` plus a side-band `List<TriviaToken>` of every
+  `;;` and `(;…;)` comment seen, in source order with their
+  original delimiters intact.
+- `Lexer.SliceTrivia(TriviaToken) → string` — materializes the
+  raw comment text.
+- `Wacs.Core.ModuleElementRef` (immutable struct: `Kind`, `Index`,
+  `InstructionIndex`) + `ModuleElementKind` enum — stable handle
+  used to key the new side-tables.
+- `Wacs.Core.WatAnnotation` (name + payload + position) and
+  `Wacs.Core.WatComment` (kind + text + position + is-trailing).
+- `Module.Annotations` and `Module.Comments` —
+  `Dictionary<ModuleElementRef, List<…>>?`, lazy-allocated so
+  comment-free modules pay no extra memory. `AddAnnotation` /
+  `AddComment` helpers append + lazy-init.
+
+### Behavior
+
+- The default `Tokenize()` path is unchanged — `SkipTrivia` still
+  drops comments, the existing parser sees the same token stream.
+  The new `_capturedTrivia` field is `null` outside
+  `TokenizeWithTrivia`, so the hot path stays allocation-free.
+- Module instances loaded from a comment-free source leave the
+  side-tables null (no allocation). Pass 3 wires the parser to
+  populate them.
+
+### Tests
+
+`LexerTriviaTests` (6 cases) covers default-strip, line-comment
+capture, block-comment capture, nested-block depth tracking,
+EOF-terminated line comments, and lazy-allocation behavior of
+the module side-tables. 429/429 Wacs.Core.Test tests pass.
+
+## WACS 0.15.0 / WACS.Cli 1.6.1 — consolidate text emission onto TextModuleWriter; retire ModuleRenderer (Pass 1)
+
+First of seven planned passes to bring `TextModuleWriter` to full
+fidelity round-trip and retire the older `ModuleRenderer`. This pass
+is the structural consolidation: every text-emission caller now goes
+through `TextModuleWriter`, the legacy renderer is gone, and the
+debug / stack-annotated rendering it used to do is reachable as an
+option on the unified writer.
+
+### Public API changes
+
+- **Deleted:** `Wacs.Core.ModuleRenderer` (entire static class —
+  `RenderWatToStream`, `RenderFunctionWat`, `GetFuncIdx`,
+  `ChopFunctionId`, `Indent2Space`).
+- **Added:** `Wacs.Core.Text.TextWriterOptions` +
+  `Wacs.Core.Text.TextWriterStyle { Canonical, StackAnnotated, Folded }`.
+- **Added:** `TextModuleWriter.Write(module, options)`,
+  `WriteTo(writer, module, options)`, and partial-render
+  `WriteFunction(module, funcIdx, indent, options)`.
+- **Added:** `TextModuleWriter.Indent2Space` (the two-space module-
+  body indent — replaces `ModuleRenderer.Indent2Space`).
+- **Added:** `Wacs.Core.Text.TextDiagnostics.GetFuncIdx(path)` /
+  `ChopFunctionId(path)` — validation-path parsers split out of the
+  old renderer.
+- **Moved:** `Module.CalculateLine(...)` (validation-path → WAT-line
+  cache) — same method, same partial class, file relocated to
+  `Modules/ModuleValidationLines.cs`.
+
+### Behavior
+
+- `TextWriterStyle.Canonical` (the default) emits the same parser-
+  friendly flat WAT that `TextModuleWriter.Write(module)` produced
+  before — no on-the-wire change for existing callers.
+- `TextWriterStyle.StackAnnotated` reproduces what
+  `ModuleRenderer.RenderFunctionWat(module, idx, "", true)` did: the
+  per-function `(;N;)` id comment, `;; label = @N` block markers,
+  and left-margin stack-state side comments. Routes through the
+  existing `Function.RenderText` + `StackRenderer` machinery.
+- `TextWriterStyle.Folded` is a placeholder for Pass 5; it currently
+  falls back to canonical.
+
+### Migrations
+
+- `Wacs.Console/Verbs/RunHandler.cs` (the validation-error reporter)
+  now calls `TextModuleWriter.WriteFunction(module, idx, "",
+  TextWriterOptions.StackAnnotated)` and
+  `TextDiagnostics.{GetFuncIdx,ChopFunctionId}`. The on-disk
+  `<funcid>.part.wat` artifact is unchanged.
+- `Wacs.Core/Modules/Sections/FunctionSection.cs` references the
+  indent constant via `TextModuleWriter.Indent2Space`.
+
+### What's next
+
+Pass 2 adds `Module.Annotations` + `Module.Comments` plus lexer
+trivia-token support. Pass 3 wires the parser to attach trivia and
+the writer to re-emit it. Pass 4 fills the remaining structural
+gaps (element / data / GC types / tags / name-section idents). Pass
+5 lights up the folded / S-expression style. Pass 6 returns a
+bidirectional LineMap from `Write`. Pass 7 is the test arc.
+
+## WACS 0.14.0 — `Wacs.Core.Bin.BinaryModuleWriter`: round-trip binary serializer
+
+Inverse of `BinaryModuleParser`, symmetric with the existing
+`Wacs.Core.Text.TextModuleWriter`. A `Module` parsed from a wasm
+binary now writes back to a byte-identical canonical form on the
+second write — and after one parse/write/parse cycle the bytes
+stabilize, so the writer is the binary inverse of the parser modulo
+non-structural details the parser already drops (custom-section
+ordering, etc.).
+
+### Design
+
+`InstructionBase` gains a virtual `RenderBinary(BinaryWriter)` that's
+the inverse of `Parse(BinaryReader)`. Default is a no-op (covers
+opcodes with no immediates like `add` / `drop` / `end`); each
+immediate-bearing subclass overrides it to emit the same operands
+in the same order it would have read them. The pattern mirrors the
+existing `RenderText` virtual that the text writer leans on. Per-
+instruction encoding stays next to the instruction class, which
+keeps the dispatch open to extension when new opcodes land.
+
+`BinaryModuleWriter` composes those overrides with section-level
+encoders for every spec section in the canonical order (type / import
+/ function / table / memory / tag / global / export / start / element /
+data-count / code / data) plus the structured custom sections (`name`,
+`metadata.code.branch_hint`) when their parser-side capture flag was
+set and the module carries the parsed structure.
+
+### Coverage
+
+Round-trip stabilizes after one write across 21 fixtures spanning
+every wasm proposal WACS supports:
+
+- **Core / multi-value / sign-extensions / saturated-float-to-int**:
+  `binding`, `tailcalls`, `fib`, `HelloWorld`
+- **Feature exercisers** (Feature.Detect/generated-wasm): `bulk-memory`,
+  `extended-const`, `multi-memory`, `multi-value`, `mutable-globals`,
+  `reference-types`, `saturated-float-to-int`, `sign-extensions`,
+  `SIMD`, `relaxed-SIMD`, `tail-call`, `typed-function-references`,
+  `GC`, `exceptions-final`, `threads`, `memory64`, `js-string-builtins`
+
+Every section variant gets exercised end-to-end:
+
+- Type section: function / struct / array composites; rec-group with
+  multi-sub forms; sub / sub-final with super-type vectors
+- Element section: all 8 flag variants (active / passive / declarative ×
+  funcref-elemkind-shortcut / reftype-expr-vector)
+- Data section: active-default-mem / active-explicit-mem / passive
+- Code section: compressed-locals run-length grouping; block / loop /
+  if-else / try-table inner sequences emitted recursively with their
+  terminator instructions intact
+- Table types: legacy reftype+limits and GC-extended `0x40 0x00`
+  init-expr form
+- Limits / memarg / global flags: all bit variants including
+  shared / thread-local / 64-bit address / multi-memory flag
+- Heap types: abstract single-byte tokens and concrete s33 indices
+  for `ref.null`, `ref.cast`, `ref.test`, `br_on_cast`, `br_on_cast_fail`
+
+### Files
+
+- `Wacs.Core/Utilities/BinaryWriterExtension.cs` — LEB128 (u32/u64/s32/s64/s33),
+  F32/F64, UTF-8 string, vector, and length-prefixed-section helpers
+- `Wacs.Core/Types/Defs/ValTypeWriter.cs` — single-byte / `0x63`-`0x64` /
+  s33-index dispatch matching `ValTypeParser`
+- `Wacs.Core/BinaryFormat/TypeWriters.cs` — `Limits`, `GlobalType`,
+  `MemoryType`, `TagType`, `TableType`, `FunctionType`, `ResultType`,
+  `FieldType`, `CompositeType`, `SubType`, `RecursiveType`, `Expression`,
+  `InstructionSequence`, opcode-prefix encoder
+- `Wacs.Core/BinaryFormat/BinaryModuleWriter.cs` — `Write(Module)` /
+  `WriteTo(Stream, Module)`; section dispatch
+- `Wacs.Core/BinaryFormat/CustomSectionEncoders.cs` — `name` subsections
+  (10 kinds) and `metadata.code.branch_hint`, sorted ascending for
+  canonical output
+- `Wacs.Core.Test/BinaryModuleWriterTests.cs` — round-trip idempotence
+  across 21 fixtures
+- 22 instruction files + `MemArg.cs` + `InstructionBase.cs` — virtual
+  + ~75 overrides
+
+### Folder note
+
+Source files live in `Wacs.Core/BinaryFormat/` rather than `Wacs.Core/Bin/`
+because the .NET SDK's default `<DefaultItemExcludes>` excludes `bin/**`
+(it's where the build output lands). The C# namespace is `Wacs.Core.Bin`
+as designed; only the on-disk folder name differs.
+
+## WACS.Cli 1.6.0 — `wacs inspect --dump-wasm`: binary output
+
+Lights up the inverse direction of `--dump-wat`. The `inspect` verb's
+input parser already auto-detects WAT vs binary, so the new flag makes
+both round-trips bidirectional from the CLI:
+
+```
+wacs inspect foo.wasm --dump-wat  --output-dir out/   # binary → text
+wacs inspect foo.wat  --dump-wasm --output-dir out/   # text   → binary
+wacs inspect foo.wasm --dump-wasm --output-dir out/   # binary → canonical binary
+```
+
+Without `--output-dir`, raw bytes stream through stdout via
+`OpenStandardOutput()` — bypassing the console's text-encoding wrapper
+so the output stays byte-clean for shell piping (e.g.
+`wacs inspect foo.wat --dump-wasm | sha256sum`).
+
+The output uses `Wacs.Core.Bin.BinaryModuleWriter` (Wacs.Core 0.14.0),
+so the canonical form is byte-identical across repeat passes. Verified
+end-to-end on Feature.Detect fixtures — `multi-value.wasm → wat → wasm`
+reproduces the canonical wasm byte-for-byte. Coverage is bounded by
+the upstream `TextModuleWriter`: features where the text writer emits
+comment placeholders (notably GC type bodies, elem / data segments)
+still round-trip on the binary side but lose information through WAT.
+
 ## WACS.WASI.NN 0.3.5 — WITX retArea wire format: payload at offset 0, errno via return value
 
 PR #142 (0.3.4) aligned the `set_input` / `compute` arg count + errno

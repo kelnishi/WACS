@@ -13,8 +13,6 @@
 // limitations under the License.
 
 using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.IO;
 using Wacs.Core.Instructions.SuperInstruction;
 using Wacs.Core.OpCodes;
@@ -27,8 +25,6 @@ namespace Wacs.Core.Instructions
 {
     public class InstLocalGet : InstructionBase, IVarInstruction, ITypedValueProducer<Value>
     {
-        public static InstLocalGet Inst = new();
-        
         public InstLocalGet() : base(ByteCode.LocalGet, +1) { }
         
         private int Index;
@@ -41,33 +37,22 @@ namespace Wacs.Core.Instructions
 
         public int GetIndex() => Index;
 
-        // Process-wide intern table for InstLocalGet by index.
-        // local.get is by far the most common opcode in real
-        // wasm bodies, so reusing one boxed instance per index
-        // keeps the parser allocation rate down on every
-        // module load.
-        //
-        // ConcurrentDictionary (not plain Dictionary) because
-        // multiple parses may run concurrently across xunit
-        // collections — the prior plain-Dictionary impl
-        // race-tore its internal array under contention,
-        // surfacing as IndexOutOfRangeException in
-        // Dictionary.TryInsert and downstream "Sequence
-        // contains no elements" once a torn-cache miss caused
-        // ParseInstruction to return null and ParseUntil to
-        // bail with an empty list.
-        private static readonly ConcurrentDictionary<int, InstLocalGet> LookupCache = new();
+        public override InstructionBase Parse(BinaryReader reader) =>
+            new InstLocalGet { Index = (int)reader.ReadLeb128_u32() };
 
-        public override InstructionBase Parse(BinaryReader reader)
-        {
-            return Immediate((int)reader.ReadLeb128_u32());
-        }
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32((uint)Index);
 
-        public InstructionBase Immediate(int index)
-        {
-            return LookupCache.GetOrAdd(index, static i =>
-                new InstLocalGet { Index = i });
-        }
+        /// <summary>
+        /// Per-occurrence factory: always allocates a fresh instance.
+        /// Kept as an instance method so callers like
+        /// <c>new InstLocalGet().Immediate(N)</c> still work — the
+        /// receiver is ignored. See
+        /// <see cref="Numeric.InstI32Const.Immediate"/> for the
+        /// rationale.
+        /// </summary>
+        public InstLocalGet Immediate(int index) =>
+            new InstLocalGet { Index = index };
 
         //0x20
         // @Spec 3.3.5.1. local.get
@@ -113,6 +98,9 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32((uint)Index);
+
         public override string RenderText(ExecContext? context)
         {
             if (context == null)
@@ -121,7 +109,7 @@ namespace Wacs.Core.Instructions
                 return $"{base.RenderText(context)} {Index}";
             if (!context.Frame.Locals.ContainsIndex(Index))
                 return $"{base.RenderText(context)} {Index}";
-            
+
             var value = context.Frame.Locals.Span[Index];
             string valStr = $" (;>{value}<;)";
             return $"{base.RenderText(context)} {Index}{valStr}";
@@ -182,6 +170,9 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32((uint)Index);
+
         public override string RenderText(ExecContext? context)
         {
             if (context == null)
@@ -190,7 +181,7 @@ namespace Wacs.Core.Instructions
                 return $"{base.RenderText(context)} {Index}";
             if (!context.Frame.Locals.ContainsIndex(Index))
                 return $"{base.RenderText(context)} {Index}";
-            
+
             var value = context.Frame.Locals.Span[Index];
             string valStr = $" (;>{value}<;)";
             return $"{base.RenderText(context)} {Index}{valStr}";

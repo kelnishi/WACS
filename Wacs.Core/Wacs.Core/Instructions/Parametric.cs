@@ -29,9 +29,7 @@ namespace Wacs.Core.Instructions
     public class InstDrop : InstructionBase, INodeConsumer<Value>
     {
         public InstDrop() : base(ByteCode.Drop, -1) { }
-        
-        public static readonly InstDrop Inst = new();
-        
+
         public int LinkStackDiff => StackDiff;
 
         public Action<ExecContext, Value> GetFunc => (_, _) => { };
@@ -57,8 +55,6 @@ namespace Wacs.Core.Instructions
     //0x1B
     public class InstSelect : InstructionBase, INodeComputer<Value, Value, int, Value>
     {
-        public static readonly InstSelect InstWithoutTypes = new();
-
         private readonly bool WithTypes;
         public ValType[] Types { get; private set; } = Array.Empty<ValType>();
 
@@ -120,6 +116,14 @@ namespace Wacs.Core.Instructions
                 Types = reader.ParseVector(ValTypeParser.Parse);
             }
             return this;
+        }
+
+        public override void RenderBinary(BinaryWriter writer)
+        {
+            if (!WithTypes) return;
+            writer.WriteLeb128_u32((uint)Types.Length);
+            foreach (var t in Types)
+                ValTypeWriter.WriteValType(writer, t, parseStorageType: false);
         }
 
         public override string RenderText(ExecContext? context) => $"{base.RenderText(context)}{(WithTypes ? $" {new ResultType(Types).ToResults()}" : "")}";

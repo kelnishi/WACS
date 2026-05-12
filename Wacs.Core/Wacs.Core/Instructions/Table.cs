@@ -86,6 +86,9 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32(X.Value);
+
         public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {X.Value}";
     }
 
@@ -149,6 +152,9 @@ namespace Wacs.Core.Instructions
             X = (TableIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32(X.Value);
 
         public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {X.Value}";
     }
@@ -248,6 +254,13 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer)
+        {
+            // Match Parse: wire order is elem-idx (Y) then table-idx (X).
+            writer.WriteLeb128_u32(Y.Value);
+            writer.WriteLeb128_u32(X.Value);
+        }
+
         public InstructionBase Immediate(TableIdx x, ElemIdx y)
         {
             X = x;
@@ -294,6 +307,9 @@ namespace Wacs.Core.Instructions
             X = (ElemIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32(X.Value);
 
         public InstructionBase Immediate(ElemIdx value)
         {
@@ -439,6 +455,12 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer)
+        {
+            writer.WriteLeb128_u32(DstX.Value);
+            writer.WriteLeb128_u32(SrcY.Value);
+        }
+
         public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {DstX.Value} {SrcY.Value}";
     }
 
@@ -510,6 +532,9 @@ namespace Wacs.Core.Instructions
             return this;
         }
 
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32(X.Value);
+
         public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {X.Value}";
     }
 
@@ -558,6 +583,9 @@ namespace Wacs.Core.Instructions
             X = (TableIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32(X.Value);
 
         public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {X.Value}";
     }
@@ -648,6 +676,9 @@ namespace Wacs.Core.Instructions
             X = (TableIdx)reader.ReadLeb128_u32();
             return this;
         }
+
+        public override void RenderBinary(BinaryWriter writer) =>
+            writer.WriteLeb128_u32(X.Value);
 
         public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {X.Value}";
     }

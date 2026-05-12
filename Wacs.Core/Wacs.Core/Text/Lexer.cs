@@ -30,6 +30,12 @@ namespace Wacs.Core.Text
         private int _line = 1;
         private int _col = 1;
 
+        // When non-null, SkipTrivia appends each consumed comment to
+        // this list as a TriviaToken so consumers can round-trip
+        // comments. The default Tokenize() path leaves it null, so the
+        // hot path (every WAT parse) stays allocation-free.
+        private List<TriviaToken>? _capturedTrivia;
+
         public Lexer(string source)
         {
             _source = source ?? throw new ArgumentNullException(nameof(source));
@@ -47,6 +53,13 @@ namespace Wacs.Core.Text
         /// Returns the raw lexeme (exact source characters) for a token.
         /// </summary>
         public string Slice(Token tok) => _source.Substring(tok.Start, tok.Length);
+
+        /// <summary>
+        /// Returns the raw text of a trivia token (the comment with its
+        /// <c>;;</c> / <c>(;…;)</c> delimiters intact).
+        /// </summary>
+        public string SliceTrivia(TriviaToken tok) =>
+            _source.Substring(tok.Start, tok.Length);
 
         /// <summary>
         /// Materializes a <see cref="TokenKind.String"/> token as its decoded
@@ -161,6 +174,26 @@ namespace Wacs.Core.Text
         /// rule outside. The relaxed class also bypasses line-comment
         /// detection on single <c>;</c>.</para>
         /// </summary>
+        /// <summary>
+        /// Tokenize and collect comments. Returns the same tokens
+        /// <see cref="Tokenize"/> would produce, plus a side-band list
+        /// of every line / block comment encountered in source order.
+        /// </summary>
+        public (List<Token> tokens, List<TriviaToken> trivia) TokenizeWithTrivia()
+        {
+            var prev = _capturedTrivia;
+            _capturedTrivia = new List<TriviaToken>();
+            try
+            {
+                var tokens = Tokenize();
+                return (tokens, _capturedTrivia);
+            }
+            finally
+            {
+                _capturedTrivia = prev;
+            }
+        }
+
         public List<Token> Tokenize()
         {
             var tokens = new List<Token>(Math.Max(16, _source.Length / 8));
@@ -291,16 +324,19 @@ namespace Wacs.Core.Text
                 // terminator (LF, CR, or CRLF) per spec § 6.2.4.
                 if (c == ';' && _pos + 1 < _source.Length && _source[_pos + 1] == ';')
                 {
+                    int startLine = _line, startCol = _col, startPos = _pos;
                     while (_pos < _source.Length
                            && _source[_pos] != '\n'
                            && _source[_pos] != '\r')
                         Advance();
+                    _capturedTrivia?.Add(new TriviaToken(
+                        TriviaKind.LineComment, startPos, _pos - startPos, startLine, startCol));
                     continue;
                 }
                 if (c == '(' && _pos + 1 < _source.Length && _source[_pos + 1] == ';')
                 {
                     // Block comment — may nest
-                    int startLine = _line, startCol = _col;
+                    int startLine = _line, startCol = _col, startPos = _pos;
                     Advance(); Advance();       // consume '(;'
                     int depth = 1;
                     while (depth > 0)
@@ -325,6 +361,8 @@ namespace Wacs.Core.Text
                             Advance();
                         }
                     }
+                    _capturedTrivia?.Add(new TriviaToken(
+                        TriviaKind.BlockComment, startPos, _pos - startPos, startLine, startCol));
                     continue;
                 }
                 break;

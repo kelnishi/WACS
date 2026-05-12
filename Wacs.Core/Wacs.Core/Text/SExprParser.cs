@@ -33,6 +33,20 @@ namespace Wacs.Core.Text
         }
 
         /// <summary>
+        /// Parse a full source string and additionally return every
+        /// comment encountered, in source order. The s-expression
+        /// shape is the same as <see cref="Parse"/>; trivia is just
+        /// side-banded for downstream attachment.
+        /// </summary>
+        public static (Lexer lexer, List<SExpr> forms, List<TriviaToken> trivia)
+            ParseWithTrivia(string source)
+        {
+            var lex = new Lexer(source);
+            var (toks, trivia) = lex.TokenizeWithTrivia();
+            return (lex, ParseTokens(lex, toks), trivia);
+        }
+
+        /// <summary>
         /// Parse a pre-tokenized stream. Useful for tests or if the caller
         /// already holds a token list.
         /// </summary>

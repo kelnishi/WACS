@@ -70,6 +70,14 @@ namespace Wacs.Console.Verbs
         {
             string ext = Path.GetExtension(path).ToLowerInvariant();
             Wacs.Core.Module module;
+            // Inspect is the one verb where round-trip fidelity matters
+            // — `--dump-wat` from a binary input should recover the
+            // `wacs.trivia` sidecar if present, and `--dump-wasm` from
+            // a WAT input should serialize comments / annotations into
+            // it. Also pick up function names so `--dump-wat` re-emits
+            // them.
+            Wacs.Core.BinaryModuleParser.ParseCustomNames = true;
+            Wacs.Core.BinaryModuleParser.ParseTrivia = true;
             try
             {
                 using var fs = new FileStream(path, FileMode.Open,
@@ -86,7 +94,7 @@ namespace Wacs.Console.Verbs
             }
 
             // Default behavior: if no explicit flag, print stats.
-            bool any = opts.Stats || opts.DumpWat
+            bool any = opts.Stats || opts.DumpWat || opts.DumpWasm
                 || opts.ListExports || opts.ListImports;
             if (!any) opts.Stats = true;
 
@@ -94,6 +102,7 @@ namespace Wacs.Console.Verbs
             if (opts.ListImports) PrintImports(module);
             if (opts.ListExports) PrintExports(module);
             if (opts.DumpWat) DumpWat(module, path, opts.OutputDir);
+            if (opts.DumpWasm) DumpWasm(module, path, opts.OutputDir);
 
             return 0;
         }
@@ -196,6 +205,31 @@ namespace Wacs.Console.Verbs
             File.WriteAllText(outPath, wat);
             System.Console.WriteLine("wrote " + outPath
                 + " (" + wat.Length + " chars)");
+        }
+
+        private static void DumpWasm(Wacs.Core.Module module, string sourcePath,
+            string outputDir)
+        {
+            byte[] bytes = Wacs.Core.Bin.BinaryModuleWriter.Write(module);
+
+            if (string.IsNullOrEmpty(outputDir))
+            {
+                // Stream raw bytes through stdout for pipe targets.
+                // Detach from the TextWriter wrapper so the bytes
+                // aren't re-encoded via the console codepage.
+                using var stdout = System.Console.OpenStandardOutput();
+                stdout.Write(bytes, 0, bytes.Length);
+                stdout.Flush();
+                return;
+            }
+
+            if (!Directory.Exists(outputDir))
+                Directory.CreateDirectory(outputDir);
+            var basename = Path.GetFileNameWithoutExtension(sourcePath);
+            var outPath = Path.Combine(outputDir, basename + ".wasm");
+            File.WriteAllBytes(outPath, bytes);
+            System.Console.WriteLine("wrote " + outPath
+                + " (" + bytes.Length + " bytes)");
         }
 
         // ============================================================

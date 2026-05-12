@@ -19,6 +19,7 @@ using FluentValidation;
 using Wacs.Core.Attributes;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Text;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
@@ -69,7 +70,7 @@ namespace Wacs.Core
                 var head = $"{indent}(func{id}{type}{param}{result}";
                 
                 writer.Write(head);
-                indent += ModuleRenderer.Indent2Space;
+                indent += TextModuleWriter.Indent2Space;
                 if (Locals.Length > 0)
                 {
                     var localtypes = string.Join(" ", Locals.Select(v => v.ToWat()));
@@ -116,7 +117,7 @@ namespace Wacs.Core
                             writer.WriteLine();
                             writer.Write(instText);
 
-                            var blockIndent = indent + ModuleRenderer.Indent2Space;
+                            var blockIndent = indent + TextModuleWriter.Indent2Space;
                         
                             for (int b = 0; b < blockInst.Count; ++b)
                             {
