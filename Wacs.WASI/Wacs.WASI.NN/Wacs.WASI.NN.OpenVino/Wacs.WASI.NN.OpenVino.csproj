@@ -12,8 +12,8 @@
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.WASI.NN.OpenVino</AssemblyName>
-        <AssemblyVersion>0.1.1</AssemblyVersion>
-        <Version>0.1.1</Version>
+        <AssemblyVersion>0.1.2</AssemblyVersion>
+        <Version>0.1.2</Version>
         <RepositoryType>git</RepositoryType>
         <!-- OpenVINO.CSharp.API targets net6.0+, so net8.0 is fine.
              Like the ORT backend we restrict to net8.0 because the
@@ -30,6 +30,15 @@
         <None Include="README.md">
             <Pack>true</Pack>
             <PackagePath/>
+        </None>
+        <!-- Ship the BYO-runtime fetch script in the NuGet under
+             `tools/` so users on macOS arm64 hitting the version-
+             skew issue (NuGet macos-arm64 native is stuck at
+             2024.4.0.1; 2025.x-exported IR fails to load) can
+             find it without checking out the repo. -->
+        <None Include="scripts/fetch-openvino-native.sh">
+            <Pack>true</Pack>
+            <PackagePath>tools/</PackagePath>
         </None>
     </ItemGroup>
 
