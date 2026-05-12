@@ -1,5 +1,70 @@
 # Changelog
 
+## WACS family release — auto-discovery for wasi-nn backends
+
+Replaces the hand-written per-backend `BuildXxxConfigureCallback`
+chain in `WasiPreview2RuntimeScope` (~620 LOC across five
+hardcoded backends) with a single auto-discovery loop. Adding a
+new wasi-nn backend no longer requires editing the DI scope —
+the new package implements `IWasiNNBackendRegistration` on its
+bindable and gets picked up the next time the bundle scope is
+built. Same shape this PR's refactor would have demanded for any
+seventh, eighth, … backend.
+
+### What changed
+
+- **`WACS.WASI.NN` 0.3.5 → 0.4.0** (minor — new public API):
+  added `IWasiNNBackendRegistration` interface with one method,
+  `ConfigureConfiguration(WasiNNConfiguration config)`.
+- **All six backend packages — `WACS.WASI.NN.OnnxRuntime` 0.3.1
+  → 0.3.2, `LlamaSharp` 0.2.3 → 0.2.4, `TorchSharp` 0.1.2 →
+  0.1.3, `OnnxRuntimeGenAI` 0.1.4 → 0.1.5, `OpenVino` 0.1.0 →
+  0.1.1, `MLNet` 0.2.3 → 0.2.4** (point — additive interface
+  implementation): each `WasiNN<Backend>Bindable` adds
+  `IWasiNNBackendRegistration` and refactors its ctor body into
+  the new method. Env-driven model-registry scanning
+  (`WACS_WASINN_GGUF_DIR` / `_TORCH_DIR` / `_GENAI_DIR`) lives
+  in the bindable as before — the DI scope no longer
+  duplicates the scan logic.
+- **`WACS.WASI.Preview2.DependencyInjection` 0.1.9 → 0.2.0**
+  (minor — behavior shift): `BuildOnnxConfigureCallback`,
+  `BuildLlamaSharpConfigureCallback`,
+  `BuildTorchSharpConfigureCallback`,
+  `BuildOnnxGenAIConfigureCallback`,
+  `BuildOpenVinoConfigureCallback`,
+  `BuildGenAIRegistryFromEnv`,
+  `BuildTorchScriptRegistryFromEnv`,
+  `BuildGgufRegistryFromEnv` and `CombineCallbacks` all gone;
+  one `BuildAutoDiscoveredCallback` walks the AppDomain for
+  `Wacs.WASI.NN.*` assemblies, finds public types implementing
+  `IWasiNNBackendRegistration`, and chains their
+  `ConfigureConfiguration` calls into the AddWasiNN configure
+  delegate. The DI scope dropped from ~945 lines to ~480.
+- **`WACS.WASI.NN.MLNet`** picks up auto-wire under `--wasip2`
+  for free (it was previously missing from the hardcoded
+  callback list — a latent gap nobody had hit).
+- **`WACS.Cli` 1.7.3 → 1.7.4** (point — rebuilt deps).
+
+### Cost analysis (the trade-offs we picked up)
+
+| | Before | After |
+|---|---|---|
+| LOC in `WasiPreview2RuntimeScope.cs` | 945 | 480 |
+| Adding a new backend touches | DI scope + new builder method | Implement interface on bindable only |
+| Env-scan code locations per backend | 2 (bindable ctor + DI builder) | 1 (bindable's `ConfigureConfiguration`) |
+| MLNet auto-wire under `--wasip2` | Missing | Works |
+| New surface area to maintain | Per-backend builders | One interface, one discovery loop |
+
+### Tests + smoke
+
+- `Wacs.Core.Test` suite: 488/488 (no change — this is DI wiring).
+- All six backend csproj's build clean.
+- Live: `wacs run --wasip2 --wasi-nn` still binds OnnxRuntime
+  (the shorthand path); `wacs run --wasip2 --bind
+  WACS.WASI.NN.OpenVino` binds via the new discovery — both
+  report `1 binding(s)` and proceed to instantiation without
+  the gap-33 `InvalidEncoding` error.
+
 ## WACS.WASI.Preview2.DependencyInjection 0.1.9 / WACS.Cli 1.7.3 — OpenVINO auto-wire under `--wasip2`
 
 Closes the gap reported in `wasi-nn/WACS-GAPS.md` §33: under

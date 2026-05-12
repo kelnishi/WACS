@@ -42,7 +42,8 @@ namespace Wacs.WASI.NN.OnnxRuntimeGenAI
     /// Composes alongside the regular ONNX backend — each handles
     /// its preferred entry point.</para>
     /// </summary>
-    public sealed class WasiNNOnnxGenAIBindable : IBindable, IDisposable
+    public sealed class WasiNNOnnxGenAIBindable
+        : IBindable, IWasiNNBackendRegistration, IDisposable
     {
         private const string EnvVarName = "WACS_WASINN_GENAI_DIR";
 
@@ -50,15 +51,20 @@ namespace Wacs.WASI.NN.OnnxRuntimeGenAI
 
         public WasiNNOnnxGenAIBindable()
         {
+            var config = WasiNNConfiguration.DefaultConfiguration();
+            ConfigureConfiguration(config);
+            _host = new WasiNNHost(config);
+        }
+
+        public void ConfigureConfiguration(WasiNNConfiguration config)
+        {
             var registry = BuildEnvRegistry();
             var backend = new OnnxGenAIBackend(name =>
                 registry.TryGetValue(name, out var dir) ? dir : null);
-            var config = WasiNNConfiguration.DefaultConfiguration();
             // Wire through load-by-name only; leave Backends[ONNX]
             // untouched so the regular OnnxBackend can still serve
             // byte-loaded ONNX through graph.load.
             config.LoadByNameBackend = backend;
-            _host = new WasiNNHost(config);
         }
 
         public void BindToRuntime(WasmRuntime runtime)

@@ -12,8 +12,8 @@
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.WASI.NN.OnnxRuntime</AssemblyName>
-        <AssemblyVersion>0.3.1</AssemblyVersion>
-        <Version>0.3.1</Version>
+        <AssemblyVersion>0.3.2</AssemblyVersion>
+        <Version>0.3.2</Version>
         <RepositoryType>git</RepositoryType>
         <!-- ONNX Runtime carries native binaries; restricting to
              net8.0 here is fine because ORT itself targets

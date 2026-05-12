@@ -12,8 +12,8 @@
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.WASI.NN.OpenVino</AssemblyName>
-        <AssemblyVersion>0.1.0</AssemblyVersion>
-        <Version>0.1.0</Version>
+        <AssemblyVersion>0.1.1</AssemblyVersion>
+        <Version>0.1.1</Version>
         <RepositoryType>git</RepositoryType>
         <!-- OpenVINO.CSharp.API targets net6.0+, so net8.0 is fine.
              Like the ORT backend we restrict to net8.0 because the
