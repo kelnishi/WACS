@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using Wacs.Core.Text;
 using Wacs.Core.Utilities;
 
 namespace Wacs.Core.Bin
@@ -158,6 +160,118 @@ namespace Wacs.Core.Bin
                         w.Write(raw);
                 }
             }
+        }
+
+        // ---- WACS trivia section --------------------------------------
+
+        // `wacs.trivia` is an optimistic in-band carrier for WAT
+        // comments (`;;` / `(;…;)`) and `(@name …)` annotations so
+        // round-tripping WAT → wasm → WAT keeps the human-authored
+        // trivia. Not part of any spec; ignored by other engines.
+        // Best-effort: source positions aren't serialized (the binary
+        // form has no source), and re-parse position assignments are
+        // approximate.
+        //
+        // Payload:
+        //   comments:    vec(entry<vec(comment)>)
+        //   annotations: vec(entry<vec(annotation)>)
+        // entry<T> ::= kind:u8  index:s32  instructionIndex:s32  payload:T
+        // comment    ::= trivia_kind:u8  is_trailing:u8  text:utf8-str
+        // annotation ::= name:utf8-str  payload:utf8-str
+
+        public static void WriteTriviaSection(BinaryWriter w, Module module)
+        {
+            WriteTriviaTable(w, module.Comments, WriteCommentEntry);
+            WriteTriviaTable(w, module.Annotations, WriteAnnotationEntry);
+        }
+
+        private static void WriteTriviaTable<T>(
+            BinaryWriter w,
+            Dictionary<ModuleElementRef, List<T>>? table,
+            System.Action<BinaryWriter, T> writeItem)
+        {
+            if (table == null || table.Count == 0)
+            {
+                w.WriteLeb128_u32(0);
+                return;
+            }
+            // Sort by key for canonical output. ModuleElementRef has no
+            // built-in comparer; tuple-sort lexicographically.
+            var sorted = table
+                .OrderBy(kv => (byte)kv.Key.Kind)
+                .ThenBy(kv => kv.Key.Index)
+                .ThenBy(kv => kv.Key.InstructionIndex)
+                .ToArray();
+            w.WriteLeb128_u32((uint)sorted.Length);
+            foreach (var kv in sorted)
+            {
+                w.Write((byte)kv.Key.Kind);
+                w.WriteLeb128_s32(kv.Key.Index);
+                w.WriteLeb128_s32(kv.Key.InstructionIndex);
+                w.WriteLeb128_u32((uint)kv.Value.Count);
+                foreach (var item in kv.Value)
+                    writeItem(w, item);
+            }
+        }
+
+        private static void WriteCommentEntry(BinaryWriter w, WatComment c)
+        {
+            w.Write((byte)c.Kind);
+            w.Write(c.IsTrailing ? (byte)1 : (byte)0);
+            w.WriteUtf8String(c.Text ?? string.Empty);
+        }
+
+        private static void WriteAnnotationEntry(BinaryWriter w, WatAnnotation a)
+        {
+            w.WriteUtf8String(a.Name ?? string.Empty);
+            w.WriteUtf8String(a.Payload ?? string.Empty);
+        }
+
+        public static void ParseTriviaSection(BinaryReader reader, Module module)
+        {
+            uint commentEntries = reader.ReadLeb128_u32();
+            for (uint i = 0; i < commentEntries; i++)
+            {
+                var owner = ReadOwner(reader);
+                uint count = reader.ReadLeb128_u32();
+                for (uint j = 0; j < count; j++)
+                {
+                    var kind = (TriviaKind)reader.ReadByte();
+                    bool isTrailing = reader.ReadByte() != 0;
+                    var text = reader.ReadUtf8String();
+                    module.AddComment(owner, new WatComment
+                    {
+                        Kind = kind,
+                        IsTrailing = isTrailing,
+                        Text = text,
+                    });
+                }
+            }
+
+            uint annotationEntries = reader.ReadLeb128_u32();
+            for (uint i = 0; i < annotationEntries; i++)
+            {
+                var owner = ReadOwner(reader);
+                uint count = reader.ReadLeb128_u32();
+                for (uint j = 0; j < count; j++)
+                {
+                    var name = reader.ReadUtf8String();
+                    var payload = reader.ReadUtf8String();
+                    module.AddAnnotation(owner, new WatAnnotation
+                    {
+                        Name = name,
+                        Payload = payload,
+                    });
+                }
+            }
+        }
+
+        private static ModuleElementRef ReadOwner(BinaryReader reader)
+        {
+            var kind = (ModuleElementKind)reader.ReadByte();
+            int index = reader.ReadLeb128_s32();
+            int instructionIndex = reader.ReadLeb128_s32();
+            return new ModuleElementRef(kind, index, instructionIndex);
         }
     }
 }

@@ -1,5 +1,80 @@
 # Changelog
 
+## WACS 0.15.19 / WACS.Cli 1.6.7 — `wacs.trivia` custom section
+
+Optimistic in-band carrier for WAT comments (`;;` line + `(;…;)`
+block) and `(@name …)` annotations so round-tripping WAT → wasm
+→ WAT keeps human-authored trivia. WACS-specific, ignored by
+other engines; no spec.
+
+### What changed
+
+- `BinaryModuleWriter` emits a `wacs.trivia` custom section
+  when `Module.Comments` or `Module.Annotations` is populated.
+- `BinaryModuleParser` parses the section when
+  `BinaryModuleParser.ParseTrivia = true` (off by default, like
+  the other opt-in custom sections).
+- `wacs inspect` flips both `ParseCustomNames` and
+  `ParseTrivia` on so `--dump-wat` from a binary input recovers
+  comments and names, and `--dump-wasm` from WAT serializes
+  them into the section.
+
+### Wire format
+
+```
+custom section "wacs.trivia":
+  comments:    vec(entry<vec(comment)>)
+  annotations: vec(entry<vec(annotation)>)
+entry<T> ::= kind:u8  index:s32  instructionIndex:s32  payload:T
+comment    ::= trivia_kind:u8  is_trailing:u8  text:utf8-str
+annotation ::= name:utf8-str  payload:utf8-str
+```
+
+### Live behavior
+
+```bash
+$ cat /tmp/commented.wat
+;; top-level header comment
+(module
+  ;; the boom function does the deed
+  (func $boom
+    i32.const 1
+    drop
+    unreachable))
+
+$ wacs inspect --dump-wasm /tmp/commented.wat --output-dir /tmp/d
+wrote /tmp/d/commented.wasm (135 bytes)
+$ wacs inspect --dump-wat /tmp/d/commented.wasm
+;; top-level header comment
+(module
+  (type (func))
+  ;; the boom function does the deed
+  (func (type 0)
+    i32.const 1
+    drop
+    unreachable
+  )
+)
+```
+
+### Lossy by design
+
+- Source line/col aren't serialized (the binary form has no
+  source positions; trivia is keyed by `ModuleElementRef`
+  only).
+- Comment positions on re-parse are best-effort — comments
+  attach to the same `ModuleElementRef` they came from, but
+  the renderer doesn't try to preserve "this comment was on
+  line 7 column 12" inside the WAT body.
+- Trailing-vs-leading distinction is preserved (the
+  `IsTrailing` flag rides along).
+
+### Tests
+
+`TriviaSectionRoundTripTests` (4 cases): top-level line
+comment, module-level annotation, opt-in gating, and zero-
+emit-when-empty. Full suite 488/488.
+
 ## WACS 0.15.18 — uninternify parse-time instruction singletons
 
 Pairs with 0.15.17. Removes the ten process-wide singletons that

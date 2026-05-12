@@ -58,6 +58,17 @@ namespace Wacs.Core
         public static bool ParseCustomNames = false;
 
         /// <summary>
+        /// Opt-in for the <c>wacs.trivia</c> custom section — an
+        /// optimistic in-band carrier for WAT comments and
+        /// <c>(@name …)</c> annotations. Off by default since most
+        /// consumers (interpreter, transpiler) don't care about
+        /// human-authored trivia. Set to <c>true</c> when the parsed
+        /// Module is going to be re-rendered as WAT and you want
+        /// comments to survive the wasm leg.
+        /// </summary>
+        public static bool ParseTrivia = false;
+
+        /// <summary>
         /// Opt-in for the `metadata.code.branch_hint` custom section
         /// (and WAT-level `(@metadata.code.branch_hint …)` annotations).
         /// Off by default — interpreter / switch-runtime consumers
@@ -284,6 +295,17 @@ namespace Wacs.Core
                         using (var subreader = reader.GetSubsectionTo((int)payloadEnd))
                         {
                             module.BranchHints = ParseBranchHintSection(subreader);
+                        }
+                        break;
+                    case "wacs.trivia" when ParseTrivia:
+                        // Optimistic in-band WAT comment / annotation
+                        // sidecar. WACS-specific (no spec), ignored by
+                        // other engines. Populates Module.Comments and
+                        // Module.Annotations.
+                        using (var subreader = reader.GetSubsectionTo((int)payloadEnd))
+                        {
+                            Wacs.Core.Bin.CustomSectionEncoders
+                                .ParseTriviaSection(subreader, module);
                         }
                         break;
                     default:

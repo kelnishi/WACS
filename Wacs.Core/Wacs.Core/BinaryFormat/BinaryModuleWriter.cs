@@ -125,6 +125,17 @@ namespace Wacs.Core.Bin
             if (module.BranchHints != null)
                 WriteCustomSection(w, "metadata.code.branch_hint",
                     inner => CustomSectionEncoders.WriteBranchHintSection(inner, module.BranchHints));
+
+            // Optimistic in-band sidecar for WAT comments / annotations.
+            // Lossy by design: source positions aren't preserved (binary
+            // has no source line/col). Emitted only when at least one
+            // table is populated.
+            if ((module.Comments != null && module.Comments.Count > 0)
+                || (module.Annotations != null && module.Annotations.Count > 0))
+            {
+                WriteCustomSection(w, "wacs.trivia",
+                    inner => CustomSectionEncoders.WriteTriviaSection(inner, module));
+            }
         }
 
         // ---- Section framing -------------------------------------------

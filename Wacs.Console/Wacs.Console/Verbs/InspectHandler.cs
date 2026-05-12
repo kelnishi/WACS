@@ -70,6 +70,14 @@ namespace Wacs.Console.Verbs
         {
             string ext = Path.GetExtension(path).ToLowerInvariant();
             Wacs.Core.Module module;
+            // Inspect is the one verb where round-trip fidelity matters
+            // — `--dump-wat` from a binary input should recover the
+            // `wacs.trivia` sidecar if present, and `--dump-wasm` from
+            // a WAT input should serialize comments / annotations into
+            // it. Also pick up function names so `--dump-wat` re-emits
+            // them.
+            Wacs.Core.BinaryModuleParser.ParseCustomNames = true;
+            Wacs.Core.BinaryModuleParser.ParseTrivia = true;
             try
             {
                 using var fs = new FileStream(path, FileMode.Open,
