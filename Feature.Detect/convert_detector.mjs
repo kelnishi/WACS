@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import wabt from 'wabt';
+import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -61,34 +61,46 @@ function toUint8Array(bufferSource) {
     }
 }
 
+// Path to the in-repo CLI project. We always shell out to `dotnet
+// run --project <CLI>` rather than rely on a globally-installed
+// `wacs`, so a stale dotnet-tool install can't ship verbs that
+// don't match HEAD.
+const cliProject = path.join(__dirname, '..', 'Wacs.Console', 'Wacs.Console');
+
 // Function to handle WAT file
 async function processWatFile(watPath, outputBasePath) {
     console.log('Processing WAT file:', watPath);
     try {
-        // Read and parse the WAT file
+        // Read .wat for metadata extraction. The actual WAT → wasm
+        // conversion goes through `wacs inspect --dump-wasm`
+        // (replaces the prior `wabt` npm dep). Feature flags from
+        // the `;; Features: ...` header are no longer threaded —
+        // WACS enables all of wasm-3.0 by default, so they're moot
+        // for every proposal Feature.Detect currently covers.
         const watContent = fs.readFileSync(watPath, 'utf8');
         const proposalInfo = extractProposalInfo(watContent);
 
-        // Initialize wabt and convert WAT to WASM
-        let features = proposalInfo.features ?? [];
-        const wabtInstance = await wabt();
-        const wasmModule = wabtInstance.parseWat(
-            'module.wat',
-            watContent,
-            Object.fromEntries(features.map((flag) => [flag, true])),);
-        
-        const { buffer } = wasmModule.toBinary({});
+        const result = spawnSync(
+            'dotnet',
+            ['run', '--project', cliProject, '--no-build', '--',
+             'inspect', '--dump-wasm', watPath],
+            { stdio: ['ignore', 'pipe', 'inherit'] });
 
-        // Write WASM file
+        if (result.status !== 0) {
+            console.error(`wacs inspect --dump-wasm exited ${result.status}`);
+            return false;
+        }
+
+        const buffer = result.stdout;
         const outputWasmPath = outputBasePath + '.wasm';
-        fs.writeFileSync(outputWasmPath, Buffer.from(buffer));
-        console.log(`Wrote ${buffer.byteLength} bytes to ${outputWasmPath}`);
+        fs.writeFileSync(outputWasmPath, buffer);
+        console.log(`Wrote ${buffer.length} bytes to ${outputWasmPath}`);
 
         const outputFilename = path.basename(outputWasmPath);
-        
+
         // Write metadata
         const metadata = {
-            source: 'wat2wasm',
+            source: 'wacs inspect --dump-wasm',
             timestamp: new Date().toISOString(),
             id: outputFileName,
             module: outputFilename,
