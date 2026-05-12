@@ -13,22 +13,55 @@ distribution format (Model + Weights). This backend reads those two builders dir
 ## Install
 
 ```bash
+# 1. Backend DLL (small, RID-agnostic).
 dotnet add package WACS.WASI.NN.OpenVino
+
+# 2. Native runtime for your platform (~150-200 MB unpacked).
+#    Pick exactly one matching your RID:
+dotnet add package OpenVINO.runtime.macos-arm64    # Apple Silicon
+dotnet add package OpenVINO.runtime.macos-x86_64   # Intel Mac
+dotnet add package OpenVINO.runtime.win            # Windows x64
+dotnet add package OpenVINO.runtime.ubuntu.22-x86_64
+# (other Linux distros + arm64 variants are published as
+#  OpenVINO.runtime.{centos7,rhel8,debian10}-x86_64 /
+#  OpenVINO.runtime.ubuntu.{18,20}-arm64 etc. — see
+#  https://www.nuget.org/packages?q=openvino.runtime)
 ```
 
-The package depends on `OpenVINO.CSharp.API` but **not** on any
-`OpenVINO.runtime.<rid>` native pack — pick the runtime matching your deployment
-target separately. The CLI bundle wires up matching native packs across the
-common RIDs already.
+The runtime pack is shipped as a sibling NuGet rather than bundled with the
+backend or CLI because each one is large enough that bundling all four would
+push the parent NuGet past the 250 MB upload limit. Native binaries land in
+`runtimes/<rid>/native/` of your published output via NuGet's standard
+RID-aware restore — `OpenVINO.CSharp.API` P/Invokes against the standard
+library names (`openvino.dylib` / `openvino.so` / `openvino.dll`) and finds
+them at load time.
 
 ## CLI
+
+The `wacs` CLI bundle ships `Wacs.WASI.NN.OpenVino.dll` but **not** the OpenVINO
+native runtime (size-bound — see the install note above). You need to drop the
+native libraries into the WACS install directory's `runtimes/<rid>/native/`
+folder yourself before invoking, or load them via `LD_LIBRARY_PATH` /
+`DYLD_LIBRARY_PATH` / `PATH`.
+
+The easiest way to get a matched set is to install `OpenVINO.runtime.<rid>` into
+a scratch project and copy the unpacked natives:
+
+```sh
+mkdir openvino-native && cd openvino-native
+dotnet new console
+dotnet add package OpenVINO.runtime.macos-arm64    # match your RID
+dotnet build
+cp -R bin/Debug/net*/runtimes "$(dirname $(which wacs))/"
+```
+
+Then invoke:
 
 ```sh
 wacs run my.component.wasm --wasip2 --bind WACS.WASI.NN.OpenVino.dll
 ```
 
-Drop `Wacs.WASI.NN.OpenVino.dll` on the load path and pass it via `--bind`. The
-CLI's `IBindable`-discovery pass auto-picks `WasiNNOpenVinoBindable` and the
+The CLI's `IBindable`-discovery pass auto-picks `WasiNNOpenVinoBindable` and the
 guest's `graph.load` calls with `encoding=openvino` route through this backend.
 
 ## Embedder

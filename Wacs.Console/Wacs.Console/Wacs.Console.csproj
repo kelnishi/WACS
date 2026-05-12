@@ -29,8 +29,8 @@
          library); the tool command users type is still `wacs`. -->
     <PackageId>WACS.Cli</PackageId>
     <Title>WACS CLI</Title>
-    <Version>1.7.1</Version>
-    <AssemblyVersion>1.7.1</AssemblyVersion>
+    <Version>1.7.2</Version>
+    <AssemblyVersion>1.7.2</AssemblyVersion>
     <FileVersion>1.4.1</FileVersion>
     <Description>WACS unified WebAssembly toolchain: run, build, aot, inspect, bindgen. v1.3 picks up WACS.Transpiler.Lib v0.7's PersistedAssemblyBuilder migration + RVA-mapped data segments, so `wacs build` produces ~11% smaller .dlls and the new EmissionTarget.Auto default cuts cold start by ~50% on the common module shapes. The `wacs aot` verb produces self-contained NativeAOT native binaries from a wasm input in one shot, with --wasi / --wasip2 baking in WASI Preview 1 / Preview 2 hosts. Supersedes wasm-transpile (WACS.Transpiler).</Description>
     <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
@@ -117,25 +117,14 @@
                       Version="8.0.0" />
   </ItemGroup>
 
-  <!-- OpenVINO native runtimes — pulled as compile-excluded
-       package references so the published `wacs` bundle ships
-       a working OpenVINO backend on the four primary RIDs.
-       NuGet's RID-aware restore drops the matching pack into
-       runtimes/<rid>/native/ in the published output; the
-       OpenVINO.CSharp.API DLL P/Invokes against the standard
-       library names (openvino.dylib / openvino.so / openvino.dll)
-       and finds them at load time. The native packs are sizable
-       (~40 MB per RID), but no larger than the ORT native runtimes
-       we already ship in the same way. -->
-  <ItemGroup>
-    <PackageReference Include="OpenVINO.runtime.macos-arm64" Version="2024.4.0.1"
-                      ExcludeAssets="compile" />
-    <PackageReference Include="OpenVINO.runtime.macos-x86_64" Version="2024.4.0.1"
-                      ExcludeAssets="compile" />
-    <PackageReference Include="OpenVINO.runtime.win" Version="2026.0.0"
-                      ExcludeAssets="compile" />
-    <PackageReference Include="OpenVINO.runtime.ubuntu.22-x86_64" Version="2024.4.0.1"
-                      ExcludeAssets="compile" />
-  </ItemGroup>
+  <!-- OpenVINO native runtimes are intentionally NOT bundled
+       here. The four primary RID packs are ~160-200 MB each
+       (decompressed) — pinning all four would push the wacs
+       NuGet upload past the 250 MB nupkg limit. Users who want
+       the OpenVINO backend install the runtime pack for their
+       RID separately: `dotnet add package
+       OpenVINO.runtime.macos-arm64` (or .win, .ubuntu.22-x86_64,
+       .macos-x86_64). See WACS.WASI.NN.OpenVino's README for
+       the full instructions. -->
 
 </Project>
