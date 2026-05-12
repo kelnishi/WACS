@@ -134,38 +134,30 @@ namespace Wacs.Core
 
             /// <summary>
             /// Walk every instruction body in <paramref name="funcs"/>
-            /// and, for each instruction whose
-            /// <see cref="InstructionBase.ByteOffsetInFunc"/> matches a
-            /// hint in <see cref="ByFuncIndex"/>, populate the
-            /// instruction-keyed lookup. Idempotent — safe to call
-            /// twice. Used by the binary parser's finalize step to
-            /// bridge offset-keyed parse data to ref-keyed transpile
-            /// data.
+            /// and, for each instruction whose body-relative byte
+            /// offset matches a hint in <see cref="ByFuncIndex"/>,
+            /// populate the instruction-keyed lookup. Idempotent — safe
+            /// to call twice. Used by the binary parser's finalize
+            /// step to bridge offset-keyed parse data to ref-keyed
+            /// transpile data. Offsets are computed on the fly through
+            /// <see cref="Wacs.Core.Bin.ByteOffsetWalker"/> rather than
+            /// stored on the instruction instance, so the same
+            /// singleton (<c>InstI32Const</c>, <c>InstLocalGet</c>, …)
+            /// reused across functions doesn't race.
             /// </summary>
             public void JoinByInstruction(
-                IEnumerable<(uint funcIdx, IEnumerable<InstructionBase> body)> funcs)
+                IEnumerable<(uint funcIdx, InstructionSequence body)> funcs)
             {
                 foreach (var (funcIdx, body) in funcs)
                 {
                     if (!ByFuncIndex.TryGetValue(funcIdx, out var fnMap))
                         continue;
-                    JoinFunctionInstructions(fnMap, body);
-                }
-            }
-
-            private void JoinFunctionInstructions(
-                Dictionary<uint, BranchHint> fnMap,
-                IEnumerable<InstructionBase> body)
-            {
-                foreach (var inst in body)
-                {
-                    if (fnMap.TryGetValue(inst.ByteOffsetInFunc, out var h))
-                        ByInstruction[inst] = h;
-                    if (inst is IBlockInstruction block)
+                    Wacs.Core.Bin.ByteOffsetWalker.Walk(body, (inst, off) =>
                     {
-                        for (int i = 0; i < block.Count; i++)
-                            JoinFunctionInstructions(fnMap, block.GetBlock(i).Instructions);
-                    }
+                        if (fnMap.TryGetValue(off, out var hint))
+                            ByInstruction[inst] = hint;
+                        return false;
+                    });
                 }
             }
         }

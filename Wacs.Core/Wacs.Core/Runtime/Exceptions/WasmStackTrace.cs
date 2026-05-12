@@ -88,10 +88,11 @@ namespace Wacs.Core.Runtime.Exceptions
             // Function identity — prefer the parsed `.Id` (e.g.
             // "$myfunc|3" from AnnotateWhileParsing), fall back to
             // the raw store address. Also capture the absolute
-            // FuncIdx so the LineMap fallback in TryResolveSourceCoord
-            // can key per-instruction lookups.
+            // FuncIdx + defined-function body so we can walk to find
+            // the trap instruction's byte offset on demand.
             string funcLabel = "<func@?>";
             int funcIdx = -1;
+            Module.Function? function = null;
             try
             {
                 var addr = new FuncAddr((int)frame.FuncAddr);
@@ -106,7 +107,12 @@ namespace Wacs.Core.Runtime.Exceptions
                     // without one. Pattern-match to keep the interface
                     // narrow.
                     if (inst is FunctionInstance fi)
+                    {
                         funcIdx = (int)fi.Index.Value;
+                        int defIdx = funcIdx - module.ImportedFunctions.Count;
+                        if (defIdx >= 0 && defIdx < module.Funcs.Count)
+                            function = module.Funcs[defIdx];
+                    }
                 }
             }
             catch
@@ -122,17 +128,33 @@ namespace Wacs.Core.Runtime.Exceptions
             // granularity.
             if (frame.Instruction != null)
             {
+                // Walk the function body to find the trap instruction's
+                // byte offset on demand. Replaces the prior approach of
+                // storing offsets on InstructionBase, which raced when
+                // instances are interned process-wide. For shared
+                // singletons (i32.const, drop, …) the walk picks the
+                // first reference match — same ambiguity as before, but
+                // computed cleanly without parse-time stamping.
+                uint? offset = function != null
+                    ? Wacs.Core.Bin.ByteOffsetWalker.Find(
+                        function.Body.Instructions, frame.Instruction)
+                    : null;
+
                 sb.Append(" (");
                 sb.Append(frame.Instruction.Op.GetMnemonic());
-                sb.Append(" @+0x");
-                sb.Append(frame.Instruction.ByteOffsetInFunc.ToString("x"));
+                if (offset.HasValue)
+                {
+                    sb.Append(" @+0x");
+                    sb.Append(offset.Value.ToString("x"));
+                }
                 sb.Append(')');
 
                 // Verbose form: resolve source line / column.
                 if (lineMap != null
                     || module.SourcePositions != null)
                 {
-                    var sourceCoord = TryResolveSourceCoord(frame.Instruction, module, lineMap, funcIdx);
+                    var sourceCoord = TryResolveSourceCoord(
+                        frame.Instruction, module, lineMap, funcIdx, offset);
                     if (sourceCoord != null)
                     {
                         sb.Append(' ');
@@ -156,7 +178,8 @@ namespace Wacs.Core.Runtime.Exceptions
             Wacs.Core.Instructions.InstructionBase inst,
             Module module,
             LineMap? lineMap,
-            int funcIdx)
+            int funcIdx,
+            uint? byteOffset)
         {
             // First preference: WAT-parsed module has direct per-
             // instruction source coords from Pass B.
@@ -168,18 +191,16 @@ namespace Wacs.Core.Runtime.Exceptions
 
             // Fallback for binary-parsed modules: Pass G records per-
             // instruction spans in the LineMap during a canonical
-            // re-render. Key is (funcIdx, ByteOffsetInFunc) — the
-            // first half identifies which function body, the second
-            // half pinpoints the exact instruction within that body.
-            // The caller computes the LineMap once via
-            // TextModuleWriter.WriteWithLineMap and caches it across
-            // formatter calls.
-            if (lineMap != null && funcIdx >= 0)
+            // re-render. Key is (funcIdx, byteOffset) — funcIdx
+            // identifies which function body, byteOffset pinpoints
+            // the instruction within that body (computed via the
+            // walker, same as the @+0x display above).
+            if (lineMap != null && funcIdx >= 0 && byteOffset.HasValue)
             {
                 var key = new ModuleElementRef(
                     ModuleElementKind.Instruction,
                     funcIdx,
-                    (int)inst.ByteOffsetInFunc);
+                    (int)byteOffset.Value);
                 var span = lineMap.ByElement(key);
                 if (span.HasValue)
                     return $"({span.Value.StartLine}:{span.Value.StartCol})";

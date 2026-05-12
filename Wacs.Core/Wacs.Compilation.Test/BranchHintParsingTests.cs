@@ -127,24 +127,20 @@ namespace Wacs.Compilation.Test
             var module = ParseModule(HintedIfModule);
 
             // Walk the top-level instructions of the only function.
-            // (Nested instructions inside the if-block also get
-            // body-relative offsets; we check the if itself.)
-            var body = module.Funcs[0].Body.Instructions.ToList();
-
             // Per the byte map in the test fixture comment:
             //   local.get 0  -> offset 0
             //   if           -> offset 2
-            //   end          -> offset 10  (the trailing expression-end
-            //                                belongs to the function body
-            //                                itself, not the if-block)
-            Assert.Equal((uint)0, body[0].ByteOffsetInFunc);
-            Assert.Equal((uint)2, body[1].ByteOffsetInFunc);
+            //   end          -> offset 10
+            // Byte offsets are now computed on demand via
+            // ByteOffsetWalker rather than stored on the instance.
+            var body = module.Funcs[0].Body.Instructions;
+            Assert.Equal((uint?)0, Wacs.Core.Bin.ByteOffsetWalker.Find(body, body[0]));
+            Assert.Equal((uint?)2, Wacs.Core.Bin.ByteOffsetWalker.Find(body, body[1]));
 
-            // The hint's offset (2) matches the `if` instruction's offset.
-            var hintedInst = body[1];
-            var hint = module.BranchHints!.TryGet(0, hintedInst.ByteOffsetInFunc);
-            Assert.NotNull(hint);
-            Assert.True(hint!.Value.IsLikely);
+            // The hint's offset (2) matches the `if` instruction's
+            // offset and resolves through the instance-keyed lookup.
+            Assert.NotNull(module.BranchHints!.TryGet(body[1]));
+            Assert.True(module.BranchHints!.TryGet(body[1])!.Value.IsLikely);
         }
 
         // Module byte layout (cumulative offsets from start of blob):
@@ -174,11 +170,11 @@ namespace Wacs.Compilation.Test
             var module = ParseModule(withoutHints);
             Assert.Null(module.BranchHints);
 
-            // But instruction byte offsets still get populated — that's
-            // a parser-level thing independent of the hint section.
-            var body = module.Funcs[0].Body.Instructions.ToList();
-            Assert.Equal((uint)0, body[0].ByteOffsetInFunc);
-            Assert.Equal((uint)2, body[1].ByteOffsetInFunc);
+            // Byte offsets are still resolvable via ByteOffsetWalker
+            // regardless of whether a hint section was present.
+            var body = module.Funcs[0].Body.Instructions;
+            Assert.Equal((uint?)0, Wacs.Core.Bin.ByteOffsetWalker.Find(body, body[0]));
+            Assert.Equal((uint?)2, Wacs.Core.Bin.ByteOffsetWalker.Find(body, body[1]));
         }
 
         [Fact]

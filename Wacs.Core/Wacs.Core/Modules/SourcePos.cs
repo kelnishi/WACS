@@ -58,11 +58,11 @@ namespace Wacs.Core
         ///
         /// <para>Consumed by the stack-trace formatter (Pass C) to
         /// resolve a frame's instruction to a source line / column.
-        /// When this is null, the formatter falls back to
-        /// <c>InstructionBase.ByteOffsetInFunc</c> (binary path) or
-        /// re-renders the module via
+        /// When this is null, the formatter re-renders the module via
         /// <see cref="Wacs.Core.Text.TextModuleWriter.WriteWithLineMap"/>
-        /// (lazy, on demand).</para>
+        /// (lazy, on demand) and resolves the instruction's body-
+        /// relative byte offset through
+        /// <see cref="Wacs.Core.Bin.ByteOffsetWalker"/>.</para>
         /// </summary>
         public Dictionary<InstructionBase, SourcePos>? SourcePositions { get; internal set; }
 

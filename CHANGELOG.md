@@ -1,5 +1,71 @@
 # Changelog
 
+## WACS 0.15.17 — on-demand byte-offset walker
+
+Replaces the parse-time `ByteOffsetInFunc` stamping (binary
+parser + Pass F annotator) with a single on-demand
+`Wacs.Core.Bin.ByteOffsetWalker`. The `ByteOffsetInFunc` field
+on `InstructionBase` is gone; consumers (stack-trace formatter,
+branch-hint join, LineMap writer) call `ByteOffsetWalker.Find`
+or `Walk` when they need an offset.
+
+### Why
+
+The deleted field was a mutable per-occurrence value living on
+instances that the rest of WACS interns process-wide
+(`InstI32Const`, `InstLocalGet`, `InstDrop`, `InstNop`, …). The
+last parse to stamp the singleton won, so:
+
+- Two functions with the same `drop` got the same offset
+  (whichever parsed last).
+- Concurrent parses (xUnit parallel collections, embedder
+  loading multiple modules) clobbered each other, producing
+  flaky test failures in Pass F/G assertions.
+
+Pass F made the surface area worse by stamping every WAT-parsed
+instruction. Rather than chase down where the race manifests,
+we deleted the storage altogether and compute offsets on demand
+through the existing `BinaryModuleWriter` + `CountingStream`
+machinery.
+
+### What changed
+
+- New `Wacs.Core.Bin.ByteOffsetWalker` (`Walk` for visitor-
+  style traversal, `Find` for first-match lookup).
+- Deleted `InstructionBase.ByteOffsetInFunc`, the parser
+  stamping at `Module.ParseInstruction`, the `BinaryParseContext`
+  thread-static and the `FunctionBodyStart` plumbing in
+  `CodeSection`, and `ByteOffsetAnnotator` (with its
+  `TextModuleParser.FinalizeModule` hook).
+- `WasmStackTrace.AppendFrame` now walks the trap function's
+  body to resolve the `@+0xXX` display and the LineMap lookup
+  key.
+- `BranchHintSection.JoinByInstruction` walks once per function
+  to map offset-keyed parse data to the instance-keyed lookup.
+- `TextModuleWriter.WriteFunc` (LineMap path) pre-walks the
+  body once to build a `Dictionary<InstructionBase, uint>` of
+  first-match offsets; `RecordInstructionSpan` looks up by
+  reference.
+
+### Remaining limitation
+
+Interned singletons (`drop`, `i32.const N`, `local.get N`, …)
+still ambiguate among occurrences — `ByteOffsetWalker.Find`
+returns the first reference match. A trap at the second `drop`
+in a function reports the first `drop`'s offset. Same
+ambiguity as 0.15.16; resolving it needs a per-occurrence
+handle in `WasmStackFrame` (body-index or linker-PC). Deferred.
+
+### Tests
+
+Removed `ByteOffsetAnnotatorTests` (now redundant — both ends
+of the walker would tautologically agree). Updated
+`BranchHintParsingTests.InstructionsCarryFuncRelativeByteOffset`
+and `NoBranchHintsWhenSectionAbsent` to call
+`ByteOffsetWalker.Find` instead of reading
+`inst.ByteOffsetInFunc`. Full suite: 484/484, stable across 10
+parallel runs (no flake).
+
 ## WACS 0.15.16 / WACS.Cli 1.6.6 — binary-source line bridge (Pass G)
 
 Binary-parsed modules now resolve to source coordinates in trap

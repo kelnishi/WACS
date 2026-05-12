@@ -357,16 +357,31 @@ namespace Wacs.Core.Text
             // instructions inside block / loop / if bodies render flat
             // (recursive folding lands in a follow-up pass).
             //
-            // Pass the absolute function index through to the
-            // sequence writer so per-instruction LineMap records use a
-            // key that matches what `WasmStackTrace` looks up at trap
-            // time (FuncAddr → FunctionInstance.Index).
+            // For LineMap recording: pre-walk the body once with
+            // ByteOffsetWalker to compute body-relative byte offsets
+            // per instruction reference. Pass G's LineMap key is
+            // (absolute funcIdx, byteOffset); WasmStackTrace's trap-
+            // time walker computes the trap's offset by the same walk,
+            // so both sides agree (first-match for shared singletons).
             int recordFuncIdx = lineMap != null ? (int)fn.Index.Value : -1;
+            Dictionary<InstructionBase, uint>? instOffsets = null;
+            if (lineMap != null)
+            {
+                instOffsets = new Dictionary<InstructionBase, uint>();
+                Wacs.Core.Bin.ByteOffsetWalker.Walk(
+                    fn.Body.Instructions,
+                    (inst, off) =>
+                    {
+                        if (!instOffsets.ContainsKey(inst))
+                            instOffsets[inst] = off;
+                        return false;
+                    });
+            }
             if (options.Style == TextWriterStyle.Folded)
                 WriteFoldedInstructionSeq(w, fn.Body.Instructions, indent + Indent2Space);
             else
                 WriteInstructionSeq(w, fn.Body.Instructions, indent + Indent2Space,
-                    trimTrailingEnd: true, lineMap, recordFuncIdx);
+                    trimTrailingEnd: true, lineMap, recordFuncIdx, instOffsets);
             w.WriteLine($"{indent})");
         }
 
@@ -615,25 +630,28 @@ namespace Wacs.Core.Text
 
         private static void WriteInstructionSeq(
             TextWriter w, InstructionSequence seq, string indent, bool trimTrailingEnd) =>
-            WriteInstructionSeq(w, seq, indent, trimTrailingEnd, lineMap: null, funcIdx: -1);
+            WriteInstructionSeq(w, seq, indent, trimTrailingEnd,
+                lineMap: null, funcIdx: -1, instOffsets: null);
 
         private static void WriteInstructionSeq(
             TextWriter w, InstructionSequence seq, string indent, bool trimTrailingEnd,
-            LineMap? lineMap, int funcIdx)
+            LineMap? lineMap, int funcIdx,
+            Dictionary<InstructionBase, uint>? instOffsets)
         {
             int count = seq.Count;
             if (trimTrailingEnd && count > 0 && seq[count - 1] is InstEnd)
                 count--;
             for (int i = 0; i < count; i++)
-                WriteInstruction(w, seq[i]!, indent, lineMap, funcIdx);
+                WriteInstruction(w, seq[i]!, indent, lineMap, funcIdx, instOffsets);
         }
 
         private static void WriteInstruction(TextWriter w, InstructionBase inst, string indent) =>
-            WriteInstruction(w, inst, indent, lineMap: null, funcIdx: -1);
+            WriteInstruction(w, inst, indent, lineMap: null, funcIdx: -1, instOffsets: null);
 
         private static void WriteInstruction(
             TextWriter w, InstructionBase inst, string indent,
-            LineMap? lineMap, int funcIdx)
+            LineMap? lineMap, int funcIdx,
+            Dictionary<InstructionBase, uint>? instOffsets)
         {
             BeginRecord(w, lineMap, out var instSnap);
 
@@ -641,16 +659,16 @@ namespace Wacs.Core.Text
             switch (inst)
             {
                 case InstBlock ib:
-                    WriteBlockForm(w, ib, "block", indent, lineMap, funcIdx);
-                    RecordInstructionSpan(w, lineMap, funcIdx, inst, instSnap);
+                    WriteBlockForm(w, ib, "block", indent, lineMap, funcIdx, instOffsets);
+                    RecordInstructionSpan(w, lineMap, funcIdx, inst, instSnap, instOffsets);
                     return;
                 case InstLoop il:
-                    WriteBlockForm(w, il, "loop", indent, lineMap, funcIdx);
-                    RecordInstructionSpan(w, lineMap, funcIdx, inst, instSnap);
+                    WriteBlockForm(w, il, "loop", indent, lineMap, funcIdx, instOffsets);
+                    RecordInstructionSpan(w, lineMap, funcIdx, inst, instSnap, instOffsets);
                     return;
                 case InstIf iif:
-                    WriteIfForm(w, iif, indent, lineMap, funcIdx);
-                    RecordInstructionSpan(w, lineMap, funcIdx, inst, instSnap);
+                    WriteIfForm(w, iif, indent, lineMap, funcIdx, instOffsets);
+                    RecordInstructionSpan(w, lineMap, funcIdx, inst, instSnap, instOffsets);
                     return;
                 case InstElse: return;  // handled inside InstIf
                 case InstEnd:   return; // trailing end already trimmed
@@ -663,28 +681,32 @@ namespace Wacs.Core.Text
             // RenderText otherwise.
             w.WriteLine($"{indent}{RenderInstruction(inst)}");
 
-            RecordInstructionSpan(w, lineMap, funcIdx, inst, instSnap);
+            RecordInstructionSpan(w, lineMap, funcIdx, inst, instSnap, instOffsets);
         }
 
         /// <summary>
         /// Record a per-instruction LineMap entry keyed by
         /// <see cref="ModuleElementKind.Instruction"/> with the
         /// function's absolute index and the instruction's
-        /// body-relative byte offset. Lets <see cref="WasmStackTrace"/>
-        /// resolve binary-parsed frames (which have no
-        /// <c>SourcePositions</c>) to a source line through a re-
-        /// rendered LineMap.
+        /// body-relative byte offset (looked up from
+        /// <paramref name="instOffsets"/>, pre-computed via
+        /// <see cref="Wacs.Core.Bin.ByteOffsetWalker"/>). Lets
+        /// <see cref="WasmStackTrace"/> resolve binary-parsed frames
+        /// (which have no <c>SourcePositions</c>) to a source line
+        /// through a re-rendered LineMap.
         /// </summary>
         private static void RecordInstructionSpan(
             TextWriter w, LineMap? lineMap, int funcIdx,
-            InstructionBase inst, (int line, int col) snap)
+            InstructionBase inst, (int line, int col) snap,
+            Dictionary<InstructionBase, uint>? instOffsets)
         {
-            if (lineMap == null || funcIdx < 0) return;
+            if (lineMap == null || funcIdx < 0 || instOffsets == null) return;
             if (w is not LineCountingTextWriter lc) return;
+            if (!instOffsets.TryGetValue(inst, out var off)) return;
             var key = new ModuleElementRef(
                 ModuleElementKind.Instruction,
                 funcIdx,
-                (int)inst.ByteOffsetInFunc);
+                (int)off);
             lineMap.Record(key, new LineMap.Span(snap.line, snap.col, lc.Line, lc.Column));
         }
 
@@ -726,25 +748,29 @@ namespace Wacs.Core.Text
         }
 
         private static void WriteBlockForm(TextWriter w, IBlockInstruction blk, string keyword, string indent) =>
-            WriteBlockForm(w, blk, keyword, indent, lineMap: null, funcIdx: -1);
+            WriteBlockForm(w, blk, keyword, indent, lineMap: null, funcIdx: -1, instOffsets: null);
 
         private static void WriteBlockForm(
             TextWriter w, IBlockInstruction blk, string keyword, string indent,
-            LineMap? lineMap, int funcIdx)
+            LineMap? lineMap, int funcIdx,
+            Dictionary<InstructionBase, uint>? instOffsets)
         {
             w.Write($"{indent}{keyword}");
             WriteBlockType(w, blk.BlockType);
             w.WriteLine();
             var body = blk.GetBlock(0).Instructions;
-            WriteInstructionSeq(w, body, indent + "  ", trimTrailingEnd: true, lineMap, funcIdx);
+            WriteInstructionSeq(w, body, indent + "  ", trimTrailingEnd: true,
+                lineMap, funcIdx, instOffsets);
             w.WriteLine($"{indent}end");
         }
 
         private static void WriteIfForm(TextWriter w, InstIf iif, string indent) =>
-            WriteIfForm(w, iif, indent, lineMap: null, funcIdx: -1);
+            WriteIfForm(w, iif, indent, lineMap: null, funcIdx: -1, instOffsets: null);
 
         private static void WriteIfForm(
-            TextWriter w, InstIf iif, string indent, LineMap? lineMap, int funcIdx)
+            TextWriter w, InstIf iif, string indent,
+            LineMap? lineMap, int funcIdx,
+            Dictionary<InstructionBase, uint>? instOffsets)
         {
             w.Write($"{indent}if");
             WriteBlockType(w, iif.BlockType);
@@ -757,7 +783,7 @@ namespace Wacs.Core.Text
             if (thenCount > 0 && (thenSeq[thenCount - 1] is InstElse || thenSeq[thenCount - 1] is InstEnd))
                 thenCount--;
             for (int i = 0; i < thenCount; i++)
-                WriteInstruction(w, thenSeq[i]!, indent + "  ", lineMap, funcIdx);
+                WriteInstruction(w, thenSeq[i]!, indent + "  ", lineMap, funcIdx, instOffsets);
             if (hasElse)
             {
                 w.WriteLine($"{indent}else");
@@ -765,7 +791,7 @@ namespace Wacs.Core.Text
                 int elseCount = elseSeq.Count;
                 if (elseCount > 0 && elseSeq[elseCount - 1] is InstEnd) elseCount--;
                 for (int i = 0; i < elseCount; i++)
-                    WriteInstruction(w, elseSeq[i]!, indent + "  ", lineMap, funcIdx);
+                    WriteInstruction(w, elseSeq[i]!, indent + "  ", lineMap, funcIdx, instOffsets);
             }
             w.WriteLine($"{indent}end");
         }

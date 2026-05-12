@@ -53,24 +53,7 @@ namespace Wacs.Core
             public static FuncLocalsBody Parse(BinaryReader reader)
             {
                 var locals = reader.ParseVector(ParseCompressedLocal);
-                // The branch-hinting proposal indexes into the
-                // function code body (after locals decl). Stash the
-                // body start on the per-parse context so
-                // ParseInstruction can record body-relative offsets
-                // onto each instruction. Push/pop is still needed
-                // because the same module can have nested function
-                // bodies that share the same parse context.
-                var scope = BinaryModuleParser.BinaryParseScope;
-                long prevBodyStart = scope.FunctionBodyStart;
-                scope.FunctionBodyStart = reader.BaseStream.Position;
-                try
-                {
-                    return new FuncLocalsBody(locals, Expression.ParseFunc(reader));
-                }
-                finally
-                {
-                    scope.FunctionBodyStart = prevBodyStart;
-                }
+                return new FuncLocalsBody(locals, Expression.ParseFunc(reader));
             }
         }
 

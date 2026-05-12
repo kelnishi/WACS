@@ -72,49 +72,6 @@ namespace Wacs.Core
 
         public static uint MaximumFunctionLocals = 2048;
 
-        /// <summary>
-        /// Per-parse mutable state for the binary parser. Holds the
-        /// transient bookkeeping (currently: the body-start offset
-        /// used by branch-hint byte-offset stamping) that earlier
-        /// lived as plain static fields. Stored in a
-        /// <c>ThreadStatic</c> slot and reset at the start of each
-        /// <see cref="ParseWasm"/> call so cross-parse leakage can't
-        /// contaminate later modules.
-        ///
-        /// Design rationale: the parser is single-threaded within a
-        /// single <c>ParseWasm</c> call, but the test runner (and
-        /// the <see cref="Wacs.Core.Text.TextScriptParser"/> eager-
-        /// parse path) invokes <c>ParseWasm</c> many times in
-        /// sequence on the same thread. Plain static state survived
-        /// across those invocations, occasionally leaking partially-
-        /// initialized values from one module's parse into the next.
-        /// A fresh context per parse closes that bug class without
-        /// requiring an API-breaking parameter on every recursive
-        /// <c>InstructionBase.Parse(BinaryReader)</c> override.
-        /// </summary>
-        internal sealed class BinaryParseContext
-        {
-            /// <summary>
-            /// Absolute byte position (within the binary stream) of
-            /// the start of the function body currently being parsed.
-            /// Set by <see cref="Module.FuncLocalsBody.Parse"/> before
-            /// reading instructions, restored on exit. Read by
-            /// <see cref="ParseInstruction"/> to compute each
-            /// instruction's body-relative offset (the lookup key for
-            /// branch-hint metadata). Negative ⇒ "not in a function
-            /// body" — instructions parsed in that state (constant
-            /// expressions, etc.) leave their
-            /// <see cref="InstructionBase.ByteOffsetInFunc"/> at zero.
-            /// </summary>
-            public long FunctionBodyStart = -1;
-        }
-
-        [System.ThreadStatic]
-        private static BinaryParseContext? _binaryParseContextSlot;
-
-        internal static BinaryParseContext BinaryParseScope =>
-            _binaryParseContextSlot ??= new BinaryParseContext();
-
         public static readonly SectionId[] SectionOrder = new[]
         {
             SectionId.Type,
@@ -147,14 +104,6 @@ namespace Wacs.Core
             var module = new Module();
             var reader = new BinaryReader(stream);
 
-            // Fresh per-parse state. Replaces the prior pattern of
-            // mutating plain static fields, which was vulnerable to
-            // cross-parse leakage when ParseWasm was called many
-            // times in sequence on the same thread (notably from
-            // TextScriptParser's eager-parse path inside
-            // assert_invalid / assert_malformed handling).
-            _binaryParseContextSlot = new BinaryParseContext();
-            
             // Read and validate the magic number and version
             try
             {
@@ -371,11 +320,6 @@ namespace Wacs.Core
         /// </summary>
         public static InstructionBase? ParseInstruction(BinaryReader reader)
         {
-            // Capture the absolute position before consuming the
-            // opcode so we can compute this instruction's
-            // body-relative byte offset (the branch-hint coordinate).
-            long instAbsPos = reader.BaseStream.Position;
-
             //Splice another byte if the first byte is a prefix
             var opcode = (OpCode)reader.ReadByte() switch {
                 OpCode.FB => new ByteCode((GcCode)reader.ReadLeb128_u32()),
@@ -386,11 +330,7 @@ namespace Wacs.Core
             };
             try
             {
-                var inst = InstructionFactory.CreateInstruction(opcode)?.Parse(reader);
-                long bodyStart = BinaryParseScope.FunctionBodyStart;
-                if (inst != null && bodyStart >= 0)
-                    inst.ByteOffsetInFunc = (uint)(instAbsPos - bodyStart);
-                return inst;
+                return InstructionFactory.CreateInstruction(opcode)?.Parse(reader);
             }
             catch (InvalidDataException exc)
             {
@@ -491,9 +431,7 @@ namespace Wacs.Core
                 // ref-keyed transpile data. After this, both binary
                 // and WAT inputs have a uniform `TryGet(inst)` lookup.
                 module.BranchHints.JoinByInstruction(
-                    module.Funcs.Select(f =>
-                        (f.Index.Value, (System.Collections.Generic.IEnumerable<InstructionBase>)
-                            f.Body.Instructions)));
+                    module.Funcs.Select(f => (f.Index.Value, f.Body.Instructions)));
             }
         }
     }

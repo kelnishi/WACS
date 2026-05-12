@@ -21,17 +21,13 @@ namespace Wacs.Core.Test
     /// Pass G: bridging binary-parsed modules to source coordinates
     /// via <see cref="TextModuleWriter.WriteWithLineMap"/>. The writer
     /// records a per-instruction span keyed by
-    /// <see cref="ModuleElementKind.Instruction"/> /
-    /// (<see cref="ModuleElementRef.Index"/> = funcIdx,
-    /// <see cref="ModuleElementRef.InstructionIndex"/> =
-    /// <see cref="InstructionBase.ByteOffsetInFunc"/>), so
+    /// <see cref="ModuleElementKind.Instruction"/> with
+    /// <see cref="ModuleElementRef.Index"/> = funcIdx and
+    /// <see cref="ModuleElementRef.InstructionIndex"/> = body-relative
+    /// byte offset (resolved via
+    /// <see cref="Wacs.Core.Bin.ByteOffsetWalker"/>), so
     /// <see cref="Runtime.Exceptions.WasmStackTrace"/> can resolve
     /// binary frames the same way it resolves WAT-parsed ones.
-    /// <para>Tests read the LineMap via <see cref="LineMap.All"/>
-    /// rather than by re-reading <c>inst.ByteOffsetInFunc</c>, because
-    /// <c>InstI32Const</c> / <c>InstLocalGet</c> intern instances
-    /// process-wide and any concurrent test parse can overwrite the
-    /// field between record and read.</para>
     /// </summary>
     public class BinarySourceLineBridgeTests
     {
@@ -81,14 +77,6 @@ namespace Wacs.Core.Test
         [Fact]
         public void LineMap_SpansHaveValidLines_PerInstruction()
         {
-            // Strict count-of-distinct-lines would race under
-            // xunit's parallel-collection runner because interned
-            // singletons (i32.const, drop, …) can have their
-            // ByteOffsetInFunc stamped by a concurrent test between
-            // record and read, collapsing two records onto one key.
-            // The mechanism is sound for serial / real-world use;
-            // tests assert only the looser invariant that spans
-            // were recorded with sensible line numbers.
             const string wat = @"(module
               (func
                 i32.const 10
@@ -110,10 +98,6 @@ namespace Wacs.Core.Test
         [Fact]
         public void LineMap_NestedBlock_RecordsAtLeastOneSpan()
         {
-            // Same race caveat as LineMap_SpansHaveValidLines: assert
-            // only that recording occurred for the function. Serial
-            // runs see 3+ records (block + i32.const + drop); under
-            // parallel races the count may collapse.
             const string wat = @"(module
               (func
                 (block
