@@ -36,15 +36,21 @@ namespace Wacs.WASI.NN.MLNet
     /// programmatically when reproducibility or pipeline-shared
     /// state matters.</para>
     /// </summary>
-    public sealed class WasiNNMLNetBindable : IBindable, IDisposable
+    public sealed class WasiNNMLNetBindable
+        : IBindable, IWasiNNBackendRegistration, IDisposable
     {
         private readonly WasiNNHost _host;
 
         public WasiNNMLNetBindable()
         {
             var config = WasiNNConfiguration.DefaultConfiguration();
-            config.Backends[GraphEncoding.ONNX] = new MLNetBackend();
+            ConfigureConfiguration(config);
             _host = new WasiNNHost(config);
+        }
+
+        public void ConfigureConfiguration(WasiNNConfiguration config)
+        {
+            config.Backends[GraphEncoding.ONNX] = new MLNetBackend();
         }
 
         public void BindToRuntime(WasmRuntime runtime)

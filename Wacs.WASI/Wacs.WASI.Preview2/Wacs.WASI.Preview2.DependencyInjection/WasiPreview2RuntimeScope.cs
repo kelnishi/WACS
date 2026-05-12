@@ -229,27 +229,27 @@ namespace Wacs.WASI.Preview2.DependencyInjection
                 "Wacs.WASI.NN.DependencyInjection.WasiNNServiceCollectionExtensions");
             if (nnExtType == null) return;
 
-            // Build per-backend configure callbacks for whatever
-            // wasi-nn backends are loadable. Each callback runs
-            // INSIDE AddWasiNN's configure step (before
-            // TryAddSingleton(opts.Configuration)), so the registered
-            // Configuration instance carries every wired backend in
-            // one go.
+            // Auto-discover every wasi-nn backend assembly loaded
+            // into the AppDomain. Each backend's bindable type
+            // implements `Wacs.WASI.NN.IWasiNNBackendRegistration`
+            // and exposes a `ConfigureConfiguration(WasiNNConfiguration)`
+            // method that mutates the shared config; we instantiate
+            // each one via its parameterless ctor and chain the
+            // mutations into the AddWasiNN configure callback.
             //
-            // Failures surface as stderr warnings (vs. silent
-            // returns) — the SLM's round-13 "InvalidEncoding"
-            // symptom and round-19's "no named-model resolver
-            // configured" both root-cause faster when the load /
-            // ctor failure shows up at startup time, not at first
-            // guest call.
-            var onnxCallback = BuildOnnxConfigureCallback(nnAsm!);
-            var llamaCallback = BuildLlamaSharpConfigureCallback(nnAsm!);
-            var torchCallback = BuildTorchSharpConfigureCallback(nnAsm!);
-            var genaiCallback = BuildOnnxGenAIConfigureCallback(nnAsm!);
-            var openVinoCallback = BuildOpenVinoConfigureCallback(nnAsm!);
-            var configureDelegate = CombineCallbacks(
-                onnxCallback, llamaCallback, torchCallback,
-                genaiCallback, openVinoCallback);
+            // Failures (assembly not loadable / type not found /
+            // Activator throws / ConfigureConfiguration throws)
+            // surface as stderr warnings — the SLM's round-13
+            // "InvalidEncoding" and round-19's "no named-model
+            // resolver configured" both root-cause faster when the
+            // load/ctor failure shows up at startup time, not at
+            // first guest call.
+            //
+            // Adding a new wasi-nn backend now requires no edit to
+            // this file: the new package's bindable implements
+            // IWasiNNBackendRegistration and gets picked up the
+            // next time the bundle scope is built.
+            var configureDelegate = BuildAutoDiscoveredCallback(nnAsm!);
 
             // services.AddWasiNN(configure) — configure runs
             // BEFORE TryAddSingleton(opts.Configuration), so each
@@ -268,627 +268,160 @@ namespace Wacs.WASI.Preview2.DependencyInjection
                 .Invoke(null, new object?[] { services });
         }
 
-        // Build an Action<WasiNNDependencyInjectionOptions>
-        // delegate (typed against the dynamically-loaded type)
-        // that calls opts.AddBackend(GraphEncoding.ONNX, new
-        // OnnxBackend()). Returns null when:
-        //   - Wacs.WASI.NN.OnnxRuntime isn't loadable
-        //   - the OnnxBackend type or its parameterless ctor
-        //     can't be resolved
-        //   - Activator.CreateInstance throws
-        // In each error case a stderr warning is emitted so the
-        // failure is diagnosable (vs the previous silent return
-        // that turned every error into "InvalidEncoding" at
-        // guest-call time).
-        private static Delegate? BuildOnnxConfigureCallback(Assembly nnAsm)
-        {
-            var optsType = nnAsm.GetType(
-                "Wacs.WASI.NN.DependencyInjection.WasiNNDependencyInjectionOptions");
-            if (optsType == null) return null;
-
-            // AddBackend(GraphEncoding, IBackend) lives in
-            // Wacs.WASI.NN.DependencyInjection but its first
-            // parameter is Wacs.WASI.NN.Types.GraphEncoding from
-            // the Wacs.WASI.NN assembly. Pull the type from the
-            // method signature so we don't have to load the
-            // sibling assembly explicitly — and so we don't fail
-            // silently if the WASI.NN type namespace ever changes.
-            var addBackend = optsType.GetMethod("AddBackend");
-            if (addBackend == null) return null;
-            var addBackendParams = addBackend.GetParameters();
-            if (addBackendParams.Length != 2) return null;
-            var encodingType = addBackendParams[0].ParameterType;
-            var backendIfaceType = addBackendParams[1].ParameterType;
-
-            var ortAsm = TryLoadAssembly("Wacs.WASI.NN.OnnxRuntime");
-            if (ortAsm == null)
-            {
-                // Not necessarily an error — `--wasip2` without
-                // `--wasi-nn` doesn't load OnnxRuntime, and that's
-                // fine. Stay quiet here; only complain when the
-                // assembly IS loadable but its Activator step
-                // fails.
-                return null;
-            }
-
-            var onnxBackendType = ortAsm.GetType(
-                "Wacs.WASI.NN.OnnxRuntime.OnnxBackend");
-            if (onnxBackendType == null)
-            {
-                System.Console.Error.WriteLine(
-                    "warn: Wacs.WASI.NN.OnnxRuntime is loadable but "
-                    + "OnnxBackend type wasn't found. wasi-nn ONNX "
-                    + "guests will see InvalidEncoding errors.");
-                return null;
-            }
-
-            object? onnxBackend;
-            try { onnxBackend = Activator.CreateInstance(onnxBackendType); }
-            catch (Exception ex)
-            {
-                System.Console.Error.WriteLine(
-                    "warn: OnnxBackend instantiation failed: "
-                    + ex.GetType().Name + ": " + ex.Message
-                    + ". wasi-nn ONNX guests will see InvalidEncoding "
-                    + "errors. Check that the native ONNX Runtime "
-                    + "library is on the load path.");
-                return null;
-            }
-            if (onnxBackend == null) return null;
-
-            object onnxEncoding = Enum.ToObject(encodingType, 1);
-
-            // Use Linq.Expressions to build a strongly-typed
-            // Action<WasiNNDependencyInjectionOptions> at runtime.
-            // Captures onnxBackend + onnxEncoding via Constant
-            // expressions so the AddBackend call site doesn't
-            // need to redo any reflection at invocation time.
-            var optsParam = System.Linq.Expressions.Expression
-                .Parameter(optsType, "opts");
-            var call = System.Linq.Expressions.Expression.Call(
-                optsParam,
-                addBackend,
-                System.Linq.Expressions.Expression.Constant(
-                    onnxEncoding, encodingType),
-                System.Linq.Expressions.Expression.Constant(
-                    onnxBackend, backendIfaceType));
-            var actionType = typeof(Action<>).MakeGenericType(optsType);
-            var lambda = System.Linq.Expressions.Expression.Lambda(
-                actionType, call, optsParam);
-            return lambda.Compile();
-        }
-
-        // Combine per-backend configure callbacks into one
-        // multicast Action<options>. Multicast invocation fires
-        // each subscriber in registration order against the same
-        // options instance — exactly what we need when
-        // AddWasiNN's `configure?.Invoke(opts)` runs. Returns
-        // null if every input is null (in which case AddWasiNN
-        // gets a null configure and runs with an empty
-        // Configuration, matching the no-backend-loadable
-        // behavior).
-        private static Delegate? CombineCallbacks(
-            params Delegate?[] callbacks)
-        {
-            Delegate? result = null;
-            foreach (var cb in callbacks)
-            {
-                if (cb == null) continue;
-                result = result == null
-                    ? cb
-                    : Delegate.Combine(result, cb);
-            }
-            return result;
-        }
-
-        // Build an Action<WasiNNDependencyInjectionOptions>
-        // delegate that wires the LlamaSharp backend, scanning
-        // <c>WACS_WASINN_GGUF_DIR</c> for *.gguf files (matches
-        // WasiNNLlamaSharpBindable's env-driven registry shape).
-        // Registers the backend under BOTH:
-        //   - opts.AddBackend(GraphEncoding.GGML, backend) — for
-        //     embedders that route through the encoding-keyed
-        //     Backends dict (currently unused for LlamaSharp
-        //     since its byte-loader path traps, but left wired
-        //     for symmetry with ONNX);
-        //   - opts.Configuration.LoadByNameBackend = backend —
-        //     the load-by-name path GraphFuncsImpl checks before
-        //     falling back to the byte-flow (gap 24).
+        // Auto-discover every wasi-nn backend assembly loaded into
+        // the AppDomain and build a single combined
+        // `Action<WasiNNDependencyInjectionOptions>` that registers
+        // each backend's `IWasiNNBackendRegistration` against the
+        // DI bundle's shared `WasiNNConfiguration`.
         //
-        // Returns null when:
-        //   - Wacs.WASI.NN.LlamaSharp isn't loadable (the common
-        //     case for `wacs run --wasip2 --wasi-nn` — only ONNX
-        //     ships bundled);
-        //   - the LlamaSharpBackend type / FromPaths factory /
-        //     LoadByNameBackend property can't be resolved;
-        //   - FromPaths throws.
-        // Each non-quiet error path emits a stderr warning so the
-        // failure mode is discoverable at startup time.
-        private static Delegate? BuildLlamaSharpConfigureCallback(
-            Assembly nnAsm)
-        {
-            var optsType = nnAsm.GetType(
-                "Wacs.WASI.NN.DependencyInjection.WasiNNDependencyInjectionOptions");
-            if (optsType == null) return null;
-
-            var addBackend = optsType.GetMethod("AddBackend");
-            if (addBackend == null) return null;
-            var addBackendParams = addBackend.GetParameters();
-            if (addBackendParams.Length != 2) return null;
-            var encodingType = addBackendParams[0].ParameterType;
-            var backendIfaceType = addBackendParams[1].ParameterType;
-
-            var llamaAsm = TryLoadAssembly("Wacs.WASI.NN.LlamaSharp");
-            if (llamaAsm == null) return null;  // not an error.
-
-            var llamaBackendType = llamaAsm.GetType(
-                "Wacs.WASI.NN.LlamaSharp.LlamaSharpBackend");
-            if (llamaBackendType == null)
-            {
-                System.Console.Error.WriteLine(
-                    "warn: Wacs.WASI.NN.LlamaSharp is loadable but "
-                    + "LlamaSharpBackend type wasn't found. wasi-nn "
-                    + "GGUF guests will see NotFound errors.");
-                return null;
-            }
-
-            var fromPaths = llamaBackendType.GetMethod("FromPaths",
-                BindingFlags.Public | BindingFlags.Static);
-            if (fromPaths == null)
-            {
-                System.Console.Error.WriteLine(
-                    "warn: LlamaSharpBackend.FromPaths(IDictionary"
-                    + "<string,string>) static factory not found. "
-                    + "Cannot auto-wire LlamaSharp; embedders should "
-                    + "construct LlamaSharpBackend directly via "
-                    + "AddWasiNN(b => b.AddBackend(...)).");
-                return null;
-            }
-
-            var registry = BuildGgufRegistryFromEnv();
-
-            object? llamaBackend;
-            try { llamaBackend = fromPaths.Invoke(null, new object?[] { registry }); }
-            catch (Exception ex)
-            {
-                System.Console.Error.WriteLine(
-                    "warn: LlamaSharpBackend.FromPaths failed: "
-                    + ex.GetType().Name + ": " + ex.Message
-                    + ". wasi-nn GGUF guests will see NotFound "
-                    + "errors. Check that the LLamaSharp native "
-                    + "library is on the load path.");
-                return null;
-            }
-            if (llamaBackend == null) return null;
-
-            // Resolve the LoadByNameBackend property on
-            // WasiNNConfiguration via opts.Configuration.
-            var configProp = optsType.GetProperty("Configuration");
-            if (configProp == null) return null;
-            var configType = configProp.PropertyType;
-            var loadByNameProp = configType.GetProperty("LoadByNameBackend");
-            if (loadByNameProp == null
-                || loadByNameProp.GetSetMethod() == null)
-            {
-                System.Console.Error.WriteLine(
-                    "warn: WasiNNConfiguration.LoadByNameBackend "
-                    + "property missing or read-only; cannot route "
-                    + "GGUF graph.load-by-name through LlamaSharp.");
-                return null;
-            }
-
-            // GGML = 5 in both Nn.GraphEncoding and
-            // Types.GraphEncoding (cross-checked at file scope).
-            object ggmlEncoding = Enum.ToObject(encodingType, 5);
-
-            // Build:
-            //   opts.AddBackend(GraphEncoding.GGML, backend);
-            //   opts.Configuration.LoadByNameBackend = backend;
-            var optsParam = Expression.Parameter(optsType, "opts");
-            var addCall = Expression.Call(
-                optsParam,
-                addBackend,
-                Expression.Constant(ggmlEncoding, encodingType),
-                Expression.Constant(llamaBackend, backendIfaceType));
-            var configAccess = Expression.Property(optsParam, configProp);
-            var assign = Expression.Assign(
-                Expression.Property(configAccess, loadByNameProp),
-                Expression.Constant(llamaBackend,
-                    loadByNameProp.PropertyType));
-            var block = Expression.Block(addCall, assign);
-            var actionType = typeof(Action<>).MakeGenericType(optsType);
-            return Expression.Lambda(actionType, block, optsParam)
-                .Compile();
-        }
-
-        // Sibling of BuildLlamaSharpConfigureCallback for the
-        // TorchSharp / PyTorch backend. Detects
-        // `Wacs.WASI.NN.TorchSharp.TorchSharpBackend`, builds an
-        // env-driven registry from $WACS_WASINN_TORCH_DIR
-        // (mirroring WasiNNTorchSharpBindable's scan), and wires
-        // the backend into BOTH `Backends[PyTorch]` AND
-        // `LoadByNameBackend` so guest `graph.load-by-name(...)`
-        // direct-links cleanly.
+        // Discovery rules:
+        //   1. Enumerate all assemblies whose name starts with
+        //      "Wacs.WASI.NN." (case-insensitive). Excludes the DI
+        //      sibling (which doesn't ship a backend) and any
+        //      `.Test` assemblies.
+        //   2. For each, find every public type implementing
+        //      `Wacs.WASI.NN.IWasiNNBackendRegistration` with a
+        //      parameterless ctor.
+        //   3. Activator.CreateInstance + call
+        //      ConfigureConfiguration(opts.Configuration) per
+        //      registrant. Failures stderr-warn and skip — one
+        //      backend's ctor failure doesn't bring down scope
+        //      construction for the others.
         //
-        // Returns null when:
-        //   - Wacs.WASI.NN.TorchSharp isn't loadable (the common
-        //     `wacs run --wasip2 --wasi-nn` ONNX-default case;
-        //     stay quiet)
-        //   - the TorchSharpBackend type / FromPaths factory /
-        //     LoadByNameBackend property isn't resolvable
-        //   - FromPaths throws (libtorch native lib missing /
-        //     mismatch)
-        // Each non-quiet error path emits a stderr warning so the
-        // failure is discoverable at startup, not at first
-        // `compute(...)`.
-        private static Delegate? BuildTorchSharpConfigureCallback(
-            Assembly nnAsm)
+        // Adding a new wasi-nn backend now requires no edit to this
+        // file: the new package's bindable implements
+        // IWasiNNBackendRegistration and gets picked up the next
+        // time the bundle scope is built.
+        private static Delegate? BuildAutoDiscoveredCallback(Assembly nnAsm)
         {
             var optsType = nnAsm.GetType(
                 "Wacs.WASI.NN.DependencyInjection.WasiNNDependencyInjectionOptions");
             if (optsType == null) return null;
-
-            var addBackend = optsType.GetMethod("AddBackend");
-            if (addBackend == null) return null;
-            var addBackendParams = addBackend.GetParameters();
-            if (addBackendParams.Length != 2) return null;
-            var encodingType = addBackendParams[0].ParameterType;
-            var backendIfaceType = addBackendParams[1].ParameterType;
-
-            var torchAsm = TryLoadAssembly("Wacs.WASI.NN.TorchSharp");
-            if (torchAsm == null) return null;  // not an error.
-
-            var torchBackendType = torchAsm.GetType(
-                "Wacs.WASI.NN.TorchSharp.TorchSharpBackend");
-            if (torchBackendType == null)
-            {
-                System.Console.Error.WriteLine(
-                    "warn: Wacs.WASI.NN.TorchSharp is loadable but "
-                    + "TorchSharpBackend type wasn't found. wasi-nn "
-                    + "PyTorch guests will see NotFound errors.");
-                return null;
-            }
-
-            var fromPaths = torchBackendType.GetMethod("FromPaths",
-                BindingFlags.Public | BindingFlags.Static);
-            if (fromPaths == null)
-            {
-                System.Console.Error.WriteLine(
-                    "warn: TorchSharpBackend.FromPaths(IDictionary"
-                    + "<string,string>) static factory not found. "
-                    + "Cannot auto-wire TorchSharp; embedders should "
-                    + "construct TorchSharpBackend directly via "
-                    + "AddWasiNN(b => b.AddBackend(...)).");
-                return null;
-            }
-
-            var registry = BuildTorchScriptRegistryFromEnv();
-
-            object? torchBackend;
-            try { torchBackend = fromPaths.Invoke(null, new object?[] { registry }); }
-            catch (Exception ex)
-            {
-                System.Console.Error.WriteLine(
-                    "warn: TorchSharpBackend.FromPaths failed: "
-                    + ex.GetType().Name + ": " + ex.Message
-                    + ". wasi-nn PyTorch guests will see NotFound "
-                    + "errors. Check that the libtorch native "
-                    + "library is on the load path.");
-                return null;
-            }
-            if (torchBackend == null) return null;
 
             var configProp = optsType.GetProperty("Configuration");
             if (configProp == null) return null;
             var configType = configProp.PropertyType;
-            var loadByNameProp = configType.GetProperty("LoadByNameBackend");
-            if (loadByNameProp == null
-                || loadByNameProp.GetSetMethod() == null)
-            {
-                System.Console.Error.WriteLine(
-                    "warn: WasiNNConfiguration.LoadByNameBackend "
-                    + "property missing or read-only; cannot route "
-                    + "PyTorch graph.load-by-name through TorchSharp.");
-                return null;
-            }
 
-            // PyTorch = 3 in both Nn.GraphEncoding and
-            // Types.GraphEncoding (cross-checked at file scope —
-            // OpenVINO=0, ONNX=1, TensorFlow=2, PyTorch=3).
-            object pytorchEncoding = Enum.ToObject(encodingType, 3);
+            // IWasiNNBackendRegistration lives in Wacs.WASI.NN; the
+            // DI assembly already references the core, so its
+            // referenced-assembly list points at the right version.
+            Assembly? coreAsm = TryLoadAssembly("Wacs.WASI.NN");
+            var regIface = coreAsm?.GetType(
+                "Wacs.WASI.NN.IWasiNNBackendRegistration");
+            if (regIface == null) return null;
+            var regMethod = regIface.GetMethod("ConfigureConfiguration");
+            if (regMethod == null) return null;
 
-            // Build:
-            //   opts.AddBackend(GraphEncoding.PyTorch, backend);
-            //   opts.Configuration.LoadByNameBackend = backend;
-            var optsParam = Expression.Parameter(optsType, "opts");
-            var addCall = Expression.Call(
-                optsParam,
-                addBackend,
-                Expression.Constant(pytorchEncoding, encodingType),
-                Expression.Constant(torchBackend, backendIfaceType));
-            var configAccess = Expression.Property(optsParam, configProp);
-            var assign = Expression.Assign(
-                Expression.Property(configAccess, loadByNameProp),
-                Expression.Constant(torchBackend,
-                    loadByNameProp.PropertyType));
-            var block = Expression.Block(addCall, assign);
-            var actionType = typeof(Action<>).MakeGenericType(optsType);
-            return Expression.Lambda(actionType, block, optsParam)
-                .Compile();
-        }
+            var registrants = DiscoverBackendRegistrants(regIface);
+            if (registrants.Count == 0) return null;
 
-        // Sibling of BuildLlamaSharpConfigureCallback /
-        // BuildTorchSharpConfigureCallback for the
-        // OnnxRuntime-GenAI backend (generative LLMs in GenAI
-        // directory format: genai_config.json + tokenizer.json +
-        // model.onnx + weights). Detects
-        // `Wacs.WASI.NN.OnnxRuntimeGenAI.OnnxGenAIBackend`, builds
-        // an env-driven registry from $WACS_WASINN_GENAI_DIR
-        // (mirroring WasiNNOnnxGenAIBindable's subdirectory scan
-        // for genai_config.json), and wires the backend into
-        // `LoadByNameBackend` ONLY — leaves `Backends[ONNX]` to
-        // the regular OnnxBackend so `graph.load(bytes)` and
-        // `graph.load-by-name(directory)` route to the right
-        // place when both packages are present.
-        //
-        // Returns null when:
-        //   - Wacs.WASI.NN.OnnxRuntimeGenAI isn't loadable (the
-        //     common `wacs run --wasip2 --wasi-nn` case);
-        //   - OnnxGenAIBackend / FromDirectories factory /
-        //     LoadByNameBackend property can't be resolved;
-        //   - FromDirectories throws.
-        // Closes gap 31 (wasi-nn/WACS-GAPS.md).
-        private static Delegate? BuildOnnxGenAIConfigureCallback(
-            Assembly nnAsm)
-        {
-            var optsType = nnAsm.GetType(
-                "Wacs.WASI.NN.DependencyInjection.WasiNNDependencyInjectionOptions");
-            if (optsType == null) return null;
-
-            var addBackend = optsType.GetMethod("AddBackend");
-            if (addBackend == null) return null;
-            var addBackendParams = addBackend.GetParameters();
-            if (addBackendParams.Length != 2) return null;
-            var backendIfaceType = addBackendParams[1].ParameterType;
-
-            var genaiAsm = TryLoadAssembly(
-                "Wacs.WASI.NN.OnnxRuntimeGenAI");
-            if (genaiAsm == null) return null;  // not an error.
-
-            var genaiBackendType = genaiAsm.GetType(
-                "Wacs.WASI.NN.OnnxRuntimeGenAI.OnnxGenAIBackend");
-            if (genaiBackendType == null)
-            {
-                System.Console.Error.WriteLine(
-                    "warn: Wacs.WASI.NN.OnnxRuntimeGenAI is loadable "
-                    + "but OnnxGenAIBackend type wasn't found. "
-                    + "wasi-nn GenAI guests will see NotFound errors.");
-                return null;
-            }
-
-            var fromDirs = genaiBackendType.GetMethod(
-                "FromDirectories",
-                BindingFlags.Public | BindingFlags.Static);
-            if (fromDirs == null)
-            {
-                System.Console.Error.WriteLine(
-                    "warn: OnnxGenAIBackend.FromDirectories(IDictionary"
-                    + "<string,string>) static factory not found. "
-                    + "Cannot auto-wire OnnxRuntimeGenAI; embedders "
-                    + "should construct OnnxGenAIBackend directly "
-                    + "via AddWasiNN(b => b.AddBackend(...)).");
-                return null;
-            }
-
-            var registry = BuildGenAIRegistryFromEnv();
-
-            object? genaiBackend;
-            try { genaiBackend = fromDirs.Invoke(null, new object?[] { registry }); }
-            catch (Exception ex)
-            {
-                System.Console.Error.WriteLine(
-                    "warn: OnnxGenAIBackend.FromDirectories failed: "
-                    + ex.GetType().Name + ": " + ex.Message
-                    + ". wasi-nn GenAI guests will see NotFound "
-                    + "errors. Check that the Microsoft.ML.OnnxRuntimeGenAI "
-                    + "native library is on the load path.");
-                return null;
-            }
-            if (genaiBackend == null) return null;
-
-            var configProp = optsType.GetProperty("Configuration");
-            if (configProp == null) return null;
-            var configType = configProp.PropertyType;
-            var loadByNameProp = configType.GetProperty("LoadByNameBackend");
-            if (loadByNameProp == null
-                || loadByNameProp.GetSetMethod() == null)
-            {
-                System.Console.Error.WriteLine(
-                    "warn: WasiNNConfiguration.LoadByNameBackend "
-                    + "property missing or read-only; cannot route "
-                    + "GenAI graph.load-by-name through OnnxGenAIBackend.");
-                return null;
-            }
-
-            // GenAI backend takes the LoadByNameBackend slot only —
-            // leaves Backends[ONNX] for the regular OnnxBackend so
-            // `graph.load(bytes)` keeps its byte-tensor I/O path
-            // while `graph.load-by-name(<dir>)` routes to GenAI's
-            // KV-cached decode loop.
+            // Build an Action<opts> that walks each registrant and
+            // invokes `reg.ConfigureConfiguration(opts.Configuration)`.
+            // Pure reflection at invocation time (not Linq.Expressions)
+            // because the registrants list is dynamic — building a
+            // typed delegate against `IWasiNNBackendRegistration`
+            // doesn't gain us anything since each call is already a
+            // reflection invoke. The Action<opts> is typed against
+            // the dynamically-resolved options type so it satisfies
+            // AddWasiNN's configure parameter contract.
             var optsParam = Expression.Parameter(optsType, "opts");
             var configAccess = Expression.Property(optsParam, configProp);
-            var assign = Expression.Assign(
-                Expression.Property(configAccess, loadByNameProp),
-                Expression.Constant(genaiBackend,
-                    loadByNameProp.PropertyType));
-            var actionType = typeof(Action<>).MakeGenericType(optsType);
-            return Expression.Lambda(actionType, assign, optsParam)
-                .Compile();
-        }
-
-        // Sibling of BuildOnnxConfigureCallback for the OpenVINO
-        // backend. Closest analog of the four (both register via
-        // the encoding-keyed Backends dict; neither uses
-        // LoadByNameBackend or a directory-registry factory).
-        // Closes the gap where the IBindable's BindHostFunction
-        // registrations get silently shadowed under --wasip2 by
-        // the direct-link path: the WitBindings handlers drop,
-        // GraphFuncsImpl reads the DI-bundle's WasiNNConfiguration,
-        // and without an auto-wire callback Backends[OpenVINO]
-        // stays empty → InvalidEncoding at guest call time.
-        //
-        // Returns null when:
-        //   - Wacs.WASI.NN.OpenVino isn't loadable (the common
-        //     `wacs run --wasip2` case without the OpenVINO
-        //     backend installed);
-        //   - OpenVinoBackend type / parameterless ctor can't be
-        //     resolved;
-        //   - Activator.CreateInstance throws (typically because
-        //     the OpenVINO native runtime isn't on the load
-        //     path — `OpenVINO.runtime.<rid>` not installed).
-        private static Delegate? BuildOpenVinoConfigureCallback(
-            Assembly nnAsm)
-        {
-            var optsType = nnAsm.GetType(
-                "Wacs.WASI.NN.DependencyInjection.WasiNNDependencyInjectionOptions");
-            if (optsType == null) return null;
-
-            var addBackend = optsType.GetMethod("AddBackend");
-            if (addBackend == null) return null;
-            var addBackendParams = addBackend.GetParameters();
-            if (addBackendParams.Length != 2) return null;
-            var encodingType = addBackendParams[0].ParameterType;
-            var backendIfaceType = addBackendParams[1].ParameterType;
-
-            var ovAsm = TryLoadAssembly("Wacs.WASI.NN.OpenVino");
-            if (ovAsm == null) return null;  // not an error.
-
-            var openVinoBackendType = ovAsm.GetType(
-                "Wacs.WASI.NN.OpenVino.OpenVinoBackend");
-            if (openVinoBackendType == null)
-            {
-                System.Console.Error.WriteLine(
-                    "warn: Wacs.WASI.NN.OpenVino is loadable but "
-                    + "OpenVinoBackend type wasn't found. wasi-nn "
-                    + "OpenVINO guests will see InvalidEncoding errors.");
-                return null;
-            }
-
-            object? openVinoBackend;
-            try { openVinoBackend = Activator.CreateInstance(openVinoBackendType); }
-            catch (Exception ex)
-            {
-                System.Console.Error.WriteLine(
-                    "warn: OpenVinoBackend instantiation failed: "
-                    + ex.GetType().Name + ": " + ex.Message
-                    + ". wasi-nn OpenVINO guests will see InvalidEncoding "
-                    + "errors. Check that the OpenVINO native runtime "
-                    + "(`OpenVINO.runtime.<rid>` NuGet) is on the load "
-                    + "path.");
-                return null;
-            }
-            if (openVinoBackend == null) return null;
-
-            // GraphEncoding.OpenVINO = 0 in the WIT enum.
-            object openVinoEncoding = Enum.ToObject(encodingType, 0);
-
-            var optsParam = Expression.Parameter(optsType, "opts");
-            var call = Expression.Call(optsParam, addBackend,
-                Expression.Constant(openVinoEncoding, encodingType),
-                Expression.Constant(openVinoBackend, backendIfaceType));
+            // Build a non-generic body: call ApplyAll(opts.Configuration, regMethod, registrants)
+            var applyAll = typeof(WasiPreview2RuntimeScope).GetMethod(
+                nameof(ApplyAllRegistrants),
+                BindingFlags.Static | BindingFlags.NonPublic)!;
+            var call = Expression.Call(applyAll,
+                Expression.Convert(configAccess, typeof(object)),
+                Expression.Constant(regMethod, typeof(MethodInfo)),
+                Expression.Constant(registrants, typeof(List<object>)));
             var actionType = typeof(Action<>).MakeGenericType(optsType);
             return Expression.Lambda(actionType, call, optsParam).Compile();
         }
 
-        // Mirrors WasiNNOnnxGenAIBindable's env-driven scan:
-        // read $WACS_WASINN_GENAI_DIR, enumerate first-level
-        // subdirectories containing `genai_config.json`, register
-        // each under its directory name. Fail-soft on IO error.
-        private static IDictionary<string, string>
-            BuildGenAIRegistryFromEnv()
+        // Invoke ConfigureConfiguration on every discovered
+        // registrant. Errors stderr-warn and skip so one bad
+        // registrant doesn't sink the others.
+        private static void ApplyAllRegistrants(
+            object config, MethodInfo regMethod, List<object> registrants)
         {
-            var dir = Environment.GetEnvironmentVariable(
-                "WACS_WASINN_GENAI_DIR");
-            var registry = new Dictionary<string, string>(
-                StringComparer.OrdinalIgnoreCase);
-            if (string.IsNullOrEmpty(dir)) return registry;
-            try
+            foreach (var r in registrants)
             {
-                if (!Directory.Exists(dir)) return registry;
-                foreach (var modelDir in Directory.EnumerateDirectories(dir))
+                try { regMethod.Invoke(r, new[] { config }); }
+                catch (TargetInvocationException ex)
                 {
-                    var configPath = Path.Combine(
-                        modelDir, "genai_config.json");
-                    if (!File.Exists(configPath)) continue;
-                    var name = Path.GetFileName(modelDir);
-                    if (!string.IsNullOrEmpty(name))
-                        registry[name!] = modelDir;
+                    var inner = ex.InnerException ?? ex;
+                    Console.Error.WriteLine(
+                        "warn: " + r.GetType().FullName
+                        + ".ConfigureConfiguration threw "
+                        + inner.GetType().Name + ": " + inner.Message
+                        + ". guests requesting this backend will see "
+                        + "InvalidEncoding / NotFound errors.");
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine(
+                        "warn: " + r.GetType().FullName
+                        + ".ConfigureConfiguration failed: "
+                        + ex.GetType().Name + ": " + ex.Message);
                 }
             }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
-            return registry;
         }
 
-        // Mirrors WasiNNTorchSharpBindable's env-driven scan:
-        // read $WACS_WASINN_TORCH_DIR, enumerate *.pt + *.ts in
-        // the top-level dir, register each under filename-sans-
-        // extension. Fail-soft on IO error.
-        private static IDictionary<string, string>
-            BuildTorchScriptRegistryFromEnv()
+        // Walk every loaded assembly with a `Wacs.WASI.NN.*` name
+        // (excluding the DI / Test subpackages), find every public
+        // class implementing the registration interface, and
+        // instantiate via parameterless ctor. Errors stderr-warn
+        // and skip — one misbehaving backend doesn't kill the rest.
+        private static List<object> DiscoverBackendRegistrants(
+            Type regIface)
         {
-            var dir = Environment.GetEnvironmentVariable(
-                "WACS_WASINN_TORCH_DIR");
-            var registry = new Dictionary<string, string>(
-                StringComparer.OrdinalIgnoreCase);
-            if (string.IsNullOrEmpty(dir)) return registry;
-            try
+            var result = new List<object>();
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
             {
-                if (!Directory.Exists(dir)) return registry;
-                foreach (var pattern in new[] { "*.pt", "*.ts" })
+                if (asm.IsDynamic) continue;
+                string name;
+                try { name = asm.GetName().Name ?? ""; }
+                catch { continue; }
+                if (!name.StartsWith("Wacs.WASI.NN.",
+                    StringComparison.OrdinalIgnoreCase)) continue;
+                if (name.EndsWith(".DependencyInjection",
+                        StringComparison.OrdinalIgnoreCase)
+                    || name.EndsWith(".Test",
+                        StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                Type[] types;
+                try { types = asm.GetExportedTypes(); }
+                catch (ReflectionTypeLoadException ex)
                 {
-                    foreach (var path in Directory.EnumerateFiles(dir,
-                        pattern, SearchOption.TopDirectoryOnly))
+                    types = ex.Types.Where(t => t != null)
+                        .Select(t => t!).ToArray();
+                }
+                catch { continue; }
+
+                foreach (var t in types)
+                {
+                    if (t == null) continue;
+                    if (t.IsAbstract || t.IsInterface) continue;
+                    if (!regIface.IsAssignableFrom(t)) continue;
+                    if (t.GetConstructor(Type.EmptyTypes) == null) continue;
+
+                    object? instance;
+                    try { instance = Activator.CreateInstance(t); }
+                    catch (Exception ex)
                     {
-                        var name = Path.GetFileNameWithoutExtension(path);
-                        if (!string.IsNullOrEmpty(name))
-                            registry[name!] = path;
+                        Console.Error.WriteLine(
+                            "warn: wasi-nn backend " + t.FullName
+                            + " ctor failed: " + ex.GetType().Name
+                            + ": " + ex.Message
+                            + ". guests requesting this backend will "
+                            + "see InvalidEncoding / NotFound errors.");
+                        continue;
                     }
+                    if (instance != null) result.Add(instance);
                 }
             }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
-            return registry;
-        }
-
-        // Mirrors WasiNNLlamaSharpBindable's env-driven scan:
-        // read $WACS_WASINN_GGUF_DIR, enumerate *.gguf files in
-        // the top-level dir, register each under its filename-
-        // sans-extension. Empty registry on miss / unset / IO
-        // error — matches the IBindable's fail-soft posture so
-        // the auto-wire never crashes scope construction.
-        private static IDictionary<string, string>
-            BuildGgufRegistryFromEnv()
-        {
-            var dir = Environment.GetEnvironmentVariable(
-                "WACS_WASINN_GGUF_DIR");
-            var registry = new Dictionary<string, string>(
-                StringComparer.OrdinalIgnoreCase);
-            if (string.IsNullOrEmpty(dir)) return registry;
-            try
-            {
-                if (!Directory.Exists(dir)) return registry;
-                foreach (var path in Directory.EnumerateFiles(dir,
-                    "*.gguf", SearchOption.TopDirectoryOnly))
-                {
-                    var name = Path.GetFileNameWithoutExtension(path);
-                    if (!string.IsNullOrEmpty(name))
-                        registry[name!] = path;
-                }
-            }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
-            return registry;
+            return result;
         }
 
         // Resolve a named assembly across both .NET load contexts.

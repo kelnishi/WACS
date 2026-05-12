@@ -43,7 +43,8 @@ namespace Wacs.WASI.NN.LlamaSharp
     /// <see cref="LlamaSharpBackend"/> directly and pass it through
     /// <c>runtime.UseWasiNN(b => b.AddBackend(...))</c>.</para>
     /// </summary>
-    public sealed class WasiNNLlamaSharpBindable : IBindable, IDisposable
+    public sealed class WasiNNLlamaSharpBindable
+        : IBindable, IWasiNNBackendRegistration, IDisposable
     {
         private const string EnvVarName = "WACS_WASINN_GGUF_DIR";
 
@@ -51,19 +52,24 @@ namespace Wacs.WASI.NN.LlamaSharp
 
         public WasiNNLlamaSharpBindable()
         {
+            var config = WasiNNConfiguration.DefaultConfiguration();
+            ConfigureConfiguration(config);
+            _host = new WasiNNHost(config);
+        }
+
+        public void ConfigureConfiguration(WasiNNConfiguration config)
+        {
             var registry = BuildEnvRegistry();
             var backend = new LlamaSharpBackend(name =>
                 registry.TryGetValue(name, out var path)
                     ? new GgufModelEntry(path)
                     : (GgufModelEntry?)null);
-            var config = WasiNNConfiguration.DefaultConfiguration();
             config.Backends[GraphEncoding.GGML] = backend;
             // LlamaSharpBackend's only practical entry is load-by-
             // name (the byte-buffer path traps for GB-scale GGUFs);
             // route load-by-name through this backend explicitly
             // rather than dropping back to the generic resolver.
             config.LoadByNameBackend = backend;
-            _host = new WasiNNHost(config);
         }
 
         public void BindToRuntime(WasmRuntime runtime)

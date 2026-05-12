@@ -35,15 +35,21 @@ namespace Wacs.WASI.NN.OnnxRuntime
     /// adapter — keeps the per-package shape identical so
     /// <c>--bind</c> works for any wasi-nn backend WACS ships.</para>
     /// </summary>
-    public sealed class WasiNNOnnxBindable : IBindable, IDisposable
+    public sealed class WasiNNOnnxBindable
+        : IBindable, IWasiNNBackendRegistration, IDisposable
     {
         private readonly WasiNNHost _host;
 
         public WasiNNOnnxBindable()
         {
             var config = WasiNNConfiguration.DefaultConfiguration();
-            config.Backends[GraphEncoding.ONNX] = new OnnxBackend();
+            ConfigureConfiguration(config);
             _host = new WasiNNHost(config);
+        }
+
+        public void ConfigureConfiguration(WasiNNConfiguration config)
+        {
+            config.Backends[GraphEncoding.ONNX] = new OnnxBackend();
         }
 
         public void BindToRuntime(WasmRuntime runtime)

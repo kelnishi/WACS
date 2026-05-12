@@ -45,7 +45,8 @@ namespace Wacs.WASI.NN.TorchSharp
     /// <c>runtime.UseWasiNN(b => b.AddBackend(GraphEncoding.PyTorch,
     /// new TorchSharpBackend(...)))</c>.</para>
     /// </summary>
-    public sealed class WasiNNTorchSharpBindable : IBindable, IDisposable
+    public sealed class WasiNNTorchSharpBindable
+        : IBindable, IWasiNNBackendRegistration, IDisposable
     {
         private const string EnvVarName = "WACS_WASINN_TORCH_DIR";
 
@@ -53,15 +54,20 @@ namespace Wacs.WASI.NN.TorchSharp
 
         public WasiNNTorchSharpBindable()
         {
+            var config = WasiNNConfiguration.DefaultConfiguration();
+            ConfigureConfiguration(config);
+            _host = new WasiNNHost(config);
+        }
+
+        public void ConfigureConfiguration(WasiNNConfiguration config)
+        {
             var registry = BuildEnvRegistry();
             var backend = TorchSharpBackend.FromPaths(registry);
-            var config = WasiNNConfiguration.DefaultConfiguration();
             config.Backends[GraphEncoding.PyTorch] = backend;
             // Route load-by-name through this backend explicitly
             // so big TorchScript files skip the canonical-ABI
             // byte-flow indirection.
             config.LoadByNameBackend = backend;
-            _host = new WasiNNHost(config);
         }
 
         public void BindToRuntime(WasmRuntime runtime)
