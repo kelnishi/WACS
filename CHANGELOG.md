@@ -1,5 +1,32 @@
 # Changelog
 
+## WACS.WASI.Preview2.DependencyInjection 0.1.9 / WACS.Cli 1.7.3 — OpenVINO auto-wire under `--wasip2`
+
+Closes the gap reported in `wasi-nn/WACS-GAPS.md` §33: under
+`--wasip2 --bind Wacs.WASI.NN.OpenVino.dll`, guests calling
+`graph.load(encoding=openvino)` saw `InvalidEncoding: No backend
+registered for encoding OpenVINO`. Root cause was the same shape
+that bit OnnxRuntimeGenAI in an earlier round: the IBindable's
+`BindHostFunction` registrations get silently shadowed under
+`--wasip2` by the direct-link path, the WitBindings handlers
+drop, `GraphFuncsImpl.Load` reads the DI-bundle's
+`WasiNNConfiguration.Backends` dict, and without an auto-wire
+callback `Backends[OpenVINO]` stays empty.
+
+Added `BuildOpenVinoConfigureCallback` to
+`WasiPreview2RuntimeScope.ReflectivelyAddWasiNN` —
+mirrors `BuildOnnxConfigureCallback` (the cleanest analog; both
+register via the encoding-keyed `Backends` dict, no
+`LoadByNameBackend` plumbing). The callback joins the existing
+four-backend combine chain and registers an
+`OpenVinoBackend()` against `GraphEncoding.OpenVINO`. Failure
+modes (assembly not loadable / type not found / `Activator`
+throws) report on stderr instead of silently leaving the
+`Backends` dict empty — same pattern as the four siblings.
+
+WACS.Cli 1.7.3 picks up the rebuilt DI assembly. No user-facing
+flag change.
+
 ## WACS.Cli 1.7.2 — drop OpenVINO native runtimes from bundle
 
 The 1.7.1 nupkg failed to publish to NuGet (HTTP 413 — package
