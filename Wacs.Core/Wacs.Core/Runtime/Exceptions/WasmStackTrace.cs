@@ -87,8 +87,11 @@ namespace Wacs.Core.Runtime.Exceptions
         {
             // Function identity — prefer the parsed `.Id` (e.g.
             // "$myfunc|3" from AnnotateWhileParsing), fall back to
-            // the raw store address.
+            // the raw store address. Also capture the absolute
+            // FuncIdx so the LineMap fallback in TryResolveSourceCoord
+            // can key per-instruction lookups.
             string funcLabel = "<func@?>";
+            int funcIdx = -1;
             try
             {
                 var addr = new FuncAddr((int)frame.FuncAddr);
@@ -98,6 +101,12 @@ namespace Wacs.Core.Runtime.Exceptions
                     funcLabel = string.IsNullOrEmpty(inst.Id)
                         ? $"func@{frame.FuncAddr}"
                         : $"${inst.Id}";
+                    // Only concrete WASM functions carry a module-level
+                    // FuncIdx; host shims implement IFunctionInstance
+                    // without one. Pattern-match to keep the interface
+                    // narrow.
+                    if (inst is FunctionInstance fi)
+                        funcIdx = (int)fi.Index.Value;
                 }
             }
             catch
@@ -123,7 +132,7 @@ namespace Wacs.Core.Runtime.Exceptions
                 if (lineMap != null
                     || module.SourcePositions != null)
                 {
-                    var sourceCoord = TryResolveSourceCoord(frame.Instruction, module, lineMap);
+                    var sourceCoord = TryResolveSourceCoord(frame.Instruction, module, lineMap, funcIdx);
                     if (sourceCoord != null)
                     {
                         sb.Append(' ');
@@ -146,7 +155,8 @@ namespace Wacs.Core.Runtime.Exceptions
         private static string? TryResolveSourceCoord(
             Wacs.Core.Instructions.InstructionBase inst,
             Module module,
-            LineMap? lineMap)
+            LineMap? lineMap,
+            int funcIdx)
         {
             // First preference: WAT-parsed module has direct per-
             // instruction source coords from Pass B.
@@ -156,15 +166,24 @@ namespace Wacs.Core.Runtime.Exceptions
                 return $"({pos.Line}:{pos.Column})";
             }
 
-            // Fall back to LineMap (Pass 6): a span on the enclosing
-            // function. The caller had to pre-render via
-            // TextModuleWriter.WriteWithLineMap to obtain the map.
-            // We don't have a quick reverse mapping from
-            // InstructionBase → FuncIdx, so this fallback applies
-            // only when the caller cared enough to compute the map.
-            // Leave as null when nothing's available — formatter
-            // drops the suffix.
-            _ = lineMap;
+            // Fallback for binary-parsed modules: Pass G records per-
+            // instruction spans in the LineMap during a canonical
+            // re-render. Key is (funcIdx, ByteOffsetInFunc) — the
+            // first half identifies which function body, the second
+            // half pinpoints the exact instruction within that body.
+            // The caller computes the LineMap once via
+            // TextModuleWriter.WriteWithLineMap and caches it across
+            // formatter calls.
+            if (lineMap != null && funcIdx >= 0)
+            {
+                var key = new ModuleElementRef(
+                    ModuleElementKind.Instruction,
+                    funcIdx,
+                    (int)inst.ByteOffsetInFunc);
+                var span = lineMap.ByElement(key);
+                if (span.HasValue)
+                    return $"({span.Value.StartLine}:{span.Value.StartCol})";
+            }
             return null;
         }
     }

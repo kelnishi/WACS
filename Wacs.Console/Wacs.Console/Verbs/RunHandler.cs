@@ -1132,6 +1132,35 @@ namespace Wacs.Console.Verbs
         }
 
         /// <summary>
+        /// Lazily build a <see cref="Wacs.Core.Text.LineMap"/> for a
+        /// binary-parsed module so <see cref="Wacs.Core.Runtime.Exceptions.WasmStackTrace.FormatVerbose"/>
+        /// can surface <c>(line:col)</c> from a canonical re-render
+        /// even when the module had no original WAT source. WAT-parsed
+        /// modules already carry <c>Module.SourcePositions</c>, so the
+        /// LineMap is unnecessary there — return null to skip the
+        /// re-render cost. The result is cached on the per-call
+        /// reference so successive frames in the same trace share it.
+        /// </summary>
+        private static Wacs.Core.Text.LineMap? BuildLineMapIfNeeded(
+            Wacs.Core.Module module)
+        {
+            if (module.SourcePositions != null) return null;
+            try
+            {
+                var (_, lineMap) = Wacs.Core.Text.TextModuleWriter
+                    .WriteWithLineMap(module);
+                return lineMap;
+            }
+            catch
+            {
+                // Re-render may fail on a module that uses a feature
+                // the text writer doesn't yet handle; don't take the
+                // trap-print path down with it.
+                return null;
+            }
+        }
+
+        /// <summary>
         /// Print a trap with both the .NET stack trace (existing
         /// behavior) and — when the trap carries a WASM-side
         /// snapshot — a WASM trace from
@@ -1151,7 +1180,8 @@ namespace Wacs.Console.Verbs
                 System.Console.Error.WriteLine("WASM stack trace:");
                 System.Console.Error.WriteLine(
                     Wacs.Core.Runtime.Exceptions.WasmStackTrace.FormatVerbose(
-                        exc.WasmFrames, module, runtime.RuntimeStore));
+                        exc.WasmFrames, module, runtime.RuntimeStore,
+                        BuildLineMapIfNeeded(module)));
             }
         }
 
@@ -1171,7 +1201,8 @@ namespace Wacs.Console.Verbs
                 System.Console.Error.WriteLine("WASM stack trace:");
                 System.Console.Error.WriteLine(
                     Wacs.Core.Runtime.Exceptions.WasmStackTrace.FormatVerbose(
-                        exc.WasmFrames, module, runtime.RuntimeStore));
+                        exc.WasmFrames, module, runtime.RuntimeStore,
+                        BuildLineMapIfNeeded(module)));
             }
         }
 
@@ -1194,7 +1225,8 @@ namespace Wacs.Console.Verbs
                 System.Console.Error.WriteLine("WASM stack trace:");
                 System.Console.Error.WriteLine(
                     Wacs.Core.Runtime.Exceptions.WasmStackTrace.FormatVerbose(
-                        exc.WasmFrames, module, runtime.RuntimeStore));
+                        exc.WasmFrames, module, runtime.RuntimeStore,
+                        BuildLineMapIfNeeded(module)));
             }
         }
 

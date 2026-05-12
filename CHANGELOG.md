@@ -1,5 +1,71 @@
 # Changelog
 
+## WACS 0.15.16 / WACS.Cli 1.6.6 — binary-source line bridge (Pass G)
+
+Binary-parsed modules now resolve to source coordinates in trap
+traces via a canonical re-render, closing the last Pass-C gap.
+The CLI lazily builds a `LineMap` on first trap and surfaces
+`(line:col)` against the re-rendered WAT, matching what WAT
+direct-parse already produced via `Module.SourcePositions`.
+
+### What changed
+
+- `TextModuleWriter.WriteWithLineMap` now records a
+  `ModuleElementKind.Instruction`-kinded `ModuleElementRef` for
+  every emitted instruction, keyed by
+  `(absolute funcIdx, ByteOffsetInFunc)`. Plumbed through
+  `WriteInstructionSeq` / `WriteInstruction` / `WriteBlockForm` /
+  `WriteIfForm`. The previous overloads (without a `LineMap`)
+  remain available for the non-tracking callers.
+- `WasmStackTrace.TryResolveSourceCoord` consults the LineMap
+  when `Module.SourcePositions` is absent — falls back to the
+  recorded span's start line / column. Resolves the
+  frame's `FuncAddr` through the `Store` to its absolute
+  `FuncIdx` (via `FunctionInstance.Index`) so the lookup key
+  matches what the writer recorded.
+- `RunHandler.BuildLineMapIfNeeded` in WACS.Cli lazily computes
+  the LineMap on demand (only when `SourcePositions` is null);
+  WAT-parsed modules skip the re-render. Wired into
+  `PrintTrap` / `PrintUnhandledWasm` / `PrintRuntimeException`.
+
+### Live behavior
+
+```bash
+# Binary input (no source) — Pass G surfaces (line:col) from
+# a canonical re-render.
+$ wacs run trap.wasm --invoke _start
+WASM stack trace:
+  at $_.boom|0 (unreachable @+0x3) (6:1)
+  at $_._start
+
+# Same WAT direct — resolves via Module.SourcePositions
+# (unchanged behavior).
+$ wacs run trap.wat --invoke _start
+WASM stack trace:
+  at $_.$boom (unreachable @+0x3) (5:5)
+  at $_._start
+```
+
+### Known limitation
+
+`ByteOffsetInFunc` is a mutable field on `InstructionBase`, but
+several instruction classes (`InstI32Const`, `InstLocalGet`,
+`InstDrop`, `InstNop`, …) intern process-wide. The latest parse
+to stamp the singleton wins, so the displayed `@+0xXX` can be
+the wrong function's offset when the same opcode/value shows up
+in multiple functions or modules. The mechanism is sound in
+serial production use; tests for Pass F/G use looser assertions
+that survive the race. The architectural fix (per-occurrence
+offset side-table + body-index in `WasmStackFrame`) is deferred.
+
+### Tests
+
+`BinarySourceLineBridgeTests` (4 cases) covering the LineMap
+recording for binary-parsed modules and WAT round-trips, plus
+`WasmStackTraceTests.FormatVerbose_BinaryParsedModule_ResolvesViaLineMap`
+exercising the full trap → re-render → format path. Full suite:
+487/487.
+
 ## WACS 0.15.15 — WAT byte-offset annotation (Pass F)
 
 WAT-parsed modules now carry `InstructionBase.ByteOffsetInFunc`

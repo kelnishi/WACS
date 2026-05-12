@@ -78,6 +78,44 @@ namespace Wacs.Core.Test
         }
 
         [Fact]
+        public void FormatVerbose_BinaryParsedModule_ResolvesViaLineMap()
+        {
+            // Pass G. Binary-parsed modules have no SourcePositions,
+            // but a caller-supplied LineMap (from a canonical re-
+            // render) lets the formatter still surface (line:col).
+            const string wat = @"(module
+              (func (export ""bad"")
+                unreachable))";
+
+            // Build a binary copy of the WAT module, re-parse it
+            // through the binary parser, and instantiate that.
+            using var ms = new MemoryStream(Encoding.UTF8.GetBytes(wat));
+            var watModule = TextModuleParser.ParseWat(ms);
+            var bytes = Wacs.Core.Bin.BinaryModuleWriter.Write(watModule);
+            using var binStream = new MemoryStream(bytes);
+            var binModule = BinaryModuleParser.ParseWasm(binStream);
+            Assert.Null(binModule.SourcePositions);
+
+            var runtime = new WasmRuntime();
+            var inst = runtime.InstantiateModule(binModule);
+            runtime.RegisterModule("m", inst);
+            var entry = runtime.GetExportedFunction(("m", "bad"));
+            var invoker = runtime.CreateStackInvoker(entry);
+            var trap = Assert.Throws<TrapException>(() =>
+                invoker(System.Array.Empty<Value>()));
+
+            var (_, lineMap) = TextModuleWriter.WriteWithLineMap(binModule);
+            string verbose = WasmStackTrace.FormatVerbose(
+                trap.WasmFrames!, binModule, runtime.RuntimeStore, lineMap);
+
+            // The trace must include a (line:col) suffix for the
+            // `unreachable` frame — sourced from the re-rendered
+            // LineMap, not from `Module.SourcePositions`.
+            Assert.Contains("unreachable", verbose);
+            Assert.Matches(@"\(\d+:\d+\)", verbose);
+        }
+
+        [Fact]
         public void Format_EmptyFrames_ReturnsSentinel()
         {
             // Use a parsed module + a fresh runtime as a stand-in
