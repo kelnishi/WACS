@@ -127,6 +127,9 @@ jobs:
           - path: Wacs.WASI/Wacs.WASI.NN/Wacs.WASI.NN.OnnxRuntimeGenAI
             package_name: WACS.WASI.NN.OnnxRuntimeGenAI
             tag_prefix: WACS-WASI-NN-v
+          - path: Wacs.WASI/Wacs.WASI.NN/Wacs.WASI.NN.OpenVino
+            package_name: WACS.WASI.NN.OpenVino
+            tag_prefix: WACS-WASI-NN-v
 
     steps:
       - name: Checkout code
