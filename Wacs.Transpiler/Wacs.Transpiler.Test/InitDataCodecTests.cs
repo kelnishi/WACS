@@ -478,7 +478,7 @@ namespace Wacs.Transpiler.Test
         public void Expression_I32Const_RoundTrip()
         {
             var expr = MakeExpression(
-                InstI32Const.Inst.Immediate(42),
+                new InstI32Const().Immediate(42),
                 new InstEnd());
             var back = RoundTripExpression(expr);
             Assert.Equal(2, back.Instructions.Count);
@@ -591,8 +591,8 @@ namespace Wacs.Transpiler.Test
             // i32.const 10; i32.const 32; i32.add; end
             // i32.add in constant exprs is WASM 3.0.
             var expr = MakeExpression(
-                InstI32Const.Inst.Immediate(10),
-                InstI32Const.Inst.Immediate(32),
+                new InstI32Const().Immediate(10),
+                new InstI32Const().Immediate(32),
                 InstI32BinOp.I32Add,
                 new InstEnd());
             var back = RoundTripExpression(expr);
@@ -633,10 +633,10 @@ namespace Wacs.Transpiler.Test
             {
                 DeferredGlobalInits = new List<(int, WasmExpression)>
                 {
-                    (3, MakeExpression(InstI32Const.Inst.Immediate(100), new InstEnd())),
+                    (3, MakeExpression(new InstI32Const().Immediate(100), new InstEnd())),
                     (7, MakeExpression(
-                        InstI32Const.Inst.Immediate(5),
-                        InstI32Const.Inst.Immediate(2),
+                        new InstI32Const().Immediate(5),
+                        new InstI32Const().Immediate(2),
                         InstI32BinOp.I32Mul,
                         new InstEnd())),
                 },
@@ -658,7 +658,7 @@ namespace Wacs.Transpiler.Test
                 {
                     (0, MakeExpression(
                         MakeGlobalGet(5),
-                        InstI32Const.Inst.Immediate(16),
+                        new InstI32Const().Immediate(16),
                         InstI32BinOp.I32Add,
                         new InstEnd())),
                 },

@@ -82,12 +82,15 @@ namespace Wacs.Transpiler.AOT
     /// </summary>
     public class StackAnalysis
     {
-        // Per-site info: singleton instructions (InstReturn.Inst, InstDrop.Inst, etc.)
-        // are shared across call sites in the interpreter, so a Dictionary<Inst, Info>
-        // keyed by reference identity collapses their per-site data. We use per-inst
-        // FIFO queues instead — each Get() dequeues one entry, yielding distinct info
-        // for each emission site. Analysis visits and emission traverse in the same
-        // order, so the sequence aligns.
+        // Per-site info: singleton instructions (ALU/relop/test ops like
+        // InstI32BinOp.I32Add, InstI32RelOp.I32Eq, etc.) are still shared
+        // across call sites in the interpreter, so a Dictionary<Inst, Info>
+        // keyed by reference identity collapses their per-site data. We use
+        // per-inst FIFO queues instead — each Get() dequeues one entry,
+        // yielding distinct info for each emission site. Analysis visits
+        // and emission traverse in the same order, so the sequence aligns.
+        // (Const, drop, return, nop, local.get and friends are now per-
+        // occurrence, but the queue cost is unchanged.)
         private readonly Dictionary<InstructionBase, Queue<InstructionInfo>> _infoByInst = new();
         // Analysis-internal direct lookup (for per-site block instructions during
         // sub-block processing — these aren't singletons so identity keys work).
@@ -101,9 +104,9 @@ namespace Wacs.Transpiler.AOT
         private int _importCount;
 
         /// <summary>
-        /// Look up precomputed info for an instruction. Each call consumes one
-        /// entry from a per-instance queue so singleton instructions (InstReturn.Inst,
-        /// InstDrop.Inst) get distinct info per emission site.
+        /// Look up precomputed info for an instruction. Each call consumes
+        /// one entry from a per-instance queue so singleton instructions
+        /// (ALU/relop/test ops) get distinct info per emission site.
         /// </summary>
         public InstructionInfo? Get(InstructionBase inst)
         {

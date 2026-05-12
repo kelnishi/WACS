@@ -1,5 +1,57 @@
 # Changelog
 
+## WACS 0.15.18 — uninternify parse-time instruction singletons
+
+Pairs with 0.15.17. Removes the ten process-wide singletons that
+the binary / text parsers used to hand out as shared instances,
+making every parsed occurrence its own `InstructionBase`.
+Resolves the first-match ambiguity that 0.15.17's
+`ByteOffsetWalker` was unable to disambiguate.
+
+### What changed
+
+- `InstI32Const` and `InstLocalGet`: deleted the static
+  `ConcurrentDictionary<int, T> LookupCache` fields and the
+  `.Inst` statics. `Immediate(N)` now always allocates a fresh
+  instance; `Parse(reader)` does the same directly.
+- Removed the `.Inst` static fields from `InstUnreachable`,
+  `InstNop`, `InstReturn`, `InstDrop`, `InstRefIsNull`,
+  `InstRefEq`, `InstRefAsNonNull`. Removed
+  `InstSelect.InstWithoutTypes`. Constructors for
+  `InstUnreachable`/`InstNop` flipped from private to public so
+  the factory can allocate them. `SpecFactory` calls `new InstX()`
+  for each opcode.
+- Test sites updated to use `new InstX().Immediate(N)` or
+  `new InstReturn()` instead of `InstX.Inst.…`.
+
+### What didn't change
+
+ALU / relop / test ops (`InstI32BinOp.I32Add`,
+`InstI32RelOp.I32Eq`, `InstI32TestOp.I32Eqz`, …) are still
+per-opcode statics referenced directly in `SpecFactory`. They
+have no per-occurrence state today, so sharing is harmless. The
+`StackAnalysis` queue-per-instance trick is kept in place to
+give those still-shared singletons per-site info. If anyone
+later attaches per-site state to ALU ops, those classes must
+also be uninterned.
+
+### Memory / runtime impact
+
+For a typical wasm module, a few extra MB of `InstructionBase`
+subclass instances at parse time. Dispatch is virtual-by-
+reference and the CLR JIT de-virtualizes the same way regardless
+of instance count, so no measurable runtime cost. Memory is
+rooted by the `Module` and lives in Gen2 for the program
+lifetime — no GC pressure.
+
+### Tests
+
+484/484 stable across 10 parallel runs (0.15.17 was also
+stable; this confirms the uninterning didn't regress
+anything). The two pre-existing `CallIndirect_dispatches_via_funcref_table`
+failures in `Wacs.Compilation.Test` are unrelated and pre-date
+this branch.
+
 ## WACS 0.15.17 — on-demand byte-offset walker
 
 Replaces the parse-time `ByteOffsetInFunc` stamping (binary

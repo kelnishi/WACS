@@ -29,9 +29,7 @@ namespace Wacs.Core.Instructions
     public class InstDrop : InstructionBase, INodeConsumer<Value>
     {
         public InstDrop() : base(ByteCode.Drop, -1) { }
-        
-        public static readonly InstDrop Inst = new();
-        
+
         public int LinkStackDiff => StackDiff;
 
         public Action<ExecContext, Value> GetFunc => (_, _) => { };
@@ -57,8 +55,6 @@ namespace Wacs.Core.Instructions
     //0x1B
     public class InstSelect : InstructionBase, INodeComputer<Value, Value, int, Value>
     {
-        public static readonly InstSelect InstWithoutTypes = new();
-
         private readonly bool WithTypes;
         public ValType[] Types { get; private set; } = Array.Empty<ValType>();
 

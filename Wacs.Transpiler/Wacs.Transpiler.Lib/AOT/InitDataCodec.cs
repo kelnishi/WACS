@@ -798,7 +798,7 @@ namespace Wacs.Transpiler.AOT
                 case InitOp.I32Const:
                 {
                     int v = ReadVarInt32(r);
-                    return InstI32Const.Inst.Immediate(v);
+                    return new InstI32Const().Immediate(v);
                 }
                 case InitOp.I64Const:
                 {

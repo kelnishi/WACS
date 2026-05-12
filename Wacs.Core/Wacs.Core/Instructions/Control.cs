@@ -37,8 +37,7 @@ namespace Wacs.Core.Instructions
     //0x00
     public sealed class InstUnreachable : InstructionBase
     {
-        public static readonly InstUnreachable Inst = new();
-        private InstUnreachable() : base(ByteCode.Unreachable, 0) { }
+        public InstUnreachable() : base(ByteCode.Unreachable, 0) { }
 
         // @Spec 3.3.8.2 unreachable
         public override void Validate(IWasmValidationContext context)
@@ -65,8 +64,7 @@ namespace Wacs.Core.Instructions
     //0x01
     public sealed class InstNop : InstructionBase
     {
-        public static readonly InstNop Inst = new();
-        private InstNop() : base(ByteCode.Nop, 0) { }
+        public InstNop() : base(ByteCode.Nop, 0) { }
 
         // @Spec 3.3.8.1. nop
         public override void Validate(IWasmValidationContext context)
@@ -842,9 +840,8 @@ namespace Wacs.Core.Instructions
     public sealed class InstReturn : InstructionBase
     {
         public InstReturn() : base(ByteCode.Return) { }
-        
-        public static readonly InstReturn Inst = new();
-        
+
+
         // @Spec 3.3.8.9. return
         public override void Validate(IWasmValidationContext context)
         {

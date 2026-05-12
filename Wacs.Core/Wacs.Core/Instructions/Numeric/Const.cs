@@ -13,8 +13,6 @@
 // limitations under the License.
 
 using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using Wacs.Core.Instructions.SuperInstruction;
@@ -28,8 +26,6 @@ namespace Wacs.Core.Instructions.Numeric
     //0x41
     public sealed class InstI32Const : InstructionBase, IConstInstruction, ITypedValueProducer<int>
     {
-        public static InstI32Const Inst = new();
-        
         public InstI32Const() : base(ByteCode.I32Const, +1) { }
         
         public int Value;
@@ -53,25 +49,25 @@ namespace Wacs.Core.Instructions.Numeric
             context.OpStack.PushI32(Value);
         }
 
-        // ConcurrentDictionary because multiple parses can run
-        // concurrently across xunit test collections — the
-        // prior plain-Dictionary impl race-tore on contention.
-        // See InstLocalGet.LookupCache for the same pattern
-        // and full failure-mode notes.
-        private static readonly ConcurrentDictionary<int, InstI32Const> LookupCache = new();
-
-        public override InstructionBase Parse(BinaryReader reader) {
-            return Immediate(reader.ReadLeb128_s32());
-        }
+        public override InstructionBase Parse(BinaryReader reader) =>
+            new InstI32Const { Value = reader.ReadLeb128_s32() };
 
         public override void RenderBinary(BinaryWriter writer) =>
             writer.WriteLeb128_s32(Value);
 
-        public InstructionBase Immediate(int value)
-        {
-            return LookupCache.GetOrAdd(value, static v =>
-                new InstI32Const { Value = v });
-        }
+        /// <summary>
+        /// Per-occurrence factory: always allocates a fresh instance.
+        /// Previously deduped through a <c>ConcurrentDictionary</c>
+        /// cache, but the resulting shared singletons couldn't carry
+        /// per-occurrence state (byte offsets, source positions),
+        /// causing test flakes and trap-trace inaccuracies. The
+        /// allocation cost is negligible at parse time. Kept as an
+        /// instance method so existing call sites
+        /// (<c>SpecFactory.CreateInstruction&lt;InstI32Const&gt;(...)
+        /// .Immediate(N)</c>) keep working — the receiver is ignored.
+        /// </summary>
+        public InstI32Const Immediate(int value) =>
+            new InstI32Const { Value = value };
 
         public int FetchImmediate(ExecContext _) => Value;
         public override string RenderText(ExecContext? context) => $"{base.RenderText(context)} {Value}";

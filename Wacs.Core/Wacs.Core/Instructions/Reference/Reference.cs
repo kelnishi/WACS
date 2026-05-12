@@ -79,8 +79,6 @@ namespace Wacs.Core.Instructions.Reference
             int booleanResult = val.IsNullRef ? 1 : 0;
             context.OpStack.PushI32(booleanResult);
         }
-
-        public static readonly InstRefIsNull Inst = new InstRefIsNull();
     }
     
     //0xD2
@@ -161,8 +159,6 @@ namespace Wacs.Core.Instructions.Reference
             int c = v1.RefEquals(v2, context.Frame.Module.Types) ? 1 : 0;
             context.OpStack.PushI32(c);
         }
-
-        public static readonly InstRefEq Inst = new InstRefEq();
     }
     
     /// <summary>
@@ -185,10 +181,8 @@ namespace Wacs.Core.Instructions.Reference
             Value vRef = context.OpStack.PopRefType();
             if (vRef.IsNullRef)
                 throw new TrapException("Ref was null.");
-            
+
             context.OpStack.PushRef(vRef);
         }
-
-        public static readonly InstRefAsNonNull Inst = new InstRefAsNonNull();
     }
 }

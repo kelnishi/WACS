@@ -51,7 +51,7 @@ namespace Wacs.Compilation.Test
         public void Compiles_i32_const_with_inlined_immediate()
         {
             // Use the existing Immediate() helper to get a cached InstI32Const with Value=99.
-            var inst = InstI32Const.Inst.Immediate(99);
+            var inst = new InstI32Const().Immediate(99);
             var compiled = BytecodeCompiler.Compile(
                 new InstructionBase[] { inst },
                 EmptySig, localsCount: 0);
@@ -69,8 +69,8 @@ namespace Wacs.Compilation.Test
             // Program: i32.const 10 ; i32.const 32 ; i32.add
             var linked = new InstructionBase[]
             {
-                InstI32Const.Inst.Immediate(10),
-                InstI32Const.Inst.Immediate(32),
+                new InstI32Const().Immediate(10),
+                new InstI32Const().Immediate(32),
                 InstI32BinOp.I32Add,
             };
             var compiled = BytecodeCompiler.Compile(linked, EmptySig, localsCount: 0);
@@ -86,11 +86,11 @@ namespace Wacs.Compilation.Test
         public void Compiles_local_get_and_binop()
         {
             // Simulate: local.get 0 ; local.get 1 ; i32.add  — classic "add two locals".
-            // Use InstLocalGet.Inst.Immediate(idx) to get cached instances.
+            // Use new InstLocalGet().Immediate(idx) to get cached instances.
             var linked = new InstructionBase[]
             {
-                InstLocalGet.Inst.Immediate(0),
-                InstLocalGet.Inst.Immediate(1),
+                new InstLocalGet().Immediate(0),
+                new InstLocalGet().Immediate(1),
                 InstI32BinOp.I32Add,
             };
             var compiled = BytecodeCompiler.Compile(linked, EmptySig, localsCount: 2);
@@ -116,9 +116,9 @@ namespace Wacs.Compilation.Test
             // Program: i32.const 7 ; return ; i32.const 99  (99 should never be pushed).
             var linked = new InstructionBase[]
             {
-                InstI32Const.Inst.Immediate(7),
-                InstReturn.Inst,
-                InstI32Const.Inst.Immediate(99),
+                new InstI32Const().Immediate(7),
+                new InstReturn(),
+                new InstI32Const().Immediate(99),
             };
             var compiled = BytecodeCompiler.Compile(linked, EmptySig, localsCount: 0);
 
@@ -136,11 +136,11 @@ namespace Wacs.Compilation.Test
             // Then push 1 (cond truthy), select -> picks 10.
             var linked = new InstructionBase[]
             {
-                InstI32Const.Inst.Immediate(10),
-                InstI32Const.Inst.Immediate(20),
-                InstI32Const.Inst.Immediate(30),
+                new InstI32Const().Immediate(10),
+                new InstI32Const().Immediate(20),
+                new InstI32Const().Immediate(30),
                 new InstDrop(),
-                InstI32Const.Inst.Immediate(1),
+                new InstI32Const().Immediate(1),
                 new InstSelect(),
             };
             var compiled = BytecodeCompiler.Compile(linked, EmptySig, localsCount: 0);
