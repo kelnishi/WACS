@@ -25,8 +25,8 @@ namespace Wacs.Core.Runtime.Exceptions
         /// WASM-side call-stack snapshot at the throw site, when the
         /// runtime captured it. Null when the path that constructed
         /// this exception didn't have an <see cref="ExecContext"/>
-        /// in scope. Pass C's formatter reads this for verbose
-        /// stack traces.
+        /// in scope. <see cref="WasmStackTrace"/> reads this for
+        /// verbose stack traces.
         /// </summary>
         public WasmStackFrame[]? WasmFrames { get; internal set; }
 

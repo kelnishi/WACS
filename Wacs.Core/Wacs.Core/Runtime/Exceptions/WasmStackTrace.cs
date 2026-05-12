@@ -123,9 +123,9 @@ namespace Wacs.Core.Runtime.Exceptions
             sb.Append(funcLabel);
 
             // Instruction context — only the top frame carries it
-            // directly. Lower frames would need a linker-PC lookup
-            // (Pass D); for now they're left at function-level
-            // granularity.
+            // directly. Lower frames would need a linker-PC-to-
+            // call-site-instruction lookup; for now they're left at
+            // function-level granularity.
             if (frame.Instruction != null)
             {
                 // Walk the function body to find the trap instruction's
@@ -182,16 +182,17 @@ namespace Wacs.Core.Runtime.Exceptions
             uint? byteOffset)
         {
             // First preference: WAT-parsed module has direct per-
-            // instruction source coords from Pass B.
+            // instruction source coords captured at parse.
             if (module.SourcePositions != null
                 && module.SourcePositions.TryGetValue(inst, out var pos))
             {
                 return $"({pos.Line}:{pos.Column})";
             }
 
-            // Fallback for binary-parsed modules: Pass G records per-
-            // instruction spans in the LineMap during a canonical
-            // re-render. Key is (funcIdx, byteOffset) — funcIdx
+            // Fallback for binary-parsed modules: per-instruction
+            // spans recorded by `TextModuleWriter.WriteWithLineMap`
+            // during a canonical re-render. Key is (funcIdx,
+            // byteOffset) — funcIdx
             // identifies which function body, byteOffset pinpoints
             // the instruction within that body (computed via the
             // walker, same as the @+0x display above).

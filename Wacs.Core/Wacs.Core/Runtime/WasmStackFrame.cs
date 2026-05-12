@@ -23,8 +23,7 @@ namespace Wacs.Core.Runtime
     /// <see cref="Instruction"/> is the instruction that was executing
     /// in this frame when the trap fired — populated directly for the
     /// throwing frame (top of the chain) and resolved lazily for
-    /// caller frames in <see cref="Wacs.Core.Runtime.Exceptions.WasmStackTrace"/>
-    /// (Pass C).</para>
+    /// caller frames in <see cref="Wacs.Core.Runtime.Exceptions.WasmStackTrace"/>.</para>
     ///
     /// <para><see cref="ResumeContinuationAddress"/> is the linker-
     /// assigned PC the caller frame will return to. Combined with the

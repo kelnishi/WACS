@@ -55,7 +55,7 @@ namespace Wacs.Core.Instructions
         // Capture the WASM call stack at throw time. The cheap path
         // (no source-map lookup) costs O(call-depth) reads of the
         // ExecContext's frame stack; rehydration to a textual trace
-        // is deferred to Wacs.Core.Runtime.WasmStackTrace (Pass C).
+        // is deferred to Wacs.Core.Runtime.Exceptions.WasmStackTrace.
         public override void Execute(ExecContext context) =>
             throw new TrapException("unreachable",
                 context.SnapshotCallStack(this));

@@ -17,12 +17,13 @@ using Xunit;
 namespace Wacs.Core.Test
 {
     /// <summary>
-    /// Pass C coverage: <see cref="WasmStackTrace.Format"/> and
+    /// <see cref="WasmStackTrace.Format"/> and
     /// <see cref="WasmStackTrace.FormatVerbose"/> render a captured
     /// <see cref="WasmStackFrame"/> chain to a human-readable trace.
     /// Cheap form runs purely on the captured fields; verbose form
     /// resolves source coords via <see cref="Module.SourcePositions"/>
-    /// when available.
+    /// when available, or via a re-rendered <see cref="LineMap"/>
+    /// for binary-parsed modules.
     /// </summary>
     public class WasmStackTraceTests
     {
@@ -60,8 +61,8 @@ namespace Wacs.Core.Test
         [Fact]
         public void FormatVerbose_WatParsedModule_AddsSourceLine()
         {
-            // WAT-parsed modules carry Module.SourcePositions from
-            // Pass B. FormatVerbose surfaces the (line:col) suffix.
+            // WAT-parsed modules carry Module.SourcePositions, which
+            // FormatVerbose surfaces as a (line:col) suffix.
             const string wat = @"(module
               (func (export ""bad"")
                 unreachable))";
@@ -80,9 +81,9 @@ namespace Wacs.Core.Test
         [Fact]
         public void FormatVerbose_BinaryParsedModule_ResolvesViaLineMap()
         {
-            // Pass G. Binary-parsed modules have no SourcePositions,
-            // but a caller-supplied LineMap (from a canonical re-
-            // render) lets the formatter still surface (line:col).
+            // Binary-parsed modules have no SourcePositions, but a
+            // caller-supplied LineMap (from a canonical re-render)
+            // lets the formatter still surface (line:col).
             const string wat = @"(module
               (func (export ""bad"")
                 unreachable))";

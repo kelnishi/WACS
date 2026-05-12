@@ -18,8 +18,8 @@ using Xunit;
 namespace Wacs.Core.Test
 {
     /// <summary>
-    /// Pass G: bridging binary-parsed modules to source coordinates
-    /// via <see cref="TextModuleWriter.WriteWithLineMap"/>. The writer
+    /// Binary-parsed modules resolve to source coordinates via
+    /// <see cref="TextModuleWriter.WriteWithLineMap"/>. The writer
     /// records a per-instruction span keyed by
     /// <see cref="ModuleElementKind.Instruction"/> with
     /// <see cref="ModuleElementRef.Index"/> = funcIdx and
@@ -62,8 +62,8 @@ namespace Wacs.Core.Test
                 drop))";
 
             var binModule = RoundTripBinary(wat);
-            // SourcePositions is the WAT-only side-table — binary parse
-            // leaves it null (Pass B invariant).
+            // SourcePositions is the WAT-only side-table — binary
+            // parse leaves it null.
             Assert.Null(binModule.SourcePositions);
 
             var (_, lineMap) = TextModuleWriter.WriteWithLineMap(binModule);
@@ -114,11 +114,11 @@ namespace Wacs.Core.Test
         [Fact]
         public void WatParsed_LineMapStillRecordsSpans()
         {
-            // A WAT-parsed module has Module.SourcePositions populated
-            // (Pass B), so the WasmStackTrace formatter prefers that
-            // table. WriteWithLineMap still records spans regardless
-            // — this test verifies the LineMap mechanism is path-
-            // independent.
+            // A WAT-parsed module has Module.SourcePositions
+            // populated, so the WasmStackTrace formatter prefers
+            // that table. WriteWithLineMap still records spans
+            // regardless — this test verifies the LineMap mechanism
+            // is path-independent.
             const string wat = @"(module
               (func (result i32)
                 i32.const 7))";

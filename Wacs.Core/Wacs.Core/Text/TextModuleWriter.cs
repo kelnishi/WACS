@@ -354,15 +354,14 @@ namespace Wacs.Core.Text
             w.WriteLine();
             // Body — folded vs flat depends on the requested style.
             // Folded mode currently folds at the top level only;
-            // instructions inside block / loop / if bodies render flat
-            // (recursive folding lands in a follow-up pass).
+            // instructions inside block / loop / if bodies render flat.
             //
             // For LineMap recording: pre-walk the body once with
             // ByteOffsetWalker to compute body-relative byte offsets
-            // per instruction reference. Pass G's LineMap key is
-            // (absolute funcIdx, byteOffset); WasmStackTrace's trap-
-            // time walker computes the trap's offset by the same walk,
-            // so both sides agree (first-match for shared singletons).
+            // per instruction reference. The LineMap key is (absolute
+            // funcIdx, byteOffset); WasmStackTrace's trap-time walker
+            // computes the trap's offset by the same walk so both
+            // sides agree (first-match for shared singletons).
             int recordFuncIdx = lineMap != null ? (int)fn.Index.Value : -1;
             Dictionary<InstructionBase, uint>? instOffsets = null;
             if (lineMap != null)

@@ -19,13 +19,12 @@ using Xunit;
 namespace Wacs.Core.Test
 {
     /// <summary>
-    /// Pass D coverage: every trap that escapes the interpreter's
-    /// dispatch loop carries a populated <c>WasmFrames</c> snapshot,
-    /// regardless of whether the throwing instruction site was
-    /// migrated. This is the broad-coverage equivalent of having
-    /// migrated each of the ~170 trap throw sites manually — the
-    /// dispatch-loop's outer catch fills in null-framed exceptions
-    /// retroactively.
+    /// Every trap that escapes the interpreter's dispatch loop
+    /// carries a populated <c>WasmFrames</c> snapshot, regardless of
+    /// where in the runtime it was thrown. Most trap sites construct
+    /// <see cref="TrapException"/> without frames; the dispatch
+    /// loop's outer catch fills them in retroactively from the
+    /// live <see cref="ExecContext"/>.
     /// </summary>
     public class ErrorFormattingTests
     {
@@ -50,11 +49,11 @@ namespace Wacs.Core.Test
         }
 
         [Fact]
-        public void Unreachable_HasMigratedFrameCapture()
+        public void Unreachable_HasFrameCapture()
         {
-            // Pre-existing Pass A coverage: the InstUnreachable throw
-            // site was migrated to use the snapshot constructor
-            // directly. Verifies the migrated path stays working.
+            // InstUnreachable throws via the snapshot-aware
+            // TrapException constructor directly. Verifies that path
+            // produces a populated WasmFrames chain.
             var (_, _, trap) = RunTrap(
                 "(module (func (export \"x\") unreachable))",
                 "x");
@@ -117,9 +116,9 @@ namespace Wacs.Core.Test
             Assert.Equal("unreachable",
                 trap.WasmFrames[0].Instruction!.Op.GetMnemonic());
             // Caller frames don't carry instruction refs in the
-            // cheap snapshot — they carry resume PCs instead.
-            // (Pass D doesn't try to resolve those to source-level
-            // instructions; the formatter just reports the PC.)
+            // cheap snapshot — they carry resume PCs instead. The
+            // formatter reports the PC rather than trying to resolve
+            // it to a source-level instruction.
             Assert.Null(trap.WasmFrames[1].Instruction);
             Assert.Null(trap.WasmFrames[2].Instruction);
         }
@@ -127,8 +126,8 @@ namespace Wacs.Core.Test
         [Fact]
         public void FormatVerbose_IncludesSourceLineFromSourcePositions()
         {
-            // WAT-parsed modules have Module.SourcePositions populated
-            // (Pass B). FormatVerbose surfaces `(line:col)`.
+            // WAT-parsed modules have Module.SourcePositions
+            // populated. FormatVerbose surfaces `(line:col)`.
             var (module, runtime, trap) = RunTrap(@"(module
                 (func (export ""x"") (result i32)
                   i32.const 7

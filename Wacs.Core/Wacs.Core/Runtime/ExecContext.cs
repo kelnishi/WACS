@@ -360,8 +360,7 @@ namespace Wacs.Core.Runtime
         /// directly when supplied (e.g. <c>this</c> from a throwing
         /// instruction). Caller frames carry their resume PC instead;
         /// resolution to the call-site instruction is deferred to the
-        /// trace formatter (Pass C) so cost stays out of the throw
-        /// path.
+        /// trace formatter so cost stays out of the throw path.
         ///
         /// <para>Cheap: O(call-depth) reads, no allocations beyond
         /// the returned array. Returns an empty array when the call

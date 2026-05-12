@@ -11,12 +11,17 @@ using CommandLine;
 namespace Wacs.Console.Verbs
 {
     /// <summary>
-    /// `wacs inspect file.wasm` — diagnostics: WAT dump, stats,
-    /// exports/imports listing. Parse-only — no instantiation,
-    /// no execution.
+    /// `wacs inspect file` — diagnostics + format conversion: WAT
+    /// dump, wasm dump, stats, exports/imports listing. Parse-only
+    /// at the runtime level — no instantiation, no execution.
+    /// Accepts either .wat or .wasm input and emits the opposite
+    /// format with --dump-wasm / --dump-wat.
     /// </summary>
     [Verb("inspect", HelpText =
-        "Diagnostics: parse a .wasm and dump WAT / stats / exports.")]
+        "Diagnostics + format conversion: parse a .wat / .wasm and "
+        + "dump the opposite format, stats, or exports/imports. "
+        + "WAT ↔ wasm round-trips include $names and an optional "
+        + "wacs.trivia custom section for comments / annotations.")]
     public sealed class InspectOptions : SharedOptions
     {
         [Value(0, MetaName = "file", HelpText =
@@ -25,15 +30,20 @@ namespace Wacs.Console.Verbs
 
         [Option("dump-wat", HelpText =
             "Render parser-friendly WAT to stdout (or to "
-            + "<basename>.wat with --output-dir). Round-trips back "
-            + "through the text parser.")]
+            + "<basename>.wat with --output-dir). Accepts .wasm or "
+            + ".wat input; round-trips back through the text parser. "
+            + "Recovers function $names from the `name` custom "
+            + "section and `;;` / `(@...)` trivia from `wacs.trivia` "
+            + "when those sections are present.")]
         public bool DumpWat { get; set; }
 
         [Option("dump-wasm", HelpText =
             "Render canonical wasm binary. With --output-dir writes "
             + "<basename>.wasm; without it streams raw bytes to "
-            + "stdout (pipe target). Combined with a .wat input, "
-            + "this is the WAT→binary direction.")]
+            + "stdout (pipe target). Accepts .wat or .wasm input. "
+            + "WAT inputs propagate $names into the `name` custom "
+            + "section and comments / annotations into `wacs.trivia` "
+            + "so a subsequent --dump-wat recovers them.")]
         public bool DumpWasm { get; set; }
 
         [Option("output-dir", HelpText =

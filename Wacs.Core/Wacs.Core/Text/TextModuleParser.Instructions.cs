@@ -90,9 +90,9 @@ namespace Wacs.Core.Text
                 // multiple instructions (operands + operator), they
                 // share the outermost form's source position —
                 // accurate when on a single line, a fair approximation
-                // otherwise. Consumed by the stack-trace formatter
-                // (Pass C) to resolve traps to source coords without
-                // re-rendering the module.
+                // otherwise. Consumed by `WasmStackTrace` to resolve
+                // traps to source coords without re-rendering the
+                // module.
                 int sourceLine = node.Token.Line;
                 int sourceCol = node.Token.Column;
                 int sourceOffset = node.Token.Start;

@@ -18,8 +18,8 @@ using Xunit;
 namespace Wacs.Core.Test
 {
     /// <summary>
-    /// Pass B coverage: <see cref="Module.SourcePositions"/> populated
-    /// by <see cref="TextModuleParser"/>. Per-instruction source coords
+    /// <see cref="Module.SourcePositions"/> populated by
+    /// <see cref="TextModuleParser"/>. Per-instruction source coords
     /// survive parsing without further work; binary-parsed modules
     /// leave the side-table null (lazy-allocation invariant).
     /// </summary>
@@ -105,7 +105,8 @@ namespace Wacs.Core.Test
         {
             // Build a tiny wasm via the round-trip path: parse WAT,
             // emit binary, re-parse binary. The binary-parsed module
-            // must NOT carry source positions — Pass B is WAT-only.
+            // must NOT carry source positions — SourcePositions is
+            // populated only by the text parser.
             const string wat = "(module (func (result i32) i32.const 1))";
             var watModule = Parse(wat);
             var bytes = Wacs.Core.Bin.BinaryModuleWriter.Write(watModule);

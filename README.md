@@ -784,15 +784,25 @@ wacs build app.component.wasm --wasip2 --emit-main \
     --entry-point greet -o app.dll
 ```
 
-**Inspect verb (parse-only diagnostics):**
+**Inspect verb (diagnostics + format conversion):**
 
 ```bash
 wacs inspect module.wasm                # stats summary (default)
 wacs inspect module.wasm --exports
 wacs inspect module.wasm --imports
-wacs inspect module.wasm --dump-wat     # round-trip WAT to stdout
 wacs inspect app.component.wasm         # component metadata
+
+# WAT ↔ wasm round-trip:
+wacs inspect module.wasm --dump-wat     # binary → WAT (stdout)
+wacs inspect module.wat  --dump-wasm    # WAT → binary (stdout pipe)
+wacs inspect module.wat  --dump-wasm --output-dir out/   # write out/module.wasm
 ```
+
+Round-trips preserve function `$names` via the standard `name`
+custom section and preserve WAT comments / `(@…)` annotations via
+a `wacs.trivia` custom section. The `wacs.trivia` section is
+WACS-specific (no spec) and ignored by other engines — strippable
+when shipping a release binary.
 
 **Sampled CoreMark performance** (M3 Max, .NET 8, `Wacs.Console/Wacs.Console/Data/coremark.wasm`, default 6000 iterations; single run each):
 

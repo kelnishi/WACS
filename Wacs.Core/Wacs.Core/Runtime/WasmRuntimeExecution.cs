@@ -729,13 +729,10 @@ namespace Wacs.Core.Runtime
                     string location = "";
                     if (options.CalculateLineNumbers)
                     {
-                        // The instruction-execution logger used to
-                        // resolve source line numbers per
-                        // instruction via ComputePointerPath (now
-                        // gone). The Pass-D refactor replaced that
-                        // with WasmStackTrace, which only formats on
-                        // trap rather than per-instruction; here we
-                        // fall back to the instruction-pointer log.
+                        // Source-line resolution per instruction is
+                        // no longer plumbed through this logger;
+                        // WasmStackTrace handles it on trap. Fall back
+                        // to the instruction-pointer log here.
                         var log = $"Inst[0x{Context.InstructionPointer:x8}]: {inst.RenderText(Context)}".PadRight(40, ' ');
                         Console.Error.WriteLine(log);
                     }
@@ -761,13 +758,10 @@ namespace Wacs.Core.Runtime
                     string location = "";
                     if (options.CalculateLineNumbers)
                     {
-                        // The instruction-execution logger used to
-                        // resolve source line numbers per
-                        // instruction via ComputePointerPath (now
-                        // gone). The Pass-D refactor replaced that
-                        // with WasmStackTrace, which only formats on
-                        // trap rather than per-instruction; here we
-                        // fall back to the instruction-pointer log.
+                        // Source-line resolution per instruction is
+                        // no longer plumbed through this logger;
+                        // WasmStackTrace handles it on trap. Fall back
+                        // to the instruction-pointer log here.
                         var log = $"Inst[0x{Context.InstructionPointer:x8}]: {inst.RenderText(Context)}".PadRight(40, ' ');
                         Console.Error.WriteLine(log);
                     }

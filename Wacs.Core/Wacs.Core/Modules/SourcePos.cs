@@ -56,8 +56,9 @@ namespace Wacs.Core
         /// WAT parser only when it first emits an instruction. The
         /// hot interpreter loop never touches it.</para>
         ///
-        /// <para>Consumed by the stack-trace formatter (Pass C) to
-        /// resolve a frame's instruction to a source line / column.
+        /// <para>Consumed by
+        /// <see cref="Wacs.Core.Runtime.Exceptions.WasmStackTrace"/>
+        /// to resolve a frame's instruction to a source line / column.
         /// When this is null, the formatter re-renders the module via
         /// <see cref="Wacs.Core.Text.TextModuleWriter.WriteWithLineMap"/>
         /// (lazy, on demand) and resolves the instruction's body-

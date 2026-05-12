@@ -17,12 +17,13 @@ using Xunit;
 namespace Wacs.Core.Test
 {
     /// <summary>
-    /// Pass A coverage: <see cref="TrapException.WasmFrames"/> and
+    /// <see cref="TrapException.WasmFrames"/> and
     /// <see cref="UnhandledWasmException.WasmFrames"/> are populated
-    /// at the proof-of-concept throw sites (`unreachable`, unhandled
-    /// `throw`). Frame chain captures top frame's throwing
-    /// instruction; caller frames record their resume PC for
-    /// later lazy resolution.
+    /// at throw sites that construct via the snapshot-aware
+    /// constructor (e.g. <c>unreachable</c>, unhandled <c>throw</c>).
+    /// The frame chain captures the top frame's throwing instruction
+    /// directly; caller frames record their resume PC for lazy
+    /// resolution by <see cref="WasmStackTrace"/>.
     /// </summary>
     public class WasmStackFrameTests
     {
@@ -64,9 +65,10 @@ namespace Wacs.Core.Test
         [Fact]
         public void TrapException_LegacyConstructor_LeavesFramesNull()
         {
-            // The bare-string constructor stays — most trap sites
-            // haven't been migrated yet (Pass D batches that work).
-            // Until then, the WasmFrames slot must be null.
+            // The bare-string constructor stays for trap sites that
+            // throw without an ExecContext in scope. The dispatch
+            // loop's outer catch enriches null-framed traps before
+            // they reach the embedder.
             var trap = new TrapException("ad hoc");
             Assert.Null(trap.WasmFrames);
             Assert.Equal("ad hoc", trap.Message);
