@@ -1,5 +1,28 @@
 # Changelog
 
+## WACS.Cli 1.7.2 — drop OpenVINO native runtimes from bundle
+
+The 1.7.1 nupkg failed to publish to NuGet (HTTP 413 — package
+exceeds the 250 MB upload limit). Each `OpenVINO.runtime.<rid>`
+pack is 150-200 MB decompressed; pinning all four primary RIDs
+(`macos-arm64` / `macos-x86_64` / `win` / `ubuntu.22-x86_64`)
+plus the existing ORT natives pushed the wacs nupkg past the
+NuGet ceiling.
+
+Removed all four `OpenVINO.runtime.*` package references from
+`Wacs.Console.csproj`. The OpenVINO backend DLL still ships in
+the wacs bundle, but the matching native runtime is the user's
+responsibility — install
+`OpenVINO.runtime.<rid>` for your RID separately and drop the
+unpacked `runtimes/<rid>/native/` tree into the wacs install
+location. Full instructions in
+[`Wacs.WASI/Wacs.WASI.NN/Wacs.WASI.NN.OpenVino/README.md`](Wacs.WASI/Wacs.WASI.NN/Wacs.WASI.NN.OpenVino/README.md).
+
+The architecture matches how ML.NET and TorchSharp backends
+already ship — the WACS-native backend DLL is small and
+bundled, the heavy ML framework's natives are a separate
+install.
+
 ## WACS.WASI.NN.OpenVino 0.1.0 / WACS.Cli 1.7.1 — OpenVINO wasi-nn backend
 
 New backend package for `graph-encoding.openvino`, plus a CLI
