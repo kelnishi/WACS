@@ -1,5 +1,89 @@
 # Changelog
 
+## WACS.WASI.NN.OpenVino 0.1.0 / WACS.Cli 1.7.1 — OpenVINO wasi-nn backend
+
+New backend package for `graph-encoding.openvino`, plus a CLI
+bundle update that ships the OpenVINO native runtimes alongside
+the existing ONNX Runtime packs. A guest that calls
+`wasi:nn/graph.load` with the `openvino` encoding now Just Works
+end-to-end on the four primary RIDs (macOS arm64 / macOS x64 /
+Windows x64 / Ubuntu 22 x64).
+
+### What's new
+
+- **`WACS.WASI.NN.OpenVino`** — backend package implementing
+  `IBackend` against [`OpenVINO.CSharp.API`](https://www.nuget.org/packages/OpenVINO.CSharp.API)
+  2025.4.0. Handles the two-builder shape (XML + bin) that the
+  wasi-nn spec was originally designed around. Element-type
+  coverage: `fp16`, `fp32`, `fp64`, `bf16`, `u8`, `i32`, `i64` —
+  every primitive in the WIT enum.
+- **`OpenVinoBackendOptions` / `OpenVinoDevice`** — typed knobs
+  for device pinning (`CPU` / `GPU` / `NPU` / `AUTO`), a
+  property-bag forwarded into OpenVINO's `compile_model`, and
+  CPU-fallback gating. Env-var aliases:
+  `WACS_WASINN_OPENVINO_DEVICE`,
+  `WACS_WASINN_OPENVINO_PROPERTIES`,
+  `WACS_WASINN_OPENVINO_FALLBACK_CPU`.
+- **`WasiNNOpenVinoBindable`** — parameterless `IBindable`
+  adapter for `--bind WACS.WASI.NN.OpenVino` (matches the
+  per-backend convention already in use by the ONNX / MLNet /
+  LlamaSharp / TorchSharp / OnnxRuntimeGenAI siblings).
+- **`Wacs.Console`** bundles `WACS.WASI.NN.OpenVino` plus
+  `OpenVINO.runtime.<rid>` native packs for macOS arm64
+  (2024.4.0.1), macOS x86_64 (2024.4.0.1), Windows
+  (2026.0.0), and Ubuntu 22 x86_64 (2024.4.0.1). NuGet's
+  RID-aware restore drops the matching native binaries into
+  `runtimes/<rid>/native/` in the published bundle.
+
+### Usage
+
+```bash
+# CLI — backend ships bundled in WACS.Cli; pick it via --bind.
+wacs run my.component.wasm --wasip2 --bind WACS.WASI.NN.OpenVino
+
+# Pin a device (default AUTO):
+WACS_WASINN_OPENVINO_DEVICE=cpu wacs run my.wasm ...
+WACS_WASINN_OPENVINO_DEVICE=gpu wacs run my.wasm ...
+
+# Forward arbitrary compile_model properties:
+WACS_WASINN_OPENVINO_PROPERTIES=PERFORMANCE_HINT=LATENCY,INFERENCE_PRECISION_HINT=f16 \
+    wacs run my.wasm ...
+```
+
+```csharp
+// Embedder
+using Wacs.Core.Runtime;
+using Wacs.WASI.NN;
+using Wacs.WASI.NN.OpenVino;
+using Wacs.WASI.NN.Types;
+
+var runtime = new WasmRuntime();
+runtime.UseWasiNN(b => b.AddBackend(
+    GraphEncoding.OpenVINO, new OpenVinoBackend()));
+```
+
+### Multi-builder `graph.load` shape
+
+OpenVINO is the wasi-nn encoding the spec multi-builder shape
+was originally designed around: `builders[0]` is the IR XML and
+`builders[1]` is the weights `.bin`. The new backend reads them
+directly into `Core.read_model(xmlBytes, weightsTensor)` with no
+intermediate file I/O. Single-builder calls fall through with
+empty weights — supports IRs that inline all constants into the
+XML.
+
+### Note: no separate `--wasi-nn-openvino` flag
+
+The pattern matches the existing MLNet / LlamaSharp / TorchSharp
+backends: a backend is selected via
+`--bind WACS.WASI.NN.<Backend>` from the bundled assembly, not
+via a flag. The shorthand `--wasi-nn` still maps to the ONNX
+Runtime backend (its job for years); a single-encoding tool
+keeps the routing unambiguous. Guests that need multiple
+encodings simultaneously belong on the `WasiNNHost`-with-
+multiple-backends programmatic path, which all packages
+support.
+
 ## WACS.Cli 1.7.0 — `wacs wast2json` verb
 
 New verb that converts a `.wast` spec-test script into the

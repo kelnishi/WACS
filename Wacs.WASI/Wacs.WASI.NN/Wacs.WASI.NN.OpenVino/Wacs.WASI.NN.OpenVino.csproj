@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <LangVersion>9</LangVersion>
+        <Nullable>enable</Nullable>
+        <Title>Wacs WASI-NN OpenVINO backend</Title>
+        <PackageId>WACS.WASI.NN.OpenVino</PackageId>
+        <Authors>Kelvin Nishikawa</Authors>
+        <Description>OpenVINO backend for WACS.WASI.NN. Implements IBackend for graph-encoding.openvino via the OpenVINO.CSharp.API NuGet. Loads OpenVINO IR (xml + bin) from the wasi-nn multi-builder shape. Ships as a sibling NuGet so consumers wiring only one backend don't pull the OpenVINO native runtimes.</Description>
+        <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
+        <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <AssemblyName>Wacs.WASI.NN.OpenVino</AssemblyName>
+        <AssemblyVersion>0.1.0</AssemblyVersion>
+        <Version>0.1.0</Version>
+        <RepositoryType>git</RepositoryType>
+        <!-- OpenVINO.CSharp.API targets net6.0+, so net8.0 is fine.
+             Like the ORT backend we restrict to net8.0 because the
+             native runtimes only publish for that floor anyway. -->
+        <TargetFramework>net8.0</TargetFramework>
+        <PackageTags>wasm;wasi;nn;ml;openvino;intel;wacs</PackageTags>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="README.md">
+            <Pack>true</Pack>
+            <PackagePath/>
+        </None>
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Wacs.WASI.NN\Wacs.WASI.NN.csproj" />
+        <!-- 2025.4.0 is the latest as of writing. The companion
+             OpenVINO.runtime.<rid> packages publish at 2024.4.0.1 for
+             everything except win (2026.0.0); the API surface this
+             backend uses (Core, Model, CompiledModel, InferRequest,
+             Tensor, Shape, element.Type, ElementType) is stable across
+             the 2024.0 → 2025.4 range. -->
+        <PackageReference Include="OpenVINO.CSharp.API" Version="2025.4.0" />
+    </ItemGroup>
+
+</Project>
