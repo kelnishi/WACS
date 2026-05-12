@@ -1,5 +1,42 @@
 # Changelog
 
+## WACS.WASI.NN.OpenVino 0.1.2 — BYO-runtime script for the 2025.x+ IR skew
+
+The NuGet `OpenVINO.runtime.macos-arm64` (and the other non-Windows
+RIDs) is **stuck at 2024.4.0.1**. IR exported by
+`pip install openvino==2025.x` or 2026.x trips
+`Incorrect weights in bin file!` at `Core.read_model` against
+the older bundled runtime. OpenVINO IR is backward-compatible
+within a major version but not forward-compatible.
+
+Ships a `tools/fetch-openvino-native.sh` script in the
+`WACS.WASI.NN.OpenVino` package that:
+
+- Resolves Intel's official tarball URL for a given version
+  (default 2025.4.1) + RID (default `osx-arm64`) via
+  `storage.openvinotoolkit.org`'s `filetree.json` index.
+- Downloads, extracts, and stages the dylibs into the wacs
+  install location's `runtimes/<rid>/native/` directory.
+- Auto-detects the wacs install path via `command -v wacs` +
+  the standard `dotnet tool list -g` layout. `--dest <path>`
+  override for embedders who installed wacs in a non-standard
+  location.
+
+The C# wrapper layer P/Invokes against `libopenvino_c` by
+soname, so Intel's newer native is binary-compatible at the
+wrapper boundary without bumping `OpenVINO.CSharp.API`. Live-
+verified that 2025.4.1 dylibs swap cleanly: `wacs run --bind
+WACS.WASI.NN.OpenVino` constructs `new Core()` against the
+newer native and reports `1 binding(s)`.
+
+Currently supports `osx-arm64` only — Linux + Windows users
+typically have a workable NuGet runtime already (Linux 2024.4
+covers most exports + Windows is at 2026.0.0 on NuGet). Open
+an issue if you need the script extended.
+
+Includes a version-skew note in the package README pointing
+at the script + Intel's release archive.
+
 ## WACS family release — auto-discovery for wasi-nn backends
 
 Replaces the hand-written per-backend `BuildXxxConfigureCallback`
