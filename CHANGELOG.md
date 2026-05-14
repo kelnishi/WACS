@@ -1,5 +1,52 @@
 # Changelog
 
+## WACS.WASI.NN.OpenVino 0.2.0 / WACS.Cli 1.7.5 — bundle OpenVINO 2026.1.0 macOS arm64 runtime
+
+Upstream `OpenVINO-CSharp-API` shipped 2026.1.0 native packs after
+the maintainer merged the auto-update PR. `OpenVINO.runtime.macos-arm64`
+is now at 2026.1.0 on NuGet (up from a stale 2024.4.0.1). Wire it
+back into the backend csproj as a transitive dependency — a stock
+`dotnet add package WACS.WASI.NN.OpenVino` on Apple Silicon now
+restores the natives automatically, and the bundled `wacs` CLI
+ships them at `tools/.../runtimes/osx-arm64/native/` so global-
+tool installs get a working OpenVINO setup with zero manual
+staging.
+
+The 2026.1 native reads OpenVINO IR exported by `pip install
+openvino==2024.x | 2025.x | 2026.x` cleanly, closing the
+forward-incompatibility gap that PR #154's `fetch-openvino-native.sh`
+script was created to bridge. With the upstream NuGet packs now
+tracking releases, the BYO-runtime fetch script is no longer
+needed and has been removed from the package.
+
+The wrapper itself stays at `OpenVINO.CSharp.API` 2025.4.0; the C
+ABI is stable within an OpenVINO major series so 2025.4 wrapper
+P/Invokes resolve cleanly against the 2026.1 native runtime.
+
+### What changed
+
+- **`WACS.WASI.NN.OpenVino` 0.1.2 → 0.2.0** (minor — adds a
+  ~170 MB transitive runtime dep on macOS arm64; out-of-box install
+  behavior on that RID shifts from "stage natives yourself" to
+  "just works"): adds `OpenVINO.runtime.macos-arm64` 2026.1.0 as
+  a hard `PackageReference` with `ExcludeAssets="compile"`. README
+  rewritten to demote the version-skew workaround to a section
+  scoped to the still-stale non-bundled RIDs (`macos-x86_64`,
+  `ubuntu.*-x86_64`).
+- **`WACS.Cli` 1.7.4 → 1.7.5** (point — bundle picks up the new
+  backend transitive dep): CLI nupkg grows from ~135 MB to ~181 MB,
+  comfortably under the 250 MB NuGet upload limit. No CLI surface
+  changes.
+
+### Verified
+
+- `dotnet pack Wacs.Console` produces `WACS.Cli.1.7.5.nupkg` at
+  ~181 MB; `unzip -l` confirms the OpenVINO 2026.1 dylibs land at
+  `tools/net9.0/any/runtimes/osx-arm64/native/`.
+- `wacs run /tmp/empty.wasm --bind WACS.WASI.NN.OpenVino --verbose`
+  reports `bind WACS.WASI.NN.OpenVino -> 1 binding(s)` against the
+  new native runtime.
+
 ## WACS.WASI.NN.OpenVino 0.1.2 — BYO-runtime script for the 2025.x+ IR skew
 
 The NuGet `OpenVINO.runtime.macos-arm64` (and the other non-Windows

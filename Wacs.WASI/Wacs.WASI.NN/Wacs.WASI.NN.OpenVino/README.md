@@ -17,81 +17,45 @@ distribution format (Model + Weights). This backend reads those two builders dir
 dotnet add package WACS.WASI.NN.OpenVino
 
 # 2. Native runtime for your platform (~150-200 MB unpacked).
-#    Pick exactly one matching your RID:
-dotnet add package OpenVINO.runtime.macos-arm64    # Apple Silicon — 2024.4.0.1 only (see version-skew note)
-dotnet add package OpenVINO.runtime.macos-x86_64   # Intel Mac — 2024.4.0.1
-dotnet add package OpenVINO.runtime.win            # Windows x64 — 2026.0.0
-dotnet add package OpenVINO.runtime.ubuntu.22-x86_64  # — 2024.4.0.1
+#    The backend pulls macos-arm64 in transitively; on other
+#    RIDs, add the matching pack explicitly:
+dotnet add package OpenVINO.runtime.macos-x86_64       # Intel Mac
+dotnet add package OpenVINO.runtime.win                # Windows x64
+dotnet add package OpenVINO.runtime.ubuntu.22-x86_64   # Ubuntu x86_64
 # (other Linux distros + arm64 variants are published as
 #  OpenVINO.runtime.{centos7,rhel8,debian10}-x86_64 /
 #  OpenVINO.runtime.ubuntu.{18,20}-arm64 etc. — see
 #  https://www.nuget.org/packages?q=openvino.runtime)
 ```
 
-The runtime pack is shipped as a sibling NuGet rather than bundled with the
-backend or CLI because each one is large enough that bundling all four would
-push the parent NuGet past the 250 MB upload limit. Native binaries land in
+The macOS arm64 runtime pack (`OpenVINO.runtime.macos-arm64` 2026.1.0) is
+bundled as a hard dependency of this backend, so a stock `dotnet add package
+WACS.WASI.NN.OpenVino` on Apple Silicon picks up the natives at restore time
+with no second `add package` step. The other RID packs are siblings rather
+than transitive deps because shipping all four runtimes would push this
+package past the 250 MB NuGet upload limit. Native binaries land in
 `runtimes/<rid>/native/` of your published output via NuGet's standard
 RID-aware restore — `OpenVINO.CSharp.API` P/Invokes against the standard
 library names (`openvino.dylib` / `openvino.so` / `openvino.dll`) and finds
 them at load time.
 
-### Version skew: bring-your-own native runtime for `2025.x` / `2026.x` IR
-
-`OpenVINO.runtime.macos-arm64`, `macos-x86_64`, and the `ubuntu.*-x86_64`
-packs are **stuck at 2024.4.0.1** (Sep 2024). Only `OpenVINO.runtime.win` has
-moved forward (2026.0.0). The OpenVINO IR format is backward-compatible
-within a major version but **not forward-compatible** — IR exported by
-`pip install openvino==2025.x` (or 2026.x) trips
-`Incorrect weights in bin file!` at `Core.read_model` when handed to a
-2024.4 runtime.
-
-If your model-export side is on a newer OpenVINO than 2024.4, you have two
-options:
-
-1. **Pin Python**: `pip install openvino==2024.4.0` and re-export the IR.
-   Simplest; works as long as the older `openvino` wheel installs cleanly
-   on your platform.
-
-2. **Drop in Intel's official native runtime**: download from
-   [`storage.openvinotoolkit.org`](https://storage.openvinotoolkit.org/repositories/openvino/packages/)
-   and stage the dylibs over the NuGet-installed `runtimes/<rid>/native/`
-   directory. The shipped C# wrapper P/Invokes by soname (`libopenvino_c`)
-   so a newer Intel runtime is binary-compatible at the wrapper layer.
-
-A turnkey script for option (2) lives at
-[`scripts/fetch-openvino-native.sh`](scripts/fetch-openvino-native.sh) in
-this package's repo:
-
-```sh
-# Downloads OpenVINO 2025.4.1 macOS arm64, auto-detects the wacs install
-# location, and stages the dylibs into runtimes/osx-arm64/native/.
-./fetch-openvino-native.sh
-
-# Specify version (default 2025.4.1) and destination explicitly:
-./fetch-openvino-native.sh -v 2026.1.0 -d /path/to/runtimes/osx-arm64/native
-```
-
-The script currently supports `osx-arm64` only — the macOS arm64 + 2025.x
-pip-export case is the gap that prompted writing it. Linux / Windows users
-typically have a workable NuGet runtime already; open an issue if you need
-the script extended.
-
 ## CLI
 
-The `wacs` CLI bundle ships `Wacs.WASI.NN.OpenVino.dll` but **not** the OpenVINO
-native runtime (size-bound — see the install note above). You need to drop the
-native libraries into the WACS install directory's `runtimes/<rid>/native/`
-folder yourself before invoking, or load them via `LD_LIBRARY_PATH` /
-`DYLD_LIBRARY_PATH` / `PATH`.
+The `wacs` CLI bundle ships `Wacs.WASI.NN.OpenVino.dll` and — on macOS
+arm64 — the matching OpenVINO native runtime, via transitive restore of the
+backend's `OpenVINO.runtime.macos-arm64` dependency. A stock
+`dotnet tool install -g WACS.Cli` on Apple Silicon gets you a working
+OpenVINO setup with no further steps.
 
-The easiest way to get a matched set is to install `OpenVINO.runtime.<rid>` into
-a scratch project and copy the unpacked natives:
+On the non-bundled RIDs (Windows, Linux, Intel Mac) you'll need to stage
+the natives manually. The easiest way to get a matched set is to install
+`OpenVINO.runtime.<rid>` into a scratch project and copy the unpacked
+natives:
 
 ```sh
 mkdir openvino-native && cd openvino-native
 dotnet new console
-dotnet add package OpenVINO.runtime.macos-arm64    # match your RID
+dotnet add package OpenVINO.runtime.ubuntu.22-x86_64   # match your RID
 dotnet build
 cp -R bin/Debug/net*/runtimes "$(dirname $(which wacs))/"
 ```
