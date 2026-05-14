@@ -12,8 +12,8 @@
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.WASI.NN.OpenVino</AssemblyName>
-        <AssemblyVersion>0.1.2</AssemblyVersion>
-        <Version>0.1.2</Version>
+        <AssemblyVersion>0.2.0</AssemblyVersion>
+        <Version>0.2.0</Version>
         <RepositoryType>git</RepositoryType>
         <!-- OpenVINO.CSharp.API targets net6.0+, so net8.0 is fine.
              Like the ORT backend we restrict to net8.0 because the
@@ -31,26 +31,35 @@
             <Pack>true</Pack>
             <PackagePath/>
         </None>
-        <!-- Ship the BYO-runtime fetch script in the NuGet under
-             `tools/` so users on macOS arm64 hitting the version-
-             skew issue (NuGet macos-arm64 native is stuck at
-             2024.4.0.1; 2025.x-exported IR fails to load) can
-             find it without checking out the repo. -->
-        <None Include="scripts/fetch-openvino-native.sh">
-            <Pack>true</Pack>
-            <PackagePath>tools/</PackagePath>
-        </None>
     </ItemGroup>
 
     <ItemGroup>
         <ProjectReference Include="..\Wacs.WASI.NN\Wacs.WASI.NN.csproj" />
-        <!-- 2025.4.0 is the latest as of writing. The companion
-             OpenVINO.runtime.<rid> packages publish at 2024.4.0.1 for
-             everything except win (2026.0.0); the API surface this
-             backend uses (Core, Model, CompiledModel, InferRequest,
-             Tensor, Shape, element.Type, ElementType) is stable across
-             the 2024.0 → 2025.4 range. -->
+        <!-- The wrapper's API surface this backend uses (Core,
+             Model, CompiledModel, InferRequest, Tensor, Shape,
+             element.Type, ElementType) is stable across the
+             2024.0 → 2025.4 range. OpenVINO maintains C ABI
+             compatibility within a major series, so the 2025.4.0
+             wrapper P/Invokes cleanly against the 2026.1.0
+             native runtime referenced below. -->
         <PackageReference Include="OpenVINO.CSharp.API" Version="2025.4.0" />
+        <!-- Bundles Intel's 2026.1.0 macOS arm64 native runtime
+             (~170 MB unpacked). Compile-only excluded so we
+             don't reference the wrapper twice; the package's
+             runtime asset lands at
+             `runtimes/osx-arm64/native/` in any consumer's
+             publish output via NuGet's RID-aware restore. The
+             previous 2024.4.0.1 pin was forward-incompatible
+             with IR exported by `pip install openvino==2025.x`
+             — the 2026.1 native reads 2024.x / 2025.x / 2026.x
+             IR cleanly. Other RIDs (macOS x86_64, win, ubuntu)
+             also published 2026.1.0 NuGets; not bundled here
+             to keep the parent CLI nupkg under the 250 MB
+             NuGet upload limit. Consumers on those platforms
+             add the matching `OpenVINO.runtime.<rid>` package
+             reference manually. -->
+        <PackageReference Include="OpenVINO.runtime.macos-arm64" Version="2026.1.0"
+                          ExcludeAssets="compile" />
     </ItemGroup>
 
 </Project>
