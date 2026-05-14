@@ -121,11 +121,20 @@ namespace Wacs.WASI.NN.OpenVino
 
                 var core = new OvCore();
                 var model = core.read_model(xmlBytes, weightsTensor);
+                // OpenVINO.CSharp.API 2025.4.0's compile_model
+                // dispatches on properties.Count and throws when
+                // Count is 0; only `null` reaches the no-props
+                // branch. Coerce empty → null so the default
+                // case (no WACS_WASINN_OPENVINO_PROPERTIES set)
+                // doesn't trip the wrapper's else throw.
+                var props = _options.Properties.Count == 0
+                    ? null
+                    : _options.Properties;
                 CompiledModel compiled;
                 try
                 {
                     compiled = core.compile_model(
-                        model, deviceName, _options.Properties);
+                        model, deviceName, props);
                 }
                 catch (Exception) when (_options.FallbackToCpu
                     && !string.Equals(deviceName, "CPU", StringComparison.Ordinal))
@@ -135,7 +144,7 @@ namespace Wacs.WASI.NN.OpenVino
                     // OpenVINO runtime distribution, so this
                     // path is the safest landing zone.
                     compiled = core.compile_model(
-                        model, "CPU", _options.Properties);
+                        model, "CPU", props);
                 }
 
                 // Tensors created from the weights bytes can be

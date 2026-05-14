@@ -1,5 +1,35 @@
 # Changelog
 
+## WACS.WASI.NN.OpenVino 0.2.1 / WACS.Cli 1.7.6 — fix compile_model empty-Properties throw
+
+`OpenVINO.CSharp.API` 2025.4.0's `Core.compile_model(model, device,
+Dictionary)` dispatches on `properties.Count` with branches for 0,
+1, 2, 3 — but the `Count == 0` arm is unreachable: only a `null`
+`Dictionary` hits the wrapper's no-properties native call, while
+an empty dict falls through the if-else chain into a throw:
+`"Only supports parameter quantities of 0, 1, 2, and 3."`
+
+`OpenVinoBackend.LoadGraph` constructed `_options.Properties` as
+an empty `Dictionary<string,string>` and passed it through, so
+every guest that loaded an OpenVINO model without setting
+`WACS_WASINN_OPENVINO_PROPERTIES` blew up at compile time.
+Surfaced now on macOS arm64 because the 2026.1.0 runtime ships
+brought `read_model` past the IR-version-skew gate that had been
+masking it — Linux and Windows guests would hit the same throw.
+
+Fix: coerce empty `Properties` to `null` at the two
+`compile_model` call sites (primary + CPU fallback) before
+dispatching to the wrapper. Reported in
+`wasi-nn/WACS-GAPS.md` gap 34.
+
+### What changed
+
+- **`WACS.WASI.NN.OpenVino` 0.2.0 → 0.2.1** (point — bug fix):
+  one-line guard in `OpenVinoBackend.cs` to substitute `null` for
+  the default empty `Properties` dict.
+- **`WACS.Cli` 1.7.5 → 1.7.6** (point — bundle re-pack against
+  the fixed backend): no CLI surface changes.
+
 ## WACS.WASI.NN.OpenVino 0.2.0 / WACS.Cli 1.7.5 — bundle OpenVINO 2026.1.0 macOS arm64 runtime
 
 Upstream `OpenVINO-CSharp-API` shipped 2026.1.0 native packs after
