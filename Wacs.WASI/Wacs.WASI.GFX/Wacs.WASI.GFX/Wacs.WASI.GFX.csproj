@@ -101,6 +101,9 @@
         <InternalsVisibleTo Include="Wacs.WASI.GFX.Test" />
         <InternalsVisibleTo Include="Wacs.WASI.GFX.Silk" />
         <InternalsVisibleTo Include="Wacs.WASI.GFX.DependencyInjection" />
+        <!-- v1 phase 3: Webgpu sibling shares ResourceTable +
+             Realloc internals via this grant. -->
+        <InternalsVisibleTo Include="Wacs.WASI.GFX.Webgpu" />
     </ItemGroup>
 
     <ItemGroup>
