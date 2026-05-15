@@ -6,6 +6,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
+using Wacs.ComponentModel.Runtime;
 using Wacs.WASI.Preview2.Cli;
 using Wacs.WASI.Preview2.Clocks;
 using Wacs.WASI.Preview2.DependencyInjection;
@@ -33,6 +34,7 @@ namespace Wacs.WASI.GFX.DependencyInjection
     /// every binding both packages contribute through one
     /// slot.</para>
     /// </summary>
+    [WacsCompositeBundle("wasi-gfx", Priority = 10)]
     public sealed class WasiPreview2GfxBundle
     {
         private readonly WasiPreview2Bundle _p2;

@@ -637,35 +637,36 @@ namespace Wacs.Transpiler.AOT.Component
 
         // Walk the loaded assemblies (and their referenced
         // assemblies) looking for a bundle type that satisfies the
-        // collected bindings. Prefers the WasiPreview2NN composite
-        // when WASI.NN is on the path (its forwarding properties
-        // cover both Preview2 and WASI.NN [WitSource] interfaces);
-        // falls back to the Preview2-only bundle otherwise.
-        // Returns null when neither is loadable — direct-link emit
-        // then falls back to the legacy delegate dispatch.
+        // collected bindings. Prefers a sibling-family composite
+        // (wasi-nn, wasi-gfx, …) when one is loaded — its forwarding
+        // properties cover both Preview2 and the sibling [WitSource]
+        // interfaces. Falls back to the Preview2-only bundle when
+        // no composite is on the load path; returns null when even
+        // Preview2 isn't loadable — direct-link emit then routes
+        // through the legacy delegate dispatch.
         private static Type? FindWasiPreview2Bundle(
             IReadOnlyList<Assembly> assemblies)
         {
-            // Prefer a composite. When a component imports both
-            // wasi:cli/* and a sibling family (wasi-nn / wasi-gfx),
-            // the composite's forwarding properties cover all bindings
-            // through one CLR object — ResolveBundleProperty's name-
-            // or-type lookup finds each one without needing emit
-            // changes. wasi-nn and wasi-gfx composites can't coexist
-            // in one process today (different families); first match
-            // wins, which mirrors how the CLI's --wasi-nn / --wasi-gfx
-            // flags route assemblies into the load list.
-            const string gfxCompositeName =
-                "Wacs.WASI.GFX.DependencyInjection.WasiPreview2GfxBundle";
-            var gfxComposite = FindBundleType(gfxCompositeName, assemblies,
-                fallbackAssembly: "Wacs.WASI.GFX.DependencyInjection");
-            if (gfxComposite != null) return gfxComposite;
-
-            const string nnCompositeName =
-                "Wacs.WASI.NN.DependencyInjection.WasiPreview2NNBundle";
-            var nnComposite = FindBundleType(nnCompositeName, assemblies,
-                fallbackAssembly: "Wacs.WASI.NN.DependencyInjection");
-            if (nnComposite != null) return nnComposite;
+            // Attribute-driven discovery: scan every loaded assembly
+            // for types carrying [WacsCompositeBundle]. Sort by
+            // Priority desc then Family asc and return the winner.
+            // The hint-load list pokes well-known sibling DI
+            // assembly names so cold-start (no prior Assembly.Load,
+            // no prior reflection touch) still surfaces them — 1c
+            // will replace these explicit names with declarative
+            // [WacsDependencyInjectionSibling] hooks on the contract
+            // assembly.
+            var compositeHints = new[]
+            {
+                "Wacs.WASI.GFX.DependencyInjection",
+                "Wacs.WASI.NN.DependencyInjection",
+            };
+            foreach (var hint in compositeHints)
+            {
+                try { Assembly.Load(hint); } catch { /* not present */ }
+            }
+            var winner = FindBestComposite(assemblies);
+            if (winner != null) return winner;
 
             // Fall back to Preview2-only — for components without
             // wasi:nn or wasi-gfx imports.
@@ -673,6 +674,54 @@ namespace Wacs.Transpiler.AOT.Component
                 "Wacs.WASI.Preview2.DependencyInjection.WasiPreview2Bundle";
             return FindBundleType(preview2Name, assemblies,
                 fallbackAssembly: "Wacs.WASI.Preview2.DependencyInjection");
+        }
+
+        // Attribute-driven composite-bundle scan. Walks `assemblies`
+        // first (the caller-supplied set), then AppDomain (so a
+        // sibling DI assembly auto-loaded by reference is still
+        // visible). Highest Priority wins; ties break by Family asc
+        // for deterministic ordering across runs.
+        internal static Type? FindBestComposite(
+            IReadOnlyList<Assembly> assemblies)
+        {
+            var seen = new HashSet<Type>();
+            var candidates = new List<(Type Type, int Priority, string Family)>();
+            void Inspect(Assembly asm)
+            {
+                if (asm.IsDynamic) return;
+                Type[] types;
+                try { types = asm.GetExportedTypes(); }
+                catch (ReflectionTypeLoadException ex)
+                {
+                    types = ex.Types
+                        .Where(t => t != null)
+                        .Select(t => t!)
+                        .ToArray();
+                }
+                foreach (var t in types)
+                {
+                    if (!seen.Add(t)) continue;
+                    var attr = t.GetCustomAttribute<
+                        Wacs.ComponentModel.Runtime
+                            .WacsCompositeBundleAttribute>(
+                                inherit: false);
+                    if (attr == null) continue;
+                    candidates.Add((t, attr.Priority, attr.Family));
+                }
+            }
+            foreach (var asm in assemblies) Inspect(asm);
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                Inspect(asm);
+
+            if (candidates.Count == 0) return null;
+            candidates.Sort((a, b) =>
+            {
+                int p = b.Priority.CompareTo(a.Priority);
+                return p != 0 ? p
+                    : string.Compare(a.Family, b.Family,
+                        StringComparison.Ordinal);
+            });
+            return candidates[0].Type;
         }
 
         private static Type? FindBundleType(string qualifiedName,

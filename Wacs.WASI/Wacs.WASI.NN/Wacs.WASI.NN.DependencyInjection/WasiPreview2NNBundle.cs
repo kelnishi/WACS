@@ -6,6 +6,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
+using Wacs.ComponentModel.Runtime;
 using Wacs.WASI.Preview2.Cli;
 using Wacs.WASI.Preview2.Clocks;
 using Wacs.WASI.Preview2.DependencyInjection;
@@ -36,6 +37,7 @@ namespace Wacs.WASI.NN.DependencyInjection
     /// the wasi-nn host) is held by the underlying bundles' own
     /// scoped services — the composite is a thin façade.</para>
     /// </summary>
+    [WacsCompositeBundle("wasi-nn", Priority = 10)]
     public sealed class WasiPreview2NNBundle
     {
         private readonly WasiPreview2Bundle _p2;

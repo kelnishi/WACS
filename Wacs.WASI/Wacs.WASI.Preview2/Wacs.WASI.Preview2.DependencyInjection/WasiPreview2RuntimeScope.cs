@@ -12,6 +12,7 @@ using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
+using Wacs.ComponentModel.Runtime;
 using Wacs.ComponentModel.Validation;
 using Wacs.Core.Runtime;
 using Wacs.WASI.Preview2.Filesystem;
@@ -195,34 +196,68 @@ namespace Wacs.WASI.Preview2.DependencyInjection
 
         private static object ResolveBundle(IServiceProvider sp)
         {
-            // When a sibling-family composite bundle is registered,
-            // prefer it — its forwarding properties cover every
-            // [WitSource] interface from both packages so direct-
-            // link emit picks up the sibling alongside Preview2. The
-            // composite types are reflection-discovered to keep
-            // this assembly free of compile-time deps on either
-            // sibling. Order: gfx first, then nn — different
-            // families don't coexist in one runtime today; first
-            // match wins, mirroring the resolver's bundle
-            // auto-discovery order.
-            var gfxAsm = TryLoadAssembly("Wacs.WASI.GFX.DependencyInjection");
-            var gfxCompositeType = gfxAsm?.GetType(
-                "Wacs.WASI.GFX.DependencyInjection.WasiPreview2GfxBundle");
-            if (gfxCompositeType != null)
+            // Attribute-driven composite-bundle discovery. Scan the
+            // AppDomain for types tagged with [WacsCompositeBundle],
+            // sort by Priority desc / Family asc, and resolve the
+            // highest one whose DI registration is present in the
+            // current scope. Falls through to the Preview2 base
+            // bundle when no composite is registered — components
+            // without sibling-family imports stay on the slim path.
+            //
+            // Cold-start hints: try-load the well-known sibling DI
+            // assemblies so a fresh process surfaces them before the
+            // attribute walk. 1c replaces these with declarative
+            // [WacsDependencyInjectionSibling] hooks.
+            foreach (var hint in new[]
             {
-                var resolved = sp.GetService(gfxCompositeType);
-                if (resolved != null) return resolved;
+                "Wacs.WASI.GFX.DependencyInjection",
+                "Wacs.WASI.NN.DependencyInjection",
+            })
+            {
+                TryLoadAssembly(hint);
             }
 
-            var nnAsm = TryLoadAssembly("Wacs.WASI.NN.DependencyInjection");
-            var nnCompositeType = nnAsm?.GetType(
-                "Wacs.WASI.NN.DependencyInjection.WasiPreview2NNBundle");
-            if (nnCompositeType != null)
+            foreach (var t in DiscoverCompositeBundleTypes())
             {
-                var resolved = sp.GetService(nnCompositeType);
+                var resolved = sp.GetService(t);
                 if (resolved != null) return resolved;
             }
             return sp.GetRequiredService<WasiPreview2Bundle>();
+        }
+
+        private static IEnumerable<Type> DiscoverCompositeBundleTypes()
+        {
+            var seen = new HashSet<Type>();
+            var candidates = new List<(Type Type, int Priority, string Family)>();
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                if (asm.IsDynamic) continue;
+                Type[] types;
+                try { types = asm.GetExportedTypes(); }
+                catch (ReflectionTypeLoadException ex)
+                {
+                    types = ex.Types
+                        .Where(t => t != null)
+                        .Select(t => t!)
+                        .ToArray();
+                }
+                foreach (var t in types)
+                {
+                    if (!seen.Add(t)) continue;
+                    var attr = t.GetCustomAttribute<
+                        WacsCompositeBundleAttribute>(inherit: false);
+                    if (attr == null) continue;
+                    candidates.Add((t, attr.Priority, attr.Family));
+                }
+            }
+            candidates.Sort((a, b) =>
+            {
+                int p = b.Priority.CompareTo(a.Priority);
+                return p != 0 ? p
+                    : string.Compare(a.Family, b.Family,
+                        StringComparison.Ordinal);
+            });
+            return candidates.Select(c => c.Type);
         }
 
         // Reflection-load the WASI.NN.DI assembly + run its
