@@ -1,5 +1,79 @@
 # Changelog
 
+## WACS.WASI.GFX 0.1.0 / WACS.WASI.GFX.Silk 0.1.0 / WACS.WASI.GFX.DependencyInjection 0.1.0 / WACS.Cli 1.7.7 — wasi-gfx host bindings (v0)
+
+Initial release of host bindings for the
+[wasi-gfx](https://github.com/WebAssembly/wasi-gfx) proposal
+(Phase 2). v0 covers three of the four wasi-gfx WIT packages —
+`wasi:graphics-context@0.0.1`, `wasi:frame-buffer@0.0.1`,
+`wasi:surface@0.0.1` — the CPU rendering path with windowing
+and input. `wasi:webgpu@0.0.1` (35 KB of WIT mirroring the
+browser WebGPU API) is deferred to v1 on a separate release
+cadence; the RayLib backend that the original plan called out
+as a parallel sibling is deferred indefinitely.
+
+Architecture mirrors `WACS.WASI.NN`: a contract package owns
+the SPI + canonical-ABI bindings, backends ship as sibling
+packages, and a DependencyInjection package provides the
+transpiler-direct-link bundle surface. The Silk.NET/SDL
+backend (`WACS.WASI.GFX.Silk`) is bundled with the CLI so
+`wacs run --wasi-gfx` resolves it via `Assembly.Load`. The
+new `--windowed` flag moves the guest to a worker thread and
+reserves the calling thread for the SDL event pump — required
+on macOS where AppKit pins windowing to the main thread.
+
+Parity reference: the new fixture at
+`Spec.Test/components/fixtures/wasi-gfx-rectangle/` mirrors
+`wasi-gfx/wasi-gfx-runtime`'s `rectangle_frame_buffer` example
+on a v0-compatible world (no webgpu inclusion). End-to-end
+bring-up is documented in the fixture README.
+
+### What changed
+
+- **`WACS.WASI.GFX` 0.1.0** (new family baseline):
+  `WasiGfxConfiguration`, `WasiGfxHost` (`IBindable`),
+  `IBackend` SPI + per-resource interfaces, vendored
+  WIT from `WebAssembly/wasi-gfx@03c3e95493`, source-gen
+  `[WitSource]` interfaces under
+  `Wacs.WASI.GFX.{GraphicsContext, FrameBuffer, Surface, Io}`,
+  hand-written canonical-ABI `WitBindings.cs` covering all
+  three v0 WIT packages.
+- **`WACS.WASI.GFX.Silk` 0.1.0** (new sibling): Silk.NET/SDL
+  backend with main-thread marshaling for window creation +
+  blit, per-event-type pollables for resize/frame/pointer/
+  key events, SDL scancode → uievents-code mapping.
+  `WasiGfxSilkBindable` ships the parameterless adapter
+  the CLI's `--bind` path activates.
+- **`WACS.WASI.GFX.DependencyInjection` 0.1.0** (new sibling):
+  `Microsoft.Extensions.DependencyInjection` extensions —
+  `AddWasiGfx`, `AddWasiPreview2GfxBundle` composite for
+  components importing both `wasi:cli/*` and wasi-gfx.
+- **`WACS.Cli` 1.7.6 → 1.7.7** (point — bundle re-pack
+  against the new family): adds `--wasi-gfx` and `--windowed`
+  flags, bundles the three new packages so the standalone
+  CLI resolves them via `Assembly.Load`. No CLI surface
+  changes beyond the new flags.
+
+### Known v0 limitations
+
+- Pollables minted by surface's `subscribe-*` land in
+  `WasiGfxHost.Pollables` rather than Preview2's pollable
+  table. Guests that mix wasi-gfx with `wasi:io/poll.poll`
+  will hit a handle-table mismatch — phase-3 follow-up is to
+  share Preview2's `ResourceContext` surface.
+- `wasi:webgpu` is unsupported.
+- `frame-buffer.buffer.set` length must match the surface's
+  RGBA8 byte budget exactly; partial / over-sized writes
+  throw a `WasiGfxException`.
+- The transpiler-direct-link path goes through the
+  interpreter bindings; per-resource concrete classes
+  (mirroring `WASI.NN`'s `Tensor`/`Graph`/etc.) land when a
+  wasi-gfx component fixture stresses the direct-link path.
+
+Family tag baseline: `WACS-WASI-GFX-v0.1.0` (no prior tags
+for this family — verified via `git tag --sort=-creatordate
+| grep WACS-WASI-GFX` returning empty before the release).
+
 ## WACS.WASI.NN.OpenVino 0.2.1 / WACS.Cli 1.7.6 — fix compile_model empty-Properties throw
 
 `OpenVINO.CSharp.API` 2025.4.0's `Core.compile_model(model, device,
