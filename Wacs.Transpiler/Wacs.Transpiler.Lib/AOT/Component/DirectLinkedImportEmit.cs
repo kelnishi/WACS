@@ -72,6 +72,20 @@ namespace Wacs.Transpiler.AOT.Component
             var wasmParams = wasmType.ParameterTypes.Types;
             var wasmResults = wasmType.ResultType.Types;
 
+            // Local helper: trace + reject. Gated; cheap when
+            // diagnostics are off. The trace text names which
+            // gate fired so a reader can connect "missing
+            // handler" to "rejected at this specific shape
+            // check." See TranspilerDiagnostics for the
+            // dedupe + env-var wiring.
+            bool Reject(string gate, string reason)
+            {
+                Wacs.Transpiler.TranspilerDiagnostics
+                    .TraceEmitGateReject(binding.Module,
+                        binding.Entity, gate, reason);
+                return false;
+            }
+
             // Resource-method shape:
             //   [method]X.foo (Instance)    : wasm has a leading i32
             //                                 handle (the resolved
@@ -90,12 +104,20 @@ namespace Wacs.Transpiler.AOT.Component
                     case HostPackageResolver.ResourceMethodKind.Instance:
                         wasmParamOffset = 1;
                         if (wasmParams.Length < 1
-                            || wasmParams[0] != ValType.I32) return false;
+                            || wasmParams[0] != ValType.I32)
+                            return Reject("instance-wire-shape",
+                                "wasm import has no leading i32 handle param");
                         if (!method.IsVirtual && !method.IsAbstract)
-                            return false;   // must be a callvirt target
+                            return Reject("instance-callvirt-target",
+                                "C# method " + method.Name
+                                + " is neither virtual nor abstract");
                         break;
                     case HostPackageResolver.ResourceMethodKind.Static:
-                        if (!method.IsStatic) return false;
+                        if (!method.IsStatic)
+                            return Reject("static-method-kind",
+                                "WIT classifies this as [static]X.foo but "
+                                + "C# method is not static — source-gen "
+                                + "must emit `static` for WIT static funcs");
                         break;
                     case HostPackageResolver.ResourceMethodKind.Constructor:
                         // Constructor: wasm returns exactly one i32
@@ -112,27 +134,44 @@ namespace Wacs.Transpiler.AOT.Component
                         //       discovers the impl type from the
                         //       resolver's host packages.
                         if (wasmResults.Length != 1
-                            || wasmResults[0] != ValType.I32) return false;
+                            || wasmResults[0] != ValType.I32)
+                            return Reject("ctor-wire-shape",
+                                "wasm import does not return single i32 handle");
                         if (method.IsStatic)
                         {
-                            if (method.ReturnType == typeof(void)) return false;
+                            if (method.ReturnType == typeof(void))
+                                return Reject("ctor-static-void-return",
+                                    "static-factory shape requires a non-void return");
                             if (!binding.InterfaceType.IsAssignableFrom(
-                                method.ReturnType)) return false;
+                                method.ReturnType))
+                                return Reject("ctor-static-return-not-iface",
+                                    "static factory returns "
+                                    + method.ReturnType.FullName
+                                    + " which is not assignable to "
+                                    + binding.InterfaceType.FullName);
                         }
                         else
                         {
                             // SourceGen shape — must be void return AND
                             // resolver must be able to find a concrete
                             // impl class with a parameterless ctor.
-                            if (method.ReturnType != typeof(void)) return false;
+                            if (method.ReturnType != typeof(void))
+                                return Reject("ctor-instance-non-void",
+                                    "SourceGen-shape ctor must return void; "
+                                    + "got " + method.ReturnType.FullName);
                             if (resolver == null
                                 || !resolver.TryFindResourceImpl(
                                     binding.InterfaceType, out _))
-                                return false;
+                                return Reject("ctor-impl-not-found",
+                                    "no concrete class implementing "
+                                    + binding.InterfaceType.FullName
+                                    + " with a public parameterless ctor "
+                                    + "found in the resolver's host packages");
                         }
                         break;
                     default:
-                        return false;
+                        return Reject("unknown-kind",
+                            "ResourceMethodKind=" + binding.ResourceKind);
                 }
             }
 
@@ -172,20 +211,39 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 int slots = CanonicalSlotCount(clrParams[i].ParameterType,
                     out var perWasmType, resolver);
-                if (slots < 0) return false;
+                if (slots < 0)
+                    return Reject("canon-abi-unsupported-param",
+                        "param[" + i + "] CLR type "
+                        + clrParams[i].ParameterType.FullName
+                        + " has no canonical-ABI slot mapping "
+                        + "(extend CanonicalSlotCount + EmitLiftForType)");
                 expectedRemainingWasm += slots;
                 // Each contributing wasm slot must match the CLR
                 // param's expected wire shape (i32 / i64 / etc.).
                 for (int s = 0; s < slots; s++)
                 {
                     int wIdx = wasmParamOffset + (expectedRemainingWasm - slots) + s;
-                    if (wIdx >= effectiveWasmCount) return false;
-                    if (wasmParams[wIdx] != perWasmType[s]) return false;
+                    if (wIdx >= effectiveWasmCount)
+                        return Reject("param-arity-overrun",
+                            "C# param[" + i + "] expected wasm slot "
+                            + wIdx + " but wasm only has "
+                            + effectiveWasmCount);
+                    if (wasmParams[wIdx] != perWasmType[s])
+                        return Reject("param-slot-type-mismatch",
+                            "param[" + i + "] slot " + s + " expected "
+                            + perWasmType[s] + " but wasm has "
+                            + wasmParams[wIdx]);
                 }
             }
             if (wasmParamOffset + expectedRemainingWasm
-                != effectiveWasmCount) return false;
-            if (wasmResults.Length > 1) return false;
+                != effectiveWasmCount)
+                return Reject("param-arity-mismatch",
+                    "CLR params consume " + expectedRemainingWasm
+                    + " wasm slots but " + effectiveWasmCount
+                    + " were available after offset " + wasmParamOffset);
+            if (wasmResults.Length > 1)
+                return Reject("multi-result",
+                    "wasm import has >1 result; only 0 or 1 supported");
 
             // Constructor return: already validated as i32 (handle)
             // wire / interface CLR. Skip the primitive-compat check.
@@ -196,7 +254,10 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 if (wasmResults.Length == 1)
                 {
-                    if (method.ReturnType == typeof(void)) return false;
+                    if (method.ReturnType == typeof(void))
+                        return Reject("return-void-vs-wasm-result",
+                            "C# method returns void but wasm import "
+                            + "declares a result of " + wasmResults[0]);
                     // own<R> return: wasm i32 (handle) + CLR
                     // resource interface. The IL allocates a handle
                     // from the returned instance via Resources.
@@ -206,14 +267,21 @@ namespace Wacs.Transpiler.AOT.Component
                         && resolver.PreferredResourcesType != null;
                     if (!isOwnReturn
                         && !IsPrimitiveCompatible(method.ReturnType,
-                            wasmResults[0])) return false;
+                            wasmResults[0]))
+                        return Reject("return-type-mismatch",
+                            "C# returns " + method.ReturnType.FullName
+                            + " but wasm expects " + wasmResults[0]
+                            + " (and the return is not own<resource>)");
                 }
                 else
                 {
                     // Wasm void return — the C# method must also
                     // return void OR Unit (Unit is a struct;
                     // zero-size). v0 only accepts plain void.
-                    if (method.ReturnType != typeof(void)) return false;
+                    if (method.ReturnType != typeof(void))
+                        return Reject("non-void-return-vs-wasm-void",
+                            "C# returns " + method.ReturnType.FullName
+                            + " but wasm import has no results");
                 }
             }
             // Constructor args ride through the same per-CLR-param

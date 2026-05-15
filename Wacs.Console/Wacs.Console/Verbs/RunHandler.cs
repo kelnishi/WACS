@@ -41,6 +41,16 @@ namespace Wacs.Console.Verbs
     {
         public static int Execute(RunOptions opts)
         {
+            // --trace-imports flips the static TranspilerDiagnostics
+            // toggle for the lifetime of this run. Emits stderr
+            // when direct-link emit rejects a binding (with the
+            // rejecting gate + reason) and when the lenient
+            // IImports stub serves a default for an unresolved
+            // import. The single highest-leverage debug flag for
+            // "wasm hangs at 100% CPU with no output" failures.
+            if (opts.TraceImports)
+                Wacs.Transpiler.TranspilerDiagnostics.Enabled = true;
+
             // --windowed wraps the entire wasm dispatch in a worker
             // thread so the calling (main) thread can host the SDL
             // event pump. The Silk backend is constructed up-front

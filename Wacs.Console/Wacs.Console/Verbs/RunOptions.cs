@@ -135,6 +135,16 @@ namespace Wacs.Console.Verbs
 
         // ---- Instrumentation (interpreter engine only) ----
 
+        [Option("trace-imports", HelpText =
+            "Log direct-link binding rejections + lenient-default "
+            + "serves to stderr. Enable to debug \"the wasm hangs "
+            + "at 100% CPU with no output\" failures: see which "
+            + "imports the transpiler's direct-link emit rejected "
+            + "(and why), plus first-occurrence logs of any "
+            + "default-served unresolved import. Equivalent to "
+            + "setting WACS_TRANSPILER_DEBUG=1.")]
+        public bool TraceImports { get; set; }
+
         [Option("profile", HelpText =
             "Bracket execution with a JetBrains dotTrace measure-"
             + "profiling session. Snapshot lands in the OS-default "

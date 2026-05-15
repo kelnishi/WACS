@@ -57,6 +57,15 @@ namespace Wacs.Transpiler.Cli
                     $"or pass lenient: true to opt into default-return behavior.");
             }
 
+            // Lenient mode: serve a default. Trace it once
+            // per (interface, method) so a hung guest spinning
+            // on an unresolved import shows up in stderr instead
+            // of as silent 100% CPU. Cost: a dedupe-set probe
+            // per invoke; negligible.
+            Wacs.Transpiler.TranspilerDiagnostics.TraceLenientServed(
+                _interfaceName ?? targetMethod.DeclaringType?.FullName ?? "<unknown>",
+                targetMethod.Name,
+                targetMethod.ReturnType);
             if (targetMethod.ReturnType == typeof(void)) return null;
             if (targetMethod.ReturnType.IsValueType)
                 return Activator.CreateInstance(targetMethod.ReturnType);
