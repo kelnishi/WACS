@@ -1,0 +1,20 @@
+package wacs:example;
+
+/// v1 phase 3 session 10 parity fixture world. Exercises the
+/// wired wasi:webgpu bindings that work against the stub backend
+/// today: get-gpu, gpu.get-preferred-canvas-format,
+/// gpu.wgsl-language-features (handle return), wgsl-language-
+/// features.has (string param), [resource-drop]gpu /
+/// [resource-drop]wgsl-language-features.
+///
+/// Real GPU execution (request-adapter and below) needs the
+/// Silk-backed wgpu dispatch shipped in v1 phase 3 session 11;
+/// guests on that path swap to a `compute` world that
+/// additionally exports the dispatch entry point.
+world hello {
+    include wasi:webgpu/imports@0.0.1;
+
+    /// Smoke entrypoint. Returns 0 on success, traps on
+    /// expectation mismatch.
+    export start: func();
+}
