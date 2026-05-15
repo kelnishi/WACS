@@ -12,6 +12,11 @@ using Wacs.WASI.GFX.HostBinding;
 using Wacs.WASI.GFX.Types;
 using IGpu = Wacs.WASI.GFX.Webgpu.Webgpu.IGpu;
 using IGpuAdapter = Wacs.WASI.GFX.Webgpu.Webgpu.IGpuAdapter;
+using IGpuBuffer = Wacs.WASI.GFX.Webgpu.Webgpu.IGpuBuffer;
+using IGpuShaderModule = Wacs.WASI.GFX.Webgpu.Webgpu.IGpuShaderModule;
+using IGpuPipelineLayout = Wacs.WASI.GFX.Webgpu.Webgpu.IGpuPipelineLayout;
+using IGpuBindGroupLayout = Wacs.WASI.GFX.Webgpu.Webgpu.IGpuBindGroupLayout;
+using IGpuBindGroup = Wacs.WASI.GFX.Webgpu.Webgpu.IGpuBindGroup;
 using IGpuDevice = Wacs.WASI.GFX.Webgpu.Webgpu.IGpuDevice;
 using IWgslLanguageFeatures = Wacs.WASI.GFX.Webgpu.Webgpu.IWgslLanguageFeatures;
 using GpuRequestAdapterOptions = Wacs.WASI.GFX.Webgpu.Webgpu.GpuRequestAdapterOptions;
@@ -63,6 +68,23 @@ namespace Wacs.WASI.GFX.Webgpu
             BindGpu(runtime, host);
             BindGpuAdapter(runtime, host);
             BindGpuDevice(runtime, host, alloc);
+            BindGpuBuffer(runtime, host, alloc);
+            BindLabeled(runtime, alloc,
+                "gpu-shader-module", host.ShaderModules,
+                h => ((IGpuShaderModule)h).Label(),
+                (h, s) => ((IGpuShaderModule)h).SetLabel(s));
+            BindLabeled(runtime, alloc,
+                "gpu-pipeline-layout", host.PipelineLayouts,
+                h => ((IGpuPipelineLayout)h).Label(),
+                (h, s) => ((IGpuPipelineLayout)h).SetLabel(s));
+            BindLabeled(runtime, alloc,
+                "gpu-bind-group-layout", host.BindGroupLayouts,
+                h => ((IGpuBindGroupLayout)h).Label(),
+                (h, s) => ((IGpuBindGroupLayout)h).SetLabel(s));
+            BindLabeled(runtime, alloc,
+                "gpu-bind-group", host.BindGroups,
+                h => ((IGpuBindGroup)h).Label(),
+                (h, s) => ((IGpuBindGroup)h).SetLabel(s));
         }
 
         // ----------------------------------------------------
@@ -350,6 +372,117 @@ namespace Wacs.WASI.GFX.Webgpu
             // pop-error-scope / onuncapturederror-subscribe /
             // connect-graphics-context land alongside the error +
             // graphics-context bridge sessions.
+        }
+
+        // ----------------------------------------------------
+        //   wasi:webgpu/webgpu@0.0.1 resource gpu-buffer
+        //     Session 5 covers the lifecycle / query methods:
+        //       size / usage / map-state / destroy / label /
+        //       set-label / [resource-drop]. The mapping methods
+        //       (map-async, unmap, get-mapped-range-*) all return
+        //       result<_, error> and land in session 6 alongside
+        //       similar result-return work on other resources.
+        // ----------------------------------------------------
+
+        private static void BindGpuBuffer(WasmRuntime runtime,
+            WasiWebgpuHost host, Wacs.WASI.GFX.HostBinding.Realloc alloc)
+        {
+            // size(self) -> u64. Wire: Func<Ctx, i32, i64>.
+            runtime.BindHostFunction<Func<ExecContext, int, long>>(
+                (Ns, "[method]gpu-buffer.size"),
+                (_, selfH) =>
+                {
+                    var buf = (IGpuBuffer)host.Buffers.Get(selfH);
+                    return unchecked((long)buf.Size());
+                });
+
+            // usage(self) -> u32. Wire: Func<Ctx, i32, i32>.
+            runtime.BindHostFunction<Func<ExecContext, int, int>>(
+                (Ns, "[method]gpu-buffer.usage"),
+                (_, selfH) =>
+                {
+                    var buf = (IGpuBuffer)host.Buffers.Get(selfH);
+                    return unchecked((int)buf.Usage());
+                });
+
+            // map-state(self) -> gpu-buffer-map-state. Enum → i32.
+            runtime.BindHostFunction<Func<ExecContext, int, int>>(
+                (Ns, "[method]gpu-buffer.map-state"),
+                (_, selfH) =>
+                {
+                    var buf = (IGpuBuffer)host.Buffers.Get(selfH);
+                    return (int)buf.MapState();
+                });
+
+            // destroy(self) — void.
+            runtime.BindHostFunction<Action<ExecContext, int>>(
+                (Ns, "[method]gpu-buffer.destroy"),
+                (_, selfH) =>
+                {
+                    var buf = (IGpuBuffer)host.Buffers.Get(selfH);
+                    buf.Destroy();
+                });
+
+            // label / set-label — same wire shape as gpu-device.
+            runtime.BindHostFunction<Action<ExecContext, int, int>>(
+                (Ns, "[method]gpu-buffer.label"),
+                (ctx, selfH, retArea) =>
+                {
+                    var buf = (IGpuBuffer)host.Buffers.Get(selfH);
+                    WriteUtf8Allocated(ctx, alloc, retArea,
+                        buf.Label() ?? string.Empty);
+                });
+            runtime.BindHostFunction<Action<ExecContext, int, int, int>>(
+                (Ns, "[method]gpu-buffer.set-label"),
+                (ctx, selfH, ptr, len) =>
+                {
+                    var buf = (IGpuBuffer)host.Buffers.Get(selfH);
+                    buf.SetLabel(ReadUtf8(ctx, ptr, len));
+                });
+
+            // [resource-drop]gpu-buffer
+            runtime.BindHostFunction<Action<ExecContext, int>>(
+                (Ns, "[resource-drop]gpu-buffer"),
+                (_, h) => host.Buffers.Drop(h));
+        }
+
+        // ----------------------------------------------------
+        //   Shared `label / set-label / [resource-drop]` shape
+        //   for the four resources whose only WIT surface this
+        //   session covers is the label triple:
+        //     gpu-shader-module, gpu-pipeline-layout,
+        //     gpu-bind-group-layout, gpu-bind-group.
+        //
+        //   Cuts ~36 lines of identical boilerplate. Resources
+        //   whose label/set-label sits alongside other methods
+        //   (gpu-buffer / gpu-device) bind them inline.
+        // ----------------------------------------------------
+
+        private static void BindLabeled(WasmRuntime runtime,
+            Wacs.WASI.GFX.HostBinding.Realloc alloc,
+            string resourceName,
+            Wacs.WASI.GFX.HostBinding.ResourceTable table,
+            Func<object, string> getLabel,
+            Action<object, string> setLabel)
+        {
+            runtime.BindHostFunction<Action<ExecContext, int, int>>(
+                (Ns, "[method]" + resourceName + ".label"),
+                (ctx, selfH, retArea) =>
+                {
+                    var inst = table.Get(selfH);
+                    WriteUtf8Allocated(ctx, alloc, retArea,
+                        getLabel(inst) ?? string.Empty);
+                });
+            runtime.BindHostFunction<Action<ExecContext, int, int, int>>(
+                (Ns, "[method]" + resourceName + ".set-label"),
+                (ctx, selfH, ptr, len) =>
+                {
+                    var inst = table.Get(selfH);
+                    setLabel(inst, ReadUtf8(ctx, ptr, len));
+                });
+            runtime.BindHostFunction<Action<ExecContext, int>>(
+                (Ns, "[resource-drop]" + resourceName),
+                (_, h) => table.Drop(h));
         }
 
         // ====================================================

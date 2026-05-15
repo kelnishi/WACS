@@ -189,5 +189,52 @@ namespace Wacs.WASI.GFX.Webgpu.Test
             Assert.True(result.IsOk);
             Assert.IsType<StubGpuDevice>(result.Ok);
         }
+
+        // ---- Session 5: buffer/shader/pipeline-layout/bind-group ----
+
+        [Fact]
+        public void StubGpuBuffer_DefaultStateMatchesUnmapped()
+        {
+            var buf = new StubGpuBuffer();
+            Assert.Equal(0ul, buf.Size());
+            Assert.Equal(0u, buf.Usage());
+            Assert.Equal(Wacs.WASI.GFX.Webgpu.Webgpu.GpuBufferMapState.Unmapped,
+                buf.MapState());
+            Assert.False(buf.Destroyed);
+            buf.Destroy();
+            Assert.True(buf.Destroyed);
+        }
+
+        [Fact]
+        public void StubGpuBuffer_LabelRoundtrip()
+        {
+            var buf = new StubGpuBuffer();
+            Assert.Equal("stub-buffer", buf.Label());
+            buf.SetLabel("vertex-buffer");
+            Assert.Equal("vertex-buffer", buf.Label());
+        }
+
+        [Fact]
+        public void LabeledResources_DefaultsAndRoundtrip()
+        {
+            // The four label-only resources share the same
+            // StubGpuFoo<T>.Label/SetLabel shape; verify each
+            // initializes to a sensible default and roundtrips.
+            var sm = new StubGpuShaderModule();
+            Assert.Equal("stub-shader", sm.Label());
+            sm.SetLabel("vert"); Assert.Equal("vert", sm.Label());
+
+            var pl = new StubGpuPipelineLayout();
+            Assert.Equal("stub-pipeline-layout", pl.Label());
+            pl.SetLabel("pl"); Assert.Equal("pl", pl.Label());
+
+            var bgl = new StubGpuBindGroupLayout();
+            Assert.Equal("stub-bind-group-layout", bgl.Label());
+            bgl.SetLabel("bgl"); Assert.Equal("bgl", bgl.Label());
+
+            var bg = new StubGpuBindGroup();
+            Assert.Equal("stub-bind-group", bg.Label());
+            bg.SetLabel("bg"); Assert.Equal("bg", bg.Label());
+        }
     }
 }

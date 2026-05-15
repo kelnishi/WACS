@@ -189,4 +189,65 @@ namespace Wacs.WASI.GFX.Webgpu.Test
         public GpuDeviceLostReason Reason() => default;
         public string Message() => string.Empty;
     }
+
+    // ---- Session 5 resources --------------------------------
+
+    internal sealed class StubGpuBuffer : IGpuBuffer
+    {
+        private string _label = "stub-buffer";
+        private bool _destroyed;
+        public ulong Size() => 0;
+        public uint Usage() => 0;
+        public GpuBufferMapState MapState()
+            => GpuBufferMapState.Unmapped;
+        public void Destroy() { _destroyed = true; }
+        public bool Destroyed => _destroyed;
+        public string Label() => _label;
+        public void SetLabel(string label) { _label = label ?? ""; }
+
+        // Session 6 — result<_, error> shape.
+        public Result<Unit, MapAsyncError> MapAsync(
+            uint mode, Option<ulong> offset, Option<ulong> size)
+            => throw new NotImplementedException();
+        public Result<byte[], GetMappedRangeError>
+            GetMappedRangeGetWithCopy(Option<ulong> offset,
+                Option<ulong> size)
+            => throw new NotImplementedException();
+        public Result<Unit, UnmapError> Unmap()
+            => throw new NotImplementedException();
+        public Result<Unit, GetMappedRangeError>
+            GetMappedRangeSetWithCopy(byte[] data,
+                Option<ulong> offset, Option<ulong> size)
+            => throw new NotImplementedException();
+    }
+
+    internal sealed class StubGpuShaderModule : IGpuShaderModule
+    {
+        private string _label = "stub-shader";
+        public IGpuCompilationInfo GetCompilationInfo()
+            => throw new NotImplementedException();
+        public string Label() => _label;
+        public void SetLabel(string label) { _label = label ?? ""; }
+    }
+
+    internal sealed class StubGpuPipelineLayout : IGpuPipelineLayout
+    {
+        private string _label = "stub-pipeline-layout";
+        public string Label() => _label;
+        public void SetLabel(string label) { _label = label ?? ""; }
+    }
+
+    internal sealed class StubGpuBindGroupLayout : IGpuBindGroupLayout
+    {
+        private string _label = "stub-bind-group-layout";
+        public string Label() => _label;
+        public void SetLabel(string label) { _label = label ?? ""; }
+    }
+
+    internal sealed class StubGpuBindGroup : IGpuBindGroup
+    {
+        private string _label = "stub-bind-group";
+        public string Label() => _label;
+        public void SetLabel(string label) { _label = label ?? ""; }
+    }
 }
