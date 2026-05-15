@@ -7,6 +7,7 @@
 
 using System;
 using Wacs.Core.Runtime;
+using Wacs.WASI.GFX.Webgpu;
 using Wacs.WASI.Preview2;
 using Wacs.WASI.Preview2.HostBinding;
 using Wacs.WASI.Preview2.Io;
@@ -39,6 +40,16 @@ namespace Wacs.WASI.GFX.Silk
         public WasiGfxHost? Host { get; private set; }
         public WasiPreview2Host? Preview2Host { get; private set; }
         public ResourceContext? SharedResources { get; private set; }
+
+        /// <summary>v1 phase 3 session 8: the matching webgpu
+        /// backend + host. Constructed alongside the CPU pair so
+        /// the same Silk bindable serves wasi:graphics-context /
+        /// wasi:frame-buffer / wasi:surface (CPU) AND
+        /// wasi:webgpu (GPU) imports through one
+        /// <c>--bind</c>. <see cref="GpuBackend"/> is null only
+        /// when <see cref="BindToRuntime"/> hasn't run yet.</summary>
+        public SilkGpuBackend? GpuBackend { get; private set; }
+        public WasiWebgpuHost? WebgpuHost { get; private set; }
 
         /// <summary>
         /// Optional pre-constructed backend the CLI's
@@ -84,6 +95,19 @@ namespace Wacs.WASI.GFX.Silk
                 .WithBackend(Backend)
                 .WithSharedResources(SharedResources));
 
+            // Wire the webgpu sibling alongside. The Silk-backed
+            // GPU dispatch lands in session 11; for now the
+            // backend resolves an IGpu singleton whose
+            // RequestAdapter throws PlatformNotSupportedException
+            // pointing at the next session. Guests that don't
+            // import wasi:webgpu/webgpu@0.0.1 never reach a
+            // throw — the bindings are registered regardless,
+            // but the call-out only fires on actual GPU use.
+            GpuBackend = new SilkGpuBackend();
+            WebgpuHost = runtime.UseWasiWebgpu(b => b
+                .WithBackend(GpuBackend)
+                .WithSharedResources(SharedResources));
+
             // Set the AppDomain-wide ambient so the transpiler-
             // direct-link path's resource constructors (Context,
             // Surface, Device, Buffer in Wacs.WASI.GFX.
@@ -105,11 +129,14 @@ namespace Wacs.WASI.GFX.Silk
 
         public void Dispose()
         {
+            WebgpuHost?.Dispose();
             Host?.Dispose();
             Preview2Host = null;
             SharedResources = null;
             Backend = null;
             Host = null;
+            GpuBackend = null;
+            WebgpuHost = null;
         }
     }
 }
