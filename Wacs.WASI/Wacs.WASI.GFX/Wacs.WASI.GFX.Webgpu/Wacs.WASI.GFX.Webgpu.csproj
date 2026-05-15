@@ -1,0 +1,92 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <LangVersion>9</LangVersion>
+        <Nullable>enable</Nullable>
+        <Title>Wacs WASI Webgpu</Title>
+        <PackageId>WACS.WASI.GFX.Webgpu</PackageId>
+        <Authors>Kelvin Nishikawa</Authors>
+        <Description>WASI-GFX `wasi:webgpu@0.0.1` host bindings for WACS — the fourth wasi-gfx WIT package, mirroring the browser WebGPU spec. Contract assembly; backend lives in WACS.WASI.GFX.Silk.</Description>
+        <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
+        <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <AssemblyName>Wacs.WASI.GFX.Webgpu</AssemblyName>
+        <AssemblyVersion>0.1.0</AssemblyVersion>
+        <Version>0.1.0</Version>
+        <RepositoryType>git</RepositoryType>
+        <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
+        <IsAotCompatible Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net7.0'))">true</IsAotCompatible>
+        <PackageTags>wasm;webassembly;wasi;gfx;webgpu;gpu;wacs</PackageTags>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+        <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+        <CompilerGeneratedFilesOutputPath>obj/Generated</CompilerGeneratedFilesOutputPath>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\..\Wacs.Core\Wacs.Core\Wacs.Core.csproj" />
+        <ProjectReference Include="..\..\..\Wacs.ComponentModel\Wacs.ComponentModel\Wacs.ComponentModel.csproj" />
+        <ProjectReference Include="..\..\..\Wacs.HostBindings\Wacs.HostBindings.Abstractions\Wacs.HostBindings.Abstractions.csproj" />
+        <!-- wasi:webgpu pulls pollable from wasi:io/poll (the
+             upstream wasi:io 0.2.0 vendor) and context +
+             abstract-buffer from wasi:graphics-context. Preview2
+             owns the pollable side; WACS.WASI.GFX owns the
+             graphics-context side. -->
+        <ProjectReference Include="..\..\Wacs.WASI.Preview2\Wacs.WASI.Preview2\Wacs.WASI.Preview2.csproj" />
+        <ProjectReference Include="..\Wacs.WASI.GFX\Wacs.WASI.GFX.csproj" />
+
+        <ProjectReference Include="..\..\..\Wacs.ComponentModel\Wacs.ComponentModel.Bindgen.SourceGen\Wacs.ComponentModel.Bindgen.SourceGen.csproj"
+                          OutputItemType="Analyzer"
+                          ReferenceOutputAssembly="false" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- wit/webgpu.wit drives host-interface emission.
+             wit/deps/{io,graphics-context}/** parses for cross-
+             package resolution but doesn't re-emit — the io types
+             live in WACS.WASI.Preview2 and graphics-context in
+             WACS.WASI.GFX. WitHostPackageNamespaceMap below
+             routes cross-pkg type refs accordingly. -->
+        <AdditionalFiles Include="wit\*.wit"
+                         WitForHost="true" />
+        <AdditionalFiles Include="wit\deps\**\*.wit"
+                         WitForHost="false" />
+
+        <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="WitForHost" />
+        <CompilerVisibleProperty Include="WitHostNamespaceOverride" />
+        <CompilerVisibleProperty Include="WitHostPackageNamespaceMap" />
+    </ItemGroup>
+
+    <PropertyGroup>
+        <WitHostNamespaceOverride>Wacs.WASI.GFX.Webgpu</WitHostNamespaceOverride>
+        <!-- io types route to the canonical Preview2.Io namespace
+             so generated IPollable references hit the same CLR
+             type Preview2's wasi:io/poll.poll resolves against.
+             graphics-context types route to Wacs.WASI.GFX so we
+             share IContext / IAbstractBuffer with the CPU path. -->
+        <WitHostPackageNamespaceMap>wasi:io=Wacs.WASI.Preview2,wasi:graphics-context=Wacs.WASI.GFX</WitHostPackageNamespaceMap>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <EmbeddedResource Include="wit\**\*.wit"
+                          LogicalName="wit/%(RecursiveDir)%(Filename)%(Extension)" />
+        <None Include="wit\deps.lock" Pack="false" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <InternalsVisibleTo Include="Wacs.WASI.GFX.Webgpu.Test" />
+        <InternalsVisibleTo Include="Wacs.WASI.GFX.Silk" />
+        <InternalsVisibleTo Include="Wacs.WASI.GFX.DependencyInjection" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="README.md">
+            <Pack>true</Pack>
+            <PackagePath/>
+        </None>
+    </ItemGroup>
+
+</Project>

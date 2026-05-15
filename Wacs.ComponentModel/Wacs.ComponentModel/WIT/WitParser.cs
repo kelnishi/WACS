@@ -159,6 +159,20 @@ namespace Wacs.ComponentModel.WIT
         {
             var t = _toks[_i];
             if (t.Kind == WitTokenKind.Ident) { _i++; return _lex.Slice(t); }
+            // WIT identifier positions also accept reserved Keyword
+            // lexemes positionally — `float32`, `u32`, etc. show up
+            // as enum case names / record field names in real specs
+            // (wasi:webgpu's `vertex-format` enum has cases named
+            // `float32`, `sint32`, ...). The structural keywords
+            // (record / variant / interface / resource etc.) only
+            // matter at the START of each item, where parsers use
+            // AtKeyword to peek without consuming — so accepting
+            // them here doesn't break the structural parse.
+            if (t.Kind == WitTokenKind.Keyword)
+            {
+                _i++;
+                return _lex.Slice(t);
+            }
             throw new FormatException($"line {t.Line}:{t.Column}: expected {role}, got {t.Kind} '{_lex.Slice(t)}'");
         }
 
