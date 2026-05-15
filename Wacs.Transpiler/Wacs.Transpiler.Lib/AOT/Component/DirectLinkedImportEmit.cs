@@ -476,7 +476,53 @@ namespace Wacs.Transpiler.AOT.Component
             // Void-instance constructor → callvirt against the
             // freshly-created impl pushed earlier.
             // Instance / free-function → callvirt.
-            if ((isStatic || isConstructor) && !isVoidInstanceCtor)
+            //
+            // v1 phase 1f: for `[static]X.foo` bindings the
+            // interface MethodInfo carries a C# default-static-
+            // interface-method body that reflectively dispatches via
+            // HostInterfaceRuntime.InvokeStaticFactoryReflective —
+            // every call paid a cache lookup + Invoke. The transpiler
+            // already knows the impl class (via the resolver's
+            // TryFindResourceImpl), so emit `call <impl.Foo>`
+            // directly instead. Falls back to `call <iface.Foo>` if
+            // the impl class can't be located — that path still
+            // routes through the reflective helper, preserving
+            // backward compat for resolvers that haven't surfaced
+            // the impl class yet.
+            if (isStatic && resolver != null
+                && resolver.TryFindResourceImpl(
+                    binding.InterfaceType, out var staticImplType))
+            {
+                // SourceGen convention: the impl class names the
+                // static factory `{InterfaceMethodName}Static` (see
+                // CSharpEmit/HostInterfaceEmit.cs: it emits a DIM
+                // body that reflectively invokes "FooStatic" on the
+                // impl). Try that suffix first, then fall back to
+                // the bare name for hand-written impls.
+                var pis = method.GetParameters();
+                var paramTypes = new Type[pis.Length];
+                for (int pi = 0; pi < pis.Length; pi++)
+                    paramTypes[pi] = pis[pi].ParameterType;
+                MethodInfo? implStatic = staticImplType.GetMethod(
+                    method.Name + "Static",
+                    BindingFlags.Public | BindingFlags.Static,
+                    binder: null,
+                    types: paramTypes,
+                    modifiers: null);
+                if (implStatic == null)
+                    implStatic = staticImplType.GetMethod(
+                        method.Name,
+                        BindingFlags.Public | BindingFlags.Static,
+                        binder: null,
+                        types: paramTypes,
+                        modifiers: null);
+                if (implStatic != null
+                    && implStatic.ReturnType == method.ReturnType)
+                    il.Emit(OpCodes.Call, implStatic);
+                else
+                    il.Emit(OpCodes.Call, method);
+            }
+            else if ((isStatic || isConstructor) && !isVoidInstanceCtor)
                 il.Emit(OpCodes.Call, method);
             else
                 il.Emit(OpCodes.Callvirt, method);
