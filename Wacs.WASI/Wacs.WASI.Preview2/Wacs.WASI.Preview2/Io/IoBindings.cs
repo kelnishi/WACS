@@ -14,19 +14,38 @@ namespace Wacs.WASI.Preview2.Io
 {
     /// <summary>
     /// Orchestrator for two foundational WASI IO interfaces:
-    /// <c>wasi:io/error@0.2.8</c> (the <see cref="Error"/>
-    /// resource) and <c>wasi:io/poll@0.2.8</c> (the
-    /// <see cref="Pollable"/> resource + top-level <c>poll</c>).
+    /// <c>wasi:io/error</c> (the <see cref="Error"/> resource) and
+    /// <c>wasi:io/poll</c> (the <see cref="Pollable"/> resource +
+    /// top-level <c>poll</c>).
     ///
     /// <para>Both register a resource into the shared
     /// <see cref="ResourceContext"/>; downstream subsystems
     /// (streams, sockets, clocks) hand back / borrow handles
     /// from these tables.</para>
+    ///
+    /// <para>v1 phase 1i: registers the same handlers under every
+    /// shape-stable <c>wasi:io@0.2.x</c> version string Preview2
+    /// supports. Guests built against an older io point release
+    /// (e.g. the upstream wasi-gfx vendoring at
+    /// <c>wasi:io@0.2.0</c>) bind without a host-side WIT bump.
+    /// The wasi-io shape is byte-stable across 0.2.0–0.2.8 — the
+    /// only difference is the version annotation in the
+    /// module-name suffix.</para>
     /// </summary>
     public sealed class IoBindings : IBindable
     {
         private readonly ResourceContext _resources;
         private readonly IPoll? _poll;
+
+        // Every 0.2.x point release Preview2 satisfies. Add new
+        // entries when wasi-io publishes; remove only on an ABI
+        // break (would also break Preview2's existing 0.2.8 callers).
+        internal static readonly string[] IoVersions =
+        {
+            "0.2.0", "0.2.1", "0.2.2", "0.2.3",
+            "0.2.4", "0.2.5", "0.2.6", "0.2.7",
+            "0.2.8",
+        };
 
         public IoBindings(ResourceContext resources,
             IPoll? poll = null)
@@ -39,13 +58,16 @@ namespace Wacs.WASI.Preview2.Io
         public void BindToRuntime(WasmRuntime runtime)
         {
             var alloc = new Realloc(runtime);
-            BindError(runtime, _resources, alloc);
-            BindPollable(runtime, _resources);
-            if (_poll != null)
-                BindPoll(runtime, _resources, alloc, _poll);
+            foreach (var ver in IoVersions)
+            {
+                BindError(runtime, _resources, alloc, ver);
+                BindPollable(runtime, _resources, ver);
+                if (_poll != null)
+                    BindPoll(runtime, _resources, alloc, _poll, ver);
+            }
         }
 
-        // wasi:io/error@0.2.8
+        // wasi:io/error@<ver>
         //   resource error {
         //     to-debug-string: func() -> string;
         //   }
@@ -53,9 +75,9 @@ namespace Wacs.WASI.Preview2.Io
         // returns it from to-debug-string. retArea is 8 bytes
         // (str-ptr + str-len) at align 4.
         private static void BindError(WasmRuntime runtime,
-            ResourceContext resources, Realloc alloc)
+            ResourceContext resources, Realloc alloc, string version)
         {
-            const string ns = "wasi:io/error@0.2.8";
+            var ns = "wasi:io/error@" + version;
             var errors = resources.Table<Error>();
 
             runtime.BindHostFunction<Action<ExecContext, int>>(
@@ -74,7 +96,7 @@ namespace Wacs.WASI.Preview2.Io
                 });
         }
 
-        // wasi:io/poll@0.2.8
+        // wasi:io/poll@<ver>
         //   resource pollable {
         //     ready: func() -> bool;
         //     block: func();
@@ -82,9 +104,9 @@ namespace Wacs.WASI.Preview2.Io
         // Resource itself; the top-level `poll` is bound
         // separately when an IPoll impl is supplied.
         private static void BindPollable(WasmRuntime runtime,
-            ResourceContext resources)
+            ResourceContext resources, string version)
         {
-            const string ns = "wasi:io/poll@0.2.8";
+            var ns = "wasi:io/poll@" + version;
             var pollables = resources.Table<Pollable>();
 
             runtime.BindHostFunction<Action<ExecContext, int>>(
@@ -102,7 +124,7 @@ namespace Wacs.WASI.Preview2.Io
                     ((Pollable)pollables.Get(handle)).Block());
         }
 
-        // wasi:io/poll@0.2.8 top-level
+        // wasi:io/poll@<ver> top-level
         //   poll: func(in: list<borrow<pollable>>) -> list<u32>
         //
         // Wire: (param listPtr i32, listLen i32, retArea i32)
@@ -110,9 +132,10 @@ namespace Wacs.WASI.Preview2.Io
         //   retArea = 8 bytes (out-list-ptr i32, out-list-len i32)
         //   output element = 4 bytes (u32 index)
         private static void BindPoll(WasmRuntime runtime,
-            ResourceContext resources, Realloc alloc, IPoll impl)
+            ResourceContext resources, Realloc alloc, IPoll impl,
+            string version)
         {
-            const string ns = "wasi:io/poll@0.2.8";
+            var ns = "wasi:io/poll@" + version;
             var pollables = resources.Table<Pollable>();
 
             runtime.BindHostFunction<Action<ExecContext, int, int, int>>(

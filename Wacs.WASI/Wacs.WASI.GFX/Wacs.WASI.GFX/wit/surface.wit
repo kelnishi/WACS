@@ -6,7 +6,7 @@ world imports {
 
 interface surface {
   use wasi:graphics-context/graphics-context@0.0.1.{context};
-  use wasi:io/poll@0.2.8.{pollable};
+  use wasi:io/poll@0.2.0.{pollable};
 
   record create-desc {
     height: option<u32>,

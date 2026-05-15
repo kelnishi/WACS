@@ -13,15 +13,9 @@ packages = [
 ]
 phase = 2
 
-# Local deviation: the upstream wasi-gfx WIT pins to
-# wasi:io@0.2.0, but WACS.WASI.Preview2 binds wasi:io@0.2.8
-# (the latest stable). The wasi:io interface shape is
-# byte-identical across these two version strings — only
-# the package version annotation differs. We bumped the
-# wit/deps/io/* files + the `use wasi:io/poll@0.2.x`
-# reference in surface.wit to 0.2.8 so Preview2's
-# IoBindings satisfies our pollable + poll imports without
-# requiring out-of-spec aliasing. The wasi-gfx ecosystem
-# will catch up on the next proposal cut.
+# v1 phase 1i removed the wasi:io version bump — Preview2's
+# IoBindings now registers handlers at every shape-stable
+# wasi:io@0.2.x point release (0.2.0–0.2.8), so vendoring the
+# upstream wasi-gfx WIT verbatim (which pins to 0.2.0) just works.
 [deviations]
-wasi-io = "bumped from 0.2.0 to 0.2.8; shape-identical"
+# (none)
