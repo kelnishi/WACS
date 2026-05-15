@@ -92,44 +92,13 @@ namespace Wacs.WASI.GFX.Silk
             // parameterless ctor.
             WasiGfxAmbient.SetBackend(Backend);
 
-            // Force-load the DependencyInjection assembly so
-            // HostPackageResolver's AppDomain walk picks up our
-            // per-resource impl classes (Context, Surface,
-            // Device, Buffer). .NET would otherwise lazy-load
-            // it only on first type touch, leaving the resolver
-            // to fall back to delegate dispatch on --wasip2 +
-            // --wasi-gfx — which never resolves and hangs the
-            // wasm guest. Silk has a ProjectReference to DI for
-            // this same reason; the explicit Assembly.Load is
-            // the belt-and-suspenders that survives a future
-            // ProjectReference cleanup.
-            try
-            {
-                var diAsm = System.Reflection.Assembly.Load(
-                    "Wacs.WASI.GFX.DependencyInjection");
-                Wacs.WASI.GFX.GfxLog.Trace(
-                    "WasiGfxSilkBindable.BindToRuntime: loaded "
-                    + diAsm.FullName);
-                // Force-touch type symbols so the resolver sees them
-                // when it walks AppDomain. Some .NET runtimes won't
-                // populate GetExportedTypes consistently until
-                // GetType is called.
-                var ctxType = diAsm.GetType(
-                    "Wacs.WASI.GFX.DependencyInjection.Context");
-                var surfType = diAsm.GetType(
-                    "Wacs.WASI.GFX.DependencyInjection.Surface");
-                Wacs.WASI.GFX.GfxLog.Trace(
-                    "WasiGfxSilkBindable.BindToRuntime: ctxType="
-                    + (ctxType?.FullName ?? "<null>")
-                    + " surfType="
-                    + (surfType?.FullName ?? "<null>"));
-            }
-            catch (Exception ex)
-            {
-                Wacs.WASI.GFX.GfxLog.Trace(
-                    "WasiGfxSilkBindable.BindToRuntime: DI load failed: "
-                    + ex.Message);
-            }
+            // 1c: the explicit Assembly.Load of
+            // Wacs.WASI.GFX.DependencyInjection is now driven by
+            // [WacsDependencyInjectionSibling] on the Wacs.WASI.GFX
+            // contract assembly. HostPackageResolver +
+            // WasiPreview2RuntimeScope read that attribute on the
+            // first scan and Assembly.Load the sibling for us — no
+            // belt-and-suspenders here.
             Wacs.WASI.GFX.GfxLog.Trace(
                 "WasiGfxSilkBindable.BindToRuntime: done");
         }

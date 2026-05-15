@@ -1077,57 +1077,29 @@ namespace Wacs.Console.Verbs
             ResolveHostPackages(RunOptions opts)
         {
             var names = new List<string>();
+            // 1c: only the contract assemblies are named here. Each
+            // declares its DI sibling via
+            // [WacsDependencyInjectionSibling], and the resolver
+            // auto-loads the sibling before its scan — so we no
+            // longer have to list `*.DependencyInjection` on this
+            // path. Direct-link emit's TryFindResourceImpl still
+            // finds Tensor / Surface / etc. once the sibling is
+            // loaded.
             if (opts.Wasip2)
-            {
                 names.Add("Wacs.WASI.Preview2");
-                // SourceGen-shape impl classes (WasiPreview2Bundle's
-                // resource impls) live in the DI sibling. The
-                // resolver's `TryFindResourceImpl` AppDomain fallback
-                // covers the case where DI isn't on this list, but
-                // listing it explicitly avoids a stale-cache window
-                // before the runtime scope loads the assembly. Gap 23
-                // (round-17 verification) traced to the same shape
-                // for the wasi-nn case.
-                names.Add("Wacs.WASI.Preview2.DependencyInjection");
-            }
             if (opts.WasiNN)
-            {
                 names.Add("Wacs.WASI.NN");
-                // Tensor, Graph, GraphExecutionContext — the
-                // SourceGen-shape impl classes resolved by
-                // `TryFindResourceImpl` for [constructor]X direct-
-                // link emit. Without this, [constructor]tensor
-                // falls back to delegate dispatch and returns
-                // handle 0 to the guest (gap 23 / round-17
-                // verification).
-                names.Add("Wacs.WASI.NN.DependencyInjection");
-            }
             if (opts.WasiGfx)
-            {
                 names.Add("Wacs.WASI.GFX");
-                // Context, AbstractBuffer, Surface, Device, Buffer
-                // — the SourceGen-shape impl classes resolved by
-                // `TryFindResourceImpl` for [constructor]X direct-
-                // link emit on wasi-gfx resources. Same shape as
-                // the wasi-nn case above. Without the DI sibling
-                // here, [constructor]surface falls to delegate
-                // dispatch + returns handle 0 + the guest spins.
-                names.Add("Wacs.WASI.GFX.DependencyInjection");
-            }
-            // --bind that resolves to a Wacs.WASI.NN.* sibling
-            // (LlamaSharp / MLNet) implicitly needs the same DI +
-            // typed-surface packages on host-packages — otherwise
-            // the resolver ends up with incomplete WitSource
-            // coverage and post-compute lifts trap with
-            // out-of-bounds memory access (gap 24a, round-19
-            // sibling observation). Mirrors the round-18 plumbing
-            // for `--wasi-nn` (the OnnxRuntime case).
+            // A --bind that resolves to a Wacs.WASI.NN.* backend
+            // sibling (LlamaSharp / MLNet / etc.) still needs the
+            // typed-surface contract on host-packages so the
+            // resolver sees the WitSource interfaces. The DI
+            // sibling auto-loads via the contract's attribute.
             if (BindReferencesWasiNNFamily(opts))
             {
                 if (!names.Contains("Wacs.WASI.NN"))
                     names.Add("Wacs.WASI.NN");
-                if (!names.Contains("Wacs.WASI.NN.DependencyInjection"))
-                    names.Add("Wacs.WASI.NN.DependencyInjection");
             }
             foreach (var n in opts.HostPackage ?? Enumerable.Empty<string>())
             {

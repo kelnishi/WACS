@@ -404,6 +404,17 @@ namespace Wacs.Transpiler.AOT.Component
             if (assemblies == null) throw new ArgumentNullException(
                 nameof(assemblies));
 
+            // 1c: pre-load any DI sibling declared on the explicit
+            // contract assemblies (or on already-loaded AppDomain
+            // assemblies) via [WacsDependencyInjectionSibling]. Runs
+            // before the [WitSource] walk so any sibling-side
+            // [WitSource] interfaces are visible if a caller routes
+            // the DI assembly through FromAssemblies, and before
+            // TryFindResourceImpl is ever called so the AppDomain
+            // walk finds the SourceGen-shape impl classes
+            // (Context / Surface / Tensor / …).
+            LoadDeclaredSiblings(assemblies);
+
             var bindings = new Dictionary<(string, string), Binding>();
             var interfaceTypes = new List<Type>();
             var seenIface = new HashSet<Type>();
@@ -650,21 +661,9 @@ namespace Wacs.Transpiler.AOT.Component
             // Attribute-driven discovery: scan every loaded assembly
             // for types carrying [WacsCompositeBundle]. Sort by
             // Priority desc then Family asc and return the winner.
-            // The hint-load list pokes well-known sibling DI
-            // assembly names so cold-start (no prior Assembly.Load,
-            // no prior reflection touch) still surfaces them — 1c
-            // will replace these explicit names with declarative
-            // [WacsDependencyInjectionSibling] hooks on the contract
-            // assembly.
-            var compositeHints = new[]
-            {
-                "Wacs.WASI.GFX.DependencyInjection",
-                "Wacs.WASI.NN.DependencyInjection",
-            };
-            foreach (var hint in compositeHints)
-            {
-                try { Assembly.Load(hint); } catch { /* not present */ }
-            }
+            // The 1c sibling-load runs in FromAssemblies above, so
+            // by the time we hit this scan every declared DI sibling
+            // is already in the AppDomain.
             var winner = FindBestComposite(assemblies);
             if (winner != null) return winner;
 
@@ -681,6 +680,43 @@ namespace Wacs.Transpiler.AOT.Component
         // sibling DI assembly auto-loaded by reference is still
         // visible). Highest Priority wins; ties break by Family asc
         // for deterministic ordering across runs.
+        // Walks the declared-sibling attributes on every assembly
+        // in `assemblies` (plus any sibling-tagged assembly already
+        // loaded into the AppDomain) and Assembly.Load()s each
+        // declared sibling. Idempotent; quiet on failure (a missing
+        // sibling DLL is not fatal — the resolver simply finds
+        // fewer impls and direct-link emit falls back to delegate
+        // dispatch). Called by FindWasiPreview2Bundle before the
+        // composite walk; also re-callable from external callers
+        // that want sibling-load semantics without going through
+        // FromAssemblies.
+        internal static void LoadDeclaredSiblings(
+            IReadOnlyList<Assembly> assemblies)
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            void LoadFromAttrs(Assembly asm)
+            {
+                var attrs = asm.GetCustomAttributes(
+                    typeof(Wacs.ComponentModel.Runtime
+                        .WacsDependencyInjectionSiblingAttribute),
+                    inherit: false);
+                foreach (var raw in attrs)
+                {
+                    var attr = (Wacs.ComponentModel.Runtime
+                        .WacsDependencyInjectionSiblingAttribute)raw;
+                    if (!seen.Add(attr.AssemblyName)) continue;
+                    try { Assembly.Load(attr.AssemblyName); }
+                    catch { /* sibling not on disk — non-fatal */ }
+                }
+            }
+            foreach (var asm in assemblies) LoadFromAttrs(asm);
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                if (asm.IsDynamic) continue;
+                LoadFromAttrs(asm);
+            }
+        }
+
         internal static Type? FindBestComposite(
             IReadOnlyList<Assembly> assemblies)
         {
@@ -713,15 +749,31 @@ namespace Wacs.Transpiler.AOT.Component
             foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
                 Inspect(asm);
 
+            return SelectBestComposite(candidates);
+        }
+
+        /// <summary>
+        /// Sort-only pick from a candidate list. Highest Priority
+        /// wins; ties break by Family ascending (lexicographic).
+        /// Returns null when the input is empty. Extracted from
+        /// <see cref="FindBestComposite"/> so tests can exercise the
+        /// selection rule without registering attributed types into
+        /// the AppDomain (which would pollute every other resolver
+        /// run in the same test process).
+        /// </summary>
+        internal static Type? SelectBestComposite(
+            IReadOnlyList<(Type Type, int Priority, string Family)> candidates)
+        {
             if (candidates.Count == 0) return null;
-            candidates.Sort((a, b) =>
+            var sorted = candidates.ToList();
+            sorted.Sort((a, b) =>
             {
                 int p = b.Priority.CompareTo(a.Priority);
                 return p != 0 ? p
                     : string.Compare(a.Family, b.Family,
                         StringComparison.Ordinal);
             });
-            return candidates[0].Type;
+            return sorted[0].Type;
         }
 
         private static Type? FindBundleType(string qualifiedName,

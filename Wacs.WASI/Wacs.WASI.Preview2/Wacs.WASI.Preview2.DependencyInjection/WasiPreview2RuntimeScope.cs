@@ -204,18 +204,15 @@ namespace Wacs.WASI.Preview2.DependencyInjection
             // bundle when no composite is registered — components
             // without sibling-family imports stay on the slim path.
             //
-            // Cold-start hints: try-load the well-known sibling DI
-            // assemblies so a fresh process surfaces them before the
-            // attribute walk. 1c replaces these with declarative
-            // [WacsDependencyInjectionSibling] hooks.
-            foreach (var hint in new[]
-            {
-                "Wacs.WASI.GFX.DependencyInjection",
-                "Wacs.WASI.NN.DependencyInjection",
-            })
-            {
-                TryLoadAssembly(hint);
-            }
+            // 1c: pre-load any DI sibling assembly declared by
+            // already-loaded contract assemblies via
+            // [WacsDependencyInjectionSibling]. The base
+            // Wacs.WASI.Preview2 assembly is always loaded here
+            // (we're in its DI sibling), and it declares its own
+            // sibling — so this also picks up the case where no
+            // GFX / NN contract was explicitly --bind'd but the
+            // declaring assembly is reachable via ProjectReference.
+            LoadDeclaredSiblings();
 
             foreach (var t in DiscoverCompositeBundleTypes())
             {
@@ -223,6 +220,30 @@ namespace Wacs.WASI.Preview2.DependencyInjection
                 if (resolved != null) return resolved;
             }
             return sp.GetRequiredService<WasiPreview2Bundle>();
+        }
+
+        // Walks every already-loaded assembly for
+        // [WacsDependencyInjectionSibling] attributes and
+        // Assembly.Load()s each declared sibling. Idempotent;
+        // quiet on failure. See HostPackageResolver.LoadDeclaredSiblings
+        // for the transpiler-side companion.
+        private static void LoadDeclaredSiblings()
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                if (asm.IsDynamic) continue;
+                var attrs = asm.GetCustomAttributes(
+                    typeof(WacsDependencyInjectionSiblingAttribute),
+                    inherit: false);
+                foreach (var raw in attrs)
+                {
+                    var attr = (WacsDependencyInjectionSiblingAttribute)raw;
+                    if (!seen.Add(attr.AssemblyName)) continue;
+                    try { Assembly.Load(attr.AssemblyName); }
+                    catch { /* not on disk — non-fatal */ }
+                }
+            }
         }
 
         private static IEnumerable<Type> DiscoverCompositeBundleTypes()
