@@ -191,8 +191,39 @@ namespace Wacs.WASI.GFX.Silk
 
         public GenWebgpu.IGpuBuffer CreateBuffer(
             GenWebgpu.GpuBufferDescriptor descriptor)
-            => throw new PlatformNotSupportedException(
-                "SilkGpuDevice.CreateBuffer: " + DispatchPending);
+        {
+            EnsureLive();
+            if (descriptor == null)
+                throw new ArgumentNullException(nameof(descriptor));
+            var label = descriptor.Label.TryGetValue(out var l) && l != null
+                ? l : string.Empty;
+            var mappedAtCreation = descriptor.MappedAtCreation
+                .TryGetValue(out var m) && m;
+            var labelBytes = label.Length > 0
+                ? System.Text.Encoding.UTF8.GetBytes(label + "\0")
+                : null;
+            global::Silk.NET.WebGPU.Buffer* buf;
+            fixed (byte* labelPtr = labelBytes)
+            {
+                var desc = new BufferDescriptor
+                {
+                    Label = labelPtr,
+                    Size = descriptor.Size,
+                    Usage = (BufferUsage)descriptor.Usage,
+                    MappedAtCreation = mappedAtCreation,
+                };
+                buf = _backend.EnsureApi().DeviceCreateBuffer(_device, &desc);
+            }
+            if (buf == null)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "SilkGpuDevice.CreateBuffer: wgpu returned a null "
+                    + "buffer for size=" + descriptor.Size + ", usage=0x"
+                    + descriptor.Usage.ToString("X")
+                    + ". Check the wgpu validation log.");
+            return new SilkGpuBuffer(_backend, buf,
+                descriptor.Size, descriptor.Usage, label,
+                mappedAtCreation);
+        }
         public GenWebgpu.IGpuTexture CreateTexture(
             GenWebgpu.GpuTextureDescriptor descriptor)
             => throw new PlatformNotSupportedException(
@@ -300,9 +331,43 @@ namespace Wacs.WASI.GFX.Silk
         public Result<Unit, GenWebgpu.WriteBufferError> WriteBufferWithCopy(
             GenWebgpu.IGpuBuffer buffer, ulong bufferOffset,
             byte[] data, Option<ulong> dataOffset, Option<ulong> size)
-            => throw new PlatformNotSupportedException(
-                "SilkGpuQueue.WriteBufferWithCopy: needs the "
-                + "SilkGpuBuffer wgpu wrapper to land.");
+        {
+            if (_disposed || _queue == null)
+                throw new ObjectDisposedException(nameof(SilkGpuQueue));
+            if (buffer is not SilkGpuBuffer sb)
+                return Result<Unit, GenWebgpu.WriteBufferError>.FromErr(
+                    new GenWebgpu.WriteBufferError
+                    {
+                        Kind = new GenWebgpu.WriteBufferErrorKind
+                            .WriteBufferErrorKindOperationError(),
+                        Message = "WriteBufferWithCopy: buffer is not a "
+                            + "Silk-backed gpu-buffer; cross-backend "
+                            + "writes are not supported.",
+                    });
+            data ??= Array.Empty<byte>();
+            var srcOff = dataOffset.TryGetValue(out var dso)
+                ? (long)dso : 0L;
+            var byteCount = size.TryGetValue(out var sz)
+                ? (long)sz : (data.Length - srcOff);
+            if (byteCount < 0 || srcOff < 0 || srcOff + byteCount > data.Length)
+                return Result<Unit, GenWebgpu.WriteBufferError>.FromErr(
+                    new GenWebgpu.WriteBufferError
+                    {
+                        Kind = new GenWebgpu.WriteBufferErrorKind
+                            .WriteBufferErrorKindOperationError(),
+                        Message = $"WriteBufferWithCopy: data range "
+                            + $"[off={srcOff}, count={byteCount}] is "
+                            + $"out of bounds for data.Length={data.Length}.",
+                    });
+            if (byteCount == 0)
+                return Result<Unit, GenWebgpu.WriteBufferError>.FromOk(default);
+            fixed (byte* p = &data[srcOff])
+            {
+                _backend.EnsureApi().QueueWriteBuffer(
+                    _queue, sb.Native, bufferOffset, p, (nuint)byteCount);
+            }
+            return Result<Unit, GenWebgpu.WriteBufferError>.FromOk(default);
+        }
 
         public void WriteTextureWithCopy(
             GenWebgpu.GpuTexelCopyTextureInfo destination,

@@ -499,11 +499,23 @@ namespace Wacs.WASI.GFX.Webgpu
             runtime.BindHostFunction<Func<ExecContext,
                 int, long, int, int, int, int, int, int, int>>(
                 (Ns, "[method]gpu-device.create-buffer"),
-                (_, selfH, _size, _usage, _mDisc, _mVal,
-                    _lblDisc, _lblPtr, _lblLen) =>
+                (ctx, selfH, sizeI64, usageI32, mDisc, mVal,
+                    lblDisc, lblPtr, lblLen) =>
                 {
                     var dev = (IGpuDevice)host.Devices.Get(selfH);
-                    var b = dev.CreateBuffer(new Webgpu.GpuBufferDescriptor());
+                    var descriptor = new Webgpu.GpuBufferDescriptor
+                    {
+                        Size = unchecked((ulong)sizeI64),
+                        Usage = unchecked((uint)usageI32),
+                        MappedAtCreation = mDisc == 0
+                            ? Option<bool>.None
+                            : Option<bool>.Some(mVal != 0),
+                        Label = lblDisc == 0
+                            ? Option<string>.None
+                            : Option<string>.Some(
+                                ReadUtf8(ctx, lblPtr, lblLen)),
+                    };
+                    var b = dev.CreateBuffer(descriptor);
                     return host.Buffers.Allocate(b);
                 });
 
