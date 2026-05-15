@@ -68,11 +68,7 @@ namespace Wacs.WASI.GFX
                     "Cannot bind wasi-gfx: no backend configured. "
                     + "Set WasiGfxConfiguration.Backend before constructing the host.");
 
-            // WitBindings.Bind(runtime, this) lands in a follow-up
-            // commit — this scaffolding pass just makes the
-            // package compile against the IBackend SPI and the
-            // source-gen output. The full canonical-ABI binding
-            // is the next milestone.
+            WitBindings.Bind(runtime, this);
         }
 
         public void Dispose()
