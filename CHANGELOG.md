@@ -1,5 +1,134 @@
 # Changelog
 
+## WACS.WASI.GFX 0.1.0 / WACS.WASI.GFX.Silk 0.1.0 / WACS.WASI.GFX.DependencyInjection 0.1.0 / WACS.ComponentModel 0.3.6 / WACS.Transpiler.Lib 0.8.16 / WACS.WASI.Preview2.DependencyInjection 0.2.1 / WACS.Cli 1.7.8 — wasi-gfx host bindings (v0)
+
+Initial release of host bindings for the
+[wasi-gfx](https://github.com/WebAssembly/wasi-gfx) proposal
+(Phase 2). v0 covers three of the four wasi-gfx WIT packages —
+`wasi:graphics-context@0.0.1`, `wasi:frame-buffer@0.0.1`,
+`wasi:surface@0.0.1` — the CPU rendering path with windowing
+and input. `wasi:webgpu@0.0.1` (35 KB of WIT mirroring the
+browser WebGPU API) is a v1 target; the RayLib backend the
+original plan called out as a parallel sibling is deferred.
+
+Architecture mirrors `WACS.WASI.NN`: a contract package owns
+the SPI + canonical-ABI bindings, backends ship as sibling
+packages, and a DependencyInjection package provides the
+transpiler-direct-link bundle surface with per-resource
+concrete classes. Both the interpreter component path and the
+`--wasip2` transpiler-direct-link path render the parity
+fixture end-to-end on macOS / Linux / Windows (SDL targets).
+The Silk.NET/SDL backend (`WACS.WASI.GFX.Silk`) is bundled
+with the CLI so `wacs run --wasi-gfx` resolves it via
+`Assembly.Load`. The new `--windowed` flag moves the guest to
+a worker thread and reserves the calling thread for the SDL
+event pump — required on macOS where AppKit pins windowing
+to the main thread.
+
+The release includes infrastructure improvements to
+`WACS.ComponentModel`, `WACS.Transpiler.Lib`, and
+`WACS.WASI.Preview2.DependencyInjection` that were necessary
+for the transpiler-direct-link path to work end-to-end —
+they're additive and benefit any future sibling family on the
+same shape.
+
+Parity reference: fixtures at
+`Spec.Test/components/fixtures/wasi-gfx-rectangle/` and
+`wasi-gfx-triangle/` mirror
+`wasi-gfx/wasi-gfx-runtime`'s `rectangle_frame_buffer` /
+`triangle` examples on a v0-compatible world (no webgpu
+inclusion). End-to-end bring-up is documented in the fixture
+READMEs.
+
+### What changed
+
+- **`WACS.WASI.GFX` 0.1.0** (new family baseline):
+  `WasiGfxConfiguration`, `WasiGfxHost` (`IBindable`),
+  `WasiGfxAmbient` static-backend holder, `IBackend` SPI +
+  per-resource interfaces, vendored WIT from
+  `WebAssembly/wasi-gfx@03c3e95493` with the `wasi:io@0.2.0`
+  reference bumped to `0.2.8` (shape-identical, aligns with
+  Preview2's existing bindings), source-gen `[WitSource]`
+  interfaces under `Wacs.WASI.GFX.{GraphicsContext,
+  FrameBuffer, Surface}`, hand-written canonical-ABI
+  `WitBindings.cs` covering all three v0 WIT packages for
+  the interpreter component path. Cross-package
+  `wasi:io/poll.pollable` references resolve to
+  `Wacs.WASI.Preview2.Io.IPollable` via the new
+  `WitHostPackageNamespaceMap` source-gen property.
+- **`WACS.WASI.GFX.Silk` 0.1.0** (new sibling): Silk.NET/SDL
+  backend with main-thread marshaling for window creation +
+  blit, per-event-type pollables for resize/frame/pointer/
+  key events backed by Preview2's `ResourceContext`, SDL
+  scancode → uievents-code mapping. `SilkGfxBackend.
+  InitializeOnMainThread` runs on the CLI's main thread
+  pre-Task.Run to close a race that would otherwise let
+  SDL_CreateWindow land on the worker. `WasiGfxSilkBindable`
+  auto-wires Preview2 alongside wasi-gfx so a single
+  `--wasi-gfx` flag satisfies every import the surface emits.
+- **`WACS.WASI.GFX.DependencyInjection` 0.1.0** (new
+  sibling): `Microsoft.Extensions.DependencyInjection`
+  extensions plus per-resource direct-link impls (`Context`,
+  `AbstractBuffer`, `Surface`, `Device`, `Buffer`) following
+  the SourceGen-resource convention (parameterless ctor +
+  `Create()`). Delegates to the `IBackend` SPI via
+  `WasiGfxAmbient`. `WasiPreview2GfxBundle` composite
+  exposes both Preview2 and wasi-gfx `[WitSource]` interfaces
+  through one CLR object.
+- **`WACS.ComponentModel` 0.3.5 → 0.3.6** (point — additive
+  infrastructure): source-gen `WitHostPackageNamespaceMap`
+  property lets a downstream package remap cross-package
+  type references to an upstream's canonical CLR namespace
+  (used by wasi-gfx to point `wasi:io` refs at Preview2's
+  emitted types). Source-gen now emits WIT `static func` as
+  C# `static` default-interface methods with a body that
+  dispatches through the new
+  `Wacs.ComponentModel.Runtime.HostInterfaceRuntime.
+  InvokeStaticFactoryReflective` helper to the impl class's
+  `{Name}Static` factory. Closes the latent same-shape bug
+  in Preview2's `Fields.from-list` /
+  `OutgoingRequest.respond`. No public API breakages.
+- **`WACS.Transpiler.Lib` 0.8.15 → 0.8.16** (point —
+  additive canonical-ABI coverage):
+  `CanonicalSlotCount` + `EmitLiftForType` now handle
+  `IResource[]` parameters (`list<borrow<R>>` /
+  `list<own<R>>`) by emitting a loop that walks the packed
+  handle array and calls `resources.GetResource` per
+  element. This was the blocking gap for
+  `wasi:io/poll.poll`; the fix is general and unblocks any
+  future WIT importing list-of-resources.
+  `HostPackageResolver.FindWasiPreview2Bundle` auto-discovers
+  `WasiPreview2GfxBundle` alongside the existing NN
+  composite and plain Preview2 fallbacks.
+- **`WACS.WASI.Preview2.DependencyInjection` 0.2.0 → 0.2.1**
+  (point — additive composite plumbing):
+  `WasiPreview2RuntimeScope` now reflectively calls
+  `AddWasiGfx` + `AddWasiPreview2GfxBundle` when the gfx
+  DI assembly is loaded, mirroring the existing
+  `ReflectivelyAddWasiNN` hook. `ResolveBundle` prefers the
+  gfx composite when it's registered.
+- **`WACS.Cli` 1.7.7 → 1.7.8** (point — flag wiring +
+  resolver list):
+  `RunOptions` gains `--wasi-gfx` and `--windowed`
+  (introduced in 1.7.7, now bundled into the resolver
+  hostpackages list so the transpiler can find the wasi-gfx
+  impl classes the same way it finds wasi-nn's).
+  `ExecuteWindowed` reflectively pre-constructs the Silk
+  backend on the main thread before Task.Run, then drives
+  `RunMainLoop` on the calling thread. No CLI surface
+  changes beyond the new flags.
+
+### Known v1 follow-ups (not blocking v0)
+
+- `wasi:webgpu` host bindings.
+- `SDL_QUIT` (window close button) + macOS Quit-menu should
+  cancel the wasm guest cleanly; v0 requires Ctrl-C.
+- The `RayLib` backend.
+
+Family tag baseline: `WACS-WASI-GFX-v0.1.0` (no prior tags
+for this family — verified via `git tag --sort=-creatordate
+| grep WACS-WASI-GFX` returning empty before the release).
+
 ## WACS.WASI.NN.OpenVino 0.2.1 / WACS.Cli 1.7.6 — fix compile_model empty-Properties throw
 
 `OpenVINO.CSharp.API` 2025.4.0's `Core.compile_model(model, device,

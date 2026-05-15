@@ -1,0 +1,22 @@
+[package]
+name = "wasi-gfx-rectangle"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Parity fixture for WACS.WASI.GFX v0. Built against
+# the v0-compatible `rectangle` world in wit/world.wit
+# (graphics-context + surface + frame-buffer only, no
+# webgpu). Drawing logic mirrors
+# wasi-gfx/wasi-gfx-runtime/examples/apps/rectangle_frame_buffer.
+
+[dependencies]
+wit-bindgen = "0.41"
+bytemuck = "1"
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = "s"
+strip = true

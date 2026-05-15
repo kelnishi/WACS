@@ -1,0 +1,57 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <LangVersion>9</LangVersion>
+        <Nullable>enable</Nullable>
+        <Title>Wacs WASI-GFX Silk.NET/SDL backend</Title>
+        <PackageId>WACS.WASI.GFX.Silk</PackageId>
+        <Authors>Kelvin Nishikawa</Authors>
+        <Description>Silk.NET/SDL backend for WACS.WASI.GFX. Implements IBackend for wasi:graphics-context, wasi:frame-buffer, and wasi:surface on top of SDL2 via Silk.NET. Ships as a sibling NuGet so consumers wiring a different backend don't pull SDL's native binaries.</Description>
+        <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
+        <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <AssemblyName>Wacs.WASI.GFX.Silk</AssemblyName>
+        <AssemblyVersion>0.1.0</AssemblyVersion>
+        <Version>0.1.0</Version>
+        <RepositoryType>git</RepositoryType>
+        <!-- Silk.NET multi-targets net8.0; SDL native binaries
+             ship in the package itself across the OSes Silk
+             supports. -->
+        <TargetFramework>net8.0</TargetFramework>
+        <PackageTags>wasm;wasi;gfx;graphics;sdl;silk;wacs</PackageTags>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+        <!-- Silk.NET.SDL exposes the C API via pointer types
+             (Window*, Renderer*, Texture*); SDL-backed code
+             needs unsafe blocks. Scope is limited to this
+             package — neither the contract nor the runtime
+             ever touches a raw pointer. -->
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="README.md">
+            <Pack>true</Pack>
+            <PackagePath/>
+        </None>
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Wacs.WASI.GFX\Wacs.WASI.GFX.csproj" />
+        <!-- Pulls in the per-resource direct-link impls
+             (Context / Surface / Device / Buffer) so when the
+             CLI loads the Silk bindable, the DependencyInjection
+             assembly is in the AppDomain by the time the
+             HostPackageResolver scans for resource impl classes.
+             Otherwise lazy-load semantics leave it absent and the
+             resolver falls back to delegate dispatch, making
+             the wasip2 + wasi-gfx CLI path hang waiting for impls. -->
+        <ProjectReference Include="..\Wacs.WASI.GFX.DependencyInjection\Wacs.WASI.GFX.DependencyInjection.csproj" />
+        <PackageReference Include="Silk.NET.SDL" Version="2.23.0" />
+        <PackageReference Include="Silk.NET.Maths" Version="2.23.0" />
+    </ItemGroup>
+
+</Project>

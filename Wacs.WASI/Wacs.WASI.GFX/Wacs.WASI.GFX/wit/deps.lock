@@ -1,0 +1,27 @@
+# Pinned upstream commit. Replay with:
+#   curl -fsSL https://raw.githubusercontent.com/WebAssembly/wasi-gfx/03c3e954937750270b0f16fcb791a5ca0e35d741/graphics-context/graphics-context.wit -o wit/graphics-context.wit
+#   curl -fsSL https://raw.githubusercontent.com/WebAssembly/wasi-gfx/03c3e954937750270b0f16fcb791a5ca0e35d741/frame-buffer/frame-buffer.wit -o wit/frame-buffer.wit
+#   curl -fsSL https://raw.githubusercontent.com/WebAssembly/wasi-gfx/03c3e954937750270b0f16fcb791a5ca0e35d741/surface/surface.wit -o wit/surface.wit
+# Plus the surface/deps/io tree (poll, error, streams, world) and surface/deps/graphics-context.
+[wasi-gfx]
+url = "https://github.com/WebAssembly/wasi-gfx"
+sha = "03c3e954937750270b0f16fcb791a5ca0e35d741"
+packages = [
+    "wasi:graphics-context@0.0.1",
+    "wasi:frame-buffer@0.0.1",
+    "wasi:surface@0.0.1",
+]
+phase = 2
+
+# Local deviation: the upstream wasi-gfx WIT pins to
+# wasi:io@0.2.0, but WACS.WASI.Preview2 binds wasi:io@0.2.8
+# (the latest stable). The wasi:io interface shape is
+# byte-identical across these two version strings — only
+# the package version annotation differs. We bumped the
+# wit/deps/io/* files + the `use wasi:io/poll@0.2.x`
+# reference in surface.wit to 0.2.8 so Preview2's
+# IoBindings satisfies our pollable + poll imports without
+# requiring out-of-spec aliasing. The wasi-gfx ecosystem
+# will catch up on the next proposal cut.
+[deviations]
+wasi-io = "bumped from 0.2.0 to 0.2.8; shape-identical"

@@ -152,6 +152,13 @@ namespace Wacs.WASI.Preview2.DependencyInjection
             // transpile time) finds the type it expects.
             ReflectivelyAddWasiNN(services);
 
+            // Same shape for WASI.GFX.DependencyInjection — when
+            // --wasi-gfx is on the load path, the composite
+            // WasiPreview2GfxBundle is what the resolver auto-
+            // discovers and what direct-link IL is emitted
+            // against.
+            ReflectivelyAddWasiGfx(services);
+
             configure?.Invoke(services);
 
             _serviceProvider = services.BuildServiceProvider();
@@ -188,19 +195,31 @@ namespace Wacs.WASI.Preview2.DependencyInjection
 
         private static object ResolveBundle(IServiceProvider sp)
         {
-            // When WASI.NN.DI is loaded and the composite bundle
-            // type is registered (via AddWasiPreview2NNBundle),
+            // When a sibling-family composite bundle is registered,
             // prefer it — its forwarding properties cover every
             // [WitSource] interface from both packages so direct-
-            // link emit picks up wasi-nn alongside Preview2. The
-            // composite type is reflection-discovered to keep
-            // this assembly free of a compile-time WASI.NN dep.
-            var nnAsm = TryLoadAssembly("Wacs.WASI.NN.DependencyInjection");
-            var compositeType = nnAsm?.GetType(
-                "Wacs.WASI.NN.DependencyInjection.WasiPreview2NNBundle");
-            if (compositeType != null)
+            // link emit picks up the sibling alongside Preview2. The
+            // composite types are reflection-discovered to keep
+            // this assembly free of compile-time deps on either
+            // sibling. Order: gfx first, then nn — different
+            // families don't coexist in one runtime today; first
+            // match wins, mirroring the resolver's bundle
+            // auto-discovery order.
+            var gfxAsm = TryLoadAssembly("Wacs.WASI.GFX.DependencyInjection");
+            var gfxCompositeType = gfxAsm?.GetType(
+                "Wacs.WASI.GFX.DependencyInjection.WasiPreview2GfxBundle");
+            if (gfxCompositeType != null)
             {
-                var resolved = sp.GetService(compositeType);
+                var resolved = sp.GetService(gfxCompositeType);
+                if (resolved != null) return resolved;
+            }
+
+            var nnAsm = TryLoadAssembly("Wacs.WASI.NN.DependencyInjection");
+            var nnCompositeType = nnAsm?.GetType(
+                "Wacs.WASI.NN.DependencyInjection.WasiPreview2NNBundle");
+            if (nnCompositeType != null)
+            {
+                var resolved = sp.GetService(nnCompositeType);
                 if (resolved != null) return resolved;
             }
             return sp.GetRequiredService<WasiPreview2Bundle>();
@@ -264,6 +283,37 @@ namespace Wacs.WASI.Preview2.DependencyInjection
             // WASI.NN [WitSource] interfaces through one CLR
             // object.
             nnExtType.GetMethod("AddWasiPreview2NNBundle",
+                    BindingFlags.Public | BindingFlags.Static)!
+                .Invoke(null, new object?[] { services });
+        }
+
+        // Same pattern as ReflectivelyAddWasiNN above but for
+        // WACS.WASI.GFX. The backend (SilkGfxBackend) is wired
+        // into WasiGfxAmbient by WasiGfxSilkBindable.BindToRuntime,
+        // not via a DI configure callback — so the gfx Configuration
+        // can stay at its DefaultConfiguration() defaults here.
+        // The DI registration's only job is to make the composite
+        // WasiPreview2GfxBundle resolvable; the bundle's GfxBackend
+        // forwarder picks up the ambient at first use.
+        private static void ReflectivelyAddWasiGfx(IServiceCollection services)
+        {
+            var gfxAsm = TryLoadAssembly("Wacs.WASI.GFX.DependencyInjection");
+            var gfxExtType = gfxAsm?.GetType(
+                "Wacs.WASI.GFX.DependencyInjection.WasiGfxServiceCollectionExtensions");
+            if (gfxExtType == null) return;
+
+            // services.AddWasiGfx(null) — registers
+            // WasiGfxConfiguration + WasiGfxBundle. configure=null
+            // means "use defaults"; the ambient-backend hook fills
+            // in the IBackend at runtime via the Silk bindable.
+            gfxExtType.GetMethod("AddWasiGfx",
+                    BindingFlags.Public | BindingFlags.Static)!
+                .Invoke(null, new object?[] { services, null });
+
+            // services.AddWasiPreview2GfxBundle() — registers the
+            // composite forwarding Preview2 + GFX bundle properties
+            // through one CLR object.
+            gfxExtType.GetMethod("AddWasiPreview2GfxBundle",
                     BindingFlags.Public | BindingFlags.Static)!
                 .Invoke(null, new object?[] { services });
         }

@@ -41,6 +41,106 @@ namespace Wacs.Console.Verbs
     {
         public static int Execute(RunOptions opts)
         {
+            // --windowed wraps the entire wasm dispatch in a worker
+            // thread so the calling (main) thread can host the SDL
+            // event pump. The Silk backend is constructed up-front
+            // here and injected into Wacs.WASI.GFX.Silk's bindable
+            // via a reflection-discovered static setter — avoids a
+            // hard ref from Wacs.Console to the Silk assembly.
+            if (opts.Windowed && opts.WasiGfx)
+                return ExecuteWindowed(opts);
+            if (opts.Windowed && !opts.WasiGfx)
+                System.Console.Error.WriteLine(
+                    "warning: --windowed has no effect without --wasi-gfx; ignoring.");
+
+            return ExecuteCore(opts);
+        }
+
+        private static int ExecuteWindowed(RunOptions opts)
+        {
+            // 1. Load the Silk assembly + reflect on the
+            //    bindable's PresetBackend static. Loading via the
+            //    existing BindingLoader gives us the same
+            //    name-or-path resolution the --bind flag uses.
+            System.Reflection.Assembly? silkAsm;
+            try { silkAsm = BindingLoader.LoadAssembly("Wacs.WASI.GFX.Silk"); }
+            catch (Exception ex)
+            {
+                System.Console.Error.WriteLine(
+                    "error: --windowed needs Wacs.WASI.GFX.Silk on the "
+                    + "load path: " + ex.Message);
+                return 1;
+            }
+            var bindableType = silkAsm.GetType(
+                "Wacs.WASI.GFX.Silk.WasiGfxSilkBindable", throwOnError: false);
+            var backendType = silkAsm.GetType(
+                "Wacs.WASI.GFX.Silk.SilkGfxBackend", throwOnError: false);
+            if (bindableType == null || backendType == null)
+            {
+                System.Console.Error.WriteLine(
+                    "error: --windowed expected WasiGfxSilkBindable + "
+                    + "SilkGfxBackend in Wacs.WASI.GFX.Silk; "
+                    + "package may be a stale/incompatible version.");
+                return 1;
+            }
+            var presetProp = bindableType.GetProperty("PresetBackend",
+                System.Reflection.BindingFlags.Public
+                | System.Reflection.BindingFlags.Static);
+            var initMethod = backendType.GetMethod("InitializeOnMainThread");
+            var runMainLoopMethod = backendType.GetMethod("RunMainLoop");
+            if (presetProp == null || initMethod == null
+                || runMainLoopMethod == null)
+            {
+                System.Console.Error.WriteLine(
+                    "error: --windowed expected PresetBackend / "
+                    + "InitializeOnMainThread / RunMainLoop members on "
+                    + "the Silk bindable + backend.");
+                return 1;
+            }
+
+            // 2. Pre-construct the backend + inject as preset. The
+            //    wasm guest's BindToRuntime call (on the worker)
+            //    sees the preset and uses it instead of constructing
+            //    a fresh one. Initialize on this (main) thread up
+            //    front so SDL_Init + main-thread-claim happen before
+            //    any worker dispatcher call races them.
+            var backend = Activator.CreateInstance(backendType)!;
+            initMethod.Invoke(backend, null);
+            presetProp.SetValue(null, backend);
+
+            // 3. Worker thread runs the wasm dispatch; main thread
+            //    pumps SDL events until the worker completes.
+            using var cts = new System.Threading.CancellationTokenSource();
+            int result = 0;
+            Exception? workerException = null;
+            var task = System.Threading.Tasks.Task.Run(() =>
+            {
+                try { result = ExecuteCore(opts); }
+                catch (Exception ex) { workerException = ex; }
+                finally { cts.Cancel(); }
+            });
+
+            try
+            {
+                runMainLoopMethod.Invoke(backend, new object[] { cts.Token });
+            }
+            catch (Exception ex)
+            {
+                System.Console.Error.WriteLine(
+                    "error: SDL event pump threw: "
+                    + (ex.InnerException?.Message ?? ex.Message));
+            }
+
+            task.Wait();
+            if (workerException != null) throw workerException;
+            // Dispose the backend so SDL window + Quit run while
+            // we're still on the main thread.
+            if (backend is IDisposable d) d.Dispose();
+            return result;
+        }
+
+        private static int ExecuteCore(RunOptions opts)
+        {
             var files = (opts.Files ?? new List<string>())
                 .Where(p => !string.IsNullOrWhiteSpace(p))
                 .ToList();
@@ -869,6 +969,7 @@ namespace Wacs.Console.Verbs
             var paths = new List<string>();
             if (opts.WasiNN) paths.Add("Wacs.WASI.NN.OnnxRuntime");
             if (opts.WasiThreads) paths.Add("Wacs.WASI.Threads");
+            if (opts.WasiGfx) paths.Add("Wacs.WASI.GFX.Silk");
             if (opts.Bind != null) paths.AddRange(opts.Bind);
             foreach (var p in paths)
             {
@@ -901,6 +1002,7 @@ namespace Wacs.Console.Verbs
             var paths = new List<string>();
             if (opts.WasiNN) paths.Add("Wacs.WASI.NN.OnnxRuntime");
             if (opts.WasiThreads) paths.Add("Wacs.WASI.Threads");
+            if (opts.WasiGfx) paths.Add("Wacs.WASI.GFX.Silk");
             if (opts.Bind != null) paths.AddRange(opts.Bind);
 
             foreach (var asmPath in paths)
@@ -989,6 +1091,18 @@ namespace Wacs.Console.Verbs
                 // handle 0 to the guest (gap 23 / round-17
                 // verification).
                 names.Add("Wacs.WASI.NN.DependencyInjection");
+            }
+            if (opts.WasiGfx)
+            {
+                names.Add("Wacs.WASI.GFX");
+                // Context, AbstractBuffer, Surface, Device, Buffer
+                // — the SourceGen-shape impl classes resolved by
+                // `TryFindResourceImpl` for [constructor]X direct-
+                // link emit on wasi-gfx resources. Same shape as
+                // the wasi-nn case above. Without the DI sibling
+                // here, [constructor]surface falls to delegate
+                // dispatch + returns handle 0 + the guest spins.
+                names.Add("Wacs.WASI.GFX.DependencyInjection");
             }
             // --bind that resolves to a Wacs.WASI.NN.* sibling
             // (LlamaSharp / MLNet) implicitly needs the same DI +

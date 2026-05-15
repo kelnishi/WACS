@@ -1,0 +1,17 @@
+package wacs:example;
+
+/// V0-compatible parity fixture world. Mirrors the
+/// `example:example/example` world from
+/// wasi-gfx/wasi-gfx-runtime/wit/example.wit but
+/// drops the wasi:webgpu inclusion — WACS.WASI.GFX
+/// v0 covers graphics-context + surface + frame-buffer
+/// only. Once v1 webgpu lands, swap to the upstream
+/// world.
+world rectangle {
+    include wasi:surface/imports@0.0.1;
+    include wasi:graphics-context/imports@0.0.1;
+    include wasi:frame-buffer/imports@0.0.1;
+
+    /// main entrypoint
+    export start: func();
+}

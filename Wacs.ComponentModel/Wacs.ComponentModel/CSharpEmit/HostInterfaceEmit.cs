@@ -247,6 +247,66 @@ namespace Wacs.ComponentModel.CSharpEmit
                     + (m.Kind == CtResourceMethodKind.Constructor
                         ? "constructor" : name));
 
+            // WIT `static func` lowers to a C# `static` default
+            // interface method. The transpiler-direct-link path
+            // routes [static]X.foo via this method's IsStatic
+            // classification — without the `static` modifier the
+            // resolver categorizes it as [method]X.foo and the
+            // wasm import goes unbound. The body delegates to a
+            // discovered impl class's `{Name}Static` factory
+            // (Wacs.WASI.GFX.DependencyInjection.Buffer.
+            // FromGraphicsBufferStatic-shaped) via the
+            // ComponentModel runtime helper, mirroring how
+            // Wacs.WASI.Preview2's Fields.FromListStatic
+            // pattern is invoked.
+            if (m.Kind == CtResourceMethodKind.Static)
+            {
+                var returnType = EmitReturnType(fn);
+                bool isVoid = returnType == "void";
+                var ifaceQualified = "global::" + ResolveNamespace(iface,
+                        EmitAmbient.Options ?? new EmitOptions())
+                    + ".I" + ToPascal(res.Name);
+                sb.Append(indent).Append("static ")
+                    .Append(returnType)
+                    .Append(' ').Append(pascalName).Append('(');
+                EmitParamList(sb, fn);
+                sb.AppendLine(")");
+                sb.Append(indent).AppendLine("{");
+
+                // Build the args array — wraps each lifted param
+                // for the reflective Invoke call.
+                sb.Append(indent).Append("    var __args = new object?[] { ");
+                bool firstArg = true;
+                foreach (var p in fn.Params)
+                {
+                    if (!firstArg) sb.Append(", ");
+                    sb.Append(ToCamel(p.Name));
+                    firstArg = false;
+                }
+                sb.AppendLine(" };");
+
+                if (isVoid)
+                {
+                    sb.Append(indent).Append("    ")
+                        .Append("global::Wacs.ComponentModel.Runtime.HostInterfaceRuntime")
+                        .Append(".InvokeStaticFactoryReflective(typeof(")
+                        .Append(ifaceQualified).Append("), \"")
+                        .Append(pascalName).AppendLine("Static\", __args);");
+                }
+                else
+                {
+                    sb.Append(indent).Append("    var __result = ")
+                        .Append("global::Wacs.ComponentModel.Runtime.HostInterfaceRuntime")
+                        .Append(".InvokeStaticFactoryReflective(typeof(")
+                        .Append(ifaceQualified).Append("), \"")
+                        .Append(pascalName).AppendLine("Static\", __args);");
+                    sb.Append(indent).Append("    return (")
+                        .Append(returnType).AppendLine(")__result!;");
+                }
+                sb.Append(indent).AppendLine("}");
+                return;
+            }
+
             sb.Append(indent)
                 .Append(EmitReturnType(fn))
                 .Append(' ').Append(pascalName).Append('(');
@@ -762,6 +822,28 @@ namespace Wacs.ComponentModel.CSharpEmit
                 return string.IsNullOrEmpty(options.HostNamespaceOverride)
                     ? "Wasi"
                     : options.HostNamespaceOverride!;
+            }
+
+            // Per-package remap: when a referenced WIT package has
+            // its canonical CLR namespace in another assembly
+            // (e.g. wasi:io lives in Wacs.WASI.Preview2), use that
+            // namespace rather than re-rooting under the local
+            // HostNamespaceOverride. Without this, every emitter
+            // would re-emit a parallel host-interface tree for
+            // every cross-package reference; resource-table
+            // tracking depends on identity at the CLR type level,
+            // so the parallel emits would diverge and break the
+            // direct-link path.
+            if (options.PackageNamespaceMap != null
+                && options.PackageNamespaceMap.TryGetValue(
+                    pkg.Namespace + ":" + string.Join(":", pkg.Path),
+                    out var remap))
+            {
+                var sbRemap = new StringBuilder();
+                sbRemap.Append(remap);
+                foreach (var seg in pkg.Path)
+                    sbRemap.Append('.').Append(ToPascal(seg));
+                return sbRemap.ToString();
             }
 
             var sb = new StringBuilder();

@@ -1,0 +1,13 @@
+package wacs:example;
+
+/// V0-compatible parity fixture world. Same shape as the
+/// rectangle fixture — graphics-context + surface +
+/// frame-buffer only, no webgpu (deferred to v1).
+world triangle {
+    include wasi:surface/imports@0.0.1;
+    include wasi:graphics-context/imports@0.0.1;
+    include wasi:frame-buffer/imports@0.0.1;
+
+    /// main entrypoint
+    export start: func();
+}

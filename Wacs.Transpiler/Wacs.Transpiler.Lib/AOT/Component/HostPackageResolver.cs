@@ -502,7 +502,9 @@ namespace Wacs.Transpiler.AOT.Component
                 && (bundle.FullName ==
                         "Wacs.WASI.Preview2.DependencyInjection.WasiPreview2Bundle"
                     || bundle.FullName ==
-                        "Wacs.WASI.NN.DependencyInjection.WasiPreview2NNBundle"))
+                        "Wacs.WASI.NN.DependencyInjection.WasiPreview2NNBundle"
+                    || bundle.FullName ==
+                        "Wacs.WASI.GFX.DependencyInjection.WasiPreview2GfxBundle"))
             {
                 // Both the pure-Preview2 and the composite bundle
                 // route resources through WasiPreview2Resources —
@@ -644,19 +646,29 @@ namespace Wacs.Transpiler.AOT.Component
         private static Type? FindWasiPreview2Bundle(
             IReadOnlyList<Assembly> assemblies)
         {
-            // Prefer the composite. When a component imports both
-            // wasi:cli/* and wasi:nn/*, the composite's forwarding
-            // properties cover all bindings through one CLR object —
-            // ResolveBundleProperty's name-or-type lookup finds
-            // each one without needing emit changes.
-            const string compositeName =
+            // Prefer a composite. When a component imports both
+            // wasi:cli/* and a sibling family (wasi-nn / wasi-gfx),
+            // the composite's forwarding properties cover all bindings
+            // through one CLR object — ResolveBundleProperty's name-
+            // or-type lookup finds each one without needing emit
+            // changes. wasi-nn and wasi-gfx composites can't coexist
+            // in one process today (different families); first match
+            // wins, which mirrors how the CLI's --wasi-nn / --wasi-gfx
+            // flags route assemblies into the load list.
+            const string gfxCompositeName =
+                "Wacs.WASI.GFX.DependencyInjection.WasiPreview2GfxBundle";
+            var gfxComposite = FindBundleType(gfxCompositeName, assemblies,
+                fallbackAssembly: "Wacs.WASI.GFX.DependencyInjection");
+            if (gfxComposite != null) return gfxComposite;
+
+            const string nnCompositeName =
                 "Wacs.WASI.NN.DependencyInjection.WasiPreview2NNBundle";
-            var composite = FindBundleType(compositeName, assemblies,
+            var nnComposite = FindBundleType(nnCompositeName, assemblies,
                 fallbackAssembly: "Wacs.WASI.NN.DependencyInjection");
-            if (composite != null) return composite;
+            if (nnComposite != null) return nnComposite;
 
             // Fall back to Preview2-only — for components without
-            // wasi:nn imports.
+            // wasi:nn or wasi-gfx imports.
             const string preview2Name =
                 "Wacs.WASI.Preview2.DependencyInjection.WasiPreview2Bundle";
             return FindBundleType(preview2Name, assemblies,

@@ -81,15 +81,32 @@ namespace Wacs.ComponentModel.Bindgen.SourceGen
                     return v;
                 });
 
-            var combined = witFiles.Combine(nsOverride);
+            // Optional per-package namespace remap: a comma-
+            // separated list of `wit:pkg=Wacs.Foo` entries. Used
+            // when emitting cross-package type references so they
+            // land in the canonical CLR namespace where that
+            // package's host interfaces already live (e.g.
+            // `wasi:io=Wacs.WASI.Preview2` keeps wasi-gfx-side
+            // pollable references pointing at the Preview2 type).
+            var pkgNsMap = context.AnalyzerConfigOptionsProvider
+                .Select(static (opts, _) =>
+                {
+                    opts.GlobalOptions.TryGetValue(
+                        "build_property.WitHostPackageNamespaceMap",
+                        out var v);
+                    return v;
+                });
+
+            var combined = witFiles.Combine(nsOverride).Combine(pkgNsMap);
 
             context.RegisterSourceOutput(combined,
-                (spc, pair) => Execute(spc, pair.Left, pair.Right));
+                (spc, pair) => Execute(spc, pair.Left.Left, pair.Left.Right, pair.Right));
         }
 
         private static void Execute(SourceProductionContext context,
             System.Collections.Immutable.ImmutableArray<(string Path, string Text, bool Emit)> files,
-            string? nsOverride)
+            string? nsOverride,
+            string? pkgNsMapRaw)
         {
             if (files.IsDefaultOrEmpty) return;
 
@@ -151,11 +168,32 @@ namespace Wacs.ComponentModel.Bindgen.SourceGen
                 return;
             }
 
+            // Parse the per-package remap string. Format:
+            // "wit:pkg=Ns,wit:pkg2=Ns2". Whitespace tolerated.
+            Dictionary<string, string>? pkgNsMap = null;
+            if (!string.IsNullOrWhiteSpace(pkgNsMapRaw))
+            {
+                pkgNsMap = new Dictionary<string, string>(
+                    System.StringComparer.OrdinalIgnoreCase);
+                foreach (var entry in pkgNsMapRaw!.Split(','))
+                {
+                    var trimmed = entry.Trim();
+                    if (trimmed.Length == 0) continue;
+                    int eq = trimmed.IndexOf('=');
+                    if (eq <= 0 || eq == trimmed.Length - 1) continue;
+                    var key = trimmed.Substring(0, eq).Trim();
+                    var val = trimmed.Substring(eq + 1).Trim();
+                    if (key.Length > 0 && val.Length > 0)
+                        pkgNsMap[key] = val;
+                }
+            }
+
             var options = new EmitOptions
             {
                 HostInterfaceMode = true,
                 HostNamespaceOverride =
                     string.IsNullOrEmpty(nsOverride) ? null : nsOverride,
+                PackageNamespaceMap = pkgNsMap,
             };
 
             foreach (var pkg in packages)

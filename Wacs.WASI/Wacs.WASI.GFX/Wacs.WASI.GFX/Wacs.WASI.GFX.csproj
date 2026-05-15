@@ -1,0 +1,113 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <LangVersion>9</LangVersion>
+        <Nullable>enable</Nullable>
+        <Title>Wacs WASI Graphics</Title>
+        <PackageId>WACS.WASI.GFX</PackageId>
+        <Authors>Kelvin Nishikawa</Authors>
+        <Description>WASI-GFX host bindings for WACS — wasi:graphics-context, wasi:frame-buffer, wasi:surface (all @0.0.1). Backend-agnostic core; the Silk.NET/SDL backend ships as a sibling package.</Description>
+        <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
+        <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <AssemblyName>Wacs.WASI.GFX</AssemblyName>
+        <AssemblyVersion>0.1.0</AssemblyVersion>
+        <Version>0.1.0</Version>
+        <RepositoryType>git</RepositoryType>
+        <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
+        <IsAotCompatible Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net7.0'))">true</IsAotCompatible>
+        <PackageTags>wasm;webassembly;wasi;gfx;graphics;wacs</PackageTags>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+        <!-- Persist source-gen output under obj/Generated for IDE
+             navigation + debugging. Doesn't affect compilation. -->
+        <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+        <CompilerGeneratedFilesOutputPath>obj/Generated</CompilerGeneratedFilesOutputPath>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\..\Wacs.Core\Wacs.Core\Wacs.Core.csproj" />
+        <ProjectReference Include="..\..\..\Wacs.ComponentModel\Wacs.ComponentModel\Wacs.ComponentModel.csproj" />
+        <ProjectReference Include="..\..\..\Wacs.HostBindings\Wacs.HostBindings.Abstractions\Wacs.HostBindings.Abstractions.csproj" />
+        <!-- wasi:surface returns wasi:io/poll.pollable resources.
+             WACS.WASI.Preview2 owns the Pollable / ManualResetPollable
+             implementation; we depend on it directly rather than
+             re-implementing pollable. -->
+        <ProjectReference Include="..\..\Wacs.WASI.Preview2\Wacs.WASI.Preview2\Wacs.WASI.Preview2.csproj" />
+
+        <!-- WIT host-interface source generator. Same wiring as
+             Wacs.WASI.NN.csproj: Analyzer attaches at compile
+             time; ReferenceOutputAssembly=false keeps the
+             SourceGen DLL off the runtime closure. -->
+        <ProjectReference Include="..\..\..\Wacs.ComponentModel\Wacs.ComponentModel.Bindgen.SourceGen\Wacs.ComponentModel.Bindgen.SourceGen.csproj"
+                          OutputItemType="Analyzer"
+                          ReferenceOutputAssembly="false" />
+    </ItemGroup>
+
+    <!-- Feed all vendored WIT to the source generator. The
+         hand-written WitBindings continues to own the interpreter-
+         side BindHostFunction wiring (lands next pass); the
+         generated interfaces are what the transpiler's
+         HostPackageResolver direct-links against on the wasip2
+         component path. -->
+    <ItemGroup>
+        <!-- Top-level wit/*.wit drive host-interface emission —
+             this is the authoritative copy of our three v0
+             packages (graphics-context, frame-buffer, surface).
+             wit/deps/io/** is parsed for cross-package resolution
+             but NOT emitted (WitForHost=false): wasi:io types are
+             canonical in WACS.WASI.Preview2 and our generated
+             cross-package refs route there via the
+             WitHostPackageNamespaceMap below. -->
+        <AdditionalFiles Include="wit\*.wit"
+                         WitForHost="true" />
+
+        <AdditionalFiles Include="wit\deps\io\**\*.wit"
+                         WitForHost="false" />
+
+        <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="WitForHost" />
+        <CompilerVisibleProperty Include="WitHostNamespaceOverride" />
+        <CompilerVisibleProperty Include="WitHostPackageNamespaceMap" />
+    </ItemGroup>
+
+    <!-- Land generated interfaces under Wacs.WASI.GFX.{Pkg},
+         matching the hand-written tree pattern Preview2 +
+         WASI.NN use. Remap wasi:io references to the canonical
+         Wacs.WASI.Preview2.Io.* namespace so our generated
+         ISurface.SubscribeResize() etc. return the SAME
+         IPollable CLR type that Preview2's wasi:io/poll.poll
+         resolves against — the transpiler-direct-link path
+         tracks resources by CLR type identity. -->
+    <PropertyGroup>
+        <WitHostNamespaceOverride>Wacs.WASI.GFX</WitHostNamespaceOverride>
+        <WitHostPackageNamespaceMap>wasi:io=Wacs.WASI.Preview2</WitHostPackageNamespaceMap>
+    </PropertyGroup>
+
+    <!-- Vendored upstream wasi-gfx spec files. Embedded so the
+         assembly is self-contained — downstream tools
+         (Linker.Validate etc.) can read them without needing
+         the wit/ tree on disk. -->
+    <ItemGroup>
+        <EmbeddedResource Include="wit\**\*.wit"
+                          LogicalName="wit/%(RecursiveDir)%(Filename)%(Extension)" />
+        <None Include="wit\deps.lock" Pack="false" />
+        <None Include="wit\deps.toml" Pack="false" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <InternalsVisibleTo Include="Wacs.WASI.GFX.Test" />
+        <InternalsVisibleTo Include="Wacs.WASI.GFX.Silk" />
+        <InternalsVisibleTo Include="Wacs.WASI.GFX.DependencyInjection" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="README.md">
+            <Pack>true</Pack>
+            <PackagePath/>
+        </None>
+    </ItemGroup>
+
+</Project>
