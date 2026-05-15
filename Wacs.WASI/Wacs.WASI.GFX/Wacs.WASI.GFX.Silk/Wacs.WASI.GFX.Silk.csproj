@@ -12,8 +12,8 @@
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.WASI.GFX.Silk</AssemblyName>
-        <AssemblyVersion>0.1.0</AssemblyVersion>
-        <Version>0.1.0</Version>
+        <AssemblyVersion>0.2.0</AssemblyVersion>
+        <Version>0.2.0</Version>
         <RepositoryType>git</RepositoryType>
         <!-- Silk.NET multi-targets net8.0; SDL native binaries
              ship in the package itself across the OSes Silk
