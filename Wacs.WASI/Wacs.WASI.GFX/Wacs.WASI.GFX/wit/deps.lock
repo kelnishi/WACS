@@ -1,0 +1,14 @@
+# Pinned upstream commit. Replay with:
+#   curl -fsSL https://raw.githubusercontent.com/WebAssembly/wasi-gfx/03c3e954937750270b0f16fcb791a5ca0e35d741/graphics-context/graphics-context.wit -o wit/graphics-context.wit
+#   curl -fsSL https://raw.githubusercontent.com/WebAssembly/wasi-gfx/03c3e954937750270b0f16fcb791a5ca0e35d741/frame-buffer/frame-buffer.wit -o wit/frame-buffer.wit
+#   curl -fsSL https://raw.githubusercontent.com/WebAssembly/wasi-gfx/03c3e954937750270b0f16fcb791a5ca0e35d741/surface/surface.wit -o wit/surface.wit
+# Plus the surface/deps/io tree (poll, error, streams, world) and surface/deps/graphics-context.
+[wasi-gfx]
+url = "https://github.com/WebAssembly/wasi-gfx"
+sha = "03c3e954937750270b0f16fcb791a5ca0e35d741"
+packages = [
+    "wasi:graphics-context@0.0.1",
+    "wasi:frame-buffer@0.0.1",
+    "wasi:surface@0.0.1",
+]
+phase = 2

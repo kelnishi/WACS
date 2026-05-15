@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <LangVersion>9</LangVersion>
+        <Nullable>enable</Nullable>
+        <Title>Wacs WASI-GFX Silk.NET/SDL backend</Title>
+        <PackageId>WACS.WASI.GFX.Silk</PackageId>
+        <Authors>Kelvin Nishikawa</Authors>
+        <Description>Silk.NET/SDL backend for WACS.WASI.GFX. Implements IBackend for wasi:graphics-context, wasi:frame-buffer, and wasi:surface on top of SDL2 via Silk.NET. Ships as a sibling NuGet so consumers wiring a different backend don't pull SDL's native binaries.</Description>
+        <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
+        <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <AssemblyName>Wacs.WASI.GFX.Silk</AssemblyName>
+        <AssemblyVersion>0.1.0</AssemblyVersion>
+        <Version>0.1.0</Version>
+        <RepositoryType>git</RepositoryType>
+        <!-- Silk.NET multi-targets net8.0; SDL native binaries
+             ship in the package itself across the OSes Silk
+             supports. -->
+        <TargetFramework>net8.0</TargetFramework>
+        <PackageTags>wasm;wasi;gfx;graphics;sdl;silk;wacs</PackageTags>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="README.md">
+            <Pack>true</Pack>
+            <PackagePath/>
+        </None>
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Wacs.WASI.GFX\Wacs.WASI.GFX.csproj" />
+        <PackageReference Include="Silk.NET.SDL" Version="2.23.0" />
+        <PackageReference Include="Silk.NET.Maths" Version="2.23.0" />
+    </ItemGroup>
+
+</Project>
