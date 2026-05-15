@@ -16,42 +16,39 @@ using GenIGpuTexture = Wacs.WASI.GFX.Webgpu.Webgpu.IGpuTexture;
 using GenIWgslLanguageFeatures = Wacs.WASI.GFX.Webgpu.Webgpu.IWgslLanguageFeatures;
 using GenGpuRAOpts = Wacs.WASI.GFX.Webgpu.Webgpu.GpuRequestAdapterOptions;
 using GenGpuTextureFormat = Wacs.WASI.GFX.Webgpu.Webgpu.GpuTextureFormat;
+using GenGpuPowerPreference = Wacs.WASI.GFX.Webgpu.Webgpu.GpuPowerPreference;
 
 namespace Wacs.WASI.GFX.Silk
 {
     /// <summary>
     /// Silk.NET.WebGPU-backed implementation of
     /// <see cref="IGpuBackend"/> — the GPU sibling to
-    /// <see cref="SilkGfxBackend"/>. v1 phase 3 session 8 ships
-    /// the skeleton + the Silk.NET.WebGPU package wiring so
-    /// downstream sessions (descriptor decoding + parity
-    /// fixtures) have a target to land against.
-    ///
-    /// <para>The same Silk dependency serves both CPU
-    /// (frame-buffer / surface) and GPU (webgpu) host paths;
-    /// embedders that wire <c>WasiGfxSilkBindable</c> get GPU
-    /// support automatically once the actual
-    /// <see cref="SilkGpu"/> implementation lands. Most surface
-    /// methods currently throw
-    /// <see cref="PlatformNotSupportedException"/> with a
-    /// pointer to the session that wires them.</para>
+    /// <see cref="SilkGfxBackend"/>. Holds the wgpu-native API
+    /// entry point + a lazily-created Instance shared by every
+    /// adapter request through the lifetime of this backend.
     ///
     /// <para><b>Threading:</b> wgpu-native is internally
     /// thread-safe; method calls on Silk.NET.WebGPU types are
     /// safe from any thread. No main-thread requirement (unlike
     /// SDL). Adapter / device handles are reference-counted at
-    /// the wgpu layer; the SPI's IDisposable.Dispose maps to
-    /// the matching <c>wgpu*Release</c> call.</para>
+    /// the wgpu layer; <see cref="IDisposable.Dispose"/> on every
+    /// wrapper maps to the matching <c>wgpu*Release</c> call.</para>
+    ///
+    /// <para><b>Lifetime:</b> backend → instance → adapter →
+    /// device → buffers / pipelines / encoders. Disposing the
+    /// backend cascades the release in LIFO order via each
+    /// wrapper's own <see cref="IDisposable.Dispose"/>.</para>
     /// </summary>
-    public sealed class SilkGpuBackend : IGpuBackend
+    public sealed unsafe class SilkGpuBackend : IGpuBackend
     {
         private SNWebGPU? _wgpu;
+        private Instance* _instance;
         private GenIGpu? _gpu;
         private bool _disposed;
 
         /// <summary>The underlying Silk.NET.WebGPU API entry
-        /// point. Lazy-initialized on first
-        /// <see cref="CreateGpu"/>.</summary>
+        /// point. Lazy-initialized on first use; survives across
+        /// every adapter / device request from this backend.</summary>
         internal SNWebGPU EnsureApi()
         {
             if (_wgpu != null) return _wgpu;
@@ -62,6 +59,26 @@ namespace Wacs.WASI.GFX.Silk
             // tree; the loader probes there first.
             _wgpu = SNWebGPU.GetApi();
             return _wgpu;
+        }
+
+        /// <summary>The single wgpu Instance shared by every
+        /// adapter request on this backend. wgpu-native is
+        /// happy with one instance per process; reusing it
+        /// avoids re-initializing the driver discovery path on
+        /// each <c>gpu.request-adapter</c> call.</summary>
+        internal Instance* EnsureInstance()
+        {
+            if (_instance != null) return _instance;
+            EnsureApi();
+            var desc = new InstanceDescriptor();
+            _instance = _wgpu!.CreateInstance(&desc);
+            if (_instance == null)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "SilkGpuBackend: wgpuCreateInstance returned "
+                    + "null. wgpu-native is installed but the driver "
+                    + "discovery failed; check the wgpu-native log "
+                    + "for the underlying error.");
+            return _instance;
         }
 
         public GenIGpu CreateGpu()
@@ -85,15 +102,18 @@ namespace Wacs.WASI.GFX.Silk
                     + "cannot be lifted to a wasi:webgpu texture; "
                     + "use the frame-buffer device's "
                     + "FromGraphicsBuffer instead.");
-            // Real wgpu texture creation: import the swap-chain
-            // surface as a WGPUTexture handle. Session 11 wires
-            // the wgpu API call alongside the surface
-            // configuration that produces IGpuAbstractBuffer
-            // instances in the first place.
+            // The wgpu-native swap-chain → wasi:webgpu texture
+            // lift needs surface configuration first (a Silk
+            // surface backed by SDL window, configured against
+            // the device's adapter). The lift wires alongside
+            // <c>connect-graphics-context</c>'s surface-create
+            // path; until then any IGpuAbstractBuffer would be
+            // synthetic.
             throw new PlatformNotSupportedException(
-                "SilkGpuBackend.FromAbstractBuffer — the wgpu-native "
-                + "swap-chain-to-texture lift lands in v1 phase 3 "
-                + "session 11 alongside SilkGpuAdapter.");
+                "SilkGpuBackend.FromAbstractBuffer: wgpu swap-chain "
+                + "→ texture lift not yet wired. Requires a "
+                + "connect-graphics-context surface configuration "
+                + "path on the GPU device.");
         }
 
         public void Dispose()
@@ -102,19 +122,107 @@ namespace Wacs.WASI.GFX.Silk
             _disposed = true;
             (_gpu as IDisposable)?.Dispose();
             _gpu = null;
+            if (_instance != null && _wgpu != null)
+            {
+                _wgpu.InstanceRelease(_instance);
+                _instance = null;
+            }
             _wgpu?.Dispose();
             _wgpu = null;
+        }
+
+        // -----------------------------------------------------
+        //  Callback-bridge helpers
+        //
+        //  wgpu-native completes adapter / device requests
+        //  synchronously — the user-supplied callback fires
+        //  before the request method returns. We exploit that to
+        //  turn the C-style callback API into a sync return via
+        //  closure capture. The Pfn* delegate stays alive for the
+        //  duration of the call (rooted by the local `cb` var),
+        //  so no GCHandle pinning is needed.
+        // -----------------------------------------------------
+
+        internal Adapter* RequestAdapterSync(
+            Instance* instance,
+            RequestAdapterOptions* options,
+            out string? errorMessage)
+        {
+            EnsureApi();
+            Adapter* result = null;
+            string? err = null;
+            bool fired = false;
+            var cb = new PfnRequestAdapterCallback(
+                (RequestAdapterStatus status, Adapter* a,
+                    byte* msg, void* _) =>
+                {
+                    fired = true;
+                    if (status == RequestAdapterStatus.Success)
+                        result = a;
+                    else
+                        err = "wgpu adapter request status="
+                            + status + (msg != null
+                                ? ": " + DecodeUtf8(msg) : "");
+                });
+            _wgpu!.InstanceRequestAdapter(instance, options, cb, null);
+            if (!fired)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "SilkGpuBackend.RequestAdapterSync: wgpu-native "
+                    + "did not invoke the adapter callback "
+                    + "synchronously — the sync-bridge assumption "
+                    + "no longer holds.");
+            errorMessage = err;
+            return result;
+        }
+
+        internal Device* RequestDeviceSync(
+            Adapter* adapter,
+            DeviceDescriptor* descriptor,
+            out string? errorMessage)
+        {
+            EnsureApi();
+            Device* result = null;
+            string? err = null;
+            bool fired = false;
+            var cb = new PfnRequestDeviceCallback(
+                (RequestDeviceStatus status, Device* d,
+                    byte* msg, void* _) =>
+                {
+                    fired = true;
+                    if (status == RequestDeviceStatus.Success)
+                        result = d;
+                    else
+                        err = "wgpu device request status="
+                            + status + (msg != null
+                                ? ": " + DecodeUtf8(msg) : "");
+                });
+            _wgpu!.AdapterRequestDevice(adapter, descriptor, cb, null);
+            if (!fired)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "SilkGpuBackend.RequestDeviceSync: wgpu-native "
+                    + "did not invoke the device callback "
+                    + "synchronously.");
+            errorMessage = err;
+            return result;
+        }
+
+        internal static string DecodeUtf8(byte* p)
+        {
+            if (p == null) return string.Empty;
+            int len = 0;
+            while (p[len] != 0) len++;
+            if (len == 0) return string.Empty;
+            return System.Text.Encoding.UTF8.GetString(p, len);
         }
     }
 
     /// <summary>
-    /// Silk-backed <c>wasi:webgpu</c> gpu singleton. Mints
-    /// adapters via the wgpu instance. v1 session 8 skeleton:
-    /// the wgpu-native instance is acquired and held; downstream
-    /// <see cref="RequestAdapter"/> / format / features methods
-    /// are stubbed until session 11 wires actual GPU dispatch.
+    /// Silk-backed <c>wasi:webgpu</c> gpu singleton. Translates
+    /// <see cref="RequestAdapter"/> to a real wgpu-native
+    /// <c>wgpuInstanceRequestAdapter</c> via the backend's
+    /// synchronous callback bridge.
     /// </summary>
-    internal sealed class SilkGpu : GenIGpu, IDisposable
+    internal sealed unsafe class SilkGpu : GenIGpu, IDisposable
     {
         private readonly SilkGpuBackend _backend;
         private bool _disposed;
@@ -127,38 +235,59 @@ namespace Wacs.WASI.GFX.Silk
         public Option<GenIGpuAdapter> RequestAdapter(
             Option<GenGpuRAOpts> options)
         {
-            // wgpu.InstanceRequestAdapter is an async-callback
-            // API that the wasi:webgpu sync surface must adapt
-            // by spinning on a flag the callback flips. Session
-            // 11 ships the adapter-resolve dance + the
-            // SilkGpuAdapter wrapper around WGPUAdapter*. Until
-            // then, headless / no-GPU embedders see this throw
-            // and can wire their own backend; CI without GPU
-            // skips wasi-webgpu fixtures.
-            throw new PlatformNotSupportedException(
-                "SilkGpu.RequestAdapter — wgpu-native dispatch "
-                + "lands in v1 phase 3 session 11. Until then, "
-                + "use a custom IGpuBackend for wasi-webgpu tests.");
+            if (_disposed)
+                throw new ObjectDisposedException(nameof(SilkGpu));
+            var instance = _backend.EnsureInstance();
+            var raOpts = default(RequestAdapterOptions);
+            if (options.TryGetValue(out var o) && o != null)
+            {
+                if (o.PowerPreference.TryGetValue(out var pp))
+                {
+                    raOpts.PowerPreference = pp switch
+                    {
+                        GenGpuPowerPreference.LowPower
+                            => PowerPreference.LowPower,
+                        GenGpuPowerPreference.HighPerformance
+                            => PowerPreference.HighPerformance,
+                        _ => PowerPreference.Undefined,
+                    };
+                }
+                if (o.ForceFallbackAdapter.TryGetValue(out var ffa))
+                    raOpts.ForceFallbackAdapter = ffa;
+                // FeatureLevel + XrCompatible aren't surfaced by
+                // wgpu-native's RequestAdapterOptions; the WIT
+                // accepts them for forward-compat but they're
+                // currently advisory.
+            }
+            var adapter = _backend.RequestAdapterSync(
+                instance, &raOpts, out var err);
+            if (adapter == null)
+            {
+                // Spec: option<gpu-adapter> — None signals "no
+                // matching adapter found." err is logged for
+                // diagnostics; the wasm guest just sees None.
+                if (err != null)
+                    Wacs.WASI.GFX.GfxLog.Trace(
+                        "SilkGpu.RequestAdapter: " + err);
+                return Option<GenIGpuAdapter>.None;
+            }
+            return Option<GenIGpuAdapter>.Some(
+                new SilkGpuAdapter(_backend, adapter));
         }
 
         public GenGpuTextureFormat GetPreferredCanvasFormat()
         {
             // wgpu reports this per-surface via
-            // wgpu.SurfaceGetCapabilities. Without an active
-            // surface the canonical answer matches what every
-            // major OS surface reports today: BGRA8 with sRGB
-            // encoding. Session 11 will pivot to the surface-
-            // queried value once SilkGpuAdapter is in place.
+            // SurfaceGetCapabilities. Without an active surface
+            // the canonical answer matches what every major OS
+            // surface reports today: BGRA8 with sRGB encoding.
             return GenGpuTextureFormat.Bgra8unormSrgb;
         }
 
         public GenIWgslLanguageFeatures WgslLanguageFeatures()
         {
-            // v1 wgpu-native doesn't expose a language-features
-            // query beyond "what it implements," which today is
-            // the WGSL spec verbatim. Return an empty features
-            // set; guests must check the WGSL spec for any
-            // extension they want to use.
+            // wgpu-native implements baseline WGSL; no opt-in
+            // features have shipped as of 2026-05.
             return new SilkWgslLanguageFeatures();
         }
 
