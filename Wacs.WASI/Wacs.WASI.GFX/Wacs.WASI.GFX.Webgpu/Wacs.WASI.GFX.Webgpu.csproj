@@ -62,12 +62,11 @@
 
     <PropertyGroup>
         <WitHostNamespaceOverride>Wacs.WASI.GFX.Webgpu</WitHostNamespaceOverride>
-        <!-- io types route to the canonical Preview2.Io namespace
-             so generated IPollable references hit the same CLR
-             type Preview2's wasi:io/poll.poll resolves against.
-             graphics-context types route to Wacs.WASI.GFX so we
-             share IContext / IAbstractBuffer with the CPU path. -->
-        <WitHostPackageNamespaceMap>wasi:io=Wacs.WASI.Preview2,wasi:graphics-context=Wacs.WASI.GFX</WitHostPackageNamespaceMap>
+        <!-- v1 phase 1 1d: cross-package refs (wasi:io,
+             wasi:graphics-context) route through
+             [WitPackageMapping] assembly attributes on the
+             referenced contract assemblies — no manual map
+             needed. -->
     </PropertyGroup>
 
     <ItemGroup>

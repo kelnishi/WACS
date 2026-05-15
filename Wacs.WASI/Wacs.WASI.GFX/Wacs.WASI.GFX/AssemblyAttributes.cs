@@ -15,3 +15,12 @@ using Wacs.ComponentModel.Runtime;
 // no need for the IBindable or the CLI to know the sibling's name.
 [assembly: WacsDependencyInjectionSibling(
     "Wacs.WASI.GFX.DependencyInjection")]
+
+// v1 phase 1 1d: declares the WIT packages this assembly owns
+// (graphics-context + frame-buffer + surface). Downstream
+// packages like Wacs.WASI.GFX.Webgpu read this attribute and
+// route their `use wasi:graphics-context/...` cross-package
+// references to Wacs.WASI.GFX automatically.
+[assembly: WitPackageMapping("wasi:graphics-context", "Wacs.WASI.GFX")]
+[assembly: WitPackageMapping("wasi:frame-buffer", "Wacs.WASI.GFX")]
+[assembly: WitPackageMapping("wasi:surface", "Wacs.WASI.GFX")]

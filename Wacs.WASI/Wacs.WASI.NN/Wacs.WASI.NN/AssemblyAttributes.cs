@@ -16,3 +16,6 @@ using Wacs.ComponentModel.Runtime;
 // name.
 [assembly: WacsDependencyInjectionSibling(
     "Wacs.WASI.NN.DependencyInjection")]
+
+// v1 phase 1 1d: wasi:nn types live in Wacs.WASI.NN.
+[assembly: WitPackageMapping("wasi:nn", "Wacs.WASI.NN")]

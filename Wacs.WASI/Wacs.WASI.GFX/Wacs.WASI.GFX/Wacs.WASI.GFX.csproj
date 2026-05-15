@@ -75,15 +75,12 @@
 
     <!-- Land generated interfaces under Wacs.WASI.GFX.{Pkg},
          matching the hand-written tree pattern Preview2 +
-         WASI.NN use. Remap wasi:io references to the canonical
-         Wacs.WASI.Preview2.Io.* namespace so our generated
-         ISurface.SubscribeResize() etc. return the SAME
-         IPollable CLR type that Preview2's wasi:io/poll.poll
-         resolves against — the transpiler-direct-link path
-         tracks resources by CLR type identity. -->
+         WASI.NN use. Cross-package `wasi:io` references route
+         to Wacs.WASI.Preview2.Io.IPollable via the
+         [WitPackageMapping] attribute on Wacs.WASI.Preview2
+         (v1 phase 1 1d) — no manual MSBuild map needed. -->
     <PropertyGroup>
         <WitHostNamespaceOverride>Wacs.WASI.GFX</WitHostNamespaceOverride>
-        <WitHostPackageNamespaceMap>wasi:io=Wacs.WASI.Preview2</WitHostPackageNamespaceMap>
     </PropertyGroup>
 
     <!-- Vendored upstream wasi-gfx spec files. Embedded so the
