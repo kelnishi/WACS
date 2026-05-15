@@ -117,7 +117,25 @@ namespace Wacs.WASI.GFX.Silk
                 .WithSharedResources(SharedResources)
                 .WithAbstractBufferResolver(handle =>
                     cpuHost.AbstractBuffers.Get(handle)
-                        as IAbstractBuffer));
+                        as IAbstractBuffer)
+                .WithGraphicsContextResolver(handle =>
+                {
+                    // Two storage shapes share this table:
+                    //   - Interpreter path: SPI IGraphicsContext
+                    //     instances allocated by the wasi:graphics-
+                    //     context.context constructor binding.
+                    //   - DI / transpiler path: DI Context wrappers
+                    //     (already implement the wit-generated
+                    //     IContext directly).
+                    // Take whichever shape is in the table and
+                    // present an IContext to the webgpu binding.
+                    var obj = cpuHost.Contexts.Get(handle);
+                    if (obj is Wacs.WASI.GFX.GraphicsContext.IContext ic)
+                        return ic;
+                    if (obj is Wacs.WASI.GFX.IGraphicsContext spi)
+                        return new SpiContextAdapter(spi);
+                    return null;
+                }));
 
             // Set the AppDomain-wide ambient so the transpiler-
             // direct-link path's resource constructors (Context,
@@ -148,6 +166,40 @@ namespace Wacs.WASI.GFX.Silk
             Host = null;
             GpuBackend = null;
             WebgpuHost = null;
+        }
+
+        // Adapts an SPI IGraphicsContext to the wit-generated
+        // wasi:graphics-context.context interface so the webgpu
+        // device's ConnectGraphicsContext (which takes IContext)
+        // can consume contexts the wasi-gfx interpreter binding
+        // stored as SPI instances. Create() is a no-op — the
+        // SPI instance is already constructed.
+        private sealed class SpiContextAdapter
+            : Wacs.WASI.GFX.GraphicsContext.IContext
+        {
+            private readonly Wacs.WASI.GFX.IGraphicsContext _inner;
+            public SpiContextAdapter(Wacs.WASI.GFX.IGraphicsContext inner)
+            {
+                _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+            }
+            public void Create() { /* already constructed */ }
+            public Wacs.WASI.GFX.GraphicsContext.IAbstractBuffer
+                GetCurrentBuffer()
+            {
+                var buf = _inner.GetCurrentBuffer();
+                return new SpiAbstractBufferAdapter(buf);
+            }
+            public void Present() => _inner.Present();
+        }
+
+        private sealed class SpiAbstractBufferAdapter
+            : Wacs.WASI.GFX.GraphicsContext.IAbstractBuffer
+        {
+            public Wacs.WASI.GFX.IAbstractBuffer Inner { get; }
+            public SpiAbstractBufferAdapter(Wacs.WASI.GFX.IAbstractBuffer inner)
+            {
+                Inner = inner ?? throw new ArgumentNullException(nameof(inner));
+            }
         }
     }
 }

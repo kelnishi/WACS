@@ -95,6 +95,10 @@ namespace Wacs.WASI.GFX.Webgpu
         internal Func<int, IAbstractBuffer?>? AbstractBufferResolver
             => _config.AbstractBufferResolver;
 
+        internal Func<int, Wacs.WASI.GFX.GraphicsContext.IContext?>?
+            GraphicsContextResolver
+            => _config.GraphicsContextResolver;
+
         /// <summary>v1: shared Preview2 resource context the
         /// host plumbs through. Needed by binding sites that mint
         /// wasi:io.Pollable resources into Preview2's table — the

@@ -64,10 +64,10 @@ namespace Wacs.WASI.GFX.Webgpu.Test
         public IGpuBuffer CreateBuffer(GpuBufferDescriptor descriptor)
             => new StubGpuBuffer();
         public IGpuTexture CreateTexture(GpuTextureDescriptor descriptor)
-            => throw new NotImplementedException();
+            => new StubGpuTexture();
         public IGpuSampler CreateSampler(
             Option<GpuSamplerDescriptor> descriptor)
-            => throw new NotImplementedException();
+            => new StubGpuSampler();
         public IGpuBindGroupLayout CreateBindGroupLayout(
             GpuBindGroupLayoutDescriptor descriptor)
             => new StubGpuBindGroupLayout();
@@ -88,10 +88,12 @@ namespace Wacs.WASI.GFX.Webgpu.Test
             => throw new NotImplementedException();
         public Result<IGpuComputePipeline, CreatePipelineError>
             CreateComputePipelineAsync(GpuComputePipelineDescriptor descriptor)
-            => throw new NotImplementedException();
+            => Result<IGpuComputePipeline, CreatePipelineError>.FromOk(
+                new StubGpuComputePipeline());
         public Result<IGpuRenderPipeline, CreatePipelineError>
             CreateRenderPipelineAsync(GpuRenderPipelineDescriptor descriptor)
-            => throw new NotImplementedException();
+            => Result<IGpuRenderPipeline, CreatePipelineError>.FromOk(
+                new StubGpuRenderPipeline());
         public IGpuCommandEncoder CreateCommandEncoder(
             Option<GpuCommandEncoderDescriptor> descriptor)
             => new StubGpuCommandEncoder();

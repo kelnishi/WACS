@@ -64,6 +64,13 @@ namespace Wacs.WASI.GFX.Webgpu
             return this;
         }
 
+        public WasiWebgpuConfigurationBuilder WithGraphicsContextResolver(
+            Func<int, Wacs.WASI.GFX.GraphicsContext.IContext?>? resolver)
+        {
+            _cfg.GraphicsContextResolver = resolver;
+            return this;
+        }
+
         internal WasiWebgpuConfiguration Build() => _cfg;
     }
 }

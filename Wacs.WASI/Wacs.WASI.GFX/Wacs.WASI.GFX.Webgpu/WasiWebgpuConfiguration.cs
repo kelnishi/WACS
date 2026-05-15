@@ -54,6 +54,24 @@ namespace Wacs.WASI.GFX.Webgpu
         /// </summary>
         public Func<int, IAbstractBuffer?>? AbstractBufferResolver { get; set; }
 
+        /// <summary>
+        /// Cross-host bridge for
+        /// <c>[method]gpu-device.connect-graphics-context</c>:
+        /// resolves a wasi-gfx-side <c>context</c> handle to a
+        /// <c>wasi:graphics-context.context</c> instance the
+        /// webgpu device's <c>IGpuDevice.ConnectGraphicsContext</c>
+        /// can consume. Parallels <see cref="AbstractBufferResolver"/>
+        /// but for the Contexts table on the sibling host. The
+        /// embedder wiring (Silk bindable) is responsible for
+        /// adapting the SPI-side stored object to this
+        /// wit-generated interface — the interpreter Contexts table
+        /// stores <c>IGraphicsContext</c> SPI instances directly,
+        /// whereas the DI/transpiler path stores
+        /// <c>DependencyInjection.Context</c> wrappers that already
+        /// implement <see cref="Wacs.WASI.GFX.GraphicsContext.IContext"/>.
+        /// </summary>
+        public Func<int, Wacs.WASI.GFX.GraphicsContext.IContext?>? GraphicsContextResolver { get; set; }
+
         public static WasiWebgpuConfiguration DefaultConfiguration()
         {
             return new WasiWebgpuConfiguration();

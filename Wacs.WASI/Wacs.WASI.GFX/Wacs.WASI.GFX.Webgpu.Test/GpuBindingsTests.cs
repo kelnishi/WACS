@@ -683,6 +683,74 @@ namespace Wacs.WASI.GFX.Webgpu.Test
         }
 
         [Fact]
+        public void StubDevice_CreateTexture_ReturnsStubTexture()
+        {
+            var dev = new StubGpuDevice();
+            var t = dev.CreateTexture(
+                new Wacs.WASI.GFX.Webgpu.Webgpu.GpuTextureDescriptor());
+            Assert.NotNull(t);
+            Assert.IsType<StubGpuTexture>(t);
+        }
+
+        [Fact]
+        public void StubDevice_CreateSampler_None_ReturnsStubSampler()
+        {
+            var dev = new StubGpuDevice();
+            var s = dev.CreateSampler(
+                Option<Wacs.WASI.GFX.Webgpu.Webgpu.GpuSamplerDescriptor>.None);
+            Assert.NotNull(s);
+            Assert.IsType<StubGpuSampler>(s);
+        }
+
+        [Fact]
+        public void StubDevice_CreateSampler_Some_ReturnsStubSampler()
+        {
+            var dev = new StubGpuDevice();
+            var s = dev.CreateSampler(Option<Wacs.WASI.GFX.Webgpu.Webgpu.GpuSamplerDescriptor>
+                .Some(new Wacs.WASI.GFX.Webgpu.Webgpu.GpuSamplerDescriptor()));
+            Assert.NotNull(s);
+        }
+
+        [Fact]
+        public void StubDevice_CreateComputePipelineAsync_ReturnsOk()
+        {
+            var dev = new StubGpuDevice();
+            var result = dev.CreateComputePipelineAsync(
+                new Wacs.WASI.GFX.Webgpu.Webgpu.GpuComputePipelineDescriptor());
+            Assert.True(result.IsOk);
+            Assert.IsType<StubGpuComputePipeline>(result.Ok);
+        }
+
+        [Fact]
+        public void StubDevice_CreateRenderPipelineAsync_ReturnsOk()
+        {
+            var dev = new StubGpuDevice();
+            var result = dev.CreateRenderPipelineAsync(
+                new Wacs.WASI.GFX.Webgpu.Webgpu.GpuRenderPipelineDescriptor());
+            Assert.True(result.IsOk);
+            Assert.IsType<StubGpuRenderPipeline>(result.Ok);
+        }
+
+        [Fact]
+        public void Builder_WithGraphicsContextResolver_AssignsConfig()
+        {
+            var b = new WasiWebgpuConfigurationBuilder();
+            Func<int, Wacs.WASI.GFX.GraphicsContext.IContext?> resolver
+                = _ => null;
+            b.WithBackend(new StubGpuBackend());
+            b.WithGraphicsContextResolver(resolver);
+            // No public surface for the config builder's interior;
+            // round-trip through UseWasiWebgpu and verify the bind
+            // succeeds, exercising the WithGraphicsContextResolver
+            // path with a non-null backend.
+            var runtime = new WasmRuntime();
+            using var host = runtime.UseWasiWebgpu(x => x
+                .WithBackend(new StubGpuBackend())
+                .WithGraphicsContextResolver(resolver));
+            Assert.NotNull(host);
+        }
+
+        [Fact]
         public void Session6_ComputePath_EndToEnd_ChainCompiles()
         {
             // Sanity: the whole compute path stub chain can be

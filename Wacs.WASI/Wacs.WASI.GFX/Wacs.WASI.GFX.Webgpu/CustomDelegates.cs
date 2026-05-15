@@ -45,10 +45,56 @@ namespace Wacs.WASI.GFX.Webgpu
             int a08, int a09, int a10, int a11, int a12, int a13, int a14,
             int a15);
 
-        // create-texture / create-sampler / create-render-pipeline
-        // and the async pipeline variants need their own
-        // high-arity delegates; defining them requires precise
-        // flat-form arity per the canonical-ABI rules, which is
-        // tracked separately from this session.
+        // create-texture shape: self + gpu-texture-descriptor flat (18 i32)
+        // + i32 return handle.
+        //   gpu-extent3-d flat = u32 + 2 opt<u32> = 5 i32
+        //   + opt<u32> mip-level-count = 2 i32
+        //   + opt<u32> sample-count   = 2 i32
+        //   + opt<enum> dimension     = 2 i32
+        //   + enum format             = 1 i32
+        //   + u32 usage               = 1 i32
+        //   + list<opt<enum>> view-formats = 2 i32 (ptr, len)
+        //   + opt<string> label       = 3 i32
+        //   total record = 18 i32
+        // ExecContext + 19 int → int.
+        internal delegate int CreateTexture(ExecContext ctx,
+            int a01, int a02, int a03, int a04, int a05, int a06, int a07,
+            int a08, int a09, int a10, int a11, int a12, int a13, int a14,
+            int a15, int a16, int a17, int a18, int a19);
+
+        // create-sampler shape: self + option<gpu-sampler-descriptor>
+        // (24 flat slots, mixed i32/f32) + i32 return handle.
+        //   opt-disc                                              i32
+        //   6 × opt<enum>      (2 i32 each)                       = 12 i32
+        //   opt<f32> lod-min-clamp = disc:i32 + val:f32           = i32, f32
+        //   opt<f32> lod-max-clamp = disc:i32 + val:f32           = i32, f32
+        //   opt<enum> compare      (2 i32)                         = 2 i32
+        //   opt<u16>  max-anisotropy (2 i32)                       = 2 i32
+        //   opt<string> label      (3 i32)                         = 3 i32
+        //   record-flat = 23 i32 + 2 f32 = 25 slots; option<that> = 26
+        // ExecContext + (self + 25 mixed) + return = 27 type params.
+        internal delegate int CreateSampler(ExecContext ctx,
+            int self,
+            int optDisc,
+            int aud, int auv, int avd, int avv, int awd, int aww,
+            int mfd, int mfv, int mnd, int mnv, int mid, int miv,
+            int lminD, float lminV, int lmaxD, float lmaxV,
+            int cmpD, int cmpV, int maD, int maV,
+            int lblD, int lblPtr, int lblLen);
+
+        // create-compute-pipeline-async shape: self + gpu-compute-pipeline-
+        // descriptor flat (11 i32) + retArea i32.
+        //   programmable-stage record flat:
+        //     module: borrow                              1 i32
+        //     entry-point: opt<string>                    3 i32
+        //     constants: opt<own>                         2 i32
+        //     = 6 i32
+        //   layout-mode variant{specific(borrow)|auto}:   2 i32 (disc + max payload)
+        //   label: opt<string>                            3 i32
+        //   record total = 11 i32
+        // 0 results. ExecContext + 13 int.
+        internal delegate void CreateComputePipelineAsync(ExecContext ctx,
+            int a01, int a02, int a03, int a04, int a05, int a06, int a07,
+            int a08, int a09, int a10, int a11, int a12, int a13);
     }
 }

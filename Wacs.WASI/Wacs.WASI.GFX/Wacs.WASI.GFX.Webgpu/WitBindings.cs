@@ -687,42 +687,113 @@ namespace Wacs.WASI.GFX.Webgpu
                     return table.Allocate((Wacs.WASI.Preview2.Io.Pollable)p);
                 });
 
-            // connect-graphics-context(self, borrow<context>)
+            // connect-graphics-context(self, borrow<context>) -> ()
             // The context handle lives in the wasi-gfx host's
-            // Contexts table — use the same AbstractBufferResolver
-            // wiring to resolve (a simple variant: just the
-            // graphics-context handle, not abstract-buffer).
+            // Contexts table. The bridge is the
+            // GraphicsContextResolver closure the embedder wires
+            // when both hosts share a process.
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
                 (Ns, "[method]gpu-device.connect-graphics-context"),
                 (_, selfH, ctxH) =>
                 {
                     var dev = (IGpuDevice)host.Devices.Get(selfH);
-                    if (host.AbstractBufferResolver == null)
+                    if (host.GraphicsContextResolver == null)
                         throw new Wacs.WASI.GFX.Types.WasiGfxException(
                             "[method]gpu-device.connect-graphics-context "
-                            + "called but no AbstractBufferResolver "
+                            + "called but no GraphicsContextResolver "
                             + "is configured; impossible to reach a "
                             + "wasi:graphics-context.context handle.");
-                    // Reuse the resolver: handle resolution path is
-                    // identical (wasi-gfx-side ResourceTable lookup).
-                    // The resolver returns IAbstractBuffer; for
-                    // context we need IContext. v1 cut: the wasi-
-                    // gfx host's Contexts is a different table from
-                    // AbstractBuffers, so the resolver alone isn't
-                    // enough. Throw with guidance until a richer
-                    // cross-host bridge lands.
-                    throw new System.NotImplementedException(
-                        "[method]gpu-device.connect-graphics-context: "
-                        + "cross-host context lookup not yet wired. "
-                        + "Pair with a richer WasiWebgpuConfiguration"
-                        + " resolver in a follow-up.");
+                    var ctxObj = host.GraphicsContextResolver(ctxH);
+                    if (ctxObj == null)
+                        throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                            "[method]gpu-device.connect-graphics-context: "
+                            + "GraphicsContextResolver returned null for "
+                            + "handle " + ctxH + ".");
+                    dev.ConnectGraphicsContext(ctxObj);
                 });
 
-            // create-render-pipeline / create-texture / create-sampler /
-            // create-*-pipeline-async — descriptor flat-forms exceed
-            // Func<T1..T16,TResult> arity or carry payload-bearing
-            // variant errors. Land in a focused descriptor-decoding
-            // session.
+            // create-texture(self, gpu-texture-descriptor) -> own<gpu-texture>
+            // Descriptor flat (18 i32) - see CustomDelegates.CreateTexture
+            // for the layout. The impl receives a default-constructed
+            // descriptor; backends that care decode the full record
+            // in a follow-up.
+            runtime.BindHostFunction<CustomDelegates.CreateTexture>(
+                (Ns, "[method]gpu-device.create-texture"),
+                (_, selfH,
+                    _w, _hDisc, _hVal, _dDisc, _dVal,
+                    _mipDisc, _mipVal, _smpDisc, _smpVal,
+                    _dimDisc, _dimVal, _fmt, _usage,
+                    _vfPtr, _vfLen, _lblDisc, _lblPtr, _lblLen) =>
+                {
+                    var dev = (IGpuDevice)host.Devices.Get(selfH);
+                    var t = dev.CreateTexture(new Webgpu.GpuTextureDescriptor());
+                    return host.Textures.Allocate(t);
+                });
+
+            // create-sampler(self, option<gpu-sampler-descriptor>)
+            //   -> own<gpu-sampler>
+            // Descriptor flat (25 mixed i32/f32) - see
+            // CustomDelegates.CreateSampler. Pass Option.None to the
+            // impl when opt-disc is 0 (no descriptor supplied).
+            runtime.BindHostFunction<CustomDelegates.CreateSampler>(
+                (Ns, "[method]gpu-device.create-sampler"),
+                (_, selfH, optDisc,
+                    _aud, _auv, _avd, _avv, _awd, _aww,
+                    _mfd, _mfv, _mnd, _mnv, _mid, _miv,
+                    _lminD, _lminV, _lmaxD, _lmaxV,
+                    _cmpD, _cmpV, _maD, _maV,
+                    _lblD, _lblPtr, _lblLen) =>
+                {
+                    var dev = (IGpuDevice)host.Devices.Get(selfH);
+                    var descriptor = optDisc == 0
+                        ? Option<Webgpu.GpuSamplerDescriptor>.None
+                        : Option<Webgpu.GpuSamplerDescriptor>.Some(
+                            new Webgpu.GpuSamplerDescriptor());
+                    var s = dev.CreateSampler(descriptor);
+                    return host.Samplers.Allocate(s);
+                });
+
+            // create-compute-pipeline-async(self, gpu-compute-pipeline-
+            //   descriptor) -> result<own<gpu-compute-pipeline>,
+            //                          create-pipeline-error>
+            // Descriptor flat = 11 i32 (same as sync create-compute-
+            // pipeline). retArea is 20 bytes (see
+            // WriteResultHandleErrPipelineRecord layout).
+            runtime.BindHostFunction<CustomDelegates.CreateComputePipelineAsync>(
+                (Ns, "[method]gpu-device.create-compute-pipeline-async"),
+                (ctx, selfH,
+                    _modH, _epDisc, _epPtr, _epLen, _cDisc, _cVal,
+                    _layDisc, _layVal, _lblDisc, _lblPtr, _lblLen,
+                    retArea) =>
+                {
+                    var dev = (IGpuDevice)host.Devices.Get(selfH);
+                    var result = dev.CreateComputePipelineAsync(
+                        new Webgpu.GpuComputePipelineDescriptor());
+                    if (result.IsOk)
+                    {
+                        var h = host.ComputePipelines.Allocate(result.Ok);
+                        WriteResultHandleErrPipelineRecord(ctx, alloc, retArea,
+                            isOk: true, handle: h,
+                            reason: 0, message: "");
+                    }
+                    else
+                    {
+                        WriteResultHandleErrPipelineRecord(ctx, alloc, retArea,
+                            isOk: false, handle: 0,
+                            reason: CreatePipelineErrorReasonDisc(
+                                result.Err!.Kind),
+                            message: result.Err.Message);
+                    }
+                });
+
+            // create-render-pipeline / create-render-pipeline-async —
+            // the gpu-render-pipeline-descriptor record nests vertex/
+            // primitive/depth-stencil/multisample/fragment sub-records
+            // for an unflattened arity > 60 i32, beyond what a single
+            // custom delegate captures cleanly. Defer until a backend
+            // (wgpu-native) actually consumes these — at that point
+            // the host code that decodes the descriptor lives in the
+            // backend and this binding is mostly retArea-write plumbing.
         }
 
         // ----------------------------------------------------
@@ -2163,6 +2234,58 @@ namespace Wacs.WASI.GFX.Webgpu
                 Webgpu.CreateQuerySetErrorKind.CreateQuerySetErrorKindTypeError => 0,
                 _ => 0,
             };
+
+        // create-pipeline-error has a payload-bearing variant kind
+        // (gpu-pipeline-error(gpu-pipeline-error-reason)) — return
+        // the inner enum value directly so the helper can write both
+        // the case-disc (always 0 — one case) and the payload at the
+        // appropriate retArea slots.
+        private static int CreatePipelineErrorReasonDisc(
+            Webgpu.CreatePipelineErrorKind k)
+        {
+            if (k is Webgpu.CreatePipelineErrorKind.CreatePipelineErrorKindGpuPipelineError g)
+                return (int)g.Value;
+            return 0;
+        }
+
+        // result<own<pipeline>, create-pipeline-error> retArea layout
+        // (align 4, size 20):
+        //   @0  outer disc:u8 + 3 pad
+        //   Ok arm:
+        //     @4  handle:i32
+        //     @8..@19 zero
+        //   Err arm (record{kind:variant{case0(enum)}, message:string}):
+        //     @4  kind.case-disc:u8 + 3 pad  (always 0; 1 case)
+        //     @8  kind.payload(enum):u32
+        //     @12 message.ptr:i32
+        //     @16 message.len:i32
+        private static void WriteResultHandleErrPipelineRecord(
+            ExecContext ctx,
+            Wacs.WASI.GFX.HostBinding.Realloc alloc,
+            int retArea,
+            bool isOk, int handle, int reason, string message)
+        {
+            var mem = ctx.Memory();
+            mem[retArea] = (byte)(isOk ? 0 : 1);
+            mem[retArea + 1] = 0;
+            mem[retArea + 2] = 0;
+            mem[retArea + 3] = 0;
+            if (isOk)
+            {
+                ctx.WriteI32LE(retArea + 4, handle);
+                for (int i = 8; i < 20; i++) mem[retArea + i] = 0;
+                return;
+            }
+            // Single variant case → case-disc is always 0.
+            mem[retArea + 4] = 0;
+            mem[retArea + 5] = 0;
+            mem[retArea + 6] = 0;
+            mem[retArea + 7] = 0;
+            ctx.WriteI32LE(retArea + 8, reason);
+            var (msgPtr, msgLen) = WriteUtf8Bytes(ctx, alloc, message);
+            ctx.WriteI32LE(retArea + 12, msgPtr);
+            ctx.WriteI32LE(retArea + 16, msgLen);
+        }
 
         // Decode a list<u8> from guest memory into a host byte[].
         // The wire shape for list<u8> params is (ptr, len) pairs
