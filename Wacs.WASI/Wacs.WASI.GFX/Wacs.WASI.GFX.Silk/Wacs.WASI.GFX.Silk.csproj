@@ -24,6 +24,12 @@
         <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
         <IncludeSymbols>true</IncludeSymbols>
         <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+        <!-- Silk.NET.SDL exposes the C API via pointer types
+             (Window*, Renderer*, Texture*); SDL-backed code
+             needs unsafe blocks. Scope is limited to this
+             package — neither the contract nor the runtime
+             ever touches a raw pointer. -->
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>
 
     <ItemGroup>
