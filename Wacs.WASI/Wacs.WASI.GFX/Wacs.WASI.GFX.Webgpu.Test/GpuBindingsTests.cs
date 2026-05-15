@@ -417,6 +417,85 @@ namespace Wacs.WASI.GFX.Webgpu.Test
             Assert.IsType<StubGpuAbstractBuffer>(ab);
         }
 
+        // ---- Render-pass + bundle-encoder lifecycle ---------
+
+        [Fact]
+        public void StubRenderPassEncoder_CapturesStateSetters()
+        {
+            var pass = new StubGpuRenderPassEncoder();
+            pass.SetViewport(0f, 0f, 800f, 600f, 0f, 1f);
+            Assert.NotNull(pass.LastViewport);
+            Assert.Equal(800f, pass.LastViewport!.Value.w);
+            Assert.Equal(1f, pass.LastViewport.Value.maxD);
+
+            pass.SetScissorRect(10u, 20u, 200u, 100u);
+            Assert.Equal((10u, 20u, 200u, 100u), pass.LastScissor);
+
+            pass.SetStencilReference(7u);
+            Assert.Equal(7u, pass.LastStencil);
+
+            pass.SetBlendConstant(new Wacs.WASI.GFX.Webgpu.Webgpu.GpuColor
+            {
+                R = 0.5, G = 0.25, B = 0.125, A = 1.0,
+            });
+            Assert.NotNull(pass.LastBlend);
+            Assert.Equal(0.5, pass.LastBlend!.R);
+        }
+
+        [Fact]
+        public void StubRenderPassEncoder_DrawAndDrawIndexed()
+        {
+            var pass = new StubGpuRenderPassEncoder();
+            pass.Draw(3u,
+                Option<uint>.Some(2u),
+                Option<uint>.None,
+                Option<uint>.None);
+            Assert.NotNull(pass.LastDraw);
+            Assert.Equal(3u, pass.LastDraw!.Value.vc);
+            Assert.True(pass.LastDraw.Value.ic.HasValue);
+            Assert.Equal(2u, pass.LastDraw.Value.ic.Value);
+
+            pass.DrawIndexed(6u,
+                Option<uint>.None,
+                Option<uint>.None,
+                Option<int>.Some(-4),
+                Option<uint>.Some(1u));
+            Assert.NotNull(pass.LastDrawIndexed);
+            Assert.True(pass.LastDrawIndexed!.Value.baseV.HasValue);
+            Assert.Equal(-4, pass.LastDrawIndexed.Value.baseV.Value);
+        }
+
+        [Fact]
+        public void StubRenderPassEncoder_OcclusionAndExecuteBundles()
+        {
+            var pass = new StubGpuRenderPassEncoder();
+            pass.BeginOcclusionQuery(5u);
+            Assert.Equal(5u, pass.LastOcclusionQuery);
+            Assert.False(pass.OcclusionEnded);
+            pass.EndOcclusionQuery();
+            Assert.True(pass.OcclusionEnded);
+
+            var b1 = new StubGpuRenderBundle();
+            pass.ExecuteBundles(
+                new Wacs.WASI.GFX.Webgpu.Webgpu.IGpuRenderBundle[] { b1 });
+            Assert.NotNull(pass.LastBundles);
+            Assert.Single(pass.LastBundles!);
+
+            Assert.False(pass.Ended);
+            pass.End();
+            Assert.True(pass.Ended);
+        }
+
+        [Fact]
+        public void StubRenderBundleEncoder_FinishReturnsBundle()
+        {
+            var enc = new StubGpuRenderBundleEncoder();
+            var bundle = enc.Finish(
+                Option<Wacs.WASI.GFX.Webgpu.Webgpu.GpuRenderBundleDescriptor>.None);
+            Assert.NotNull(bundle);
+            Assert.IsType<StubGpuRenderBundle>(bundle);
+        }
+
         [Fact]
         public void Session6_ComputePath_EndToEnd_ChainCompiles()
         {

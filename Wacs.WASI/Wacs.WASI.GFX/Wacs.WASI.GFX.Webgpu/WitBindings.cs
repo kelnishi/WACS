@@ -28,6 +28,11 @@ using IGpuTextureView = Wacs.WASI.GFX.Webgpu.Webgpu.IGpuTextureView;
 using IGpuSampler = Wacs.WASI.GFX.Webgpu.Webgpu.IGpuSampler;
 using IGpuRenderPipeline = Wacs.WASI.GFX.Webgpu.Webgpu.IGpuRenderPipeline;
 using IGpuRenderBundle = Wacs.WASI.GFX.Webgpu.Webgpu.IGpuRenderBundle;
+using IGpuRenderPassEncoder = Wacs.WASI.GFX.Webgpu.Webgpu.IGpuRenderPassEncoder;
+using IGpuRenderBundleEncoder = Wacs.WASI.GFX.Webgpu.Webgpu.IGpuRenderBundleEncoder;
+using GpuColor = Wacs.WASI.GFX.Webgpu.Webgpu.GpuColor;
+using GpuIndexFormat = Wacs.WASI.GFX.Webgpu.Webgpu.GpuIndexFormat;
+using GpuRenderBundleDescriptor = Wacs.WASI.GFX.Webgpu.Webgpu.GpuRenderBundleDescriptor;
 using IWgslLanguageFeatures = Wacs.WASI.GFX.Webgpu.Webgpu.IWgslLanguageFeatures;
 using GpuRequestAdapterOptions = Wacs.WASI.GFX.Webgpu.Webgpu.GpuRequestAdapterOptions;
 using GpuDeviceDescriptor = Wacs.WASI.GFX.Webgpu.Webgpu.GpuDeviceDescriptor;
@@ -119,6 +124,8 @@ namespace Wacs.WASI.GFX.Webgpu
                 "gpu-render-bundle", host.RenderBundles,
                 h => ((IGpuRenderBundle)h).Label(),
                 (h, s) => ((IGpuRenderBundle)h).SetLabel(s));
+            BindGpuRenderPassEncoder(runtime, host, alloc);
+            BindGpuRenderBundleEncoder(runtime, host, alloc);
 
             // v1 phase 3 session 9: graphics-context bridge.
             // [static]gpu-texture.from-graphics-buffer(buffer:
@@ -863,6 +870,373 @@ namespace Wacs.WASI.GFX.Webgpu
                     var bgl = p.GetBindGroupLayout(unchecked((uint)index));
                     return host.BindGroupLayouts.Allocate(bgl);
                 });
+        }
+
+        // ----------------------------------------------------
+        //   wasi:webgpu/webgpu@0.0.1 resource gpu-render-pass-encoder
+        //     Session: render-pass-encoder lifecycle. Covers the
+        //     state-setting and draw methods. set-bind-group
+        //     (option<list<u32>> + result<_, error>) deferred to
+        //     the result<_, error> batch.
+        // ----------------------------------------------------
+
+        private static void BindGpuRenderPassEncoder(WasmRuntime runtime,
+            WasiWebgpuHost host, Wacs.WASI.GFX.HostBinding.Realloc alloc)
+        {
+            // set-viewport(self, x, y, w, h, minDepth, maxDepth: f32×6)
+            runtime.BindHostFunction<Action<ExecContext,
+                int, float, float, float, float, float, float>>(
+                (Ns, "[method]gpu-render-pass-encoder.set-viewport"),
+                (_, selfH, x, y, w, h, minD, maxD) =>
+                    ((IGpuRenderPassEncoder)host.RenderPassEncoders
+                        .Get(selfH))
+                    .SetViewport(x, y, w, h, minD, maxD));
+
+            // set-scissor-rect(self, x, y, w, h: u32×4)
+            runtime.BindHostFunction<Action<ExecContext,
+                int, int, int, int, int>>(
+                (Ns, "[method]gpu-render-pass-encoder.set-scissor-rect"),
+                (_, selfH, x, y, w, h) =>
+                    ((IGpuRenderPassEncoder)host.RenderPassEncoders
+                        .Get(selfH))
+                    .SetScissorRect(unchecked((uint)x),
+                        unchecked((uint)y),
+                        unchecked((uint)w),
+                        unchecked((uint)h)));
+
+            // set-blend-constant(self, gpu-color{r,g,b,a: f64}) →
+            // 4 f64 flat-form params.
+            runtime.BindHostFunction<Action<ExecContext,
+                int, double, double, double, double>>(
+                (Ns, "[method]gpu-render-pass-encoder.set-blend-constant"),
+                (_, selfH, r, g, b, a) =>
+                {
+                    var enc = (IGpuRenderPassEncoder)host.RenderPassEncoders
+                        .Get(selfH);
+                    enc.SetBlendConstant(new GpuColor
+                    {
+                        R = r, G = g, B = b, A = a,
+                    });
+                });
+
+            // set-stencil-reference(self, u32)
+            runtime.BindHostFunction<Action<ExecContext, int, int>>(
+                (Ns, "[method]gpu-render-pass-encoder.set-stencil-reference"),
+                (_, selfH, reference) =>
+                    ((IGpuRenderPassEncoder)host.RenderPassEncoders
+                        .Get(selfH))
+                    .SetStencilReference(unchecked((uint)reference)));
+
+            // begin-occlusion-query(self, u32)
+            runtime.BindHostFunction<Action<ExecContext, int, int>>(
+                (Ns, "[method]gpu-render-pass-encoder.begin-occlusion-query"),
+                (_, selfH, queryIndex) =>
+                    ((IGpuRenderPassEncoder)host.RenderPassEncoders
+                        .Get(selfH))
+                    .BeginOcclusionQuery(unchecked((uint)queryIndex)));
+
+            // end-occlusion-query(self) — void
+            runtime.BindHostFunction<Action<ExecContext, int>>(
+                (Ns, "[method]gpu-render-pass-encoder.end-occlusion-query"),
+                (_, selfH) =>
+                    ((IGpuRenderPassEncoder)host.RenderPassEncoders
+                        .Get(selfH))
+                    .EndOcclusionQuery());
+
+            // execute-bundles(self, list<borrow<gpu-render-bundle>>)
+            // Wire: (self, listPtr:i32, listLen:i32). 4-byte handles.
+            runtime.BindHostFunction<Action<ExecContext, int, int, int>>(
+                (Ns, "[method]gpu-render-pass-encoder.execute-bundles"),
+                (ctx, selfH, listPtr, listLen) =>
+                {
+                    var enc = (IGpuRenderPassEncoder)host.RenderPassEncoders
+                        .Get(selfH);
+                    var bundles = new IGpuRenderBundle[listLen];
+                    for (int i = 0; i < listLen; i++)
+                    {
+                        int h = ctx.ReadI32LE(listPtr + i * 4);
+                        bundles[i] = (IGpuRenderBundle)host.RenderBundles.Get(h);
+                    }
+                    enc.ExecuteBundles(bundles);
+                });
+
+            // end(self)
+            runtime.BindHostFunction<Action<ExecContext, int>>(
+                (Ns, "[method]gpu-render-pass-encoder.end"),
+                (_, selfH) =>
+                    ((IGpuRenderPassEncoder)host.RenderPassEncoders
+                        .Get(selfH))
+                    .End());
+
+            // set-pipeline(self, borrow<gpu-render-pipeline>)
+            runtime.BindHostFunction<Action<ExecContext, int, int>>(
+                (Ns, "[method]gpu-render-pass-encoder.set-pipeline"),
+                (_, selfH, pipeH) =>
+                {
+                    var enc = (IGpuRenderPassEncoder)host.RenderPassEncoders
+                        .Get(selfH);
+                    var pipe = (IGpuRenderPipeline)host.RenderPipelines.Get(pipeH);
+                    enc.SetPipeline(pipe);
+                });
+
+            // set-index-buffer(self, buf, fmt, opt<u64> off, opt<u64> size)
+            // Wire: (self, buf:i32, fmt:i32,
+            //        offDisc:i32, offVal:i64, sizDisc:i32, sizVal:i64)
+            runtime.BindHostFunction<Action<ExecContext,
+                int, int, int, int, long, int, long>>(
+                (Ns, "[method]gpu-render-pass-encoder.set-index-buffer"),
+                (_, selfH, bufH, fmt, offDisc, offVal, sizDisc, sizVal) =>
+                {
+                    var enc = (IGpuRenderPassEncoder)host.RenderPassEncoders
+                        .Get(selfH);
+                    var buf = (IGpuBuffer)host.Buffers.Get(bufH);
+                    enc.SetIndexBuffer(buf,
+                        (GpuIndexFormat)fmt,
+                        offDisc == 0 ? Option<ulong>.None
+                            : Option<ulong>.Some(unchecked((ulong)offVal)),
+                        sizDisc == 0 ? Option<ulong>.None
+                            : Option<ulong>.Some(unchecked((ulong)sizVal)));
+                });
+
+            // set-vertex-buffer(self, slot, opt<buf>, opt<u64> off, opt<u64> size)
+            runtime.BindHostFunction<Action<ExecContext,
+                int, int, int, int, int, long, int, long>>(
+                (Ns, "[method]gpu-render-pass-encoder.set-vertex-buffer"),
+                (_, selfH, slot, bufDisc, bufVal,
+                    offDisc, offVal, sizDisc, sizVal) =>
+                {
+                    var enc = (IGpuRenderPassEncoder)host.RenderPassEncoders
+                        .Get(selfH);
+                    enc.SetVertexBuffer(unchecked((uint)slot),
+                        bufDisc == 0 ? Option<IGpuBuffer>.None
+                            : Option<IGpuBuffer>.Some(
+                                (IGpuBuffer)host.Buffers.Get(bufVal)),
+                        offDisc == 0 ? Option<ulong>.None
+                            : Option<ulong>.Some(unchecked((ulong)offVal)),
+                        sizDisc == 0 ? Option<ulong>.None
+                            : Option<ulong>.Some(unchecked((ulong)sizVal)));
+                });
+
+            // draw(self, vertex-count, opt<instance>, opt<first-vertex>,
+            //      opt<first-instance>)
+            runtime.BindHostFunction<Action<ExecContext,
+                int, int, int, int, int, int, int, int>>(
+                (Ns, "[method]gpu-render-pass-encoder.draw"),
+                (_, selfH, vc,
+                    instDisc, instVal, firstVDisc, firstVVal,
+                    firstIDisc, firstIVal) =>
+                {
+                    var enc = (IGpuRenderPassEncoder)host.RenderPassEncoders
+                        .Get(selfH);
+                    enc.Draw(unchecked((uint)vc),
+                        instDisc == 0 ? Option<uint>.None
+                            : Option<uint>.Some(unchecked((uint)instVal)),
+                        firstVDisc == 0 ? Option<uint>.None
+                            : Option<uint>.Some(unchecked((uint)firstVVal)),
+                        firstIDisc == 0 ? Option<uint>.None
+                            : Option<uint>.Some(unchecked((uint)firstIVal)));
+                });
+
+            // draw-indexed(self, index-count, opt<inst>, opt<first-index>,
+            //              opt<base-vertex:s32>, opt<first-instance>)
+            runtime.BindHostFunction<Action<ExecContext,
+                int, int, int, int, int, int, int, int, int, int>>(
+                (Ns, "[method]gpu-render-pass-encoder.draw-indexed"),
+                (_, selfH, ic,
+                    instDisc, instVal, firstIDisc, firstIVal,
+                    baseVDisc, baseVVal, firstInDisc, firstInVal) =>
+                {
+                    var enc = (IGpuRenderPassEncoder)host.RenderPassEncoders
+                        .Get(selfH);
+                    enc.DrawIndexed(unchecked((uint)ic),
+                        instDisc == 0 ? Option<uint>.None
+                            : Option<uint>.Some(unchecked((uint)instVal)),
+                        firstIDisc == 0 ? Option<uint>.None
+                            : Option<uint>.Some(unchecked((uint)firstIVal)),
+                        baseVDisc == 0 ? Option<int>.None
+                            : Option<int>.Some(baseVVal),
+                        firstInDisc == 0 ? Option<uint>.None
+                            : Option<uint>.Some(unchecked((uint)firstInVal)));
+                });
+
+            // draw-indirect(self, borrow<buf>, u64 offset)
+            runtime.BindHostFunction<Action<ExecContext, int, int, long>>(
+                (Ns, "[method]gpu-render-pass-encoder.draw-indirect"),
+                (_, selfH, bufH, off) =>
+                {
+                    var enc = (IGpuRenderPassEncoder)host.RenderPassEncoders
+                        .Get(selfH);
+                    var buf = (IGpuBuffer)host.Buffers.Get(bufH);
+                    enc.DrawIndirect(buf, unchecked((ulong)off));
+                });
+
+            // draw-indexed-indirect(self, borrow<buf>, u64 offset)
+            runtime.BindHostFunction<Action<ExecContext, int, int, long>>(
+                (Ns, "[method]gpu-render-pass-encoder.draw-indexed-indirect"),
+                (_, selfH, bufH, off) =>
+                {
+                    var enc = (IGpuRenderPassEncoder)host.RenderPassEncoders
+                        .Get(selfH);
+                    var buf = (IGpuBuffer)host.Buffers.Get(bufH);
+                    enc.DrawIndexedIndirect(buf, unchecked((ulong)off));
+                });
+
+            BindDebugMarkers(runtime, alloc, "gpu-render-pass-encoder",
+                host.RenderPassEncoders,
+                h => ((IGpuRenderPassEncoder)h).PushDebugGroup,
+                h => ((IGpuRenderPassEncoder)h).PopDebugGroup,
+                h => ((IGpuRenderPassEncoder)h).InsertDebugMarker);
+
+            BindLabeled(runtime, alloc,
+                "gpu-render-pass-encoder", host.RenderPassEncoders,
+                h => ((IGpuRenderPassEncoder)h).Label(),
+                (h, s) => ((IGpuRenderPassEncoder)h).SetLabel(s));
+        }
+
+        // ----------------------------------------------------
+        //   wasi:webgpu/webgpu@0.0.1 resource gpu-render-bundle-encoder
+        //     finish(opt<descriptor>) + the shared
+        //     set-pipeline/set-buffer/draw* surface from
+        //     render-pass-encoder. set-bind-group deferred
+        //     (result<_, error> batch).
+        // ----------------------------------------------------
+
+        private static void BindGpuRenderBundleEncoder(WasmRuntime runtime,
+            WasiWebgpuHost host, Wacs.WASI.GFX.HostBinding.Realloc alloc)
+        {
+            // finish(self, opt<gpu-render-bundle-descriptor{label:opt<string>}>)
+            //   -> own<gpu-render-bundle>
+            // opt<descriptor> = 1 + 3 = 4 i32 params; self + 4 = 5 i32 in;
+            // i32 result. Descriptor ignored (label only); session-shortcut.
+            runtime.BindHostFunction<Func<ExecContext,
+                int, int, int, int, int, int>>(
+                (Ns, "[method]gpu-render-bundle-encoder.finish"),
+                (_, selfH, _od, _lDisc, _lPtr, _lLen) =>
+                {
+                    var enc = (IGpuRenderBundleEncoder)host.RenderBundleEncoders
+                        .Get(selfH);
+                    var bundle = enc.Finish(
+                        Option<GpuRenderBundleDescriptor>.None);
+                    return host.RenderBundles.Allocate(bundle);
+                });
+
+            // set-pipeline / set-index-buffer / set-vertex-buffer /
+            // draw / draw-indexed / draw-indirect / draw-indexed-indirect
+            // — identical wire form to gpu-render-pass-encoder. Routes
+            // through host.RenderBundleEncoders + the bundle-encoder
+            // IGpuRenderBundleEncoder methods.
+            runtime.BindHostFunction<Action<ExecContext, int, int>>(
+                (Ns, "[method]gpu-render-bundle-encoder.set-pipeline"),
+                (_, selfH, pipeH) =>
+                {
+                    var enc = (IGpuRenderBundleEncoder)host.RenderBundleEncoders
+                        .Get(selfH);
+                    var pipe = (IGpuRenderPipeline)host.RenderPipelines.Get(pipeH);
+                    enc.SetPipeline(pipe);
+                });
+
+            runtime.BindHostFunction<Action<ExecContext,
+                int, int, int, int, long, int, long>>(
+                (Ns, "[method]gpu-render-bundle-encoder.set-index-buffer"),
+                (_, selfH, bufH, fmt, offDisc, offVal, sizDisc, sizVal) =>
+                {
+                    var enc = (IGpuRenderBundleEncoder)host.RenderBundleEncoders
+                        .Get(selfH);
+                    var buf = (IGpuBuffer)host.Buffers.Get(bufH);
+                    enc.SetIndexBuffer(buf,
+                        (GpuIndexFormat)fmt,
+                        offDisc == 0 ? Option<ulong>.None
+                            : Option<ulong>.Some(unchecked((ulong)offVal)),
+                        sizDisc == 0 ? Option<ulong>.None
+                            : Option<ulong>.Some(unchecked((ulong)sizVal)));
+                });
+
+            runtime.BindHostFunction<Action<ExecContext,
+                int, int, int, int, int, long, int, long>>(
+                (Ns, "[method]gpu-render-bundle-encoder.set-vertex-buffer"),
+                (_, selfH, slot, bufDisc, bufVal,
+                    offDisc, offVal, sizDisc, sizVal) =>
+                {
+                    var enc = (IGpuRenderBundleEncoder)host.RenderBundleEncoders
+                        .Get(selfH);
+                    enc.SetVertexBuffer(unchecked((uint)slot),
+                        bufDisc == 0 ? Option<IGpuBuffer>.None
+                            : Option<IGpuBuffer>.Some(
+                                (IGpuBuffer)host.Buffers.Get(bufVal)),
+                        offDisc == 0 ? Option<ulong>.None
+                            : Option<ulong>.Some(unchecked((ulong)offVal)),
+                        sizDisc == 0 ? Option<ulong>.None
+                            : Option<ulong>.Some(unchecked((ulong)sizVal)));
+                });
+
+            runtime.BindHostFunction<Action<ExecContext,
+                int, int, int, int, int, int, int, int>>(
+                (Ns, "[method]gpu-render-bundle-encoder.draw"),
+                (_, selfH, vc,
+                    instDisc, instVal, firstVDisc, firstVVal,
+                    firstIDisc, firstIVal) =>
+                {
+                    var enc = (IGpuRenderBundleEncoder)host.RenderBundleEncoders
+                        .Get(selfH);
+                    enc.Draw(unchecked((uint)vc),
+                        instDisc == 0 ? Option<uint>.None
+                            : Option<uint>.Some(unchecked((uint)instVal)),
+                        firstVDisc == 0 ? Option<uint>.None
+                            : Option<uint>.Some(unchecked((uint)firstVVal)),
+                        firstIDisc == 0 ? Option<uint>.None
+                            : Option<uint>.Some(unchecked((uint)firstIVal)));
+                });
+
+            runtime.BindHostFunction<Action<ExecContext,
+                int, int, int, int, int, int, int, int, int, int>>(
+                (Ns, "[method]gpu-render-bundle-encoder.draw-indexed"),
+                (_, selfH, ic,
+                    instDisc, instVal, firstIDisc, firstIVal,
+                    baseVDisc, baseVVal, firstInDisc, firstInVal) =>
+                {
+                    var enc = (IGpuRenderBundleEncoder)host.RenderBundleEncoders
+                        .Get(selfH);
+                    enc.DrawIndexed(unchecked((uint)ic),
+                        instDisc == 0 ? Option<uint>.None
+                            : Option<uint>.Some(unchecked((uint)instVal)),
+                        firstIDisc == 0 ? Option<uint>.None
+                            : Option<uint>.Some(unchecked((uint)firstIVal)),
+                        baseVDisc == 0 ? Option<int>.None
+                            : Option<int>.Some(baseVVal),
+                        firstInDisc == 0 ? Option<uint>.None
+                            : Option<uint>.Some(unchecked((uint)firstInVal)));
+                });
+
+            runtime.BindHostFunction<Action<ExecContext, int, int, long>>(
+                (Ns, "[method]gpu-render-bundle-encoder.draw-indirect"),
+                (_, selfH, bufH, off) =>
+                {
+                    var enc = (IGpuRenderBundleEncoder)host.RenderBundleEncoders
+                        .Get(selfH);
+                    var buf = (IGpuBuffer)host.Buffers.Get(bufH);
+                    enc.DrawIndirect(buf, unchecked((ulong)off));
+                });
+
+            runtime.BindHostFunction<Action<ExecContext, int, int, long>>(
+                (Ns, "[method]gpu-render-bundle-encoder.draw-indexed-indirect"),
+                (_, selfH, bufH, off) =>
+                {
+                    var enc = (IGpuRenderBundleEncoder)host.RenderBundleEncoders
+                        .Get(selfH);
+                    var buf = (IGpuBuffer)host.Buffers.Get(bufH);
+                    enc.DrawIndexedIndirect(buf, unchecked((ulong)off));
+                });
+
+            BindDebugMarkers(runtime, alloc, "gpu-render-bundle-encoder",
+                host.RenderBundleEncoders,
+                h => ((IGpuRenderBundleEncoder)h).PushDebugGroup,
+                h => ((IGpuRenderBundleEncoder)h).PopDebugGroup,
+                h => ((IGpuRenderBundleEncoder)h).InsertDebugMarker);
+
+            BindLabeled(runtime, alloc,
+                "gpu-render-bundle-encoder", host.RenderBundleEncoders,
+                h => ((IGpuRenderBundleEncoder)h).Label(),
+                (h, s) => ((IGpuRenderBundleEncoder)h).SetLabel(s));
         }
 
         // Shared `push-debug-group(label: string) / pop-debug-group() /

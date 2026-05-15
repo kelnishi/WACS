@@ -397,4 +397,113 @@ namespace Wacs.WASI.GFX.Webgpu.Test
         public string Label() => _label;
         public void SetLabel(string label) { _label = label ?? ""; }
     }
+
+    // ---- Render-pass-encoder + render-bundle-encoder --------
+
+    internal sealed class StubGpuRenderPassEncoder
+        : IGpuRenderPassEncoder
+    {
+        private string _label = "stub-render-pass";
+        public (float x, float y, float w, float h,
+            float minD, float maxD)? LastViewport { get; private set; }
+        public (uint x, uint y, uint w, uint h)? LastScissor
+        { get; private set; }
+        public GpuColor? LastBlend { get; private set; } // nullable ref
+        public uint? LastStencil { get; private set; }
+        public uint? LastOcclusionQuery { get; private set; }
+        public bool OcclusionEnded { get; private set; }
+        public IGpuRenderBundle[]? LastBundles { get; private set; }
+        public bool Ended { get; private set; }
+        public IGpuRenderPipeline? LastPipeline { get; private set; }
+        public (uint vc, Option<uint> ic,
+            Option<uint> firstV, Option<uint> firstI)? LastDraw
+        { get; private set; }
+        public (uint ic, Option<uint> instc, Option<uint> firstI,
+            Option<int> baseV, Option<uint> firstInst)? LastDrawIndexed
+        { get; private set; }
+
+        public void SetViewport(float x, float y, float width,
+            float height, float minDepth, float maxDepth)
+            => LastViewport = (x, y, width, height, minDepth, maxDepth);
+        public void SetScissorRect(uint x, uint y, uint width, uint height)
+            => LastScissor = (x, y, width, height);
+        public void SetBlendConstant(GpuColor color)
+            => LastBlend = color;
+        public void SetStencilReference(uint reference)
+            => LastStencil = reference;
+        public void BeginOcclusionQuery(uint queryIndex)
+            => LastOcclusionQuery = queryIndex;
+        public void EndOcclusionQuery() { OcclusionEnded = true; }
+        public void ExecuteBundles(IGpuRenderBundle[] bundles)
+            => LastBundles = bundles;
+        public void End() { Ended = true; }
+        public string Label() => _label;
+        public void SetLabel(string label) { _label = label ?? ""; }
+        public void PushDebugGroup(string groupLabel) { }
+        public void PopDebugGroup() { }
+        public void InsertDebugMarker(string markerLabel) { }
+        public Result<Unit, SetBindGroupError> SetBindGroup(uint index,
+            Option<IGpuBindGroup> bindGroup,
+            Option<uint[]> dynamicOffsetsData,
+            Option<ulong> dynamicOffsetsDataStart,
+            Option<uint> dynamicOffsetsDataLength)
+            => throw new NotImplementedException();
+        public void SetPipeline(IGpuRenderPipeline pipeline)
+            => LastPipeline = pipeline;
+        public void SetIndexBuffer(IGpuBuffer buffer,
+            GpuIndexFormat indexFormat, Option<ulong> offset,
+            Option<ulong> size) { }
+        public void SetVertexBuffer(uint slot,
+            Option<IGpuBuffer> buffer, Option<ulong> offset,
+            Option<ulong> size) { }
+        public void Draw(uint vertexCount, Option<uint> instanceCount,
+            Option<uint> firstVertex, Option<uint> firstInstance)
+            => LastDraw = (vertexCount, instanceCount,
+                firstVertex, firstInstance);
+        public void DrawIndexed(uint indexCount,
+            Option<uint> instanceCount, Option<uint> firstIndex,
+            Option<int> baseVertex, Option<uint> firstInstance)
+            => LastDrawIndexed = (indexCount, instanceCount,
+                firstIndex, baseVertex, firstInstance);
+        public void DrawIndirect(IGpuBuffer indirectBuffer,
+            ulong indirectOffset) { }
+        public void DrawIndexedIndirect(IGpuBuffer indirectBuffer,
+            ulong indirectOffset) { }
+    }
+
+    internal sealed class StubGpuRenderBundleEncoder
+        : IGpuRenderBundleEncoder
+    {
+        private string _label = "stub-render-bundle-encoder";
+        public IGpuRenderBundle Finish(
+            Option<GpuRenderBundleDescriptor> descriptor)
+            => new StubGpuRenderBundle();
+        public string Label() => _label;
+        public void SetLabel(string label) { _label = label ?? ""; }
+        public void PushDebugGroup(string groupLabel) { }
+        public void PopDebugGroup() { }
+        public void InsertDebugMarker(string markerLabel) { }
+        public Result<Unit, SetBindGroupError> SetBindGroup(uint index,
+            Option<IGpuBindGroup> bindGroup,
+            Option<uint[]> dynamicOffsetsData,
+            Option<ulong> dynamicOffsetsDataStart,
+            Option<uint> dynamicOffsetsDataLength)
+            => throw new NotImplementedException();
+        public void SetPipeline(IGpuRenderPipeline pipeline) { }
+        public void SetIndexBuffer(IGpuBuffer buffer,
+            GpuIndexFormat indexFormat, Option<ulong> offset,
+            Option<ulong> size) { }
+        public void SetVertexBuffer(uint slot,
+            Option<IGpuBuffer> buffer, Option<ulong> offset,
+            Option<ulong> size) { }
+        public void Draw(uint vertexCount, Option<uint> instanceCount,
+            Option<uint> firstVertex, Option<uint> firstInstance) { }
+        public void DrawIndexed(uint indexCount,
+            Option<uint> instanceCount, Option<uint> firstIndex,
+            Option<int> baseVertex, Option<uint> firstInstance) { }
+        public void DrawIndirect(IGpuBuffer indirectBuffer,
+            ulong indirectOffset) { }
+        public void DrawIndexedIndirect(IGpuBuffer indirectBuffer,
+            ulong indirectOffset) { }
+    }
 }
