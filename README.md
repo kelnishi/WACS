@@ -71,7 +71,7 @@ Versions auto-update from NuGet. See the [CHANGELOG](CHANGELOG.md) for release n
 - **Godot Compatibility**: Compatible with **Godot Engine - [.NET](https://docs.godotengine.org/en/stable/tutorials/scripting/c_sharp/c_sharp_basics.html)**. 
 - **Pure C# Implementation**: Written in C# 9.0/.NET Standard 2.1. (No `unsafe` keyword blocks, no raw pointer arithmetic — see [notes on `System.Runtime.CompilerServices.Unsafe` in the switch dispatcher](#running-wacsconsole).)
 - **No Complex Dependencies**: Uses [FluentValidation](https://github.com/FluentValidation/FluentValidation) and [Microsoft.Extensions.ObjectPool](https://www.nuget.org/packages/Microsoft.Extensions.ObjectPool) as its only dependencies.
-- **WebAssembly 3.0 Spec Compliance**: Passes the [WebAssembly 3.0](https://webassembly.github.io/spec/versions/core/WebAssembly-3.0.pdf) spec [test suite](https://github.com/WebAssembly/spec/tree/wasm-3.0).
+- **WebAssembly 3.0 Spec Compliance**: Passes the [WebAssembly 3.0](https://webassembly.github.io/spec/core/_download/WebAssembly.pdf) spec [test suite](https://github.com/WebAssembly/spec/tree/wasm-3.0).
 - **First-class WAT / WAST**: Pure-C# reader and writer for the WebAssembly text format. The `wacs` CLI takes `.wat` directly; the spec `.wast` suite parses natively with no external `wast2json` / wabt dependency.
 - **Magical Interop**: Host bindings are validated with reflection, no boilerplate code required.
 - **Async Tasks**: [JSPI](https://github.com/WebAssembly/js-promise-integration)-like non-blocking calls for async functions.
@@ -84,7 +84,7 @@ Because WebAssembly is memory-safe and can be ahead-of-time validated, WACS make
 UGC, DLC, or plugin systems that include executable logic.
 
 ## WebAssembly Feature Extensions
-WACS is based on the [WebAssembly Core 3 spec](https://webassembly.github.io/spec/versions/core/WebAssembly-3.0.pdf) and passes the associated [test suite](https://github.com/WebAssembly/spec/tree/wasm-3.0).
+WACS is based on the [WebAssembly Core 3 spec](https://webassembly.github.io/spec/core/_download/WebAssembly.pdf) and passes the associated [test suite](https://github.com/WebAssembly/spec/tree/wasm-3.0).
 
 Support for all standardized extensions is listed below.
 
