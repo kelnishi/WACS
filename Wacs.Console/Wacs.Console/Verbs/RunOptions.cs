@@ -116,6 +116,23 @@ namespace Wacs.Console.Verbs
             + "`wasi_thread_start (param i32 i32)`.")]
         public bool WasiThreads { get; set; }
 
+        [Option("wasi-gfx", HelpText =
+            "Wire wasi-gfx host bindings using the default Silk.NET/"
+            + "SDL backend (`Wacs.WASI.GFX.Silk`). Equivalent to "
+            + "`--bind Wacs.WASI.GFX.Silk`. Pair with --windowed when "
+            + "the guest opens surfaces so the SDL event pump runs "
+            + "on the main thread.")]
+        public bool WasiGfx { get; set; }
+
+        [Option("windowed", HelpText =
+            "Run the guest on a worker thread and reserve the calling "
+            + "(main) thread for the SDL event pump. Required when "
+            + "--wasi-gfx surfaces are opened: macOS AppKit requires "
+            + "windowing on the main thread. Without this, surface "
+            + "events won't dispatch and on macOS window creation will "
+            + "abort.")]
+        public bool Windowed { get; set; }
+
         // ---- Instrumentation (interpreter engine only) ----
 
         [Option("profile", HelpText =
