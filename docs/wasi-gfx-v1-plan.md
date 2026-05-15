@@ -31,6 +31,26 @@ and the v1 work it unblocks. None breaks existing public API; the
 new mechanisms are additive and the old hardcoded fallbacks remain
 during a transition window.
 
+### Phase 1 progress
+
+| Item | Status | Commit |
+|---|---|---|
+| 1a — diagnostics | shipped | `e4da5926` |
+| 1b — attribute-driven bundles | shipped | `8dead299` |
+| 1c — DI-sibling auto-discovery | shipped | `60d23bd4` |
+| 1d — source-gen pkg-mapping | deferred | source-gen refactor; manual `WitHostPackageNamespaceMap` works fine today |
+| 1e — canonical-ABI shape coverage | shipped | `7db96d34` |
+| 1f — first-class static-method IL | shipped | `c7877948` |
+| 1g — scoped backend factory | deferred | most invasive item per the plan; deferred to a focused branch |
+| 1h — auto-generated composites | deferred | only 2 composites exist; source-gen ROI is negative until 4+ |
+| 1i — multi-version wasi:io | shipped | `ffaf6a1f` |
+
+Six of nine items shipped on this branch. The three deferred items
+are all source-gen-heavy refactors whose benefit is felt only when
+a new sibling family lands — 1b + 1c already removed the
+hardcoded edits per new family, so the remaining items are perf /
+ergonomic polish that can land in a focused later branch.
+
 ### 1a. Diagnostics — loud-fail unresolved direct-link bindings
 
 **Where:** `Wacs.Transpiler.Lib/AOT/Component/ComponentMainHost.cs`
