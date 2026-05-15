@@ -105,6 +105,18 @@
          and useful enough to ship by default. -->
     <ProjectReference Include="..\..\Wacs.WASI\Wacs.WASI.Threads\Wacs.WASI.Threads\Wacs.WASI.Threads.csproj"
                       ExcludeAssets="compile" />
+    <!-- Bundled so the wasi-gfx flag resolves the Silk
+         backend DLL via Assembly.Load. Silk.NET.SDL pulls
+         SDL2 native binaries per RID, ~3 MB on darwin-arm64,
+         comparable for other supported RIDs. Worth shipping
+         alongside the wasi-nn backends so the CLI provides
+         end-to-end wasi-gfx out of the box. -->
+    <ProjectReference Include="..\..\Wacs.WASI\Wacs.WASI.GFX\Wacs.WASI.GFX\Wacs.WASI.GFX.csproj"
+                      ExcludeAssets="compile" />
+    <ProjectReference Include="..\..\Wacs.WASI\Wacs.WASI.GFX\Wacs.WASI.GFX.Silk\Wacs.WASI.GFX.Silk.csproj"
+                      ExcludeAssets="compile" />
+    <ProjectReference Include="..\..\Wacs.WASI\Wacs.WASI.GFX\Wacs.WASI.GFX.DependencyInjection\Wacs.WASI.GFX.DependencyInjection.csproj"
+                      ExcludeAssets="compile" />
   </ItemGroup>
 
   <ItemGroup>
