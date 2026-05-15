@@ -544,6 +544,72 @@ namespace Wacs.WASI.GFX.Webgpu.Test
         // ---- Custom-arity binding shape --------------------
 
         [Fact]
+        public void StubQueue_WriteBufferWithCopy_CapturesArgs()
+        {
+            var q = new StubGpuQueue();
+            var buf = new StubGpuBuffer();
+            var data = new byte[] { 0x10, 0x20, 0x30 };
+            var result = q.WriteBufferWithCopy(buf, 64ul, data,
+                Option<ulong>.Some(0ul),
+                Option<ulong>.Some(3ul));
+            Assert.True(result.IsOk);
+            Assert.NotNull(q.LastWriteBuffer);
+            Assert.Equal(64ul, q.LastWriteBuffer!.Value.offset);
+            Assert.Equal(3, q.LastWriteBuffer.Value.data.Length);
+        }
+
+        [Fact]
+        public void StubBuffer_GetMappedRangeSetWithCopy_CapturesData()
+        {
+            var buf = new StubGpuBuffer();
+            var data = new byte[] { 1, 2, 3, 4 };
+            var result = buf.GetMappedRangeSetWithCopy(data,
+                Option<ulong>.None, Option<ulong>.None);
+            Assert.True(result.IsOk);
+            Assert.NotNull(buf.LastSetData);
+            Assert.Equal(4, buf.LastSetData!.Length);
+        }
+
+        [Fact]
+        public void StubEncoders_SetBindGroup_AllOk()
+        {
+            // All three encoders share the same set-bind-group
+            // contract. Default stub returns Ok; the binding's
+            // try/catch-NotImplementedException path is exercised
+            // by adapter tests below.
+            var cp = new StubGpuComputePassEncoder();
+            var rp = new StubGpuRenderPassEncoder();
+            var rb = new StubGpuRenderBundleEncoder();
+            var bg = new StubGpuBindGroup();
+            var cpResult = cp.SetBindGroup(0u,
+                Option<Wacs.WASI.GFX.Webgpu.Webgpu.IGpuBindGroup>.Some(bg),
+                Option<uint[]>.None, Option<ulong>.None, Option<uint>.None);
+            Assert.True(cpResult.IsOk);
+            var rpResult = rp.SetBindGroup(0u,
+                Option<Wacs.WASI.GFX.Webgpu.Webgpu.IGpuBindGroup>.Some(bg),
+                Option<uint[]>.None, Option<ulong>.None, Option<uint>.None);
+            Assert.True(rpResult.IsOk);
+            var rbResult = rb.SetBindGroup(0u,
+                Option<Wacs.WASI.GFX.Webgpu.Webgpu.IGpuBindGroup>.Some(bg),
+                Option<uint[]>.None, Option<ulong>.None, Option<uint>.None);
+            Assert.True(rbResult.IsOk);
+        }
+
+        [Fact]
+        public void StubAdapter_RequestDevice_OkArm()
+        {
+            // Stub returns FromOk(StubGpuDevice). Confirms the
+            // handle-Ok shape's CLR-side wiring is correct;
+            // wire-form retArea write is exercised at fixture-
+            // run time.
+            var ad = new StubGpuAdapter();
+            var result = ad.RequestDevice(
+                Option<Wacs.WASI.GFX.Webgpu.Webgpu.GpuDeviceDescriptor>.None);
+            Assert.True(result.IsOk);
+            Assert.IsType<StubGpuDevice>(result.Ok);
+        }
+
+        [Fact]
         public void StubTexture_CreateView_Returns()
         {
             // create-view has a 22-arity wire form via the

@@ -176,10 +176,20 @@ namespace Wacs.WASI.GFX.Webgpu.Test
             Submissions.Add(commandBuffers);
         }
         public void OnSubmittedWorkDone() { OnSubmittedCalls++; }
+        /// <summary>Most recent (buffer, offset, data) passed to
+        /// <see cref="WriteBufferWithCopy"/>. Tests verify the
+        /// canonical-ABI list<u8> decode pinned the right bytes.</summary>
+        public (IGpuBuffer buffer, ulong offset, byte[] data,
+            Option<ulong> dataOffset, Option<ulong> size)? LastWriteBuffer
+        { get; private set; }
         public Result<Unit, WriteBufferError> WriteBufferWithCopy(
             IGpuBuffer buffer, ulong bufferOffset, byte[] data,
             Option<ulong> dataOffset, Option<ulong> size)
-            => throw new NotImplementedException();
+        {
+            LastWriteBuffer = (buffer, bufferOffset, data,
+                dataOffset, size);
+            return Result<Unit, WriteBufferError>.FromOk(Unit.Value);
+        }
         public void WriteTextureWithCopy(
             GpuTexelCopyTextureInfo destination, byte[] data,
             GpuTexelCopyBufferLayout dataLayout, GpuExtent3D size)
@@ -230,7 +240,8 @@ namespace Wacs.WASI.GFX.Webgpu.Test
         public Result<byte[], GetMappedRangeError>
             GetMappedRangeGetWithCopy(Option<ulong> offset,
                 Option<ulong> size)
-            => throw new NotImplementedException();
+            => Result<byte[], GetMappedRangeError>.FromOk(
+                Array.Empty<byte>());
         public Result<Unit, UnmapError> Unmap()
         {
             if (FailWithUnmapError)
@@ -243,10 +254,18 @@ namespace Wacs.WASI.GFX.Webgpu.Test
                     });
             return Result<Unit, UnmapError>.FromOk(Unit.Value);
         }
+        /// <summary>Captures the last data buffer handed to
+        /// <see cref="GetMappedRangeSetWithCopy"/> so tests can
+        /// verify the canonical-ABI list<u8> decode landed
+        /// correctly.</summary>
+        public byte[]? LastSetData { get; private set; }
         public Result<Unit, GetMappedRangeError>
             GetMappedRangeSetWithCopy(byte[] data,
                 Option<ulong> offset, Option<ulong> size)
-            => throw new NotImplementedException();
+        {
+            LastSetData = data;
+            return Result<Unit, GetMappedRangeError>.FromOk(Unit.Value);
+        }
     }
 
     internal sealed class StubGpuShaderModule : IGpuShaderModule
@@ -357,7 +376,7 @@ namespace Wacs.WASI.GFX.Webgpu.Test
             Option<uint[]> dynamicOffsetsData,
             Option<ulong> dynamicOffsetsDataStart,
             Option<uint> dynamicOffsetsDataLength)
-            => throw new NotImplementedException();
+            => Result<Unit, SetBindGroupError>.FromOk(Unit.Value);
     }
 
     internal sealed class StubGpuCommandBuffer : IGpuCommandBuffer
@@ -471,7 +490,7 @@ namespace Wacs.WASI.GFX.Webgpu.Test
             Option<uint[]> dynamicOffsetsData,
             Option<ulong> dynamicOffsetsDataStart,
             Option<uint> dynamicOffsetsDataLength)
-            => throw new NotImplementedException();
+            => Result<Unit, SetBindGroupError>.FromOk(Unit.Value);
         public void SetPipeline(IGpuRenderPipeline pipeline)
             => LastPipeline = pipeline;
         public void SetIndexBuffer(IGpuBuffer buffer,
@@ -512,7 +531,7 @@ namespace Wacs.WASI.GFX.Webgpu.Test
             Option<uint[]> dynamicOffsetsData,
             Option<ulong> dynamicOffsetsDataStart,
             Option<uint> dynamicOffsetsDataLength)
-            => throw new NotImplementedException();
+            => Result<Unit, SetBindGroupError>.FromOk(Unit.Value);
         public void SetPipeline(IGpuRenderPipeline pipeline) { }
         public void SetIndexBuffer(IGpuBuffer buffer,
             GpuIndexFormat indexFormat, Option<ulong> offset,

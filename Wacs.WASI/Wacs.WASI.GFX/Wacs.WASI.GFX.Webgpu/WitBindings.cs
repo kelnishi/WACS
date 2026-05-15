@@ -37,6 +37,12 @@ using UnmapErrorKind = Wacs.WASI.GFX.Webgpu.Webgpu.UnmapErrorKind;
 using MapAsyncErrorKind = Wacs.WASI.GFX.Webgpu.Webgpu.MapAsyncErrorKind;
 using WriteBufferErrorKind = Wacs.WASI.GFX.Webgpu.Webgpu.WriteBufferErrorKind;
 using SetBindGroupErrorKind = Wacs.WASI.GFX.Webgpu.Webgpu.SetBindGroupErrorKind;
+using GetMappedRangeErrorKind = Wacs.WASI.GFX.Webgpu.Webgpu.GetMappedRangeErrorKind;
+using RequestDeviceErrorKind = Wacs.WASI.GFX.Webgpu.Webgpu.RequestDeviceErrorKind;
+using CreateQuerySetErrorKind = Wacs.WASI.GFX.Webgpu.Webgpu.CreateQuerySetErrorKind;
+using IGpuQuerySet = Wacs.WASI.GFX.Webgpu.Webgpu.IGpuQuerySet;
+using GpuQuerySetDescriptor = Wacs.WASI.GFX.Webgpu.Webgpu.GpuQuerySetDescriptor;
+using GpuQueryType = Wacs.WASI.GFX.Webgpu.Webgpu.GpuQueryType;
 using IWgslLanguageFeatures = Wacs.WASI.GFX.Webgpu.Webgpu.IWgslLanguageFeatures;
 using GpuRequestAdapterOptions = Wacs.WASI.GFX.Webgpu.Webgpu.GpuRequestAdapterOptions;
 using GpuDeviceDescriptor = Wacs.WASI.GFX.Webgpu.Webgpu.GpuDeviceDescriptor;
@@ -87,7 +93,7 @@ namespace Wacs.WASI.GFX.Webgpu
                     + "a backend on the host's configuration.");
             var alloc = new Wacs.WASI.GFX.HostBinding.Realloc(runtime);
             BindGpu(runtime, host);
-            BindGpuAdapter(runtime, host);
+            BindGpuAdapter(runtime, host, alloc);
             BindGpuDevice(runtime, host, alloc);
             BindGpuBuffer(runtime, host, alloc);
             BindLabeled(runtime, alloc,
@@ -300,7 +306,9 @@ namespace Wacs.WASI.GFX.Webgpu
         //     request-device: func(...) -> result<gpu-device, request-device-error>;
         // ----------------------------------------------------
 
-        private static void BindGpuAdapter(WasmRuntime runtime, WasiWebgpuHost host)
+        private static void BindGpuAdapter(WasmRuntime runtime,
+            WasiWebgpuHost host,
+            Wacs.WASI.GFX.HostBinding.Realloc alloc)
         {
             // features / limits / info — all (self) -> own<handle>.
             // Wire: Func<Ctx, i32, i32>.
@@ -338,22 +346,47 @@ namespace Wacs.WASI.GFX.Webgpu
             // request-device(self, descriptor: option<gpu-device-descriptor>)
             //   -> result<gpu-device, request-device-error>
             //
-            // The option<descriptor> flat-form has nested lists, options,
-            // and a resource handle (record-option-gpu-size64) — substantial
-            // canonical-ABI plumbing. Sessions 5-6 wire it alongside the
-            // descriptor's nested resources (buffer / shader / pipeline-
-            // layout). For session 4 the binding is registered with a
-            // throw-stub body so validation pre-flight sees it and the
-            // intent is obvious to a reader who hits the throw.
-            runtime.BindHostFunction<Action<ExecContext, int, int>>(
+            // option<gpu-device-descriptor> flat-form (13 i32):
+            //   opt_disc:i32
+            //   record:
+            //     required-features: option<list<gpu-feature-name>>  3 i32
+            //     required-limits:   option<own<record-option-gpu-size64>> 2
+            //     default-queue:     option<gpu-queue-descriptor{label:opt<string>}> 4
+            //     label:             option<string>                  3 i32
+            //
+            // Wire: 1 (self) + 13 (option<record>) + 1 (retArea) = 15 i32.
+            // retArea: 16 bytes, align 4 (handle Ok or kind+message Err).
+            //
+            // Descriptor decoding deferred — impl receives
+            // Option<GpuDeviceDescriptor>.None; nested-list +
+            // option<own<R>> + nested-record decode pairs with the
+            // create-* methods that share the same shape complexity.
+            runtime.BindHostFunction<CustomDelegates.RequestDevice>(
                 (Ns, "[method]gpu-adapter.request-device"),
-                (_, _self, _retArea) =>
+                (ctx, selfH, _od,
+                    _rfDisc, _rfPtr, _rfLen,
+                    _rlDisc, _rlVal,
+                    _dqDisc, _dqLDisc, _dqLPtr, _dqLLen,
+                    _lblDisc, _lblPtr, _lblLen,
+                    retArea) =>
                 {
-                    throw new NotImplementedException(
-                        "wasi:webgpu [method]gpu-adapter.request-device — "
-                        + "the option<gpu-device-descriptor> flat-form "
-                        + "lands in v1 phase 3 session 5 alongside the "
-                        + "descriptor's nested resources.");
+                    var ad = (IGpuAdapter)host.Adapters.Get(selfH);
+                    var result = ad.RequestDevice(
+                        Option<GpuDeviceDescriptor>.None);
+                    if (result.IsOk)
+                    {
+                        var handle = host.Devices.Allocate(result.Ok);
+                        WriteResultHandleErrRecord(ctx, alloc, retArea,
+                            isOk: true, handle: handle,
+                            kindDisc: 0, message: "");
+                    }
+                    else
+                    {
+                        WriteResultHandleErrRecord(ctx, alloc, retArea,
+                            isOk: false, handle: 0,
+                            kindDisc: RequestDeviceErrorKindDisc(result.Err!.Kind),
+                            message: result.Err.Message);
+                    }
                 });
 
             // [resource-drop]gpu-adapter
@@ -526,6 +559,30 @@ namespace Wacs.WASI.GFX.Webgpu
             runtime.BindHostFunction<Action<ExecContext, int>>(
                 (Ns, "[resource-drop]gpu-buffer"),
                 (_, h) => host.Buffers.Drop(h));
+
+            // get-mapped-range-set-with-copy(self, list<u8>,
+            //   opt<u64> off, opt<u64> size)
+            //   -> result<_, get-mapped-range-error>
+            runtime.BindHostFunction<Action<ExecContext,
+                int, int, int, int, long, int, long, int>>(
+                (Ns, "[method]gpu-buffer.get-mapped-range-set-with-copy"),
+                (ctx, selfH, dataPtr, dataLen,
+                    offDisc, offVal, sizDisc, sizVal, retArea) =>
+                {
+                    var buf = (IGpuBuffer)host.Buffers.Get(selfH);
+                    var data = ReadByteArray(ctx, dataPtr, dataLen);
+                    var result = buf.GetMappedRangeSetWithCopy(data,
+                        offDisc == 0 ? Option<ulong>.None
+                            : Option<ulong>.Some(unchecked((ulong)offVal)),
+                        sizDisc == 0 ? Option<ulong>.None
+                            : Option<ulong>.Some(unchecked((ulong)sizVal)));
+                    WriteResultUnitErrRecord(ctx, alloc, retArea,
+                        result.IsOk,
+                        result.IsErr
+                            ? GetMappedRangeErrorKindDisc(result.Err!.Kind)
+                            : 0,
+                        result.IsErr ? result.Err!.Message : "");
+                });
 
             // unmap(self) -> result<_, unmap-error>
             // Wire: (self, retArea). 0 results. retArea = 16 bytes
@@ -763,6 +820,14 @@ namespace Wacs.WASI.GFX.Webgpu
                 "gpu-compute-pass-encoder", host.ComputePassEncoders,
                 h => ((IGpuComputePassEncoder)h).Label(),
                 (h, s) => ((IGpuComputePassEncoder)h).SetLabel(s));
+
+            BindSetBindGroup(runtime, alloc,
+                "gpu-compute-pass-encoder",
+                host.ComputePassEncoders, host.BindGroups,
+                (instance, args) =>
+                    ((IGpuComputePassEncoder)instance).SetBindGroup(
+                        args.index, args.bindGroup, args.dynamicOffsets,
+                        args.dynamicOffsetsStart, args.dynamicOffsetsLength));
         }
 
         // ----------------------------------------------------
@@ -807,6 +872,35 @@ namespace Wacs.WASI.GFX.Webgpu
                 "gpu-queue", host.Queues,
                 h => ((IGpuQueue)h).Label(),
                 (h, s) => ((IGpuQueue)h).SetLabel(s));
+
+            // write-buffer-with-copy(self, borrow<buf>, u64 bufOff,
+            //   list<u8> data, opt<u64> dataOff, opt<u64> size)
+            //   -> result<_, write-buffer-error>
+            // Wire: (self, buf:i32, bufOff:i64, dataPtr:i32, dataLen:i32,
+            //        doDisc:i32, doVal:i64, sizDisc:i32, sizVal:i64,
+            //        retArea:i32) — 6 i32 + 3 i64 = 10 args total.
+            runtime.BindHostFunction<Action<ExecContext,
+                int, int, long, int, int, int, long, int, long, int>>(
+                (Ns, "[method]gpu-queue.write-buffer-with-copy"),
+                (ctx, selfH, bufH, bufOff, dataPtr, dataLen,
+                    doDisc, doVal, sizDisc, sizVal, retArea) =>
+                {
+                    var queue = (IGpuQueue)host.Queues.Get(selfH);
+                    var buf = (IGpuBuffer)host.Buffers.Get(bufH);
+                    var data = ReadByteArray(ctx, dataPtr, dataLen);
+                    var result = queue.WriteBufferWithCopy(
+                        buf, unchecked((ulong)bufOff), data,
+                        doDisc == 0 ? Option<ulong>.None
+                            : Option<ulong>.Some(unchecked((ulong)doVal)),
+                        sizDisc == 0 ? Option<ulong>.None
+                            : Option<ulong>.Some(unchecked((ulong)sizVal)));
+                    WriteResultUnitErrRecord(ctx, alloc, retArea,
+                        result.IsOk,
+                        result.IsErr
+                            ? WriteBufferErrorKindDisc(result.Err!.Kind)
+                            : 0,
+                        result.IsErr ? result.Err!.Message : "");
+                });
         }
 
         // ----------------------------------------------------
@@ -1171,6 +1265,14 @@ namespace Wacs.WASI.GFX.Webgpu
                 "gpu-render-pass-encoder", host.RenderPassEncoders,
                 h => ((IGpuRenderPassEncoder)h).Label(),
                 (h, s) => ((IGpuRenderPassEncoder)h).SetLabel(s));
+
+            BindSetBindGroup(runtime, alloc,
+                "gpu-render-pass-encoder",
+                host.RenderPassEncoders, host.BindGroups,
+                (instance, args) =>
+                    ((IGpuRenderPassEncoder)instance).SetBindGroup(
+                        args.index, args.bindGroup, args.dynamicOffsets,
+                        args.dynamicOffsetsStart, args.dynamicOffsetsLength));
         }
 
         // ----------------------------------------------------
@@ -1317,6 +1419,14 @@ namespace Wacs.WASI.GFX.Webgpu
                 "gpu-render-bundle-encoder", host.RenderBundleEncoders,
                 h => ((IGpuRenderBundleEncoder)h).Label(),
                 (h, s) => ((IGpuRenderBundleEncoder)h).SetLabel(s));
+
+            BindSetBindGroup(runtime, alloc,
+                "gpu-render-bundle-encoder",
+                host.RenderBundleEncoders, host.BindGroups,
+                (instance, args) =>
+                    ((IGpuRenderBundleEncoder)instance).SetBindGroup(
+                        args.index, args.bindGroup, args.dynamicOffsets,
+                        args.dynamicOffsetsStart, args.dynamicOffsetsLength));
         }
 
         // Shared `push-debug-group(label: string) / pop-debug-group() /
@@ -1354,6 +1464,89 @@ namespace Wacs.WASI.GFX.Webgpu
                 {
                     var inst = table.Get(selfH);
                     insertFor(inst)(ReadUtf8(ctx, ptr, len));
+                });
+        }
+
+        // Shared `set-bind-group(index, opt<borrow<bg>>,
+        // opt<list<u32>> dynamic-offsets, opt<u64>, opt<u32>) ->
+        // result<_, set-bind-group-error>` across the three
+        // encoders (compute-pass, render-pass, render-bundle).
+        // Identical wire form; only the impl callback differs.
+        //
+        // Wire (Action arity 13, all i32 except offset-start i64):
+        //   self, index, bgDisc, bgVal, listDisc, listPtr, listLen,
+        //   offDisc, offVal(i64), lenDisc, lenVal, retArea
+        internal struct BindGroupArgs
+        {
+            public uint index;
+            public Option<IGpuBindGroup> bindGroup;
+            public Option<uint[]> dynamicOffsets;
+            public Option<ulong> dynamicOffsetsStart;
+            public Option<uint> dynamicOffsetsLength;
+        }
+
+        private static void BindSetBindGroup(WasmRuntime runtime,
+            Wacs.WASI.GFX.HostBinding.Realloc alloc,
+            string resourceName,
+            Wacs.WASI.GFX.HostBinding.ResourceTable encoderTable,
+            Wacs.WASI.GFX.HostBinding.ResourceTable bindGroupTable,
+            Func<object, BindGroupArgs,
+                Result<Unit, Webgpu.SetBindGroupError>> invoke)
+        {
+            runtime.BindHostFunction<Action<ExecContext,
+                int, int, int, int, int, int, int, int, long, int, int, int>>(
+                (Ns, "[method]" + resourceName + ".set-bind-group"),
+                (ctx, selfH, index,
+                    bgDisc, bgVal,
+                    listDisc, listPtr, listLen,
+                    offDisc, offVal,
+                    lenDisc, lenVal,
+                    retArea) =>
+                {
+                    var enc = encoderTable.Get(selfH);
+                    var args = new BindGroupArgs
+                    {
+                        index = unchecked((uint)index),
+                        bindGroup = bgDisc == 0
+                            ? Option<IGpuBindGroup>.None
+                            : Option<IGpuBindGroup>.Some(
+                                (IGpuBindGroup)bindGroupTable.Get(bgVal)),
+                        dynamicOffsets = listDisc == 0
+                            ? Option<uint[]>.None
+                            : Option<uint[]>.Some(
+                                ReadU32List(ctx, listPtr, listLen)),
+                        dynamicOffsetsStart = offDisc == 0
+                            ? Option<ulong>.None
+                            : Option<ulong>.Some(unchecked((ulong)offVal)),
+                        dynamicOffsetsLength = lenDisc == 0
+                            ? Option<uint>.None
+                            : Option<uint>.Some(unchecked((uint)lenVal)),
+                    };
+                    Result<Unit, Webgpu.SetBindGroupError> result;
+                    try { result = invoke(enc, args); }
+                    catch (NotImplementedException)
+                    {
+                        // Backend hasn't wired set-bind-group yet
+                        // — surface as a synthetic Range arm so
+                        // the guest sees a non-trap failure rather
+                        // than a thrown exception escaping the
+                        // host function. Once a real backend lands,
+                        // the impl returns Ok/Err directly.
+                        result = Result<Unit, Webgpu.SetBindGroupError>
+                            .FromErr(new Webgpu.SetBindGroupError
+                            {
+                                Kind = new SetBindGroupErrorKind
+                                    .SetBindGroupErrorKindRangeError(),
+                                Message = "host backend hasn't "
+                                    + "implemented set-bind-group",
+                            });
+                    }
+                    WriteResultUnitErrRecord(ctx, alloc, retArea,
+                        result.IsOk,
+                        result.IsErr
+                            ? SetBindGroupErrorKindDisc(result.Err!.Kind)
+                            : 0,
+                        result.IsErr ? result.Err!.Message : "");
                 });
         }
 
@@ -1486,6 +1679,39 @@ namespace Wacs.WASI.GFX.Webgpu
             ctx.WriteI32LE(retArea + 12, msgLen);
         }
 
+        // result<handle, error-record> retArea (16 bytes, align 4):
+        //   disc:u8 @0 + 3 pad
+        //   payload @4: max(handle=4, error-record=12) = 12 bytes
+        //     if Ok:  handle:i32 @4 (4 bytes used, 8 trailing pad)
+        //     if Err: kind:u8 @4 + 3 pad + msg.ptr @8 + msg.len @12
+        // Same shape as the Unit variant — Ok arm just writes a
+        // handle at +4 instead of zeros.
+        private static void WriteResultHandleErrRecord(ExecContext ctx,
+            Wacs.WASI.GFX.HostBinding.Realloc alloc, int retArea,
+            bool isOk, int handle, int kindDisc, string message)
+        {
+            var mem = ctx.Memory();
+            mem[retArea] = (byte)(isOk ? 0 : 1);
+            mem[retArea + 1] = 0;
+            mem[retArea + 2] = 0;
+            mem[retArea + 3] = 0;
+            if (isOk)
+            {
+                ctx.WriteI32LE(retArea + 4, handle);
+                // Zero trailing 8 bytes of the 12-byte payload
+                // area for determinism.
+                for (int i = 8; i < 16; i++) mem[retArea + i] = 0;
+                return;
+            }
+            mem[retArea + 4] = (byte)kindDisc;
+            mem[retArea + 5] = 0;
+            mem[retArea + 6] = 0;
+            mem[retArea + 7] = 0;
+            var (msgPtr, msgLen) = WriteUtf8Bytes(ctx, alloc, message);
+            ctx.WriteI32LE(retArea + 8, msgPtr);
+            ctx.WriteI32LE(retArea + 12, msgLen);
+        }
+
         // Per-error-type kind→disc mappings. The WIT variants
         // have only no-payload cases, so the discriminant matches
         // declaration order. Each error type's case set differs;
@@ -1522,5 +1748,56 @@ namespace Wacs.WASI.GFX.Webgpu
                 Webgpu.SetBindGroupErrorKind.SetBindGroupErrorKindRangeError => 0,
                 _ => 0,
             };
+
+        private static int GetMappedRangeErrorKindDisc(GetMappedRangeErrorKind k)
+            => k switch
+            {
+                Webgpu.GetMappedRangeErrorKind.GetMappedRangeErrorKindOperationError => 0,
+                Webgpu.GetMappedRangeErrorKind.GetMappedRangeErrorKindRangeError => 1,
+                Webgpu.GetMappedRangeErrorKind.GetMappedRangeErrorKindTypeError => 2,
+                _ => 0,
+            };
+
+        private static int RequestDeviceErrorKindDisc(RequestDeviceErrorKind k)
+            => k switch
+            {
+                Webgpu.RequestDeviceErrorKind.RequestDeviceErrorKindTypeError => 0,
+                Webgpu.RequestDeviceErrorKind.RequestDeviceErrorKindOperationError => 1,
+                _ => 0,
+            };
+
+        private static int CreateQuerySetErrorKindDisc(CreateQuerySetErrorKind k)
+            => k switch
+            {
+                Webgpu.CreateQuerySetErrorKind.CreateQuerySetErrorKindTypeError => 0,
+                _ => 0,
+            };
+
+        // Decode a list<u8> from guest memory into a host byte[].
+        // The wire shape for list<u8> params is (ptr, len) pairs
+        // already on the stack; this helper just resolves the
+        // pointer and copies. Used by queue.write-buffer-with-
+        // copy + buffer.get-mapped-range-set-with-copy where the
+        // host side wants the bytes for either inspection or
+        // forwarding.
+        private static byte[] ReadByteArray(ExecContext ctx, int ptr, int len)
+        {
+            if (len <= 0) return Array.Empty<byte>();
+            var mem = ctx.Memory();
+            var arr = new byte[len];
+            for (int i = 0; i < len; i++) arr[i] = mem[ptr + i];
+            return arr;
+        }
+
+        // Decode a list<u32> at (ptr, count). 4 bytes per element.
+        // Used by set-bind-group's dynamic-offsets parameter.
+        private static uint[] ReadU32List(ExecContext ctx, int ptr, int count)
+        {
+            if (count <= 0) return Array.Empty<uint>();
+            var arr = new uint[count];
+            for (int i = 0; i < count; i++)
+                arr[i] = unchecked((uint)ctx.ReadI32LE(ptr + i * 4));
+            return arr;
+        }
     }
 }
