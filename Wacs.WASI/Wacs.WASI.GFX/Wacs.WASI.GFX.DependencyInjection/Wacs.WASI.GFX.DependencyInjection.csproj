@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <LangVersion>9</LangVersion>
+        <Nullable>enable</Nullable>
+        <Title>WACS WASI-GFX — DI extensions</Title>
+        <PackageId>WACS.WASI.GFX.DependencyInjection</PackageId>
+        <Authors>Kelvin Nishikawa</Authors>
+        <Description>Microsoft.Extensions.DependencyInjection extension methods for WACS.WASI.GFX. Registers the WasiGfxBundle that the transpiler's HostPackageResolver will direct-link wasi-gfx imports against — symmetric with WACS.WASI.NN.DependencyInjection and WACS.WASI.Preview2.DependencyInjection.</Description>
+        <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
+        <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <AssemblyName>Wacs.WASI.GFX.DependencyInjection</AssemblyName>
+        <AssemblyVersion>0.1.0</AssemblyVersion>
+        <Version>0.1.0</Version>
+        <RepositoryType>git</RepositoryType>
+        <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
+        <IsAotCompatible Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net7.0'))">true</IsAotCompatible>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="README.md">
+            <Pack>true</Pack>
+            <PackagePath/>
+        </None>
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Wacs.WASI.GFX\Wacs.WASI.GFX.csproj" />
+        <ProjectReference Include="..\..\..\Wacs.ComponentModel\Wacs.ComponentModel\Wacs.ComponentModel.csproj" />
+        <ProjectReference Include="..\..\..\Wacs.Core\Wacs.Core\Wacs.Core.csproj" />
+        <!-- Soft dep on Preview2's DI package: enables the
+             WasiPreview2GfxBundle composite. wasi-gfx-only
+             embedders that don't wire Preview2 still get the
+             WasiGfxBundle path; the composite is opt-in. -->
+        <ProjectReference Include="..\..\Wacs.WASI.Preview2\Wacs.WASI.Preview2.DependencyInjection\Wacs.WASI.Preview2.DependencyInjection.csproj" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.0" />
+    </ItemGroup>
+
+</Project>
