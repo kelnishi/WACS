@@ -119,6 +119,43 @@ namespace Wacs.WASI.GFX.Webgpu
                 "gpu-render-bundle", host.RenderBundles,
                 h => ((IGpuRenderBundle)h).Label(),
                 (h, s) => ((IGpuRenderBundle)h).SetLabel(s));
+
+            // v1 phase 3 session 9: graphics-context bridge.
+            // [static]gpu-texture.from-graphics-buffer(buffer:
+            //   abstract-buffer) -> own<gpu-texture>
+            // Wire: (i32 abHandle) -> i32 texHandle. The wasm-
+            // side handle lives in the wasi-gfx host's
+            // AbstractBuffers table; the configured resolver
+            // (set by WasiGfxSilkBindable) maps it. Without the
+            // resolver this throws with a clear bridge-not-
+            // wired message.
+            runtime.BindHostFunction<Func<ExecContext, int, int>>(
+                (Ns, "[static]gpu-texture.from-graphics-buffer"),
+                (_, abHandle) =>
+                {
+                    if (host.AbstractBufferResolver == null)
+                        throw new WasiGfxException(
+                            "[static]gpu-texture.from-graphics-buffer "
+                            + "called but no AbstractBufferResolver "
+                            + "is configured on this WasiWebgpuHost. "
+                            + "The graphics-context bridge requires a "
+                            + "wasi-gfx sibling host; pair --wasi-gfx "
+                            + "+ --wasi-webgpu in the CLI, or wire "
+                            + "WasiWebgpuConfiguration"
+                            + ".AbstractBufferResolver directly.");
+                    var ab = host.AbstractBufferResolver(abHandle);
+                    if (ab == null)
+                        throw new WasiGfxException(
+                            "[static]gpu-texture.from-graphics-buffer: "
+                            + "abstract-buffer handle " + abHandle
+                            + " is not registered in the wasi-gfx host.");
+                    if (host.Backend == null)
+                        throw new WasiGfxException(
+                            "[static]gpu-texture.from-graphics-buffer "
+                            + "called on a host with no IGpuBackend.");
+                    var tex = host.Backend.FromAbstractBuffer(ab);
+                    return host.Textures.Allocate(tex);
+                });
         }
 
         // ----------------------------------------------------

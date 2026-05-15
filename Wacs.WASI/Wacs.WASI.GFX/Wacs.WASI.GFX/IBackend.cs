@@ -106,10 +106,45 @@ namespace Wacs.WASI.GFX
     /// Host-side <c>wasi:graphics-context.abstract-buffer</c>.
     /// Opaque connector type. Frame-buffer guests turn it into
     /// a CPU pixel buffer via
-    /// <see cref="IFrameBufferDevice"/>; v1 webgpu guests will
-    /// turn it into a GPUTexture.
+    /// <see cref="IFrameBufferDevice"/>; webgpu guests turn it
+    /// into a GPUTexture via <c>[static]gpu-texture.from-graphics-buffer</c>.
+    ///
+    /// <para>v1 phase 3 session 9: backends produce instances
+    /// that implement <em>one</em> of the two sub-interfaces
+    /// (<see cref="ICpuAbstractBuffer"/> or
+    /// <see cref="IGpuAbstractBuffer"/>) so consumers can
+    /// downcast cleanly without backend-specific knowledge. The
+    /// wasi-gfx WIT itself doesn't distinguish — a single
+    /// <c>abstract-buffer</c> handle moves through both worlds
+    /// at the wire level. Mixing kinds (e.g. handing a CPU
+    /// buffer to <c>[static]gpu-texture.from-graphics-buffer</c>)
+    /// is a backend-level error, surfaced at the consume site
+    /// rather than at the produce site.</para>
     /// </summary>
     public interface IAbstractBuffer : IDisposable
+    {
+    }
+
+    /// <summary>
+    /// Marker for an <see cref="IAbstractBuffer"/> the
+    /// <see cref="IFrameBufferDevice.FromGraphicsBuffer"/> path
+    /// can consume — a CPU-side raster surface where the bytes
+    /// are addressable by the host. Backends with a CPU
+    /// rendering target produce these from
+    /// <see cref="IGraphicsContext.GetCurrentBuffer"/>.
+    /// </summary>
+    public interface ICpuAbstractBuffer : IAbstractBuffer
+    {
+    }
+
+    /// <summary>
+    /// Marker for an <see cref="IAbstractBuffer"/> the
+    /// <c>[static]gpu-texture.from-graphics-buffer</c> path can
+    /// consume — a GPU swap-chain surface that wraps a wgpu /
+    /// vulkan / metal texture handle. Backends with an active
+    /// GPU rendering target produce these.
+    /// </summary>
+    public interface IGpuAbstractBuffer : IAbstractBuffer
     {
     }
 

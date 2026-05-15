@@ -12,6 +12,7 @@ using Wacs.WASI.GFX.Webgpu;
 using SNWebGPU = Silk.NET.WebGPU.WebGPU;
 using GenIGpu = Wacs.WASI.GFX.Webgpu.Webgpu.IGpu;
 using GenIGpuAdapter = Wacs.WASI.GFX.Webgpu.Webgpu.IGpuAdapter;
+using GenIGpuTexture = Wacs.WASI.GFX.Webgpu.Webgpu.IGpuTexture;
 using GenIWgslLanguageFeatures = Wacs.WASI.GFX.Webgpu.Webgpu.IWgslLanguageFeatures;
 using GenGpuRAOpts = Wacs.WASI.GFX.Webgpu.Webgpu.GpuRequestAdapterOptions;
 using GenGpuTextureFormat = Wacs.WASI.GFX.Webgpu.Webgpu.GpuTextureFormat;
@@ -68,6 +69,31 @@ namespace Wacs.WASI.GFX.Silk
             if (_disposed)
                 throw new ObjectDisposedException(nameof(SilkGpuBackend));
             return _gpu ??= new SilkGpu(this);
+        }
+
+        public GenIGpuTexture FromAbstractBuffer(IAbstractBuffer source)
+        {
+            if (_disposed)
+                throw new ObjectDisposedException(nameof(SilkGpuBackend));
+            if (source == null)
+                throw new ArgumentNullException(nameof(source));
+            if (source is not IGpuAbstractBuffer)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "SilkGpuBackend.FromAbstractBuffer: source is "
+                    + "not an IGpuAbstractBuffer. The CPU-path "
+                    + "(SilkAbstractBuffer / ICpuAbstractBuffer) "
+                    + "cannot be lifted to a wasi:webgpu texture; "
+                    + "use the frame-buffer device's "
+                    + "FromGraphicsBuffer instead.");
+            // Real wgpu texture creation: import the swap-chain
+            // surface as a WGPUTexture handle. Session 11 wires
+            // the wgpu API call alongside the surface
+            // configuration that produces IGpuAbstractBuffer
+            // instances in the first place.
+            throw new PlatformNotSupportedException(
+                "SilkGpuBackend.FromAbstractBuffer — the wgpu-native "
+                + "swap-chain-to-texture lift lands in v1 phase 3 "
+                + "session 11 alongside SilkGpuAdapter.");
         }
 
         public void Dispose()

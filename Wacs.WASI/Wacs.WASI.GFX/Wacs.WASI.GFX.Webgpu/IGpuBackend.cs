@@ -6,9 +6,11 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
-// IGpu lives in the source-gen-emitted nested namespace
-// Wacs.WASI.GFX.Webgpu.Webgpu (override + WIT interface name).
+// IGpu / IGpuTexture live in the source-gen-emitted nested
+// namespace Wacs.WASI.GFX.Webgpu.Webgpu (override + WIT
+// interface name).
 using IGpu = Wacs.WASI.GFX.Webgpu.Webgpu.IGpu;
+using IGpuTexture = Wacs.WASI.GFX.Webgpu.Webgpu.IGpuTexture;
 
 namespace Wacs.WASI.GFX.Webgpu
 {
@@ -45,5 +47,27 @@ namespace Wacs.WASI.GFX.Webgpu
         /// from this for the lifetime of the host scope.
         /// </summary>
         IGpu CreateGpu();
+
+        /// <summary>
+        /// Wrap a graphics-context <see cref="IGpuAbstractBuffer"/>
+        /// (a GPU swap-chain surface) as a wasi:webgpu
+        /// <c>gpu-texture</c>. Backs the
+        /// <c>[static]gpu-texture.from-graphics-buffer</c>
+        /// import. Implementations MUST reject CPU-path
+        /// <see cref="ICpuAbstractBuffer"/> inputs with a clear
+        /// "wrong-kind" error — that lift belongs on the
+        /// <see cref="IFrameBufferDevice.FromGraphicsBuffer"/>
+        /// path.
+        ///
+        /// <para>Ownership: the WIT signature consumes
+        /// <c>own&lt;abstract-buffer&gt;</c>; the caller (the
+        /// wasi-webgpu WitBindings dispatcher) drops the wasm-
+        /// side handle after this method returns. Backends may
+        /// retain the underlying CLR instance as part of the
+        /// returned texture's lifetime, or copy out the wgpu
+        /// handle and let the abstract-buffer's Dispose
+        /// run.</para>
+        /// </summary>
+        IGpuTexture FromAbstractBuffer(IAbstractBuffer source);
     }
 }

@@ -86,6 +86,15 @@ namespace Wacs.WASI.GFX.Webgpu
         /// configured.</summary>
         public IGpuBackend? Backend => _config.Backend;
 
+        /// <summary>The cross-host abstract-buffer resolver
+        /// configured at construction. Used by the
+        /// <c>[static]gpu-texture.from-graphics-buffer</c>
+        /// binding to look up the wasi-gfx-side handle.
+        /// Null when no graphics-context bridge is wired (pure-
+        /// webgpu embedders).</summary>
+        internal Func<int, IAbstractBuffer?>? AbstractBufferResolver
+            => _config.AbstractBufferResolver;
+
         /// <summary>The lazily-constructed singleton <c>gpu</c>
         /// resource — the wasi:webgpu spec's
         /// <c>navigator.gpu</c> equivalent. Null when no backend

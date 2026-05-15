@@ -83,7 +83,7 @@ namespace Wacs.WASI.GFX.Silk
     /// returned frame-buffer-buffer talks to the context
     /// directly.
     /// </summary>
-    internal sealed class SilkAbstractBuffer : IAbstractBuffer
+    internal sealed class SilkAbstractBuffer : ICpuAbstractBuffer
     {
         internal SilkContext Context { get; }
 
@@ -119,6 +119,19 @@ namespace Wacs.WASI.GFX.Silk
 
         public IFrameBufferBuffer FromGraphicsBuffer(IAbstractBuffer src)
         {
+            // v1 phase 3 session 9: downcast goes through
+            // ICpuAbstractBuffer so a guest accidentally handing
+            // a GPU-surface buffer to the CPU frame-buffer path
+            // gets a clear "wrong kind" error instead of a
+            // backend-specific cast failure.
+            if (src is not ICpuAbstractBuffer)
+                throw new WasiGfxException(
+                    "device.FromGraphicsBuffer: source is not a "
+                    + "CPU-path abstract-buffer (got GPU-path or "
+                    + "third-party type). The frame-buffer device "
+                    + "only consumes ICpuAbstractBuffer; webgpu "
+                    + "guests should use "
+                    + "[static]gpu-texture.from-graphics-buffer.");
             if (src is not SilkAbstractBuffer sab)
                 throw new WasiGfxException(
                     "device.FromGraphicsBuffer: source is not a "

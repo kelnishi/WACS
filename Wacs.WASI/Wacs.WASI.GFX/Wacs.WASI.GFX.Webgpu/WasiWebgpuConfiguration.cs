@@ -5,6 +5,8 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+using System;
+
 namespace Wacs.WASI.GFX.Webgpu
 {
     /// <summary>
@@ -36,6 +38,21 @@ namespace Wacs.WASI.GFX.Webgpu
         /// them.
         /// </summary>
         public Wacs.WASI.Preview2.HostBinding.ResourceContext? SharedResources { get; set; }
+
+        /// <summary>
+        /// Cross-host bridge for the
+        /// <c>[static]gpu-texture.from-graphics-buffer</c>
+        /// import: maps an <c>abstract-buffer</c> wasm handle
+        /// to its host-side <see cref="IAbstractBuffer"/>
+        /// instance. The handle lives in <c>WasiGfxHost</c>'s
+        /// AbstractBuffers table (a sibling host); the webgpu
+        /// dispatcher doesn't see that table directly. Null in
+        /// pure-webgpu embedders (no graphics-context bridge);
+        /// <c>WasiGfxSilkBindable</c> wires it to point at the
+        /// CPU host's lookup so the bridge works in the
+        /// combined CLI path.
+        /// </summary>
+        public Func<int, IAbstractBuffer?>? AbstractBufferResolver { get; set; }
 
         public static WasiWebgpuConfiguration DefaultConfiguration()
         {

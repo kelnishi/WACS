@@ -57,6 +57,13 @@ namespace Wacs.WASI.GFX.Webgpu
             return this;
         }
 
+        public WasiWebgpuConfigurationBuilder WithAbstractBufferResolver(
+            Func<int, IAbstractBuffer?>? resolver)
+        {
+            _cfg.AbstractBufferResolver = resolver;
+            return this;
+        }
+
         internal WasiWebgpuConfiguration Build() => _cfg;
     }
 }

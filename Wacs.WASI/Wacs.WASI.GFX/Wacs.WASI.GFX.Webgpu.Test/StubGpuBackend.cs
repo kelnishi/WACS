@@ -30,6 +30,7 @@ namespace Wacs.WASI.GFX.Webgpu.Test
     internal sealed class StubGpuBackend : IGpuBackend
     {
         public int CreateGpuCalls { get; private set; }
+        public int FromAbstractBufferCalls { get; private set; }
         public bool Disposed { get; private set; }
 
         public GenIGpu CreateGpu()
@@ -38,7 +39,35 @@ namespace Wacs.WASI.GFX.Webgpu.Test
             return new StubGpu();
         }
 
+        public Wacs.WASI.GFX.Webgpu.Webgpu.IGpuTexture
+            FromAbstractBuffer(Wacs.WASI.GFX.IAbstractBuffer source)
+        {
+            FromAbstractBufferCalls++;
+            if (source is not Wacs.WASI.GFX.IGpuAbstractBuffer)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "StubGpuBackend.FromAbstractBuffer: source must "
+                    + "be IGpuAbstractBuffer.");
+            return new StubGpuTexture();
+        }
+
         public void Dispose() { Disposed = true; }
+    }
+
+    /// <summary>Test stand-in for a GPU-path abstract-buffer —
+    /// implements the marker interface so the bridge can downcast
+    /// without exploding on the test side.</summary>
+    internal sealed class StubGpuAbstractBuffer
+        : Wacs.WASI.GFX.IGpuAbstractBuffer
+    {
+        public void Dispose() { }
+    }
+
+    /// <summary>Test stand-in for a CPU-path abstract-buffer —
+    /// used to verify the bridge rejects it on the GPU side.</summary>
+    internal sealed class TestCpuAbstractBuffer
+        : Wacs.WASI.GFX.ICpuAbstractBuffer
+    {
+        public void Dispose() { }
     }
 
     internal sealed class StubGpu : GenIGpu

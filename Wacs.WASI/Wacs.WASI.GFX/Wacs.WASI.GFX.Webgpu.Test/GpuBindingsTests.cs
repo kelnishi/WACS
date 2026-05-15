@@ -369,6 +369,54 @@ namespace Wacs.WASI.GFX.Webgpu.Test
             rb.SetLabel("rb"); Assert.Equal("rb", rb.Label());
         }
 
+        // ---- Session 9: graphics-context bridge ------------
+
+        [Fact]
+        public void Backend_FromAbstractBuffer_RejectsCpuKind()
+        {
+            // The bridge MUST reject ICpuAbstractBuffer inputs
+            // — that lift belongs on the frame-buffer device,
+            // not on gpu-texture.from-graphics-buffer.
+            var stub = new StubGpuBackend();
+            var cpuBuf = new TestCpuAbstractBuffer();
+            var ex = Assert.Throws<Wacs.WASI.GFX.Types.WasiGfxException>(
+                () => stub.FromAbstractBuffer(cpuBuf));
+            Assert.Contains("IGpuAbstractBuffer", ex.Message);
+        }
+
+        [Fact]
+        public void Backend_FromAbstractBuffer_AcceptsGpuKind()
+        {
+            var stub = new StubGpuBackend();
+            var gpuBuf = new StubGpuAbstractBuffer();
+            var tex = stub.FromAbstractBuffer(gpuBuf);
+            Assert.NotNull(tex);
+            Assert.Equal(1, stub.FromAbstractBufferCalls);
+        }
+
+        [Fact]
+        public void Builder_WithAbstractBufferResolver_Plumbs()
+        {
+            // Wire a custom resolver through the fluent
+            // builder and verify it lands on the host's
+            // configuration (visible through the internal
+            // accessor).
+            var runtime = new WasmRuntime();
+            var stub = new StubGpuBackend();
+            int captured = -1;
+            using var host = runtime.UseWasiWebgpu(b => b
+                .WithBackend(stub)
+                .WithAbstractBufferResolver(h =>
+                {
+                    captured = h;
+                    return new StubGpuAbstractBuffer();
+                }));
+            Assert.NotNull(host.AbstractBufferResolver);
+            var ab = host.AbstractBufferResolver!(42);
+            Assert.Equal(42, captured);
+            Assert.IsType<StubGpuAbstractBuffer>(ab);
+        }
+
         [Fact]
         public void Session6_ComputePath_EndToEnd_ChainCompiles()
         {
