@@ -25,19 +25,15 @@ namespace Wacs.WASI.GFX
     ///
     /// <para><b>Pollable handle space:</b> surface's
     /// <c>subscribe-*</c> methods mint <c>own&lt;pollable&gt;</c>
-    /// resources. v0 allocates these into
-    /// <see cref="WasiGfxHost.Pollables"/> — our own table. The
-    /// guest then calls <c>wasi:io/poll@0.2.0</c>'s
-    /// <c>pollable.ready()</c> / <c>pollable.block()</c>, which
-    /// Preview2 binds against ITS pollable table — different
-    /// table, no shared handles. The phase-3 plan is to share
-    /// the table via the existing
-    /// <c>Wacs.WASI.Preview2.HostBinding.ResourceContext</c>
-    /// surface (which exposes
-    /// <c>Table&lt;Pollable&gt;()</c> publicly). For now, this
-    /// limitation surfaces only when wasi-gfx surface events are
-    /// actually polled by the guest — an integration concern,
-    /// not a binding-correctness concern.</para>
+    /// resources into the shared Preview2
+    /// <c>ResourceContext.Table&lt;Pollable&gt;()</c> (set up
+    /// by <see cref="WasiGfxConfiguration.SharedResources"/>),
+    /// so the guest's <c>wasi:io/poll@0.2.8.poll</c> (bound by
+    /// Preview2's IoBindings against the same table) finds
+    /// them. <see cref="WasiGfxSilkBindable"/> wires Preview2
+    /// alongside wasi-gfx with a single shared
+    /// <c>ResourceContext</c>; CLI consumers get this
+    /// automatically via <c>--wasi-gfx</c>.</para>
     ///
     /// <para><b>Canonical-ABI layout facts used here:</b>
     /// <list type="bullet">
@@ -370,10 +366,7 @@ namespace Wacs.WASI.GFX
                     var p = fetch(s);
                     var h = host.Pollables.Allocate(p);
                     GfxLog.Trace("[method]surface." + methodName
-                        + ": minted pollable handle="
-                        + h + " (in WasiGfxHost.Pollables — note: "
-                        + "wasi:io/poll.poll resolves against "
-                        + "Preview2's table, not this one)");
+                        + ": minted pollable handle=" + h);
                     return h;
                 });
         }

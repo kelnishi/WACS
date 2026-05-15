@@ -7,15 +7,20 @@ Implements `IBackend` for the v0 wasi-gfx packages
 
 ## Status
 
-v0 scaffolding stub. The full SDL event pump, window
-management, and CPU pixel-blit implementation lands in a
-follow-up milestone. The CLI `--wasi-gfx` flag and the package
-identity are already wired so downstream consumers can pin
-against this package today.
+v0 feature-complete on the CPU rendering path. Opens a real
+SDL window, blits RGBA8 pixels per `frame-buffer.buffer.set`,
+dispatches OS events (resize / pointer / key) into `wasi:io/
+poll.pollable`s on the surface. Works under both the
+interpreter component path and the transpiler direct-link
+path.
 
-## Usage (when complete)
+## Usage
 
 ```sh
+# Interpreter component path:
+wacs run --wasi-gfx --windowed my.component.wasm
+
+# Transpiler direct-link path (canonical wasip2 workflow):
 wacs run --wasip2 --wasi-gfx --windowed my.component.wasm
 ```
 

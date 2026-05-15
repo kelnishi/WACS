@@ -14,19 +14,20 @@ namespace Wacs.WASI.GFX.DependencyInjection
     /// transpiler-direct-link path. Symmetric with
     /// <c>WasiPreview2Bundle</c> and <c>WasiNNBundle</c>.
     ///
-    /// <para>v0 surface: just the configured
+    /// <para>Holds the configured
     /// <see cref="WasiGfxConfiguration"/> + the configured
     /// <see cref="IBackend"/>. The per-resource concrete
-    /// classes that <c>HostPackageResolver</c> would direct-link
-    /// against (mirroring WASI.NN's <c>Tensor</c>,
-    /// <c>Graph</c>, <c>GraphExecutionContext</c>,
-    /// <c>Error</c>) are a v1 follow-up — the wasi-gfx
-    /// resources (context, surface, frame-buffer device +
-    /// buffer, abstract-buffer) all use <c>constructor(...)</c>
-    /// rather than free-function factories, so the binding
-    /// shape is different. v0 ships the interpreter path
-    /// via <c>WitBindings.cs</c>; transpiler-direct-link wiring
-    /// lands when a wasi-gfx component fixture exercises it.</para>
+    /// classes <c>HostPackageResolver</c> direct-links against
+    /// (<c>Context</c>, <c>AbstractBuffer</c>, <c>Surface</c>,
+    /// <c>Device</c>, <c>Buffer</c>) live alongside this
+    /// bundle and are discovered by the resolver via
+    /// <c>TryFindResourceImpl</c>. They use a parameterless
+    /// ctor + <c>Create()</c> shape (the SourceGen-resource
+    /// convention) and pull the backend from
+    /// <see cref="WasiGfxAmbient"/> at <c>Create()</c> time —
+    /// the bundle's role is to carry that backend through DI
+    /// so the ambient is set before any wasm guest resource
+    /// is minted.</para>
     /// </summary>
     public sealed class WasiGfxBundle
     {

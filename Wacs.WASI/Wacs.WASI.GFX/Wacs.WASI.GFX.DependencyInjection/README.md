@@ -24,17 +24,32 @@ lookups to either the Preview2 sub-bundle or the wasi-gfx
 sub-bundle. Components importing both `wasi:cli/*` and any
 wasi-gfx package resolve through one bundle slot.
 
-## v0 surface
+## What's in the box
 
-`WasiGfxBundle` exposes the configuration + backend only —
-sufficient for embedders that want to introspect or replace
-the backend at runtime. The per-resource concrete classes
-that `HostPackageResolver` would direct-link against
-(mirroring `WASI.NN`'s `Tensor`/`Graph`/etc.) are a v1
-follow-up because wasi-gfx's resources all use
-`constructor(...)` rather than free-function factories, so
-the binding shape differs from `WASI.NN.IGraphFuncs`.
+`WasiGfxBundle` carries the configuration + backend.
+`WasiPreview2GfxBundle` is the composite the transpiler's
+`HostPackageResolver` direct-links against when both Preview2
+and wasi-gfx are loaded.
 
-The interpreter path goes through `WACS.WASI.GFX`'s
-`WitBindings.cs` directly via
-`runtime.UseWasiGfx(b => b.WithBackend(...))` — no DI required.
+Per-resource impl classes (`Context`, `AbstractBuffer`,
+`Surface`, `Device`, `Buffer`) follow the SourceGen-resource
+convention — parameterless ctor + `Create()`, with the
+backend pulled from `WasiGfxAmbient` at construction time.
+They live in this package and the resolver discovers them via
+`TryFindResourceImpl`.
+
+Both engines run wasi-gfx components end-to-end:
+
+```sh
+# Interpreter component path:
+wacs run --wasi-gfx --windowed my.component.wasm
+
+# Transpiler direct-link path:
+wacs run --wasip2 --wasi-gfx --windowed my.component.wasm
+```
+
+`AddWasiGfx` + `AddWasiPreview2GfxBundle` register everything
+via `Microsoft.Extensions.DependencyInjection`. The CLI
+auto-wires both at startup via the
+`WasiPreview2RuntimeScope.ReflectivelyAddWasiGfx` hook in
+Preview2's DI scope.

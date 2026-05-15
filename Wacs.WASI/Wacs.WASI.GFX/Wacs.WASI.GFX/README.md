@@ -38,9 +38,10 @@ exact commit and replay commands.
 
 ## Status
 
-v0 is the scaffolding + SPI cut. The hand-written
-canonical-ABI `WitBindings.cs` and the Silk.NET backend land
-in subsequent milestones. Component-side parity is verified
-against
+v0 is feature-complete on the CPU rendering path. Both the
+interpreter component path (`--wasi-gfx`) and the transpiler
+direct-link path (`--wasip2 --wasi-gfx`) render the parity
+fixture end-to-end. Component-side parity is verified against
 [`wasi-gfx/wasi-gfx-runtime`](https://github.com/wasi-gfx/wasi-gfx-runtime)'s
-`rectangle_frame_buffer` example.
+`rectangle_frame_buffer` example (plus a sibling `triangle`
+fixture under `Spec.Test/components/fixtures/`).
