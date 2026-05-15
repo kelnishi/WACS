@@ -43,6 +43,17 @@
              the composite path needs the Preview2 types. -->
         <ProjectReference Include="..\..\Wacs.WASI.Preview2\Wacs.WASI.Preview2.DependencyInjection\Wacs.WASI.Preview2.DependencyInjection.csproj" />
         <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.0" />
+
+        <!-- v1 phase 1 1h: WasiPreview2NNBundle is a partial
+             class auto-completed by the CompositeBundleGenerator. -->
+        <ProjectReference Include="..\..\..\Wacs.ComponentModel\Wacs.ComponentModel.Bindgen.SourceGen\Wacs.ComponentModel.Bindgen.SourceGen.csproj"
+                          OutputItemType="Analyzer"
+                          ReferenceOutputAssembly="false" />
     </ItemGroup>
+
+    <PropertyGroup>
+        <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+        <CompilerGeneratedFilesOutputPath>obj/Generated</CompilerGeneratedFilesOutputPath>
+    </PropertyGroup>
 
 </Project>

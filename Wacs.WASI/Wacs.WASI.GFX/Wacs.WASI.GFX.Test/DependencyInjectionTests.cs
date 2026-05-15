@@ -49,7 +49,14 @@ namespace Wacs.WASI.GFX.Test
             Assert.NotNull(composite);
             Assert.NotNull(composite.Preview2);
             Assert.NotNull(composite.Gfx);
-            Assert.IsType<StubBackend>(composite.GfxBackend);
+            // v1 phase 1 1h: the composite's forwarding
+            // properties come from CompositeBundleGenerator now.
+            // The Backend property forwards from
+            // WasiGfxBundle.Backend (no `Gfx` prefix); the
+            // direct .Gfx accessor still exposes the underlying
+            // bundle for callers that want to disambiguate.
+            Assert.IsType<StubBackend>(composite.Backend);
+            Assert.IsType<StubBackend>(composite.Gfx.Backend);
         }
     }
 }

@@ -40,6 +40,21 @@
              WasiGfxBundle path; the composite is opt-in. -->
         <ProjectReference Include="..\..\Wacs.WASI.Preview2\Wacs.WASI.Preview2.DependencyInjection\Wacs.WASI.Preview2.DependencyInjection.csproj" />
         <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.0" />
+
+        <!-- v1 phase 1 1h: WasiPreview2GfxBundle is a partial
+             class auto-completed by the CompositeBundleGenerator.
+             Analyzer ref pulls the generator in at compile time;
+             ReferenceOutputAssembly=false keeps the generator
+             DLL off the runtime closure. -->
+        <ProjectReference Include="..\..\..\Wacs.ComponentModel\Wacs.ComponentModel.Bindgen.SourceGen\Wacs.ComponentModel.Bindgen.SourceGen.csproj"
+                          OutputItemType="Analyzer"
+                          ReferenceOutputAssembly="false" />
     </ItemGroup>
+
+    <PropertyGroup>
+        <!-- Persist generator output for IDE navigation. -->
+        <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+        <CompilerGeneratedFilesOutputPath>obj/Generated</CompilerGeneratedFilesOutputPath>
+    </PropertyGroup>
 
 </Project>
