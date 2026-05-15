@@ -6,6 +6,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
+using Wacs.ComponentModel.Runtime;
 using Wacs.Core.Runtime;
 using Wacs.WASI.GFX.Types;
 using Wacs.WASI.GFX.Webgpu;
@@ -119,6 +120,74 @@ namespace Wacs.WASI.GFX.Webgpu.Test
             // backend in the ctor.
             using var host = new WasiWebgpuHost();
             Assert.Null(host.Backend);
+        }
+
+        // ---- Session 4: gpu-adapter + gpu-device stubs --------
+        //
+        // Wire-form binding invocation lands once parity fixtures
+        // arrive (session 10) — there's no public host-function-
+        // lookup API on WasmRuntime today. Session 4's coverage
+        // is the SPI side: stub backend → IGpu → adapter/device
+        // chain works correctly so the WitBindings dispatch on
+        // top has a working target.
+
+        [Fact]
+        public void StubGpu_AlwaysReturnAdapter_YieldsAdapter()
+        {
+            // The session-4 stub gpu exposes a flag to toggle
+            // request-adapter's behavior. None mode is the
+            // session-3 baseline; Some mode is what later wire-
+            // form tests use.
+            var stub = new StubGpuBackend();
+            var gpu = stub.CreateGpu();
+            var stubGpu = (StubGpu)gpu;
+            stubGpu.AlwaysReturnAdapter = true;
+
+            var result = gpu.RequestAdapter(
+                Option<Wacs.WASI.GFX.Webgpu.Webgpu.GpuRequestAdapterOptions>.None);
+            Assert.True(result.HasValue);
+            Assert.IsType<StubGpuAdapter>(result.Value);
+        }
+
+        [Fact]
+        public void StubGpu_RequestAdapterDefault_ReturnsNone()
+        {
+            var stub = new StubGpuBackend();
+            var gpu = stub.CreateGpu();
+            var result = gpu.RequestAdapter(
+                Option<Wacs.WASI.GFX.Webgpu.Webgpu.GpuRequestAdapterOptions>.None);
+            Assert.False(result.HasValue);
+        }
+
+        [Fact]
+        public void StubGpuAdapter_IsFallbackAdapter_False()
+        {
+            var ad = new StubGpuAdapter();
+            Assert.False(ad.IsFallbackAdapter());
+            // Features / Limits / Info are all handle returns;
+            // ensure they at least don't throw.
+            Assert.NotNull(ad.Features());
+            Assert.NotNull(ad.Limits());
+            Assert.NotNull(ad.Info());
+        }
+
+        [Fact]
+        public void StubGpuDevice_LabelRoundtrip()
+        {
+            var dev = new StubGpuDevice();
+            Assert.Equal("stub-device", dev.Label());
+            dev.SetLabel("renamed");
+            Assert.Equal("renamed", dev.Label());
+        }
+
+        [Fact]
+        public void StubGpuAdapter_RequestDevice_ReturnsOk()
+        {
+            var ad = new StubGpuAdapter();
+            var result = ad.RequestDevice(
+                Option<Wacs.WASI.GFX.Webgpu.Webgpu.GpuDeviceDescriptor>.None);
+            Assert.True(result.IsOk);
+            Assert.IsType<StubGpuDevice>(result.Ok);
         }
     }
 }

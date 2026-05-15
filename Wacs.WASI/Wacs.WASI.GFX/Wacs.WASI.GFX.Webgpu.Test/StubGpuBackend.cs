@@ -47,13 +47,27 @@ namespace Wacs.WASI.GFX.Webgpu.Test
         public int GetPreferredCanvasFormatCalls { get; private set; }
         public int WgslLanguageFeaturesCalls { get; private set; }
 
+        /// <summary>When true, <see cref="RequestAdapter"/>
+        /// returns a fresh <see cref="StubGpuAdapter"/>. Default
+        /// false → returns None, matching the original session 3
+        /// stub. Session 4 tests flip this to exercise the
+        /// option-handle retArea write path.</summary>
+        public bool AlwaysReturnAdapter { get; set; }
+
+        /// <summary>Captures the most recent
+        /// <c>request-adapter</c> arguments so session 4 tests
+        /// can assert the canonical-ABI option<record> decoding
+        /// landed the right CLR values.</summary>
+        public Option<GenGpuRAOpts> LastRequestAdapterOptions { get; private set; }
+
         public Option<GenIGpuAdapter> RequestAdapter(
             Option<GenGpuRAOpts> options)
         {
             RequestAdapterCalls++;
-            // Stub: report "no adapter". Real backends construct
-            // an adapter via the GPU driver.
-            return Option<GenIGpuAdapter>.None;
+            LastRequestAdapterOptions = options;
+            return AlwaysReturnAdapter
+                ? Option<GenIGpuAdapter>.Some(new StubGpuAdapter())
+                : Option<GenIGpuAdapter>.None;
         }
 
         public GenGpuTextureFormat GetPreferredCanvasFormat()
