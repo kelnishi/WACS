@@ -406,6 +406,12 @@ namespace Wacs.WASI.GFX.Webgpu
         private static void BindGpuDevice(WasmRuntime runtime,
             WasiWebgpuHost host, Wacs.WASI.GFX.HostBinding.Realloc alloc)
         {
+            // Wire the cross-helper closure for the
+            // option<own<gpu-error>> retArea writer so it can
+            // allocate handles into this host's Errors table
+            // without knowing about WasiWebgpuHost directly.
+            _allocateGpuError = err => host.Errors.Allocate(err);
+
             // features / limits / adapter-info — handle returns.
             runtime.BindHostFunction<Func<ExecContext, int, int>>(
                 (Ns, "[method]gpu-device.features"),
@@ -480,13 +486,243 @@ namespace Wacs.WASI.GFX.Webgpu
                 (Ns, "[resource-drop]gpu-device"),
                 (_, h) => host.Devices.Drop(h));
 
-            // create-buffer / -texture / -sampler / -bind-group-* /
-            // -pipeline-* / -shader-module / -command-encoder /
-            // -render-bundle-encoder / -query-set + the two async
-            // variants land in sessions 5-7. push-error-scope /
-            // pop-error-scope / onuncapturederror-subscribe /
-            // connect-graphics-context land alongside the error +
-            // graphics-context bridge sessions.
+            // ===== create-* methods (descriptor decoding deferred) =====
+            // All create-* methods receive their flat-form params and
+            // pass a default-constructed descriptor (or Option.None for
+            // option<descriptor>) to the impl. Real backends (wgpu-
+            // native) need full descriptor decode; ships alongside the
+            // dispatcher.
+
+            // create-buffer(self, gpu-buffer-descriptor{u64,u32,opt<bool>,opt<string>})
+            //   -> own<gpu-buffer>
+            // Flat: u64 size + u32 usage + 2 opt<bool> + 3 opt<string> = 1 i64 + 6 i32
+            runtime.BindHostFunction<Func<ExecContext,
+                int, long, int, int, int, int, int, int, int>>(
+                (Ns, "[method]gpu-device.create-buffer"),
+                (_, selfH, _size, _usage, _mDisc, _mVal,
+                    _lblDisc, _lblPtr, _lblLen) =>
+                {
+                    var dev = (IGpuDevice)host.Devices.Get(selfH);
+                    var b = dev.CreateBuffer(new Webgpu.GpuBufferDescriptor());
+                    return host.Buffers.Allocate(b);
+                });
+
+            // create-bind-group-layout(self, descriptor{list, opt<string>})
+            //   -> own<bg-layout>. Flat: 2 i32 list + 3 i32 opt<string> = 5 i32.
+            runtime.BindHostFunction<Func<ExecContext,
+                int, int, int, int, int, int, int>>(
+                (Ns, "[method]gpu-device.create-bind-group-layout"),
+                (_, selfH, _entPtr, _entLen,
+                    _lblDisc, _lblPtr, _lblLen) =>
+                {
+                    var dev = (IGpuDevice)host.Devices.Get(selfH);
+                    var bgl = dev.CreateBindGroupLayout(
+                        new Webgpu.GpuBindGroupLayoutDescriptor());
+                    return host.BindGroupLayouts.Allocate(bgl);
+                });
+
+            // create-pipeline-layout(self, descriptor{list, opt<string>})
+            //   -> own<pipeline-layout>. Same shape as create-bind-group-layout.
+            runtime.BindHostFunction<Func<ExecContext,
+                int, int, int, int, int, int, int>>(
+                (Ns, "[method]gpu-device.create-pipeline-layout"),
+                (_, selfH, _bglPtr, _bglLen,
+                    _lblDisc, _lblPtr, _lblLen) =>
+                {
+                    var dev = (IGpuDevice)host.Devices.Get(selfH);
+                    var pl = dev.CreatePipelineLayout(
+                        new Webgpu.GpuPipelineLayoutDescriptor());
+                    return host.PipelineLayouts.Allocate(pl);
+                });
+
+            // create-bind-group(self, descriptor{borrow, list, opt<string>})
+            //   -> own<bind-group>. Flat: 1 i32 borrow + 2 i32 list + 3 i32 = 6 i32.
+            runtime.BindHostFunction<Func<ExecContext,
+                int, int, int, int, int, int, int, int>>(
+                (Ns, "[method]gpu-device.create-bind-group"),
+                (_, selfH, _layH, _entPtr, _entLen,
+                    _lblDisc, _lblPtr, _lblLen) =>
+                {
+                    var dev = (IGpuDevice)host.Devices.Get(selfH);
+                    var bg = dev.CreateBindGroup(
+                        new Webgpu.GpuBindGroupDescriptor());
+                    return host.BindGroups.Allocate(bg);
+                });
+
+            // create-shader-module(self, descriptor{string, opt<list>, opt<string>})
+            //   -> own<shader-module>. Flat: 2 i32 string + 3 i32 opt<list> + 3 i32 opt<string> = 8 i32.
+            runtime.BindHostFunction<Func<ExecContext,
+                int, int, int, int, int, int, int, int, int, int>>(
+                (Ns, "[method]gpu-device.create-shader-module"),
+                (_, selfH, _codePtr, _codeLen,
+                    _hintsDisc, _hintsPtr, _hintsLen,
+                    _lblDisc, _lblPtr, _lblLen) =>
+                {
+                    var dev = (IGpuDevice)host.Devices.Get(selfH);
+                    var sm = dev.CreateShaderModule(
+                        new Webgpu.GpuShaderModuleDescriptor());
+                    return host.ShaderModules.Allocate(sm);
+                });
+
+            // create-compute-pipeline(self, descriptor{programmable-stage, layout-mode,
+            //   opt<string>}). Flat: 6 i32 (programmable-stage) + 2 i32 (layout-mode
+            //   variant) + 3 i32 (opt<string>) = 11 i32.
+            runtime.BindHostFunction<Func<ExecContext,
+                int, int, int, int, int, int, int, int, int, int, int, int, int>>(
+                (Ns, "[method]gpu-device.create-compute-pipeline"),
+                (_, selfH, _modH, _epDisc, _epPtr, _epLen, _cDisc, _cVal,
+                    _layDisc, _layVal, _lblDisc, _lblPtr, _lblLen) =>
+                {
+                    var dev = (IGpuDevice)host.Devices.Get(selfH);
+                    var cp = dev.CreateComputePipeline(
+                        new Webgpu.GpuComputePipelineDescriptor());
+                    return host.ComputePipelines.Allocate(cp);
+                });
+
+            // create-command-encoder(self, opt<descriptor{label:opt<string>}>)
+            //   -> own<command-encoder>. Flat: 1 + 3 = 4 i32.
+            runtime.BindHostFunction<Func<ExecContext,
+                int, int, int, int, int, int>>(
+                (Ns, "[method]gpu-device.create-command-encoder"),
+                (_, selfH, _oDisc, _lblDisc, _lblPtr, _lblLen) =>
+                {
+                    var dev = (IGpuDevice)host.Devices.Get(selfH);
+                    var enc = dev.CreateCommandEncoder(
+                        Option<Webgpu.GpuCommandEncoderDescriptor>.None);
+                    return host.CommandEncoders.Allocate(enc);
+                });
+
+            // create-render-bundle-encoder(self, descriptor) -> own<render-bundle-encoder>.
+            // Descriptor: opt<bool>(2) + opt<bool>(2) + list<opt<format>>(2) +
+            // opt<format>(2) + opt<u32>(2) + opt<string>(3) = 13 i32.
+            runtime.BindHostFunction<Func<ExecContext,
+                int, int, int, int, int, int, int, int, int, int, int, int, int, int, int>>(
+                (Ns, "[method]gpu-device.create-render-bundle-encoder"),
+                (_, selfH,
+                    _drDisc, _drVal, _srDisc, _srVal,
+                    _cfPtr, _cfLen, _dsfDisc, _dsfVal,
+                    _scDisc, _scVal, _lblDisc, _lblPtr, _lblLen) =>
+                {
+                    var dev = (IGpuDevice)host.Devices.Get(selfH);
+                    var enc = dev.CreateRenderBundleEncoder(
+                        new Webgpu.GpuRenderBundleEncoderDescriptor());
+                    return host.RenderBundleEncoders.Allocate(enc);
+                });
+
+            // create-query-set(self, descriptor{type:enum, count:u32, opt<string>})
+            //   -> result<own<query-set>, create-query-set-error>
+            // Flat: 1 + 1 + 3 = 5 i32; self + 5 + retArea = 7 i32, 0 results.
+            runtime.BindHostFunction<Action<ExecContext,
+                int, int, int, int, int, int, int>>(
+                (Ns, "[method]gpu-device.create-query-set"),
+                (ctx, selfH, _type, _count,
+                    _lblDisc, _lblPtr, _lblLen, retArea) =>
+                {
+                    var dev = (IGpuDevice)host.Devices.Get(selfH);
+                    var result = dev.CreateQuerySet(
+                        new Webgpu.GpuQuerySetDescriptor());
+                    if (result.IsOk)
+                    {
+                        var h = host.QuerySets.Allocate(result.Ok);
+                        WriteResultHandleErrRecord(ctx, alloc, retArea,
+                            isOk: true, handle: h,
+                            kindDisc: 0, message: "");
+                    }
+                    else
+                    {
+                        WriteResultHandleErrRecord(ctx, alloc, retArea,
+                            isOk: false, handle: 0,
+                            kindDisc: CreateQuerySetErrorKindDisc(result.Err!.Kind),
+                            message: result.Err.Message);
+                    }
+                });
+
+            // ===== Misc gpu-device methods =====
+
+            // push-error-scope(self, filter: gpu-error-filter)
+            runtime.BindHostFunction<Action<ExecContext, int, int>>(
+                (Ns, "[method]gpu-device.push-error-scope"),
+                (_, selfH, filter) =>
+                {
+                    var dev = (IGpuDevice)host.Devices.Get(selfH);
+                    dev.PushErrorScope((Webgpu.GpuErrorFilter)filter);
+                });
+
+            // pop-error-scope(self)
+            //   -> result<option<own<gpu-error>>, pop-error-scope-error>
+            // retArea: 16 bytes, align 4.
+            //   outer disc:u8 @0 + 3 pad
+            //   payload @4:
+            //     Ok (option<own>):  inner disc:u8 @4 + 3 pad + handle @8
+            //     Err (record):      kind:u8 @4 + 3 pad + msg.ptr @8 + msg.len @12
+            runtime.BindHostFunction<Action<ExecContext, int, int>>(
+                (Ns, "[method]gpu-device.pop-error-scope"),
+                (ctx, selfH, retArea) =>
+                {
+                    var dev = (IGpuDevice)host.Devices.Get(selfH);
+                    var result = dev.PopErrorScope();
+                    WriteResultOptionHandleErrRecord(ctx, alloc, retArea,
+                        result);
+                });
+
+            // onuncapturederror-subscribe(self) -> own<pollable>
+            // The returned pollable lives in the shared Preview2
+            // ResourceContext (wasi:io's IPollable resource), not
+            // a webgpu-local table. Bind through SharedResources;
+            // when no SharedResources is configured the call
+            // surfaces as a clear bridge-missing error.
+            runtime.BindHostFunction<Func<ExecContext, int, int>>(
+                (Ns, "[method]gpu-device.onuncapturederror-subscribe"),
+                (_, selfH) =>
+                {
+                    var dev = (IGpuDevice)host.Devices.Get(selfH);
+                    if (host.SharedResources == null)
+                        throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                            "onuncapturederror-subscribe needs "
+                            + "WasiWebgpuConfiguration.SharedResources "
+                            + "to mint a pollable handle.");
+                    var p = dev.OnuncapturederrorSubscribe();
+                    var table = host.SharedResources
+                        .Table<Wacs.WASI.Preview2.Io.Pollable>();
+                    return table.Allocate((Wacs.WASI.Preview2.Io.Pollable)p);
+                });
+
+            // connect-graphics-context(self, borrow<context>)
+            // The context handle lives in the wasi-gfx host's
+            // Contexts table — use the same AbstractBufferResolver
+            // wiring to resolve (a simple variant: just the
+            // graphics-context handle, not abstract-buffer).
+            runtime.BindHostFunction<Action<ExecContext, int, int>>(
+                (Ns, "[method]gpu-device.connect-graphics-context"),
+                (_, selfH, ctxH) =>
+                {
+                    var dev = (IGpuDevice)host.Devices.Get(selfH);
+                    if (host.AbstractBufferResolver == null)
+                        throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                            "[method]gpu-device.connect-graphics-context "
+                            + "called but no AbstractBufferResolver "
+                            + "is configured; impossible to reach a "
+                            + "wasi:graphics-context.context handle.");
+                    // Reuse the resolver: handle resolution path is
+                    // identical (wasi-gfx-side ResourceTable lookup).
+                    // The resolver returns IAbstractBuffer; for
+                    // context we need IContext. v1 cut: the wasi-
+                    // gfx host's Contexts is a different table from
+                    // AbstractBuffers, so the resolver alone isn't
+                    // enough. Throw with guidance until a richer
+                    // cross-host bridge lands.
+                    throw new System.NotImplementedException(
+                        "[method]gpu-device.connect-graphics-context: "
+                        + "cross-host context lookup not yet wired. "
+                        + "Pair with a richer WasiWebgpuConfiguration"
+                        + " resolver in a follow-up.");
+                });
+
+            // create-render-pipeline / create-texture / create-sampler /
+            // create-*-pipeline-async — descriptor flat-forms exceed
+            // Func<T1..T16,TResult> arity or carry payload-bearing
+            // variant errors. Land in a focused descriptor-decoding
+            // session.
         }
 
         // ----------------------------------------------------
@@ -559,6 +795,26 @@ namespace Wacs.WASI.GFX.Webgpu
             runtime.BindHostFunction<Action<ExecContext, int>>(
                 (Ns, "[resource-drop]gpu-buffer"),
                 (_, h) => host.Buffers.Drop(h));
+
+            // get-mapped-range-get-with-copy(self, opt<u64> offset,
+            //   opt<u64> size) -> result<list<u8>, get-mapped-range-error>
+            // Wire: self + 2 opt<u64> (4 args, 2 i32 + 2 i64) + retArea
+            // = 6 args total. retArea: 16 bytes, align 4. Ok writes
+            // (ptr, len) at +4/+8; Err writes kind+msg.
+            runtime.BindHostFunction<Action<ExecContext,
+                int, int, long, int, long, int>>(
+                (Ns, "[method]gpu-buffer.get-mapped-range-get-with-copy"),
+                (ctx, selfH, offDisc, offVal, sizDisc, sizVal, retArea) =>
+                {
+                    var buf = (IGpuBuffer)host.Buffers.Get(selfH);
+                    var result = buf.GetMappedRangeGetWithCopy(
+                        offDisc == 0 ? Option<ulong>.None
+                            : Option<ulong>.Some(unchecked((ulong)offVal)),
+                        sizDisc == 0 ? Option<ulong>.None
+                            : Option<ulong>.Some(unchecked((ulong)sizVal)));
+                    WriteResultByteArrayErrRecord(ctx, alloc, retArea,
+                        result);
+                });
 
             // get-mapped-range-set-with-copy(self, list<u8>,
             //   opt<u64> off, opt<u64> size)
@@ -1650,6 +1906,141 @@ namespace Wacs.WASI.GFX.Webgpu
         //         msg.ptr:i32 @8
         //         msg.len:i32 @12
         // ====================================================
+
+        // result<list<u8>, error-record> retArea (16 bytes, align 4):
+        //   disc:u8 @0 + 3 pad
+        //   payload @4:
+        //     if Ok:  list<u8> ptr:i32 @4 + len:i32 @8 (4 bytes pad)
+        //     if Err: kind:u8 @4 + 3 pad + msg.ptr @8 + msg.len @12
+        // Same total size as the Unit/handle variants (max payload
+        // = 12 bytes).
+        private static void WriteResultByteArrayErrRecord(ExecContext ctx,
+            Wacs.WASI.GFX.HostBinding.Realloc alloc, int retArea,
+            Result<byte[], Webgpu.GetMappedRangeError> result)
+        {
+            var mem = ctx.Memory();
+            if (result.IsOk)
+            {
+                mem[retArea] = 0;
+                mem[retArea + 1] = 0;
+                mem[retArea + 2] = 0;
+                mem[retArea + 3] = 0;
+                var bytes = result.Ok ?? Array.Empty<byte>();
+                int ptr = bytes.Length == 0 ? 0
+                    : alloc.Allocate(1, bytes.Length);
+                if (bytes.Length > 0)
+                {
+                    for (int i = 0; i < bytes.Length; i++)
+                        mem[ptr + i] = bytes[i];
+                }
+                ctx.WriteI32LE(retArea + 4, ptr);
+                ctx.WriteI32LE(retArea + 8, bytes.Length);
+                mem[retArea + 12] = 0;
+                mem[retArea + 13] = 0;
+                mem[retArea + 14] = 0;
+                mem[retArea + 15] = 0;
+                return;
+            }
+            mem[retArea] = 1;
+            mem[retArea + 1] = 0;
+            mem[retArea + 2] = 0;
+            mem[retArea + 3] = 0;
+            mem[retArea + 4] = (byte)GetMappedRangeErrorKindDisc(
+                result.Err!.Kind);
+            mem[retArea + 5] = 0;
+            mem[retArea + 6] = 0;
+            mem[retArea + 7] = 0;
+            var (msgPtr, msgLen) = WriteUtf8Bytes(ctx, alloc,
+                result.Err.Message);
+            ctx.WriteI32LE(retArea + 8, msgPtr);
+            ctx.WriteI32LE(retArea + 12, msgLen);
+        }
+
+        // result<option<own<R>>, error-record> retArea
+        // (16 bytes, align 4). Used by pop-error-scope.
+        //   outer disc:u8 @0 + 3 pad
+        //   payload @4:
+        //     if outer=Ok:
+        //       inner option<own<R>>:
+        //         inner disc:u8 @4 + 3 pad
+        //         handle:i32 @8 (only valid when inner=Some)
+        //     if outer=Err:
+        //       kind:u8 @4 + 3 pad + msg.ptr @8 + msg.len @12
+        private static void WriteResultOptionHandleErrRecord(
+            ExecContext ctx,
+            Wacs.WASI.GFX.HostBinding.Realloc alloc, int retArea,
+            Result<Option<Webgpu.IGpuError>,
+                Webgpu.PopErrorScopeError> result)
+        {
+            var mem = ctx.Memory();
+            if (result.IsOk)
+            {
+                mem[retArea] = 0;
+                mem[retArea + 1] = 0;
+                mem[retArea + 2] = 0;
+                mem[retArea + 3] = 0;
+                var inner = result.Ok;
+                if (inner.HasValue)
+                {
+                    mem[retArea + 4] = 1; // Some
+                    mem[retArea + 5] = 0;
+                    mem[retArea + 6] = 0;
+                    mem[retArea + 7] = 0;
+                    // Stub side: no Errors table yet; nest the
+                    // error handle into a future host.Errors slot.
+                    // For now there's no impl producing IGpuError,
+                    // so this branch is reachable only by future
+                    // backends.
+                    // Allocate via reflection-friendly path:
+                    ctx.WriteI32LE(retArea + 8,
+                        AllocateGpuErrorHandle(
+                            (object)(inner.Value)));
+                }
+                else
+                {
+                    mem[retArea + 4] = 0;
+                    for (int i = 5; i < 16; i++) mem[retArea + i] = 0;
+                }
+                return;
+            }
+            mem[retArea] = 1;
+            mem[retArea + 1] = 0;
+            mem[retArea + 2] = 0;
+            mem[retArea + 3] = 0;
+            mem[retArea + 4] = (byte)PopErrorScopeErrorKindDisc(
+                result.Err!.Kind);
+            mem[retArea + 5] = 0;
+            mem[retArea + 6] = 0;
+            mem[retArea + 7] = 0;
+            var (msgPtr, msgLen) = WriteUtf8Bytes(ctx, alloc,
+                result.Err.Message);
+            ctx.WriteI32LE(retArea + 8, msgPtr);
+            ctx.WriteI32LE(retArea + 12, msgLen);
+        }
+
+        // Bridge for IGpuError → host.Errors table. Closure-
+        // captured during Bind so the writer above can stay
+        // independent of the host instance.
+        private static System.Func<object, int>? _allocateGpuError;
+        private static int AllocateGpuErrorHandle(object gpuError)
+        {
+            if (_allocateGpuError == null)
+                throw new System.InvalidOperationException(
+                    "AllocateGpuErrorHandle invoked before the "
+                    + "BindGpuDevice plumbing set the closure. "
+                    + "This indicates the binding registration "
+                    + "order changed unexpectedly.");
+            return _allocateGpuError(gpuError);
+        }
+
+        private static int PopErrorScopeErrorKindDisc(
+            Webgpu.PopErrorScopeErrorKind k)
+            => k switch
+            {
+                Webgpu.PopErrorScopeErrorKind
+                    .PopErrorScopeErrorKindOperationError => 0,
+                _ => 0,
+            };
 
         private static void WriteResultUnitErrRecord(ExecContext ctx,
             Wacs.WASI.GFX.HostBinding.Realloc alloc, int retArea,

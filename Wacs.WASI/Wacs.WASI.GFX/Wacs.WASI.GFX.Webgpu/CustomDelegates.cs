@@ -44,5 +44,11 @@ namespace Wacs.WASI.GFX.Webgpu
             int a01, int a02, int a03, int a04, int a05, int a06, int a07,
             int a08, int a09, int a10, int a11, int a12, int a13, int a14,
             int a15);
+
+        // create-texture / create-sampler / create-render-pipeline
+        // and the async pipeline variants need their own
+        // high-arity delegates; defining them requires precise
+        // flat-form arity per the canonical-ABI rules, which is
+        // tracked separately from this session.
     }
 }

@@ -62,7 +62,7 @@ namespace Wacs.WASI.GFX.Webgpu.Test
         // wire layer. Until then these stubs are unreachable
         // through any bound host function.
         public IGpuBuffer CreateBuffer(GpuBufferDescriptor descriptor)
-            => throw new NotImplementedException();
+            => new StubGpuBuffer();
         public IGpuTexture CreateTexture(GpuTextureDescriptor descriptor)
             => throw new NotImplementedException();
         public IGpuSampler CreateSampler(
@@ -70,19 +70,19 @@ namespace Wacs.WASI.GFX.Webgpu.Test
             => throw new NotImplementedException();
         public IGpuBindGroupLayout CreateBindGroupLayout(
             GpuBindGroupLayoutDescriptor descriptor)
-            => throw new NotImplementedException();
+            => new StubGpuBindGroupLayout();
         public IGpuPipelineLayout CreatePipelineLayout(
             GpuPipelineLayoutDescriptor descriptor)
-            => throw new NotImplementedException();
+            => new StubGpuPipelineLayout();
         public IGpuBindGroup CreateBindGroup(
             GpuBindGroupDescriptor descriptor)
-            => throw new NotImplementedException();
+            => new StubGpuBindGroup();
         public IGpuShaderModule CreateShaderModule(
             GpuShaderModuleDescriptor descriptor)
-            => throw new NotImplementedException();
+            => new StubGpuShaderModule();
         public IGpuComputePipeline CreateComputePipeline(
             GpuComputePipelineDescriptor descriptor)
-            => throw new NotImplementedException();
+            => new StubGpuComputePipeline();
         public IGpuRenderPipeline CreateRenderPipeline(
             GpuRenderPipelineDescriptor descriptor)
             => throw new NotImplementedException();
@@ -94,18 +94,22 @@ namespace Wacs.WASI.GFX.Webgpu.Test
             => throw new NotImplementedException();
         public IGpuCommandEncoder CreateCommandEncoder(
             Option<GpuCommandEncoderDescriptor> descriptor)
-            => throw new NotImplementedException();
+            => new StubGpuCommandEncoder();
         public IGpuRenderBundleEncoder CreateRenderBundleEncoder(
             GpuRenderBundleEncoderDescriptor descriptor)
-            => throw new NotImplementedException();
+            => new StubGpuRenderBundleEncoder();
         public Result<IGpuQuerySet, CreateQuerySetError> CreateQuerySet(
             GpuQuerySetDescriptor descriptor)
             => throw new NotImplementedException();
+        public GpuErrorFilter? LastErrorScopeFilter { get; private set; }
         public void PushErrorScope(GpuErrorFilter filter)
-            => throw new NotImplementedException();
+        {
+            LastErrorScopeFilter = filter;
+        }
         public Result<Option<IGpuError>, PopErrorScopeError>
             PopErrorScope()
-            => throw new NotImplementedException();
+            => Result<Option<IGpuError>, PopErrorScopeError>.FromOk(
+                Option<IGpuError>.None);
         public IPollable OnuncapturederrorSubscribe()
             => throw new NotImplementedException();
         public void ConnectGraphicsContext(GenIContext context)

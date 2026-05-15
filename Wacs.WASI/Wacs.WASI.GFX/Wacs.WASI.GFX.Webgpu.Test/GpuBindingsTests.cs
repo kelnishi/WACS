@@ -610,6 +610,65 @@ namespace Wacs.WASI.GFX.Webgpu.Test
         }
 
         [Fact]
+        public void StubDevice_CreateMethods_ReturnStubs()
+        {
+            var dev = new StubGpuDevice();
+            Assert.IsType<StubGpuBuffer>(dev.CreateBuffer(
+                new Wacs.WASI.GFX.Webgpu.Webgpu.GpuBufferDescriptor()));
+            Assert.IsType<StubGpuBindGroupLayout>(
+                dev.CreateBindGroupLayout(
+                    new Wacs.WASI.GFX.Webgpu.Webgpu
+                        .GpuBindGroupLayoutDescriptor()));
+            Assert.IsType<StubGpuPipelineLayout>(
+                dev.CreatePipelineLayout(
+                    new Wacs.WASI.GFX.Webgpu.Webgpu
+                        .GpuPipelineLayoutDescriptor()));
+            Assert.IsType<StubGpuBindGroup>(dev.CreateBindGroup(
+                new Wacs.WASI.GFX.Webgpu.Webgpu.GpuBindGroupDescriptor()));
+            Assert.IsType<StubGpuShaderModule>(dev.CreateShaderModule(
+                new Wacs.WASI.GFX.Webgpu.Webgpu
+                    .GpuShaderModuleDescriptor()));
+            Assert.IsType<StubGpuComputePipeline>(
+                dev.CreateComputePipeline(
+                    new Wacs.WASI.GFX.Webgpu.Webgpu
+                        .GpuComputePipelineDescriptor()));
+            Assert.IsType<StubGpuCommandEncoder>(
+                dev.CreateCommandEncoder(
+                    Option<Wacs.WASI.GFX.Webgpu.Webgpu
+                        .GpuCommandEncoderDescriptor>.None));
+            Assert.IsType<StubGpuRenderBundleEncoder>(
+                dev.CreateRenderBundleEncoder(
+                    new Wacs.WASI.GFX.Webgpu.Webgpu
+                        .GpuRenderBundleEncoderDescriptor()));
+        }
+
+        [Fact]
+        public void StubDevice_PushPopErrorScope()
+        {
+            var dev = new StubGpuDevice();
+            dev.PushErrorScope(
+                Wacs.WASI.GFX.Webgpu.Webgpu.GpuErrorFilter.Validation);
+            Assert.Equal(
+                Wacs.WASI.GFX.Webgpu.Webgpu.GpuErrorFilter.Validation,
+                dev.LastErrorScopeFilter);
+
+            var result = dev.PopErrorScope();
+            Assert.True(result.IsOk);
+            Assert.False(result.Ok.HasValue);
+        }
+
+        [Fact]
+        public void StubBuffer_GetMappedRangeGetWithCopy_OkEmpty()
+        {
+            var buf = new StubGpuBuffer();
+            var result = buf.GetMappedRangeGetWithCopy(
+                Option<ulong>.None, Option<ulong>.None);
+            Assert.True(result.IsOk);
+            Assert.NotNull(result.Ok);
+            Assert.Empty(result.Ok);
+        }
+
+        [Fact]
         public void StubTexture_CreateView_Returns()
         {
             // create-view has a 22-arity wire form via the
