@@ -62,6 +62,11 @@
         <ProjectReference Include="..\Wacs.WASI.GFX.Webgpu\Wacs.WASI.GFX.Webgpu.csproj" />
         <PackageReference Include="Silk.NET.WebGPU" Version="2.23.0" />
         <PackageReference Include="Silk.NET.WebGPU.Native.WGPU" Version="2.23.0" />
+        <!-- wgpu-native-specific extensions. Provides DevicePoll
+             which the callback→sync bridge needs for callback-
+             driven APIs (buffer.MapAsync, queue.OnSubmittedWorkDone,
+             device.PopErrorScope). -->
+        <PackageReference Include="Silk.NET.WebGPU.Extensions.WGPU" Version="2.23.0" />
     </ItemGroup>
 
 </Project>

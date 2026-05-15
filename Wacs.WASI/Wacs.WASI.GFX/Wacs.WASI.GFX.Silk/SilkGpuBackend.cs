@@ -6,7 +6,10 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
+using Silk.NET.Core.Contexts;
+using Silk.NET.Core.Loader;
 using Silk.NET.WebGPU;
+using Silk.NET.WebGPU.Extensions.WGPU;
 using Wacs.ComponentModel.Runtime;
 using Wacs.WASI.GFX.Webgpu;
 using SNWebGPU = Silk.NET.WebGPU.WebGPU;
@@ -42,6 +45,7 @@ namespace Wacs.WASI.GFX.Silk
     public sealed unsafe class SilkGpuBackend : IGpuBackend
     {
         private SNWebGPU? _wgpu;
+        private Wgpu? _wgpuExt;
         private Instance* _instance;
         private GenIGpu? _gpu;
         private bool _disposed;
@@ -59,6 +63,53 @@ namespace Wacs.WASI.GFX.Silk
             // tree; the loader probes there first.
             _wgpu = SNWebGPU.GetApi();
             return _wgpu;
+        }
+
+        /// <summary>The wgpu-native extensions API — adds
+        /// <c>DevicePoll</c> on top of the core
+        /// <see cref="SNWebGPU"/> surface. Used by the
+        /// callback→sync bridge for buffer.map-async,
+        /// queue.on-submitted-work-done, and other callback-
+        /// driven flows.</summary>
+        internal Wgpu EnsureWgpuExt()
+        {
+            if (_wgpuExt != null) return _wgpuExt;
+            EnsureApi();
+            _wgpuExt = new Wgpu(_wgpu!.Context);
+            return _wgpuExt;
+        }
+
+        /// <summary>Drives wgpu-native's event loop until the
+        /// supplied <paramref name="isDone"/> flag flips. Used
+        /// by every callback→sync bridge that isn't covered by
+        /// the synchronous adapter/device path. Loops with
+        /// <c>wgpuDevicePoll(device, true, NULL)</c> which blocks
+        /// until at least one queue submission completes; safe
+        /// to call before a submission has been kicked off (it
+        /// returns immediately when the queue is idle).
+        ///
+        /// <para>Bounded by <paramref name="maxIterations"/> to
+        /// avoid livelock on a callback that never fires; the
+        /// default is generous enough for any healthy GPU op.</para>
+        /// </summary>
+        internal void PollUntilDone(Device* device, Func<bool> isDone,
+            int maxIterations = 1000)
+        {
+            if (device == null)
+                throw new ArgumentNullException(nameof(device));
+            if (isDone == null)
+                throw new ArgumentNullException(nameof(isDone));
+            var ext = EnsureWgpuExt();
+            for (int i = 0; i < maxIterations; i++)
+            {
+                if (isDone()) return;
+                ext.DevicePoll(device, true, null);
+            }
+            if (!isDone())
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "SilkGpuBackend.PollUntilDone: callback did not fire "
+                    + "after " + maxIterations + " wgpuDevicePoll calls. "
+                    + "The wgpu-native driver may have stalled.");
         }
 
         /// <summary>The single wgpu Instance shared by every

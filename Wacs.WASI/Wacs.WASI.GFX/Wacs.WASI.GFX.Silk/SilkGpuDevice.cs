@@ -75,7 +75,7 @@ namespace Wacs.WASI.GFX.Silk
                     + "null. The device handle is alive but no queue "
                     + "was attached — wgpu-native treats this as a "
                     + "fatal error on the driver side.");
-            return _queueWrapper = new SilkGpuQueue(_backend, _queue);
+            return _queueWrapper = new SilkGpuQueue(_backend, _device, _queue);
         }
 
         public void Destroy()
@@ -220,7 +220,7 @@ namespace Wacs.WASI.GFX.Silk
                     + "buffer for size=" + descriptor.Size + ", usage=0x"
                     + descriptor.Usage.ToString("X")
                     + ". Check the wgpu validation log.");
-            return new SilkGpuBuffer(_backend, buf,
+            return new SilkGpuBuffer(_backend, _device, buf,
                 descriptor.Size, descriptor.Usage, label,
                 mappedAtCreation);
         }
@@ -647,13 +647,15 @@ namespace Wacs.WASI.GFX.Silk
     internal sealed unsafe class SilkGpuQueue : GenWebgpu.IGpuQueue, IDisposable
     {
         private readonly SilkGpuBackend _backend;
+        private readonly Device* _device;
         private Queue* _queue;
         private string _label = string.Empty;
         private bool _disposed;
 
-        public SilkGpuQueue(SilkGpuBackend backend, Queue* queue)
+        public SilkGpuQueue(SilkGpuBackend backend, Device* device, Queue* queue)
         {
             _backend = backend;
+            _device = device;
             _queue = queue;
         }
 
@@ -700,9 +702,20 @@ namespace Wacs.WASI.GFX.Silk
         }
 
         public void OnSubmittedWorkDone()
-            => throw new PlatformNotSupportedException(
-                "SilkGpuQueue.OnSubmittedWorkDone: callback-driven; "
-                + "needs wgpu-poll infrastructure to bridge to sync.");
+        {
+            if (_disposed || _queue == null)
+                throw new ObjectDisposedException(nameof(SilkGpuQueue));
+            if (_device == null)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "SilkGpuQueue.OnSubmittedWorkDone: queue is not "
+                    + "associated with a device (constructed via a "
+                    + "non-standard path).");
+            bool done = false;
+            var cb = new PfnQueueWorkDoneCallback(
+                (QueueWorkDoneStatus _, void* _) => done = true);
+            _backend.EnsureApi().QueueOnSubmittedWorkDone(_queue, cb, null);
+            _backend.PollUntilDone(_device, () => done);
+        }
 
         public Result<Unit, GenWebgpu.WriteBufferError> WriteBufferWithCopy(
             GenWebgpu.IGpuBuffer buffer, ulong bufferOffset,
