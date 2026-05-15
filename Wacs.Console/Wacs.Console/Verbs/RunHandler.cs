@@ -120,6 +120,9 @@ namespace Wacs.Console.Verbs
 
             // 3. Worker thread runs the wasm dispatch; main thread
             //    pumps SDL events until the worker completes.
+            //    Phase 2: subscribe to the backend's QuitRequested
+            //    event so an OS quit signal (Cmd-Q, close button,
+            //    Alt-F4, SIGTERM) cancels the wasm task's CT.
             using var cts = new System.Threading.CancellationTokenSource();
             int result = 0;
             Exception? workerException = null;
@@ -129,6 +132,19 @@ namespace Wacs.Console.Verbs
                 catch (Exception ex) { workerException = ex; }
                 finally { cts.Cancel(); }
             });
+
+            var quitEvent = backendType.GetEvent("QuitRequested");
+            Action? quitHandler = null;
+            if (quitEvent != null)
+            {
+                quitHandler = () =>
+                {
+                    System.Console.Error.WriteLine(
+                        "wacs: OS quit signal received; shutting down.");
+                    cts.Cancel();
+                };
+                quitEvent.AddEventHandler(backend, quitHandler);
+            }
 
             try
             {
@@ -141,7 +157,39 @@ namespace Wacs.Console.Verbs
                     + (ex.InnerException?.Message ?? ex.Message));
             }
 
-            task.Wait();
+            // If the wasm task is still running after the event
+            // pump exited (typical on user-driven quit — the
+            // guest's poll() is blocked on a Pollable that won't
+            // wake), bail out after a short grace window. The
+            // wasm runtime doesn't have a coop-cancellation hook
+            // yet so we settle for process exit. Exit code is the
+            // last value the wasm guest produced (0 if it didn't
+            // run long enough to produce one).
+            bool quitObserved = false;
+            var isQuitProp = backendType.GetProperty("IsQuitRequested");
+            if (isQuitProp != null)
+                quitObserved = (bool)(isQuitProp.GetValue(backend)
+                    ?? false);
+            if (quitObserved)
+            {
+                // Give the wasm task a brief chance to wake on
+                // its next poll() iteration; otherwise process-
+                // exit. 100ms matches the plan's acceptance
+                // criterion (clean shutdown within 100ms).
+                if (!task.Wait(System.TimeSpan.FromMilliseconds(100)))
+                {
+                    if (quitHandler != null && quitEvent != null)
+                        quitEvent.RemoveEventHandler(backend, quitHandler);
+                    if (backend is IDisposable diQuit) diQuit.Dispose();
+                    System.Environment.Exit(result);
+                }
+            }
+            else
+            {
+                task.Wait();
+            }
+            if (quitHandler != null && quitEvent != null)
+                quitEvent.RemoveEventHandler(backend, quitHandler);
             if (workerException != null) throw workerException;
             // Dispose the backend so SDL window + Quit run while
             // we're still on the main thread.
