@@ -81,6 +81,37 @@ namespace Wacs.WASI.GFX.Silk
             Host = runtime.UseWasiGfx(b => b
                 .WithBackend(Backend)
                 .WithSharedResources(SharedResources));
+
+            // Set the AppDomain-wide ambient so the transpiler-
+            // direct-link path's resource constructors (Context,
+            // Surface, Device, Buffer in Wacs.WASI.GFX.
+            // DependencyInjection) can find the backend without
+            // a per-instance reference threaded through their
+            // parameterless ctor.
+            WasiGfxAmbient.SetBackend(Backend);
+
+            // Force-load the DependencyInjection assembly so
+            // HostPackageResolver's AppDomain walk picks up our
+            // per-resource impl classes (Context, Surface,
+            // Device, Buffer). .NET would otherwise lazy-load
+            // it only on first type touch, leaving the resolver
+            // to fall back to delegate dispatch on --wasip2 +
+            // --wasi-gfx — which never resolves and hangs the
+            // wasm guest. Silk has a ProjectReference to DI for
+            // this same reason; the explicit Assembly.Load is
+            // the belt-and-suspenders that survives a future
+            // ProjectReference cleanup.
+            try
+            {
+                System.Reflection.Assembly.Load(
+                    "Wacs.WASI.GFX.DependencyInjection");
+            }
+            catch
+            {
+                // Direct-link path will fall back to delegate
+                // dispatch via WitBindings handlers; not an
+                // error, just degraded perf.
+            }
         }
 
         public void Dispose()
