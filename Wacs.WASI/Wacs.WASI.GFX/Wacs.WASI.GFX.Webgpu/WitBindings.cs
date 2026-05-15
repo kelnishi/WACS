@@ -33,6 +33,10 @@ using IGpuRenderBundleEncoder = Wacs.WASI.GFX.Webgpu.Webgpu.IGpuRenderBundleEnco
 using GpuColor = Wacs.WASI.GFX.Webgpu.Webgpu.GpuColor;
 using GpuIndexFormat = Wacs.WASI.GFX.Webgpu.Webgpu.GpuIndexFormat;
 using GpuRenderBundleDescriptor = Wacs.WASI.GFX.Webgpu.Webgpu.GpuRenderBundleDescriptor;
+using UnmapErrorKind = Wacs.WASI.GFX.Webgpu.Webgpu.UnmapErrorKind;
+using MapAsyncErrorKind = Wacs.WASI.GFX.Webgpu.Webgpu.MapAsyncErrorKind;
+using WriteBufferErrorKind = Wacs.WASI.GFX.Webgpu.Webgpu.WriteBufferErrorKind;
+using SetBindGroupErrorKind = Wacs.WASI.GFX.Webgpu.Webgpu.SetBindGroupErrorKind;
 using IWgslLanguageFeatures = Wacs.WASI.GFX.Webgpu.Webgpu.IWgslLanguageFeatures;
 using GpuRequestAdapterOptions = Wacs.WASI.GFX.Webgpu.Webgpu.GpuRequestAdapterOptions;
 using GpuDeviceDescriptor = Wacs.WASI.GFX.Webgpu.Webgpu.GpuDeviceDescriptor;
@@ -522,6 +526,47 @@ namespace Wacs.WASI.GFX.Webgpu
             runtime.BindHostFunction<Action<ExecContext, int>>(
                 (Ns, "[resource-drop]gpu-buffer"),
                 (_, h) => host.Buffers.Drop(h));
+
+            // unmap(self) -> result<_, unmap-error>
+            // Wire: (self, retArea). 0 results. retArea = 16 bytes
+            // (disc:u8 @0 + 3 pad + payload @4..15).
+            runtime.BindHostFunction<Action<ExecContext, int, int>>(
+                (Ns, "[method]gpu-buffer.unmap"),
+                (ctx, selfH, retArea) =>
+                {
+                    var buf = (IGpuBuffer)host.Buffers.Get(selfH);
+                    var result = buf.Unmap();
+                    WriteResultUnitErrRecord(ctx, alloc, retArea,
+                        result.IsOk,
+                        result.IsErr
+                            ? UnmapErrorKindDisc(result.Err!.Kind)
+                            : 0,
+                        result.IsErr ? result.Err!.Message : "");
+                });
+
+            // map-async(self, mode: gpu-map-mode-flags, opt<u64> offset,
+            //   opt<u64> size) -> result<_, map-async-error>
+            // Wire: (self, mode:i32, offDisc:i32, offVal:i64,
+            //        sizDisc:i32, sizVal:i64, retArea:i32). 0 results.
+            runtime.BindHostFunction<Action<ExecContext,
+                int, int, int, long, int, long, int>>(
+                (Ns, "[method]gpu-buffer.map-async"),
+                (ctx, selfH, mode, offDisc, offVal, sizDisc, sizVal, retArea) =>
+                {
+                    var buf = (IGpuBuffer)host.Buffers.Get(selfH);
+                    var result = buf.MapAsync(
+                        unchecked((uint)mode),
+                        offDisc == 0 ? Option<ulong>.None
+                            : Option<ulong>.Some(unchecked((ulong)offVal)),
+                        sizDisc == 0 ? Option<ulong>.None
+                            : Option<ulong>.Some(unchecked((ulong)sizVal)));
+                    WriteResultUnitErrRecord(ctx, alloc, retArea,
+                        result.IsOk,
+                        result.IsErr
+                            ? MapAsyncErrorKindDisc(result.Err!.Kind)
+                            : 0,
+                        result.IsErr ? result.Err!.Message : "");
+                });
         }
 
         // ----------------------------------------------------
@@ -833,6 +878,41 @@ namespace Wacs.WASI.GFX.Webgpu
                 "gpu-texture", host.Textures,
                 h => ((IGpuTexture)h).Label(),
                 (h, s) => ((IGpuTexture)h).SetLabel(s));
+
+            // create-view(self, opt<gpu-texture-view-descriptor>)
+            //   -> own<gpu-texture-view>
+            //
+            // option<descriptor> flat-form: 1 opt-disc + 9 option
+            // fields (8 option<enum/u32> = 2 i32 each, 1 option<string>
+            // = 3 i32) = 1 + 16 + 3 = 20 i32. Wire: self + 20 +
+            // i32 result = 22-arity callable, beyond
+            // Func<T1..T16,TResult>. Bound via the custom
+            // CreateView delegate in CustomDelegates.
+            //
+            // v1 follow-up: descriptor fields ignored; impl
+            // receives Option<GpuTextureViewDescriptor>.None. Real
+            // backends pulling format/dimension/aspect/mip/array
+            // ranges need the full decode — pairs with the Silk
+            // wgpu dispatcher when it lands.
+            runtime.BindHostFunction<CustomDelegates.CreateView>(
+                (Ns, "[method]gpu-texture.create-view"),
+                (_, selfH,
+                    _od,
+                    _fmtD, _fmtV,
+                    _dimD, _dimV,
+                    _usD, _usV,
+                    _aspD, _aspV,
+                    _mipBD, _mipBV,
+                    _mipCD, _mipCV,
+                    _arrBD, _arrBV,
+                    _arrCD, _arrCV,
+                    _lblD, _lblPtr, _lblLen) =>
+                {
+                    var tex = (IGpuTexture)host.Textures.Get(selfH);
+                    var view = tex.CreateView(
+                        Option<Webgpu.GpuTextureViewDescriptor>.None);
+                    return host.TextureViews.Allocate(view);
+                });
         }
 
         private static void BindTextureU32Query(WasmRuntime runtime,
@@ -1337,6 +1417,19 @@ namespace Wacs.WASI.GFX.Webgpu
             Wacs.WASI.GFX.HostBinding.Realloc alloc, int retArea,
             string value)
         {
+            var (ptr, len) = WriteUtf8Bytes(ctx, alloc, value);
+            ctx.WriteI32LE(retArea, ptr);
+            ctx.WriteI32LE(retArea + 4, len);
+        }
+
+        // Encode `value` as UTF-8 + allocate guest memory; return
+        // the (ptr, len) pair. Caller writes the pair wherever it
+        // belongs in retArea — useful when the (ptr, len) lands
+        // inside a larger record payload, not at the retArea root.
+        private static (int ptr, int len) WriteUtf8Bytes(
+            ExecContext ctx,
+            Wacs.WASI.GFX.HostBinding.Realloc alloc, string value)
+        {
             var bytes = System.Text.Encoding.UTF8.GetBytes(value);
             int ptr = bytes.Length == 0 ? 0
                 : alloc.Allocate(1, bytes.Length);
@@ -1346,8 +1439,88 @@ namespace Wacs.WASI.GFX.Webgpu
                 for (int i = 0; i < bytes.Length; i++)
                     mem[ptr + i] = bytes[i];
             }
-            ctx.WriteI32LE(retArea, ptr);
-            ctx.WriteI32LE(retArea + 4, bytes.Length);
+            return (ptr, bytes.Length);
         }
+
+        // ====================================================
+        //   result<unit, error-record> retArea writer
+        //   ----------------------------------------------------
+        //   Every wasi:webgpu `result<_, foo-error>` has the same
+        //   payload shape — the error is a record
+        //   `{ kind: variant-no-payload, message: string }`.
+        //   Storage layout at retArea (16 bytes, align 4):
+        //     disc:u8 @0 + 3 pad
+        //     payload @4:
+        //       (if disc=0 / Ok) unused, zero
+        //       (if disc=1 / Err) error-record @4:
+        //         kind:u8 @4 + 3 pad
+        //         msg.ptr:i32 @8
+        //         msg.len:i32 @12
+        // ====================================================
+
+        private static void WriteResultUnitErrRecord(ExecContext ctx,
+            Wacs.WASI.GFX.HostBinding.Realloc alloc, int retArea,
+            bool isOk, int kindDisc, string message)
+        {
+            var mem = ctx.Memory();
+            if (isOk)
+            {
+                // Ok arm. Zero the 16-byte retArea — the disc
+                // byte at @0 marks Ok; payload bytes are
+                // undefined per canon-ABI but zero is the
+                // deterministic choice consumers can rely on.
+                for (int i = 0; i < 16; i++) mem[retArea + i] = 0;
+                return;
+            }
+            // Err arm.
+            mem[retArea] = 1;
+            mem[retArea + 1] = 0;
+            mem[retArea + 2] = 0;
+            mem[retArea + 3] = 0;
+            mem[retArea + 4] = (byte)kindDisc;
+            mem[retArea + 5] = 0;
+            mem[retArea + 6] = 0;
+            mem[retArea + 7] = 0;
+            var (msgPtr, msgLen) = WriteUtf8Bytes(ctx, alloc, message);
+            ctx.WriteI32LE(retArea + 8, msgPtr);
+            ctx.WriteI32LE(retArea + 12, msgLen);
+        }
+
+        // Per-error-type kind→disc mappings. The WIT variants
+        // have only no-payload cases, so the discriminant matches
+        // declaration order. Each error type's case set differs;
+        // the source-gen represents the variant as a base class
+        // with one sealed subclass per case, so we identify cases
+        // via type checks.
+
+        private static int UnmapErrorKindDisc(UnmapErrorKind k)
+            => k switch
+            {
+                Webgpu.UnmapErrorKind.UnmapErrorKindAbortError => 0,
+                _ => 0,
+            };
+
+        private static int MapAsyncErrorKindDisc(MapAsyncErrorKind k)
+            => k switch
+            {
+                Webgpu.MapAsyncErrorKind.MapAsyncErrorKindOperationError => 0,
+                Webgpu.MapAsyncErrorKind.MapAsyncErrorKindRangeError => 1,
+                Webgpu.MapAsyncErrorKind.MapAsyncErrorKindAbortError => 2,
+                _ => 0,
+            };
+
+        private static int WriteBufferErrorKindDisc(WriteBufferErrorKind k)
+            => k switch
+            {
+                Webgpu.WriteBufferErrorKind.WriteBufferErrorKindOperationError => 0,
+                _ => 0,
+            };
+
+        private static int SetBindGroupErrorKindDisc(SetBindGroupErrorKind k)
+            => k switch
+            {
+                Webgpu.SetBindGroupErrorKind.SetBindGroupErrorKindRangeError => 0,
+                _ => 0,
+            };
     }
 }

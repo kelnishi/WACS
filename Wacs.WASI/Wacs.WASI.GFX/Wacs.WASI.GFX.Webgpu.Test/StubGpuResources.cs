@@ -209,16 +209,40 @@ namespace Wacs.WASI.GFX.Webgpu.Test
         public string Label() => _label;
         public void SetLabel(string label) { _label = label ?? ""; }
 
-        // Session 6 — result<_, error> shape.
+        // result<_, error> shapes — drive Ok/Err via the public
+        // toggles so tests can verify both retArea paths.
+        public bool FailWithUnmapError { get; set; }
+        public bool FailWithMapAsyncError { get; set; }
+
         public Result<Unit, MapAsyncError> MapAsync(
             uint mode, Option<ulong> offset, Option<ulong> size)
-            => throw new NotImplementedException();
+        {
+            if (FailWithMapAsyncError)
+                return Result<Unit, MapAsyncError>.FromErr(
+                    new MapAsyncError
+                    {
+                        Kind = new MapAsyncErrorKind
+                            .MapAsyncErrorKindRangeError(),
+                        Message = "stub: out of range",
+                    });
+            return Result<Unit, MapAsyncError>.FromOk(Unit.Value);
+        }
         public Result<byte[], GetMappedRangeError>
             GetMappedRangeGetWithCopy(Option<ulong> offset,
                 Option<ulong> size)
             => throw new NotImplementedException();
         public Result<Unit, UnmapError> Unmap()
-            => throw new NotImplementedException();
+        {
+            if (FailWithUnmapError)
+                return Result<Unit, UnmapError>.FromErr(
+                    new UnmapError
+                    {
+                        Kind = new UnmapErrorKind
+                            .UnmapErrorKindAbortError(),
+                        Message = "stub: aborted",
+                    });
+            return Result<Unit, UnmapError>.FromOk(Unit.Value);
+        }
         public Result<Unit, GetMappedRangeError>
             GetMappedRangeSetWithCopy(byte[] data,
                 Option<ulong> offset, Option<ulong> size)

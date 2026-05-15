@@ -496,6 +496,67 @@ namespace Wacs.WASI.GFX.Webgpu.Test
             Assert.IsType<StubGpuRenderBundle>(bundle);
         }
 
+        // ---- result<_, error> shapes -----------------------
+
+        [Fact]
+        public void StubBuffer_Unmap_OkByDefault()
+        {
+            var buf = new StubGpuBuffer();
+            var result = buf.Unmap();
+            Assert.True(result.IsOk);
+        }
+
+        [Fact]
+        public void StubBuffer_Unmap_ErrWhenToggled()
+        {
+            var buf = new StubGpuBuffer { FailWithUnmapError = true };
+            var result = buf.Unmap();
+            Assert.True(result.IsErr);
+            Assert.NotNull(result.Err);
+            Assert.Equal("stub: aborted", result.Err!.Message);
+            Assert.IsType<Wacs.WASI.GFX.Webgpu.Webgpu.UnmapErrorKind
+                .UnmapErrorKindAbortError>(result.Err.Kind);
+        }
+
+        [Fact]
+        public void StubBuffer_MapAsync_OkByDefault()
+        {
+            var buf = new StubGpuBuffer();
+            var result = buf.MapAsync(0u,
+                Option<ulong>.None, Option<ulong>.None);
+            Assert.True(result.IsOk);
+        }
+
+        [Fact]
+        public void StubBuffer_MapAsync_ErrCarriesKindAndMessage()
+        {
+            var buf = new StubGpuBuffer
+                { FailWithMapAsyncError = true };
+            var result = buf.MapAsync(0u,
+                Option<ulong>.Some(0ul),
+                Option<ulong>.Some(1024ul));
+            Assert.True(result.IsErr);
+            Assert.IsType<Wacs.WASI.GFX.Webgpu.Webgpu.MapAsyncErrorKind
+                .MapAsyncErrorKindRangeError>(result.Err!.Kind);
+            Assert.Equal("stub: out of range", result.Err.Message);
+        }
+
+        // ---- Custom-arity binding shape --------------------
+
+        [Fact]
+        public void StubTexture_CreateView_Returns()
+        {
+            // create-view has a 22-arity wire form via the
+            // CustomDelegates.CreateView delegate. The SPI-level
+            // call passes Option<...>.None per the session-
+            // shortcut on descriptor decoding.
+            var t = new StubGpuTexture();
+            var view = t.CreateView(
+                Option<Wacs.WASI.GFX.Webgpu.Webgpu.GpuTextureViewDescriptor>.None);
+            Assert.NotNull(view);
+            Assert.IsType<StubGpuTextureView>(view);
+        }
+
         [Fact]
         public void Session6_ComputePath_EndToEnd_ChainCompiles()
         {
