@@ -264,9 +264,56 @@ namespace Wacs.WASI.GFX.Silk
             Option<uint[]> dynamicOffsets,
             Option<ulong> dynamicOffsetsDataStart,
             Option<uint> dynamicOffsetsDataLength)
-            => throw new PlatformNotSupportedException(
-                "SilkGpuComputePassEncoder.SetBindGroup: bind-group "
-                + "wgpu wrapper not yet landed.");
+        {
+            EnsureLive();
+            BindGroup* native = null;
+            if (bindGroup.TryGetValue(out var bg) && bg != null)
+            {
+                if (bg is not SilkGpuBindGroup sbg)
+                    return Result<Unit, GenWebgpu.SetBindGroupError>.FromErr(
+                        new GenWebgpu.SetBindGroupError
+                        {
+                            Kind = new GenWebgpu.SetBindGroupErrorKind
+                                .SetBindGroupErrorKindRangeError(),
+                            Message = "SetBindGroup: non-Silk-backed bind "
+                                + "group.",
+                        });
+                native = sbg.Native;
+            }
+            // dynamic-offsets: spec splits into the full list +
+            // start/length window. The window narrows the slice
+            // passed to wgpu. Default (no options) → no offsets.
+            uint[] offs = dynamicOffsets.TryGetValue(out var arr) && arr != null
+                ? arr : Array.Empty<uint>();
+            uint start = dynamicOffsetsDataStart.TryGetValue(out var s)
+                ? (uint)s : 0u;
+            uint len = dynamicOffsetsDataLength.TryGetValue(out var len2)
+                ? len2 : (uint)offs.Length;
+            if (start > offs.Length || start + len > offs.Length)
+                return Result<Unit, GenWebgpu.SetBindGroupError>.FromErr(
+                    new GenWebgpu.SetBindGroupError
+                    {
+                        Kind = new GenWebgpu.SetBindGroupErrorKind
+                            .SetBindGroupErrorKindRangeError(),
+                        Message = "SetBindGroup: dynamic-offsets window "
+                            + $"[start={start}, len={len}] is out of "
+                            + $"bounds for list length {offs.Length}.",
+                    });
+            if (len == 0)
+            {
+                _backend.EnsureApi().ComputePassEncoderSetBindGroup(
+                    _pass, index, native, 0, null);
+            }
+            else
+            {
+                fixed (uint* p = &offs[start])
+                {
+                    _backend.EnsureApi().ComputePassEncoderSetBindGroup(
+                        _pass, index, native, (nuint)len, p);
+                }
+            }
+            return Result<Unit, GenWebgpu.SetBindGroupError>.FromOk(default);
+        }
 
         public void End()
         {
@@ -409,12 +456,14 @@ namespace Wacs.WASI.GFX.Silk
         {
             if (_disposed || _pipeline == null)
                 throw new ObjectDisposedException(nameof(SilkGpuComputePipeline));
-            // wgpu returns a refcounted handle; the wrapper class
-            // for bind-group-layout exists separately and lands
-            // alongside create-bind-group-layout. Defer.
-            throw new PlatformNotSupportedException(
-                "SilkGpuComputePipeline.GetBindGroupLayout: bind-group-"
-                + "layout wgpu wrapper not yet landed.");
+            var bgl = _backend.EnsureApi()
+                .ComputePipelineGetBindGroupLayout(_pipeline, index);
+            if (bgl == null)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "SilkGpuComputePipeline.GetBindGroupLayout("
+                    + index + "): wgpu returned a null layout — "
+                    + "check the WGSL @group/@binding decorations.");
+            return new SilkGpuBindGroupLayout(_backend, bgl, string.Empty);
         }
 
         public string Label() => _label;

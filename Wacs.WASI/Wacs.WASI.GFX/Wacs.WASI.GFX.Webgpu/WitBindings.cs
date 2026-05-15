@@ -521,43 +521,95 @@ namespace Wacs.WASI.GFX.Webgpu
 
             // create-bind-group-layout(self, descriptor{list, opt<string>})
             //   -> own<bg-layout>. Flat: 2 i32 list + 3 i32 opt<string> = 5 i32.
+            // entries list: each element is a 112-byte gpu-bind-group-
+            // layout-entry record in guest memory; see
+            // ReadBindGroupLayoutEntry for the byte layout.
             runtime.BindHostFunction<Func<ExecContext,
                 int, int, int, int, int, int, int>>(
                 (Ns, "[method]gpu-device.create-bind-group-layout"),
-                (_, selfH, _entPtr, _entLen,
-                    _lblDisc, _lblPtr, _lblLen) =>
+                (ctx, selfH, entPtr, entLen,
+                    lblDisc, lblPtr, lblLen) =>
                 {
                     var dev = (IGpuDevice)host.Devices.Get(selfH);
-                    var bgl = dev.CreateBindGroupLayout(
-                        new Webgpu.GpuBindGroupLayoutDescriptor());
+                    var entries = new Webgpu.GpuBindGroupLayoutEntry[entLen];
+                    for (int i = 0; i < entLen; i++)
+                        entries[i] = ReadBindGroupLayoutEntry(
+                            ctx, entPtr + i * 112);
+                    var descriptor = new Webgpu.GpuBindGroupLayoutDescriptor
+                    {
+                        Entries = entries,
+                        Label = lblDisc == 0
+                            ? Option<string>.None
+                            : Option<string>.Some(ReadUtf8(ctx, lblPtr, lblLen)),
+                    };
+                    var bgl = dev.CreateBindGroupLayout(descriptor);
                     return host.BindGroupLayouts.Allocate(bgl);
                 });
 
             // create-pipeline-layout(self, descriptor{list, opt<string>})
-            //   -> own<pipeline-layout>. Same shape as create-bind-group-layout.
+            //   -> own<pipeline-layout>.
+            // bind-group-layouts list: list<option<borrow<gpu-bind-group-
+            // layout>>>. Each element is opt<u32 handle>: 4-byte disc +
+            // 4-byte payload = 8 bytes, align 4.
             runtime.BindHostFunction<Func<ExecContext,
                 int, int, int, int, int, int, int>>(
                 (Ns, "[method]gpu-device.create-pipeline-layout"),
-                (_, selfH, _bglPtr, _bglLen,
-                    _lblDisc, _lblPtr, _lblLen) =>
+                (ctx, selfH, bglPtr, bglLen,
+                    lblDisc, lblPtr, lblLen) =>
                 {
                     var dev = (IGpuDevice)host.Devices.Get(selfH);
-                    var pl = dev.CreatePipelineLayout(
-                        new Webgpu.GpuPipelineLayoutDescriptor());
+                    var bgls = new Option<IGpuBindGroupLayout>[bglLen];
+                    for (int i = 0; i < bglLen; i++)
+                    {
+                        int elemPtr = bglPtr + i * 8;
+                        int disc = ctx.Memory()[elemPtr];
+                        if (disc == 0)
+                            bgls[i] = Option<IGpuBindGroupLayout>.None;
+                        else
+                        {
+                            int handle = ctx.ReadI32LE(elemPtr + 4);
+                            var inst = (IGpuBindGroupLayout)
+                                host.BindGroupLayouts.Get(handle);
+                            bgls[i] = Option<IGpuBindGroupLayout>.Some(inst);
+                        }
+                    }
+                    var descriptor = new Webgpu.GpuPipelineLayoutDescriptor
+                    {
+                        BindGroupLayouts = bgls,
+                        Label = lblDisc == 0
+                            ? Option<string>.None
+                            : Option<string>.Some(ReadUtf8(ctx, lblPtr, lblLen)),
+                    };
+                    var pl = dev.CreatePipelineLayout(descriptor);
                     return host.PipelineLayouts.Allocate(pl);
                 });
 
             // create-bind-group(self, descriptor{borrow, list, opt<string>})
             //   -> own<bind-group>. Flat: 1 i32 borrow + 2 i32 list + 3 i32 = 6 i32.
+            // entries list: each element is a 56-byte gpu-bind-group-entry
+            // record. See ReadBindGroupEntry for the byte layout.
             runtime.BindHostFunction<Func<ExecContext,
                 int, int, int, int, int, int, int, int>>(
                 (Ns, "[method]gpu-device.create-bind-group"),
-                (_, selfH, _layH, _entPtr, _entLen,
-                    _lblDisc, _lblPtr, _lblLen) =>
+                (ctx, selfH, layH, entPtr, entLen,
+                    lblDisc, lblPtr, lblLen) =>
                 {
                     var dev = (IGpuDevice)host.Devices.Get(selfH);
-                    var bg = dev.CreateBindGroup(
-                        new Webgpu.GpuBindGroupDescriptor());
+                    var layout = (IGpuBindGroupLayout)
+                        host.BindGroupLayouts.Get(layH);
+                    var entries = new Webgpu.GpuBindGroupEntry[entLen];
+                    for (int i = 0; i < entLen; i++)
+                        entries[i] = ReadBindGroupEntry(
+                            ctx, entPtr + i * 56, host);
+                    var descriptor = new Webgpu.GpuBindGroupDescriptor
+                    {
+                        Layout = layout,
+                        Entries = entries,
+                        Label = lblDisc == 0
+                            ? Option<string>.None
+                            : Option<string>.Some(ReadUtf8(ctx, lblPtr, lblLen)),
+                    };
+                    var bg = dev.CreateBindGroup(descriptor);
                     return host.BindGroups.Allocate(bg);
                 });
 
@@ -593,12 +645,37 @@ namespace Wacs.WASI.GFX.Webgpu
             runtime.BindHostFunction<Func<ExecContext,
                 int, int, int, int, int, int, int, int, int, int, int, int, int>>(
                 (Ns, "[method]gpu-device.create-compute-pipeline"),
-                (_, selfH, _modH, _epDisc, _epPtr, _epLen, _cDisc, _cVal,
-                    _layDisc, _layVal, _lblDisc, _lblPtr, _lblLen) =>
+                (ctx, selfH, modH, epDisc, epPtr, epLen, cDisc, cVal,
+                    layDisc, layVal, lblDisc, lblPtr, lblLen) =>
                 {
                     var dev = (IGpuDevice)host.Devices.Get(selfH);
-                    var cp = dev.CreateComputePipeline(
-                        new Webgpu.GpuComputePipelineDescriptor());
+                    var module = (IGpuShaderModule)host.ShaderModules.Get(modH);
+                    var stage = new Webgpu.GpuProgrammableStage
+                    {
+                        Module = module,
+                        EntryPoint = epDisc == 0
+                            ? Option<string>.None
+                            : Option<string>.Some(ReadUtf8(ctx, epPtr, epLen)),
+                        // constants resource decode deferred; hello_compute
+                        // doesn't use override constants.
+                        Constants = Option<Webgpu.IRecordGpuPipelineConstantValue>.None,
+                    };
+                    // layout-mode variant: disc 0 = specific(borrow<pipeline-
+                    // layout>); disc 1 = auto.
+                    Webgpu.GpuLayoutMode layoutMode =
+                        layDisc == 0
+                        ? new Webgpu.GpuLayoutMode.GpuLayoutModeSpecific(
+                            (IGpuPipelineLayout)host.PipelineLayouts.Get(layVal))
+                        : new Webgpu.GpuLayoutMode.GpuLayoutModeAuto();
+                    var descriptor = new Webgpu.GpuComputePipelineDescriptor
+                    {
+                        Compute = stage,
+                        Layout = layoutMode,
+                        Label = lblDisc == 0
+                            ? Option<string>.None
+                            : Option<string>.Some(ReadUtf8(ctx, lblPtr, lblLen)),
+                    };
+                    var cp = dev.CreateComputePipeline(descriptor);
                     return host.ComputePipelines.Allocate(cp);
                 });
 
@@ -2344,6 +2421,188 @@ namespace Wacs.WASI.GFX.Webgpu
             for (int i = 0; i < count; i++)
                 arr[i] = unchecked((uint)ctx.ReadI32LE(ptr + i * 4));
             return arr;
+        }
+
+        // ============================================================
+        //   Canonical-ABI in-memory decoders for list<record>
+        //   parameters that the binding receives as (ptr, len).
+        //   The byte layouts are derived from the WIT records and
+        //   the Component Model canonical-ABI alignment rules:
+        //     align(record) = max(align of fields, 1)
+        //     size(record)  = aligned-up(sum of fields with padding)
+        //     option<T>: align = max(1, align(T));
+        //                size  = align + size(T)
+        //     variant   : align = max align of payloads;
+        //                 size  = align + max size of payloads
+        // ============================================================
+
+        // gpu-bind-group-layout-entry record layout (size=112, align=8):
+        //   @0..3   : binding         u32
+        //   @4..7   : visibility      u32 (shader-stage-flags)
+        //   @8..47  : buffer          option<buffer-binding-layout>
+        //     @8       disc:u8 (+ 7 pad)
+        //     @16..47  buffer-binding-layout (32, align 8):
+        //       @16..23 type        option<enum>   (disc@16, val@20)
+        //       @24..25 hasDynOff   option<bool>   (disc@24, val@25)
+        //       @26..31 (pad)
+        //       @32..47 minBindSize option<u64>    (disc@32, val@40)
+        //   @48..59 : sampler         option<sampler-binding-layout>
+        //     @48 disc:u8 (+ 3 pad)
+        //     @52..59 sbl (size 8, align 4):
+        //       @52..59 type option<enum> (disc@52, val@56)
+        //   @60..83 : texture         option<texture-binding-layout>
+        //     @60 disc:u8 (+ 3 pad)
+        //     @64..83 tbl (size 20, align 4):
+        //       @64..71  sampleType    option<enum>
+        //       @72..79  viewDimension option<enum>
+        //       @80..81  multisampled  option<bool>
+        //       @82..83  (pad)
+        //   @84..107: storage-texture option<storage-texture-binding-layout>
+        //     @84 disc:u8 (+ 3 pad)
+        //     @88..107 stbl (size 20, align 4):
+        //       @88..95  access        option<enum>
+        //       @96..99  format        enum (u32, required)
+        //       @100..107 viewDimension option<enum>
+        //   @108..111 : record-trailing pad to align 8
+        private static Webgpu.GpuBindGroupLayoutEntry
+            ReadBindGroupLayoutEntry(ExecContext ctx, int ptr)
+        {
+            var mem = ctx.Memory();
+            var entry = new Webgpu.GpuBindGroupLayoutEntry
+            {
+                Binding = unchecked((uint)ctx.ReadI32LE(ptr + 0)),
+                Visibility = unchecked((uint)ctx.ReadI32LE(ptr + 4)),
+                Buffer = Option<Webgpu.GpuBufferBindingLayout>.None,
+                Sampler = Option<Webgpu.GpuSamplerBindingLayout>.None,
+                Texture = Option<Webgpu.GpuTextureBindingLayout>.None,
+                StorageTexture = Option<Webgpu.GpuStorageTextureBindingLayout>.None,
+            };
+            if (mem[ptr + 8] != 0)
+            {
+                var bbl = new Webgpu.GpuBufferBindingLayout
+                {
+                    Type = mem[ptr + 16] == 0
+                        ? Option<Webgpu.GpuBufferBindingType>.None
+                        : Option<Webgpu.GpuBufferBindingType>.Some(
+                            (Webgpu.GpuBufferBindingType)ctx.ReadI32LE(ptr + 20)),
+                    HasDynamicOffset = mem[ptr + 24] == 0
+                        ? Option<bool>.None
+                        : Option<bool>.Some(mem[ptr + 25] != 0),
+                    MinBindingSize = mem[ptr + 32] == 0
+                        ? Option<ulong>.None
+                        : Option<ulong>.Some(unchecked((ulong)ctx.ReadI64LE(ptr + 40))),
+                };
+                entry.Buffer = Option<Webgpu.GpuBufferBindingLayout>.Some(bbl);
+            }
+            if (mem[ptr + 48] != 0)
+            {
+                var sbl = new Webgpu.GpuSamplerBindingLayout
+                {
+                    Type = mem[ptr + 52] == 0
+                        ? Option<Webgpu.GpuSamplerBindingType>.None
+                        : Option<Webgpu.GpuSamplerBindingType>.Some(
+                            (Webgpu.GpuSamplerBindingType)ctx.ReadI32LE(ptr + 56)),
+                };
+                entry.Sampler = Option<Webgpu.GpuSamplerBindingLayout>.Some(sbl);
+            }
+            if (mem[ptr + 60] != 0)
+            {
+                var tbl = new Webgpu.GpuTextureBindingLayout
+                {
+                    SampleType = mem[ptr + 64] == 0
+                        ? Option<Webgpu.GpuTextureSampleType>.None
+                        : Option<Webgpu.GpuTextureSampleType>.Some(
+                            (Webgpu.GpuTextureSampleType)ctx.ReadI32LE(ptr + 68)),
+                    ViewDimension = mem[ptr + 72] == 0
+                        ? Option<Webgpu.GpuTextureViewDimension>.None
+                        : Option<Webgpu.GpuTextureViewDimension>.Some(
+                            (Webgpu.GpuTextureViewDimension)ctx.ReadI32LE(ptr + 76)),
+                    Multisampled = mem[ptr + 80] == 0
+                        ? Option<bool>.None
+                        : Option<bool>.Some(mem[ptr + 81] != 0),
+                };
+                entry.Texture = Option<Webgpu.GpuTextureBindingLayout>.Some(tbl);
+            }
+            if (mem[ptr + 84] != 0)
+            {
+                var stbl = new Webgpu.GpuStorageTextureBindingLayout
+                {
+                    Access = mem[ptr + 88] == 0
+                        ? Option<Webgpu.GpuStorageTextureAccess>.None
+                        : Option<Webgpu.GpuStorageTextureAccess>.Some(
+                            (Webgpu.GpuStorageTextureAccess)ctx.ReadI32LE(ptr + 92)),
+                    Format = (Webgpu.GpuTextureFormat)ctx.ReadI32LE(ptr + 96),
+                    ViewDimension = mem[ptr + 100] == 0
+                        ? Option<Webgpu.GpuTextureViewDimension>.None
+                        : Option<Webgpu.GpuTextureViewDimension>.Some(
+                            (Webgpu.GpuTextureViewDimension)ctx.ReadI32LE(ptr + 104)),
+                };
+                entry.StorageTexture = Option<Webgpu.GpuStorageTextureBindingLayout>.Some(stbl);
+            }
+            return entry;
+        }
+
+        // gpu-bind-group-entry record layout (size=56, align=8):
+        //   @0..3   : binding   u32
+        //   @4..7   : (pad to align 8 for the variant)
+        //   @8..55  : resource  variant (align 8, size 48):
+        //     @8        disc:u8 (+ 7 pad)
+        //     @16..55   payload (40 bytes max — gpu-buffer-binding):
+        //       disc 0 (gpu-buffer-binding record, size 40, align 8):
+        //         @16..19  buffer u32 handle
+        //         @20..23  (pad)
+        //         @24..39  offset option<u64>  (disc@24, val@32)
+        //         @40..55  size   option<u64>  (disc@40, val@48)
+        //       disc 1 (gpu-sampler borrow): @16..19 = u32 handle
+        //       disc 2 (gpu-texture-view borrow): @16..19 = u32 handle
+        private static Webgpu.GpuBindGroupEntry ReadBindGroupEntry(
+            ExecContext ctx, int ptr, WasiWebgpuHost host)
+        {
+            var mem = ctx.Memory();
+            var binding = unchecked((uint)ctx.ReadI32LE(ptr + 0));
+            int disc = mem[ptr + 8];
+            Webgpu.GpuBindingResource resource;
+            switch (disc)
+            {
+                case 0:
+                    var bufH = ctx.ReadI32LE(ptr + 16);
+                    var offDisc = mem[ptr + 24];
+                    var sizeDisc = mem[ptr + 40];
+                    var bb = new Webgpu.GpuBufferBinding
+                    {
+                        Buffer = (IGpuBuffer)host.Buffers.Get(bufH),
+                        Offset = offDisc == 0
+                            ? Option<ulong>.None
+                            : Option<ulong>.Some(unchecked((ulong)ctx.ReadI64LE(ptr + 32))),
+                        Size = sizeDisc == 0
+                            ? Option<ulong>.None
+                            : Option<ulong>.Some(unchecked((ulong)ctx.ReadI64LE(ptr + 48))),
+                    };
+                    resource = new Webgpu.GpuBindingResource
+                        .GpuBindingResourceGpuBufferBinding(bb);
+                    break;
+                case 1:
+                    var sampH = ctx.ReadI32LE(ptr + 16);
+                    resource = new Webgpu.GpuBindingResource
+                        .GpuBindingResourceGpuSampler(
+                            (IGpuSampler)host.Samplers.Get(sampH));
+                    break;
+                case 2:
+                    var tvH = ctx.ReadI32LE(ptr + 16);
+                    resource = new Webgpu.GpuBindingResource
+                        .GpuBindingResourceGpuTextureView(
+                            (IGpuTextureView)host.TextureViews.Get(tvH));
+                    break;
+                default:
+                    throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                        "ReadBindGroupEntry: unexpected variant disc="
+                        + disc + " (entry binding=" + binding + ").");
+            }
+            return new Webgpu.GpuBindGroupEntry
+            {
+                Binding = binding,
+                Resource = resource,
+            };
         }
     }
 }

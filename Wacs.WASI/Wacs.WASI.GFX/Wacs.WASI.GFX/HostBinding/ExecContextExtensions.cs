@@ -37,6 +37,19 @@ namespace Wacs.WASI.GFX.HostBinding
             mem[ptr + 3] = (byte)(value >> 24);
         }
 
+        public static long ReadI64LE(this ExecContext ctx, int ptr)
+        {
+            var mem = ctx.DefaultMemory.Data;
+            return mem[ptr]
+                | ((long)mem[ptr + 1] << 8)
+                | ((long)mem[ptr + 2] << 16)
+                | ((long)mem[ptr + 3] << 24)
+                | ((long)mem[ptr + 4] << 32)
+                | ((long)mem[ptr + 5] << 40)
+                | ((long)mem[ptr + 6] << 48)
+                | ((long)mem[ptr + 7] << 56);
+        }
+
         public static double ReadF64LE(this ExecContext ctx, int ptr)
         {
             var mem = ctx.DefaultMemory.Data;

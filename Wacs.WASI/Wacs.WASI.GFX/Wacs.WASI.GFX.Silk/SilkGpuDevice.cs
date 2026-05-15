@@ -234,16 +234,246 @@ namespace Wacs.WASI.GFX.Silk
                 "SilkGpuDevice.CreateSampler: " + DispatchPending);
         public GenWebgpu.IGpuBindGroupLayout CreateBindGroupLayout(
             GenWebgpu.GpuBindGroupLayoutDescriptor descriptor)
-            => throw new PlatformNotSupportedException(
-                "SilkGpuDevice.CreateBindGroupLayout: " + DispatchPending);
+        {
+            EnsureLive();
+            if (descriptor == null)
+                throw new ArgumentNullException(nameof(descriptor));
+            var entries = descriptor.Entries ?? Array.Empty<GenWebgpu.GpuBindGroupLayoutEntry>();
+            var label = descriptor.Label.TryGetValue(out var l) && l != null
+                ? l : string.Empty;
+            var labelBytes = label.Length > 0
+                ? System.Text.Encoding.UTF8.GetBytes(label + "\0")
+                : null;
+            var nativeEntries = new BindGroupLayoutEntry[entries.Length];
+            for (int i = 0; i < entries.Length; i++)
+            {
+                var src = entries[i];
+                ref var dst = ref nativeEntries[i];
+                dst = default;
+                dst.Binding = src.Binding;
+                dst.Visibility = (ShaderStage)src.Visibility;
+                if (src.Buffer.TryGetValue(out var bbl) && bbl != null)
+                {
+                    dst.Buffer.Type = bbl.Type.TryGetValue(out var bt)
+                        ? bt switch
+                        {
+                            GenWebgpu.GpuBufferBindingType.Uniform => BufferBindingType.Uniform,
+                            GenWebgpu.GpuBufferBindingType.Storage => BufferBindingType.Storage,
+                            GenWebgpu.GpuBufferBindingType.ReadOnlyStorage => BufferBindingType.ReadOnlyStorage,
+                            _ => BufferBindingType.Undefined,
+                        }
+                        : BufferBindingType.Uniform;
+                    dst.Buffer.HasDynamicOffset = bbl.HasDynamicOffset.TryGetValue(out var hdo) && hdo;
+                    dst.Buffer.MinBindingSize = bbl.MinBindingSize.TryGetValue(out var mbs) ? mbs : 0;
+                }
+                if (src.Sampler.TryGetValue(out var sbl) && sbl != null)
+                {
+                    dst.Sampler.Type = sbl.Type.TryGetValue(out var st)
+                        ? st switch
+                        {
+                            GenWebgpu.GpuSamplerBindingType.Filtering => SamplerBindingType.Filtering,
+                            GenWebgpu.GpuSamplerBindingType.NonFiltering => SamplerBindingType.NonFiltering,
+                            GenWebgpu.GpuSamplerBindingType.Comparison => SamplerBindingType.Comparison,
+                            _ => SamplerBindingType.Undefined,
+                        }
+                        : SamplerBindingType.Filtering;
+                }
+                if (src.Texture.TryGetValue(out var tbl) && tbl != null)
+                {
+                    dst.Texture.SampleType = tbl.SampleType.TryGetValue(out var tst)
+                        ? tst switch
+                        {
+                            GenWebgpu.GpuTextureSampleType.Float => TextureSampleType.Float,
+                            GenWebgpu.GpuTextureSampleType.UnfilterableFloat => TextureSampleType.UnfilterableFloat,
+                            GenWebgpu.GpuTextureSampleType.Depth => TextureSampleType.Depth,
+                            GenWebgpu.GpuTextureSampleType.Sint => TextureSampleType.Sint,
+                            GenWebgpu.GpuTextureSampleType.Uint => TextureSampleType.Uint,
+                            _ => TextureSampleType.Undefined,
+                        }
+                        : TextureSampleType.Float;
+                    dst.Texture.ViewDimension = MapViewDimension(
+                        tbl.ViewDimension.TryGetValue(out var tvd)
+                            ? (GenWebgpu.GpuTextureViewDimension?)tvd : null);
+                    dst.Texture.Multisampled = tbl.Multisampled.TryGetValue(out var ms) && ms;
+                }
+                if (src.StorageTexture.TryGetValue(out var stbl) && stbl != null)
+                {
+                    dst.StorageTexture.Access = stbl.Access.TryGetValue(out var sta)
+                        ? sta switch
+                        {
+                            GenWebgpu.GpuStorageTextureAccess.WriteOnly => StorageTextureAccess.WriteOnly,
+                            GenWebgpu.GpuStorageTextureAccess.ReadOnly => StorageTextureAccess.ReadOnly,
+                            GenWebgpu.GpuStorageTextureAccess.ReadWrite => StorageTextureAccess.ReadWrite,
+                            _ => StorageTextureAccess.Undefined,
+                        }
+                        : StorageTextureAccess.WriteOnly;
+                    dst.StorageTexture.Format = MapTextureFormat(stbl.Format);
+                    dst.StorageTexture.ViewDimension = MapViewDimension(
+                        stbl.ViewDimension.TryGetValue(out var svd)
+                            ? (GenWebgpu.GpuTextureViewDimension?)svd : null);
+                }
+            }
+            BindGroupLayout* bgl;
+            fixed (byte* labelPtr = labelBytes)
+            fixed (BindGroupLayoutEntry* entriesPtr = nativeEntries)
+            {
+                var desc = new BindGroupLayoutDescriptor
+                {
+                    Label = labelPtr,
+                    EntryCount = (nuint)entries.Length,
+                    Entries = entriesPtr,
+                };
+                bgl = _backend.EnsureApi().DeviceCreateBindGroupLayout(_device, &desc);
+            }
+            if (bgl == null)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "SilkGpuDevice.CreateBindGroupLayout: wgpu returned "
+                    + "a null layout.");
+            return new SilkGpuBindGroupLayout(_backend, bgl, label);
+        }
+
         public GenWebgpu.IGpuPipelineLayout CreatePipelineLayout(
             GenWebgpu.GpuPipelineLayoutDescriptor descriptor)
-            => throw new PlatformNotSupportedException(
-                "SilkGpuDevice.CreatePipelineLayout: " + DispatchPending);
+        {
+            EnsureLive();
+            if (descriptor == null)
+                throw new ArgumentNullException(nameof(descriptor));
+            var bgls = descriptor.BindGroupLayouts
+                ?? Array.Empty<Option<GenWebgpu.IGpuBindGroupLayout>>();
+            var label = descriptor.Label.TryGetValue(out var l) && l != null
+                ? l : string.Empty;
+            var labelBytes = label.Length > 0
+                ? System.Text.Encoding.UTF8.GetBytes(label + "\0")
+                : null;
+            var nativeArr = new IntPtr[bgls.Length];
+            for (int i = 0; i < bgls.Length; i++)
+            {
+                if (!bgls[i].TryGetValue(out var bgl) || bgl == null)
+                {
+                    nativeArr[i] = IntPtr.Zero;
+                    continue;
+                }
+                if (bgl is not SilkGpuBindGroupLayout sbgl)
+                    throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                        "SilkGpuDevice.CreatePipelineLayout: "
+                        + $"bindGroupLayouts[{i}] is not a Silk-backed "
+                        + "gpu-bind-group-layout.");
+                nativeArr[i] = (IntPtr)sbgl.Native;
+            }
+            PipelineLayout* pl;
+            fixed (byte* labelPtr = labelBytes)
+            fixed (IntPtr* arrPtr = nativeArr)
+            {
+                var desc = new PipelineLayoutDescriptor
+                {
+                    Label = labelPtr,
+                    BindGroupLayoutCount = (nuint)bgls.Length,
+                    BindGroupLayouts = (BindGroupLayout**)arrPtr,
+                };
+                pl = _backend.EnsureApi().DeviceCreatePipelineLayout(_device, &desc);
+            }
+            if (pl == null)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "SilkGpuDevice.CreatePipelineLayout: wgpu returned "
+                    + "a null layout.");
+            return new SilkGpuPipelineLayout(_backend, pl, label);
+        }
+
         public GenWebgpu.IGpuBindGroup CreateBindGroup(
             GenWebgpu.GpuBindGroupDescriptor descriptor)
-            => throw new PlatformNotSupportedException(
-                "SilkGpuDevice.CreateBindGroup: " + DispatchPending);
+        {
+            EnsureLive();
+            if (descriptor == null)
+                throw new ArgumentNullException(nameof(descriptor));
+            if (descriptor.Layout is not SilkGpuBindGroupLayout slayout)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "SilkGpuDevice.CreateBindGroup: layout is not a "
+                    + "Silk-backed gpu-bind-group-layout.");
+            var entries = descriptor.Entries
+                ?? Array.Empty<GenWebgpu.GpuBindGroupEntry>();
+            var label = descriptor.Label.TryGetValue(out var l) && l != null
+                ? l : string.Empty;
+            var labelBytes = label.Length > 0
+                ? System.Text.Encoding.UTF8.GetBytes(label + "\0")
+                : null;
+            var nativeEntries = new BindGroupEntry[entries.Length];
+            for (int i = 0; i < entries.Length; i++)
+            {
+                var src = entries[i];
+                ref var dst = ref nativeEntries[i];
+                dst = default;
+                dst.Binding = src.Binding;
+                switch (src.Resource)
+                {
+                    case GenWebgpu.GpuBindingResource.GpuBindingResourceGpuBufferBinding bb:
+                        if (bb.Value.Buffer is not SilkGpuBuffer sb)
+                            throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                                $"SilkGpuDevice.CreateBindGroup: entries[{i}]"
+                                + ".buffer is not a Silk-backed buffer.");
+                        dst.Buffer = sb.Native;
+                        dst.Offset = bb.Value.Offset.TryGetValue(out var off) ? off : 0;
+                        dst.Size = bb.Value.Size.TryGetValue(out var sz)
+                            ? sz : sb.NativeSize - dst.Offset;
+                        break;
+                    case GenWebgpu.GpuBindingResource.GpuBindingResourceGpuSampler ss:
+                        // Sampler wgpu wrapper not yet landed; throw with
+                        // a clear pointer.
+                        throw new PlatformNotSupportedException(
+                            "SilkGpuDevice.CreateBindGroup: sampler "
+                            + "binding-resource not yet wired (sampler "
+                            + "wgpu wrapper pending).");
+                    case GenWebgpu.GpuBindingResource.GpuBindingResourceGpuTextureView tv:
+                        throw new PlatformNotSupportedException(
+                            "SilkGpuDevice.CreateBindGroup: texture-view "
+                            + "binding-resource not yet wired (texture-view "
+                            + "wgpu wrapper pending).");
+                    default:
+                        throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                            $"SilkGpuDevice.CreateBindGroup: entries[{i}]"
+                            + " has an unrecognized binding-resource "
+                            + "variant case.");
+                }
+            }
+            BindGroup* bg;
+            fixed (byte* labelPtr = labelBytes)
+            fixed (BindGroupEntry* entriesPtr = nativeEntries)
+            {
+                var desc = new BindGroupDescriptor
+                {
+                    Label = labelPtr,
+                    Layout = slayout.Native,
+                    EntryCount = (nuint)entries.Length,
+                    Entries = entriesPtr,
+                };
+                bg = _backend.EnsureApi().DeviceCreateBindGroup(_device, &desc);
+            }
+            if (bg == null)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "SilkGpuDevice.CreateBindGroup: wgpu returned a null "
+                    + "bind group.");
+            return new SilkGpuBindGroup(_backend, bg, label);
+        }
+
+        private static TextureViewDimension MapViewDimension(
+            GenWebgpu.GpuTextureViewDimension? d)
+            => d switch
+            {
+                GenWebgpu.GpuTextureViewDimension.D1 => TextureViewDimension.Dimension1D,
+                GenWebgpu.GpuTextureViewDimension.D2 => TextureViewDimension.Dimension2D,
+                GenWebgpu.GpuTextureViewDimension.D2Array => TextureViewDimension.Dimension2DArray,
+                GenWebgpu.GpuTextureViewDimension.Cube => TextureViewDimension.DimensionCube,
+                GenWebgpu.GpuTextureViewDimension.CubeArray => TextureViewDimension.DimensionCubeArray,
+                GenWebgpu.GpuTextureViewDimension.D3 => TextureViewDimension.Dimension3D,
+                _ => TextureViewDimension.DimensionUndefined,
+            };
+
+        private static TextureFormat MapTextureFormat(
+            GenWebgpu.GpuTextureFormat f)
+            // wasi:webgpu's gpu-texture-format and wgpu's TextureFormat
+            // are spec-aligned. Numeric equivalence holds for the
+            // common cases; cast through for now and revisit if a
+            // mismatch surfaces.
+            => (TextureFormat)f;
         public GenWebgpu.IGpuShaderModule CreateShaderModule(
             GenWebgpu.GpuShaderModuleDescriptor descriptor)
         {
@@ -288,8 +518,59 @@ namespace Wacs.WASI.GFX.Silk
         }
         public GenWebgpu.IGpuComputePipeline CreateComputePipeline(
             GenWebgpu.GpuComputePipelineDescriptor descriptor)
-            => throw new PlatformNotSupportedException(
-                "SilkGpuDevice.CreateComputePipeline: " + DispatchPending);
+        {
+            EnsureLive();
+            if (descriptor == null)
+                throw new ArgumentNullException(nameof(descriptor));
+            var stage = descriptor.Compute
+                ?? throw new ArgumentNullException(
+                    nameof(descriptor) + ".Compute");
+            if (stage.Module is not SilkGpuShaderModule smod)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "SilkGpuDevice.CreateComputePipeline: programmable-"
+                    + "stage.module is not a Silk-backed shader-module.");
+            var entryPoint = stage.EntryPoint.TryGetValue(out var ep) && ep != null
+                ? ep : "main";
+            var label = descriptor.Label.TryGetValue(out var l) && l != null
+                ? l : string.Empty;
+            PipelineLayout* nativeLayout = null;
+            if (descriptor.Layout
+                is GenWebgpu.GpuLayoutMode.GpuLayoutModeSpecific spec)
+            {
+                if (spec.Value is not SilkGpuPipelineLayout spl)
+                    throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                        "SilkGpuDevice.CreateComputePipeline: layout."
+                        + "specific is not a Silk-backed pipeline-layout.");
+                nativeLayout = spl.Native;
+            }
+            var labelBytes = label.Length > 0
+                ? System.Text.Encoding.UTF8.GetBytes(label + "\0")
+                : null;
+            var epBytes = System.Text.Encoding.UTF8.GetBytes(entryPoint + "\0");
+            ComputePipeline* cp;
+            fixed (byte* labelPtr = labelBytes)
+            fixed (byte* epPtr = epBytes)
+            {
+                var desc = new ComputePipelineDescriptor
+                {
+                    Label = labelPtr,
+                    Layout = nativeLayout,
+                    Compute = new ProgrammableStageDescriptor
+                    {
+                        Module = smod.Native,
+                        EntryPoint = epPtr,
+                        ConstantCount = 0,
+                        Constants = null,
+                    },
+                };
+                cp = _backend.EnsureApi().DeviceCreateComputePipeline(_device, &desc);
+            }
+            if (cp == null)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "SilkGpuDevice.CreateComputePipeline: wgpu returned "
+                    + "a null pipeline.");
+            return new SilkGpuComputePipeline(_backend, cp, label);
+        }
         public GenWebgpu.IGpuRenderPipeline CreateRenderPipeline(
             GenWebgpu.GpuRenderPipelineDescriptor descriptor)
             => throw new PlatformNotSupportedException(
