@@ -29,6 +29,11 @@ namespace Wacs.WASI.GFX.DependencyInjection
             GfxLog.Trace("DI.Context: type loaded into AppDomain");
         }
 
+        public Context()
+        {
+            GfxLog.Trace("DI.Context: ctor invoked (Activator.CreateInstance)");
+        }
+
         public void Create()
         {
             GfxLog.Trace("DI.Context.Create: invoked");

@@ -55,6 +55,8 @@ namespace Wacs.WASI.GFX.Silk
 
         public void BindToRuntime(WasmRuntime runtime)
         {
+            Wacs.WASI.GFX.GfxLog.Trace(
+                "WasiGfxSilkBindable.BindToRuntime: entry");
             Backend = PresetBackend ?? new SilkGfxBackend();
             // Preset is single-use — if a second bind runs on the
             // same process, it gets a fresh backend rather than
@@ -103,15 +105,33 @@ namespace Wacs.WASI.GFX.Silk
             // ProjectReference cleanup.
             try
             {
-                System.Reflection.Assembly.Load(
+                var diAsm = System.Reflection.Assembly.Load(
                     "Wacs.WASI.GFX.DependencyInjection");
+                Wacs.WASI.GFX.GfxLog.Trace(
+                    "WasiGfxSilkBindable.BindToRuntime: loaded "
+                    + diAsm.FullName);
+                // Force-touch type symbols so the resolver sees them
+                // when it walks AppDomain. Some .NET runtimes won't
+                // populate GetExportedTypes consistently until
+                // GetType is called.
+                var ctxType = diAsm.GetType(
+                    "Wacs.WASI.GFX.DependencyInjection.Context");
+                var surfType = diAsm.GetType(
+                    "Wacs.WASI.GFX.DependencyInjection.Surface");
+                Wacs.WASI.GFX.GfxLog.Trace(
+                    "WasiGfxSilkBindable.BindToRuntime: ctxType="
+                    + (ctxType?.FullName ?? "<null>")
+                    + " surfType="
+                    + (surfType?.FullName ?? "<null>"));
             }
-            catch
+            catch (Exception ex)
             {
-                // Direct-link path will fall back to delegate
-                // dispatch via WitBindings handlers; not an
-                // error, just degraded perf.
+                Wacs.WASI.GFX.GfxLog.Trace(
+                    "WasiGfxSilkBindable.BindToRuntime: DI load failed: "
+                    + ex.Message);
             }
+            Wacs.WASI.GFX.GfxLog.Trace(
+                "WasiGfxSilkBindable.BindToRuntime: done");
         }
 
         public void Dispose()

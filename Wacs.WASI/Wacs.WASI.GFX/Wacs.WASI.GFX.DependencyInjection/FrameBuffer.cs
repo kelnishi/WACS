@@ -24,12 +24,14 @@ namespace Wacs.WASI.GFX.DependencyInjection
 
         public void Create()
         {
+            GfxLog.Trace("DI.Device.Create: invoked");
             var backend = WasiGfxAmbient.RequireBackend();
             Inner = backend.CreateFrameBufferDevice();
         }
 
         public void ConnectGraphicsContext(GenGfxCtx.IContext context)
         {
+            GfxLog.Trace("DI.Device.ConnectGraphicsContext");
             if (context is not Context ctx)
                 throw new Types.WasiGfxException(
                     "device.connect-graphics-context: foreign IContext impl");
@@ -67,6 +69,7 @@ namespace Wacs.WASI.GFX.DependencyInjection
         public static Buffer FromGraphicsBufferStatic(
             GenGfxCtx.IAbstractBuffer abstractBuffer)
         {
+            GfxLog.Trace("DI.Buffer.FromGraphicsBufferStatic: invoked");
             if (abstractBuffer is not AbstractBuffer ab)
                 throw new Types.WasiGfxException(
                     "buffer.from-graphics-buffer: foreign IAbstractBuffer impl");
@@ -92,6 +95,7 @@ namespace Wacs.WASI.GFX.DependencyInjection
 
         public byte[] Get()
         {
+            GfxLog.Trace("DI.Buffer.Get");
             if (Inner == null)
                 throw new Types.WasiGfxException(
                     "buffer.get called on uninitialized buffer");
@@ -101,6 +105,7 @@ namespace Wacs.WASI.GFX.DependencyInjection
 
         public void Set(byte[] val)
         {
+            GfxLog.Trace("DI.Buffer.Set: " + val.Length + " bytes");
             if (Inner == null)
                 throw new Types.WasiGfxException(
                     "buffer.set called on uninitialized buffer");

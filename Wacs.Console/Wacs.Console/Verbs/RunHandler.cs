@@ -1092,6 +1092,18 @@ namespace Wacs.Console.Verbs
                 // verification).
                 names.Add("Wacs.WASI.NN.DependencyInjection");
             }
+            if (opts.WasiGfx)
+            {
+                names.Add("Wacs.WASI.GFX");
+                // Context, AbstractBuffer, Surface, Device, Buffer
+                // — the SourceGen-shape impl classes resolved by
+                // `TryFindResourceImpl` for [constructor]X direct-
+                // link emit on wasi-gfx resources. Same shape as
+                // the wasi-nn case above. Without the DI sibling
+                // here, [constructor]surface falls to delegate
+                // dispatch + returns handle 0 + the guest spins.
+                names.Add("Wacs.WASI.GFX.DependencyInjection");
+            }
             // --bind that resolves to a Wacs.WASI.NN.* sibling
             // (LlamaSharp / MLNet) implicitly needs the same DI +
             // typed-surface packages on host-packages — otherwise

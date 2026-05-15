@@ -957,6 +957,78 @@ namespace Wacs.Transpiler.AOT.Component
                 il.Emit(OpCodes.Castclass, clrType);
                 return;
             }
+            // IResource[] — list<borrow<R>> / list<own<R>>. Outer
+            // (listPtr, count) at temps[wasmCursor..cursor+1]; each
+            // element is a 4-byte i32 handle. Loop reading handles,
+            // calling resources.GetResource(typeof(R), handle),
+            // building a typed IResource[] for the C# call site.
+            // wasi:io/poll.poll uses this exact shape.
+            if (clrType.IsArray
+                && clrType.GetArrayRank() == 1
+                && resolver != null
+                && resolver.IsResourceInterface(
+                    clrType.GetElementType()!)
+                && resourcesType != null)
+            {
+                var elemType = clrType.GetElementType()!;
+                var arrLocal = il.DeclareLocal(clrType);
+                var idxLocal = il.DeclareLocal(typeof(int));
+                var loopTop = il.DefineLabel();
+                var loopCond = il.DefineLabel();
+
+                // arr = new T[count]
+                il.Emit(OpCodes.Ldloc, temps[wasmCursor + 1]); // count
+                il.Emit(OpCodes.Newarr, elemType);
+                il.Emit(OpCodes.Stloc, arrLocal);
+                // i = 0
+                il.Emit(OpCodes.Ldc_I4_0);
+                il.Emit(OpCodes.Stloc, idxLocal);
+                il.Emit(OpCodes.Br, loopCond);
+                // loopTop:
+                il.MarkLabel(loopTop);
+                // handle = *(int*)(mem + listPtr + i*4)  via
+                // ReadI32LE through MemoryInstance helpers — emit
+                // inline. Push: arr, i, then value.
+                il.Emit(OpCodes.Ldloc, arrLocal);
+                il.Emit(OpCodes.Ldloc, idxLocal);
+                // Lift one handle from listPtr + i*4
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, MemoriesField);
+                il.Emit(OpCodes.Ldc_I4_0);
+                il.Emit(OpCodes.Ldelem_Ref);                  // MemoryInstance
+                il.Emit(OpCodes.Ldloc, temps[wasmCursor]);    // listPtr
+                il.Emit(OpCodes.Ldloc, idxLocal);
+                il.Emit(OpCodes.Ldc_I4_4);
+                il.Emit(OpCodes.Mul);
+                il.Emit(OpCodes.Add);                         // listPtr + i*4
+                il.Emit(OpCodes.Call, PrimitiveReadI32LEMethod);
+                // resources.GetResource(typeof(elem), handle) → cast
+                var handleLocal = il.DeclareLocal(typeof(int));
+                il.Emit(OpCodes.Stloc, handleLocal);
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, ResourcesField);
+                il.Emit(OpCodes.Castclass, resourcesType);
+                il.Emit(OpCodes.Ldtoken, elemType);
+                il.Emit(OpCodes.Call, GetTypeFromHandleMethod);
+                il.Emit(OpCodes.Ldloc, handleLocal);
+                il.Emit(OpCodes.Callvirt,
+                    ResolveGetResourceMethod(resourcesType));
+                il.Emit(OpCodes.Castclass, elemType);
+                il.Emit(OpCodes.Stelem_Ref);
+                // i++
+                il.Emit(OpCodes.Ldloc, idxLocal);
+                il.Emit(OpCodes.Ldc_I4_1);
+                il.Emit(OpCodes.Add);
+                il.Emit(OpCodes.Stloc, idxLocal);
+                // loopCond: i < count?
+                il.MarkLabel(loopCond);
+                il.Emit(OpCodes.Ldloc, idxLocal);
+                il.Emit(OpCodes.Ldloc, temps[wasmCursor + 1]);
+                il.Emit(OpCodes.Blt, loopTop);
+                // Push the result array.
+                il.Emit(OpCodes.Ldloc, arrLocal);
+                return;
+            }
             // Primitive — load the spilled local and apply any
             // narrow CLR conversion.
             il.Emit(OpCodes.Ldloc, temps[wasmCursor]);
@@ -1072,6 +1144,17 @@ namespace Wacs.Transpiler.AOT.Component
         private static readonly FieldInfo CabiReallocField =
             typeof(ThinContext).GetField(
                 nameof(ThinContext.CabiRealloc))!;
+
+        // PrimitiveStore.ReadI32LE(memory, offset) → int — read a
+        // little-endian i32 from guest memory. Used by the list-of-
+        // resource-handles lift path to walk a packed handle array.
+        private static readonly MethodInfo PrimitiveReadI32LEMethod =
+            typeof(PrimitiveStore).GetMethod(
+                nameof(PrimitiveStore.ReadI32LE),
+                BindingFlags.Public | BindingFlags.Static,
+                binder: null,
+                types: new[] { typeof(MemoryInstance), typeof(int) },
+                modifiers: null)!;
 
         private static readonly MethodInfo StoreStringMethod =
             typeof(PrimitiveStore).GetMethod(
@@ -3618,6 +3701,22 @@ namespace Wacs.Transpiler.AOT.Component
                 && (IsTupleOfPrimitives(clrType.GetElementType()!)
                     || IsTupleOfFlatFields(
                         clrType.GetElementType()!, resolver)))
+            {
+                wasmTypes = new[] { ValType.I32, ValType.I32 };
+                return 2;
+            }
+            // IResource[] — `list<borrow<R>>` / `list<own<R>>` PARAM.
+            // Outer (i32 ptr, i32 count) + per-element 4-byte handles.
+            // wasi-gfx's `wasi:io/poll.poll(list<borrow<pollable>>)`
+            // is the canonical example. Element is a resource
+            // interface — recurse into IsResourceInterface, then
+            // emit a loop that lifts each handle via
+            // resources.GetResource(typeof(R), handle).
+            if (clrType.IsArray
+                && clrType.GetArrayRank() == 1
+                && resolver != null
+                && resolver.IsResourceInterface(
+                    clrType.GetElementType()!))
             {
                 wasmTypes = new[] { ValType.I32, ValType.I32 };
                 return 2;

@@ -47,8 +47,8 @@
              assembly is in the AppDomain by the time the
              HostPackageResolver scans for resource impl classes.
              Otherwise lazy-load semantics leave it absent and the
-             resolver falls back to delegate dispatch — making
-             `--wasip2 --wasi-gfx` runs hang waiting for impls. -->
+             resolver falls back to delegate dispatch, making
+             the wasip2 + wasi-gfx CLI path hang waiting for impls. -->
         <ProjectReference Include="..\Wacs.WASI.GFX.DependencyInjection\Wacs.WASI.GFX.DependencyInjection.csproj" />
         <PackageReference Include="Silk.NET.SDL" Version="2.23.0" />
         <PackageReference Include="Silk.NET.Maths" Version="2.23.0" />

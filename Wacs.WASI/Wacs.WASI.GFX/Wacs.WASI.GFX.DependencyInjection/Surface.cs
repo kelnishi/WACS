@@ -34,6 +34,11 @@ namespace Wacs.WASI.GFX.DependencyInjection
             GfxLog.Trace("DI.Surface: type loaded into AppDomain");
         }
 
+        public Surface()
+        {
+            GfxLog.Trace("DI.Surface: ctor invoked (Activator.CreateInstance)");
+        }
+
         public void Create(GenSurface.CreateDesc desc)
         {
             GfxLog.Trace("DI.Surface.Create: invoked");
@@ -45,9 +50,13 @@ namespace Wacs.WASI.GFX.DependencyInjection
 
         public void ConnectGraphicsContext(GenGfxCtx.IContext context)
         {
+            Wacs.WASI.GFX.GfxLog.Trace(
+                "DI.Surface.ConnectGraphicsContext: ctx.Type="
+                + (context?.GetType()?.FullName ?? "<null>"));
             if (context is not Context ctx)
                 throw new SpiTypes.WasiGfxException(
-                    "surface.connect-graphics-context: foreign IContext impl");
+                    "surface.connect-graphics-context: foreign IContext impl, got "
+                    + (context?.GetType()?.FullName ?? "<null>"));
             EnsureCreated();
             Inner.ConnectGraphicsContext(ctx.Inner);
         }
@@ -77,30 +86,39 @@ namespace Wacs.WASI.GFX.DependencyInjection
         // (which IS IPollable), so we can return directly.
 
         public Preview2Io.IPollable SubscribeResize()
-        { EnsureCreated(); return Inner.SubscribeResize(); }
+        {
+            Wacs.WASI.GFX.GfxLog.Trace("DI.Surface.SubscribeResize");
+            EnsureCreated();
+            return Inner.SubscribeResize();
+        }
 
         public Preview2Io.IPollable SubscribeFrame()
-        { EnsureCreated(); return Inner.SubscribeFrame(); }
+        {
+            Wacs.WASI.GFX.GfxLog.Trace("DI.Surface.SubscribeFrame");
+            EnsureCreated();
+            return Inner.SubscribeFrame();
+        }
 
         public Preview2Io.IPollable SubscribePointerUp()
-        { EnsureCreated(); return Inner.SubscribePointerUp(); }
+        { Wacs.WASI.GFX.GfxLog.Trace("DI.Surface.SubscribePointerUp"); EnsureCreated(); return Inner.SubscribePointerUp(); }
 
         public Preview2Io.IPollable SubscribePointerDown()
-        { EnsureCreated(); return Inner.SubscribePointerDown(); }
+        { Wacs.WASI.GFX.GfxLog.Trace("DI.Surface.SubscribePointerDown"); EnsureCreated(); return Inner.SubscribePointerDown(); }
 
         public Preview2Io.IPollable SubscribePointerMove()
-        { EnsureCreated(); return Inner.SubscribePointerMove(); }
+        { Wacs.WASI.GFX.GfxLog.Trace("DI.Surface.SubscribePointerMove"); EnsureCreated(); return Inner.SubscribePointerMove(); }
 
         public Preview2Io.IPollable SubscribeKeyUp()
-        { EnsureCreated(); return Inner.SubscribeKeyUp(); }
+        { Wacs.WASI.GFX.GfxLog.Trace("DI.Surface.SubscribeKeyUp"); EnsureCreated(); return Inner.SubscribeKeyUp(); }
 
         public Preview2Io.IPollable SubscribeKeyDown()
-        { EnsureCreated(); return Inner.SubscribeKeyDown(); }
+        { Wacs.WASI.GFX.GfxLog.Trace("DI.Surface.SubscribeKeyDown"); EnsureCreated(); return Inner.SubscribeKeyDown(); }
 
         // ---- get-* : translate Types.X (SPI) -> Surface.X (generated)
 
         public Option<GenSurface.ResizeEvent> GetResize()
         {
+            Wacs.WASI.GFX.GfxLog.Trace("DI.Surface.GetResize");
             EnsureCreated();
             var ev = Inner.GetResize();
             if (ev == null) return Option<GenSurface.ResizeEvent>.None;
@@ -114,6 +132,7 @@ namespace Wacs.WASI.GFX.DependencyInjection
 
         public Option<GenSurface.FrameEvent> GetFrame()
         {
+            Wacs.WASI.GFX.GfxLog.Trace("DI.Surface.GetFrame");
             EnsureCreated();
             var ev = Inner.GetFrame();
             if (ev == null) return Option<GenSurface.FrameEvent>.None;
