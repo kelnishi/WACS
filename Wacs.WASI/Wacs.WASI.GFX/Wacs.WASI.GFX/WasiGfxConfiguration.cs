@@ -30,6 +30,18 @@ namespace Wacs.WASI.GFX
         public IBackend? Backend { get; set; }
 
         /// <summary>
+        /// Shared resource context — the same instance Preview2's
+        /// <c>WasiPreview2Host</c> uses. wasi-gfx's surface
+        /// <c>subscribe-*</c> methods mint pollables into
+        /// <c>SharedResources.Table&lt;Wacs.WASI.Preview2.Io.Pollable&gt;()</c>
+        /// so that Preview2's <c>wasi:io/poll@0.2.0.poll</c>
+        /// binding can resolve those handles. REQUIRED for any
+        /// real-world embedding — the runtime cannot service
+        /// surface pollables without it.
+        /// </summary>
+        public Wacs.WASI.Preview2.HostBinding.ResourceContext? SharedResources { get; set; }
+
+        /// <summary>
         /// Standard-defaults factory. Returns a configuration
         /// with no backend wired — the embedder fills in
         /// <see cref="Backend"/> before constructing the host.

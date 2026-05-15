@@ -50,12 +50,35 @@ namespace Wacs.WASI.GFX.Silk
                 return;
             _dispatcher.Invoke(() =>
             {
+                GfxLog.Trace("SilkGfxBackend: SDL_Init(VIDEO | EVENTS)");
                 int rc = _sdl.Init(Sdl.InitVideo | Sdl.InitEvents);
                 if (rc != 0)
                     throw new WasiGfxException(
                         "SDL_Init(VIDEO | EVENTS) failed: rc="
                         + rc);
+                GfxLog.Trace("SilkGfxBackend: SDL_Init OK");
             });
+        }
+
+        /// <summary>
+        /// Initialize SDL + claim the calling thread as the main
+        /// thread before any worker can race the dispatcher.
+        /// Required for the CLI's <c>--windowed</c> path: the
+        /// embedder must call this on the main thread BEFORE
+        /// kicking the wasm guest onto a worker. Subsequent
+        /// dispatcher calls from worker threads will then correctly
+        /// marshal back rather than racing inline on whichever
+        /// thread got there first.
+        ///
+        /// <para>Idempotent — repeat calls are no-ops (SDL_Init
+        /// is refcounted internally; ClaimMainThread re-writes
+        /// the same thread id).</para>
+        /// </summary>
+        public void InitializeOnMainThread()
+        {
+            EnsureSdlInit();
+            _dispatcher.ClaimMainThread();
+            GfxLog.Trace("SilkGfxBackend: initialized + main thread claimed");
         }
 
         public IGraphicsContext CreateContext()
@@ -83,13 +106,17 @@ namespace Wacs.WASI.GFX.Silk
 
         public void RunMainLoop(CancellationToken ct)
         {
+            // Defensive: init + claim if the caller didn't go
+            // through InitializeOnMainThread first. Idempotent.
             EnsureSdlInit();
             _dispatcher.ClaimMainThread();
+            GfxLog.Trace("SilkGfxBackend.RunMainLoop: claimed main thread, entering pump");
             var ev = new Event();
             // Tick: drain pending dispatcher work + pump SDL events
             // + emit a frame event to every surface so guests using
             // requestAnimationFrame-style loops get woken. The
             // 16ms sleep targets ~60Hz; not precise.
+            long tick = 0;
             while (!ct.IsCancellationRequested)
             {
                 _dispatcher.DrainPending();
@@ -100,9 +127,15 @@ namespace Wacs.WASI.GFX.Silk
                 foreach (var s in _surfacesByWindowId.Values)
                     s.OnFrame();
 
+                // Heartbeat every ~5s so log readers know the pump is alive.
+                if (GfxLog.Enabled && (++tick % 300) == 0)
+                    GfxLog.Trace("SilkGfxBackend.RunMainLoop: heartbeat, "
+                        + "surfaces=" + _surfacesByWindowId.Count);
+
                 try { System.Threading.Thread.Sleep(16); }
                 catch (System.Threading.ThreadInterruptedException) { /* fall through */ }
             }
+            GfxLog.Trace("SilkGfxBackend.RunMainLoop: cancellation observed, exiting");
         }
 
         private void DispatchSdlEvent(ref Event ev)

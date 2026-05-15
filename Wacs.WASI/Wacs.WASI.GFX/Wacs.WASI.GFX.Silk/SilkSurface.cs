@@ -63,6 +63,7 @@ namespace Wacs.WASI.GFX.Silk
 
             dispatcher.Invoke(() =>
             {
+                GfxLog.Trace("SilkSurface.ctor: SDL_CreateWindow " + width + "x" + height);
                 fixed (byte* titleBytes = System.Text.Encoding.UTF8.GetBytes(title + "\0"))
                 {
                     _window = _sdl.CreateWindow(
@@ -82,6 +83,13 @@ namespace Wacs.WASI.GFX.Silk
                         "SDL_CreateRenderer failed: "
                         + Marshal.PtrToStringAnsi((nint)_sdl.GetError()));
                 WindowId = _sdl.GetWindowID(_window);
+                // Force-bring to foreground; on macOS, windows
+                // created by a backgrounded SDL app sometimes
+                // stay below the calling terminal otherwise.
+                _sdl.RaiseWindow(_window);
+                _sdl.ShowWindow(_window);
+                GfxLog.Trace("SilkSurface.ctor: window_id=" + WindowId
+                    + " renderer_ok=" + (_renderer != null));
             });
         }
 

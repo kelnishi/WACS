@@ -3,6 +3,8 @@
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 
+using System.Collections.Generic;
+
 namespace Wacs.ComponentModel.CSharpEmit
 {
     /// <summary>
@@ -101,6 +103,29 @@ namespace Wacs.ComponentModel.CSharpEmit
         /// <see cref="HostInterfaceMode"/> is true.
         /// </summary>
         public string? HostNamespaceOverride { get; set; }
+
+        /// <summary>
+        /// Per-WIT-package namespace remap, used when emitting
+        /// cross-package type references. Map key is a WIT
+        /// package qualified name like
+        /// <c>wasi:io</c> (no version); value is the C# root
+        /// namespace where that package's host interfaces
+        /// already live in some other assembly.
+        ///
+        /// <para>Example: a wasi-gfx package that imports
+        /// <c>wasi:io/poll.pollable</c> sets
+        /// <c>{ "wasi:io" : "Wacs.WASI.Preview2" }</c> so its
+        /// generated <c>ISurface.SubscribeResize()</c> returns
+        /// <c>Wacs.WASI.Preview2.Io.IPollable</c> (the canonical
+        /// Preview2 type) rather than re-emitting a parallel
+        /// <c>Wacs.WASI.GFX.Io.IPollable</c> that would mismatch
+        /// at the resource-table level.</para>
+        ///
+        /// <para>Only consulted for packages NOT in the local
+        /// emit set — local packages always use
+        /// <see cref="HostNamespaceOverride"/>.</para>
+        /// </summary>
+        public IReadOnlyDictionary<string, string>? PackageNamespaceMap { get; set; }
     }
 
     public enum CSharpRuntime

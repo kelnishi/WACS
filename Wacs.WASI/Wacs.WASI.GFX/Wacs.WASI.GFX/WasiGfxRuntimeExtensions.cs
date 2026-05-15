@@ -57,6 +57,7 @@ namespace Wacs.WASI.GFX
     public sealed class WasiGfxBuilder
     {
         private IBackend? _backend;
+        private Wacs.WASI.Preview2.HostBinding.ResourceContext? _shared;
 
         /// <summary>
         /// Set the backend for this host. v0 supports one
@@ -69,10 +70,27 @@ namespace Wacs.WASI.GFX
             return this;
         }
 
+        /// <summary>
+        /// Bind this host's pollable table to the Preview2
+        /// <c>ResourceContext</c> the same runtime's
+        /// <c>WasiPreview2Host</c> is using. Required so the
+        /// guest's <c>wasi:io/poll.poll</c> calls (bound by
+        /// Preview2) can resolve the pollables minted by
+        /// surface's <c>subscribe-*</c> methods. Omit only for
+        /// tests / headless usage where the guest never polls.
+        /// </summary>
+        public WasiGfxBuilder WithSharedResources(
+            Wacs.WASI.Preview2.HostBinding.ResourceContext shared)
+        {
+            _shared = shared ?? throw new ArgumentNullException(nameof(shared));
+            return this;
+        }
+
         internal WasiGfxConfiguration Build()
         {
             var cfg = WasiGfxConfiguration.DefaultConfiguration();
             cfg.Backend = _backend;
+            cfg.SharedResources = _shared;
             return cfg;
         }
     }

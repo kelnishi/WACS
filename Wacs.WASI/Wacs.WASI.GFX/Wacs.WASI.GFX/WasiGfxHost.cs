@@ -34,18 +34,30 @@ namespace Wacs.WASI.GFX
         internal ResourceTable FrameBufferBuffers { get; } = new();
         internal ResourceTable AbstractBuffers { get; } = new();
 
-        // Pollables are minted by surface's subscribe-* methods.
-        // The handle space is shared across all subscribe-*
-        // sources so guests can mix-and-match in a single poll
-        // call. The Pollable type comes from WACS.WASI.Preview2;
-        // we reuse it directly rather than re-implementing.
-        internal ResourceTable Pollables { get; } = new();
+        // Pollables share Preview2's ResourceContext. When
+        // SharedResources is set, surface's subscribe-* methods
+        // mint pollables into Table<Pollable>() on that context,
+        // and Preview2's wasi:io/poll@0.2.0.poll binding (which
+        // looks up handles in the same context) finds them.
+        //
+        // If SharedResources is null (tests / headless usage
+        // that never polls), we fall back to a local table —
+        // surface.subscribe-* still produces handles but
+        // wasi:io/poll.poll won't see them. Real embedders MUST
+        // configure SharedResources.
+        internal Wacs.WASI.Preview2.HostBinding.ResourceTable Pollables { get; }
 
         public WasiGfxHost() : this(WasiGfxConfiguration.DefaultConfiguration()) { }
 
         public WasiGfxHost(WasiGfxConfiguration config)
         {
             _config = config ?? throw new ArgumentNullException(nameof(config));
+            // Reuse Preview2's pollable table when shared resources
+            // are configured (the wired-with-Preview2 case); fall
+            // back to a fresh one otherwise.
+            Pollables = _config.SharedResources != null
+                ? _config.SharedResources.Table<Wacs.WASI.Preview2.Io.Pollable>()
+                : new Wacs.WASI.Preview2.HostBinding.ResourceTable();
         }
 
         /// <summary>
@@ -73,13 +85,15 @@ namespace Wacs.WASI.GFX
 
         public void Dispose()
         {
-            // Tables drop in dependency order: pollables and
-            // buffers are leaves; surfaces/devices/contexts may
-            // own each other transitively, but each instance is
-            // only disposed once because Drop bails on
-            // already-removed entries. Backend.Dispose runs last
-            // — it owns the OS window + SDL handles.
-            Pollables.Clear();
+            // Tables drop in dependency order: buffers are leaves;
+            // surfaces/devices/contexts may own each other
+            // transitively, but each instance is only disposed
+            // once because Drop bails on already-removed entries.
+            // Pollables are NOT cleared here — they live in
+            // Preview2's shared ResourceContext (or our local
+            // fallback) and disposing them is Preview2's job.
+            // Backend.Dispose runs last — it owns the OS window
+            // + SDL handles.
             FrameBufferBuffers.Clear();
             FrameBufferDevices.Clear();
             AbstractBuffers.Clear();

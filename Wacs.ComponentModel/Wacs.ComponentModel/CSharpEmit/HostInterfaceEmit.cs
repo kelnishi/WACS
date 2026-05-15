@@ -764,6 +764,28 @@ namespace Wacs.ComponentModel.CSharpEmit
                     : options.HostNamespaceOverride!;
             }
 
+            // Per-package remap: when a referenced WIT package has
+            // its canonical CLR namespace in another assembly
+            // (e.g. wasi:io lives in Wacs.WASI.Preview2), use that
+            // namespace rather than re-rooting under the local
+            // HostNamespaceOverride. Without this, every emitter
+            // would re-emit a parallel host-interface tree for
+            // every cross-package reference; resource-table
+            // tracking depends on identity at the CLR type level,
+            // so the parallel emits would diverge and break the
+            // direct-link path.
+            if (options.PackageNamespaceMap != null
+                && options.PackageNamespaceMap.TryGetValue(
+                    pkg.Namespace + ":" + string.Join(":", pkg.Path),
+                    out var remap))
+            {
+                var sbRemap = new StringBuilder();
+                sbRemap.Append(remap);
+                foreach (var seg in pkg.Path)
+                    sbRemap.Append('.').Append(ToPascal(seg));
+                return sbRemap.ToString();
+            }
+
             var sb = new StringBuilder();
             sb.Append(string.IsNullOrEmpty(options.HostNamespaceOverride)
                 ? ToPascal(pkg.Namespace)

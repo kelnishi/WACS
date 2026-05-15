@@ -57,30 +57,33 @@
         <!-- Top-level wit/*.wit drive host-interface emission —
              this is the authoritative copy of our three v0
              packages (graphics-context, frame-buffer, surface).
-             wit/deps/io/** also emits: the generator uses one
-             project-wide namespace override (no per-package
-             override), so cross-package references from surface
-             into wasi:io/poll get qualified as
-             Wacs.WASI.GFX.Io.IPollable. Re-emitting io here
-             creates that namespace locally. Distinct CLR type
-             from Wacs.WASI.Preview2.Io.IPollable, but both
-             map to the same WIT resource — the WitBindings
-             layer adapts between them. -->
+             wit/deps/io/** is parsed for cross-package resolution
+             but NOT emitted (WitForHost=false): wasi:io types are
+             canonical in WACS.WASI.Preview2 and our generated
+             cross-package refs route there via the
+             WitHostPackageNamespaceMap below. -->
         <AdditionalFiles Include="wit\*.wit"
                          WitForHost="true" />
 
         <AdditionalFiles Include="wit\deps\io\**\*.wit"
-                         WitForHost="true" />
+                         WitForHost="false" />
 
         <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="WitForHost" />
         <CompilerVisibleProperty Include="WitHostNamespaceOverride" />
+        <CompilerVisibleProperty Include="WitHostPackageNamespaceMap" />
     </ItemGroup>
 
     <!-- Land generated interfaces under Wacs.WASI.GFX.{Pkg},
          matching the hand-written tree pattern Preview2 +
-         WASI.NN use. -->
+         WASI.NN use. Remap wasi:io references to the canonical
+         Wacs.WASI.Preview2.Io.* namespace so our generated
+         ISurface.SubscribeResize() etc. return the SAME
+         IPollable CLR type that Preview2's wasi:io/poll.poll
+         resolves against — the transpiler-direct-link path
+         tracks resources by CLR type identity. -->
     <PropertyGroup>
         <WitHostNamespaceOverride>Wacs.WASI.GFX</WitHostNamespaceOverride>
+        <WitHostPackageNamespaceMap>wasi:io=Wacs.WASI.Preview2</WitHostPackageNamespaceMap>
     </PropertyGroup>
 
     <!-- Vendored upstream wasi-gfx spec files. Embedded so the

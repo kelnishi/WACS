@@ -86,20 +86,26 @@ namespace Wacs.Console.Verbs
             var presetProp = bindableType.GetProperty("PresetBackend",
                 System.Reflection.BindingFlags.Public
                 | System.Reflection.BindingFlags.Static);
+            var initMethod = backendType.GetMethod("InitializeOnMainThread");
             var runMainLoopMethod = backendType.GetMethod("RunMainLoop");
-            if (presetProp == null || runMainLoopMethod == null)
+            if (presetProp == null || initMethod == null
+                || runMainLoopMethod == null)
             {
                 System.Console.Error.WriteLine(
-                    "error: --windowed expected PresetBackend / RunMainLoop "
-                    + "members on the Silk bindable + backend.");
+                    "error: --windowed expected PresetBackend / "
+                    + "InitializeOnMainThread / RunMainLoop members on "
+                    + "the Silk bindable + backend.");
                 return 1;
             }
 
             // 2. Pre-construct the backend + inject as preset. The
             //    wasm guest's BindToRuntime call (on the worker)
             //    sees the preset and uses it instead of constructing
-            //    a fresh one.
+            //    a fresh one. Initialize on this (main) thread up
+            //    front so SDL_Init + main-thread-claim happen before
+            //    any worker dispatcher call races them.
             var backend = Activator.CreateInstance(backendType)!;
+            initMethod.Invoke(backend, null);
             presetProp.SetValue(null, backend);
 
             // 3. Worker thread runs the wasm dispatch; main thread

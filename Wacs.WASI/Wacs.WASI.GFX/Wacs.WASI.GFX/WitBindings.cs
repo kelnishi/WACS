@@ -65,10 +65,12 @@ namespace Wacs.WASI.GFX
 
         public static void Bind(WasmRuntime runtime, WasiGfxHost host)
         {
+            GfxLog.Trace("WitBindings.Bind: registering host functions");
             var alloc = new Realloc(runtime);
             BindGraphicsContext(runtime, host);
             BindFrameBuffer(runtime, host, alloc);
             BindSurface(runtime, host, alloc);
+            GfxLog.Trace("WitBindings.Bind: registration complete");
         }
 
         // ----------------------------------------------------
@@ -91,7 +93,9 @@ namespace Wacs.WASI.GFX
                 {
                     var backend = RequireBackend(host);
                     var ctx = backend.CreateContext();
-                    return host.Contexts.Allocate(ctx);
+                    var h = host.Contexts.Allocate(ctx);
+                    GfxLog.Trace("[constructor]context -> handle=" + h);
+                    return h;
                 });
 
             // [method]context.get-current-buffer(self) -> own<abstract-buffer>
@@ -249,8 +253,15 @@ namespace Wacs.WASI.GFX
                     var backend = RequireBackend(host);
                     uint? height = hDisc == 0 ? (uint?)null : (uint)hVal;
                     uint? width  = wDisc == 0 ? (uint?)null : (uint)wVal;
+                    GfxLog.Trace("[constructor]surface: requested width="
+                        + (width?.ToString() ?? "default")
+                        + " height=" + (height?.ToString() ?? "default"));
                     var surf = backend.CreateSurface(width, height);
-                    return host.Surfaces.Allocate(surf);
+                    var h = host.Surfaces.Allocate(surf);
+                    GfxLog.Trace("[constructor]surface -> handle=" + h
+                        + " actual_width=" + surf.Width
+                        + " actual_height=" + surf.Height);
+                    return h;
                 });
 
             runtime.BindHostFunction<Action<ExecContext, int, int>>(
@@ -357,7 +368,13 @@ namespace Wacs.WASI.GFX
                 {
                     var s = (ISurface)host.Surfaces.Get(selfH);
                     var p = fetch(s);
-                    return host.Pollables.Allocate(p);
+                    var h = host.Pollables.Allocate(p);
+                    GfxLog.Trace("[method]surface." + methodName
+                        + ": minted pollable handle="
+                        + h + " (in WasiGfxHost.Pollables — note: "
+                        + "wasi:io/poll.poll resolves against "
+                        + "Preview2's table, not this one)");
+                    return h;
                 });
         }
 
