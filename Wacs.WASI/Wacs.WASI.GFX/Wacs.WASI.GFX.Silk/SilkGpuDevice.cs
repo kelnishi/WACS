@@ -246,8 +246,46 @@ namespace Wacs.WASI.GFX.Silk
                 "SilkGpuDevice.CreateBindGroup: " + DispatchPending);
         public GenWebgpu.IGpuShaderModule CreateShaderModule(
             GenWebgpu.GpuShaderModuleDescriptor descriptor)
-            => throw new PlatformNotSupportedException(
-                "SilkGpuDevice.CreateShaderModule: " + DispatchPending);
+        {
+            EnsureLive();
+            if (descriptor == null)
+                throw new ArgumentNullException(nameof(descriptor));
+            // wgpu's ShaderModuleDescriptor is the outer descriptor;
+            // the WGSL source is provided through a chained
+            // ShaderModuleWGSLDescriptor.
+            var label = descriptor.Label.TryGetValue(out var l) && l != null
+                ? l : string.Empty;
+            var code = descriptor.Code ?? string.Empty;
+            var labelBytes = label.Length > 0
+                ? System.Text.Encoding.UTF8.GetBytes(label + "\0")
+                : null;
+            var codeBytes = System.Text.Encoding.UTF8.GetBytes(code + "\0");
+            ShaderModule* sm;
+            fixed (byte* labelPtr = labelBytes)
+            fixed (byte* codePtr = codeBytes)
+            {
+                var wgsl = new ShaderModuleWGSLDescriptor
+                {
+                    Chain = new ChainedStruct
+                    {
+                        SType = SType.ShaderModuleWgslDescriptor,
+                    },
+                    Code = codePtr,
+                };
+                var desc = new ShaderModuleDescriptor
+                {
+                    Label = labelPtr,
+                    NextInChain = (ChainedStruct*)&wgsl,
+                };
+                sm = _backend.EnsureApi().DeviceCreateShaderModule(_device, &desc);
+            }
+            if (sm == null)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "SilkGpuDevice.CreateShaderModule: wgpu returned "
+                    + "a null shader module. Check wgpu's WGSL "
+                    + "compilation log.");
+            return new SilkGpuShaderModule(_backend, sm, label);
+        }
         public GenWebgpu.IGpuComputePipeline CreateComputePipeline(
             GenWebgpu.GpuComputePipelineDescriptor descriptor)
             => throw new PlatformNotSupportedException(
@@ -266,8 +304,30 @@ namespace Wacs.WASI.GFX.Silk
                 "SilkGpuDevice.CreateRenderPipelineAsync: " + DispatchPending);
         public GenWebgpu.IGpuCommandEncoder CreateCommandEncoder(
             Option<GenWebgpu.GpuCommandEncoderDescriptor> descriptor)
-            => throw new PlatformNotSupportedException(
-                "SilkGpuDevice.CreateCommandEncoder: " + DispatchPending);
+        {
+            EnsureLive();
+            string label = string.Empty;
+            if (descriptor.TryGetValue(out var d) && d != null)
+                label = d.Label.TryGetValue(out var l) && l != null
+                    ? l : string.Empty;
+            var labelBytes = label.Length > 0
+                ? System.Text.Encoding.UTF8.GetBytes(label + "\0")
+                : null;
+            CommandEncoder* enc;
+            fixed (byte* labelPtr = labelBytes)
+            {
+                var desc = new CommandEncoderDescriptor
+                {
+                    Label = labelPtr,
+                };
+                enc = _backend.EnsureApi().DeviceCreateCommandEncoder(_device, &desc);
+            }
+            if (enc == null)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "SilkGpuDevice.CreateCommandEncoder: wgpu returned "
+                    + "a null command encoder.");
+            return new SilkGpuCommandEncoder(_backend, enc, label);
+        }
         public GenWebgpu.IGpuRenderBundleEncoder CreateRenderBundleEncoder(
             GenWebgpu.GpuRenderBundleEncoderDescriptor descriptor)
             => throw new PlatformNotSupportedException(
@@ -319,9 +379,44 @@ namespace Wacs.WASI.GFX.Silk
         internal Queue* Native => _queue;
 
         public void Submit(GenWebgpu.IGpuCommandBuffer[] commandBuffers)
-            => throw new PlatformNotSupportedException(
-                "SilkGpuQueue.Submit: wgpu command-buffer lift "
-                + "lands alongside the command-encoder wgpu wiring.");
+        {
+            if (_disposed || _queue == null)
+                throw new ObjectDisposedException(nameof(SilkGpuQueue));
+            commandBuffers ??= Array.Empty<GenWebgpu.IGpuCommandBuffer>();
+            var count = commandBuffers.Length;
+            // wgpu wants a contiguous CommandBuffer* array. Stackalloc
+            // covers reasonable submit batch sizes (a few CBs);
+            // the WIT spec allows arbitrary list length, so degrade
+            // gracefully to a heap array for large batches.
+            if (count <= 16)
+            {
+                CommandBuffer** stack = stackalloc CommandBuffer*[count];
+                for (int i = 0; i < count; i++)
+                    stack[i] = ExtractNative(commandBuffers[i], i);
+                _backend.EnsureApi().QueueSubmit(_queue, (uint)count, stack);
+            }
+            else
+            {
+                var arr = new IntPtr[count];
+                for (int i = 0; i < count; i++)
+                    arr[i] = (IntPtr)ExtractNative(commandBuffers[i], i);
+                fixed (IntPtr* p = arr)
+                {
+                    _backend.EnsureApi().QueueSubmit(
+                        _queue, (uint)count, (CommandBuffer**)p);
+                }
+            }
+        }
+
+        private static CommandBuffer* ExtractNative(
+            GenWebgpu.IGpuCommandBuffer cb, int index)
+        {
+            if (cb is not SilkGpuCommandBuffer s)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    $"SilkGpuQueue.Submit: commandBuffers[{index}] is "
+                    + "not a Silk-backed gpu-command-buffer.");
+            return s.Native;
+        }
 
         public void OnSubmittedWorkDone()
             => throw new PlatformNotSupportedException(

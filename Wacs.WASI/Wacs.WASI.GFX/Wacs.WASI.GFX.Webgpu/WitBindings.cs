@@ -566,13 +566,24 @@ namespace Wacs.WASI.GFX.Webgpu
             runtime.BindHostFunction<Func<ExecContext,
                 int, int, int, int, int, int, int, int, int, int>>(
                 (Ns, "[method]gpu-device.create-shader-module"),
-                (_, selfH, _codePtr, _codeLen,
+                (ctx, selfH, codePtr, codeLen,
                     _hintsDisc, _hintsPtr, _hintsLen,
-                    _lblDisc, _lblPtr, _lblLen) =>
+                    lblDisc, lblPtr, lblLen) =>
                 {
                     var dev = (IGpuDevice)host.Devices.Get(selfH);
-                    var sm = dev.CreateShaderModule(
-                        new Webgpu.GpuShaderModuleDescriptor());
+                    var descriptor = new Webgpu.GpuShaderModuleDescriptor
+                    {
+                        Code = ReadUtf8(ctx, codePtr, codeLen),
+                        // compilation-hints decoding deferred — the
+                        // wgpu-native binding does its own WGSL
+                        // parsing and ignores hints today.
+                        CompilationHints = Option<Webgpu.GpuShaderModuleCompilationHint[]>.None,
+                        Label = lblDisc == 0
+                            ? Option<string>.None
+                            : Option<string>.Some(
+                                ReadUtf8(ctx, lblPtr, lblLen)),
+                    };
+                    var sm = dev.CreateShaderModule(descriptor);
                     return host.ShaderModules.Allocate(sm);
                 });
 
@@ -596,11 +607,20 @@ namespace Wacs.WASI.GFX.Webgpu
             runtime.BindHostFunction<Func<ExecContext,
                 int, int, int, int, int, int>>(
                 (Ns, "[method]gpu-device.create-command-encoder"),
-                (_, selfH, _oDisc, _lblDisc, _lblPtr, _lblLen) =>
+                (ctx, selfH, oDisc, lblDisc, lblPtr, lblLen) =>
                 {
                     var dev = (IGpuDevice)host.Devices.Get(selfH);
-                    var enc = dev.CreateCommandEncoder(
-                        Option<Webgpu.GpuCommandEncoderDescriptor>.None);
+                    var descriptor = oDisc == 0
+                        ? Option<Webgpu.GpuCommandEncoderDescriptor>.None
+                        : Option<Webgpu.GpuCommandEncoderDescriptor>.Some(
+                            new Webgpu.GpuCommandEncoderDescriptor
+                            {
+                                Label = lblDisc == 0
+                                    ? Option<string>.None
+                                    : Option<string>.Some(
+                                        ReadUtf8(ctx, lblPtr, lblLen)),
+                            });
+                    var enc = dev.CreateCommandEncoder(descriptor);
                     return host.CommandEncoders.Allocate(enc);
                 });
 
