@@ -304,6 +304,71 @@ namespace Wacs.WASI.GFX.Webgpu.Test
             Assert.Equal(2, q.OnSubmittedCalls);
         }
 
+        // ---- Session 7: render-path stubs -------------------
+
+        [Fact]
+        public void StubGpuTexture_DefaultQueries()
+        {
+            var t = new StubGpuTexture();
+            Assert.Equal(0u, t.Width());
+            Assert.Equal(0u, t.Height());
+            Assert.Equal(1u, t.DepthOrArrayLayers());
+            Assert.Equal(1u, t.MipLevelCount());
+            Assert.Equal(1u, t.SampleCount());
+            Assert.Equal(0u, t.Usage());
+            Assert.Equal(
+                Wacs.WASI.GFX.Webgpu.Webgpu.GpuTextureDimension.D2,
+                t.Dimension());
+            Assert.Equal(
+                Wacs.WASI.GFX.Webgpu.Webgpu.GpuTextureFormat.Rgba8unorm,
+                t.Format());
+        }
+
+        [Fact]
+        public void StubGpuTexture_DestroyAndLabel()
+        {
+            var t = new StubGpuTexture();
+            Assert.False(t.Destroyed);
+            t.Destroy();
+            Assert.True(t.Destroyed);
+
+            Assert.Equal("stub-texture", t.Label());
+            t.SetLabel("color-target");
+            Assert.Equal("color-target", t.Label());
+        }
+
+        [Fact]
+        public void StubGpuTexture_CreateView_ReturnsView()
+        {
+            var t = new StubGpuTexture();
+            var v = t.CreateView(
+                Option<Wacs.WASI.GFX.Webgpu.Webgpu.GpuTextureViewDescriptor>.None);
+            Assert.NotNull(v);
+            Assert.IsType<StubGpuTextureView>(v);
+        }
+
+        [Fact]
+        public void RenderPathLabeled_DefaultsAndRoundtrip()
+        {
+            var v = new StubGpuTextureView();
+            Assert.Equal("stub-texture-view", v.Label());
+            v.SetLabel("view"); Assert.Equal("view", v.Label());
+
+            var s = new StubGpuSampler();
+            Assert.Equal("stub-sampler", s.Label());
+            s.SetLabel("smp"); Assert.Equal("smp", s.Label());
+
+            var rp = new StubGpuRenderPipeline();
+            Assert.Equal("stub-render-pipeline", rp.Label());
+            rp.SetLabel("rp"); Assert.Equal("rp", rp.Label());
+            // get-bind-group-layout returns a fresh BGL.
+            Assert.NotNull(rp.GetBindGroupLayout(0));
+
+            var rb = new StubGpuRenderBundle();
+            Assert.Equal("stub-render-bundle", rb.Label());
+            rb.SetLabel("rb"); Assert.Equal("rb", rb.Label());
+        }
+
         [Fact]
         public void Session6_ComputePath_EndToEnd_ChainCompiles()
         {

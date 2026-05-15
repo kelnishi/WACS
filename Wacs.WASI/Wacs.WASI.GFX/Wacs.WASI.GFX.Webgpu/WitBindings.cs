@@ -23,6 +23,11 @@ using IGpuCommandEncoder = Wacs.WASI.GFX.Webgpu.Webgpu.IGpuCommandEncoder;
 using IGpuComputePassEncoder = Wacs.WASI.GFX.Webgpu.Webgpu.IGpuComputePassEncoder;
 using IGpuCommandBuffer = Wacs.WASI.GFX.Webgpu.Webgpu.IGpuCommandBuffer;
 using IGpuQueue = Wacs.WASI.GFX.Webgpu.Webgpu.IGpuQueue;
+using IGpuTexture = Wacs.WASI.GFX.Webgpu.Webgpu.IGpuTexture;
+using IGpuTextureView = Wacs.WASI.GFX.Webgpu.Webgpu.IGpuTextureView;
+using IGpuSampler = Wacs.WASI.GFX.Webgpu.Webgpu.IGpuSampler;
+using IGpuRenderPipeline = Wacs.WASI.GFX.Webgpu.Webgpu.IGpuRenderPipeline;
+using IGpuRenderBundle = Wacs.WASI.GFX.Webgpu.Webgpu.IGpuRenderBundle;
 using IWgslLanguageFeatures = Wacs.WASI.GFX.Webgpu.Webgpu.IWgslLanguageFeatures;
 using GpuRequestAdapterOptions = Wacs.WASI.GFX.Webgpu.Webgpu.GpuRequestAdapterOptions;
 using GpuDeviceDescriptor = Wacs.WASI.GFX.Webgpu.Webgpu.GpuDeviceDescriptor;
@@ -100,6 +105,20 @@ namespace Wacs.WASI.GFX.Webgpu
                 h => ((IGpuCommandBuffer)h).Label(),
                 (h, s) => ((IGpuCommandBuffer)h).SetLabel(s));
             BindGpuQueue(runtime, host, alloc);
+            BindGpuTexture(runtime, host, alloc);
+            BindLabeled(runtime, alloc,
+                "gpu-texture-view", host.TextureViews,
+                h => ((IGpuTextureView)h).Label(),
+                (h, s) => ((IGpuTextureView)h).SetLabel(s));
+            BindLabeled(runtime, alloc,
+                "gpu-sampler", host.Samplers,
+                h => ((IGpuSampler)h).Label(),
+                (h, s) => ((IGpuSampler)h).SetLabel(s));
+            BindGpuRenderPipeline(runtime, host, alloc);
+            BindLabeled(runtime, alloc,
+                "gpu-render-bundle", host.RenderBundles,
+                h => ((IGpuRenderBundle)h).Label(),
+                (h, s) => ((IGpuRenderBundle)h).SetLabel(s));
         }
 
         // ----------------------------------------------------
@@ -712,6 +731,102 @@ namespace Wacs.WASI.GFX.Webgpu
         //   whose label/set-label sits alongside other methods
         //   (gpu-buffer / gpu-device) bind them inline.
         // ----------------------------------------------------
+
+        // ----------------------------------------------------
+        //   wasi:webgpu/webgpu@0.0.1 resource gpu-texture
+        //     Session 7 covers query/lifecycle methods. The
+        //     create-view path is deferred: its descriptor has
+        //     9 option fields (20 i32 flat), pushing the host
+        //     function's input arity beyond Func<T1..T16,TResult>
+        //     and requiring an IFunctionInstance custom shape
+        //     that pairs with the descriptor-decoding work in
+        //     session 8. [static]from-graphics-buffer waits on
+        //     the graphics-context bridge session.
+        // ----------------------------------------------------
+
+        private static void BindGpuTexture(WasmRuntime runtime,
+            WasiWebgpuHost host, Wacs.WASI.GFX.HostBinding.Realloc alloc)
+        {
+            runtime.BindHostFunction<Action<ExecContext, int>>(
+                (Ns, "[method]gpu-texture.destroy"),
+                (_, selfH) =>
+                {
+                    var t = (IGpuTexture)host.Textures.Get(selfH);
+                    t.Destroy();
+                });
+
+            // u32-return query methods share a helper.
+            BindTextureU32Query(runtime, host, "width",
+                t => t.Width());
+            BindTextureU32Query(runtime, host, "height",
+                t => t.Height());
+            BindTextureU32Query(runtime, host, "depth-or-array-layers",
+                t => t.DepthOrArrayLayers());
+            BindTextureU32Query(runtime, host, "mip-level-count",
+                t => t.MipLevelCount());
+            BindTextureU32Query(runtime, host, "sample-count",
+                t => t.SampleCount());
+            BindTextureU32Query(runtime, host, "usage",
+                t => t.Usage());
+
+            // dimension / format — enum returns lower to i32.
+            runtime.BindHostFunction<Func<ExecContext, int, int>>(
+                (Ns, "[method]gpu-texture.dimension"),
+                (_, selfH) =>
+                {
+                    var t = (IGpuTexture)host.Textures.Get(selfH);
+                    return (int)t.Dimension();
+                });
+            runtime.BindHostFunction<Func<ExecContext, int, int>>(
+                (Ns, "[method]gpu-texture.format"),
+                (_, selfH) =>
+                {
+                    var t = (IGpuTexture)host.Textures.Get(selfH);
+                    return (int)t.Format();
+                });
+
+            BindLabeled(runtime, alloc,
+                "gpu-texture", host.Textures,
+                h => ((IGpuTexture)h).Label(),
+                (h, s) => ((IGpuTexture)h).SetLabel(s));
+        }
+
+        private static void BindTextureU32Query(WasmRuntime runtime,
+            WasiWebgpuHost host, string methodName,
+            Func<IGpuTexture, uint> query)
+        {
+            runtime.BindHostFunction<Func<ExecContext, int, int>>(
+                (Ns, "[method]gpu-texture." + methodName),
+                (_, selfH) =>
+                {
+                    var t = (IGpuTexture)host.Textures.Get(selfH);
+                    return unchecked((int)query(t));
+                });
+        }
+
+        // ----------------------------------------------------
+        //   wasi:webgpu/webgpu@0.0.1 resource gpu-render-pipeline
+        //     Identical surface to gpu-compute-pipeline: label,
+        //     set-label, get-bind-group-layout, drop.
+        // ----------------------------------------------------
+
+        private static void BindGpuRenderPipeline(WasmRuntime runtime,
+            WasiWebgpuHost host, Wacs.WASI.GFX.HostBinding.Realloc alloc)
+        {
+            BindLabeled(runtime, alloc,
+                "gpu-render-pipeline", host.RenderPipelines,
+                h => ((IGpuRenderPipeline)h).Label(),
+                (h, s) => ((IGpuRenderPipeline)h).SetLabel(s));
+
+            runtime.BindHostFunction<Func<ExecContext, int, int, int>>(
+                (Ns, "[method]gpu-render-pipeline.get-bind-group-layout"),
+                (_, selfH, index) =>
+                {
+                    var p = (IGpuRenderPipeline)host.RenderPipelines.Get(selfH);
+                    var bgl = p.GetBindGroupLayout(unchecked((uint)index));
+                    return host.BindGroupLayouts.Allocate(bgl);
+                });
+        }
 
         // Shared `push-debug-group(label: string) / pop-debug-group() /
         // insert-debug-marker(label: string)` triple — shows up on

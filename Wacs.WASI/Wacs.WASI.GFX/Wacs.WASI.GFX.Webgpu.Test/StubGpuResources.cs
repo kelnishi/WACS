@@ -342,4 +342,59 @@ namespace Wacs.WASI.GFX.Webgpu.Test
         public string Label() => _label;
         public void SetLabel(string label) { _label = label ?? ""; }
     }
+
+    // ---- Session 7: render path resources -------------------
+
+    internal sealed class StubGpuTexture : IGpuTexture
+    {
+        private string _label = "stub-texture";
+        public bool Destroyed { get; private set; }
+
+        public IGpuTextureView CreateView(
+            Option<GpuTextureViewDescriptor> descriptor)
+            => new StubGpuTextureView();
+        public void Destroy() { Destroyed = true; }
+        public uint Width() => 0;
+        public uint Height() => 0;
+        public uint DepthOrArrayLayers() => 1;
+        public uint MipLevelCount() => 1;
+        public uint SampleCount() => 1;
+        public GpuTextureDimension Dimension()
+            => GpuTextureDimension.D2;
+        public GpuTextureFormat Format()
+            => GpuTextureFormat.Rgba8unorm;
+        public uint Usage() => 0;
+        public string Label() => _label;
+        public void SetLabel(string label) { _label = label ?? ""; }
+    }
+
+    internal sealed class StubGpuTextureView : IGpuTextureView
+    {
+        private string _label = "stub-texture-view";
+        public string Label() => _label;
+        public void SetLabel(string label) { _label = label ?? ""; }
+    }
+
+    internal sealed class StubGpuSampler : IGpuSampler
+    {
+        private string _label = "stub-sampler";
+        public string Label() => _label;
+        public void SetLabel(string label) { _label = label ?? ""; }
+    }
+
+    internal sealed class StubGpuRenderPipeline : IGpuRenderPipeline
+    {
+        private string _label = "stub-render-pipeline";
+        public string Label() => _label;
+        public void SetLabel(string label) { _label = label ?? ""; }
+        public IGpuBindGroupLayout GetBindGroupLayout(uint index)
+            => new StubGpuBindGroupLayout();
+    }
+
+    internal sealed class StubGpuRenderBundle : IGpuRenderBundle
+    {
+        private string _label = "stub-render-bundle";
+        public string Label() => _label;
+        public void SetLabel(string label) { _label = label ?? ""; }
+    }
 }
