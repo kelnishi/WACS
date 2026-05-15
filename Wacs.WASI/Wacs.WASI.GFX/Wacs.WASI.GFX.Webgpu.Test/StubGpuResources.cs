@@ -168,10 +168,14 @@ namespace Wacs.WASI.GFX.Webgpu.Test
 
     internal sealed class StubGpuQueue : IGpuQueue
     {
+        private string _label = "stub-queue";
+        public System.Collections.Generic.List<IGpuCommandBuffer[]> Submissions { get; } = new();
+        public int OnSubmittedCalls { get; private set; }
         public void Submit(IGpuCommandBuffer[] commandBuffers)
-            => throw new NotImplementedException();
-        public void OnSubmittedWorkDone()
-            => throw new NotImplementedException();
+        {
+            Submissions.Add(commandBuffers);
+        }
+        public void OnSubmittedWorkDone() { OnSubmittedCalls++; }
         public Result<Unit, WriteBufferError> WriteBufferWithCopy(
             IGpuBuffer buffer, ulong bufferOffset, byte[] data,
             Option<ulong> dataOffset, Option<ulong> size)
@@ -180,8 +184,8 @@ namespace Wacs.WASI.GFX.Webgpu.Test
             GpuTexelCopyTextureInfo destination, byte[] data,
             GpuTexelCopyBufferLayout dataLayout, GpuExtent3D size)
             => throw new NotImplementedException();
-        public string Label() => "stub-queue";
-        public void SetLabel(string label) { }
+        public string Label() => _label;
+        public void SetLabel(string label) { _label = label ?? ""; }
     }
 
     internal sealed class StubGpuDeviceLostInfo : IGpuDeviceLostInfo
@@ -247,6 +251,94 @@ namespace Wacs.WASI.GFX.Webgpu.Test
     internal sealed class StubGpuBindGroup : IGpuBindGroup
     {
         private string _label = "stub-bind-group";
+        public string Label() => _label;
+        public void SetLabel(string label) { _label = label ?? ""; }
+    }
+
+    // ---- Session 6: compute path ----------------------------
+
+    internal sealed class StubGpuComputePipeline : IGpuComputePipeline
+    {
+        private string _label = "stub-compute-pipeline";
+        public string Label() => _label;
+        public void SetLabel(string label) { _label = label ?? ""; }
+        public IGpuBindGroupLayout GetBindGroupLayout(uint index)
+            => new StubGpuBindGroupLayout();
+    }
+
+    internal sealed class StubGpuCommandEncoder : IGpuCommandEncoder
+    {
+        private string _label = "stub-command-encoder";
+        public IGpuRenderPassEncoder BeginRenderPass(
+            GpuRenderPassDescriptor descriptor)
+            => throw new NotImplementedException();
+        public IGpuComputePassEncoder BeginComputePass(
+            Option<GpuComputePassDescriptor> descriptor)
+            => new StubGpuComputePassEncoder();
+        public void CopyBufferToBuffer(IGpuBuffer source,
+            ulong sourceOffset, IGpuBuffer destination,
+            ulong destinationOffset, ulong size) { }
+        public void CopyBufferToTexture(GpuTexelCopyBufferInfo source,
+            GpuTexelCopyTextureInfo destination, GpuExtent3D copySize)
+            => throw new NotImplementedException();
+        public void CopyTextureToBuffer(GpuTexelCopyTextureInfo source,
+            GpuTexelCopyBufferInfo destination, GpuExtent3D copySize)
+            => throw new NotImplementedException();
+        public void CopyTextureToTexture(GpuTexelCopyTextureInfo source,
+            GpuTexelCopyTextureInfo destination, GpuExtent3D copySize)
+            => throw new NotImplementedException();
+        public void ClearBuffer(IGpuBuffer buffer,
+            Option<ulong> offset, Option<ulong> size) { }
+        public void ResolveQuerySet(IGpuQuerySet querySet,
+            uint firstQuery, uint queryCount, IGpuBuffer destination,
+            ulong destinationOffset)
+            => throw new NotImplementedException();
+        public IGpuCommandBuffer Finish(
+            Option<GpuCommandBufferDescriptor> descriptor)
+            => new StubGpuCommandBuffer();
+        public string Label() => _label;
+        public void SetLabel(string label) { _label = label ?? ""; }
+        public void PushDebugGroup(string groupLabel) { }
+        public void PopDebugGroup() { }
+        public void InsertDebugMarker(string markerLabel) { }
+    }
+
+    internal sealed class StubGpuComputePassEncoder : IGpuComputePassEncoder
+    {
+        private string _label = "stub-compute-pass";
+        public IGpuComputePipeline? LastPipeline { get; private set; }
+        public (uint x, Option<uint> y, Option<uint> z)? LastDispatch
+        { get; private set; }
+        public bool Ended { get; private set; }
+
+        public void SetPipeline(IGpuComputePipeline pipeline)
+        {
+            LastPipeline = pipeline;
+        }
+        public void DispatchWorkgroups(uint workgroupCountX,
+            Option<uint> workgroupCountY, Option<uint> workgroupCountZ)
+        {
+            LastDispatch = (workgroupCountX, workgroupCountY, workgroupCountZ);
+        }
+        public void DispatchWorkgroupsIndirect(IGpuBuffer indirectBuffer,
+            ulong indirectOffset) { }
+        public void End() { Ended = true; }
+        public string Label() => _label;
+        public void SetLabel(string label) { _label = label ?? ""; }
+        public void PushDebugGroup(string groupLabel) { }
+        public void PopDebugGroup() { }
+        public void InsertDebugMarker(string markerLabel) { }
+        public Result<Unit, SetBindGroupError> SetBindGroup(uint index,
+            Option<IGpuBindGroup> bindGroup,
+            Option<uint[]> dynamicOffsetsData,
+            Option<ulong> dynamicOffsetsDataStart,
+            Option<uint> dynamicOffsetsDataLength)
+            => throw new NotImplementedException();
+    }
+
+    internal sealed class StubGpuCommandBuffer : IGpuCommandBuffer
+    {
+        private string _label = "stub-command-buffer";
         public string Label() => _label;
         public void SetLabel(string label) { _label = label ?? ""; }
     }

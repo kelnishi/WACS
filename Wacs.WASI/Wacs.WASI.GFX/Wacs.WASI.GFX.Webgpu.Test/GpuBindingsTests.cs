@@ -236,5 +236,96 @@ namespace Wacs.WASI.GFX.Webgpu.Test
             Assert.Equal("stub-bind-group", bg.Label());
             bg.SetLabel("bg"); Assert.Equal("bg", bg.Label());
         }
+
+        // ---- Session 6: compute path stubs ------------------
+
+        [Fact]
+        public void StubComputePipeline_GetBindGroupLayout_Returns()
+        {
+            var p = new StubGpuComputePipeline();
+            Assert.NotNull(p.GetBindGroupLayout(0));
+            Assert.NotNull(p.GetBindGroupLayout(7));
+        }
+
+        [Fact]
+        public void StubCommandEncoder_BeginComputePass_ReturnsPass()
+        {
+            var enc = new StubGpuCommandEncoder();
+            var pass = enc.BeginComputePass(
+                Option<Wacs.WASI.GFX.Webgpu.Webgpu.GpuComputePassDescriptor>.None);
+            Assert.NotNull(pass);
+            Assert.IsType<StubGpuComputePassEncoder>(pass);
+        }
+
+        [Fact]
+        public void StubCommandEncoder_Finish_ReturnsCommandBuffer()
+        {
+            var enc = new StubGpuCommandEncoder();
+            var cb = enc.Finish(
+                Option<Wacs.WASI.GFX.Webgpu.Webgpu.GpuCommandBufferDescriptor>.None);
+            Assert.NotNull(cb);
+            Assert.IsType<StubGpuCommandBuffer>(cb);
+        }
+
+        [Fact]
+        public void StubComputePass_RecordsLifecycle()
+        {
+            var pass = new StubGpuComputePassEncoder();
+            var pipe = new StubGpuComputePipeline();
+            pass.SetPipeline(pipe);
+            Assert.Same(pipe, pass.LastPipeline);
+
+            pass.DispatchWorkgroups(64,
+                Option<uint>.Some(8), Option<uint>.None);
+            Assert.NotNull(pass.LastDispatch);
+            Assert.Equal(64u, pass.LastDispatch!.Value.x);
+            Assert.True(pass.LastDispatch.Value.y.HasValue);
+            Assert.Equal(8u, pass.LastDispatch.Value.y.Value);
+            Assert.False(pass.LastDispatch.Value.z.HasValue);
+
+            Assert.False(pass.Ended);
+            pass.End();
+            Assert.True(pass.Ended);
+        }
+
+        [Fact]
+        public void StubQueue_SubmitCapturesBuffers()
+        {
+            var q = new StubGpuQueue();
+            var cb1 = new StubGpuCommandBuffer();
+            var cb2 = new StubGpuCommandBuffer();
+            q.Submit(new Wacs.WASI.GFX.Webgpu.Webgpu.IGpuCommandBuffer[] { cb1, cb2 });
+            Assert.Single(q.Submissions);
+            Assert.Equal(2, q.Submissions[0].Length);
+
+            Assert.Equal(0, q.OnSubmittedCalls);
+            q.OnSubmittedWorkDone();
+            q.OnSubmittedWorkDone();
+            Assert.Equal(2, q.OnSubmittedCalls);
+        }
+
+        [Fact]
+        public void Session6_ComputePath_EndToEnd_ChainCompiles()
+        {
+            // Sanity: the whole compute path stub chain can be
+            // constructed and walked without throwing. This is
+            // the shape hello_compute will exercise once the
+            // Silk backend lands in session 8.
+            var stub = new StubGpuBackend();
+            var dev = new StubGpuDevice();
+            var enc = new StubGpuCommandEncoder();
+            var pass = enc.BeginComputePass(
+                Option<Wacs.WASI.GFX.Webgpu.Webgpu.GpuComputePassDescriptor>.None);
+            pass.SetPipeline(new StubGpuComputePipeline());
+            pass.DispatchWorkgroups(1u,
+                Option<uint>.None, Option<uint>.None);
+            pass.End();
+            var cb = enc.Finish(
+                Option<Wacs.WASI.GFX.Webgpu.Webgpu.GpuCommandBufferDescriptor>.None);
+            dev.Queue().Submit(
+                new Wacs.WASI.GFX.Webgpu.Webgpu.IGpuCommandBuffer[] { cb });
+            // No assertions on intermediate values — this is a
+            // shape-compiles smoke test.
+        }
     }
 }
