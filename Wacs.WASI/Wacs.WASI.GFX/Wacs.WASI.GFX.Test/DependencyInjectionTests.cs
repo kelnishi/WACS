@@ -58,5 +58,45 @@ namespace Wacs.WASI.GFX.Test
             Assert.IsType<StubBackend>(composite.Backend);
             Assert.IsType<StubBackend>(composite.Gfx.Backend);
         }
+
+        // ---- v1 phase 1 1g: scoped backend factory ----------
+
+        [Fact]
+        public void Context_BundleCtor_PullsBackendFromConfiguration()
+        {
+            // Two separate runtimes in one AppDomain — each gets
+            // its own bundle pointing at a distinct backend. The
+            // v0 WasiGfxAmbient static would have made this
+            // impossible; v1 phase 1 1g threads the backend
+            // through the bundle so each impl sees only its
+            // owner's backend.
+            var cfg1 = WasiGfxConfiguration.DefaultConfiguration();
+            var stub1 = new StubBackend();
+            cfg1.Backend = stub1;
+            var bundle1 = new WasiGfxBundle(cfg1);
+
+            var cfg2 = WasiGfxConfiguration.DefaultConfiguration();
+            var stub2 = new StubBackend();
+            cfg2.Backend = stub2;
+            var bundle2 = new WasiGfxBundle(cfg2);
+
+            // Construct two Context impls bound to different
+            // bundles; Create() routes through the configured
+            // backend, not the ambient.
+            using var ctx1 = new Context(bundle1);
+            using var ctx2 = new Context(bundle2);
+            ctx1.Create();
+            ctx2.Create();
+
+            Assert.Equal(1, stub1.ContextsCreated);
+            Assert.Equal(1, stub2.ContextsCreated);
+        }
+
+        [Fact]
+        public void Context_BundleCtor_NullArgThrows()
+        {
+            Assert.Throws<System.ArgumentNullException>(
+                () => new Context(null!));
+        }
     }
 }

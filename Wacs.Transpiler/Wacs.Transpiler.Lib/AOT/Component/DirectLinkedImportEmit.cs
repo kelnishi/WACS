@@ -385,9 +385,62 @@ namespace Wacs.Transpiler.AOT.Component
                     || !resolver.TryFindResourceImpl(
                         binding.InterfaceType, out var implType))
                     return; // gate already validated this; defensive.
-                var implCtor = implType
-                    .GetConstructor(System.Type.EmptyTypes)!;
+
+                // v1 phase 1 1g: prefer a bundle-taking ctor over
+                // the parameterless one — lets the impl pull the
+                // backend from per-runtime bundle state instead of
+                // a process-global ambient. Three preferences in
+                // order:
+                //   1) implType.ctor(bundleType)       direct cast
+                //   2) implType.ctor(leafType) where bundleType
+                //      has a property of leafType (e.g. a
+                //      composite bundle's `Gfx` accessor)
+                //   3) implType.ctor()                  fallback
+                ConstructorInfo? bundleCtor = null;
+                PropertyInfo? leafAccessor = null;
+                if (bundleType != null)
+                {
+                    bundleCtor = implType.GetConstructor(
+                        new[] { bundleType });
+                    if (bundleCtor == null)
+                    {
+                        foreach (var prop in bundleType.GetProperties(
+                            BindingFlags.Public | BindingFlags.Instance))
+                        {
+                            if (prop.GetMethod == null) continue;
+                            var c = implType.GetConstructor(
+                                new[] { prop.PropertyType });
+                            if (c != null)
+                            {
+                                bundleCtor = c;
+                                leafAccessor = prop;
+                                break;
+                            }
+                        }
+                    }
+                }
+                var implCtor = bundleCtor ?? implType.GetConstructor(
+                    System.Type.EmptyTypes);
+                if (implCtor == null)
+                    throw new InvalidOperationException(
+                        "DirectLinkedImportEmit: impl class "
+                        + implType.FullName + " has neither a "
+                        + "parameterless ctor nor one taking the "
+                        + "host bundle " + bundleType?.FullName
+                        + " — can't construct via [constructor]"
+                        + binding.ResourceName + " direct-link.");
+
                 voidCtorInstance = il.DeclareLocal(binding.InterfaceType);
+                if (bundleCtor != null)
+                {
+                    // Push the bundle (with optional leaf walk).
+                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Ldfld, HostBundleField);
+                    il.Emit(OpCodes.Castclass, bundleType!);
+                    if (leafAccessor != null)
+                        il.Emit(OpCodes.Callvirt,
+                            leafAccessor.GetMethod!);
+                }
                 il.Emit(OpCodes.Newobj, implCtor);
                 il.Emit(OpCodes.Dup);                     // [inst, inst]
                 il.Emit(OpCodes.Stloc, voidCtorInstance); // [inst]
