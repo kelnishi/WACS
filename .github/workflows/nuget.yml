@@ -20,12 +20,19 @@ on:
       - 'WACS-HostBindings-v*.*.*'
       # `WACS-WASI-NN-v*` publishes the wasi-nn family — the
       # backend-agnostic core, the DI bundle (concrete resource
-      # impls + composite WasiPreview2NNBundle), and the three
-      # backend siblings (ONNX Runtime, ML.NET, LlamaSharp).
-      # Versioned together because the bundle's [WitSource]
-      # forwarding properties expose interfaces from the core
-      # package — a stale core breaks the composite.
+      # impls + composite WasiPreview2NNBundle), and the backend
+      # siblings (ONNX Runtime, ONNX Runtime GenAI, ML.NET,
+      # LlamaSharp, TorchSharp, OpenVINO). Versioned together
+      # because the bundle's [WitSource] forwarding properties
+      # expose interfaces from the core package — a stale core
+      # breaks the composite.
       - 'WACS-WASI-NN-v*.*.*'
+      # `WACS-WASI-GFX-v*` publishes the wasi-gfx family — the
+      # backend-agnostic core, the webgpu contract sibling, the
+      # DI bundle, and the Silk.NET/SDL + wgpu-native backend.
+      # All four versioned together; the wasi-gfx WIT proposal
+      # is still at WASI Phase 2 so packages ship -preview.
+      - 'WACS-WASI-GFX-v*.*.*'
 
 jobs:
   build-and-publish:
@@ -130,6 +137,24 @@ jobs:
           - path: Wacs.WASI/Wacs.WASI.NN/Wacs.WASI.NN.OpenVino
             package_name: WACS.WASI.NN.OpenVino
             tag_prefix: WACS-WASI-NN-v
+
+          # `WACS-WASI-GFX-v*` → wasi-gfx family. Backend-agnostic
+          # core + webgpu contract sibling + DI bundle + Silk.NET/
+          # SDL + wgpu-native backend. Versioned together; the
+          # csproj versions carry a -preview suffix while the
+          # upstream wasi-gfx proposal sits at WASI Phase 2.
+          - path: Wacs.WASI/Wacs.WASI.GFX/Wacs.WASI.GFX
+            package_name: WACS.WASI.GFX
+            tag_prefix: WACS-WASI-GFX-v
+          - path: Wacs.WASI/Wacs.WASI.GFX/Wacs.WASI.GFX.Webgpu
+            package_name: WACS.WASI.GFX.Webgpu
+            tag_prefix: WACS-WASI-GFX-v
+          - path: Wacs.WASI/Wacs.WASI.GFX/Wacs.WASI.GFX.DependencyInjection
+            package_name: WACS.WASI.GFX.DependencyInjection
+            tag_prefix: WACS-WASI-GFX-v
+          - path: Wacs.WASI/Wacs.WASI.GFX/Wacs.WASI.GFX.Silk
+            package_name: WACS.WASI.GFX.Silk
+            tag_prefix: WACS-WASI-GFX-v
 
     steps:
       - name: Checkout code
