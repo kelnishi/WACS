@@ -1,5 +1,63 @@
 # Changelog
 
+## WACS.WASI.Preview2.DependencyInjection 0.3.0 / WACS.WASI.NN.DependencyInjection 0.3.0 / WACS.WASI.GFX.DependencyInjection 0.2.0-preview — attribute-driven scope discovery
+
+`WasiPreview2RuntimeScope` no longer hardcodes the wasi-nn /
+wasi-gfx assembly + type + method names it used to look up at
+scope-build time. New subsystem DI packages plug in by shipping
+their own `IWasiScopeBootstrap` implementation and an
+assembly-level `[WasiScopeBootstrap(typeof(MyBootstrap))]`
+attribute; the scope walks every loaded assembly for the
+attribute and invokes each pointed-at bootstrap.
+
+This is a coordinated upgrade — Preview2.DI 0.3.0 deletes the
+hardcoded NN/GFX paths, so it must be paired with NN.DI 0.3.0
+(ships `NNScopeBootstrap` + attribute) and GFX.DI 0.2.0-preview
+(ships `GfxScopeBootstrap` + attribute). Consumers using the
+in-tree project references upgrade together; NuGet consumers
+should bump all three at once.
+
+### What changed
+
+- **`WACS.WASI.Preview2.DependencyInjection` 0.2.2 → 0.3.0**
+  (minor — behavior change): `WasiPreview2RuntimeScope` adds
+  `IWasiScopeBootstrap` interface + `WasiScopeBootstrapAttribute`
+  as public API. Deletes the previous hardcoded
+  `ReflectivelyAddWasiNN` / `ReflectivelyAddWasiGfx` /
+  `BuildAutoDiscoveredCallback` / `ApplyAllRegistrants` /
+  `DiscoverBackendRegistrants` / `TryLoadAssembly` helpers — the
+  attribute walk supersedes all of them. ~290 lines deleted.
+- **`WACS.WASI.NN.DependencyInjection` 0.2.3 → 0.3.0** (minor —
+  new public type): ships `NNScopeBootstrap : IWasiScopeBootstrap`
+  with the wasi-nn backend auto-discovery logic that previously
+  lived in Preview2.DI. The NN-specific reflection (walking for
+  `IWasiNNBackendRegistration` implementations) now lives in the
+  NN package, where the interface type can be referenced directly
+  via `typeof(IWasiNNBackendRegistration)` instead of a string-
+  based `Assembly.GetType` lookup.
+- **`WACS.WASI.GFX.DependencyInjection` 0.1.1-preview → 0.2.0-preview**
+  (minor — new public type): ships `GfxScopeBootstrap` with the
+  AddWasiGfx + AddWasiPreview2GfxBundle registration calls that
+  previously lived in Preview2.DI.
+
+### AOT correctness
+
+The new path is AOT-safe: the only reflection is
+`Activator.CreateInstance(attr.Type)`, where `attr.Type` comes
+from a `typeof(...)` token statically referenced in the sibling
+assembly's `[WasiScopeBootstrap(...)]` argument. Trimming
+preserves the type and its public parameterless constructor
+because they're rooted by static reference. The remaining
+`Assembly.GetExportedTypes` walks (composite bundle + backend
+registrant discovery) are suppressed with documented
+justifications.
+
+### Warning impact
+
+Solution-wide IL warnings: 106 → 76 (−30). The 30 warnings in
+`WasiPreview2RuntimeScope` dropped to 0; the new
+`NNScopeBootstrap` carries 0 unsuppressed warnings.
+
 ## WACS.WASI.NN 0.4.1 — Phase 2 status callout + README backend catch-up
 
 NuGet description-only refresh. No code or API change; existing
