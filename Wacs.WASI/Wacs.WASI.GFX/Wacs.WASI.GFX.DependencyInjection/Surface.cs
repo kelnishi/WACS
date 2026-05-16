@@ -26,6 +26,7 @@ namespace Wacs.WASI.GFX.DependencyInjection
     /// </summary>
     public sealed class Surface : GenSurface.ISurface, IDisposable
     {
+        private readonly WasiGfxBundle? _bundle;
         internal SpiGfx.ISurface Inner { get; private set; } = null!;
         private bool _disposed;
 
@@ -34,15 +35,29 @@ namespace Wacs.WASI.GFX.DependencyInjection
             GfxLog.Trace("DI.Surface: type loaded into AppDomain");
         }
 
+        [Obsolete("Prefer Surface(WasiGfxBundle) — the bundle " +
+            "ctor moves off the WasiGfxAmbient static.")]
         public Surface()
         {
-            GfxLog.Trace("DI.Surface: ctor invoked (Activator.CreateInstance)");
+            GfxLog.Trace("DI.Surface: ctor invoked (ambient path)");
+        }
+
+        public Surface(WasiGfxBundle bundle)
+        {
+            _bundle = bundle ?? throw new ArgumentNullException(nameof(bundle));
+            GfxLog.Trace("DI.Surface: ctor invoked (bundle path)");
         }
 
         public void Create(GenSurface.CreateDesc desc)
         {
             GfxLog.Trace("DI.Surface.Create: invoked");
-            var backend = WasiGfxAmbient.RequireBackend();
+            var backend = _bundle?.Configuration.Backend
+#pragma warning disable CS0618
+                ?? WasiGfxAmbient.RequireBackend();
+#pragma warning restore CS0618
+            if (backend == null)
+                throw new SpiTypes.WasiGfxException(
+                    "DI.Surface.Create: no backend available.");
             uint? w = desc.Width.HasValue ? desc.Width.Value : (uint?)null;
             uint? h = desc.Height.HasValue ? desc.Height.Value : (uint?)null;
             Inner = backend.CreateSurface(w, h);

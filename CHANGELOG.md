@@ -1,5 +1,217 @@
 # Changelog
 
+## WACS.WASI.NN 0.4.1 — Phase 2 status callout + README backend catch-up
+
+NuGet description-only refresh. No code or API change; existing
+0.4.0 consumers can upgrade transparently.
+
+### What changed
+
+- **`WACS.WASI.NN` 0.4.0 → 0.4.1** (point — doc-driven):
+  - NuGet `<Description>` now names all six bundled backends
+    (ONNX Runtime, ONNX Runtime GenAI, ML.NET, LlamaSharp,
+    TorchSharp, OpenVINO), corrects the WIT-version reference
+    (`wasi:nn@0.2.0-rc-2024-10-28`, matches the pinned wit),
+    and adds a Phase 2 status sentence.
+  - README packed with the NuGet: package table now lists the
+    three backend siblings added since the last README refresh
+    (`OnnxRuntimeGenAI`, `TorchSharp`, `OpenVino`); encoding
+    routing table updates `pytorch` → `TorchSharpBackend`,
+    `openvino` → `OpenVinoBackend`, ggml lists both
+    `LlamaSharpBackend` + `OnnxRuntimeGenAIBackend`. Adds a
+    Standardization-status section pointing at the upstream
+    WASI Proposals.md Phase 2 listing.
+
+The seven sibling wasi-nn packages (`WACS.WASI.NN.DependencyInjection`,
+`.OnnxRuntime`, `.OnnxRuntimeGenAI`, `.MLNet`, `.LlamaSharp`,
+`.TorchSharp`, `.OpenVino`) also had a Phase 2 status sentence
+appended to their NuGet descriptions; bumps for those land with
+their next functional change rather than triggering a fan-out
+point release for description-only edits.
+
+## WACS.WASI.GFX.Webgpu 0.1.0-preview / WACS.WASI.GFX 0.2.0-preview / WACS.WASI.GFX.Silk 0.2.0-preview / WACS.WASI.GFX.DependencyInjection 0.1.1-preview / WACS.WASI.Preview2 0.5.0 / WACS.WASI.Preview2.DependencyInjection 0.2.2 / WACS.ComponentModel 0.4.0 / WACS.Transpiler.Lib 0.9.0 / WACS.Cli 1.8.0 / WACS 0.15.20 — wasi-gfx v1 (wasi:webgpu host bindings + Phase 1/2 polish)
+
+The four `WACS.WASI.GFX.*` packages adopt a NuGet `-preview`
+suffix to signal that the wasi-gfx proposal is at WASI Phase 2
+(not yet standardized). Consumers need `dotnet add package … --prerelease`
+to install. The wasi-nn family (also tracking a Phase 2 proposal)
+adds the same status callout in its NuGet `<Description>` but keeps
+its stable version trajectory — those packages already have shipped
+consumers.
+
+v1 release for the wasi-gfx family. The fourth wasi-gfx WIT
+package — `wasi:webgpu@0.0.1`, ~35 KB of WIT mirroring the
+browser WebGPU API — gets host bindings in a new sibling
+package `WACS.WASI.GFX.Webgpu`. The Silk.NET/SDL backend
+extends to wrap Silk.NET.WebGPU / wgpu-native so one Silk
+dependency serves both CPU (frame-buffer / surface) and GPU
+(webgpu) paths through a single `--wasi-gfx`/`--bind` flag.
+Phase 1 (implementor-DX architectural fixes) and Phase 2
+(window-close graceful shutdown) ship alongside.
+
+Architecture mirrors v0: a contract package owns the SPI +
+canonical-ABI bindings, backends ship as sibling packages, and
+a graphics-context bridge connects the CPU and GPU paths
+through polymorphic `IAbstractBuffer` marker sub-interfaces.
+
+Host-side coverage for the wasi:webgpu surface is wired across
+all 38 resources at the lifecycle level (label / set-label /
+[resource-drop]) plus the entry-point compute path through
+queue.submit. Pipeline-create + descriptor-decoding methods on
+gpu-device + the wgpu-native dispatch implementation in
+SilkGpuBackend are skeletons targeting a follow-up cut; the
+binding gates are registered so guests reach a clear
+`PlatformNotSupportedException` rather than "missing handler"
+when they call into the unwired arms. The `wasi-webgpu-hello`
+parity fixture at `Spec.Test/components/fixtures/` exercises
+every wire-form binding the stub backend supports end-to-end.
+
+### What changed
+
+- **`WACS.WASI.GFX.Webgpu` 0.1.0** (new sibling): host
+  bindings for `wasi:webgpu@0.0.1`. Source-gen emits 39
+  `[WitSource]`-tagged interfaces from
+  `webgpu.wit`. `IGpuBackend` SPI exposes `CreateGpu()` +
+  `FromAbstractBuffer(IAbstractBuffer)` (the graphics-context
+  bridge). `WasiWebgpuHost` owns 31 per-resource tables;
+  `WasiWebgpuConfiguration.AbstractBufferResolver` plumbs the
+  cross-host abstract-buffer handle lookup. WitBindings.cs
+  wires ~70 canonical-ABI host functions covering the entry
+  points (`get-gpu`, `[method]gpu.*`), gpu-adapter + gpu-device
+  query surface, buffer/shader/pipeline-layout/bind-group
+  lifecycle, the full compute path
+  (compute-pipeline + command-encoder + compute-pass-encoder +
+  command-buffer + queue.submit), render-path resource
+  lifecycle (texture / texture-view / sampler / render-pipeline
+  / render-bundle), and the `[static]gpu-texture.from-graphics-
+  buffer` graphics-context bridge. New helper `BindLabeled` +
+  `BindDebugMarkers` collapse the label-and-debug boilerplate
+  shared across encoder / pass-encoder resources. Deferred to a
+  follow-up cut: descriptor decoding for the create-* methods
+  on gpu-device (20+ i32 flat-form param shapes that exceed
+  `Func<T1..T16, TResult>` arity), result<_, error> shapes on
+  buffer.map-async / unmap / get-mapped-range-*, the option<...>
+  param decoding for set-bind-group / write-buffer-with-copy.
+- **`WACS.WASI.GFX` 0.1.0 → 0.2.0** (minor — new public
+  interfaces): `ICpuAbstractBuffer` / `IGpuAbstractBuffer`
+  marker sub-interfaces on `IAbstractBuffer`. The wasi-gfx WIT
+  itself doesn't distinguish — one `abstract-buffer` handle
+  moves through both worlds at the wire level — but the marker
+  pair lets backends produce one kind and consumers downcast
+  cleanly without backend-specific knowledge. The frame-buffer
+  device's `FromGraphicsBuffer` now downcasts on the marker
+  first so a guest accidentally feeding a GPU buffer to the
+  CPU path gets "wrong kind" instead of a backend-specific
+  cast failure.
+- **`WACS.WASI.GFX.Silk` 0.1.0 → 0.2.0** (minor — capability:
+  adds GPU backend): `SilkGpuBackend : IGpuBackend` skeleton
+  with `Silk.NET.WebGPU 2.23.0` + `Silk.NET.WebGPU.Native.WGPU
+  2.23.0` package references. `SilkGpu.GetPreferredCanvasFormat`
+  reports `Bgra8UnormSrgb`; `RequestAdapter` /
+  `FromAbstractBuffer` throw `PlatformNotSupportedException`
+  pending the wgpu-native dispatcher follow-up.
+  `WasiGfxSilkBindable` constructs the GPU pair alongside the
+  CPU pair and wires the cross-host
+  `AbstractBufferResolver` automatically.
+  `SilkGfxBackend` Phase 2 changes: `QuitRequested` event +
+  sticky `IsQuitRequested` property; `EventType.Quit` and the
+  last-window `WindowEventID.Close` both signal it.
+  `SilkAbstractBuffer` now implements `ICpuAbstractBuffer`.
+- **`WACS.WASI.GFX.DependencyInjection` 0.1.0 → 0.1.1**
+  (point): `WasiPreview2GfxBundle` carries
+  `[WacsCompositeBundle("wasi-gfx", Priority = 10)]` for
+  the attribute-driven discovery rewrite.
+- **`WACS.WASI.Preview2` 0.4.1 → 0.5.0** (minor — behavior
+  change): `IoBindings` now registers
+  `wasi:io/error` + `wasi:io/poll` handlers at every
+  shape-stable point release (`0.2.0` through `0.2.8`). Guests
+  built against an older io version bind without a host-side
+  WIT bump; the wasi-gfx vendored WIT in
+  `Wacs.WASI.GFX/wit/deps/io/` reverts to upstream-verbatim
+  `wasi:io@0.2.0`. The `Strict_canon_abi_drift_is_bounded`
+  test learns to ignore the expected ExtraBinding entries for
+  `wasi:io@0.2.0..0.2.7` since they're intentional
+  compatibility shims rather than real drift.
+- **`WACS.WASI.Preview2.DependencyInjection` 0.2.1 → 0.2.2**
+  (point — attribute-driven discovery): `WasiPreview2NNBundle`
+  + `WasiPreview2GfxBundle` consumers walk
+  `[WacsCompositeBundle]` attribute-tagged composites with
+  Priority desc / Family asc ordering instead of the hardcoded
+  qualified-name cascade. `[WacsDependencyInjectionSibling]`
+  on contract assemblies drives the sibling DI auto-load
+  (deletes ~30 lines of belt-and-suspenders
+  `Assembly.Load` + CLI sibling-listing).
+- **`WACS.ComponentModel` 0.3.6 → 0.4.0** (minor — new public
+  types):
+  - `WacsCompositeBundleAttribute` (Family + Priority) — drives
+    the attribute-driven composite-bundle discovery.
+  - `WacsDependencyInjectionSiblingAttribute` (AssemblyName) —
+    declares DI siblings on contract assemblies so
+    `HostPackageResolver` + `WasiPreview2RuntimeScope`
+    auto-load them.
+  - WIT parser relaxation: `ConsumeIdent` now accepts
+    Keyword-class tokens positionally. The wasi:webgpu
+    `vertex-format` enum has cases named `float32`, `sint32`,
+    etc. — bare primitive-type lexemes that the spec allows as
+    identifiers in non-type position but the previous strict-
+    Ident parser rejected.
+- **`WACS.Transpiler.Lib` 0.8.16 → 0.9.0** (minor — new public
+  diagnostics + emit changes):
+  - `TranspilerDiagnostics` env-var-gated trace surface
+    (`WACS_TRANSPILER_DEBUG=1`): logs direct-link emit
+    rejections (gate name + reason) and `IImports` stub
+    lenient-default serves. Closes v0's "wasm hangs at 100%
+    CPU with no output" debugging hole.
+  - First-class IL emit for `[static]X.foo` resource methods:
+    bypasses `HostInterfaceRuntime.InvokeStaticFactoryReflective`
+    when the resolver locates an impl class with `{Name}Static`.
+  - Attribute-driven composite-bundle discovery
+    (`FindBestComposite` / `SelectBestComposite` sort helper),
+    DI-sibling auto-discovery (`LoadDeclaredSiblings`).
+  - 44-row canonical-ABI shape coverage matrix
+    (`CanonicalAbiCoverageTests`) locks every CLR↔wasm shape
+    `DirectLinkedImportEmit.CanEmitDirect` currently accepts.
+- **`WACS.Cli` 1.7.8 → 1.8.0** (minor — behavior change for
+  `--windowed`):
+  - New `--trace-imports` flag (point-level addition by
+    itself) toggles `TranspilerDiagnostics.Enabled` for the
+    run.
+  - Phase 2 quit-shutdown: `ExecuteWindowed` subscribes to the
+    SDL backend's `QuitRequested` event (Cmd-Q / window close
+    / Alt-F4 / SIGTERM) and cancels the wasm task's
+    `CancellationTokenSource` on signal. If the wasm guest
+    doesn't observe cancellation within 100ms (typical for
+    `poll()`-wedged guests), the host process-exits with the
+    last wasm-produced exit code instead of hanging until
+    Ctrl-C.
+  - `ResolveHostPackages` collapses: `--wasip2` / `--wasi-nn`
+    / `--wasi-gfx` name only the contract assemblies now; the
+    DI siblings auto-load via the attribute.
+- **`WACS` 0.15.19 → 0.15.20** (point): WIT parser carries the
+  ConsumeIdent relaxation (lives in `Wacs.Core` via the
+  `Wacs.ComponentModel` package's source tree).
+
+### Family tag
+
+`WACS-WASI-GFX-v0.2.0` — the family-wide minor bump anchors the
+new `WACS.WASI.GFX.Webgpu` sibling at its 0.1.0 baseline plus
+the capability-changing `WACS.WASI.GFX` + `WACS.WASI.GFX.Silk`
+minor bumps. No previous `WACS-WASI-GFX-v*` tag existed; the v0
+ship in commit `81b07e1c` predated the family-tag convention.
+
+### Parity fixture
+
+`Spec.Test/components/fixtures/wasi-webgpu-hello/` — minimal
+Rust component built against the `wasi:webgpu@0.0.1` wire
+surface. Calls `get-gpu`, `gpu.get-preferred-canvas-format`,
+`gpu.wgsl-language-features`, `wgsl-language-features.has`, and
+the matching `[resource-drop]`s. Traps via `unreachable!()` on
+expectation mismatch — successful `start()` return signals all
+wire-form decoding landed correctly. Pre-built
+`wasm/hello.component.wasm` (16 KB) checked in.
+`hello_compute` / `skybox` full-pipeline parity fixtures land
+alongside the wgpu-native dispatcher follow-up.
+
 ## WACS.WASI.GFX 0.1.0 / WACS.WASI.GFX.Silk 0.1.0 / WACS.WASI.GFX.DependencyInjection 0.1.0 / WACS.ComponentModel 0.3.6 / WACS.Transpiler.Lib 0.8.16 / WACS.WASI.Preview2.DependencyInjection 0.2.1 / WACS.Cli 1.7.8 — wasi-gfx host bindings (v0)
 
 Initial release of host bindings for the

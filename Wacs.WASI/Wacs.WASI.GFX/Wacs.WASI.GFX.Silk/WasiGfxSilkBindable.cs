@@ -7,6 +7,7 @@
 
 using System;
 using Wacs.Core.Runtime;
+using Wacs.WASI.GFX.Webgpu;
 using Wacs.WASI.Preview2;
 using Wacs.WASI.Preview2.HostBinding;
 using Wacs.WASI.Preview2.Io;
@@ -39,6 +40,16 @@ namespace Wacs.WASI.GFX.Silk
         public WasiGfxHost? Host { get; private set; }
         public WasiPreview2Host? Preview2Host { get; private set; }
         public ResourceContext? SharedResources { get; private set; }
+
+        /// <summary>The matching webgpu backend + host.
+        /// Constructed alongside the CPU pair so the same Silk
+        /// bindable serves wasi:graphics-context /
+        /// wasi:frame-buffer / wasi:surface (CPU) AND
+        /// wasi:webgpu (GPU) imports through one <c>--bind</c>.
+        /// <see cref="GpuBackend"/> is null only when
+        /// <see cref="BindToRuntime"/> hasn't run yet.</summary>
+        public SilkGpuBackend? GpuBackend { get; private set; }
+        public WasiWebgpuHost? WebgpuHost { get; private set; }
 
         /// <summary>
         /// Optional pre-constructed backend the CLI's
@@ -84,6 +95,42 @@ namespace Wacs.WASI.GFX.Silk
                 .WithBackend(Backend)
                 .WithSharedResources(SharedResources));
 
+            // Wire the webgpu sibling alongside. The webgpu host's
+            // [static]gpu-texture.from-graphics-buffer needs to
+            // resolve an abstract-buffer wasm handle to the host-
+            // side IAbstractBuffer that lives in the wasi-gfx
+            // sibling host's table. Bridge by closure since both
+            // hosts share this bindable's scope. Guests that don't
+            // import wasi:webgpu/webgpu@0.0.1 never reach the
+            // bridge — the bindings are registered regardless,
+            // but the resolver only fires on actual GPU use.
+            var cpuHost = Host;
+            GpuBackend = new SilkGpuBackend();
+            WebgpuHost = runtime.UseWasiWebgpu(b => b
+                .WithBackend(GpuBackend)
+                .WithSharedResources(SharedResources)
+                .WithAbstractBufferResolver(handle =>
+                    cpuHost.AbstractBuffers.Get(handle)
+                        as IAbstractBuffer)
+                .WithGraphicsContextResolver(handle =>
+                {
+                    // Two storage shapes share this table:
+                    //   - Interpreter path: SPI IGraphicsContext
+                    //     instances allocated by the wasi:graphics-
+                    //     context.context constructor binding.
+                    //   - DI / transpiler path: DI Context wrappers
+                    //     (already implement the wit-generated
+                    //     IContext directly).
+                    // Take whichever shape is in the table and
+                    // present an IContext to the webgpu binding.
+                    var obj = cpuHost.Contexts.Get(handle);
+                    if (obj is Wacs.WASI.GFX.GraphicsContext.IContext ic)
+                        return ic;
+                    if (obj is Wacs.WASI.GFX.IGraphicsContext spi)
+                        return new SpiContextAdapter(spi);
+                    return null;
+                }));
+
             // Set the AppDomain-wide ambient so the transpiler-
             // direct-link path's resource constructors (Context,
             // Surface, Device, Buffer in Wacs.WASI.GFX.
@@ -92,55 +139,61 @@ namespace Wacs.WASI.GFX.Silk
             // parameterless ctor.
             WasiGfxAmbient.SetBackend(Backend);
 
-            // Force-load the DependencyInjection assembly so
-            // HostPackageResolver's AppDomain walk picks up our
-            // per-resource impl classes (Context, Surface,
-            // Device, Buffer). .NET would otherwise lazy-load
-            // it only on first type touch, leaving the resolver
-            // to fall back to delegate dispatch on --wasip2 +
-            // --wasi-gfx — which never resolves and hangs the
-            // wasm guest. Silk has a ProjectReference to DI for
-            // this same reason; the explicit Assembly.Load is
-            // the belt-and-suspenders that survives a future
-            // ProjectReference cleanup.
-            try
-            {
-                var diAsm = System.Reflection.Assembly.Load(
-                    "Wacs.WASI.GFX.DependencyInjection");
-                Wacs.WASI.GFX.GfxLog.Trace(
-                    "WasiGfxSilkBindable.BindToRuntime: loaded "
-                    + diAsm.FullName);
-                // Force-touch type symbols so the resolver sees them
-                // when it walks AppDomain. Some .NET runtimes won't
-                // populate GetExportedTypes consistently until
-                // GetType is called.
-                var ctxType = diAsm.GetType(
-                    "Wacs.WASI.GFX.DependencyInjection.Context");
-                var surfType = diAsm.GetType(
-                    "Wacs.WASI.GFX.DependencyInjection.Surface");
-                Wacs.WASI.GFX.GfxLog.Trace(
-                    "WasiGfxSilkBindable.BindToRuntime: ctxType="
-                    + (ctxType?.FullName ?? "<null>")
-                    + " surfType="
-                    + (surfType?.FullName ?? "<null>"));
-            }
-            catch (Exception ex)
-            {
-                Wacs.WASI.GFX.GfxLog.Trace(
-                    "WasiGfxSilkBindable.BindToRuntime: DI load failed: "
-                    + ex.Message);
-            }
+            // 1c: the explicit Assembly.Load of
+            // Wacs.WASI.GFX.DependencyInjection is now driven by
+            // [WacsDependencyInjectionSibling] on the Wacs.WASI.GFX
+            // contract assembly. HostPackageResolver +
+            // WasiPreview2RuntimeScope read that attribute on the
+            // first scan and Assembly.Load the sibling for us — no
+            // belt-and-suspenders here.
             Wacs.WASI.GFX.GfxLog.Trace(
                 "WasiGfxSilkBindable.BindToRuntime: done");
         }
 
         public void Dispose()
         {
+            WebgpuHost?.Dispose();
             Host?.Dispose();
             Preview2Host = null;
             SharedResources = null;
             Backend = null;
             Host = null;
+            GpuBackend = null;
+            WebgpuHost = null;
+        }
+
+        // Adapts an SPI IGraphicsContext to the wit-generated
+        // wasi:graphics-context.context interface so the webgpu
+        // device's ConnectGraphicsContext (which takes IContext)
+        // can consume contexts the wasi-gfx interpreter binding
+        // stored as SPI instances. Create() is a no-op — the
+        // SPI instance is already constructed.
+        internal sealed class SpiContextAdapter
+            : Wacs.WASI.GFX.GraphicsContext.IContext
+        {
+            internal Wacs.WASI.GFX.IGraphicsContext Inner { get; }
+            public SpiContextAdapter(Wacs.WASI.GFX.IGraphicsContext inner)
+            {
+                Inner = inner ?? throw new ArgumentNullException(nameof(inner));
+            }
+            public void Create() { /* already constructed */ }
+            public Wacs.WASI.GFX.GraphicsContext.IAbstractBuffer
+                GetCurrentBuffer()
+            {
+                var buf = Inner.GetCurrentBuffer();
+                return new SpiAbstractBufferAdapter(buf);
+            }
+            public void Present() => Inner.Present();
+        }
+
+        private sealed class SpiAbstractBufferAdapter
+            : Wacs.WASI.GFX.GraphicsContext.IAbstractBuffer
+        {
+            public Wacs.WASI.GFX.IAbstractBuffer Inner { get; }
+            public SpiAbstractBufferAdapter(Wacs.WASI.GFX.IAbstractBuffer inner)
+            {
+                Inner = inner ?? throw new ArgumentNullException(nameof(inner));
+            }
         }
     }
 }

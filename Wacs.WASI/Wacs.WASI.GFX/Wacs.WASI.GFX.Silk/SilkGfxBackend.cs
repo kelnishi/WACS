@@ -14,7 +14,7 @@ using Wacs.WASI.GFX.Types;
 namespace Wacs.WASI.GFX.Silk
 {
     /// <summary>
-    /// Silk.NET/SDL backend for wasi-gfx v0. Implements
+    /// Silk.NET/SDL backend for wasi-gfx. Implements
     /// <see cref="IBackend"/> against SDL2 via Silk.NET. Owns
     /// the SDL_Init lifecycle, a <see cref="MainThreadDispatcher"/>
     /// for marshaling window/render calls onto the main
@@ -24,8 +24,8 @@ namespace Wacs.WASI.GFX.Silk
     /// (CreateSurface etc.) marshal through the dispatcher. If
     /// the embedder hasn't called <see cref="RunMainLoop"/>
     /// yet, the dispatcher executes inline on the caller's
-    /// thread — fine on Linux/Windows for tests, racy on
-    /// macOS but accepted for v0.</para>
+    /// thread — fine on Linux/Windows for tests, racy on macOS
+    /// but tolerated.</para>
     /// </summary>
     public sealed class SilkGfxBackend : IBackend
     {
@@ -35,6 +35,29 @@ namespace Wacs.WASI.GFX.Silk
             = new ConcurrentDictionary<uint, SilkSurface>();
         private int _sdlInitialized;
         private bool _disposed;
+        private int _quitRequested;
+
+        /// <summary>
+        /// Fires once on the first OS quit signal observed by the
+        /// event pump — SDL_QUIT (Cmd-Q on macOS, Alt-F4 on
+        /// Windows, the window-decoration close button, or a
+        /// process SIGTERM that SDL forwards). Embedders subscribe
+        /// to drive their cancellation: cancel the wasm task's
+        /// CancellationTokenSource, signal Pollables, or
+        /// <c>Environment.Exit</c>. Raises on the main (event-
+        /// pump) thread. Idempotent — only fires the first time;
+        /// <see cref="IsQuitRequested"/> stays true for the rest
+        /// of the process lifetime.
+        ///
+        /// <para>Subscribers must be tolerant of being invoked
+        /// once and only once.</para>
+        /// </summary>
+        public event Action? QuitRequested;
+
+        /// <summary>True once the event pump has observed an OS
+        /// quit signal. Sticky.</summary>
+        public bool IsQuitRequested
+            => Volatile.Read(ref _quitRequested) != 0;
 
         public SilkGfxBackend()
         {
@@ -117,7 +140,8 @@ namespace Wacs.WASI.GFX.Silk
             // requestAnimationFrame-style loops get woken. The
             // 16ms sleep targets ~60Hz; not precise.
             long tick = 0;
-            while (!ct.IsCancellationRequested)
+            while (!ct.IsCancellationRequested
+                && !IsQuitRequested)
             {
                 _dispatcher.DrainPending();
 
@@ -162,11 +186,16 @@ namespace Wacs.WASI.GFX.Silk
                     OnKey(ref ev, down: false);
                     break;
                 case EventType.Quit:
-                    // App-level quit; v0 lets the embedder's
-                    // cancellation token drive shutdown. Quit
-                    // events from the OS reach the guest as a
-                    // resize/key event from its perspective —
-                    // ignored here.
+                    // App-level quit (Cmd-Q on macOS, close
+                    // button on the last-remaining window, Alt-F4
+                    // on Windows, SIGTERM forwarded by SDL).
+                    // Signal subscribers and stop the event pump on
+                    // the next iteration via IsQuitRequested. The
+                    // embedder's QuitRequested handler does any
+                    // wasm-side cleanup (cancel the wasm task,
+                    // release surfaces); the backend just emits
+                    // the signal.
+                    OnQuitSignal();
                     break;
             }
         }
@@ -185,7 +214,32 @@ namespace Wacs.WASI.GFX.Silk
                 case WindowEventID.Resized:
                     surface.OnOsResize((uint)ev.Window.Data1, (uint)ev.Window.Data2);
                     break;
+                case WindowEventID.Close:
+                    // Per-window close. Only one surface is
+                    // supported at a time today, so per-window
+                    // close collapses to a process-level quit
+                    // (matches the SDL_QUIT path). Multi-window
+                    // support would route the close to the
+                    // specific surface and only signal quit when
+                    // the last surface closes.
+                    _surfacesByWindowId.TryRemove(wid, out _);
+                    if (_surfacesByWindowId.IsEmpty)
+                        OnQuitSignal();
+                    break;
             }
+        }
+
+        // Fire QuitRequested at most once. Sticky so the pump
+        // loop's next iteration exits via IsQuitRequested even if
+        // the subscriber doesn't cancel the token immediately.
+        private void OnQuitSignal()
+        {
+            if (Interlocked.CompareExchange(
+                    ref _quitRequested, 1, 0) != 0)
+                return;
+            GfxLog.Trace("SilkGfxBackend: OS quit signal; raising "
+                + "QuitRequested");
+            QuitRequested?.Invoke();
         }
 
         private void OnMouseMotion(ref Event ev)
@@ -213,9 +267,9 @@ namespace Wacs.WASI.GFX.Silk
             var key = SdlKeyMapping.FromScancode((Scancode)ev.Key.Keysym.Scancode);
             var (alt, ctrl, meta, shift) = SdlKeyMapping.Modifiers(
                 (Keymod)ev.Key.Keysym.Mod);
-            // v0 leaves text=null; the IME / text-input flow
-            // is wired through SDL_TEXTINPUT events which we
-            // don't enable in v0 (would need SDL_StartTextInput).
+            // text=null; the IME / text-input flow is wired
+            // through SDL_TEXTINPUT events, which aren't enabled
+            // here (would need SDL_StartTextInput).
             if (down) surface.OnKeyDown(key, null, alt, ctrl, meta, shift);
             else      surface.OnKeyUp(key, null, alt, ctrl, meta, shift);
         }

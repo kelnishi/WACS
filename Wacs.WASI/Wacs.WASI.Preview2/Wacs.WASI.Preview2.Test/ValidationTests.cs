@@ -5,6 +5,7 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+using System;
 using System.IO;
 using System.Linq;
 using Microsoft.Extensions.DependencyInjection;
@@ -341,9 +342,28 @@ namespace Wacs.WASI.Preview2.Test
             var asm = typeof(Wacs.WASI.Preview2.Cli.CliBindings).Assembly;
             var report = linker.Validate(WitContract.FromAssembly(asm));
 
-            Assert.True(report.IsClean,
+            // v1 phase 1i: IoBindings registers wasi:io/error +
+            // wasi:io/poll handlers at every shape-stable point
+            // release (0.2.0–0.2.8). The contract-side WIT only
+            // declares 0.2.8 — by design — so the earlier versions
+            // surface as ExtraBinding drift. Filter them out: any
+            // wasi:io/{error,poll}@0.2.0..0.2.7 ExtraBinding is
+            // expected compatibility scaffolding, not real drift.
+            bool IsIoVersionCompatShim(ValidationIssue i)
+                => i.Kind == ValidationIssueKind.ExtraBinding
+                    && (i.Module.StartsWith("wasi:io/error@0.2.",
+                            StringComparison.Ordinal)
+                        || i.Module.StartsWith("wasi:io/poll@0.2.",
+                            StringComparison.Ordinal))
+                    && !i.Module.EndsWith("@0.2.8",
+                        StringComparison.Ordinal);
+
+            var unexpected = report.Issues
+                .Where(i => !IsIoVersionCompatShim(i))
+                .ToList();
+            Assert.True(unexpected.Count == 0,
                 "Unexpected canon-ABI drift: "
-                + string.Join("; ", report.Issues.Select(i =>
+                + string.Join("; ", unexpected.Select(i =>
                     i.Kind + " " + i.Module + "/" + i.Entity)));
         }
 

@@ -60,9 +60,9 @@ namespace Wacs.WASI.GFX
         private Wacs.WASI.Preview2.HostBinding.ResourceContext? _shared;
 
         /// <summary>
-        /// Set the backend for this host. v0 supports one
-        /// backend per host; subsequent calls replace the
-        /// previous value (last-write-wins).
+        /// Set the backend for this host. One backend per host;
+        /// subsequent calls replace the previous value
+        /// (last-write-wins).
         /// </summary>
         public WasiGfxBuilder WithBackend(IBackend backend)
         {

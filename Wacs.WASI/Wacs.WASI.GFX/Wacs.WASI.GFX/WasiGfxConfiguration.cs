@@ -23,9 +23,9 @@ namespace Wacs.WASI.GFX
     {
         /// <summary>
         /// The single backend that handles surface, frame-buffer,
-        /// and graphics-context for this host. v1 will add a
-        /// separate slot for webgpu when that package lands;
-        /// for v0, one backend covers everything it implements.
+        /// and graphics-context for this host. One backend covers
+        /// every package the host serves; a separate webgpu host
+        /// holds the matching GPU backend.
         /// </summary>
         public IBackend? Backend { get; set; }
 

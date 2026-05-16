@@ -6,7 +6,7 @@
         <Title>Wacs WASI-NN LlamaSharp backend</Title>
         <PackageId>WACS.WASI.NN.LlamaSharp</PackageId>
         <Authors>Kelvin Nishikawa</Authors>
-        <Description>LlamaSharp / llama.cpp backend for WACS.WASI.NN. Implements GraphEncoding.ggml on the WasmEdge convention (load-by-name plus U8 tensors carrying UTF-8 prompt and response text). Models are resolved by name through an embedder-supplied registry — model files are GB-scale and not embedded in the wasm.</Description>
+        <Description>LlamaSharp / llama.cpp backend for WACS.WASI.NN. Implements GraphEncoding.ggml on the WasmEdge convention (load-by-name plus U8 tensors carrying UTF-8 prompt and response text). Models are resolved by name through an embedder-supplied registry — model files are GB-scale and not embedded in the wasm. Tracks the wasi-nn proposal at WASI Phase 2 — the WIT surface may change as the proposal evolves.</Description>
         <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
         <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>

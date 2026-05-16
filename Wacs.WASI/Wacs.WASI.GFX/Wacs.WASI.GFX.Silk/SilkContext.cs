@@ -18,7 +18,7 @@ namespace Wacs.WASI.GFX.Silk
     /// this context; <see cref="Present"/> blits the back-buffer
     /// bytes to the connected surface and renders.
     ///
-    /// <para>v0 contract: one surface per context. Multi-surface
+    /// <para>Contract: one surface per context. Multi-surface
     /// composition is out of scope until the WIT clarifies it.</para>
     /// </summary>
     internal sealed class SilkContext : IGraphicsContext
@@ -27,6 +27,12 @@ namespace Wacs.WASI.GFX.Silk
         internal byte[] BackBuffer { get; private set; } = Array.Empty<byte>();
         internal int BackBufferWidth { get; private set; }
         internal int BackBufferHeight { get; private set; }
+        /// <summary>Set by <c>SilkGpuDevice.ConnectGraphicsContext</c>
+        /// when a webgpu device takes over the frame loop. While
+        /// non-null, <see cref="GetCurrentBuffer"/> returns a GPU-
+        /// flavored abstract-buffer and <see cref="Present"/>
+        /// routes through wgpu's surface-present.</summary>
+        internal SilkGpuConnection? GpuConnection { get; set; }
 
         internal void ConnectSurface(SilkSurface surface)
         {
@@ -54,6 +60,11 @@ namespace Wacs.WASI.GFX.Silk
                 throw new WasiGfxException(
                     "context.get-current-buffer called before any "
                     + "surface was connected to this context.");
+            // GPU mode: hand back a GPU-flavored buffer that
+            // resolves to the surface's current swap-chain texture
+            // when the webgpu side lifts it via from-graphics-buffer.
+            if (GpuConnection != null)
+                return new SilkGpuAbstractBuffer(GpuConnection);
             EnsureBackBuffer();
             return new SilkAbstractBuffer(this);
         }
@@ -64,6 +75,14 @@ namespace Wacs.WASI.GFX.Silk
                 throw new WasiGfxException(
                     "context.present called before any surface "
                     + "was connected to this context.");
+            // GPU mode: present routes through wgpu's swap-chain.
+            // The SDL window's surface is already attached to wgpu
+            // via the Metal layer, so we don't also do SDL's blit.
+            if (GpuConnection != null)
+            {
+                GpuConnection.Present();
+                return;
+            }
             Surface.Blit(BackBuffer, BackBufferWidth, BackBufferHeight);
         }
 
@@ -83,7 +102,7 @@ namespace Wacs.WASI.GFX.Silk
     /// returned frame-buffer-buffer talks to the context
     /// directly.
     /// </summary>
-    internal sealed class SilkAbstractBuffer : IAbstractBuffer
+    internal sealed class SilkAbstractBuffer : ICpuAbstractBuffer
     {
         internal SilkContext Context { get; }
 
@@ -97,11 +116,11 @@ namespace Wacs.WASI.GFX.Silk
 
     /// <summary>
     /// CPU-path frame-buffer device for the Silk backend.
-    /// Stores the context it's connected to so future
-    /// multi-device flows have a hook, but the static
+    /// Stores the context it's connected to as a hook for
+    /// future multi-device flows; today the static
     /// <c>buffer.from-graphics-buffer</c> path reads the
-    /// context off the abstract-buffer directly — the device
-    /// reference is informational in v0.
+    /// context off the abstract-buffer directly so the device
+    /// reference is informational.
     /// </summary>
     internal sealed class SilkFrameBufferDevice : IFrameBufferDevice
     {
@@ -119,6 +138,18 @@ namespace Wacs.WASI.GFX.Silk
 
         public IFrameBufferBuffer FromGraphicsBuffer(IAbstractBuffer src)
         {
+            // Downcast goes through ICpuAbstractBuffer so a
+            // guest accidentally handing a GPU-surface buffer to
+            // the CPU frame-buffer path gets a clear "wrong kind"
+            // error instead of a backend-specific cast failure.
+            if (src is not ICpuAbstractBuffer)
+                throw new WasiGfxException(
+                    "device.FromGraphicsBuffer: source is not a "
+                    + "CPU-path abstract-buffer (got GPU-path or "
+                    + "third-party type). The frame-buffer device "
+                    + "only consumes ICpuAbstractBuffer; webgpu "
+                    + "guests should use "
+                    + "[static]gpu-texture.from-graphics-buffer.");
             if (src is not SilkAbstractBuffer sab)
                 throw new WasiGfxException(
                     "device.FromGraphicsBuffer: source is not a "

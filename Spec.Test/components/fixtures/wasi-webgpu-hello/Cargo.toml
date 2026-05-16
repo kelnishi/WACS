@@ -1,0 +1,25 @@
+[package]
+name = "wasi-webgpu-hello"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# v1 phase 3 session 10 parity fixture for WACS.WASI.GFX.Webgpu.
+# Exercises the wired bindings that work against the host's stub
+# backend today: get-gpu, gpu.get-preferred-canvas-format,
+# gpu.wgsl-language-features, wgsl-language-features.has, and
+# the matching [resource-drop]s.
+#
+# Full hello_compute / skybox parity (request-adapter through
+# pipeline dispatch) waits on v1 phase 3 session 11's Silk wgpu
+# dispatcher.
+
+[dependencies]
+wit-bindgen = "0.41"
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = "s"
+strip = true

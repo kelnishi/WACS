@@ -19,10 +19,10 @@ namespace Wacs.WASI.GFX.Silk
     /// scancodes have the same semantics, so this is a
     /// near-1:1 mapping.
     ///
-    /// <para>v0 covers the writing-system keys (digits +
-    /// letters), the common control / arrow / numpad / F-key
-    /// blocks, and the basic modifiers + audio/media subset.
-    /// Unmapped scancodes return null — the WIT uses
+    /// <para>Covers the writing-system keys (digits + letters),
+    /// the common control / arrow / numpad / F-key blocks, and
+    /// the basic modifiers + audio/media subset. Unmapped
+    /// scancodes return null — the WIT uses
     /// <c>option&lt;key&gt;</c> for that case.</para>
     /// </summary>
     internal static class SdlKeyMapping

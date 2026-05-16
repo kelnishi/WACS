@@ -6,7 +6,7 @@
         <Title>WACS WASI-NN — DI extensions</Title>
         <PackageId>WACS.WASI.NN.DependencyInjection</PackageId>
         <Authors>Kelvin Nishikawa</Authors>
-        <Description>Microsoft.Extensions.DependencyInjection extension methods for WACS.WASI.NN. Registers the WasiNNBundle that the transpiler's HostPackageResolver direct-links wasi:nn imports against — symmetric with WACS.WASI.Preview2.DependencyInjection.</Description>
+        <Description>Microsoft.Extensions.DependencyInjection extension methods for WACS.WASI.NN. Registers the WasiNNBundle that the transpiler's HostPackageResolver direct-links wasi:nn imports against — symmetric with WACS.WASI.Preview2.DependencyInjection. Tracks the wasi-nn proposal at WASI Phase 2 — the WIT surface may change as the proposal evolves.</Description>
         <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
         <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
@@ -43,6 +43,17 @@
              the composite path needs the Preview2 types. -->
         <ProjectReference Include="..\..\Wacs.WASI.Preview2\Wacs.WASI.Preview2.DependencyInjection\Wacs.WASI.Preview2.DependencyInjection.csproj" />
         <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.0" />
+
+        <!-- v1 phase 1 1h: WasiPreview2NNBundle is a partial
+             class auto-completed by the CompositeBundleGenerator. -->
+        <ProjectReference Include="..\..\..\Wacs.ComponentModel\Wacs.ComponentModel.Bindgen.SourceGen\Wacs.ComponentModel.Bindgen.SourceGen.csproj"
+                          OutputItemType="Analyzer"
+                          ReferenceOutputAssembly="false" />
     </ItemGroup>
+
+    <PropertyGroup>
+        <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+        <CompilerGeneratedFilesOutputPath>obj/Generated</CompilerGeneratedFilesOutputPath>
+    </PropertyGroup>
 
 </Project>

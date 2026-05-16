@@ -21,6 +21,7 @@ namespace Wacs.WASI.GFX.DependencyInjection
     /// </summary>
     public sealed class Context : GenGfxCtx.IContext, IDisposable
     {
+        private readonly WasiGfxBundle? _bundle;
         internal SpiGfx.IGraphicsContext Inner { get; private set; } = null!;
         private bool _disposed;
 
@@ -29,15 +30,40 @@ namespace Wacs.WASI.GFX.DependencyInjection
             GfxLog.Trace("DI.Context: type loaded into AppDomain");
         }
 
+        /// <summary>Parameterless ctor used as a back-compat
+        /// fallback (the transpiler emits this when no
+        /// bundle-taking ctor is found on the impl). Current
+        /// transpiler emit prefers the
+        /// <see cref="Context(WasiGfxBundle)"/> ctor and threads
+        /// the backend through the bundle — letting multi-runtime
+        /// embedders run separate <see cref="IBackend"/>s in one
+        /// process.</summary>
+        [Obsolete("Prefer the bundle-taking ctor — multi-runtime " +
+            "support drops the WasiGfxAmbient static. Kept for " +
+            "transpiler back-compat with the earlier emit shape.")]
         public Context()
         {
-            GfxLog.Trace("DI.Context: ctor invoked (Activator.CreateInstance)");
+            GfxLog.Trace("DI.Context: ctor invoked (Activator.CreateInstance, ambient path)");
+        }
+
+        public Context(WasiGfxBundle bundle)
+        {
+            _bundle = bundle ?? throw new ArgumentNullException(nameof(bundle));
+            GfxLog.Trace("DI.Context: ctor invoked (bundle path)");
         }
 
         public void Create()
         {
             GfxLog.Trace("DI.Context.Create: invoked");
-            var backend = WasiGfxAmbient.RequireBackend();
+            var backend = _bundle?.Configuration.Backend
+#pragma warning disable CS0618 // Type or member is obsolete
+                ?? WasiGfxAmbient.RequireBackend();
+#pragma warning restore CS0618
+            if (backend == null)
+                throw new Types.WasiGfxException(
+                    "DI.Context.Create: no backend available. "
+                    + "Construct via Context(WasiGfxBundle) or set "
+                    + "the legacy WasiGfxAmbient.Backend.");
             Inner = backend.CreateContext();
         }
 

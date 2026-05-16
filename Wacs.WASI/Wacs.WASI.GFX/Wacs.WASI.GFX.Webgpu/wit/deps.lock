@@ -1,0 +1,19 @@
+# Pinned upstream commit. Replay with:
+#   curl -fsSL https://raw.githubusercontent.com/WebAssembly/wasi-gfx/03c3e954937750270b0f16fcb791a5ca0e35d741/webgpu/webgpu.wit -o wit/webgpu.wit
+# Plus the webgpu/deps/io tree (poll, error, streams, world) and
+# webgpu/deps/graphics-context. wit/deps/{io,graphics-context} are
+# byte-vendored from the same commit's webgpu/deps subtree (which
+# is identical to the surface/deps subtree we already vendor in
+# Wacs.WASI.GFX).
+[wasi-gfx]
+url = "https://github.com/WebAssembly/wasi-gfx"
+sha = "03c3e954937750270b0f16fcb791a5ca0e35d741"
+packages = [
+    "wasi:webgpu@0.0.1",
+]
+phase = 2
+
+# Preview2's IoBindings binds every shape-stable wasi:io@0.2.x
+# version, so this package is upstream-verbatim — no deviations.
+[deviations]
+# (none)

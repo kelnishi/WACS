@@ -19,13 +19,28 @@ namespace Wacs.WASI.GFX.DependencyInjection
     /// </summary>
     public sealed class Device : GenFb.IDevice, IDisposable
     {
+        private readonly WasiGfxBundle? _bundle;
         internal SpiGfx.IFrameBufferDevice Inner { get; private set; } = null!;
         private bool _disposed;
+
+        [Obsolete("Prefer Device(WasiGfxBundle).")]
+        public Device() { }
+
+        public Device(WasiGfxBundle bundle)
+        {
+            _bundle = bundle ?? throw new ArgumentNullException(nameof(bundle));
+        }
 
         public void Create()
         {
             GfxLog.Trace("DI.Device.Create: invoked");
-            var backend = WasiGfxAmbient.RequireBackend();
+            var backend = _bundle?.Configuration.Backend
+#pragma warning disable CS0618
+                ?? WasiGfxAmbient.RequireBackend();
+#pragma warning restore CS0618
+            if (backend == null)
+                throw new Types.WasiGfxException(
+                    "DI.Device.Create: no backend available.");
             Inner = backend.CreateFrameBufferDevice();
         }
 
@@ -64,6 +79,13 @@ namespace Wacs.WASI.GFX.DependencyInjection
         internal SpiGfx.IFrameBufferBuffer Inner { get; private set; } = null!;
         private bool _disposed;
 
+        // FromGraphicsBufferStatic mints these via `new Buffer()`
+        // and assigns Inner; no public bundle-taking ctor needed
+        // because the static factory above already resolved the
+        // backend (currently via the ambient — see note inside).
+        [Obsolete("Internal mint path only — use FromGraphicsBufferStatic.")]
+        public Buffer() { }
+
         /// <summary>Static factory for the WIT
         /// <c>[static]buffer.from-graphics-buffer</c> wire shape.</summary>
         public static Buffer FromGraphicsBufferStatic(
@@ -79,12 +101,21 @@ namespace Wacs.WASI.GFX.DependencyInjection
             // The static call has no surface/device handle; the
             // backend's CPU-path frame-buffer device is the single
             // wasi:frame-buffer.device that was constructed.
-            // SilkFrameBufferDevice supports FromGraphicsBuffer
-            // without a connect-step.
+            // The WIT [static]buffer.from-graphics-buffer signature
+            // still ties this to the ambient — a static method
+            // can't take the bundle through normal ctor injection.
+            // The transpiler-direct-link path for [static]
+            // resource factories uses the impl's static method
+            // directly, so future work could pass the bundle
+            // through a thread-local set at dispatch time.
+#pragma warning disable CS0618
             var backend = WasiGfxAmbient.RequireBackend();
+#pragma warning restore CS0618
             var dev = backend.CreateFrameBufferDevice();
             var inner = dev.FromGraphicsBuffer(ab.Inner);
+#pragma warning disable CS0618 // Type or member is obsolete
             var buf = new Buffer();
+#pragma warning restore CS0618
             buf.Inner = inner;
             return buf;
         }

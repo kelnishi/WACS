@@ -29,7 +29,7 @@ namespace Wacs.WASI.GFX.Types
     /// the next frame (equivalent of
     /// <c>requestAnimationFrame</c>). The WIT carries a
     /// placeholder <c>nothing: bool</c> because empty records
-    /// aren't representable; v0 ignores the field.
+    /// aren't representable; the field is ignored.
     /// </summary>
     public readonly struct FrameEvent
     {
@@ -43,8 +43,8 @@ namespace Wacs.WASI.GFX.Types
 
     /// <summary>
     /// <c>wasi:surface.pointer-event</c> — mouse / touch /
-    /// pencil position update. v0 carries x/y only; buttons
-    /// and pressure are deferred to a future WIT cut.
+    /// pencil position update. Carries x/y only; buttons and
+    /// pressure aren't part of the current WIT.
     /// </summary>
     public readonly struct PointerEvent
     {

@@ -1,0 +1,13 @@
+package wacs:game-of-life-windowed;
+
+/// Windowed standalone demo world. Imports wasi:surface for
+/// the window + input events, wasi:graphics-context for the
+/// CPU↔GPU bridge, wasi:webgpu for the compute + render
+/// dispatch, and wasi:io/poll for the per-frame poll().
+world game-of-life-windowed {
+    include wasi:surface/imports@0.0.1;
+    include wasi:graphics-context/imports@0.0.1;
+    include wasi:webgpu/imports@0.0.1;
+
+    export start: func();
+}

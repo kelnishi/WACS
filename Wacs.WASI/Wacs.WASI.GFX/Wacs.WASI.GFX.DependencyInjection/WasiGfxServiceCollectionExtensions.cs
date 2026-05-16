@@ -22,9 +22,9 @@ namespace Wacs.WASI.GFX.DependencyInjection
             = WasiGfxConfiguration.DefaultConfiguration();
 
         /// <summary>
-        /// Set the backend on the configuration. v0 supports
-        /// one backend per host; later calls replace earlier
-        /// ones (last-write-wins).
+        /// Set the backend on the configuration. One backend
+        /// per host; later calls replace earlier ones
+        /// (last-write-wins).
         /// </summary>
         public WasiGfxDependencyInjectionOptions WithBackend(IBackend backend)
         {

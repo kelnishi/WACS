@@ -36,7 +36,7 @@ namespace Wacs.WASI.GFX.Silk
     /// and headless usage exercise SDL without spinning up
     /// the loop — degradation, not silent breakage. On macOS
     /// this still fails when the test thread isn't the
-    /// process main thread; documented but tolerated for v0.</para>
+    /// process main thread; documented but tolerated.</para>
     /// </summary>
     internal sealed class MainThreadDispatcher
     {

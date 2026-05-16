@@ -1,0 +1,18 @@
+package wacs:hello-compute;
+
+/// Parity world for the WACS.WASI.GFX.Webgpu compute path.
+/// Imports the full wasi:webgpu surface and exports a single
+/// start() entrypoint that runs an add-one compute kernel
+/// against a real wgpu backend.
+///
+/// A successful return from start() signals the entire chain
+/// works end-to-end. Any expectation mismatch (request-adapter
+/// fails, shader compile fails, readback mismatch, etc.) traps
+/// via unreachable!() — the host test runner reads the trap as
+/// the failure signal.
+world hello-compute {
+    include wasi:webgpu/imports@0.0.1;
+
+    /// Returns nothing on success; traps on mismatch.
+    export start: func();
+}

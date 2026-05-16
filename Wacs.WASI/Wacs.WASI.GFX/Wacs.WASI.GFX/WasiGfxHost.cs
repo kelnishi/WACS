@@ -19,9 +19,9 @@ namespace Wacs.WASI.GFX
     /// <see cref="BindToRuntime"/> to wire imports onto a
     /// <see cref="WasmRuntime"/>.
     ///
-    /// <para>v0 binds canonical-ABI WIT only — wasi-gfx has no
+    /// <para>Binds canonical-ABI WIT only — wasi-gfx has no
     /// legacy WITX twin. One <see cref="IBackend"/> per host;
-    /// the backend covers all three v0 packages
+    /// the backend covers all three packages
     /// (graphics-context + surface + frame-buffer).</para>
     /// </summary>
     public sealed class WasiGfxHost : IBindable, IDisposable

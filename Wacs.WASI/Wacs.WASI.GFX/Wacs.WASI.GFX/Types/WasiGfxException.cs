@@ -12,10 +12,9 @@ namespace Wacs.WASI.GFX.Types
     /// <summary>
     /// Runtime failures inside a wasi-gfx backend. The binding
     /// layer catches this and lowers it to the right
-    /// canonical-ABI representation for the call site (most
-    /// wasi-gfx methods today don't return result&lt;_, _&gt;
-    /// — failures trap the guest. The proposal is still
-    /// Phase 2, error-modeling will tighten as it advances.)
+    /// canonical-ABI representation for the call site. Most
+    /// wasi-gfx methods today don't return result&lt;_, _&gt; —
+    /// failures trap the guest.
     /// </summary>
     public sealed class WasiGfxException : Exception
     {

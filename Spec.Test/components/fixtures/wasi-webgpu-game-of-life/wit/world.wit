@@ -1,0 +1,12 @@
+package wacs:game-of-life;
+
+/// Parity world for a Conway's Game of Life smoke test.
+/// Two compute-pass iterations over an 8×8 torus grid with two
+/// ping-ponged storage buffers; verifies the blinker oscillator
+/// returns to its initial pattern after one full period.
+world game-of-life {
+    include wasi:webgpu/imports@0.0.1;
+
+    /// Returns nothing on success; traps on mismatch.
+    export start: func();
+}

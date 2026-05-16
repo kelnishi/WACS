@@ -6,7 +6,7 @@
         <Title>Wacs WASI-NN OnnxRuntime-GenAI backend</Title>
         <PackageId>WACS.WASI.NN.OnnxRuntimeGenAI</PackageId>
         <Authors>Kelvin Nishikawa</Authors>
-        <Description>OnnxRuntime-GenAI backend for WACS.WASI.NN. Wraps Microsoft.ML.OnnxRuntimeGenAI for first-class generative LLM inference (Gemma 3, Llama, Qwen, Phi families) through wasi-nn. Exposes two compute shapes selected by named-input convention: "prompt" (utf-8) runs full tokenize -> KV-cached decode -> detokenize in one call; "input_ids" (int64) runs a single forward pass returning logits for guests that drive their own decode loop. Linked against CoreML.framework on osx-arm64 for Metal-capable acceleration where the underlying ORT EP supports it.</Description>
+        <Description>OnnxRuntime-GenAI backend for WACS.WASI.NN. Wraps Microsoft.ML.OnnxRuntimeGenAI for first-class generative LLM inference (Gemma 3, Llama, Qwen, Phi families) through wasi-nn. Exposes two compute shapes selected by named-input convention: "prompt" (utf-8) runs full tokenize -> KV-cached decode -> detokenize in one call; "input_ids" (int64) runs a single forward pass returning logits for guests that drive their own decode loop. Linked against CoreML.framework on osx-arm64 for Metal-capable acceleration where the underlying ORT EP supports it. Tracks the wasi-nn proposal at WASI Phase 2 — the WIT surface may change as the proposal evolves.</Description>
         <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
         <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>

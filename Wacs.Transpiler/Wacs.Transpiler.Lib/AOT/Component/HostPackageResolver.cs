@@ -404,6 +404,17 @@ namespace Wacs.Transpiler.AOT.Component
             if (assemblies == null) throw new ArgumentNullException(
                 nameof(assemblies));
 
+            // 1c: pre-load any DI sibling declared on the explicit
+            // contract assemblies (or on already-loaded AppDomain
+            // assemblies) via [WacsDependencyInjectionSibling]. Runs
+            // before the [WitSource] walk so any sibling-side
+            // [WitSource] interfaces are visible if a caller routes
+            // the DI assembly through FromAssemblies, and before
+            // TryFindResourceImpl is ever called so the AppDomain
+            // walk finds the SourceGen-shape impl classes
+            // (Context / Surface / Tensor / …).
+            LoadDeclaredSiblings(assemblies);
+
             var bindings = new Dictionary<(string, string), Binding>();
             var interfaceTypes = new List<Type>();
             var seenIface = new HashSet<Type>();
@@ -637,35 +648,24 @@ namespace Wacs.Transpiler.AOT.Component
 
         // Walk the loaded assemblies (and their referenced
         // assemblies) looking for a bundle type that satisfies the
-        // collected bindings. Prefers the WasiPreview2NN composite
-        // when WASI.NN is on the path (its forwarding properties
-        // cover both Preview2 and WASI.NN [WitSource] interfaces);
-        // falls back to the Preview2-only bundle otherwise.
-        // Returns null when neither is loadable — direct-link emit
-        // then falls back to the legacy delegate dispatch.
+        // collected bindings. Prefers a sibling-family composite
+        // (wasi-nn, wasi-gfx, …) when one is loaded — its forwarding
+        // properties cover both Preview2 and the sibling [WitSource]
+        // interfaces. Falls back to the Preview2-only bundle when
+        // no composite is on the load path; returns null when even
+        // Preview2 isn't loadable — direct-link emit then routes
+        // through the legacy delegate dispatch.
         private static Type? FindWasiPreview2Bundle(
             IReadOnlyList<Assembly> assemblies)
         {
-            // Prefer a composite. When a component imports both
-            // wasi:cli/* and a sibling family (wasi-nn / wasi-gfx),
-            // the composite's forwarding properties cover all bindings
-            // through one CLR object — ResolveBundleProperty's name-
-            // or-type lookup finds each one without needing emit
-            // changes. wasi-nn and wasi-gfx composites can't coexist
-            // in one process today (different families); first match
-            // wins, which mirrors how the CLI's --wasi-nn / --wasi-gfx
-            // flags route assemblies into the load list.
-            const string gfxCompositeName =
-                "Wacs.WASI.GFX.DependencyInjection.WasiPreview2GfxBundle";
-            var gfxComposite = FindBundleType(gfxCompositeName, assemblies,
-                fallbackAssembly: "Wacs.WASI.GFX.DependencyInjection");
-            if (gfxComposite != null) return gfxComposite;
-
-            const string nnCompositeName =
-                "Wacs.WASI.NN.DependencyInjection.WasiPreview2NNBundle";
-            var nnComposite = FindBundleType(nnCompositeName, assemblies,
-                fallbackAssembly: "Wacs.WASI.NN.DependencyInjection");
-            if (nnComposite != null) return nnComposite;
+            // Attribute-driven discovery: scan every loaded assembly
+            // for types carrying [WacsCompositeBundle]. Sort by
+            // Priority desc then Family asc and return the winner.
+            // The 1c sibling-load runs in FromAssemblies above, so
+            // by the time we hit this scan every declared DI sibling
+            // is already in the AppDomain.
+            var winner = FindBestComposite(assemblies);
+            if (winner != null) return winner;
 
             // Fall back to Preview2-only — for components without
             // wasi:nn or wasi-gfx imports.
@@ -673,6 +673,107 @@ namespace Wacs.Transpiler.AOT.Component
                 "Wacs.WASI.Preview2.DependencyInjection.WasiPreview2Bundle";
             return FindBundleType(preview2Name, assemblies,
                 fallbackAssembly: "Wacs.WASI.Preview2.DependencyInjection");
+        }
+
+        // Attribute-driven composite-bundle scan. Walks `assemblies`
+        // first (the caller-supplied set), then AppDomain (so a
+        // sibling DI assembly auto-loaded by reference is still
+        // visible). Highest Priority wins; ties break by Family asc
+        // for deterministic ordering across runs.
+        // Walks the declared-sibling attributes on every assembly
+        // in `assemblies` (plus any sibling-tagged assembly already
+        // loaded into the AppDomain) and Assembly.Load()s each
+        // declared sibling. Idempotent; quiet on failure (a missing
+        // sibling DLL is not fatal — the resolver simply finds
+        // fewer impls and direct-link emit falls back to delegate
+        // dispatch). Called by FindWasiPreview2Bundle before the
+        // composite walk; also re-callable from external callers
+        // that want sibling-load semantics without going through
+        // FromAssemblies.
+        internal static void LoadDeclaredSiblings(
+            IReadOnlyList<Assembly> assemblies)
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            void LoadFromAttrs(Assembly asm)
+            {
+                var attrs = asm.GetCustomAttributes(
+                    typeof(Wacs.ComponentModel.Runtime
+                        .WacsDependencyInjectionSiblingAttribute),
+                    inherit: false);
+                foreach (var raw in attrs)
+                {
+                    var attr = (Wacs.ComponentModel.Runtime
+                        .WacsDependencyInjectionSiblingAttribute)raw;
+                    if (!seen.Add(attr.AssemblyName)) continue;
+                    try { Assembly.Load(attr.AssemblyName); }
+                    catch { /* sibling not on disk — non-fatal */ }
+                }
+            }
+            foreach (var asm in assemblies) LoadFromAttrs(asm);
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                if (asm.IsDynamic) continue;
+                LoadFromAttrs(asm);
+            }
+        }
+
+        internal static Type? FindBestComposite(
+            IReadOnlyList<Assembly> assemblies)
+        {
+            var seen = new HashSet<Type>();
+            var candidates = new List<(Type Type, int Priority, string Family)>();
+            void Inspect(Assembly asm)
+            {
+                if (asm.IsDynamic) return;
+                Type[] types;
+                try { types = asm.GetExportedTypes(); }
+                catch (ReflectionTypeLoadException ex)
+                {
+                    types = ex.Types
+                        .Where(t => t != null)
+                        .Select(t => t!)
+                        .ToArray();
+                }
+                foreach (var t in types)
+                {
+                    if (!seen.Add(t)) continue;
+                    var attr = t.GetCustomAttribute<
+                        Wacs.ComponentModel.Runtime
+                            .WacsCompositeBundleAttribute>(
+                                inherit: false);
+                    if (attr == null) continue;
+                    candidates.Add((t, attr.Priority, attr.Family));
+                }
+            }
+            foreach (var asm in assemblies) Inspect(asm);
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                Inspect(asm);
+
+            return SelectBestComposite(candidates);
+        }
+
+        /// <summary>
+        /// Sort-only pick from a candidate list. Highest Priority
+        /// wins; ties break by Family ascending (lexicographic).
+        /// Returns null when the input is empty. Extracted from
+        /// <see cref="FindBestComposite"/> so tests can exercise the
+        /// selection rule without registering attributed types into
+        /// the AppDomain (which would pollute every other resolver
+        /// run in the same test process).
+        /// </summary>
+        internal static Type? SelectBestComposite(
+            IReadOnlyList<(Type Type, int Priority, string Family)> candidates)
+        {
+            if (candidates.Count == 0) return null;
+            var sorted = candidates.ToList();
+            sorted.Sort((a, b) =>
+            {
+                int p = b.Priority.CompareTo(a.Priority);
+                return p != 0 ? p
+                    : string.Compare(a.Family, b.Family,
+                        StringComparison.Ordinal);
+            });
+            return sorted[0].Type;
         }
 
         private static Type? FindBundleType(string qualifiedName,

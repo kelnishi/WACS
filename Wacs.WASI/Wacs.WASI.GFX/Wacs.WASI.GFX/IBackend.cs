@@ -28,7 +28,7 @@ namespace Wacs.WASI.GFX
     ///
     /// <para><b>Threading:</b> backends that drive OS windowing
     /// or input MUST pump their event loop on the embedder's
-    /// main thread — see <see cref="RunMainLoop"/>. v0 SPI does
+    /// main thread — see <see cref="RunMainLoop"/>. The SPI does
     /// not support background-thread event pumps; that's a macOS
     /// AppKit hard requirement we don't paper over.</para>
     /// </summary>
@@ -46,11 +46,11 @@ namespace Wacs.WASI.GFX
 
         /// <summary>
         /// Mint a <c>wasi:surface.surface</c> resource. The
-        /// surface is the drawing target — a host-owned window
-        /// in v0 — and the source of pointer/key/resize/frame
-        /// events. Width/height are advisory; backends may
-        /// substitute platform defaults (e.g. SDL falls back to
-        /// 640x480 when both are null).
+        /// surface is the drawing target — a host-owned window —
+        /// and the source of pointer/key/resize/frame events.
+        /// Width/height are advisory; backends may substitute
+        /// platform defaults (e.g. SDL falls back to 640x480
+        /// when both are null).
         /// </summary>
         ISurface CreateSurface(uint? width, uint? height);
 
@@ -106,10 +106,45 @@ namespace Wacs.WASI.GFX
     /// Host-side <c>wasi:graphics-context.abstract-buffer</c>.
     /// Opaque connector type. Frame-buffer guests turn it into
     /// a CPU pixel buffer via
-    /// <see cref="IFrameBufferDevice"/>; v1 webgpu guests will
-    /// turn it into a GPUTexture.
+    /// <see cref="IFrameBufferDevice"/>; webgpu guests turn it
+    /// into a GPUTexture via <c>[static]gpu-texture.from-graphics-buffer</c>.
+    ///
+    /// <para>Backends produce instances that implement
+    /// <em>one</em> of the two sub-interfaces
+    /// (<see cref="ICpuAbstractBuffer"/> or
+    /// <see cref="IGpuAbstractBuffer"/>) so consumers can
+    /// downcast cleanly without backend-specific knowledge. The
+    /// wasi-gfx WIT itself doesn't distinguish — a single
+    /// <c>abstract-buffer</c> handle moves through both worlds
+    /// at the wire level. Mixing kinds (e.g. handing a CPU
+    /// buffer to <c>[static]gpu-texture.from-graphics-buffer</c>)
+    /// is a backend-level error, surfaced at the consume site
+    /// rather than at the produce site.</para>
     /// </summary>
     public interface IAbstractBuffer : IDisposable
+    {
+    }
+
+    /// <summary>
+    /// Marker for an <see cref="IAbstractBuffer"/> the
+    /// <see cref="IFrameBufferDevice.FromGraphicsBuffer"/> path
+    /// can consume — a CPU-side raster surface where the bytes
+    /// are addressable by the host. Backends with a CPU
+    /// rendering target produce these from
+    /// <see cref="IGraphicsContext.GetCurrentBuffer"/>.
+    /// </summary>
+    public interface ICpuAbstractBuffer : IAbstractBuffer
+    {
+    }
+
+    /// <summary>
+    /// Marker for an <see cref="IAbstractBuffer"/> the
+    /// <c>[static]gpu-texture.from-graphics-buffer</c> path can
+    /// consume — a GPU swap-chain surface that wraps a wgpu /
+    /// vulkan / metal texture handle. Backends with an active
+    /// GPU rendering target produce these.
+    /// </summary>
+    public interface IGpuAbstractBuffer : IAbstractBuffer
     {
     }
 
@@ -120,7 +155,7 @@ namespace Wacs.WASI.GFX
     /// corresponding get-* method drains the latest event (or
     /// returns null if no event is pending since the last drain).
     ///
-    /// <para>v0 backends typically return
+    /// <para>Backends typically return
     /// <c>Wacs.WASI.Preview2.Io.ManualResetPollable</c>
     /// instances — the existing wasi-io plumbing covers the
     /// guest-side <c>pollable.ready()</c> / <c>pollable.block()</c>
@@ -169,7 +204,7 @@ namespace Wacs.WASI.GFX
     }
 
     /// <summary>
-    /// Host-side <c>wasi:frame-buffer.device</c>. v0 backends
+    /// Host-side <c>wasi:frame-buffer.device</c>. Backends
     /// expose a single device per host; the WIT supports
     /// multi-device but no current guest needs it.
     /// </summary>
@@ -197,16 +232,15 @@ namespace Wacs.WASI.GFX
 
     /// <summary>
     /// Host-side <c>wasi:frame-buffer.buffer</c>. Raw pixel
-    /// bytes — v0 hard-codes the layout as RGBA8 packed,
-    /// width*height*4 bytes. The WIT signature uses
-    /// <c>list&lt;u8&gt;</c> which is intentionally untyped on
-    /// the format; format negotiation is deferred to a future
-    /// proposal cut.
+    /// bytes hard-coded as RGBA8 packed, width*height*4 bytes.
+    /// The WIT signature uses <c>list&lt;u8&gt;</c> which is
+    /// intentionally untyped on the format; format negotiation
+    /// is not part of the current WIT.
     /// </summary>
     public interface IFrameBufferBuffer : IDisposable
     {
         /// <summary>
-        /// Read pixels out of the backing buffer. v0 returns a
+        /// Read pixels out of the backing buffer. Returns a
         /// view — callers MUST consume before the next surface
         /// frame tick.
         /// </summary>

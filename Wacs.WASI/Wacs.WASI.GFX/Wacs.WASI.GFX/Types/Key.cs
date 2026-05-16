@@ -153,8 +153,8 @@ namespace Wacs.WASI.GFX.Types
         ScrollLock,
         Pause,
 
-        // Media + browser keys (subset; full set lands when the
-        // WIT enum stabilizes — proposal is still Phase 2).
+        // Media + browser keys (subset of the upstream WIT enum;
+        // the full set isn't enumerated here yet).
         BrowserBack,
         BrowserFavorites,
         BrowserForward,

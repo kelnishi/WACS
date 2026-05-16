@@ -25,7 +25,10 @@
             <PrivateAssets>all</PrivateAssets>
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
-        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.3.0" />
+        <!-- 4.4+ required for ForAttributeWithMetadataName,
+             the cheap-marker-attribute discovery path used by
+             CompositeBundleGenerator. -->
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.4.0" />
     </ItemGroup>
 
     <!-- Share the emission + parser source files from the

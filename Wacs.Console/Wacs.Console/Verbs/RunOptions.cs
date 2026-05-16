@@ -118,10 +118,15 @@ namespace Wacs.Console.Verbs
 
         [Option("wasi-gfx", HelpText =
             "Wire wasi-gfx host bindings using the default Silk.NET/"
-            + "SDL backend (`Wacs.WASI.GFX.Silk`). Equivalent to "
-            + "`--bind Wacs.WASI.GFX.Silk`. Pair with --windowed when "
-            + "the guest opens surfaces so the SDL event pump runs "
-            + "on the main thread.")]
+            + "SDL + wgpu-native backend (`Wacs.WASI.GFX.Silk`). "
+            + "Loads all four wasi-gfx WIT packages — "
+            + "`wasi:graphics-context` / `wasi:surface` / `wasi:frame-"
+            + "buffer` / `wasi:webgpu` — through the one backend; "
+            + "headless GPU work runs anywhere wgpu-native runs, the "
+            + "SDL/Metal swap-chain path is verified on macOS arm64. "
+            + "Equivalent to `--bind Wacs.WASI.GFX.Silk`. Pair with "
+            + "--windowed when the guest opens surfaces so the SDL "
+            + "event pump runs on the main thread.")]
         public bool WasiGfx { get; set; }
 
         [Option("windowed", HelpText =
@@ -134,6 +139,16 @@ namespace Wacs.Console.Verbs
         public bool Windowed { get; set; }
 
         // ---- Instrumentation (interpreter engine only) ----
+
+        [Option("trace-imports", HelpText =
+            "Log direct-link binding rejections + lenient-default "
+            + "serves to stderr. Enable to debug \"the wasm hangs "
+            + "at 100% CPU with no output\" failures: see which "
+            + "imports the transpiler's direct-link emit rejected "
+            + "(and why), plus first-occurrence logs of any "
+            + "default-served unresolved import. Equivalent to "
+            + "setting WACS_TRANSPILER_DEBUG=1.")]
+        public bool TraceImports { get; set; }
 
         [Option("profile", HelpText =
             "Bracket execution with a JetBrains dotTrace measure-"

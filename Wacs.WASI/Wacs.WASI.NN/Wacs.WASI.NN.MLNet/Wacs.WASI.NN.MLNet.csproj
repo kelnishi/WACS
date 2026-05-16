@@ -6,7 +6,7 @@
         <Title>Wacs WASI-NN ML.NET backend</Title>
         <PackageId>WACS.WASI.NN.MLNet</PackageId>
         <Authors>Kelvin Nishikawa</Authors>
-        <Description>ML.NET backend for WACS.WASI.NN. Hosts ONNX inference under an MLContext lifecycle so embedders can compose wasi-nn inference with the rest of their ML.NET pipeline (preprocessing transformers, custom predictors, etc.). For raw tensor inference with no pipeline integration, prefer Wacs.WASI.NN.OnnxRuntime — it avoids the Microsoft.ML transitive surface.</Description>
+        <Description>ML.NET backend for WACS.WASI.NN. Hosts ONNX inference under an MLContext lifecycle so embedders can compose wasi-nn inference with the rest of their ML.NET pipeline (preprocessing transformers, custom predictors, etc.). For raw tensor inference with no pipeline integration, prefer Wacs.WASI.NN.OnnxRuntime — it avoids the Microsoft.ML transitive surface. Tracks the wasi-nn proposal at WASI Phase 2 — the WIT surface may change as the proposal evolves.</Description>
         <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
         <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>

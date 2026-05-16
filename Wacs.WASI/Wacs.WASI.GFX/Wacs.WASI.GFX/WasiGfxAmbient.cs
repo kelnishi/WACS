@@ -24,8 +24,7 @@ namespace Wacs.WASI.GFX
     /// <c>WasiGfxSilkBindable.BindToRuntime</c> on the CLI's
     /// <c>--wasi-gfx</c> path. Single-runtime / single-process
     /// scope — multi-host setups in one AppDomain need to
-    /// thread an <see cref="IBackend"/> through differently;
-    /// out of v0 scope.</para>
+    /// thread an <see cref="IBackend"/> through differently.</para>
     /// </summary>
     public static class WasiGfxAmbient
     {

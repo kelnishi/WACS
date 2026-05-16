@@ -88,6 +88,11 @@ namespace Wacs.ComponentModel.Bindgen.SourceGen
             // package's host interfaces already live (e.g.
             // `wasi:io=Wacs.WASI.Preview2` keeps wasi-gfx-side
             // pollable references pointing at the Preview2 type).
+            //
+            // v1 phase 1 1d: this MSBuild item is now an OVERRIDE
+            // mechanism for edge cases. The default mapping comes
+            // from [assembly: WitPackageMapping] attributes on
+            // referenced assemblies — see attrPkgNsMap below.
             var pkgNsMap = context.AnalyzerConfigOptionsProvider
                 .Select(static (opts, _) =>
                 {
@@ -97,16 +102,67 @@ namespace Wacs.ComponentModel.Bindgen.SourceGen
                     return v;
                 });
 
-            var combined = witFiles.Combine(nsOverride).Combine(pkgNsMap);
+            // v1 phase 1 1d: read [assembly: WitPackageMapping]
+            // attributes from every referenced assembly so
+            // downstream packages get the mapping for free.
+            var attrPkgNsMap = context.CompilationProvider
+                .Select(static (compilation, _) =>
+                {
+                    var map = new Dictionary<string, string>(
+                        System.StringComparer.OrdinalIgnoreCase);
+                    // Include the current compilation's own
+                    // attributes (a single-assembly package that
+                    // declares its own mapping picks itself up).
+                    CollectMappings(compilation.Assembly, map);
+                    foreach (var asm in compilation
+                        .SourceModule.ReferencedAssemblySymbols)
+                    {
+                        CollectMappings(asm, map);
+                    }
+                    return (IReadOnlyDictionary<string, string>)map;
+                });
+
+            var combined = witFiles.Combine(nsOverride)
+                .Combine(pkgNsMap).Combine(attrPkgNsMap);
 
             context.RegisterSourceOutput(combined,
-                (spc, pair) => Execute(spc, pair.Left.Left, pair.Left.Right, pair.Right));
+                (spc, pair) => Execute(spc,
+                    pair.Left.Left.Left,
+                    pair.Left.Left.Right,
+                    pair.Left.Right,
+                    pair.Right));
+        }
+
+        // Walk an assembly symbol's [WitPackageMapping] attrs and
+        // add to `map`. Multiple attrs per assembly are allowed
+        // (one assembly often owns several WIT packages). Manual
+        // MSBuild overrides take precedence over attribute
+        // mappings; this method just gathers the attribute set.
+        private static void CollectMappings(IAssemblySymbol asm,
+            Dictionary<string, string> map)
+        {
+            foreach (var attr in asm.GetAttributes())
+            {
+                if (attr.AttributeClass == null) continue;
+                if (attr.AttributeClass.ToDisplayString()
+                    != "Wacs.ComponentModel.Runtime.WitPackageMappingAttribute")
+                    continue;
+                if (attr.ConstructorArguments.Length < 2) continue;
+                var pkg = attr.ConstructorArguments[0].Value as string;
+                var ns = attr.ConstructorArguments[1].Value as string;
+                if (string.IsNullOrEmpty(pkg)
+                    || string.IsNullOrEmpty(ns)) continue;
+                // First-attr-wins on dup; the manual MSBuild
+                // override path can still take precedence above.
+                if (!map.ContainsKey(pkg!)) map[pkg!] = ns!;
+            }
         }
 
         private static void Execute(SourceProductionContext context,
             System.Collections.Immutable.ImmutableArray<(string Path, string Text, bool Emit)> files,
             string? nsOverride,
-            string? pkgNsMapRaw)
+            string? pkgNsMapRaw,
+            IReadOnlyDictionary<string, string> attrPkgNsMap)
         {
             if (files.IsDefaultOrEmpty) return;
 
@@ -168,12 +224,22 @@ namespace Wacs.ComponentModel.Bindgen.SourceGen
                 return;
             }
 
-            // Parse the per-package remap string. Format:
-            // "wit:pkg=Ns,wit:pkg2=Ns2". Whitespace tolerated.
+            // Start from the attribute-driven map (collected from
+            // referenced assemblies' [WitPackageMapping]); layer
+            // the MSBuild override on top so an explicit project
+            // setting still wins for edge cases. Format of the
+            // MSBuild raw string: "wit:pkg=Ns,wit:pkg2=Ns2".
             Dictionary<string, string>? pkgNsMap = null;
-            if (!string.IsNullOrWhiteSpace(pkgNsMapRaw))
+            if (attrPkgNsMap.Count > 0)
             {
                 pkgNsMap = new Dictionary<string, string>(
+                    System.StringComparer.OrdinalIgnoreCase);
+                foreach (var kv in attrPkgNsMap)
+                    pkgNsMap[kv.Key] = kv.Value;
+            }
+            if (!string.IsNullOrWhiteSpace(pkgNsMapRaw))
+            {
+                pkgNsMap ??= new Dictionary<string, string>(
                     System.StringComparer.OrdinalIgnoreCase);
                 foreach (var entry in pkgNsMapRaw!.Split(','))
                 {
@@ -184,7 +250,7 @@ namespace Wacs.ComponentModel.Bindgen.SourceGen
                     var key = trimmed.Substring(0, eq).Trim();
                     var val = trimmed.Substring(eq + 1).Trim();
                     if (key.Length > 0 && val.Length > 0)
-                        pkgNsMap[key] = val;
+                        pkgNsMap[key] = val; // MSBuild wins
                 }
             }
 
