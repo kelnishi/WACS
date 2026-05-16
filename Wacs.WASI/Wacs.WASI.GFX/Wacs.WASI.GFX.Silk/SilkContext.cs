@@ -18,7 +18,7 @@ namespace Wacs.WASI.GFX.Silk
     /// this context; <see cref="Present"/> blits the back-buffer
     /// bytes to the connected surface and renders.
     ///
-    /// <para>v0 contract: one surface per context. Multi-surface
+    /// <para>Contract: one surface per context. Multi-surface
     /// composition is out of scope until the WIT clarifies it.</para>
     /// </summary>
     internal sealed class SilkContext : IGraphicsContext
@@ -116,11 +116,11 @@ namespace Wacs.WASI.GFX.Silk
 
     /// <summary>
     /// CPU-path frame-buffer device for the Silk backend.
-    /// Stores the context it's connected to so future
-    /// multi-device flows have a hook, but the static
+    /// Stores the context it's connected to as a hook for
+    /// future multi-device flows; today the static
     /// <c>buffer.from-graphics-buffer</c> path reads the
-    /// context off the abstract-buffer directly — the device
-    /// reference is informational in v0.
+    /// context off the abstract-buffer directly so the device
+    /// reference is informational.
     /// </summary>
     internal sealed class SilkFrameBufferDevice : IFrameBufferDevice
     {
@@ -138,11 +138,10 @@ namespace Wacs.WASI.GFX.Silk
 
         public IFrameBufferBuffer FromGraphicsBuffer(IAbstractBuffer src)
         {
-            // v1 phase 3 session 9: downcast goes through
-            // ICpuAbstractBuffer so a guest accidentally handing
-            // a GPU-surface buffer to the CPU frame-buffer path
-            // gets a clear "wrong kind" error instead of a
-            // backend-specific cast failure.
+            // Downcast goes through ICpuAbstractBuffer so a
+            // guest accidentally handing a GPU-surface buffer to
+            // the CPU frame-buffer path gets a clear "wrong kind"
+            // error instead of a backend-specific cast failure.
             if (src is not ICpuAbstractBuffer)
                 throw new WasiGfxException(
                     "device.FromGraphicsBuffer: source is not a "

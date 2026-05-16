@@ -15,7 +15,7 @@ using Wacs.WASI.Preview2.Io;
 namespace Wacs.WASI.GFX
 {
     /// <summary>
-    /// Component-model (WIT) bindings for the v0 wasi-gfx
+    /// Component-model (WIT) bindings for the wasi-gfx
     /// packages: <c>wasi:graphics-context@0.0.1</c>,
     /// <c>wasi:frame-buffer@0.0.1</c>, <c>wasi:surface@0.0.1</c>.
     /// Hand-rolled per WASI.NN's <c>WitBindings.cs</c> pattern;
@@ -169,10 +169,10 @@ namespace Wacs.WASI.GFX
                 (FrameBufferNs, "[static]buffer.from-graphics-buffer"),
                 (_, abH) =>
                 {
-                    // Find a device to drive — v0 contract is one device
-                    // per host, so we walk the table for the first. A
-                    // future cut may add a static-device or pass the
-                    // device handle explicitly.
+                    // Find a device to drive — the current contract
+                    // is one device per host, so we walk the table for
+                    // the first. A future WIT cut may add a static-
+                    // device or pass the device handle explicitly.
                     var dev = RequireSingleFrameBufferDevice(host);
                     var ab = (IAbstractBuffer)host.AbstractBuffers.Get(abH);
                     var buf = dev.FromGraphicsBuffer(ab);
@@ -412,9 +412,9 @@ namespace Wacs.WASI.GFX
             return host.Backend;
         }
 
-        // v0 SPI is one frame-buffer device per host, mirroring the
-        // wasi-gfx WIT's "single device" implicit contract. Multi-
-        // device support lands when the WIT clarifies it.
+        // The SPI is one frame-buffer device per host, mirroring
+        // the wasi-gfx WIT's "single device" implicit contract.
+        // Multi-device support would require a WIT clarification.
         private static IFrameBufferDevice RequireSingleFrameBufferDevice(WasiGfxHost host)
         {
             if (host.FrameBufferDevices.Count == 0)

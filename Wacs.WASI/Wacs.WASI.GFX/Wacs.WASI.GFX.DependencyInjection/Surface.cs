@@ -35,8 +35,8 @@ namespace Wacs.WASI.GFX.DependencyInjection
             GfxLog.Trace("DI.Surface: type loaded into AppDomain");
         }
 
-        [Obsolete("Prefer Surface(WasiGfxBundle) — v1 phase 1 1g " +
-            "moves off the WasiGfxAmbient static.")]
+        [Obsolete("Prefer Surface(WasiGfxBundle) — the bundle " +
+            "ctor moves off the WasiGfxAmbient static.")]
         public Surface()
         {
             GfxLog.Trace("DI.Surface: ctor invoked (ambient path)");

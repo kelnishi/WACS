@@ -14,7 +14,7 @@ using Wacs.WASI.GFX.Types;
 namespace Wacs.WASI.GFX.Silk
 {
     /// <summary>
-    /// Silk.NET/SDL backend for wasi-gfx v0. Implements
+    /// Silk.NET/SDL backend for wasi-gfx. Implements
     /// <see cref="IBackend"/> against SDL2 via Silk.NET. Owns
     /// the SDL_Init lifecycle, a <see cref="MainThreadDispatcher"/>
     /// for marshaling window/render calls onto the main
@@ -24,8 +24,8 @@ namespace Wacs.WASI.GFX.Silk
     /// (CreateSurface etc.) marshal through the dispatcher. If
     /// the embedder hasn't called <see cref="RunMainLoop"/>
     /// yet, the dispatcher executes inline on the caller's
-    /// thread — fine on Linux/Windows for tests, racy on
-    /// macOS but accepted for v0.</para>
+    /// thread — fine on Linux/Windows for tests, racy on macOS
+    /// but tolerated.</para>
     /// </summary>
     public sealed class SilkGfxBackend : IBackend
     {
@@ -49,8 +49,7 @@ namespace Wacs.WASI.GFX.Silk
         /// <see cref="IsQuitRequested"/> stays true for the rest
         /// of the process lifetime.
         ///
-        /// <para>v1 phase 2: replaces v0's "SDL_QUIT is ignored"
-        /// stub. Subscribers must be tolerant of being invoked
+        /// <para>Subscribers must be tolerant of being invoked
         /// once and only once.</para>
         /// </summary>
         public event Action? QuitRequested;
@@ -190,12 +189,11 @@ namespace Wacs.WASI.GFX.Silk
                     // App-level quit (Cmd-Q on macOS, close
                     // button on the last-remaining window, Alt-F4
                     // on Windows, SIGTERM forwarded by SDL).
-                    // Phase 2: signal subscribers and stop the
-                    // event pump on the next iteration via
-                    // IsQuitRequested. The embedder's QuitRequested
-                    // handler is responsible for any wasm-side
-                    // cleanup (cancelling the wasm task,
-                    // releasing surfaces) — backend just emits
+                    // Signal subscribers and stop the event pump on
+                    // the next iteration via IsQuitRequested. The
+                    // embedder's QuitRequested handler does any
+                    // wasm-side cleanup (cancel the wasm task,
+                    // release surfaces); the backend just emits
                     // the signal.
                     OnQuitSignal();
                     break;
@@ -217,13 +215,13 @@ namespace Wacs.WASI.GFX.Silk
                     surface.OnOsResize((uint)ev.Window.Data1, (uint)ev.Window.Data2);
                     break;
                 case WindowEventID.Close:
-                    // Phase 2: per-window close. v0 supports one
-                    // surface at a time, so per-window close
-                    // collapses to a process-level quit (matches
-                    // the SDL_QUIT path). If/when multi-window
-                    // support lands, this branch routes the close
-                    // event to the specific surface and only
-                    // signals quit when the last surface closes.
+                    // Per-window close. Only one surface is
+                    // supported at a time today, so per-window
+                    // close collapses to a process-level quit
+                    // (matches the SDL_QUIT path). Multi-window
+                    // support would route the close to the
+                    // specific surface and only signal quit when
+                    // the last surface closes.
                     _surfacesByWindowId.TryRemove(wid, out _);
                     if (_surfacesByWindowId.IsEmpty)
                         OnQuitSignal();
@@ -269,9 +267,9 @@ namespace Wacs.WASI.GFX.Silk
             var key = SdlKeyMapping.FromScancode((Scancode)ev.Key.Keysym.Scancode);
             var (alt, ctrl, meta, shift) = SdlKeyMapping.Modifiers(
                 (Keymod)ev.Key.Keysym.Mod);
-            // v0 leaves text=null; the IME / text-input flow
-            // is wired through SDL_TEXTINPUT events which we
-            // don't enable in v0 (would need SDL_StartTextInput).
+            // text=null; the IME / text-input flow is wired
+            // through SDL_TEXTINPUT events, which aren't enabled
+            // here (would need SDL_StartTextInput).
             if (down) surface.OnKeyDown(key, null, alt, ctrl, meta, shift);
             else      surface.OnKeyUp(key, null, alt, ctrl, meta, shift);
         }

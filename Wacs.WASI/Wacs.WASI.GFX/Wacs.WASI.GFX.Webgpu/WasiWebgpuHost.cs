@@ -20,17 +20,9 @@ namespace Wacs.WASI.GFX.Webgpu
     /// <see cref="BindToRuntime"/> to wire imports onto a
     /// <see cref="WasmRuntime"/>.
     ///
-    /// <para>v1 phase 3 session 2: scaffolding only. The
-    /// <see cref="BindToRuntime"/> delegation to
-    /// <c>WitBindings.Bind</c> is in place but the per-resource
-    /// canonical-ABI host functions land across sessions 3-6.
-    /// A host constructed here is harmless — its
-    /// <see cref="BindToRuntime"/> wires zero imports until then.</para>
-    ///
-    /// <para>Resource tables are one-per-wasi:webgpu resource.
-    /// Webgpu has 38 resources; tables are created lazily on
-    /// first use to keep no-webgpu embedders' constructor cost
-    /// flat.</para>
+    /// <para>One <see cref="ResourceTable"/> per wasi:webgpu
+    /// resource type. Tables are eager so direct-link emit can
+    /// resolve impl classes at transpile time.</para>
     /// </summary>
     public sealed class WasiWebgpuHost : IBindable, IDisposable
     {
@@ -99,8 +91,8 @@ namespace Wacs.WASI.GFX.Webgpu
             GraphicsContextResolver
             => _config.GraphicsContextResolver;
 
-        /// <summary>v1: shared Preview2 resource context the
-        /// host plumbs through. Needed by binding sites that mint
+        /// <summary>Shared Preview2 resource context the host
+        /// plumbs through. Needed by binding sites that mint
         /// wasi:io.Pollable resources into Preview2's table — the
         /// only path their handles can flow through wasi:io/poll
         /// .poll on the host side.</summary>

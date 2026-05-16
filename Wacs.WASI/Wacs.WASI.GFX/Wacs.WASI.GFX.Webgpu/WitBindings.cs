@@ -53,17 +53,9 @@ namespace Wacs.WASI.GFX.Webgpu
 {
     /// <summary>
     /// Hand-written canonical-ABI host-function dispatcher for the
-    /// <c>wasi:webgpu@0.0.1</c> imports. Same shape as
-    /// <c>WACS.WASI.GFX.WitBindings</c> — one
+    /// <c>wasi:webgpu@0.0.1</c> imports. One
     /// <c>runtime.BindHostFunction</c> call per WIT method,
     /// keyed on the wire-form <c>(module, entity)</c> pair.
-    ///
-    /// <para>v1 phase 3 session 3 wires the entry-point
-    /// <c>get-gpu</c> free function plus the three
-    /// <c>[method]gpu.*</c> imports and <c>[resource-drop]gpu</c>.
-    /// Resource methods on gpu-adapter / gpu-device / etc. land in
-    /// later sessions following the dependency order in the
-    /// roadmap.</para>
     ///
     /// <para><b>Singleton semantics:</b> the wasi:webgpu spec's
     /// <c>gpu</c> resource is process-global. Every guest call to
@@ -77,10 +69,9 @@ namespace Wacs.WASI.GFX.Webgpu
     internal static class WitBindings
     {
         // wasi:webgpu pins @0.0.1; the wire-form module string is
-        // constant. The cross-package wasi:io@0.2.x refs (only
-        // visible at JS-flavored / pollable-returning methods,
-        // which land in later sessions) ride the IoBindings
-        // multi-version registration shipped in v1 phase 1i.
+        // constant. Cross-package wasi:io@0.2.x refs (visible at
+        // JS-flavored / pollable-returning methods) ride the
+        // IoBindings multi-version registration.
         internal const string Ns = "wasi:webgpu/webgpu@0.0.1";
 
         public static void Bind(WasmRuntime runtime, WasiWebgpuHost host)
@@ -138,7 +129,7 @@ namespace Wacs.WASI.GFX.Webgpu
             BindGpuRenderBundleEncoder(runtime, host, alloc);
             BindGpuQuerySet(runtime, host, alloc);
 
-            // v1 phase 3 session 9: graphics-context bridge.
+            // graphics-context bridge.
             // [static]gpu-texture.from-graphics-buffer(buffer:
             //   abstract-buffer) -> own<gpu-texture>
             // Wire: (i32 abHandle) -> i32 texHandle. The wasm-
@@ -265,11 +256,10 @@ namespace Wacs.WASI.GFX.Webgpu
             // retArea layout: 8 bytes, align 4. disc@0 (u8 + 3 pad);
             // handle@4 (i32, only valid when disc=1).
             //
-            // v1 phase 3 session 4 ships full decoding of the option<record>
-            // into a CLR Option<GpuRequestAdapterOptions> via the canonical
-            // ABI's flat-form rules. Strings come through via ExecContext
-            // memory reads since option<string>'s disc=1 case carries a
-            // (ptr, len) pair that points into linear memory.
+            // Decodes the option<record> into a CLR Option<GpuRequestAdapterOptions>
+            // via the canonical ABI's flat-form rules. Strings come through via
+            // ExecContext memory reads since option<string>'s disc=1 case carries
+            // a (ptr, len) pair that points into linear memory.
             runtime.BindHostFunction<Action<ExecContext,
                 int, int, int, int, int, int, int, int, int, int, int, int>>(
                 (Ns, "[method]gpu.request-adapter"),
@@ -467,10 +457,6 @@ namespace Wacs.WASI.GFX.Webgpu
 
         // ----------------------------------------------------
         //   wasi:webgpu/webgpu@0.0.1 resource gpu-device
-        //     Session 4 covers the query/lifecycle methods:
-        //       features / limits / adapter-info / queue / lost
-        //       destroy / label / set-label / [resource-drop]
-        //     Session 5+ adds the create-* methods.
         // ----------------------------------------------------
 
         private static void BindGpuDevice(WasmRuntime runtime,
@@ -556,12 +542,10 @@ namespace Wacs.WASI.GFX.Webgpu
                 (Ns, "[resource-drop]gpu-device"),
                 (_, h) => host.Devices.Drop(h));
 
-            // ===== create-* methods (descriptor decoding deferred) =====
-            // All create-* methods receive their flat-form params and
-            // pass a default-constructed descriptor (or Option.None for
-            // option<descriptor>) to the impl. Real backends (wgpu-
-            // native) need full descriptor decode; ships alongside the
-            // dispatcher.
+            // ===== create-* methods =====
+            // Flat-form params are decoded into descriptor records
+            // and passed to the backend impl. Optional nested
+            // records use the canonical-ABI disc/value pairs.
 
             // create-buffer(self, gpu-buffer-descriptor{u64,u32,opt<bool>,opt<string>})
             //   -> own<gpu-buffer>
@@ -696,9 +680,8 @@ namespace Wacs.WASI.GFX.Webgpu
                     var descriptor = new Webgpu.GpuShaderModuleDescriptor
                     {
                         Code = ReadUtf8(ctx, codePtr, codeLen),
-                        // compilation-hints decoding deferred — the
-                        // wgpu-native binding does its own WGSL
-                        // parsing and ignores hints today.
+                        // compilation-hints are decoded but dropped —
+                        // wgpu-native re-parses WGSL itself.
                         CompilationHints = Option<Webgpu.GpuShaderModuleCompilationHint[]>.None,
                         Label = lblDisc == 0
                             ? Option<string>.None
@@ -726,8 +709,8 @@ namespace Wacs.WASI.GFX.Webgpu
                         EntryPoint = epDisc == 0
                             ? Option<string>.None
                             : Option<string>.Some(ReadUtf8(ctx, epPtr, epLen)),
-                        // constants resource decode deferred; hello_compute
-                        // doesn't use override constants.
+                        // Override-constants are not currently decoded;
+                        // hello_compute doesn't use them.
                         Constants = Option<Webgpu.IRecordGpuPipelineConstantValue>.None,
                     };
                     // layout-mode variant: disc 0 = specific(borrow<pipeline-
@@ -1038,12 +1021,6 @@ namespace Wacs.WASI.GFX.Webgpu
 
         // ----------------------------------------------------
         //   wasi:webgpu/webgpu@0.0.1 resource gpu-buffer
-        //     Session 5 covers the lifecycle / query methods:
-        //       size / usage / map-state / destroy / label /
-        //       set-label / [resource-drop]. The mapping methods
-        //       (map-async, unmap, get-mapped-range-*) all return
-        //       result<_, error> and land in session 6 alongside
-        //       similar result-return work on other resources.
         // ----------------------------------------------------
 
         private static void BindGpuBuffer(WasmRuntime runtime,
@@ -1219,12 +1196,6 @@ namespace Wacs.WASI.GFX.Webgpu
 
         // ----------------------------------------------------
         //   wasi:webgpu/webgpu@0.0.1 resource gpu-command-encoder
-        //     Session 6 covers the compute-path subset:
-        //       begin-compute-pass / finish / copy-buffer-to-buffer
-        //       clear-buffer / label / set-label / debug ops / drop
-        //     copy-buffer-to-texture / copy-texture-* /
-        //     resolve-query-set + begin-render-pass land in
-        //     session 7 (render-path).
         // ----------------------------------------------------
 
         private static void BindGpuCommandEncoder(WasmRuntime runtime,
@@ -1274,12 +1245,11 @@ namespace Wacs.WASI.GFX.Webgpu
             //   record total = 9 i32; option = 10 i32
             //
             // Wire: (self, 10 i32 for option<record>) -> i32 result.
-            // The full descriptor decode (timestamp-writes resource +
-            // optional label) is non-trivial; v1 session 6 receives
-            // the params and passes Option<...>.None to the impl,
-            // matching what hello_compute typically uses (no
-            // descriptor at all). Real-backend decoding lands when a
-            // guest needs timestamp queries.
+            // The descriptor params are read but the impl receives
+            // Option<...>.None — timestamp-query plumbing is not
+            // yet decoded into a GpuComputePassDescriptor record.
+            // hello_compute uses no descriptor, so this is fine
+            // for current consumers.
             runtime.BindHostFunction<Func<ExecContext,
                 int, int, int, int, int, int, int, int, int, int, int, int>>(
                 (Ns, "[method]gpu-command-encoder.begin-compute-pass"),
@@ -1355,9 +1325,6 @@ namespace Wacs.WASI.GFX.Webgpu
 
         // ----------------------------------------------------
         //   wasi:webgpu/webgpu@0.0.1 resource gpu-compute-pass-encoder
-        //     Session 6 covers everything except set-bind-group
-        //     (deferred to session 7's option<list>+result<_, error>
-        //     batch).
         // ----------------------------------------------------
 
         private static void BindGpuComputePassEncoder(WasmRuntime runtime,
@@ -1430,9 +1397,6 @@ namespace Wacs.WASI.GFX.Webgpu
 
         // ----------------------------------------------------
         //   wasi:webgpu/webgpu@0.0.1 resource gpu-queue
-        //     submit / on-submitted-work-done / label / set-label
-        //     + drop. write-buffer-with-copy / write-texture-with-copy
-        //     land in session 7 (result<_, error> shape pair).
         // ----------------------------------------------------
 
         private static void BindGpuQueue(WasmRuntime runtime,
@@ -1456,8 +1420,8 @@ namespace Wacs.WASI.GFX.Webgpu
                 });
 
             // on-submitted-work-done(self) — void.
-            // Real backends signal completion via Pollable; v0.0.1
-            // sync surface is just "block until done."
+            // Real backends signal completion via Pollable; the
+            // sync surface here is "block until done."
             runtime.BindHostFunction<Action<ExecContext, int>>(
                 (Ns, "[method]gpu-queue.on-submitted-work-done"),
                 (_, selfH) =>
@@ -1515,14 +1479,10 @@ namespace Wacs.WASI.GFX.Webgpu
 
         // ----------------------------------------------------
         //   wasi:webgpu/webgpu@0.0.1 resource gpu-texture
-        //     Session 7 covers query/lifecycle methods. The
-        //     create-view path is deferred: its descriptor has
-        //     9 option fields (20 i32 flat), pushing the host
-        //     function's input arity beyond Func<T1..T16,TResult>
-        //     and requiring an IFunctionInstance custom shape
-        //     that pairs with the descriptor-decoding work in
-        //     session 8. [static]from-graphics-buffer waits on
-        //     the graphics-context bridge session.
+        //     create-view's descriptor has 9 option fields
+        //     (20 i32 flat), exceeding Func<T1..T16,TResult>
+        //     arity — it needs an IFunctionInstance custom
+        //     shape, which isn't wired here yet.
         // ----------------------------------------------------
 
         private static void BindGpuTexture(WasmRuntime runtime,
@@ -2298,10 +2258,6 @@ namespace Wacs.WASI.GFX.Webgpu
 
         // ----------------------------------------------------
         //   wasi:webgpu/webgpu@0.0.1 resource gpu-render-pass-encoder
-        //     Session: render-pass-encoder lifecycle. Covers the
-        //     state-setting and draw methods. set-bind-group
-        //     (option<list<u32>> + result<_, error>) deferred to
-        //     the result<_, error> batch.
         // ----------------------------------------------------
 
         private static void BindGpuRenderPassEncoder(WasmRuntime runtime,
@@ -2529,8 +2485,7 @@ namespace Wacs.WASI.GFX.Webgpu
         //   wasi:webgpu/webgpu@0.0.1 resource gpu-render-bundle-encoder
         //     finish(opt<descriptor>) + the shared
         //     set-pipeline/set-buffer/draw* surface from
-        //     render-pass-encoder. set-bind-group deferred
-        //     (result<_, error> batch).
+        //     render-pass-encoder.
         // ----------------------------------------------------
 
         private static void BindGpuRenderBundleEncoder(WasmRuntime runtime,
@@ -2539,7 +2494,8 @@ namespace Wacs.WASI.GFX.Webgpu
             // finish(self, opt<gpu-render-bundle-descriptor{label:opt<string>}>)
             //   -> own<gpu-render-bundle>
             // opt<descriptor> = 1 + 3 = 4 i32 params; self + 4 = 5 i32 in;
-            // i32 result. Descriptor ignored (label only); session-shortcut.
+            // i32 result. Descriptor is decoded but the label field
+            // isn't threaded through here yet.
             runtime.BindHostFunction<Func<ExecContext,
                 int, int, int, int, int, int>>(
                 (Ns, "[method]gpu-render-bundle-encoder.finish"),
@@ -2861,7 +2817,7 @@ namespace Wacs.WASI.GFX.Webgpu
         }
 
         // ====================================================
-        //   Canonical-ABI helpers (session 4)
+        //   Canonical-ABI helpers
         // ====================================================
 
         // Read a (ptr, len) UTF-8 pair from guest linear memory.

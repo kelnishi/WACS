@@ -62,11 +62,10 @@
 
     <PropertyGroup>
         <WitHostNamespaceOverride>Wacs.WASI.GFX.Webgpu</WitHostNamespaceOverride>
-        <!-- v1 phase 1 1d: cross-package refs (wasi:io,
-             wasi:graphics-context) route through
-             [WitPackageMapping] assembly attributes on the
-             referenced contract assemblies — no manual map
-             needed. -->
+        <!-- Cross-package refs (wasi:io, wasi:graphics-context)
+             route through [WitPackageMapping] assembly attributes
+             on the referenced contract assemblies — no manual
+             map needed. -->
     </PropertyGroup>
 
     <ItemGroup>

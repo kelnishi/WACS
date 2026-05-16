@@ -21,9 +21,9 @@ namespace Wacs.WASI.GFX.Webgpu
     {
         /// <summary>
         /// The single backend driving webgpu resources for this
-        /// host. v1 phase 3c sets this to the same
-        /// <c>SilkGfxBackend</c> instance that v0 provides for
-        /// the CPU IBackend path — one backend, two SPIs.
+        /// host. The combined CLI path points this at the same
+        /// <c>SilkGfxBackend</c> instance that serves the CPU
+        /// IBackend host — one backend, two SPIs.
         /// </summary>
         public IGpuBackend? Backend { get; set; }
 

@@ -49,27 +49,26 @@ namespace Wacs.WASI.GFX.Test
             Assert.NotNull(composite);
             Assert.NotNull(composite.Preview2);
             Assert.NotNull(composite.Gfx);
-            // v1 phase 1 1h: the composite's forwarding
-            // properties come from CompositeBundleGenerator now.
-            // The Backend property forwards from
-            // WasiGfxBundle.Backend (no `Gfx` prefix); the
-            // direct .Gfx accessor still exposes the underlying
-            // bundle for callers that want to disambiguate.
+            // The composite's forwarding properties come from
+            // CompositeBundleGenerator. The Backend property
+            // forwards from WasiGfxBundle.Backend (no `Gfx`
+            // prefix); the direct .Gfx accessor still exposes
+            // the underlying bundle for callers that want to
+            // disambiguate.
             Assert.IsType<StubBackend>(composite.Backend);
             Assert.IsType<StubBackend>(composite.Gfx.Backend);
         }
 
-        // ---- v1 phase 1 1g: scoped backend factory ----------
+        // ---- scoped backend factory ----------
 
         [Fact]
         public void Context_BundleCtor_PullsBackendFromConfiguration()
         {
             // Two separate runtimes in one AppDomain — each gets
             // its own bundle pointing at a distinct backend. The
-            // v0 WasiGfxAmbient static would have made this
-            // impossible; v1 phase 1 1g threads the backend
-            // through the bundle so each impl sees only its
-            // owner's backend.
+            // legacy WasiGfxAmbient static would have made this
+            // impossible; the bundle ctor threads the backend
+            // through so each impl sees only its owner's backend.
             var cfg1 = WasiGfxConfiguration.DefaultConfiguration();
             var stub1 = new StubBackend();
             cfg1.Backend = stub1;

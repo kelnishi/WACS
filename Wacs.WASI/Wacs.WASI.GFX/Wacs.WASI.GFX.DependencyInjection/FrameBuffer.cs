@@ -101,14 +101,13 @@ namespace Wacs.WASI.GFX.DependencyInjection
             // The static call has no surface/device handle; the
             // backend's CPU-path frame-buffer device is the single
             // wasi:frame-buffer.device that was constructed.
-            // v1 phase 1 1g: the WIT [static]buffer.from-graphics-
-            // buffer signature still ties this to the ambient — a
-            // static method can't take the bundle through normal
-            // ctor injection. The transpiler-direct-link path for
-            // [static] resource factories uses the impl's static
-            // method directly (phase 1f), so future work could
-            // pass the bundle through a thread-local set at
-            // dispatch time. Keeping the ambient call here for now.
+            // The WIT [static]buffer.from-graphics-buffer signature
+            // still ties this to the ambient — a static method
+            // can't take the bundle through normal ctor injection.
+            // The transpiler-direct-link path for [static]
+            // resource factories uses the impl's static method
+            // directly, so future work could pass the bundle
+            // through a thread-local set at dispatch time.
 #pragma warning disable CS0618
             var backend = WasiGfxAmbient.RequireBackend();
 #pragma warning restore CS0618

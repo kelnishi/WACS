@@ -16,17 +16,9 @@ namespace Wacs.WASI.GFX.Webgpu
     /// parameters). The runtime's
     /// <c>WasmRuntime.BindHostFunction&lt;TDelegate&gt;</c>
     /// constraint accepts any <c>Delegate</c> subtype, so a
-    /// purpose-built delegate slots in cleanly.
-    ///
-    /// <para>v1 phase 3 result&lt;_, error&gt; / custom-arity
-    /// follow-up: gpu-texture.create-view's
-    /// <c>option&lt;gpu-texture-view-descriptor&gt;</c> has 9
-    /// option fields (8 option&lt;enum/u32&gt; + 1
-    /// option&lt;string&gt;), flattening to 20 i32. Plus the
-    /// self handle and the i32 return, that's a 22-parameter
-    /// callable. Future gpu-device.create-buffer descriptors with
-    /// i64 fields use shapes defined alongside their binding.
-    /// </para>
+    /// purpose-built delegate slots in cleanly. Examples:
+    /// <c>create-view</c> flattens to 22 params (self + 20 option
+    /// fields + return); <c>create-sampler</c> mixes i32 and f32.
     /// </summary>
     internal static class CustomDelegates
     {

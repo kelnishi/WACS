@@ -15,15 +15,14 @@ using GenIContext = Wacs.WASI.GFX.GraphicsContext.IContext;
 namespace Wacs.WASI.GFX.Webgpu.Test
 {
     /// <summary>
-    /// Stub impls of every wasi:webgpu resource interface a v1
-    /// phase 3 session 4 test exercises. Methods the bindings
-    /// touch return deterministic stub values; methods bound by
-    /// later sessions throw <see cref="NotImplementedException"/>
-    /// so a session-N test calling a session-N+k method gets a
-    /// clear "wire this next" signal instead of a silent bad
-    /// result. The volume reflects the wasi:webgpu surface area —
-    /// 38 resources / ~220 methods total; this file stubs only
-    /// the resources sessions 3-4 reach.
+    /// Stub impls of wasi:webgpu resource interfaces the tests
+    /// exercise. Methods the bindings touch return deterministic
+    /// stub values; methods that aren't covered yet throw
+    /// <see cref="NotImplementedException"/> so a test that
+    /// touches an unbound method gets a clear "wire this next"
+    /// signal instead of a silent bad result. The volume
+    /// reflects the wasi:webgpu surface area — 38 resources /
+    /// ~220 methods total; only the reachable subset is stubbed.
     /// </summary>
     internal sealed class StubGpuAdapter : IGpuAdapter
     {
@@ -210,7 +209,7 @@ namespace Wacs.WASI.GFX.Webgpu.Test
         public string Message() => string.Empty;
     }
 
-    // ---- Session 5 resources --------------------------------
+    // ---- buffer / shader / pipeline-layout / bind-group -----
 
     internal sealed class StubGpuBuffer : IGpuBuffer
     {
@@ -304,7 +303,7 @@ namespace Wacs.WASI.GFX.Webgpu.Test
         public void SetLabel(string label) { _label = label ?? ""; }
     }
 
-    // ---- Session 6: compute path ----------------------------
+    // ---- compute path ---------------------------------------
 
     internal sealed class StubGpuComputePipeline : IGpuComputePipeline
     {
@@ -392,7 +391,7 @@ namespace Wacs.WASI.GFX.Webgpu.Test
         public void SetLabel(string label) { _label = label ?? ""; }
     }
 
-    // ---- Session 7: render path resources -------------------
+    // ---- render path resources ------------------------------
 
     internal sealed class StubGpuTexture : IGpuTexture
     {

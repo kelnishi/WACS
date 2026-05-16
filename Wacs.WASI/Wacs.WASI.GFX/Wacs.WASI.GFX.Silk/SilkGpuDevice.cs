@@ -19,12 +19,6 @@ namespace Wacs.WASI.GFX.Silk
     /// (some queries forward to the adapter — features /
     /// limits / adapter-info follow the wgpu pattern of "ask the
     /// adapter, not the device").
-    ///
-    /// <para>The descriptor-decoding work for the create-*
-    /// methods lands across follow-up commits — this commit
-    /// ships the device-handle skeleton so the request-device
-    /// chain returns a real wgpu Device that downstream resource
-    /// work can attach to.</para>
     /// </summary>
     internal sealed unsafe class SilkGpuDevice : GenWebgpu.IGpuDevice, IDisposable
     {
@@ -251,13 +245,13 @@ namespace Wacs.WASI.GFX.Silk
 
             // Build the macOS Metal surface descriptor. The
             // wgpu-native spec lists Metal, Windows-HWND, Xlib,
-            // Wayland, X11/XCB, Android — v1 ships macOS first;
-            // other platforms throw with a clear pointer.
+            // Wayland, X11/XCB, Android — only macOS is wired
+            // here; other platforms throw with a clear pointer.
             if (!System.Runtime.InteropServices.RuntimeInformation
                     .IsOSPlatform(System.Runtime.InteropServices.OSPlatform.OSX))
                 throw new PlatformNotSupportedException(
                     "SilkGpuDevice.ConnectGraphicsContext: only macOS "
-                    + "(Metal-backed wgpu surface) is wired in v1. The "
+                    + "(Metal-backed wgpu surface) is currently wired. "
                     + "Windows/Linux paths would mirror this with "
                     + "SurfaceDescriptorFromWindowsHwnd / "
                     + "SurfaceDescriptorFromXlibWindow / "
@@ -343,18 +337,16 @@ namespace Wacs.WASI.GFX.Silk
             silkCtx.GpuConnection = connection;
         }
 
-        // ===== create-* methods land in follow-up commits =====
-        // Each method needs the descriptor flat-form decoding
-        // (the WitBindings.cs side passes a default-constructed
-        // record today). The methods below throw with a clear
-        // "descriptor decoder lands in next commit" signal so the
-        // host binding's wire-form decode can still proceed and
-        // the throw surfaces as the bridge to wgpu-native.
+        // ===== create-* methods =====
+        // create-* paths that aren't yet bridged to wgpu-native
+        // throw DispatchPending so the binding's wire-form decode
+        // still succeeds and the missing translation surfaces as a
+        // single message at dispatch time.
 
         private const string DispatchPending
-            = "wgpu-native dispatch path landing in follow-up commits. "
-              + "The binding's wire-form decoding works; the "
-              + "descriptor → wgpu translation is the next step.";
+            = "wgpu-native dispatch path is not implemented for this "
+              + "resource. The binding's wire-form decoding works; "
+              + "the descriptor → wgpu translation is not wired.";
 
         public GenWebgpu.IGpuBuffer CreateBuffer(
             GenWebgpu.GpuBufferDescriptor descriptor)
@@ -1527,9 +1519,8 @@ namespace Wacs.WASI.GFX.Silk
     }
 
     /// <summary>
-    /// wgpu-backed queue wrapper. Submit / write-buffer / on-
-    /// submitted-work-done land in follow-up commits alongside
-    /// the command-buffer descriptor decode.
+    /// wgpu-backed queue wrapper. Hosts submit / write-buffer /
+    /// on-submitted-work-done over a wgpu <c>Queue*</c>.
     /// </summary>
     internal sealed unsafe class SilkGpuQueue : GenWebgpu.IGpuQueue, IDisposable
     {

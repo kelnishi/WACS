@@ -21,7 +21,7 @@ namespace Wacs.WASI.GFX.Silk
     /// pollables let the wasm guest poll for resize/frame/
     /// pointer/key events.
     ///
-    /// <para>v0 dimensions are captured at construction; OS
+    /// <para>Dimensions are captured at construction; OS
     /// resize events update <see cref="Width"/> /
     /// <see cref="Height"/> and the texture is re-allocated
     /// on the next <see cref="Blit"/>.

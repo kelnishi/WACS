@@ -52,13 +52,13 @@
         <ProjectReference Include="..\Wacs.WASI.GFX.DependencyInjection\Wacs.WASI.GFX.DependencyInjection.csproj" />
         <PackageReference Include="Silk.NET.SDL" Version="2.23.0" />
         <PackageReference Include="Silk.NET.Maths" Version="2.23.0" />
-        <!-- v1 phase 3 session 8: wasi:webgpu backend. Silk.NET
-             wraps wgpu-native; the .Native.WGPU package pulls
-             the per-OS wgpu shared libraries. The contract +
-             SPI lives in Wacs.WASI.GFX.Webgpu; this package
-             ships the Silk-backed implementation so one Silk
-             dependency serves both CPU (frame-buffer / surface)
-             and GPU (webgpu) paths. -->
+        <!-- wasi:webgpu backend. Silk.NET wraps wgpu-native;
+             the .Native.WGPU package pulls the per-OS wgpu
+             shared libraries. The contract + SPI lives in
+             Wacs.WASI.GFX.Webgpu; this package provides the
+             Silk-backed implementation so one Silk dependency
+             serves both CPU (frame-buffer / surface) and GPU
+             (webgpu) paths. -->
         <ProjectReference Include="..\Wacs.WASI.GFX.Webgpu\Wacs.WASI.GFX.Webgpu.csproj" />
         <PackageReference Include="Silk.NET.WebGPU" Version="2.23.0" />
         <PackageReference Include="Silk.NET.WebGPU.Native.WGPU" Version="2.23.0" />

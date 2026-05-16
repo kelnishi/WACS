@@ -13,7 +13,7 @@ packages = [
 ]
 phase = 2
 
-# v1 phase 1i shipped multi-version wasi:io binding in Preview2,
-# so this package is upstream-verbatim — no deviations.
+# Preview2's IoBindings binds every shape-stable wasi:io@0.2.x
+# version, so this package is upstream-verbatim — no deviations.
 [deviations]
 # (none)

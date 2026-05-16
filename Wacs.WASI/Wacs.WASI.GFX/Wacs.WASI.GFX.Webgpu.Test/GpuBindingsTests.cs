@@ -15,15 +15,13 @@ using Xunit;
 namespace Wacs.WASI.GFX.Webgpu.Test
 {
     /// <summary>
-    /// Session 3 acceptance tests for the wasi:webgpu host
-    /// scaffolding. Covers configuration / BindToRuntime
-    /// lifecycle / disposal / singleton semantics. Per-binding
-    /// invocation tests land alongside the transpiler fixture
-    /// tests in a later session — we'd need either a wasm
-    /// component that imports the bindings or the runtime's
-    /// internal entity-bindings table to assert the dispatch
-    /// shape directly, both deferred to the parity-fixture
-    /// session.
+    /// Acceptance tests for the wasi:webgpu host scaffolding.
+    /// Covers configuration / BindToRuntime lifecycle / disposal
+    /// / singleton semantics. Per-binding invocation shape isn't
+    /// asserted here: that needs either a wasm component that
+    /// imports the bindings or access to the runtime's internal
+    /// entity-bindings table, and lives in the parity-fixture
+    /// tests.
     /// </summary>
     public class GpuBindingsTests
     {
@@ -122,22 +120,21 @@ namespace Wacs.WASI.GFX.Webgpu.Test
             Assert.Null(host.Backend);
         }
 
-        // ---- Session 4: gpu-adapter + gpu-device stubs --------
+        // ---- gpu-adapter + gpu-device stubs --------
         //
-        // Wire-form binding invocation lands once parity fixtures
-        // arrive (session 10) — there's no public host-function-
-        // lookup API on WasmRuntime today. Session 4's coverage
-        // is the SPI side: stub backend → IGpu → adapter/device
-        // chain works correctly so the WitBindings dispatch on
-        // top has a working target.
+        // These tests assert the SPI side only: stub backend →
+        // IGpu → adapter/device chain wires up correctly so the
+        // WitBindings dispatch on top has a working target.
+        // Wire-form invocation is asserted in the parity fixtures
+        // (there's no public host-function-lookup API on
+        // WasmRuntime today).
 
         [Fact]
         public void StubGpu_AlwaysReturnAdapter_YieldsAdapter()
         {
-            // The session-4 stub gpu exposes a flag to toggle
-            // request-adapter's behavior. None mode is the
-            // session-3 baseline; Some mode is what later wire-
-            // form tests use.
+            // The stub gpu exposes a flag to toggle
+            // request-adapter's behavior between None (baseline)
+            // and Some (exercise the option-handle retArea path).
             var stub = new StubGpuBackend();
             var gpu = stub.CreateGpu();
             var stubGpu = (StubGpu)gpu;
@@ -190,7 +187,7 @@ namespace Wacs.WASI.GFX.Webgpu.Test
             Assert.IsType<StubGpuDevice>(result.Ok);
         }
 
-        // ---- Session 5: buffer/shader/pipeline-layout/bind-group ----
+        // ---- buffer / shader / pipeline-layout / bind-group ----
 
         [Fact]
         public void StubGpuBuffer_DefaultStateMatchesUnmapped()
@@ -237,7 +234,7 @@ namespace Wacs.WASI.GFX.Webgpu.Test
             bg.SetLabel("bg"); Assert.Equal("bg", bg.Label());
         }
 
-        // ---- Session 6: compute path stubs ------------------
+        // ---- compute path stubs ----------------------------
 
         [Fact]
         public void StubComputePipeline_GetBindGroupLayout_Returns()
@@ -304,7 +301,7 @@ namespace Wacs.WASI.GFX.Webgpu.Test
             Assert.Equal(2, q.OnSubmittedCalls);
         }
 
-        // ---- Session 7: render-path stubs -------------------
+        // ---- render-path stubs ------------------------------
 
         [Fact]
         public void StubGpuTexture_DefaultQueries()
@@ -369,7 +366,7 @@ namespace Wacs.WASI.GFX.Webgpu.Test
             rb.SetLabel("rb"); Assert.Equal("rb", rb.Label());
         }
 
-        // ---- Session 9: graphics-context bridge ------------
+        // ---- graphics-context bridge -----------------------
 
         [Fact]
         public void Backend_FromAbstractBuffer_RejectsCpuKind()
@@ -755,8 +752,8 @@ namespace Wacs.WASI.GFX.Webgpu.Test
         {
             // Sanity: the whole compute path stub chain can be
             // constructed and walked without throwing. This is
-            // the shape hello_compute will exercise once the
-            // Silk backend lands in session 8.
+            // the shape hello_compute exercises once a real GPU
+            // backend (e.g. Silk) is wired in.
             var stub = new StubGpuBackend();
             var dev = new StubGpuDevice();
             var enc = new StubGpuCommandEncoder();

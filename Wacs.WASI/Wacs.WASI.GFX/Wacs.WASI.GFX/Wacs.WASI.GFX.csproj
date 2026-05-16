@@ -48,15 +48,14 @@
     </ItemGroup>
 
     <!-- Feed all vendored WIT to the source generator. The
-         hand-written WitBindings continues to own the interpreter-
-         side BindHostFunction wiring (lands next pass); the
-         generated interfaces are what the transpiler's
-         HostPackageResolver direct-links against on the wasip2
-         component path. -->
+         hand-written WitBindings owns the interpreter-side
+         BindHostFunction wiring; the generated interfaces are
+         what the transpiler's HostPackageResolver direct-links
+         against on the wasip2 component path. -->
     <ItemGroup>
         <!-- Top-level wit/*.wit drive host-interface emission —
-             this is the authoritative copy of our three v0
-             packages (graphics-context, frame-buffer, surface).
+             this is the authoritative copy of our three packages
+             (graphics-context, frame-buffer, surface).
              wit/deps/io/** is parsed for cross-package resolution
              but NOT emitted (WitForHost=false): wasi:io types are
              canonical in WACS.WASI.Preview2 and our generated
@@ -77,8 +76,8 @@
          matching the hand-written tree pattern Preview2 +
          WASI.NN use. Cross-package `wasi:io` references route
          to Wacs.WASI.Preview2.Io.IPollable via the
-         [WitPackageMapping] attribute on Wacs.WASI.Preview2
-         (v1 phase 1 1d) — no manual MSBuild map needed. -->
+         [WitPackageMapping] attribute on Wacs.WASI.Preview2 —
+         no manual MSBuild map needed. -->
     <PropertyGroup>
         <WitHostNamespaceOverride>Wacs.WASI.GFX</WitHostNamespaceOverride>
     </PropertyGroup>
@@ -98,8 +97,8 @@
         <InternalsVisibleTo Include="Wacs.WASI.GFX.Test" />
         <InternalsVisibleTo Include="Wacs.WASI.GFX.Silk" />
         <InternalsVisibleTo Include="Wacs.WASI.GFX.DependencyInjection" />
-        <!-- v1 phase 3: Webgpu sibling shares ResourceTable +
-             Realloc internals via this grant. -->
+        <!-- Webgpu sibling shares ResourceTable + Realloc
+             internals via this grant. -->
         <InternalsVisibleTo Include="Wacs.WASI.GFX.Webgpu" />
     </ItemGroup>
 

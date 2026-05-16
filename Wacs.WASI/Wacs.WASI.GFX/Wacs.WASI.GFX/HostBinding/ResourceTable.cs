@@ -20,7 +20,7 @@ namespace Wacs.WASI.GFX.HostBinding
     /// WASI.NN.
     ///
     /// <para>Handle 0 is the canonical-ABI null sentinel.
-    /// Allocation starts at 1; v0 doesn't reuse handles after
+    /// Allocation starts at 1; handles are not reused after
     /// drop. <see cref="Drop"/> disposes the instance if it
     /// implements <see cref="IDisposable"/>.</para>
     /// </summary>

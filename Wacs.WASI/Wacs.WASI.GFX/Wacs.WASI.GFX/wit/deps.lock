@@ -13,9 +13,9 @@ packages = [
 ]
 phase = 2
 
-# v1 phase 1i removed the wasi:io version bump — Preview2's
-# IoBindings now registers handlers at every shape-stable
-# wasi:io@0.2.x point release (0.2.0–0.2.8), so vendoring the
-# upstream wasi-gfx WIT verbatim (which pins to 0.2.0) just works.
+# Preview2's IoBindings registers handlers at every shape-
+# stable wasi:io@0.2.x point release (0.2.0–0.2.8), so
+# vendoring the upstream wasi-gfx WIT verbatim (which pins to
+# 0.2.0) works without any version-bump deviation.
 [deviations]
 # (none)

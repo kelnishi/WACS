@@ -16,7 +16,7 @@ using Wacs.ComponentModel.Runtime;
 [assembly: WacsDependencyInjectionSibling(
     "Wacs.WASI.GFX.DependencyInjection")]
 
-// v1 phase 1 1d: declares the WIT packages this assembly owns
+// Declares the WIT packages this assembly owns
 // (graphics-context + frame-buffer + surface). Downstream
 // packages like Wacs.WASI.GFX.Webgpu read this attribute and
 // route their `use wasi:graphics-context/...` cross-package

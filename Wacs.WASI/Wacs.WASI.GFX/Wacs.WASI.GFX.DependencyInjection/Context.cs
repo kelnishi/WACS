@@ -30,9 +30,9 @@ namespace Wacs.WASI.GFX.DependencyInjection
             GfxLog.Trace("DI.Context: type loaded into AppDomain");
         }
 
-        /// <summary>v1 phase 1 1g: parameterless ctor stays as a
-        /// back-compat fallback (the transpiler emits this when
-        /// no bundle-taking ctor is found on the impl). New
+        /// <summary>Parameterless ctor used as a back-compat
+        /// fallback (the transpiler emits this when no
+        /// bundle-taking ctor is found on the impl). Current
         /// transpiler emit prefers the
         /// <see cref="Context(WasiGfxBundle)"/> ctor and threads
         /// the backend through the bundle — letting multi-runtime
@@ -40,7 +40,7 @@ namespace Wacs.WASI.GFX.DependencyInjection
         /// process.</summary>
         [Obsolete("Prefer the bundle-taking ctor — multi-runtime " +
             "support drops the WasiGfxAmbient static. Kept for " +
-            "transpiler back-compat with v0 emit.")]
+            "transpiler back-compat with the earlier emit shape.")]
         public Context()
         {
             GfxLog.Trace("DI.Context: ctor invoked (Activator.CreateInstance, ambient path)");

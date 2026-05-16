@@ -21,13 +21,12 @@ namespace Wacs.WASI.GFX.Webgpu
     /// resource) that drives every downstream GPU resource
     /// (adapter / device / queue / buffer / texture / pipeline).
     ///
-    /// <para><b>Wiring contract:</b> the v0 GFX backend
-    /// (<c>WACS.WASI.GFX.Silk.SilkGfxBackend</c>) is extended in
-    /// phase 3c to also implement this interface — one Silk
-    /// backend covers both CPU (frame-buffer) and GPU (webgpu)
-    /// paths. Future non-Silk backends (Vulkan-direct, Metal-
-    /// direct) can implement IGpuBackend independently of the CPU
-    /// IBackend.</para>
+    /// <para><b>Wiring contract:</b> the GFX backend
+    /// (<c>WACS.WASI.GFX.Silk.SilkGfxBackend</c>) also implements
+    /// this interface — one Silk backend covers both CPU
+    /// (frame-buffer) and GPU (webgpu) paths. Non-Silk backends
+    /// (Vulkan-direct, Metal-direct) can implement IGpuBackend
+    /// independently of the CPU IBackend.</para>
     ///
     /// <para><b>Threading:</b> the IGpu and its descendants are
     /// invoked on whichever thread the wasm guest's import call

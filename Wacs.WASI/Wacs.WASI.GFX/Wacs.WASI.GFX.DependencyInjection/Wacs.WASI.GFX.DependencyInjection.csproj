@@ -47,8 +47,8 @@
              expose it to the Silk sibling. -->
         <InternalsVisibleTo Include="Wacs.WASI.GFX.Silk" />
 
-        <!-- v1 phase 1 1h: WasiPreview2GfxBundle is a partial
-             class auto-completed by the CompositeBundleGenerator.
+        <!-- WasiPreview2GfxBundle is a partial class
+             auto-completed by the CompositeBundleGenerator.
              Analyzer ref pulls the generator in at compile time;
              ReferenceOutputAssembly=false keeps the generator
              DLL off the runtime closure. -->

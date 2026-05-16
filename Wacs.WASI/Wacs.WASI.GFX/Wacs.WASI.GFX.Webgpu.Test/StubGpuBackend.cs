@@ -17,15 +17,10 @@ using GenGpuTextureFormat = Wacs.WASI.GFX.Webgpu.Webgpu.GpuTextureFormat;
 namespace Wacs.WASI.GFX.Webgpu.Test
 {
     /// <summary>
-    /// Headless test backend for the v1 phase 3 SPI tests. Records
-    /// call counts so the tests can assert the WitBindings reached
-    /// the backend correctly; doesn't load any GPU drivers.
-    ///
-    /// <para>v1 phase 3 session 3 covers <c>get-gpu</c> +
-    /// <c>get-preferred-canvas-format</c> +
-    /// <c>wgsl-language-features</c> + <c>[resource-drop]gpu</c>.
-    /// Adapter / device / buffer / pipeline stubs land alongside
-    /// later sessions.</para>
+    /// Headless test backend for the wasi:webgpu SPI tests.
+    /// Records call counts so the tests can assert the
+    /// WitBindings reached the backend correctly; doesn't load
+    /// any GPU drivers.
     /// </summary>
     internal sealed class StubGpuBackend : IGpuBackend
     {
@@ -78,15 +73,14 @@ namespace Wacs.WASI.GFX.Webgpu.Test
 
         /// <summary>When true, <see cref="RequestAdapter"/>
         /// returns a fresh <see cref="StubGpuAdapter"/>. Default
-        /// false → returns None, matching the original session 3
-        /// stub. Session 4 tests flip this to exercise the
-        /// option-handle retArea write path.</summary>
+        /// false → returns None. Tests flip this when they need
+        /// to exercise the option-handle retArea write path.</summary>
         public bool AlwaysReturnAdapter { get; set; }
 
         /// <summary>Captures the most recent
-        /// <c>request-adapter</c> arguments so session 4 tests
-        /// can assert the canonical-ABI option<record> decoding
-        /// landed the right CLR values.</summary>
+        /// <c>request-adapter</c> arguments so tests can assert
+        /// the canonical-ABI option<record> decoding landed the
+        /// right CLR values.</summary>
         public Option<GenGpuRAOpts> LastRequestAdapterOptions { get; private set; }
 
         public Option<GenIGpuAdapter> RequestAdapter(

@@ -25,7 +25,7 @@ namespace Wacs.WASI.GFX.Silk
     /// the connection: <see cref="Dispose"/> releases it via
     /// SurfaceRelease + MetalDestroyView.</para>
     ///
-    /// <para>v1 macOS-only: only the Metal surface-descriptor
+    /// <para>macOS-only: only the Metal surface-descriptor
     /// path is implemented. Other platforms throw on connect
     /// with a clear pointer at the missing surface-from-* helper.</para>
     /// </summary>
@@ -101,12 +101,10 @@ namespace Wacs.WASI.GFX.Silk
             // The Metal view was created via SDL_Metal_CreateView
             // and must be released through the SDL helper. The SDL
             // handle lives on the wasi-gfx side; we can't reach it
-            // from here without coupling. For v1 the Metal view
-            // leaks until process exit — wgpu surface release
-            // already drops the underlying CAMetalLayer ref, so
-            // the residual leak is the SDL_MetalView wrapper, not
-            // the layer itself. Investigate when multi-surface
-            // composition lands.
+            // from here without coupling, so the Metal view leaks
+            // until process exit. wgpu surface release already drops
+            // the underlying CAMetalLayer ref, so the residual leak
+            // is the SDL_MetalView wrapper, not the layer itself.
             _metalView = null;
         }
 

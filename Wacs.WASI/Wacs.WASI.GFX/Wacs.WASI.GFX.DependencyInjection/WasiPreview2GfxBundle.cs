@@ -19,15 +19,14 @@ namespace Wacs.WASI.GFX.DependencyInjection
     /// <c>object hostBundle</c> slot; this composite satisfies
     /// every binding both packages contribute through one slot.
     ///
-    /// <para>v1 phase 1 deferred item 1h: the constructor +
-    /// forwarding-properties body lands via the
-    /// <c>CompositeBundleGenerator</c> source-generator, driven
-    /// by the <see cref="WacsCompositeBundleGenAttribute"/> on
-    /// this partial class. Was ~90 lines of hand-written
-    /// boilerplate in v0; reflective consumers still see the
-    /// same surface (the generator stamps
+    /// <para>The constructor + forwarding-properties body is
+    /// emitted by the <c>CompositeBundleGenerator</c> source
+    /// generator, driven by the
+    /// <see cref="WacsCompositeBundleGenAttribute"/> on this
+    /// partial class. Reflective consumers see the surface the
+    /// generator stamps
     /// <c>[WacsCompositeBundle("wasi-gfx", Priority = 10)]</c>
-    /// on the generated half).</para>
+    /// on the generated half.</para>
     /// </summary>
     [WacsCompositeBundleGen(
         typeof(WasiPreview2Bundle), typeof(WasiGfxBundle),

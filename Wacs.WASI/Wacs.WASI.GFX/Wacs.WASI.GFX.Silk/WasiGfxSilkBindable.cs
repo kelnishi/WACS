@@ -41,13 +41,13 @@ namespace Wacs.WASI.GFX.Silk
         public WasiPreview2Host? Preview2Host { get; private set; }
         public ResourceContext? SharedResources { get; private set; }
 
-        /// <summary>v1 phase 3 session 8: the matching webgpu
-        /// backend + host. Constructed alongside the CPU pair so
-        /// the same Silk bindable serves wasi:graphics-context /
+        /// <summary>The matching webgpu backend + host.
+        /// Constructed alongside the CPU pair so the same Silk
+        /// bindable serves wasi:graphics-context /
         /// wasi:frame-buffer / wasi:surface (CPU) AND
-        /// wasi:webgpu (GPU) imports through one
-        /// <c>--bind</c>. <see cref="GpuBackend"/> is null only
-        /// when <see cref="BindToRuntime"/> hasn't run yet.</summary>
+        /// wasi:webgpu (GPU) imports through one <c>--bind</c>.
+        /// <see cref="GpuBackend"/> is null only when
+        /// <see cref="BindToRuntime"/> hasn't run yet.</summary>
         public SilkGpuBackend? GpuBackend { get; private set; }
         public WasiWebgpuHost? WebgpuHost { get; private set; }
 
@@ -95,21 +95,15 @@ namespace Wacs.WASI.GFX.Silk
                 .WithBackend(Backend)
                 .WithSharedResources(SharedResources));
 
-            // Wire the webgpu sibling alongside. The Silk-backed
-            // GPU dispatch lands in session 11; for now the
-            // backend resolves an IGpu singleton whose
-            // RequestAdapter throws PlatformNotSupportedException
-            // pointing at the next session. Guests that don't
-            // import wasi:webgpu/webgpu@0.0.1 never reach a
-            // throw — the bindings are registered regardless,
-            // but the call-out only fires on actual GPU use.
-            // v1 phase 3 session 9: graphics-context bridge.
-            // The webgpu host's [static]gpu-texture.from-graphics-
-            // buffer needs to resolve an abstract-buffer wasm
-            // handle to the host-side IAbstractBuffer that lives
-            // in the wasi-gfx sibling host's table. Bridge by
-            // closure since both hosts share this bindable's
-            // scope.
+            // Wire the webgpu sibling alongside. The webgpu host's
+            // [static]gpu-texture.from-graphics-buffer needs to
+            // resolve an abstract-buffer wasm handle to the host-
+            // side IAbstractBuffer that lives in the wasi-gfx
+            // sibling host's table. Bridge by closure since both
+            // hosts share this bindable's scope. Guests that don't
+            // import wasi:webgpu/webgpu@0.0.1 never reach the
+            // bridge — the bindings are registered regardless,
+            // but the resolver only fires on actual GPU use.
             var cpuHost = Host;
             GpuBackend = new SilkGpuBackend();
             WebgpuHost = runtime.UseWasiWebgpu(b => b
