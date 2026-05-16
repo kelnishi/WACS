@@ -673,7 +673,6 @@ namespace Wacs.Transpiler.AOT.Component
                         || IsLikelyVariantBase(
                             method.ReturnType.GetElementType()!));
 
-                int offsetSoFar = 0;
                 if (isOptionOrResultArrayReturn)
                 {
                     EmitListOfOptionOrResultReturn(il,

@@ -49,7 +49,6 @@ namespace Wacs.Core.Instructions.SuperInstruction
     {
         private readonly Value _constantValue;
         private readonly int _to;
-        private ValType type;
 
         public InstLocalConstSet(T c, InstLocalSet to) : base(ByteCode.LocalConstSet)
         {

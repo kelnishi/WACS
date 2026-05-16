@@ -58,8 +58,15 @@
              NuGet upload limit. Consumers on those platforms
              add the matching `OpenVINO.runtime.<rid>` package
              reference manually. -->
+        <!-- NU1701 suppressed: OpenVINO.runtime.<rid> packages
+             ship native binaries only — no managed assemblies and
+             no .NETStandard / net8/9 build folder — so NuGet
+             restores them via the .NETFramework moniker and warns.
+             ExcludeAssets="compile" already prevents any managed
+             surface from being pulled. -->
         <PackageReference Include="OpenVINO.runtime.macos-arm64" Version="2026.1.0"
-                          ExcludeAssets="compile" />
+                          ExcludeAssets="compile"
+                          NoWarn="NU1701" />
     </ItemGroup>
 
 </Project>

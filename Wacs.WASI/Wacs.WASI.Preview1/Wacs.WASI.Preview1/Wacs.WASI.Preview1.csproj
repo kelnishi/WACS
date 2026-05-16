@@ -3,6 +3,12 @@
     <PropertyGroup>
         <LangVersion>9</LangVersion>
         <Nullable>enable</Nullable>
+        <!-- CS8981: type names like `ptr`, `size`, `fd`,
+             `timestamp`, `filesize`, `dircookie` etc. are WITX
+             schema-derived identifiers from the WASI Preview 1
+             spec. The names are mandated by upstream; renaming
+             would break the contract. -->
+        <NoWarn>$(NoWarn);CS8981</NoWarn>
         <Title>Wacs WASI Preview 1</Title>
         <PackageId>WACS.WASI.Preview1</PackageId>
         <Authors>Kelvin Nishikawa</Authors>

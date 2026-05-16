@@ -468,6 +468,7 @@ namespace Wacs.WASI.Preview1
                     mem.WriteInt32(bufUsedPtr, strLen);
                 }
                 catch (SandboxError sandboxError) { return (int)sandboxError.ErrorNumber; }
+                return (int)ErrNo.Success;
 #else
                 return (int)ErrNo.NoSys;
 #endif
@@ -475,7 +476,6 @@ namespace Wacs.WASI.Preview1
             catch (FileNotFoundException) { return (int)ErrNo.NoEnt; }
             catch (UnauthorizedAccessException) { return (int)ErrNo.Acces; }
             catch (IOException) { return (int)ErrNo.NoSys; }
-            return (int)ErrNo.Success;
         }
 
         [WacsImport("wasi_snapshot_preview1", "path_remove_directory")]
