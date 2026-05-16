@@ -71,7 +71,7 @@ namespace Wacs.Core.Instructions
         /// </summary>
         /// <param name="context"></param>
         /// <returns>ValueTask containing the effective number of wasm instructions executed</returns>
-        public virtual async ValueTask ExecuteAsync(ExecContext context)
+        public virtual ValueTask ExecuteAsync(ExecContext context)
         {
             throw new WasmRuntimeException("Async Execution must be explicitly implemented");
         }

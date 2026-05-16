@@ -31,6 +31,17 @@
          emit unsafe blocks — the hot-path uses only Unsafe.Add / Unsafe.ReadUnaligned,
          which are managed intrinsics. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- CS9057 suppressed: the .NET 8 SDK ships analyzers
+         (Microsoft.Interop.ComInterfaceGenerator,
+         Microsoft.Interop.JavaScript.JSImportGenerator,
+         Microsoft.Interop.LibraryImportGenerator,
+         System.Text.Json.SourceGeneration,
+         System.Text.RegularExpressions.Generator) compiled against
+         Roslyn 4.4-4.5; LangVersion 9 resolves to an older Roslyn.
+         These analyzers don't fire on our code — we don't use the
+         features they target — but their version-check noise
+         clutters the build. -->
+    <NoWarn>$(NoWarn);CS9057</NoWarn>
   </PropertyGroup>
 
   <PropertyGroup>
