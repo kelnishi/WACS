@@ -34,7 +34,7 @@ namespace Wacs.Core.Instructions
         // tail-calls degrade to a plain host invocation followed by an
         // immediate FunctionReturn — semantically equivalent to call+return,
         // which is what the spec's tail-call proposal requires.
-        private IFunctionInstance _functionInstance;
+        private IFunctionInstance _functionInstance = null!;
 
         public InstReturnCall() : base(ByteCode.ReturnCall) 
             => IsAsync = false;

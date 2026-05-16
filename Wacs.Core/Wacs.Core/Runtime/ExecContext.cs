@@ -265,7 +265,7 @@ namespace Wacs.Core.Runtime
             }
             else
             {
-                Console.Error.WriteLine($"[0x{i:x8}]     {inst.StackDiff:+####;-####;0} {inst}");
+                Console.Error.WriteLine($"[0x{i:x8}]     {inst!.StackDiff:+####;-####;0} {inst}");
             }
         }
 

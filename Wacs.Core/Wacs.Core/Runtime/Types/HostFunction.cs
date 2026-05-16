@@ -201,7 +201,7 @@ namespace Wacs.Core.Runtime.Types
                 return wasmValue =>
                 {
                     var instance = Activator.CreateInstance(hostType);
-                    ((ITypeConvertable)instance).FromWasmValue(wasmValue);
+                    ((ITypeConvertable)instance!).FromWasmValue(wasmValue);
                     return instance;
                 }; 
             }
@@ -265,11 +265,11 @@ namespace Wacs.Core.Runtime.Types
                 {
                     outArgs -= 1;
                     if (_resultConversions[j] != null)
-                        returnValue = _resultConversions[j]?.Invoke(returnValue) ?? returnValue;
-                    context.OpStack.PushValue(new Value(returnValue));
+                        returnValue = _resultConversions[j]?.Invoke(returnValue!) ?? returnValue;
+                    context.OpStack.PushValue(new Value(returnValue!));
                     ++j;
                 }
-                
+
                 int idx = ParameterBuffer.Length - outArgs;
                 for (; idx < ParameterBuffer.Length; ++idx, ++j)
                 {
@@ -282,7 +282,7 @@ namespace Wacs.Core.Runtime.Types
             catch (TargetInvocationException ex)
             {
                 throw ex.InnerException!;
-            }   
+            }
         }
 
         public async ValueTask InvokeAsync(ExecContext context)
@@ -303,20 +303,20 @@ namespace Wacs.Core.Runtime.Types
             try
             {
                 var task = _invoker.Invoke(_hostFunction, ParameterBuffer) as Task;
-                await task;
+                await task!;
 
                 int outArgs = Type.ResultType.Types.Length;
                 int j = 0;
                 if (_captureReturn)
                 {
                     outArgs -= 1;
-                        
-                    var resultProperty = task.GetType().GetProperty("Result");
+
+                    var resultProperty = task!.GetType().GetProperty("Result");
                     var returnValue = resultProperty?.GetValue(task) ?? null;
-                        
+
                     if (_resultConversions[j] != null)
-                        returnValue = _resultConversions[j]?.Invoke(returnValue) ?? returnValue;
-                    context.OpStack.PushValue(new Value(returnValue));
+                        returnValue = _resultConversions[j]?.Invoke(returnValue!) ?? returnValue;
+                    context.OpStack.PushValue(new Value(returnValue!));
                     ++j;
                 }
                 

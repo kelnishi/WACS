@@ -63,7 +63,7 @@ namespace Wacs.Core.Instructions.GC
         {
             if (refVal.IsNullRef)
                 throw new TrapException("struct.get: null reference");
-            var refStruct = (StoreStruct)refVal.GcRef;
+            var refStruct = (StoreStruct)refVal.GcRef!;
             return refStruct[(FieldIdx)fieldIdx];
         }
 
@@ -73,7 +73,7 @@ namespace Wacs.Core.Instructions.GC
         {
             if (refVal.IsNullRef)
                 throw new TrapException("struct.set: null reference");
-            var refStruct = (StoreStruct)refVal.GcRef;
+            var refStruct = (StoreStruct)refVal.GcRef!;
             refStruct[(FieldIdx)fieldIdx] = val;
         }
 
@@ -83,7 +83,7 @@ namespace Wacs.Core.Instructions.GC
         {
             if (refVal.IsNullRef)
                 throw new TrapException("struct.get_s: null reference");
-            var refStruct = (StoreStruct)refVal.GcRef;
+            var refStruct = (StoreStruct)refVal.GcRef!;
             var v = refStruct[(FieldIdx)fieldIdx];
             var defType = ctx.Frame.Module.Types[(TypeIdx)typeIdx];
             var structType = (StructType)defType.Expansion;
@@ -102,7 +102,7 @@ namespace Wacs.Core.Instructions.GC
         {
             if (refVal.IsNullRef)
                 throw new TrapException("struct.get_u: null reference");
-            var refStruct = (StoreStruct)refVal.GcRef;
+            var refStruct = (StoreStruct)refVal.GcRef!;
             var v = refStruct[(FieldIdx)fieldIdx];
             var defType = ctx.Frame.Module.Types[(TypeIdx)typeIdx];
             var structType = (StructType)defType.Expansion;
@@ -132,7 +132,7 @@ namespace Wacs.Core.Instructions.GC
         {
             if (refVal.IsNullRef)
                 throw new TrapException("array.len: null reference");
-            return ((StoreArray)refVal.GcRef).Length;
+            return ((StoreArray)refVal.GcRef!).Length;
         }
 
         // 0xFB 0B array.get — pop ref, pop idx, push elem. Non-packed only.
@@ -141,7 +141,7 @@ namespace Wacs.Core.Instructions.GC
         {
             if (refVal.IsNullRef)
                 throw new TrapException("array.get: null reference");
-            var arr = (StoreArray)refVal.GcRef;
+            var arr = (StoreArray)refVal.GcRef!;
             if ((uint)idx >= (uint)arr.Length)
                 throw new TrapException("array.get: out of bounds");
             return arr[idx];
@@ -153,7 +153,7 @@ namespace Wacs.Core.Instructions.GC
         {
             if (refVal.IsNullRef)
                 throw new TrapException("array.set: null reference");
-            var arr = (StoreArray)refVal.GcRef;
+            var arr = (StoreArray)refVal.GcRef!;
             if ((uint)idx >= (uint)arr.Length)
                 throw new TrapException("array.set: out of bounds");
             arr[idx] = val;

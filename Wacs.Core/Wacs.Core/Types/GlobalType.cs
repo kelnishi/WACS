@@ -66,7 +66,7 @@ namespace Wacs.Core.Types
             return $"GlobalType({qual}{mut} {ContentType})";
         }
 
-        public override bool Equals(object obj) =>
+        public override bool Equals(object? obj) =>
             obj is GlobalType other &&
             ContentType == other.ContentType &&
             Mutability == other.Mutability &&

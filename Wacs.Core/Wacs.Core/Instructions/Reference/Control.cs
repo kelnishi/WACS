@@ -144,7 +144,7 @@ namespace Wacs.Core.Instructions.Reference
     public class InstCallRef : InstructionBase, ICallInstruction
     {
         public TypeIdx X;
-        private FunctionType cachedFunctionType;
+        private FunctionType cachedFunctionType = null!;
         public int TypeIndex => (int)X.Value;
 
         public InstCallRef() : base(ByteCode.CallRef)

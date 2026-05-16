@@ -85,7 +85,7 @@ namespace Wacs.Core.Instructions
     public class InstBlock : BlockTarget, IBlockInstruction
     {
         public InstBlock() : base(ByteCode.Block) { }
-        private Block Block;
+        private Block Block = null!;
 
         public ValType BlockType => Block.BlockType;
 

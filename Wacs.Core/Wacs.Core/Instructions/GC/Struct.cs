@@ -63,7 +63,7 @@ namespace Wacs.Core.Instructions.GC
             var compositeType = defType.Expansion;
             var structType = compositeType as StructType;
 
-            int stackDiff = +1 -structType.FieldTypes.Length;
+            int stackDiff = +1 -structType!.FieldTypes.Length;
             context.DeltaStack(stackDiff);
             return this;
         }

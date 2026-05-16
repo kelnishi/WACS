@@ -134,13 +134,13 @@ namespace Wacs.Compilation.Test
             // Byte offsets are now computed on demand via
             // ByteOffsetWalker rather than stored on the instance.
             var body = module.Funcs[0].Body.Instructions;
-            Assert.Equal((uint?)0, Wacs.Core.Bin.ByteOffsetWalker.Find(body, body[0]));
-            Assert.Equal((uint?)2, Wacs.Core.Bin.ByteOffsetWalker.Find(body, body[1]));
+            Assert.Equal((uint?)0, Wacs.Core.Bin.ByteOffsetWalker.Find(body, body[0]!));
+            Assert.Equal((uint?)2, Wacs.Core.Bin.ByteOffsetWalker.Find(body, body[1]!));
 
             // The hint's offset (2) matches the `if` instruction's
             // offset and resolves through the instance-keyed lookup.
-            Assert.NotNull(module.BranchHints!.TryGet(body[1]));
-            Assert.True(module.BranchHints!.TryGet(body[1])!.Value.IsLikely);
+            Assert.NotNull(module.BranchHints!.TryGet(body[1]!));
+            Assert.True(module.BranchHints!.TryGet(body[1]!)!.Value.IsLikely);
         }
 
         // Module byte layout (cumulative offsets from start of blob):
@@ -173,8 +173,8 @@ namespace Wacs.Compilation.Test
             // Byte offsets are still resolvable via ByteOffsetWalker
             // regardless of whether a hint section was present.
             var body = module.Funcs[0].Body.Instructions;
-            Assert.Equal((uint?)0, Wacs.Core.Bin.ByteOffsetWalker.Find(body, body[0]));
-            Assert.Equal((uint?)2, Wacs.Core.Bin.ByteOffsetWalker.Find(body, body[1]));
+            Assert.Equal((uint?)0, Wacs.Core.Bin.ByteOffsetWalker.Find(body, body[0]!));
+            Assert.Equal((uint?)2, Wacs.Core.Bin.ByteOffsetWalker.Find(body, body[1]!));
         }
 
         [Fact]

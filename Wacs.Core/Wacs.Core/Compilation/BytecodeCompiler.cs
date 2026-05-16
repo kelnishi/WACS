@@ -1055,7 +1055,7 @@ namespace Wacs.Core.Compilation
         private sealed class RefEq<T> : IEqualityComparer<T> where T : class
         {
             public static readonly RefEq<T> Instance = new RefEq<T>();
-            public bool Equals(T x, T y) => ReferenceEquals(x, y);
+            public bool Equals(T? x, T? y) => ReferenceEquals(x, y);
             public int GetHashCode(T obj) => RuntimeHelpers.GetHashCode(obj);
         }
     }

@@ -7549,7 +7549,7 @@ namespace Wacs.Transpiler.Test
             // the same instance, not a fresh one each time.
             object? rTick2 = callTick.Invoke(instance,
                 Array.Empty<object>());
-            Assert.Equal(43, (int)rTick2);
+            Assert.Equal(43, (int)rTick2!);
         }
 
         [Fact]

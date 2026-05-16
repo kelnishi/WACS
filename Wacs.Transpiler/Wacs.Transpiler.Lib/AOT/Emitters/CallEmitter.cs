@@ -657,7 +657,7 @@ namespace Wacs.Transpiler.AOT.Emitters
 
             // Cast to typed Func<>/Action<> (signature uses Value for refs).
             var delegateType = BuildDelegateType(site.FuncType);
-            il.Emit(OpCodes.Castclass, delegateType);
+            il.Emit(OpCodes.Castclass, delegateType!);
 
             // Push params, wrapping GC refs to Value for signature match.
             for (int i = 0; i < paramCount; i++)
@@ -672,7 +672,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             }
 
             // Invoke
-            il.Emit(OpCodes.Callvirt, delegateType.GetMethod("Invoke")!);
+            il.Emit(OpCodes.Callvirt, delegateType!.GetMethod("Invoke")!);
 
             // Unwrap Value → object for GC-ref result.
             if (resultTypes.Length > 0 && ModuleTranspiler.IsGcRefType(resultTypes[0], moduleInst))

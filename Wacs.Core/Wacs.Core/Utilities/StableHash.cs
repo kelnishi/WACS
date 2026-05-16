@@ -88,7 +88,7 @@ namespace Wacs.Core.Utilities
                 default:
                     // For complex objects, you might want to implement a custom mechanism
                     // such as reflection-based property enumeration
-                    Add(obj.ToString());
+                    Add(obj.ToString()!);
                     break;
             }
         }

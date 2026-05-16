@@ -98,7 +98,7 @@ namespace Wacs.Core.OpCodes
         public static implicit operator ByteCode(AtomCode b) => new ByteCode(b);
         public static implicit operator ByteCode(WacsCode b) => new ByteCode(b);
         
-        public override bool Equals(object obj) =>
+        public override bool Equals(object? obj) =>
             obj is ByteCode other && x00 == other.x00 && x00 switch {
                 OpCode.FB => xFB.Equals(other.xFB),
                 OpCode.FC => xFC.Equals(other.xFC),

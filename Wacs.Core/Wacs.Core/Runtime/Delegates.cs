@@ -77,7 +77,7 @@ namespace Wacs.Core.Runtime
                 throw new ArgumentException($"The type {delegateType.Name} is not a delegate type.");
             }
 
-            MethodInfo invokeMethod = delegateType.GetMethod("Invoke");
+            MethodInfo invokeMethod = delegateType.GetMethod("Invoke")!;
             if (invokeMethod == null)
             {
                 throw new ArgumentException($"The delegate type {delegateType.Name} does not have an Invoke method.");

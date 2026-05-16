@@ -24,8 +24,8 @@ namespace Wacs.Core.Compilation
     {
         public ByteCode Op;
         public Dictionary<int, (string type, bool isparam)> Locals = new();
-        public string Template;
-        public string Return;
+        public string Template = null!;
+        public string Return = null!;
 
         public int ParameterCount => Locals.Values.Select((t, p) => p).Count();
 
@@ -74,13 +74,13 @@ namespace Wacs.Core.Compilation
             if (opReturns != null && opReturns.Length == 1)
                 returns = opReturns[0].Type;
 
-            string template = mi.Invoke(null, null) as string;
+            string template = (mi.Invoke(null, null) as string)!;
             var src = new InstructionSource
             {
                 Op = opcode,
                 Locals = locals,
                 Return = returns,
-                Template = template
+                Template = template!
             };
             
             return src;
