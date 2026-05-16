@@ -14,6 +14,7 @@
 
 using System;
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using Wacs.Core.Attributes;
 
 // ReSharper disable InconsistentNaming
@@ -43,6 +44,10 @@ namespace Wacs.Core.OpCodes
                 _ => opcode.x00.GetMnemonic()
             };
 
+        [UnconditionalSuppressMessage("Trimming", "IL2090",
+            Justification = "T : Enum — public fields are the enum " +
+                "members. Statically referenced enum types preserve " +
+                "their field metadata under trimming.")]
         private static string LookUp<T>(T op)
         where T : Enum
         {

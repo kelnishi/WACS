@@ -7,6 +7,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Reflection;
 using Wacs.ComponentModel.CSharpEmit;
@@ -38,6 +39,12 @@ namespace Wacs.ComponentModel.Bindgen
         /// (e.g. a <c>wasm-tools component new</c> output that
         /// stripped the section before transpilation).
         /// </summary>
+        [UnconditionalSuppressMessage("Trimming", "IL2026",
+            Justification = "ExtractWitBytes is a bindgen-tool entry " +
+                "point — it reads metadata from a compile-output dll " +
+                "the developer passed explicitly. The dll's types are " +
+                "in the developer's own build; trimming the bindgen " +
+                "tool itself doesn't affect the target dll's content.")]
         public static byte[]? ExtractWitBytes(string dllPath)
         {
             if (dllPath == null) throw new ArgumentNullException(nameof(dllPath));
@@ -58,6 +65,16 @@ namespace Wacs.ComponentModel.Bindgen
         /// <c>ComponentAssemblyEmit.EmitComponentMetadataClass</c>
         /// produces.
         /// </summary>
+        [UnconditionalSuppressMessage("Trimming", "IL2026",
+            Justification = "Walks the assembly looking for a transpiler-" +
+                "emitted ComponentMetadata class. The transpiler emits " +
+                "this type unconditionally, so trimming the bindgen tool " +
+                "doesn't affect target assemblies.")]
+        [UnconditionalSuppressMessage("Trimming", "IL2075",
+            Justification = "GetField is called on a Type from " +
+                "assembly.GetTypes(); the lookup target is the well-known " +
+                "ComponentMetadata.EmbeddedWitBytes static field — its " +
+                "metadata is preserved by the transpiler's emit path.")]
         public static byte[]? ExtractWitBytes(Assembly assembly)
         {
             if (assembly == null) throw new ArgumentNullException(nameof(assembly));

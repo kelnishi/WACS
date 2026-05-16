@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Threading.Tasks;
 using Wacs.Core.Attributes;
@@ -50,7 +51,13 @@ namespace Wacs.Core.Runtime.Types
         /// <param name="delType">The System.Type of the delegate must match type.</param>
         /// <param name="hostFunction">The delegate representing the host function.</param>
         /// <param name="isAsync">True if the function returns a System.Threading.Task</param>
-        public HostFunction((string module, string entity) id, FunctionType type, Type delType, Delegate hostFunction, bool isAsync)
+        [UnconditionalSuppressMessage("Trimming", "IL2070",
+            Justification = "delType.GetMethod(\"Invoke\") on the " +
+                "delegate type the runtime is binding. Delegates are " +
+                "first-class types — their Invoke method is preserved " +
+                "by the runtime metadata layer.")]
+        public HostFunction((string module, string entity) id, FunctionType type,
+            Type delType, Delegate hostFunction, bool isAsync)
         {
             Type = type;
             _hostFunction = hostFunction;
@@ -178,6 +185,12 @@ namespace Wacs.Core.Runtime.Types
         private static uint ConvertInt(int value) => BitConverter.ToUInt32(BitConverter.GetBytes(value), 0);
         private static ulong ConvertLong(long value) => BitConverter.ToUInt64(BitConverter.GetBytes(value), 0);
 
+        [UnconditionalSuppressMessage("Trimming", "IL2067",
+            Justification = "hostType is constrained to value types " +
+                "implementing ITypeConvertable — the parameterless " +
+                "constructor on a struct exists by language guarantee, " +
+                "not metadata. Activator.CreateInstance(Type) is safe " +
+                "regardless of trimming.")]
         private static ConversionHelper CreateConversionHelper(Type hostType)
         {
             if (hostType.IsEnum)
