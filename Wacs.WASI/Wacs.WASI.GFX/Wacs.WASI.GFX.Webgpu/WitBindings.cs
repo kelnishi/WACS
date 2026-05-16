@@ -1818,11 +1818,6 @@ namespace Wacs.WASI.GFX.Webgpu
         }
 
         // Canonical-ABI memory tuple for create-render-pipeline.
-        // Partial decode — handles the simple fixture path
-        // (primitive/depth-stencil/multisample = None; fragment
-        // = Some with simple color targets). Full decode of
-        // depth-stencil's stencil-face-state etc. is mechanical
-        // but the fixture doesn't exercise it.
         //
         //   @0   self handle: u32
         //   @4   vertex (36 bytes):
@@ -1920,17 +1915,175 @@ namespace Wacs.WASI.GFX.Webgpu
                 : Option<string>.Some(ReadUtf8(ctx,
                     ctx.ReadI32LE(p + 192), ctx.ReadI32LE(p + 196)));
 
+            var primitive = ReadOptPrimitiveState(ctx, p + 40);
+            var depthStencil = ReadOptDepthStencilState(ctx, p + 52);
+            var multisample = ReadOptMultisampleState(ctx, p + 120);
+
             var descriptor = new Webgpu.GpuRenderPipelineDescriptor
             {
                 Vertex = vertex,
-                Primitive = Option<Webgpu.GpuPrimitiveState>.None,
-                DepthStencil = Option<Webgpu.GpuDepthStencilState>.None,
-                Multisample = Option<Webgpu.GpuMultisampleState>.None,
+                Primitive = primitive,
+                DepthStencil = depthStencil,
+                Multisample = multisample,
                 Fragment = fragment,
                 Layout = layoutMode,
                 Label = label,
             };
             return (self, descriptor);
+        }
+
+        // opt<gpu-primitive-state> at offset p (11 bytes, align 1).
+        //   @p+0 disc
+        //   @p+1 record payload (10 bytes):
+        //     @p+1 topology opt<enum-u8> (2)
+        //     @p+3 strip-index-format opt<enum-u8> (2)
+        //     @p+5 front-face opt<enum-u8> (2)
+        //     @p+7 cull-mode opt<enum-u8> (2)
+        //     @p+9 unclipped-depth opt<bool> (2)
+        private static Option<Webgpu.GpuPrimitiveState>
+            ReadOptPrimitiveState(ExecContext ctx, int p)
+        {
+            var mem = ctx.Memory();
+            if (mem[p] == 0)
+                return Option<Webgpu.GpuPrimitiveState>.None;
+            return Option<Webgpu.GpuPrimitiveState>.Some(
+                new Webgpu.GpuPrimitiveState
+                {
+                    Topology = mem[p + 1] == 0
+                        ? Option<Webgpu.GpuPrimitiveTopology>.None
+                        : Option<Webgpu.GpuPrimitiveTopology>.Some(
+                            (Webgpu.GpuPrimitiveTopology)mem[p + 2]),
+                    StripIndexFormat = mem[p + 3] == 0
+                        ? Option<Webgpu.GpuIndexFormat>.None
+                        : Option<Webgpu.GpuIndexFormat>.Some(
+                            (Webgpu.GpuIndexFormat)mem[p + 4]),
+                    FrontFace = mem[p + 5] == 0
+                        ? Option<Webgpu.GpuFrontFace>.None
+                        : Option<Webgpu.GpuFrontFace>.Some(
+                            (Webgpu.GpuFrontFace)mem[p + 6]),
+                    CullMode = mem[p + 7] == 0
+                        ? Option<Webgpu.GpuCullMode>.None
+                        : Option<Webgpu.GpuCullMode>.Some(
+                            (Webgpu.GpuCullMode)mem[p + 8]),
+                    UnclippedDepth = mem[p + 9] == 0
+                        ? Option<bool>.None
+                        : Option<bool>.Some(mem[p + 10] != 0),
+                });
+        }
+
+        // opt<gpu-depth-stencil-state> at offset p (68 bytes,
+        // align 4). disc @p+0; payload (64 bytes, align 4) @p+4.
+        //   @p+4  format u8 (1)
+        //   @p+5  depth-write-enabled opt<bool> (2)
+        //   @p+7  depth-compare opt<enum-u8> (2)
+        //   @p+9  stencil-front opt<sff> (9 bytes, align 1)
+        //   @p+18 stencil-back opt<sff> (9 bytes)
+        //   @p+28 stencil-read-mask opt<u32> (8 bytes, align 4)
+        //   @p+36 stencil-write-mask opt<u32> (8 bytes)
+        //   @p+44 depth-bias opt<s32> (8 bytes)
+        //   @p+52 depth-bias-slope-scale opt<f32> (8 bytes)
+        //   @p+60 depth-bias-clamp opt<f32> (8 bytes)
+        private static Option<Webgpu.GpuDepthStencilState>
+            ReadOptDepthStencilState(ExecContext ctx, int p)
+        {
+            var mem = ctx.Memory();
+            if (mem[p] == 0)
+                return Option<Webgpu.GpuDepthStencilState>.None;
+            return Option<Webgpu.GpuDepthStencilState>.Some(
+                new Webgpu.GpuDepthStencilState
+                {
+                    Format = (Webgpu.GpuTextureFormat)mem[p + 4],
+                    DepthWriteEnabled = mem[p + 5] == 0
+                        ? Option<bool>.None
+                        : Option<bool>.Some(mem[p + 6] != 0),
+                    DepthCompare = mem[p + 7] == 0
+                        ? Option<Webgpu.GpuCompareFunction>.None
+                        : Option<Webgpu.GpuCompareFunction>.Some(
+                            (Webgpu.GpuCompareFunction)mem[p + 8]),
+                    StencilFront = ReadOptStencilFaceState(ctx, p + 9),
+                    StencilBack  = ReadOptStencilFaceState(ctx, p + 18),
+                    StencilReadMask = mem[p + 28] == 0
+                        ? Option<uint>.None
+                        : Option<uint>.Some(
+                            unchecked((uint)ctx.ReadI32LE(p + 32))),
+                    StencilWriteMask = mem[p + 36] == 0
+                        ? Option<uint>.None
+                        : Option<uint>.Some(
+                            unchecked((uint)ctx.ReadI32LE(p + 40))),
+                    DepthBias = mem[p + 44] == 0
+                        ? Option<int>.None
+                        : Option<int>.Some(ctx.ReadI32LE(p + 48)),
+                    DepthBiasSlopeScale = mem[p + 52] == 0
+                        ? Option<float>.None
+                        : Option<float>.Some(BitConverter.Int32BitsToSingle(
+                            ctx.ReadI32LE(p + 56))),
+                    DepthBiasClamp = mem[p + 60] == 0
+                        ? Option<float>.None
+                        : Option<float>.Some(BitConverter.Int32BitsToSingle(
+                            ctx.ReadI32LE(p + 64))),
+                });
+        }
+
+        // opt<gpu-stencil-face-state> at offset p (9 bytes,
+        // align 1). disc @p+0; payload (8 bytes) @p+1.
+        //   @p+1 compare opt<enum-u8> (2)
+        //   @p+3 fail-op opt<enum-u8> (2)
+        //   @p+5 depth-fail-op opt<enum-u8> (2)
+        //   @p+7 pass-op opt<enum-u8> (2)
+        private static Option<Webgpu.GpuStencilFaceState>
+            ReadOptStencilFaceState(ExecContext ctx, int p)
+        {
+            var mem = ctx.Memory();
+            if (mem[p] == 0)
+                return Option<Webgpu.GpuStencilFaceState>.None;
+            return Option<Webgpu.GpuStencilFaceState>.Some(
+                new Webgpu.GpuStencilFaceState
+                {
+                    Compare = mem[p + 1] == 0
+                        ? Option<Webgpu.GpuCompareFunction>.None
+                        : Option<Webgpu.GpuCompareFunction>.Some(
+                            (Webgpu.GpuCompareFunction)mem[p + 2]),
+                    FailOp = mem[p + 3] == 0
+                        ? Option<Webgpu.GpuStencilOperation>.None
+                        : Option<Webgpu.GpuStencilOperation>.Some(
+                            (Webgpu.GpuStencilOperation)mem[p + 4]),
+                    DepthFailOp = mem[p + 5] == 0
+                        ? Option<Webgpu.GpuStencilOperation>.None
+                        : Option<Webgpu.GpuStencilOperation>.Some(
+                            (Webgpu.GpuStencilOperation)mem[p + 6]),
+                    PassOp = mem[p + 7] == 0
+                        ? Option<Webgpu.GpuStencilOperation>.None
+                        : Option<Webgpu.GpuStencilOperation>.Some(
+                            (Webgpu.GpuStencilOperation)mem[p + 8]),
+                });
+        }
+
+        // opt<gpu-multisample-state> at offset p (24 bytes,
+        // align 4). disc @p+0; payload (20 bytes, align 4) @p+4.
+        //   @p+4  count opt<u32> (8 bytes)
+        //   @p+12 mask opt<u32> (8 bytes)
+        //   @p+20 alpha-to-coverage-enabled opt<bool> (2 bytes)
+        private static Option<Webgpu.GpuMultisampleState>
+            ReadOptMultisampleState(ExecContext ctx, int p)
+        {
+            var mem = ctx.Memory();
+            if (mem[p] == 0)
+                return Option<Webgpu.GpuMultisampleState>.None;
+            return Option<Webgpu.GpuMultisampleState>.Some(
+                new Webgpu.GpuMultisampleState
+                {
+                    Count = mem[p + 4] == 0
+                        ? Option<uint>.None
+                        : Option<uint>.Some(
+                            unchecked((uint)ctx.ReadI32LE(p + 8))),
+                    Mask = mem[p + 12] == 0
+                        ? Option<uint>.None
+                        : Option<uint>.Some(
+                            unchecked((uint)ctx.ReadI32LE(p + 16))),
+                    AlphaToCoverageEnabled = mem[p + 20] == 0
+                        ? Option<bool>.None
+                        : Option<bool>.Some(mem[p + 21] != 0),
+                });
         }
 
         private static void BindTextureU32Query(WasmRuntime runtime,
