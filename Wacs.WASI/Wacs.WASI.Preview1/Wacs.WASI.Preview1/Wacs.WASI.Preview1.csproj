@@ -19,9 +19,9 @@
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.WASI.Preview1</AssemblyName>
         <RootNamespace>Wacs.WASI.Preview1</RootNamespace>
-        <AssemblyVersion>0.13.0</AssemblyVersion>
+        <AssemblyVersion>0.13.1</AssemblyVersion>
         <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-        <Version>0.13.0</Version>
+        <Version>0.13.1</Version>
         <RepositoryType>git</RepositoryType>
         <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
         <IsAotCompatible>true</IsAotCompatible>
