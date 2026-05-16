@@ -5,12 +5,14 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
-// Standalone windowed demo: Conway's Game of Life on the GPU,
-// rendered to a wasi:surface window via the wasi:webgpu swap-
-// chain path. Run with:
-//   wacs run --wasi-gfx --windowed \
-//     wasm/game-of-life-windowed.component.wasm
-// Hit Escape (or close the window) to quit.
+// Standalone windowed demo: Conway's Game of Life on the GPU.
+//
+// Controls:
+//   click+drag — paint live cells (sim pauses while dragging)
+//   space      — toggle pause / resume
+//   c          — clear grid
+//   r          — randomize grid (each press reseeds)
+//   escape     — quit
 
 wit_bindgen::generate!({
     path: "wit",
@@ -24,12 +26,11 @@ use wasi::graphics_context::graphics_context;
 use wasi::surface::surface;
 use wasi::webgpu::webgpu;
 
-// Combined WGSL: one compute entry plus a vertex+fragment pair
-// for the cell-grid rasterization. Two storage buffers are
-// ping-ponged each frame for the Conway transition; the
-// fragment shader samples whichever buffer holds the just-
-// computed "current" state.
-const SHADER_WGSL: &str = r#"
+// Two separate shader modules: WGSL doesn't allow two
+// resource variables at the same @group/@binding within one
+// module, even if they're used by disjoint entry points.
+
+const CS_WGSL: &str = r#"
 const W: u32 = 64u;
 const H: u32 = 64u;
 
@@ -60,6 +61,11 @@ fn cs_main(@builtin(global_invocation_id) id: vec3<u32>) {
     }
     dst[id.y * W + id.x] = next;
 }
+"#;
+
+const RS_WGSL: &str = r#"
+const W: u32 = 64u;
+const H: u32 = 64u;
 
 struct CellUniforms {
     surface_w: f32,
@@ -102,32 +108,29 @@ const H: usize = 64;
 const N: usize = W * H;
 const BYTES: u64 = (N * 4) as u64;
 
-// WebGPU usage / map / shader-stage flag values (numeric — the
-// WIT doesn't expose them as constants).
+// WebGPU usage / map / shader-stage flag values.
 const BU_COPY_DST: u32 = 0x0008;
 const BU_STORAGE: u32 = 0x0080;
 const BU_UNIFORM: u32 = 0x0040;
-const TU_RENDER_ATTACHMENT: u32 = 0x0010;
 const SS_COMPUTE: u32 = 0x4;
 const SS_FRAGMENT: u32 = 0x2;
 
-// Seed with an R-pentomino — small, chaotic, evolves for ~1100
-// generations on an infinite plane (we run on a torus so the
-// trail eventually wraps and self-collides, which is fine for
-// a screensaver-style demo).
-fn initial_grid() -> Vec<u8> {
+// xorshift32 — small, no dep needed.
+fn random_grid(seed: u32) -> Vec<u8> {
+    let mut s = seed | 1;
     let mut g = vec![0u32; N];
-    let cx = W / 2;
-    let cy = H / 2;
-    // .XX
-    // XX.
-    // .X.
-    g[(cy - 1) * W + (cx)]     = 1;
-    g[(cy - 1) * W + (cx + 1)] = 1;
-    g[(cy)     * W + (cx - 1)] = 1;
-    g[(cy)     * W + (cx)]     = 1;
-    g[(cy + 1) * W + (cx)]     = 1;
+    for cell in g.iter_mut() {
+        s ^= s << 13;
+        s ^= s >> 17;
+        s ^= s << 5;
+        // ~28% alive density — chaotic but not saturated.
+        *cell = if (s & 0xFF) < 72 { 1 } else { 0 };
+    }
     g.iter().flat_map(|v| v.to_le_bytes()).collect()
+}
+
+fn empty_grid() -> Vec<u8> {
+    vec![0u8; (BYTES) as usize]
 }
 
 struct Demo;
@@ -153,10 +156,6 @@ impl Guest for Demo {
             Err(e) => unreachable!("request_device: {}", e.message),
         };
         let queue = device.queue();
-
-        // Wire the graphics context to the device — this is
-        // what configures the wgpu surface against the SDL
-        // window's Metal layer.
         device.connect_graphics_context(&ctx);
 
         // -------- buffers --------
@@ -172,52 +171,56 @@ impl Guest for Demo {
             mapped_at_creation: None,
             label: Some("grid-b".to_string()),
         });
-        let init = initial_grid();
-        if let Err(e) =
-            queue.write_buffer_with_copy(&buf_a, 0, &init, None, None)
-        {
-            unreachable!("write_buffer: {}", e.message);
-        }
+        // Initial random seed.
+        let mut seed_counter: u32 = 0x12345678;
+        let init = random_grid(seed_counter);
+        write_both(&queue, &buf_a, &buf_b, &init);
 
-        // Uniforms (surface w/h as f32 pair, 8 bytes; pad to
-        // 16-byte uniform-buffer alignment).
         let uniforms = device.create_buffer(&webgpu::GpuBufferDescriptor {
             size: 16,
             usage: BU_UNIFORM | BU_COPY_DST,
             mapped_at_creation: None,
             label: Some("uniforms".to_string()),
         });
-        write_uniforms(&queue, &uniforms, 640.0, 640.0);
+        let mut win_w: f32 = 640.0;
+        let mut win_h: f32 = 640.0;
+        write_uniforms(&queue, &uniforms, win_w, win_h);
 
-        // -------- shader + bind layouts + pipelines --------
-        let shader =
+        // -------- shaders + pipelines --------
+        let cs_shader =
             device.create_shader_module(&webgpu::GpuShaderModuleDescriptor {
-                code: SHADER_WGSL.to_string(),
+                code: CS_WGSL.to_string(),
                 compilation_hints: None,
-                label: Some("gol-shader".to_string()),
+                label: Some("cs-shader".to_string()),
+            });
+        let rs_shader =
+            device.create_shader_module(&webgpu::GpuShaderModuleDescriptor {
+                code: RS_WGSL.to_string(),
+                compilation_hints: None,
+                label: Some("rs-shader".to_string()),
             });
 
-        // Compute bgl: two storage buffers (read + read_write).
         let cs_bgl = device.create_bind_group_layout(
             &webgpu::GpuBindGroupLayoutDescriptor {
                 entries: vec![
-                    bgl_entry_buffer(0, SS_COMPUTE,
+                    bgl_buffer(0, SS_COMPUTE,
                         webgpu::GpuBufferBindingType::ReadOnlyStorage),
-                    bgl_entry_buffer(1, SS_COMPUTE,
+                    bgl_buffer(1, SS_COMPUTE,
                         webgpu::GpuBufferBindingType::Storage),
                 ],
                 label: Some("cs-bgl".to_string()),
             },
         );
-        let cs_pl =
-            device.create_pipeline_layout(&webgpu::GpuPipelineLayoutDescriptor {
+        let cs_pl = device.create_pipeline_layout(
+            &webgpu::GpuPipelineLayoutDescriptor {
                 bind_group_layouts: vec![Some(&cs_bgl)],
                 label: Some("cs-pl".to_string()),
-            });
+            },
+        );
         let cs_pipeline = device.create_compute_pipeline(
             webgpu::GpuComputePipelineDescriptor {
                 compute: webgpu::GpuProgrammableStage {
-                    module: &shader,
+                    module: &cs_shader,
                     entry_point: Some("cs_main".to_string()),
                     constants: None,
                 },
@@ -226,8 +229,6 @@ impl Guest for Demo {
             },
         );
 
-        // Render bgl: uniform (binding 0) + read-only storage
-        // (binding 1, fragment-visible).
         let rs_bgl = device.create_bind_group_layout(
             &webgpu::GpuBindGroupLayoutDescriptor {
                 entries: vec![
@@ -243,22 +244,23 @@ impl Guest for Demo {
                         texture: None,
                         storage_texture: None,
                     },
-                    bgl_entry_buffer(1, SS_FRAGMENT,
+                    bgl_buffer(1, SS_FRAGMENT,
                         webgpu::GpuBufferBindingType::ReadOnlyStorage),
                 ],
                 label: Some("rs-bgl".to_string()),
             },
         );
-        let rs_pl =
-            device.create_pipeline_layout(&webgpu::GpuPipelineLayoutDescriptor {
+        let rs_pl = device.create_pipeline_layout(
+            &webgpu::GpuPipelineLayoutDescriptor {
                 bind_group_layouts: vec![Some(&rs_bgl)],
                 label: Some("rs-pl".to_string()),
-            });
+            },
+        );
         let rs_pipeline = device.create_render_pipeline(
             webgpu::GpuRenderPipelineDescriptor {
                 vertex: webgpu::GpuVertexState {
                     buffers: None,
-                    module: &shader,
+                    module: &rs_shader,
                     entry_point: Some("vs_main".to_string()),
                     constants: None,
                 },
@@ -267,16 +269,11 @@ impl Guest for Demo {
                 multisample: None,
                 fragment: Some(webgpu::GpuFragmentState {
                     targets: vec![Some(webgpu::GpuColorTargetState {
-                        // wgpu's preferred surface format is
-                        // typically Bgra8UnormSrgb on macOS Metal,
-                        // but our wasi-webgpu Silk backend reports
-                        // Bgra8unorm-srgb from the surface's
-                        // GetPreferredFormat. Match that.
                         format: webgpu::GpuTextureFormat::Bgra8unormSrgb,
                         blend: None,
                         write_mask: None,
                     })],
-                    module: &shader,
+                    module: &rs_shader,
                     entry_point: Some("fs_main".to_string()),
                     constants: None,
                 }),
@@ -285,88 +282,148 @@ impl Guest for Demo {
             },
         );
 
-        // -------- compute bind groups (ping-pong) --------
-        let cs_bg_ab = device.create_bind_group(&webgpu::GpuBindGroupDescriptor {
-            layout: &cs_bgl,
-            entries: vec![
-                bg_buffer_entry(0, &buf_a),
-                bg_buffer_entry(1, &buf_b),
-            ],
-            label: Some("cs-bg-ab".to_string()),
-        });
-        let cs_bg_ba = device.create_bind_group(&webgpu::GpuBindGroupDescriptor {
-            layout: &cs_bgl,
-            entries: vec![
-                bg_buffer_entry(0, &buf_b),
-                bg_buffer_entry(1, &buf_a),
-            ],
-            label: Some("cs-bg-ba".to_string()),
-        });
+        // Compute + render bind groups. Two each for the
+        // ping-pong: bg_a* reads buf_a (the "current" when
+        // current_is_a is true); bg_b* reads buf_b.
+        let cs_bg_a_to_b = device.create_bind_group(
+            &webgpu::GpuBindGroupDescriptor {
+                layout: &cs_bgl,
+                entries: vec![
+                    bg_buffer(0, &buf_a),
+                    bg_buffer(1, &buf_b),
+                ],
+                label: Some("cs-bg-a-to-b".to_string()),
+            },
+        );
+        let cs_bg_b_to_a = device.create_bind_group(
+            &webgpu::GpuBindGroupDescriptor {
+                layout: &cs_bgl,
+                entries: vec![
+                    bg_buffer(0, &buf_b),
+                    bg_buffer(1, &buf_a),
+                ],
+                label: Some("cs-bg-b-to-a".to_string()),
+            },
+        );
+        let rs_bg_a = device.create_bind_group(
+            &webgpu::GpuBindGroupDescriptor {
+                layout: &rs_bgl,
+                entries: vec![
+                    bg_buffer(0, &uniforms),
+                    bg_buffer(1, &buf_a),
+                ],
+                label: Some("rs-bg-a".to_string()),
+            },
+        );
+        let rs_bg_b = device.create_bind_group(
+            &webgpu::GpuBindGroupDescriptor {
+                layout: &rs_bgl,
+                entries: vec![
+                    bg_buffer(0, &uniforms),
+                    bg_buffer(1, &buf_b),
+                ],
+                label: Some("rs-bg-b".to_string()),
+            },
+        );
 
-        // -------- render bind groups (uniform + current grid) --
-        let rs_bg_a = device.create_bind_group(&webgpu::GpuBindGroupDescriptor {
-            layout: &rs_bgl,
-            entries: vec![
-                bg_buffer_entry(0, &uniforms),
-                bg_buffer_entry(1, &buf_a),
-            ],
-            label: Some("rs-bg-a".to_string()),
-        });
-        let rs_bg_b = device.create_bind_group(&webgpu::GpuBindGroupDescriptor {
-            layout: &rs_bgl,
-            entries: vec![
-                bg_buffer_entry(0, &uniforms),
-                bg_buffer_entry(1, &buf_b),
-            ],
-            label: Some("rs-bg-b".to_string()),
-        });
-
-        // -------- frame loop --------
+        // -------- event subscriptions --------
         let frame = canvas.subscribe_frame();
         let key_down = canvas.subscribe_key_down();
         let resize = canvas.subscribe_resize();
-        let pollables = vec![&frame, &key_down, &resize];
+        let p_down = canvas.subscribe_pointer_down();
+        let p_up = canvas.subscribe_pointer_up();
+        let p_move = canvas.subscribe_pointer_move();
+        let pollables = vec![
+            &frame, &key_down, &resize, &p_down, &p_up, &p_move,
+        ];
+        const IDX_FRAME: u32 = 0;
+        const IDX_KEY:   u32 = 1;
+        const IDX_RESIZE: u32 = 2;
+        const IDX_PDOWN: u32 = 3;
+        const IDX_PUP:   u32 = 4;
+        const IDX_PMOVE: u32 = 5;
 
-        let mut tick: u64 = 0;
+        // -------- state --------
+        let mut current_is_a: bool = true; // buf_a holds the current grid
+        let mut paused: bool = false;
+        let mut painting: bool = false;
+
         loop {
             let ready = wasi::io::poll::poll(&pollables);
 
-            // Key-down: quit on Escape.
-            if ready.contains(&1) {
+            // ---- keyboard ----
+            if ready.contains(&IDX_KEY) {
                 while let Some(ev) = canvas.get_key_down() {
                     if let Some(k) = ev.key {
-                        if matches!(k, surface::Key::Escape) {
-                            return;
+                        match k {
+                            surface::Key::Escape => return,
+                            surface::Key::Space  => paused = !paused,
+                            surface::Key::KeyC   => {
+                                let empty = empty_grid();
+                                write_both(&queue, &buf_a, &buf_b, &empty);
+                            }
+                            surface::Key::KeyR   => {
+                                seed_counter = seed_counter
+                                    .wrapping_mul(0x9E3779B1)
+                                    .wrapping_add(1);
+                                let g = random_grid(seed_counter);
+                                write_both(&queue, &buf_a, &buf_b, &g);
+                            }
+                            _ => {}
                         }
                     }
                 }
             }
 
-            // Resize: update the uniform so the fragment-side
-            // cell-coord math stays correct.
-            if ready.contains(&2) {
-                if let Some(ev) = canvas.get_resize() {
-                    write_uniforms(&queue, &uniforms,
-                        ev.width as f32, ev.height as f32);
+            // ---- mouse ----
+            if ready.contains(&IDX_PDOWN) {
+                while let Some(ev) = canvas.get_pointer_down() {
+                    painting = true;
+                    paint_at(&queue, &buf_a, &buf_b,
+                        ev.x, ev.y, win_w, win_h);
+                }
+            }
+            if ready.contains(&IDX_PUP) {
+                while canvas.get_pointer_up().is_some() {
+                    painting = false;
+                }
+            }
+            if ready.contains(&IDX_PMOVE) {
+                while let Some(ev) = canvas.get_pointer_move() {
+                    if painting {
+                        paint_at(&queue, &buf_a, &buf_b,
+                            ev.x, ev.y, win_w, win_h);
+                    }
                 }
             }
 
-            if ready.contains(&0) {
-                canvas.get_frame();
-                let even = tick % 2 == 0;
-                let (cs_bg, rs_bg) = if even {
-                    (&cs_bg_ab, &rs_bg_b) // A→B; render B
-                } else {
-                    (&cs_bg_ba, &rs_bg_a) // B→A; render A
-                };
+            // ---- resize ----
+            if ready.contains(&IDX_RESIZE) {
+                if let Some(ev) = canvas.get_resize() {
+                    win_w = ev.width as f32;
+                    win_h = ev.height as f32;
+                    write_uniforms(&queue, &uniforms, win_w, win_h);
+                }
+            }
 
-                // Current swap-chain view for this frame.
+            // ---- frame ----
+            if ready.contains(&IDX_FRAME) {
+                canvas.get_frame();
+
                 let ab = ctx.get_current_buffer();
                 let tex = webgpu::GpuTexture::from_graphics_buffer(ab);
                 let view = tex.create_view(None);
 
                 let encoder = device.create_command_encoder(None);
-                {
+
+                // Step the sim only if running and not painting.
+                let do_step = !paused && !painting;
+                if do_step {
+                    let cs_bg = if current_is_a {
+                        &cs_bg_a_to_b // src = A; dst = B
+                    } else {
+                        &cs_bg_b_to_a // src = B; dst = A
+                    };
                     let p = encoder.begin_compute_pass(None);
                     p.set_pipeline(&cs_pipeline);
                     if let Err(e) =
@@ -376,7 +433,10 @@ impl Guest for Demo {
                     }
                     p.dispatch_workgroups(1, None, None);
                     p.end();
+                    current_is_a = !current_is_a;
                 }
+
+                let rs_bg = if current_is_a { &rs_bg_a } else { &rs_bg_b };
                 {
                     let p = encoder.begin_render_pass(
                         &webgpu::GpuRenderPassDescriptor {
@@ -410,17 +470,13 @@ impl Guest for Demo {
                 }
                 let cmd = encoder.finish(None);
                 queue.submit(&[&cmd]);
-
-                // context.present routes through the wgpu
-                // surface-present on the Silk backend.
                 ctx.present();
-                tick += 1;
             }
         }
     }
 }
 
-fn bgl_entry_buffer(
+fn bgl_buffer(
     binding: u32, vis: u32, ty: webgpu::GpuBufferBindingType,
 ) -> webgpu::GpuBindGroupLayoutEntry {
     webgpu::GpuBindGroupLayoutEntry {
@@ -437,7 +493,7 @@ fn bgl_entry_buffer(
     }
 }
 
-fn bg_buffer_entry<'a>(
+fn bg_buffer<'a>(
     binding: u32, buf: &'a webgpu::GpuBuffer,
 ) -> webgpu::GpuBindGroupEntry<'a> {
     webgpu::GpuBindGroupEntry {
@@ -463,5 +519,54 @@ fn write_uniforms(
         queue.write_buffer_with_copy(uniforms, 0, &data, None, None)
     {
         unreachable!("write_buffer uniforms: {}", e.message);
+    }
+}
+
+// Write the same grid bytes to BOTH ping-pong buffers so the
+// next compute step reads the painted state regardless of which
+// buffer is currently the "source".
+fn write_both(
+    queue: &webgpu::GpuQueue,
+    buf_a: &webgpu::GpuBuffer,
+    buf_b: &webgpu::GpuBuffer,
+    bytes: &[u8],
+) {
+    if let Err(e) =
+        queue.write_buffer_with_copy(buf_a, 0, bytes, None, None)
+    {
+        unreachable!("write_buffer A: {}", e.message);
+    }
+    if let Err(e) =
+        queue.write_buffer_with_copy(buf_b, 0, bytes, None, None)
+    {
+        unreachable!("write_buffer B: {}", e.message);
+    }
+}
+
+fn paint_at(
+    queue: &webgpu::GpuQueue,
+    buf_a: &webgpu::GpuBuffer,
+    buf_b: &webgpu::GpuBuffer,
+    x: f64, y: f64, win_w: f32, win_h: f32,
+) {
+    if win_w <= 0.0 || win_h <= 0.0 { return; }
+    let cw = win_w as f64 / W as f64;
+    let ch = win_h as f64 / H as f64;
+    if cw <= 0.0 || ch <= 0.0 { return; }
+    let cx = (x / cw).floor() as i64;
+    let cy = (y / ch).floor() as i64;
+    if cx < 0 || cy < 0 || cx >= W as i64 || cy >= H as i64 { return; }
+    let idx = (cy as u64) * (W as u64) + (cx as u64);
+    let offset = idx * 4;
+    let bytes = 1u32.to_le_bytes();
+    if let Err(e) =
+        queue.write_buffer_with_copy(buf_a, offset, &bytes, None, None)
+    {
+        unreachable!("paint A: {}", e.message);
+    }
+    if let Err(e) =
+        queue.write_buffer_with_copy(buf_b, offset, &bytes, None, None)
+    {
+        unreachable!("paint B: {}", e.message);
     }
 }

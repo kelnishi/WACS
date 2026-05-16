@@ -17,9 +17,19 @@ dotnet run --project Wacs.Console/Wacs.Console -c Release -- \
 (`--call start` overrides the CLI's default `_start` entrypoint —
 the WIT exports `start: func()`, no leading underscore.)
 
-A 640×640 window opens with an R-pentomino seed. The compute
-shader steps the simulation once per frame; the fragment shader
-draws the grid. Hit **Escape** (or close the window) to quit.
+A 640×640 window opens with a random ~28%-density seed. The
+compute shader steps the simulation once per frame; the
+fragment shader draws the grid.
+
+### Controls
+
+| Key / action | Effect |
+|---|---|
+| **click + drag** | paint live cells (sim auto-pauses while dragging) |
+| **space** | toggle pause / resume |
+| **c** | clear the grid |
+| **r** | re-randomize (each press picks a new seed) |
+| **escape** | quit (closing the window also works) |
 
 `--wasi-gfx` wires the Silk SDL backend, which brings up BOTH
 the CPU host (wasi:graphics-context / wasi:surface / wasi:frame-
