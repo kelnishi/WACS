@@ -57,19 +57,20 @@ namespace Wacs.WASI.GFX.Silk
         {
             EnsureLive();
             string label = string.Empty;
-            // wgpu's TextureViewDescriptor uses zero / Undefined
-            // values to mean "inherit from texture". When the WIT
-            // option is None we pass an all-zero descriptor; when
-            // Some we map each option<T> into the corresponding
-            // field (None inside the inner record → leave default
-            // zero / Undefined).
+            // wgpu defaults: MipLevelCount + ArrayLayerCount =
+            // 0xFFFFFFFF means "use all remaining" — passing 0
+            // is rejected by wgpu validation as "invalid count".
+            // The other enum-typed fields treat zero = Undefined
+            // which wgpu maps to "inherit from texture".
             var desc = default(TextureViewDescriptor);
+            desc.MipLevelCount = uint.MaxValue;
+            desc.ArrayLayerCount = uint.MaxValue;
             if (descriptor.TryGetValue(out var d) && d != null)
             {
                 label = d.Label.TryGetValue(out var l) && l != null
                     ? l : string.Empty;
                 if (d.Format.TryGetValue(out var fmt))
-                    desc.Format = (TextureFormat)fmt;
+                    desc.Format = SilkGpuDevice.MapTextureFormat(fmt);
                 if (d.Dimension.TryGetValue(out var dim))
                     desc.Dimension = MapViewDim(dim);
                 // d.Usage is a webgpu-spec hint not exposed by

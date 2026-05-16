@@ -840,60 +840,16 @@ namespace Wacs.WASI.GFX.Webgpu
                 });
 
             // create-texture(self, gpu-texture-descriptor) -> own<gpu-texture>
-            // Descriptor flat (19 i32) — see CustomDelegates.CreateTexture
-            // for the field-by-field layout.
-            runtime.BindHostFunction<CustomDelegates.CreateTexture>(
+            //
+            // Canonical-ABI flat-form: 1 self + 19 descriptor =
+            // 20 > 16. Indirect: single i32 pointer to the
+            // (self, descriptor) memory tuple (72 bytes).
+            runtime.BindHostFunction<Func<ExecContext, int, int>>(
                 (Ns, "[method]gpu-device.create-texture"),
-                (ctx, selfH,
-                    w, hDisc, hVal, dDisc, dVal,
-                    mipDisc, mipVal, smpDisc, smpVal,
-                    dimDisc, dimVal, fmt, usage,
-                    vfDisc, vfPtr, vfLen, lblDisc, lblPtr, lblLen) =>
+                (ctx, paramsPtr) =>
                 {
+                    var (selfH, descriptor) = ReadCreateTextureParams(ctx, paramsPtr);
                     var dev = (IGpuDevice)host.Devices.Get(selfH);
-                    var size = new Webgpu.GpuExtent3D
-                    {
-                        Width = unchecked((uint)w),
-                        Height = hDisc == 0
-                            ? Option<uint>.None
-                            : Option<uint>.Some(unchecked((uint)hVal)),
-                        DepthOrArrayLayers = dDisc == 0
-                            ? Option<uint>.None
-                            : Option<uint>.Some(unchecked((uint)dVal)),
-                    };
-                    // view-formats: opt<list<gpu-texture-format>>. The
-                    // enum encodes as u8 in memory; read each byte.
-                    Option<Webgpu.GpuTextureFormat[]> viewFormats;
-                    if (vfDisc == 0)
-                        viewFormats = Option<Webgpu.GpuTextureFormat[]>.None;
-                    else
-                    {
-                        var arr = new Webgpu.GpuTextureFormat[vfLen];
-                        var mem = ctx.Memory();
-                        for (int i = 0; i < vfLen; i++)
-                            arr[i] = (Webgpu.GpuTextureFormat)mem[vfPtr + i];
-                        viewFormats = Option<Webgpu.GpuTextureFormat[]>.Some(arr);
-                    }
-                    var descriptor = new Webgpu.GpuTextureDescriptor
-                    {
-                        Size = size,
-                        MipLevelCount = mipDisc == 0
-                            ? Option<uint>.None
-                            : Option<uint>.Some(unchecked((uint)mipVal)),
-                        SampleCount = smpDisc == 0
-                            ? Option<uint>.None
-                            : Option<uint>.Some(unchecked((uint)smpVal)),
-                        Dimension = dimDisc == 0
-                            ? Option<Webgpu.GpuTextureDimension>.None
-                            : Option<Webgpu.GpuTextureDimension>.Some(
-                                (Webgpu.GpuTextureDimension)dimVal),
-                        Format = (Webgpu.GpuTextureFormat)fmt,
-                        Usage = unchecked((uint)usage),
-                        ViewFormats = viewFormats,
-                        Label = lblDisc == 0
-                            ? Option<string>.None
-                            : Option<string>.Some(ReadUtf8(ctx, lblPtr, lblLen)),
-                    };
                     var t = dev.CreateTexture(descriptor);
                     return host.Textures.Allocate(t);
                 });
@@ -1003,14 +959,21 @@ namespace Wacs.WASI.GFX.Webgpu
                     }
                 });
 
-            // create-render-pipeline / create-render-pipeline-async —
-            // the gpu-render-pipeline-descriptor record nests vertex/
-            // primitive/depth-stencil/multisample/fragment sub-records
-            // for an unflattened arity > 60 i32, beyond what a single
-            // custom delegate captures cleanly. Defer until a backend
-            // (wgpu-native) actually consumes these — at that point
-            // the host code that decodes the descriptor lives in the
-            // backend and this binding is mostly retArea-write plumbing.
+            // create-render-pipeline(self, gpu-render-pipeline-descriptor)
+            //   -> own<gpu-render-pipeline>
+            // Indirect form. The descriptor flat-form is in the
+            // 60+ slot range; canonical-ABI collapses to a single
+            // i32 pointer.
+            runtime.BindHostFunction<Func<ExecContext, int, int>>(
+                (Ns, "[method]gpu-device.create-render-pipeline"),
+                (ctx, paramsPtr) =>
+                {
+                    var (selfH, descriptor) =
+                        ReadCreateRenderPipelineParams(ctx, paramsPtr, host);
+                    var dev = (IGpuDevice)host.Devices.Get(selfH);
+                    var pipeline = dev.CreateRenderPipeline(descriptor);
+                    return host.RenderPipelines.Allocate(pipeline);
+                });
         }
 
         // ----------------------------------------------------
@@ -1207,6 +1170,37 @@ namespace Wacs.WASI.GFX.Webgpu
         private static void BindGpuCommandEncoder(WasmRuntime runtime,
             WasiWebgpuHost host, Wacs.WASI.GFX.HostBinding.Realloc alloc)
         {
+            // begin-render-pass(self, descriptor: gpu-render-pass-descriptor)
+            //   -> own<gpu-render-pass-encoder>
+            // Indirect form (descriptor flat >> 16 slots). The
+            // memory tuple is (self, descriptor). The render-
+            // pass descriptor is the deepest nested record in
+            // the WIT — color-attachments list, optional depth-
+            // stencil with stencil-face sub-records, optional
+            // timestamp-writes, optional occlusion query set.
+            runtime.BindHostFunction<Func<ExecContext, int, int>>(
+                (Ns, "[method]gpu-command-encoder.begin-render-pass"),
+                (ctx, paramsPtr) =>
+                {
+                    var (selfH, desc) =
+                        ReadBeginRenderPassParams(ctx, paramsPtr, host);
+                    var enc = (IGpuCommandEncoder)host.CommandEncoders.Get(selfH);
+                    var pass = enc.BeginRenderPass(desc);
+                    return host.RenderPassEncoders.Allocate(pass);
+                });
+
+            // copy-texture-to-buffer(self, source, destination, copy-size)
+            // Indirect form (flat >> 16). 3 nested records.
+            runtime.BindHostFunction<Action<ExecContext, int>>(
+                (Ns, "[method]gpu-command-encoder.copy-texture-to-buffer"),
+                (ctx, paramsPtr) =>
+                {
+                    var (selfH, src, dst, size) =
+                        ReadCopyTextureToBufferParams(ctx, paramsPtr, host);
+                    var enc = (IGpuCommandEncoder)host.CommandEncoders.Get(selfH);
+                    enc.CopyTextureToBuffer(src, dst, size);
+                });
+
             // begin-compute-pass(self, descriptor: option<gpu-compute-pass-descriptor>)
             //   -> own<gpu-compute-pass-encoder>
             //
@@ -1520,37 +1514,423 @@ namespace Wacs.WASI.GFX.Webgpu
             // create-view(self, opt<gpu-texture-view-descriptor>)
             //   -> own<gpu-texture-view>
             //
-            // option<descriptor> flat-form: 1 opt-disc + 9 option
-            // fields (8 option<enum/u32> = 2 i32 each, 1 option<string>
-            // = 3 i32) = 1 + 16 + 3 = 20 i32. Wire: self + 20 +
-            // i32 result = 22-arity callable, beyond
-            // Func<T1..T16,TResult>. Bound via the custom
-            // CreateView delegate in CustomDelegates.
-            //
-            // v1 follow-up: descriptor fields ignored; impl
-            // receives Option<GpuTextureViewDescriptor>.None. Real
-            // backends pulling format/dimension/aspect/mip/array
-            // ranges need the full decode — pairs with the Silk
-            // wgpu dispatcher when it lands.
-            runtime.BindHostFunction<CustomDelegates.CreateView>(
+            // Canonical-ABI flat-form: 1 self + 20 descriptor = 21
+            // slots > MAX_FLAT_PARAMS (16). The whole arglist
+            // collapses to a single i32 pointing at the
+            // (self, descriptor) memory tuple. Tuple is 68 bytes
+            // (see ReadCreateViewParams for the layout).
+            runtime.BindHostFunction<Func<ExecContext, int, int>>(
                 (Ns, "[method]gpu-texture.create-view"),
-                (_, selfH,
-                    _od,
-                    _fmtD, _fmtV,
-                    _dimD, _dimV,
-                    _usD, _usV,
-                    _aspD, _aspV,
-                    _mipBD, _mipBV,
-                    _mipCD, _mipCV,
-                    _arrBD, _arrBV,
-                    _arrCD, _arrCV,
-                    _lblD, _lblPtr, _lblLen) =>
+                (ctx, paramsPtr) =>
                 {
+                    var (selfH, descriptor) = ReadCreateViewParams(ctx, paramsPtr);
                     var tex = (IGpuTexture)host.Textures.Get(selfH);
-                    var view = tex.CreateView(
-                        Option<Webgpu.GpuTextureViewDescriptor>.None);
+                    var view = tex.CreateView(descriptor);
                     return host.TextureViews.Allocate(view);
                 });
+        }
+
+        // Canonical-ABI memory tuple for create-view's indirect-
+        // form params. Total size 68 bytes.
+        //   @0   self handle: u32
+        //   @4   option<descriptor>: 64 bytes (disc + 3 pad + 60-byte
+        //        descriptor payload starting at @8)
+        //   Within the descriptor (8 + offset):
+        //     @8   format          opt<enum-u8>  (disc@8, val@9)
+        //     @10  dimension       opt<enum-u8>  (disc@10, val@11)
+        //     @12  usage           opt<u32>      (disc@12, val@16)
+        //     @20  aspect          opt<enum-u8>  (disc@20, val@21)
+        //     @24  base-mip-level  opt<u32>      (disc@24, val@28)
+        //     @32  mip-level-count opt<u32>      (disc@32, val@36)
+        //     @40  base-array-layer opt<u32>     (disc@40, val@44)
+        //     @48  array-layer-count opt<u32>    (disc@48, val@52)
+        //     @56  label           opt<string>   (disc@56, ptr@60, len@64)
+        private static (int self, Option<Webgpu.GpuTextureViewDescriptor> descriptor)
+            ReadCreateViewParams(ExecContext ctx, int p)
+        {
+            var mem = ctx.Memory();
+            int self = ctx.ReadI32LE(p);
+            if (mem[p + 4] == 0)
+                return (self, Option<Webgpu.GpuTextureViewDescriptor>.None);
+            var d = new Webgpu.GpuTextureViewDescriptor
+            {
+                Format = mem[p + 8] == 0
+                    ? Option<Webgpu.GpuTextureFormat>.None
+                    : Option<Webgpu.GpuTextureFormat>.Some(
+                        (Webgpu.GpuTextureFormat)mem[p + 9]),
+                Dimension = mem[p + 10] == 0
+                    ? Option<Webgpu.GpuTextureViewDimension>.None
+                    : Option<Webgpu.GpuTextureViewDimension>.Some(
+                        (Webgpu.GpuTextureViewDimension)mem[p + 11]),
+                Usage = mem[p + 12] == 0
+                    ? Option<uint>.None
+                    : Option<uint>.Some(unchecked((uint)ctx.ReadI32LE(p + 16))),
+                Aspect = mem[p + 20] == 0
+                    ? Option<Webgpu.GpuTextureAspect>.None
+                    : Option<Webgpu.GpuTextureAspect>.Some(
+                        (Webgpu.GpuTextureAspect)mem[p + 21]),
+                BaseMipLevel = mem[p + 24] == 0
+                    ? Option<uint>.None
+                    : Option<uint>.Some(unchecked((uint)ctx.ReadI32LE(p + 28))),
+                MipLevelCount = mem[p + 32] == 0
+                    ? Option<uint>.None
+                    : Option<uint>.Some(unchecked((uint)ctx.ReadI32LE(p + 36))),
+                BaseArrayLayer = mem[p + 40] == 0
+                    ? Option<uint>.None
+                    : Option<uint>.Some(unchecked((uint)ctx.ReadI32LE(p + 44))),
+                ArrayLayerCount = mem[p + 48] == 0
+                    ? Option<uint>.None
+                    : Option<uint>.Some(unchecked((uint)ctx.ReadI32LE(p + 52))),
+                Label = mem[p + 56] == 0
+                    ? Option<string>.None
+                    : Option<string>.Some(ReadUtf8(ctx,
+                        ctx.ReadI32LE(p + 60), ctx.ReadI32LE(p + 64))),
+            };
+            return (self, Option<Webgpu.GpuTextureViewDescriptor>.Some(d));
+        }
+
+        // Canonical-ABI memory tuple for create-texture's
+        // indirect-form params. Total 72 bytes.
+        //   @0   self handle: u32
+        //   @4..23  size: gpu-extent3-d
+        //     @4   width: u32
+        //     @8   height          opt<u32>  (disc@8,  val@12)
+        //     @16  depth-or-array  opt<u32>  (disc@16, val@20)
+        //   @24..31 mip-level-count opt<u32> (disc@24, val@28)
+        //   @32..39 sample-count    opt<u32> (disc@32, val@36)
+        //   @40..41 dimension       opt<enum-u8>
+        //   @42     format          enum-u8  (required, no disc)
+        //   @43     (pad to align 4)
+        //   @44..47 usage           u32
+        //   @48..59 view-formats    opt<list<enum-u8>>  (disc@48, ptr@52, len@56)
+        //   @60..71 label           opt<string>         (disc@60, ptr@64, len@68)
+        private static (int self, Webgpu.GpuTextureDescriptor descriptor)
+            ReadCreateTextureParams(ExecContext ctx, int p)
+        {
+            var mem = ctx.Memory();
+            int self = ctx.ReadI32LE(p);
+            var size = new Webgpu.GpuExtent3D
+            {
+                Width = unchecked((uint)ctx.ReadI32LE(p + 4)),
+                Height = mem[p + 8] == 0
+                    ? Option<uint>.None
+                    : Option<uint>.Some(unchecked((uint)ctx.ReadI32LE(p + 12))),
+                DepthOrArrayLayers = mem[p + 16] == 0
+                    ? Option<uint>.None
+                    : Option<uint>.Some(unchecked((uint)ctx.ReadI32LE(p + 20))),
+            };
+            Option<Webgpu.GpuTextureFormat[]> viewFormats;
+            if (mem[p + 48] == 0)
+                viewFormats = Option<Webgpu.GpuTextureFormat[]>.None;
+            else
+            {
+                int vfPtr = ctx.ReadI32LE(p + 52);
+                int vfLen = ctx.ReadI32LE(p + 56);
+                var arr = new Webgpu.GpuTextureFormat[vfLen];
+                for (int i = 0; i < vfLen; i++)
+                    arr[i] = (Webgpu.GpuTextureFormat)mem[vfPtr + i];
+                viewFormats = Option<Webgpu.GpuTextureFormat[]>.Some(arr);
+            }
+            var descriptor = new Webgpu.GpuTextureDescriptor
+            {
+                Size = size,
+                MipLevelCount = mem[p + 24] == 0
+                    ? Option<uint>.None
+                    : Option<uint>.Some(unchecked((uint)ctx.ReadI32LE(p + 28))),
+                SampleCount = mem[p + 32] == 0
+                    ? Option<uint>.None
+                    : Option<uint>.Some(unchecked((uint)ctx.ReadI32LE(p + 36))),
+                Dimension = mem[p + 40] == 0
+                    ? Option<Webgpu.GpuTextureDimension>.None
+                    : Option<Webgpu.GpuTextureDimension>.Some(
+                        (Webgpu.GpuTextureDimension)mem[p + 41]),
+                Format = (Webgpu.GpuTextureFormat)mem[p + 42],
+                Usage = unchecked((uint)ctx.ReadI32LE(p + 44)),
+                ViewFormats = viewFormats,
+                Label = mem[p + 60] == 0
+                    ? Option<string>.None
+                    : Option<string>.Some(ReadUtf8(ctx,
+                        ctx.ReadI32LE(p + 64), ctx.ReadI32LE(p + 68))),
+            };
+            return (self, descriptor);
+        }
+
+        // Canonical-ABI memory tuple for begin-render-pass's
+        // indirect-form params. Outer-tuple align is 8 (descriptor
+        // contains opt<u64> max-draw-count).
+        //   @0   self handle: u32
+        //   @8   descriptor record:
+        //     @8   color-attachments list (ptr@8, len@12)
+        //     @16  depth-stencil-attachment: opt<dsa>  (40 bytes)
+        //     @56  occlusion-query-set: opt<u32>       (8 bytes)
+        //     @64  timestamp-writes: opt<tsw>          (24 bytes)
+        //     @88  max-draw-count: opt<u64>            (16 bytes)
+        //     @104 label: opt<string>                  (12 bytes)
+        // List elements (opt<color-attachment>): 80 bytes each,
+        // align 8. Attachment record (size 72, align 8):
+        //   @0  view u32, @4 depth-slice opt<u32>, @12 resolve-
+        //   target opt<u32>, @24 clear-value opt<gpu-color>
+        //   (32-byte color at @32), @64 load-op u8, @65 store-op u8.
+        private static (int self, Webgpu.GpuRenderPassDescriptor descriptor)
+            ReadBeginRenderPassParams(ExecContext ctx, int p, WasiWebgpuHost host)
+        {
+            var mem = ctx.Memory();
+            int self = ctx.ReadI32LE(p);
+            int caPtr = ctx.ReadI32LE(p + 8);
+            int caLen = ctx.ReadI32LE(p + 12);
+            var attachments = new Option<Webgpu.GpuRenderPassColorAttachment>[caLen];
+            for (int i = 0; i < caLen; i++)
+            {
+                int basePtr = caPtr + i * 80;
+                if (mem[basePtr] == 0)
+                {
+                    attachments[i] = Option<Webgpu.GpuRenderPassColorAttachment>.None;
+                    continue;
+                }
+                int rec = basePtr + 8;
+                Option<IGpuTextureView> resolveTarget = mem[rec + 12] == 0
+                    ? Option<IGpuTextureView>.None
+                    : Option<IGpuTextureView>.Some(
+                        (IGpuTextureView)host.TextureViews.Get(
+                            ctx.ReadI32LE(rec + 16)));
+                Option<Webgpu.GpuColor> clearValue;
+                if (mem[rec + 24] == 0)
+                    clearValue = Option<Webgpu.GpuColor>.None;
+                else
+                {
+                    clearValue = Option<Webgpu.GpuColor>.Some(new Webgpu.GpuColor
+                    {
+                        R = BitConverter.Int64BitsToDouble(ctx.ReadI64LE(rec + 32)),
+                        G = BitConverter.Int64BitsToDouble(ctx.ReadI64LE(rec + 40)),
+                        B = BitConverter.Int64BitsToDouble(ctx.ReadI64LE(rec + 48)),
+                        A = BitConverter.Int64BitsToDouble(ctx.ReadI64LE(rec + 56)),
+                    });
+                }
+                attachments[i] = Option<Webgpu.GpuRenderPassColorAttachment>.Some(
+                    new Webgpu.GpuRenderPassColorAttachment
+                    {
+                        View = (IGpuTextureView)host.TextureViews.Get(
+                            ctx.ReadI32LE(rec + 0)),
+                        DepthSlice = mem[rec + 4] == 0
+                            ? Option<uint>.None
+                            : Option<uint>.Some(unchecked((uint)ctx.ReadI32LE(rec + 8))),
+                        ResolveTarget = resolveTarget,
+                        ClearValue = clearValue,
+                        LoadOp = (Webgpu.GpuLoadOp)mem[rec + 64],
+                        StoreOp = (Webgpu.GpuStoreOp)mem[rec + 65],
+                    });
+            }
+            // depth-stencil / occlusion-query-set / timestamp-
+            // writes / max-draw-count defaults None — the fixture
+            // path doesn't exercise them. Full decode is mechanical
+            // when needed; the disc bytes at the comment offsets
+            // are 0 for None.
+            var descriptor = new Webgpu.GpuRenderPassDescriptor
+            {
+                ColorAttachments = attachments,
+                DepthStencilAttachment = Option<Webgpu.GpuRenderPassDepthStencilAttachment>.None,
+                OcclusionQuerySet = Option<IGpuQuerySet>.None,
+                TimestampWrites = Option<Webgpu.GpuRenderPassTimestampWrites>.None,
+                MaxDrawCount = Option<ulong>.None,
+                Label = mem[p + 104] == 0
+                    ? Option<string>.None
+                    : Option<string>.Some(ReadUtf8(ctx,
+                        ctx.ReadI32LE(p + 108), ctx.ReadI32LE(p + 112))),
+            };
+            return (self, descriptor);
+        }
+
+        // Canonical-ABI memory tuple for copy-texture-to-buffer.
+        // Tuple align = 8 (destination has opt<u64>).
+        //   @0   self handle: u32
+        //   @4   source: texel-copy-texture-info (44 bytes, align 4)
+        //     @4   texture u32; @8 mip-level opt<u32>;
+        //     @16  origin opt<origin3-d> (28 bytes);
+        //     @44  aspect opt<enum-u8>
+        //   @48  destination: texel-copy-buffer-info (40 bytes, align 8)
+        //     @48  buffer u32; @56 offset opt<u64> (val@64);
+        //     @72  bytes-per-row opt<u32> (val@76);
+        //     @80  rows-per-image opt<u32> (val@84)
+        //   @88  copy-size: gpu-extent3-d (20 bytes, align 4)
+        //     @88  width u32; @92 height opt<u32>; @100 depth opt<u32>
+        private static (int self,
+                Webgpu.GpuTexelCopyTextureInfo source,
+                Webgpu.GpuTexelCopyBufferInfo destination,
+                Webgpu.GpuExtent3D copySize)
+            ReadCopyTextureToBufferParams(ExecContext ctx, int p, WasiWebgpuHost host)
+        {
+            var mem = ctx.Memory();
+            int self = ctx.ReadI32LE(p);
+            Option<Webgpu.GpuOrigin3D> origin;
+            if (mem[p + 16] == 0)
+                origin = Option<Webgpu.GpuOrigin3D>.None;
+            else
+            {
+                origin = Option<Webgpu.GpuOrigin3D>.Some(new Webgpu.GpuOrigin3D
+                {
+                    X = mem[p + 20] == 0
+                        ? Option<uint>.None
+                        : Option<uint>.Some(unchecked((uint)ctx.ReadI32LE(p + 24))),
+                    Y = mem[p + 28] == 0
+                        ? Option<uint>.None
+                        : Option<uint>.Some(unchecked((uint)ctx.ReadI32LE(p + 32))),
+                    Z = mem[p + 36] == 0
+                        ? Option<uint>.None
+                        : Option<uint>.Some(unchecked((uint)ctx.ReadI32LE(p + 40))),
+                });
+            }
+            var source = new Webgpu.GpuTexelCopyTextureInfo
+            {
+                Texture = (IGpuTexture)host.Textures.Get(ctx.ReadI32LE(p + 4)),
+                MipLevel = mem[p + 8] == 0
+                    ? Option<uint>.None
+                    : Option<uint>.Some(unchecked((uint)ctx.ReadI32LE(p + 12))),
+                Origin = origin,
+                Aspect = mem[p + 44] == 0
+                    ? Option<Webgpu.GpuTextureAspect>.None
+                    : Option<Webgpu.GpuTextureAspect>.Some(
+                        (Webgpu.GpuTextureAspect)mem[p + 45]),
+            };
+            var destination = new Webgpu.GpuTexelCopyBufferInfo
+            {
+                Buffer = (IGpuBuffer)host.Buffers.Get(ctx.ReadI32LE(p + 48)),
+                Offset = mem[p + 56] == 0
+                    ? Option<ulong>.None
+                    : Option<ulong>.Some(unchecked((ulong)ctx.ReadI64LE(p + 64))),
+                BytesPerRow = mem[p + 72] == 0
+                    ? Option<uint>.None
+                    : Option<uint>.Some(unchecked((uint)ctx.ReadI32LE(p + 76))),
+                RowsPerImage = mem[p + 80] == 0
+                    ? Option<uint>.None
+                    : Option<uint>.Some(unchecked((uint)ctx.ReadI32LE(p + 84))),
+            };
+            var copySize = new Webgpu.GpuExtent3D
+            {
+                Width = unchecked((uint)ctx.ReadI32LE(p + 88)),
+                Height = mem[p + 92] == 0
+                    ? Option<uint>.None
+                    : Option<uint>.Some(unchecked((uint)ctx.ReadI32LE(p + 96))),
+                DepthOrArrayLayers = mem[p + 100] == 0
+                    ? Option<uint>.None
+                    : Option<uint>.Some(unchecked((uint)ctx.ReadI32LE(p + 104))),
+            };
+            return (self, source, destination, copySize);
+        }
+
+        // Canonical-ABI memory tuple for create-render-pipeline.
+        // Partial decode — handles the simple fixture path
+        // (primitive/depth-stencil/multisample = None; fragment
+        // = Some with simple color targets). Full decode of
+        // depth-stencil's stencil-face-state etc. is mechanical
+        // but the fixture doesn't exercise it.
+        //
+        //   @0   self handle: u32
+        //   @4   vertex (36 bytes):
+        //     @4   buffers opt<list<opt<vbl>>> (disc@4, ptr@8, len@12)
+        //     @16  module u32
+        //     @20  entry-point opt<string> (disc@20, ptr@24, len@28)
+        //     @32  constants opt<u32> (disc@32, val@36)
+        //   @40  primitive: opt<primitive-state> (11 bytes)
+        //   @52  depth-stencil: opt<dss> (68 bytes, align 4)
+        //   @120 multisample: opt<multisample-state> (24 bytes)
+        //   @144 fragment: opt<fragment-state> (36 bytes)
+        //   @180 layout: gpu-layout-mode variant (8 bytes, align 4)
+        //   @188 label: opt<string> (12 bytes, align 4)
+        // Tuple-size = 200 bytes (aligned to 8 for align).
+        private static (int self, Webgpu.GpuRenderPipelineDescriptor descriptor)
+            ReadCreateRenderPipelineParams(ExecContext ctx, int p, WasiWebgpuHost host)
+        {
+            var mem = ctx.Memory();
+            int self = ctx.ReadI32LE(p);
+
+            var vertex = new Webgpu.GpuVertexState
+            {
+                Buffers = Option<Option<Webgpu.GpuVertexBufferLayout>[]>.None,
+                Module = (IGpuShaderModule)host.ShaderModules.Get(
+                    ctx.ReadI32LE(p + 16)),
+                EntryPoint = mem[p + 20] == 0
+                    ? Option<string>.None
+                    : Option<string>.Some(ReadUtf8(ctx,
+                        ctx.ReadI32LE(p + 24), ctx.ReadI32LE(p + 28))),
+                Constants = Option<Webgpu.IRecordGpuPipelineConstantValue>.None,
+            };
+
+            // fragment (opt<fragment-state>): disc @144.
+            Option<Webgpu.GpuFragmentState> fragment;
+            if (mem[p + 144] == 0)
+                fragment = Option<Webgpu.GpuFragmentState>.None;
+            else
+            {
+                int fr = p + 148;
+                int tgtPtr = ctx.ReadI32LE(fr + 0);
+                int tgtLen = ctx.ReadI32LE(fr + 4);
+                // opt<color-target-state> = 28 bytes each.
+                //   color-target record:
+                //     @0  format enum-u8
+                //     @1  blend opt<blend-state> (13 bytes, align 1)
+                //     @14 (pad)
+                //     @16 write-mask opt<u32>
+                //   record size 24, align 4. opt<record> = 28.
+                var targets = new Option<Webgpu.GpuColorTargetState>[tgtLen];
+                for (int i = 0; i < tgtLen; i++)
+                {
+                    int basePtr = tgtPtr + i * 28;
+                    if (mem[basePtr] == 0)
+                    {
+                        targets[i] = Option<Webgpu.GpuColorTargetState>.None;
+                        continue;
+                    }
+                    int tr = basePtr + 4;
+                    targets[i] = Option<Webgpu.GpuColorTargetState>.Some(
+                        new Webgpu.GpuColorTargetState
+                        {
+                            Format = (Webgpu.GpuTextureFormat)mem[tr + 0],
+                            Blend = Option<Webgpu.GpuBlendState>.None,
+                            WriteMask = mem[tr + 16] == 0
+                                ? Option<uint>.None
+                                : Option<uint>.Some(
+                                    unchecked((uint)ctx.ReadI32LE(tr + 20))),
+                        });
+                }
+                fragment = Option<Webgpu.GpuFragmentState>.Some(
+                    new Webgpu.GpuFragmentState
+                    {
+                        Targets = targets,
+                        Module = (IGpuShaderModule)host.ShaderModules.Get(
+                            ctx.ReadI32LE(fr + 8)),
+                        EntryPoint = mem[fr + 12] == 0
+                            ? Option<string>.None
+                            : Option<string>.Some(ReadUtf8(ctx,
+                                ctx.ReadI32LE(fr + 16), ctx.ReadI32LE(fr + 20))),
+                        Constants = Option<Webgpu.IRecordGpuPipelineConstantValue>.None,
+                    });
+            }
+
+            // layout-mode variant: disc@180. specific case payload
+            // = u32 at @184. auto case = empty.
+            Webgpu.GpuLayoutMode layoutMode = mem[p + 180] == 0
+                ? (Webgpu.GpuLayoutMode)
+                    new Webgpu.GpuLayoutMode.GpuLayoutModeSpecific(
+                        (IGpuPipelineLayout)host.PipelineLayouts.Get(
+                            ctx.ReadI32LE(p + 184)))
+                : new Webgpu.GpuLayoutMode.GpuLayoutModeAuto();
+
+            var label = mem[p + 188] == 0
+                ? Option<string>.None
+                : Option<string>.Some(ReadUtf8(ctx,
+                    ctx.ReadI32LE(p + 192), ctx.ReadI32LE(p + 196)));
+
+            var descriptor = new Webgpu.GpuRenderPipelineDescriptor
+            {
+                Vertex = vertex,
+                Primitive = Option<Webgpu.GpuPrimitiveState>.None,
+                DepthStencil = Option<Webgpu.GpuDepthStencilState>.None,
+                Multisample = Option<Webgpu.GpuMultisampleState>.None,
+                Fragment = fragment,
+                Layout = layoutMode,
+                Label = label,
+            };
+            return (self, descriptor);
         }
 
         private static void BindTextureU32Query(WasmRuntime runtime,

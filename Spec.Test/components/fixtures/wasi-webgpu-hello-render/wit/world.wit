@@ -1,0 +1,18 @@
+package wacs:hello-render;
+
+/// Parity world for the WACS.WASI.GFX.Webgpu render path.
+/// Imports the full wasi:webgpu surface and exports start();
+/// the guest renders a triangle to an offscreen texture, copies
+/// the result to a readback buffer, maps + verifies expected
+/// pixel colors.
+///
+/// Headless by design: no surface / window / swap-chain. The
+/// swap-chain path is exercised by --windowed integration runs;
+/// this fixture verifies the render pipeline + render-pass
+/// chain in a way that a CI runner without a display can assert.
+world hello-render {
+    include wasi:webgpu/imports@0.0.1;
+
+    /// Returns nothing on success; traps on mismatch.
+    export start: func();
+}

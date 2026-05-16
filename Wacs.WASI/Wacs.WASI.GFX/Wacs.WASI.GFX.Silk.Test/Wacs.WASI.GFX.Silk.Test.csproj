@@ -35,6 +35,10 @@
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
             <Link>fixtures\hello-compute.component.wasm</Link>
         </None>
+        <None Include="..\..\..\Spec.Test\components\fixtures\wasi-webgpu-hello-render\wasm\hello-render.component.wasm">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <Link>fixtures\hello-render.component.wasm</Link>
+        </None>
     </ItemGroup>
 
 </Project>

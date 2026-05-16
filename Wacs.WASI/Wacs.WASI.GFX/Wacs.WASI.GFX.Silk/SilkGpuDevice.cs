@@ -397,7 +397,7 @@ namespace Wacs.WASI.GFX.Silk
                 : null;
             var vfWgpu = new TextureFormat[viewFormats.Length];
             for (int i = 0; i < viewFormats.Length; i++)
-                vfWgpu[i] = (TextureFormat)viewFormats[i];
+                vfWgpu[i] = MapTextureFormat(viewFormats[i]);
             Texture* tex;
             fixed (byte* labelPtr = labelBytes)
             fixed (TextureFormat* vfPtr = vfWgpu)
@@ -413,7 +413,7 @@ namespace Wacs.WASI.GFX.Silk
                         Height = height,
                         DepthOrArrayLayers = depth,
                     },
-                    Format = (TextureFormat)descriptor.Format,
+                    Format = MapTextureFormat(descriptor.Format),
                     MipLevelCount = mipLevels,
                     SampleCount = sampleCount,
                     ViewFormatCount = (nuint)viewFormats.Length,
@@ -782,13 +782,13 @@ namespace Wacs.WASI.GFX.Silk
                 _ => TextureViewDimension.DimensionUndefined,
             };
 
-        private static TextureFormat MapTextureFormat(
+        internal static TextureFormat MapTextureFormat(
             GenWebgpu.GpuTextureFormat f)
-            // wasi:webgpu's gpu-texture-format and wgpu's TextureFormat
-            // are spec-aligned. Numeric equivalence holds for the
-            // common cases; cast through for now and revisit if a
-            // mismatch surfaces.
-            => (TextureFormat)f;
+            // WIT and wgpu both follow the WebGPU spec format
+            // ordering, but wgpu prepends an Undefined=0 case
+            // that the WIT enum doesn't have. Shift by +1 so
+            // WIT Rgba8unorm (17) lands on wgpu Rgba8Unorm (18).
+            => (TextureFormat)((int)f + 1);
         public GenWebgpu.IGpuShaderModule CreateShaderModule(
             GenWebgpu.GpuShaderModuleDescriptor descriptor)
         {
@@ -1002,7 +1002,7 @@ namespace Wacs.WASI.GFX.Silk
             bool hasDss = false;
             if (descriptor.DepthStencil.TryGetValue(out var ds) && ds != null)
             {
-                dss.Format = (TextureFormat)ds.Format;
+                dss.Format = MapTextureFormat(ds.Format);
                 dss.DepthWriteEnabled = ds.DepthWriteEnabled
                     .TryGetValue(out var dwe) && dwe;
                 dss.DepthCompare = ds.DepthCompare.TryGetValue(out var dc)
@@ -1064,7 +1064,7 @@ namespace Wacs.WASI.GFX.Silk
                     }
                     nativeTargets[i] = new ColorTargetState
                     {
-                        Format = (TextureFormat)t.Format,
+                        Format = MapTextureFormat(t.Format),
                         WriteMask = t.WriteMask.TryGetValue(out var wm)
                             ? (ColorWriteMask)wm : ColorWriteMask.All,
                     };
@@ -1420,7 +1420,7 @@ namespace Wacs.WASI.GFX.Silk
             var nativeFormats = new TextureFormat[colorFormats.Length];
             for (int i = 0; i < colorFormats.Length; i++)
                 nativeFormats[i] = colorFormats[i].TryGetValue(out var f)
-                    ? (TextureFormat)f : TextureFormat.Undefined;
+                    ? MapTextureFormat(f) : TextureFormat.Undefined;
             RenderBundleEncoder* enc;
             fixed (byte* labelPtr = labelBytes)
             fixed (TextureFormat* formatsPtr = nativeFormats)
@@ -1432,7 +1432,7 @@ namespace Wacs.WASI.GFX.Silk
                     ColorFormats = nativeFormats.Length > 0 ? formatsPtr : null,
                     DepthStencilFormat = descriptor.DepthStencilFormat
                         .TryGetValue(out var dsf)
-                        ? (TextureFormat)dsf : TextureFormat.Undefined,
+                        ? MapTextureFormat(dsf) : TextureFormat.Undefined,
                     SampleCount = descriptor.SampleCount.TryGetValue(out var sc)
                         ? sc : 1u,
                     DepthReadOnly = descriptor.DepthReadOnly.TryGetValue(out var dro)

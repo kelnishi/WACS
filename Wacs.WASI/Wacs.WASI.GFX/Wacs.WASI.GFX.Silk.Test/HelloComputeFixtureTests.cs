@@ -38,56 +38,61 @@ namespace Wacs.WASI.GFX.Silk.Test
     /// </summary>
     public class HelloComputeFixtureTests
     {
-        private const string FixtureName = "fixtures/hello-compute.component.wasm";
-
         [Fact]
         public void HelloCompute_FixtureRunsAgainstWgpuNative()
         {
+            FixtureRunner.RunOrSkip("fixtures/hello-compute.component.wasm",
+                nameof(HelloCompute_FixtureRunsAgainstWgpuNative));
+        }
+
+        [Fact]
+        public void HelloRender_FixtureRunsAgainstWgpuNative()
+        {
+            FixtureRunner.RunOrSkip("fixtures/hello-render.component.wasm",
+                nameof(HelloRender_FixtureRunsAgainstWgpuNative));
+        }
+    }
+
+    /// <summary>
+    /// Shared "load fixture, wire Silk webgpu, invoke start()"
+    /// runner. xUnit's preferred SkippableFact attribute isn't
+    /// in our deps; tests that need a GPU soft-skip when
+    /// wgpu-native isn't available unless the CI escape hatch
+    /// <c>WACS_REQUIRE_WGPU=1</c> is set.
+    /// </summary>
+    internal static class FixtureRunner
+    {
+        internal static void RunOrSkip(string fixturePath, string testName)
+        {
             if (!TryInitWgpuBackend(out var backend, out var skipReason))
             {
-                // Soft-skip — xUnit's preferred SkippableFact
-                // attribute isn't in our deps; assert-fail-fast
-                // with a clear reason instead, gated behind the
-                // CI escape hatch the environment variable
-                // provides.
                 if (Environment.GetEnvironmentVariable("WACS_REQUIRE_WGPU") == "1")
                     Assert.Fail("wgpu-native unavailable but "
                         + "WACS_REQUIRE_WGPU=1: " + skipReason);
-                // Otherwise, treat as "fixture exists and would
-                // have run if a GPU was available" — no Assert
-                // call means the test passes vacuously. Trace
-                // for visibility.
-                Console.WriteLine("[skip] HelloCompute_Fixture"
-                    + "RunsAgainstWgpuNative: " + skipReason);
+                Console.WriteLine("[skip] " + testName + ": " + skipReason);
                 return;
             }
             using (backend)
             {
-                var bytes = File.ReadAllBytes(FixtureName);
+                var bytes = File.ReadAllBytes(fixturePath);
                 var resources = new ResourceContext();
-
                 var ci = ComponentInstance.Instantiate(bytes, runtime =>
                 {
-                        // Preview2 first — wasi-webgpu mints
-                        // pollables into the Preview2 table for
-                        // some flows.
-                        var p2 = new WasiPreview2Host(new WasiPreview2HostBuilder
-                        {
-                            SharedResources = resources,
-                            Poll = new PollSource(),
-                        });
-                        p2.BindToRuntime(runtime);
+                    var p2 = new WasiPreview2Host(new WasiPreview2HostBuilder
+                    {
+                        SharedResources = resources,
+                        Poll = new PollSource(),
+                    });
+                    p2.BindToRuntime(runtime);
 
-                        var webgpuHost = new WasiWebgpuHost(
-                            new WasiWebgpuConfiguration
-                            {
-                                Backend = backend,
-                                SharedResources = resources,
-                            });
-                        webgpuHost.BindToRuntime(runtime);
+                    var webgpuHost = new WasiWebgpuHost(
+                        new WasiWebgpuConfiguration
+                        {
+                            Backend = backend!,
+                            SharedResources = resources,
+                        });
+                    webgpuHost.BindToRuntime(runtime);
                 });
-                // start() trap → exception. No throw means the
-                // guest's expectations all passed.
                 ci.Invoke("start");
             }
         }
@@ -99,9 +104,6 @@ namespace Wacs.WASI.GFX.Silk.Test
             try
             {
                 var b = new SilkGpuBackend();
-                // EnsureInstance forces the wgpu-native dylib
-                // load — fails fast here if the library isn't
-                // available or no adapter can be discovered.
                 _ = b.GetType()
                     .GetMethod("EnsureInstance",
                         System.Reflection.BindingFlags.Instance

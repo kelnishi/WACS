@@ -1,0 +1,29 @@
+[package]
+name = "wasi-webgpu-hello-render"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Render-path parity fixture for WACS.WASI.GFX.Webgpu. Draws a
+# triangle to a 64×64 offscreen texture, copies to a readback
+# buffer, maps the buffer, and verifies a pixel inside the
+# triangle is red and a pixel outside is black.
+#
+# Exercises the full render-pipeline chain: shader-module
+# (vertex+fragment in one WGSL file), pipeline-layout with an
+# empty bind-group-layout, render-pipeline (auto layout) with
+# one color target, command-encoder.begin-render-pass with one
+# color attachment + clear, render-pass set-pipeline + draw,
+# command-encoder.copy-texture-to-buffer, queue.submit, buffer.
+# map-async + readback. Uses an offscreen texture rather than a
+# swap-chain surface so the fixture is headless-testable.
+
+[dependencies]
+wit-bindgen = "0.41"
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = "s"
+strip = true
