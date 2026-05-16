@@ -7,9 +7,21 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
 using Wacs.ComponentModel.Runtime;
+
+// ComponentBridge is the cross-engine adapter: it wires an
+// interpreted ComponentInstance to a transpiler-shaped typed
+// surface via DispatchProxy + MakeGenericMethod. The runtime
+// interface synthesis is fundamentally incompatible with AOT
+// (NativeAOT / Unity IL2CPP). AOT-targeting consumers should use
+// the build-time-transpiled typed harness — see
+// docs/wit-harness-plan.md. The public entry points carry
+// [RequiresDynamicCode] + [RequiresUnreferencedCode] for that
+// reason; the interior reflection is suppressed file-wide here.
+#pragma warning disable IL2060, IL2070, IL2111, IL3050
 
 namespace Wacs.ComponentModel.Runtime
 {
@@ -40,6 +52,11 @@ namespace Wacs.ComponentModel.Runtime
         /// for nested-interface exports where the wasm-side path
         /// doesn't match the interface method name directly).
         /// </summary>
+        [RequiresDynamicCode("Synthesizes a typed proxy of TInterface " +
+            "via DispatchProxy.Create + MakeGenericMethod. AOT consumers " +
+            "must use the build-time typed harness surface instead.")]
+        [RequiresUnreferencedCode("Reflects over TInterface's methods + " +
+            "their parameter / return types at runtime.")]
         public static TInterface AsTypedInterface<TInterface>(
             ComponentInstance instance,
             Func<MethodInfo, string>? exportNameMapper = null)
@@ -53,6 +70,11 @@ namespace Wacs.ComponentModel.Runtime
         /// Non-generic counterpart — useful when the interface type
         /// is reflected at runtime (e.g. iterating bundle ctor params).
         /// </summary>
+        [RequiresDynamicCode("Synthesizes a typed proxy of interfaceType " +
+            "via DispatchProxy.Create + MakeGenericMethod. AOT consumers " +
+            "must use the build-time typed harness surface instead.")]
+        [RequiresUnreferencedCode("Reflects over the interface's methods " +
+            "+ their parameter / return types at runtime.")]
         public static object AsTypedInterface(Type interfaceType,
             ComponentInstance instance,
             Func<MethodInfo, string>? exportNameMapper = null)
@@ -94,6 +116,12 @@ namespace Wacs.ComponentModel.Runtime
         /// order. <see cref="WasiPreview2Bundle"/>-style classes
         /// match this shape.</para>
         /// </summary>
+        [RequiresDynamicCode("Reflects bundleType's constructor + " +
+            "synthesizes proxies for each WitSource interface property. " +
+            "AOT consumers must use the build-time typed harness " +
+            "surface instead.")]
+        [RequiresUnreferencedCode("Reflects over the bundle type's " +
+            "constructor parameters at runtime.")]
         public static object AsHostBundle(ComponentInstance instance,
             Type bundleType,
             Func<MethodInfo, string>? exportNameMapper = null)

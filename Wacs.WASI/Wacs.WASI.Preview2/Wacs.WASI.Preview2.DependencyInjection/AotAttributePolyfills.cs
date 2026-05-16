@@ -69,5 +69,36 @@ namespace System.Diagnostics.CodeAnalysis
         Interfaces = 0x2000,
         All = ~None,
     }
+
+    [AttributeUsage(
+        AttributeTargets.Constructor | AttributeTargets.Event
+        | AttributeTargets.Method | AttributeTargets.Property,
+        Inherited = false)]
+    internal sealed class RequiresUnreferencedCodeAttribute : Attribute
+    {
+        public RequiresUnreferencedCodeAttribute(string message) { Message = message; }
+        public string Message { get; }
+        public string? Url { get; set; }
+    }
+}
+#endif
+
+// [RequiresDynamicCode] is .NET 7+, not .NET 5. Polyfill on
+// anything older. The TFM check is intentionally separate from
+// the rest of this file because RequiresUnreferencedCode landed
+// in .NET 5 but RequiresDynamicCode followed two releases later.
+#if !NET7_0_OR_GREATER
+namespace System.Diagnostics.CodeAnalysis
+{
+    [AttributeUsage(
+        AttributeTargets.Constructor | AttributeTargets.Method
+        | AttributeTargets.Class,
+        Inherited = false)]
+    internal sealed class RequiresDynamicCodeAttribute : Attribute
+    {
+        public RequiresDynamicCodeAttribute(string message) { Message = message; }
+        public string Message { get; }
+        public string? Url { get; set; }
+    }
 }
 #endif

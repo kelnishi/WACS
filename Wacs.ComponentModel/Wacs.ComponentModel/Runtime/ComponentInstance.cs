@@ -7,9 +7,33 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+
+// The component-model interpreter's canonical-ABI lift/lower
+// machinery uses Type.MakeGenericType / MethodInfo.MakeGenericMethod
+// / Array.CreateInstance(Type, …) / Activator.CreateInstance(Type)
+// per call boundary to materialize Option<T> / Result<T,E> / List<T>
+// / variant arms from runtime WIT type info. This path is
+// fundamentally incompatible with AOT (NativeAOT / Unity IL2CPP)
+// because the generic instantiations aren't statically rooted.
+//
+// AOT-targeting consumers do NOT call into this file at runtime —
+// they go through the build-time-transpiled typed harness shipping
+// in their consumer assembly (see docs/wit-harness-plan.md). For
+// non-AOT consumers (desktop dev, JIT-only) the reflective path
+// works fine. The public entry points carry
+// [RequiresDynamicCode] + [RequiresUnreferencedCode] so AOT
+// builds emit a clear top-level error rather than runtime crashes
+// inside the interior.
+//
+// File-level pragma over the IL codes the lift/lower paths emit.
+// Anything outside lift/lower (parsing, instantiation of
+// modules) does not trip these codes — they originate solely in
+// the typed-generic dispatch helpers below.
+#pragma warning disable IL2026, IL2067, IL2072, IL2075, IL2087, IL3050
 using Wacs.ComponentModel.CanonicalABI;
 using Wacs.ComponentModel.Runtime.Parser;
 using Wacs.Core;
@@ -75,10 +99,22 @@ namespace Wacs.ComponentModel.Runtime
 
         /// <summary>
         /// Parse + instantiate a component binary in one pass.
-        /// Single-core-module components only for v0 — multi-
-        /// module composition lands when Phase 1c grows up to
-        /// match the transpiler's coverage.
+        ///
+        /// <para>NOT AOT-compatible: lift/lower at component-import/
+        /// export boundaries uses runtime generic specialization
+        /// (Type.MakeGenericType / MethodInfo.MakeGenericMethod /
+        /// Activator.CreateInstance). NativeAOT / IL2CPP consumers
+        /// should use the build-time-transpiled typed harness
+        /// surface instead — see docs/wit-harness-plan.md.</para>
         /// </summary>
+        [RequiresDynamicCode("Component-model lift/lower instantiates " +
+            "Option<T> / Result<T,E> / list<T> / variant arms via " +
+            "Type.MakeGenericType at runtime from the component's WIT " +
+            "shape. AOT consumers must use the build-time typed " +
+            "harness surface instead.")]
+        [RequiresUnreferencedCode("Reflective lift/lower walks types " +
+            "decoded from the component binary at runtime; trimming " +
+            "may remove the needed generic specializations.")]
         public static ComponentInstance Instantiate(byte[] componentBytes,
             Action<WasmRuntime>? configureImports = null)
         {
@@ -86,6 +122,14 @@ namespace Wacs.ComponentModel.Runtime
             return Instantiate(ms, configureImports);
         }
 
+        [RequiresDynamicCode("Component-model lift/lower instantiates " +
+            "Option<T> / Result<T,E> / list<T> / variant arms via " +
+            "Type.MakeGenericType at runtime from the component's WIT " +
+            "shape. AOT consumers must use the build-time typed " +
+            "harness surface instead.")]
+        [RequiresUnreferencedCode("Reflective lift/lower walks types " +
+            "decoded from the component binary at runtime; trimming " +
+            "may remove the needed generic specializations.")]
         public static ComponentInstance Instantiate(Stream componentStream,
             Action<WasmRuntime>? configureImports = null)
         {
@@ -113,6 +157,14 @@ namespace Wacs.ComponentModel.Runtime
         /// pair matches the component-level interface name +
         /// kebab-case function name verbatim — see Phase 3 v0
         /// fixtures for the convention.</para></summary>
+        [RequiresDynamicCode("Component-model lift/lower instantiates " +
+            "Option<T> / Result<T,E> / list<T> / variant arms via " +
+            "Type.MakeGenericType at runtime from the component's WIT " +
+            "shape. AOT consumers must use the build-time typed " +
+            "harness surface instead.")]
+        [RequiresUnreferencedCode("Reflective lift/lower walks types " +
+            "decoded from the component binary at runtime; trimming " +
+            "may remove the needed generic specializations.")]
         public static ComponentInstance Instantiate(ComponentModule component,
             Action<WasmRuntime>? configureImports = null)
         {
