@@ -1,0 +1,21 @@
+[package]
+name = "wasi-webgpu-game-of-life-windowed"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Standalone windowed demo: Conway's Game of Life on the GPU,
+# rendered to a wasi:surface window via the wasi:webgpu swap-
+# chain path. Not for the test suite — run via
+#   wacs run --wasi-gfx --windowed wasm/game-of-life-windowed.component.wasm
+# Hit Escape (or close the window) to quit.
+
+[dependencies]
+wit-bindgen = "0.41"
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = "s"
+strip = true
