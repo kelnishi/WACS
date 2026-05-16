@@ -118,10 +118,15 @@ namespace Wacs.Console.Verbs
 
         [Option("wasi-gfx", HelpText =
             "Wire wasi-gfx host bindings using the default Silk.NET/"
-            + "SDL backend (`Wacs.WASI.GFX.Silk`). Equivalent to "
-            + "`--bind Wacs.WASI.GFX.Silk`. Pair with --windowed when "
-            + "the guest opens surfaces so the SDL event pump runs "
-            + "on the main thread.")]
+            + "SDL + wgpu-native backend (`Wacs.WASI.GFX.Silk`). "
+            + "Loads all four wasi-gfx WIT packages — "
+            + "`wasi:graphics-context` / `wasi:surface` / `wasi:frame-"
+            + "buffer` / `wasi:webgpu` — through the one backend; "
+            + "headless GPU work runs anywhere wgpu-native runs, the "
+            + "SDL/Metal swap-chain path is verified on macOS arm64. "
+            + "Equivalent to `--bind Wacs.WASI.GFX.Silk`. Pair with "
+            + "--windowed when the guest opens surfaces so the SDL "
+            + "event pump runs on the main thread.")]
         public bool WasiGfx { get; set; }
 
         [Option("windowed", HelpText =

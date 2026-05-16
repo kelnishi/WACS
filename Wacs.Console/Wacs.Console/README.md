@@ -138,6 +138,21 @@ wacs run my.component.wasm --wasip2 --wasi-nn -d ./models
 # through --bind directly.
 ```
 
+**Run a component that imports `wasi:graphics-context` / `wasi:webgpu`:**
+
+```bash
+wacs run my-app.component.wasm --wasip2 --wasi-gfx --windowed --call start
+# --wasi-gfx loads the Silk.NET/SDL + wgpu-native backend bundled
+# with the CLI; all four wasi-gfx WIT packages (graphics-context,
+# surface, frame-buffer, webgpu) run through it against one SDL
+# window. --windowed reserves the main thread for the SDL event
+# pump and runs the wasm guest on a worker — required on macOS
+# whenever the guest opens a surface (AppKit pins NSView creation
+# to the main thread). --call start picks the cargo-component
+# default export (vs. --wasip2's default wasi:cli/run@<v>#run).
+# See docs/WASI_GFX_USAGE.md for the full guide.
+```
+
 **Multi-module composition via ModuleLinker:**
 
 ```bash
@@ -201,6 +216,9 @@ wacs run app.wasm --bind ./MyGameHost.dll
 | `--wasip2` | off | Shorthand: `--host-package Wacs.WASI.Preview2 + Wacs.WASI.Preview2.DependencyInjection`. The DI sibling carries the SourceGen-shape impl classes the transpiler instantiates for `[constructor]X`; both halves are needed for direct-link emit. See [`docs/COMPONENT_CHAINING.md`](../../docs/COMPONENT_CHAINING.md). |
 | `--wasi-nn` | off | Shorthand: adds `Wacs.WASI.NN + Wacs.WASI.NN.DependencyInjection + Wacs.WASI.NN.OnnxRuntime`. ONNX is the default (bundled) backend. For non-ONNX backends — ML.NET, LlamaSharp (GGUF), TorchSharp (PyTorch / TorchScript) — use `--bind <path-to-backend.dll>` directly; `--bind` auto-pulls `Wacs.WASI.NN + .DependencyInjection` when the bound assembly's identity starts with `Wacs.WASI.NN.` (gap 24a). The composite `WasiPreview2NNBundle` is auto-discovered when both `--wasip2` and a wasi-nn backend are wired. |
 | `--wasi-threads` | off | Shorthand `--bind Wacs.WASI.Threads`. Wires `wasi:thread-spawn`; module must declare/import shared memory and export `wasi_thread_start (param i32 i32)`. |
+| `--wasi-gfx` | off | Shorthand: adds `Wacs.WASI.GFX + .DependencyInjection + .Webgpu + .Silk`. The Silk.NET/SDL + wgpu-native backend drives all four wasi-gfx WIT packages (`wasi:graphics-context` / `wasi:surface` / `wasi:frame-buffer` / `wasi:webgpu`) against one SDL window. Pair with `--windowed` for guests that open surfaces; the swap-chain path is verified on macOS arm64 (Windows / Linux: headless wgpu works, swap-chain throws `PlatformNotSupportedException`). See [`docs/WASI_GFX_USAGE.md`](../../docs/WASI_GFX_USAGE.md). |
+| `--windowed` | off | Reserve the calling (main) thread for the SDL event pump and run the wasm guest on a worker thread. Required for `--wasi-gfx` guests that open surfaces (macOS AppKit pins NSView creation to the main thread). Without this, surface events won't dispatch and on macOS window creation will abort. Harmless for headless GPU guests (emits a no-effect warning). |
+| `--trace-imports` | off | Log direct-link binding rejections + lenient-default serves to stderr. Use to debug "the wasm hangs at 100% CPU with no output" failures — see which imports the transpiler rejected (and why), plus first-occurrence logs of any unresolved import served by a default stub. Equivalent to `WACS_TRANSPILER_DEBUG=1`. |
 | `--profile` | off | JetBrains dotTrace measure-profiler session. |
 | `--log-gas` | off | Print total instructions executed. |
 | `--gas-limit <N>` | 0 (∞) | Trap if instructions exceed N. |
