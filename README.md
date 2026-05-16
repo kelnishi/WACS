@@ -64,6 +64,11 @@ Versions auto-update from NuGet. See the [CHANGELOG](CHANGELOG.md) for release n
 | [`WACS.WASI.NN.LlamaSharp`](https://www.nuget.org/packages/WACS.WASI.NN.LlamaSharp) | [![](https://img.shields.io/nuget/v/WACS.WASI.NN.LlamaSharp?label=&style=flat-square)](https://www.nuget.org/packages/WACS.WASI.NN.LlamaSharp) | wasi-nn GGUF / llama.cpp backend (Metal on Apple Silicon) |
 | [`WACS.WASI.NN.MLNet`](https://www.nuget.org/packages/WACS.WASI.NN.MLNet) | [![](https://img.shields.io/nuget/v/WACS.WASI.NN.MLNet?label=&style=flat-square)](https://www.nuget.org/packages/WACS.WASI.NN.MLNet) | wasi-nn ML.NET-flavored ONNX backend |
 | [`WACS.WASI.NN.TorchSharp`](https://www.nuget.org/packages/WACS.WASI.NN.TorchSharp) | [![](https://img.shields.io/nuget/v/WACS.WASI.NN.TorchSharp?label=&style=flat-square)](https://www.nuget.org/packages/WACS.WASI.NN.TorchSharp) | wasi-nn TorchScript backend (PyTorch ecosystem) |
+| [`WACS.WASI.NN.OpenVino`](https://www.nuget.org/packages/WACS.WASI.NN.OpenVino) | [![](https://img.shields.io/nuget/v/WACS.WASI.NN.OpenVino?label=&style=flat-square)](https://www.nuget.org/packages/WACS.WASI.NN.OpenVino) | wasi-nn OpenVINO backend (IR loader; macOS arm64 runtime bundled) |
+| [`WACS.WASI.GFX`](https://www.nuget.org/packages/WACS.WASI.GFX) | [![](https://img.shields.io/nuget/vpre/WACS.WASI.GFX?label=&style=flat-square)](https://www.nuget.org/packages/WACS.WASI.GFX) | wasi-gfx host bindings — `graphics-context` / `surface` / `frame-buffer` / `webgpu` (proposal at WASI Phase 2 — packages ship `-preview`) |
+| [`WACS.WASI.GFX.Webgpu`](https://www.nuget.org/packages/WACS.WASI.GFX.Webgpu) | [![](https://img.shields.io/nuget/vpre/WACS.WASI.GFX.Webgpu?label=&style=flat-square)](https://www.nuget.org/packages/WACS.WASI.GFX.Webgpu) | `wasi:webgpu@0.0.1` contract — typed host interfaces + canonical-ABI dispatcher |
+| [`WACS.WASI.GFX.DependencyInjection`](https://www.nuget.org/packages/WACS.WASI.GFX.DependencyInjection) | [![](https://img.shields.io/nuget/vpre/WACS.WASI.GFX.DependencyInjection?label=&style=flat-square)](https://www.nuget.org/packages/WACS.WASI.GFX.DependencyInjection) | One-call DI registration + `WasiPreview2GfxBundle` composite for transpiler direct-link |
+| [`WACS.WASI.GFX.Silk`](https://www.nuget.org/packages/WACS.WASI.GFX.Silk) | [![](https://img.shields.io/nuget/vpre/WACS.WASI.GFX.Silk?label=&style=flat-square)](https://www.nuget.org/packages/WACS.WASI.GFX.Silk) | Silk.NET/SDL + wgpu-native backend — drives all four wasi-gfx WIT packages against one SDL window |
 
 ## Features
 
@@ -140,6 +145,9 @@ WACS implements the [WebAssembly Component Model](https://github.com/WebAssembly
 # Run a component with WASI Preview 2 + wasi-nn (ONNX) wired
 wacs run my.component.wasm --wasip2 --wasi-nn -d ./models::/models
 
+# Run a component that opens a window through wasi-gfx + wasi:webgpu
+wacs run my.component.wasm --wasip2 --wasi-gfx --windowed --call start
+
 # Generate C# bindings from a WIT package
 wacs bindgen wit/cli/world.wit -o ./gen
 
@@ -147,18 +155,19 @@ wacs bindgen wit/cli/world.wit -o ./gen
 wacs bindgen app.dll -o ./regen
 ```
 
-The CLI shorthands (`--wasip2`, `--wasi-nn`, `--wasi-threads`) load
-the matching host packages AND their DependencyInjection siblings —
-both are needed because typed `[WitSource]` interfaces and the
-SourceGen-shape impl classes the transpiler instantiates live in
-sibling assemblies.
+The CLI shorthands (`--wasip2`, `--wasi-nn`, `--wasi-threads`,
+`--wasi-gfx`) load the matching host packages AND their
+DependencyInjection siblings — both are needed because typed
+`[WitSource]` interfaces and the SourceGen-shape impl classes the
+transpiler instantiates live in sibling assemblies.
 
 ### Runtime requirements at a glance
 
 | Capability | Packages on load path |
 |---|---|
 | `--wasip2` | `WACS.WASI.Preview2` + `WACS.WASI.Preview2.DependencyInjection` |
-| `--wasi-nn` | adds `WACS.WASI.NN` + `WACS.WASI.NN.DependencyInjection` + `WACS.WASI.NN.OnnxRuntime` |
+| `--wasi-nn` | adds `WACS.WASI.NN` + `WACS.WASI.NN.DependencyInjection` + `WACS.WASI.NN.OnnxRuntime` (default bundled backend). Non-ONNX backends — `MLNet`, `LlamaSharp`, `TorchSharp`, `OpenVino`, `OnnxRuntimeGenAI` — ride on `--bind <backend.dll>`; the auto-pull resolver wires the typed-surface + DI siblings when the bound assembly's identity starts with `Wacs.WASI.NN.` |
+| `--wasi-gfx` | adds `WACS.WASI.GFX` + `WACS.WASI.GFX.DependencyInjection` + `WACS.WASI.GFX.Webgpu` + `WACS.WASI.GFX.Silk`. One Silk.NET/SDL + wgpu-native backend drives all four wasi-gfx WIT packages (`graphics-context` / `surface` / `frame-buffer` / `webgpu`). Pair with `--windowed` when the guest opens surfaces — macOS swap-chain verified; headless wgpu works on Windows/Linux. The packages currently ship as NuGet `-preview` (wasi-gfx proposal is at WASI Phase 2) |
 | `--wasi-threads` | adds `WACS.WASI.Threads` |
 | Custom imports | `--bind <Asm>` (any `IBindable`) |
 
@@ -171,7 +180,9 @@ share one namespace across all subsystems.
 See [`docs/COMPONENT_CHAINING.md`](docs/COMPONENT_CHAINING.md) for the
 full chaining model, the AppDomain-fallback contract for
 dynamically loaded DI siblings, and how to add a new WASI subsystem
-to the composite.
+to the composite. Subsystem-specific deep-dives: [`docs/WASI_NN_USAGE.md`](docs/WASI_NN_USAGE.md)
+(every backend's `--bind` recipe + the GGUF / TorchScript / OpenVINO IR conventions);
+[`docs/WASI_GFX_USAGE.md`](docs/WASI_GFX_USAGE.md) (threading model, swap-chain bridge, parity fixtures).
 
 ### Embedding — one-shot scope
 
@@ -229,7 +240,11 @@ runtime.AutoDiscoverHostPackages();
 | [`WACS.WASI.Preview2.DependencyInjection`](https://www.nuget.org/packages/WACS.WASI.Preview2.DependencyInjection) | One-call DI registration of the bundle |
 | [`WACS.WASI.NN`](https://www.nuget.org/packages/WACS.WASI.NN) | wasi-nn host bindings (WIT + WITX) + `WasiNNHost : IBindable` + source-gen `[WitSource]` interfaces |
 | [`WACS.WASI.NN.DependencyInjection`](https://www.nuget.org/packages/WACS.WASI.NN.DependencyInjection) | `WasiNNBundle`, `WasiPreview2NNBundle` composite, concrete resource impls (`Tensor`, `Graph`, `GraphExecutionContext`, `Error`) |
-| [`WACS.WASI.NN.{OnnxRuntime,MLNet,LlamaSharp}`](https://www.nuget.org/packages/WACS.WASI.NN.OnnxRuntime) | Backend implementations + parameterless `IBindable` adapters (`WasiNNOnnxBindable`, `WasiNNMLNetBindable`, `WasiNNLlamaSharpBindable`) for `--bind` |
+| [`WACS.WASI.NN.{OnnxRuntime,OnnxRuntimeGenAI,MLNet,LlamaSharp,TorchSharp,OpenVino}`](https://www.nuget.org/packages/WACS.WASI.NN.OnnxRuntime) | Backend implementations + parameterless `IBindable` adapters (`WasiNNOnnxBindable` / `WasiNNOnnxGenAIBindable` / `WasiNNMLNetBindable` / `WasiNNLlamaSharpBindable` / `WasiNNTorchSharpBindable` / `WasiNNOpenVinoBindable`) for `--bind` |
+| [`WACS.WASI.GFX`](https://www.nuget.org/packages/WACS.WASI.GFX) | wasi-gfx host bindings — `graphics-context` / `surface` / `frame-buffer` + `WasiGfxHost : IBindable` + source-gen `[WitSource]` interfaces (`-preview` — Phase 2 proposal) |
+| [`WACS.WASI.GFX.Webgpu`](https://www.nuget.org/packages/WACS.WASI.GFX.Webgpu) | `wasi:webgpu@0.0.1` contract — host interfaces + canonical-ABI dispatcher (`-preview`) |
+| [`WACS.WASI.GFX.DependencyInjection`](https://www.nuget.org/packages/WACS.WASI.GFX.DependencyInjection) | `WasiGfxBundle` + `WasiPreview2GfxBundle` composite for the transpiler's direct-link path (`-preview`) |
+| [`WACS.WASI.GFX.Silk`](https://www.nuget.org/packages/WACS.WASI.GFX.Silk) | Silk.NET/SDL + wgpu-native backend — one backend drives all four wasi-gfx WIT packages against a single SDL window (`-preview`) |
 | [`WACS.WASI.Threads`](https://www.nuget.org/packages/WACS.WASI.Threads) | `wasi:thread-spawn` host adapter + `runtime.UseWasiThreads()` |
 
 ## WASI Preview 1
