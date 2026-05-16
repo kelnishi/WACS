@@ -27,3 +27,8 @@ crate-type = ["cdylib"]
 [profile.release]
 opt-level = "s"
 strip = true
+# panic=abort strips the formatter machinery that otherwise drags
+# wasi:cli/terminal-{input,output,stdin,stdout,stderr} imports
+# into the component, which the headless test runner doesn't bind.
+panic = "abort"
+lto = true

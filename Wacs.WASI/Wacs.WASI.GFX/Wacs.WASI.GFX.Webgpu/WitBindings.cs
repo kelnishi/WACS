@@ -1720,15 +1720,15 @@ namespace Wacs.WASI.GFX.Webgpu
                         StoreOp = (Webgpu.GpuStoreOp)mem[rec + 65],
                     });
             }
-            // depth-stencil / occlusion-query-set / timestamp-
-            // writes / max-draw-count defaults None — the fixture
-            // path doesn't exercise them. Full decode is mechanical
-            // when needed; the disc bytes at the comment offsets
-            // are 0 for None.
+            // occlusion-query-set / timestamp-writes / max-draw-
+            // count default None — the fixture path doesn't
+            // exercise them. Full decode is mechanical when needed;
+            // the disc bytes at the comment offsets are 0 for None.
             var descriptor = new Webgpu.GpuRenderPassDescriptor
             {
                 ColorAttachments = attachments,
-                DepthStencilAttachment = Option<Webgpu.GpuRenderPassDepthStencilAttachment>.None,
+                DepthStencilAttachment = ReadOptDepthStencilAttachment(
+                    ctx, p + 16, host),
                 OcclusionQuerySet = Option<IGpuQuerySet>.None,
                 TimestampWrites = Option<Webgpu.GpuRenderPassTimestampWrites>.None,
                 MaxDrawCount = Option<ulong>.None,
@@ -1738,6 +1738,66 @@ namespace Wacs.WASI.GFX.Webgpu
                         ctx.ReadI32LE(p + 108), ctx.ReadI32LE(p + 112))),
             };
             return (self, descriptor);
+        }
+
+        // opt<gpu-render-pass-depth-stencil-attachment> at offset
+        // p (40 bytes, align 4). disc @p+0; payload (36 bytes,
+        // align 4) @p+4.
+        //   @p+4  view u32 (4)
+        //   @p+8  depth-clear-value opt<f32> (8 bytes, align 4)
+        //         disc@p+8 val@p+12
+        //   @p+16 depth-load-op opt<enum-u8> (2)
+        //   @p+18 depth-store-op opt<enum-u8> (2)
+        //   @p+20 depth-read-only opt<bool> (2)
+        //         pad to @p+24 (align 4)
+        //   @p+24 stencil-clear-value opt<u32> (8 bytes)
+        //         disc@p+24 val@p+28
+        //   @p+32 stencil-load-op opt<enum-u8> (2)
+        //   @p+34 stencil-store-op opt<enum-u8> (2)
+        //   @p+36 stencil-read-only opt<bool> (2)
+        private static Option<Webgpu.GpuRenderPassDepthStencilAttachment>
+            ReadOptDepthStencilAttachment(
+                ExecContext ctx, int p, WasiWebgpuHost host)
+        {
+            var mem = ctx.Memory();
+            if (mem[p] == 0)
+                return Option<Webgpu.GpuRenderPassDepthStencilAttachment>.None;
+            return Option<Webgpu.GpuRenderPassDepthStencilAttachment>.Some(
+                new Webgpu.GpuRenderPassDepthStencilAttachment
+                {
+                    View = (IGpuTextureView)host.TextureViews.Get(
+                        ctx.ReadI32LE(p + 4)),
+                    DepthClearValue = mem[p + 8] == 0
+                        ? Option<float>.None
+                        : Option<float>.Some(BitConverter.Int32BitsToSingle(
+                            ctx.ReadI32LE(p + 12))),
+                    DepthLoadOp = mem[p + 16] == 0
+                        ? Option<Webgpu.GpuLoadOp>.None
+                        : Option<Webgpu.GpuLoadOp>.Some(
+                            (Webgpu.GpuLoadOp)mem[p + 17]),
+                    DepthStoreOp = mem[p + 18] == 0
+                        ? Option<Webgpu.GpuStoreOp>.None
+                        : Option<Webgpu.GpuStoreOp>.Some(
+                            (Webgpu.GpuStoreOp)mem[p + 19]),
+                    DepthReadOnly = mem[p + 20] == 0
+                        ? Option<bool>.None
+                        : Option<bool>.Some(mem[p + 21] != 0),
+                    StencilClearValue = mem[p + 24] == 0
+                        ? Option<uint>.None
+                        : Option<uint>.Some(
+                            unchecked((uint)ctx.ReadI32LE(p + 28))),
+                    StencilLoadOp = mem[p + 32] == 0
+                        ? Option<Webgpu.GpuLoadOp>.None
+                        : Option<Webgpu.GpuLoadOp>.Some(
+                            (Webgpu.GpuLoadOp)mem[p + 33]),
+                    StencilStoreOp = mem[p + 34] == 0
+                        ? Option<Webgpu.GpuStoreOp>.None
+                        : Option<Webgpu.GpuStoreOp>.Some(
+                            (Webgpu.GpuStoreOp)mem[p + 35]),
+                    StencilReadOnly = mem[p + 36] == 0
+                        ? Option<bool>.None
+                        : Option<bool>.Some(mem[p + 37] != 0),
+                });
         }
 
         // Canonical-ABI memory tuple for copy-texture-to-buffer.

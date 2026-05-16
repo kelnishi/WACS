@@ -8,6 +8,12 @@
 // Render-path parity fixture for WACS.WASI.GFX.Webgpu. Draws a
 // triangle to a 64×64 offscreen texture, copies it to a readback
 // buffer, maps + verifies pixel colors. Traps on mismatch.
+//
+// Exercises the full create-render-pipeline descriptor decode:
+// primitive=Some, depth-stencil=Some (Depth24plusStencil8 +
+// stencil-front/back face states), multisample=Some. A matching
+// depth texture + depth-stencil attachment on the render pass
+// keeps wgpu-native validation happy.
 
 wit_bindgen::generate!({
     path: "wit",
@@ -55,6 +61,11 @@ const BU_COPY_DST: u32 = 0x0008;
 const TU_COPY_SRC: u32 = 0x0001;
 const TU_RENDER_ATTACHMENT: u32 = 0x0010;
 
+// Depth-stencil format the pipeline uses + the depth texture
+// matches.
+const DEPTH_STENCIL_FORMAT: webgpu::GpuTextureFormat =
+    webgpu::GpuTextureFormat::Depth24plusStencil8;
+
 // Map-mode flags.
 const MAP_READ: u32 = 0x0001;
 
@@ -82,6 +93,18 @@ impl Guest for Example {
             });
 
         // ----- render pipeline (auto layout, RGBA8Unorm target) -----
+        //
+        // primitive / depth-stencil / multisample are all Some so
+        // the canonical-ABI decoder walks every field. depth-
+        // compare=Always + stencil ops=Keep mean the depth/stencil
+        // state has no behavioral effect on the rendered pixels —
+        // the verification below remains a flat red-vs-black check.
+        let no_op_stencil_face = webgpu::GpuStencilFaceState {
+            compare: Some(webgpu::GpuCompareFunction::Always),
+            fail_op: Some(webgpu::GpuStencilOperation::Keep),
+            depth_fail_op: Some(webgpu::GpuStencilOperation::Keep),
+            pass_op: Some(webgpu::GpuStencilOperation::Keep),
+        };
         let pipeline = device.create_render_pipeline(
             webgpu::GpuRenderPipelineDescriptor {
                 vertex: webgpu::GpuVertexState {
@@ -90,9 +113,30 @@ impl Guest for Example {
                     entry_point: Some("vs_main".to_string()),
                     constants: None,
                 },
-                primitive: None,
-                depth_stencil: None,
-                multisample: None,
+                primitive: Some(webgpu::GpuPrimitiveState {
+                    topology: Some(webgpu::GpuPrimitiveTopology::TriangleList),
+                    strip_index_format: None,
+                    front_face: Some(webgpu::GpuFrontFace::Ccw),
+                    cull_mode: Some(webgpu::GpuCullMode::None),
+                    unclipped_depth: Some(false),
+                }),
+                depth_stencil: Some(webgpu::GpuDepthStencilState {
+                    format: DEPTH_STENCIL_FORMAT,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(webgpu::GpuCompareFunction::Always),
+                    stencil_front: Some(no_op_stencil_face),
+                    stencil_back: Some(no_op_stencil_face),
+                    stencil_read_mask: Some(0xFFFFFFFF),
+                    stencil_write_mask: Some(0xFFFFFFFF),
+                    depth_bias: Some(0),
+                    depth_bias_slope_scale: Some(0.0),
+                    depth_bias_clamp: Some(0.0),
+                }),
+                multisample: Some(webgpu::GpuMultisampleState {
+                    count: Some(1),
+                    mask: Some(0xFFFFFFFF),
+                    alpha_to_coverage_enabled: Some(false),
+                }),
                 fragment: Some(webgpu::GpuFragmentState {
                     targets: vec![Some(webgpu::GpuColorTargetState {
                         // RGBA8 unorm matches the texture format we
@@ -127,6 +171,23 @@ impl Guest for Example {
         });
         let color_view = color_target.create_view(None);
 
+        // ----- depth-stencil target (matches pipeline format) -----
+        let depth_target = device.create_texture(&webgpu::GpuTextureDescriptor {
+            size: webgpu::GpuExtent3D {
+                width: WIDTH,
+                height: Some(HEIGHT),
+                depth_or_array_layers: Some(1),
+            },
+            mip_level_count: Some(1),
+            sample_count: Some(1),
+            dimension: Some(webgpu::GpuTextureDimension::D2),
+            format: DEPTH_STENCIL_FORMAT,
+            usage: TU_RENDER_ATTACHMENT,
+            view_formats: None,
+            label: Some("depth-target".to_string()),
+        });
+        let depth_view = depth_target.create_view(None);
+
         // ----- readback buffer -----
         let staging = device.create_buffer(&webgpu::GpuBufferDescriptor {
             size: READBACK_BYTES,
@@ -153,7 +214,19 @@ impl Guest for Example {
                             store_op: webgpu::GpuStoreOp::Store,
                         },
                     )],
-                    depth_stencil_attachment: None,
+                    depth_stencil_attachment: Some(
+                        webgpu::GpuRenderPassDepthStencilAttachment {
+                            view: &depth_view,
+                            depth_clear_value: Some(1.0),
+                            depth_load_op: Some(webgpu::GpuLoadOp::Clear),
+                            depth_store_op: Some(webgpu::GpuStoreOp::Store),
+                            depth_read_only: Some(false),
+                            stencil_clear_value: Some(0),
+                            stencil_load_op: Some(webgpu::GpuLoadOp::Clear),
+                            stencil_store_op: Some(webgpu::GpuStoreOp::Store),
+                            stencil_read_only: Some(false),
+                        },
+                    ),
                     occlusion_query_set: None,
                     timestamp_writes: None,
                     max_draw_count: None,

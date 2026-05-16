@@ -13,6 +13,7 @@ using Wacs.WASI.GFX.Webgpu;
 using Wacs.WASI.Preview2;
 using Wacs.WASI.Preview2.HostBinding;
 using Wacs.WASI.Preview2.Io;
+using P2Cli = Wacs.WASI.Preview2.Cli;
 using Xunit;
 
 namespace Wacs.WASI.GFX.Silk.Test
@@ -89,6 +90,21 @@ namespace Wacs.WASI.GFX.Silk.Test
                     {
                         SharedResources = resources,
                         Poll = new PollSource(),
+                        // Wire the full wasi:cli surface so any fixture
+                        // whose code size exceeds LTO's dead-code-
+                        // elimination threshold (e.g. the render-pipeline
+                        // fixture with depth-stencil + multisample state)
+                        // can still bind every wasi:cli import the rust
+                        // panic machinery drags in even when the guest
+                        // never actually uses them.
+                        Environment = new P2Cli.Environment(),
+                        Exit = new P2Cli.ExitHandler(),
+                        Stdin = new P2Cli.Stdin(),
+                        Stdout = new P2Cli.Stdout(),
+                        Stderr = new P2Cli.Stderr(),
+                        TerminalStdin = new P2Cli.TerminalStdin(),
+                        TerminalStdout = new P2Cli.TerminalStdout(),
+                        TerminalStderr = new P2Cli.TerminalStderr(),
                     });
                     p2.BindToRuntime(runtime);
 
