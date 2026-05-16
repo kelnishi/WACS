@@ -55,9 +55,119 @@ namespace Wacs.WASI.GFX.Silk
 
         public GenWebgpu.IGpuRenderPassEncoder BeginRenderPass(
             GenWebgpu.GpuRenderPassDescriptor descriptor)
-            => throw new PlatformNotSupportedException(
-                "SilkGpuCommandEncoder.BeginRenderPass: render-pass "
-                + "descriptor decode + wgpu wiring not yet landed.");
+        {
+            EnsureLive();
+            if (descriptor == null)
+                throw new ArgumentNullException(nameof(descriptor));
+            var label = descriptor.Label.TryGetValue(out var l) && l != null
+                ? l : string.Empty;
+            var labelBytes = label.Length > 0
+                ? System.Text.Encoding.UTF8.GetBytes(label + "\0")
+                : null;
+            var colorAttachments = descriptor.ColorAttachments
+                ?? Array.Empty<Option<GenWebgpu.GpuRenderPassColorAttachment>>();
+            var nativeAtts = new RenderPassColorAttachment[colorAttachments.Length];
+            for (int i = 0; i < colorAttachments.Length; i++)
+            {
+                if (!colorAttachments[i].TryGetValue(out var ca) || ca == null)
+                {
+                    // wgpu treats null View as "no attachment at this
+                    // slot"; the WIT's None on the outer option matches.
+                    nativeAtts[i] = default;
+                    continue;
+                }
+                if (ca.View is not SilkGpuTextureView sv)
+                    throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                        $"BeginRenderPass: color attachment {i} view is "
+                        + "not Silk-backed.");
+                TextureView* resolve = null;
+                if (ca.ResolveTarget.TryGetValue(out var rt) && rt != null)
+                {
+                    if (rt is not SilkGpuTextureView srt)
+                        throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                            $"BeginRenderPass: color attachment {i} "
+                            + "resolve-target is not Silk-backed.");
+                    resolve = srt.Native;
+                }
+                var clear = new Color { R = 0, G = 0, B = 0, A = 0 };
+                if (ca.ClearValue.TryGetValue(out var cv) && cv != null)
+                {
+                    clear.R = cv.R; clear.G = cv.G; clear.B = cv.B; clear.A = cv.A;
+                }
+                nativeAtts[i] = new RenderPassColorAttachment
+                {
+                    View = sv.Native,
+                    DepthSlice = ca.DepthSlice.TryGetValue(out var ds) ? ds : 0u,
+                    ResolveTarget = resolve,
+                    LoadOp = ca.LoadOp == GenWebgpu.GpuLoadOp.Load
+                        ? LoadOp.Load : LoadOp.Clear,
+                    StoreOp = ca.StoreOp == GenWebgpu.GpuStoreOp.Store
+                        ? StoreOp.Store : StoreOp.Discard,
+                    ClearValue = clear,
+                };
+            }
+
+            RenderPassDepthStencilAttachment dsa = default;
+            bool hasDsa = false;
+            if (descriptor.DepthStencilAttachment.TryGetValue(out var dsaOpt)
+                && dsaOpt != null)
+            {
+                if (dsaOpt.View is not SilkGpuTextureView dsv)
+                    throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                        "BeginRenderPass: depth-stencil view is not Silk-backed.");
+                dsa.View = dsv.Native;
+                dsa.DepthClearValue = dsaOpt.DepthClearValue.TryGetValue(out var dcv)
+                    ? dcv : 0f;
+                dsa.DepthLoadOp = dsaOpt.DepthLoadOp.TryGetValue(out var dlo)
+                    ? (dlo == GenWebgpu.GpuLoadOp.Load ? LoadOp.Load : LoadOp.Clear)
+                    : LoadOp.Undefined;
+                dsa.DepthStoreOp = dsaOpt.DepthStoreOp.TryGetValue(out var dso)
+                    ? (dso == GenWebgpu.GpuStoreOp.Store ? StoreOp.Store : StoreOp.Discard)
+                    : StoreOp.Undefined;
+                dsa.DepthReadOnly = dsaOpt.DepthReadOnly.TryGetValue(out var dro) && dro;
+                dsa.StencilClearValue = dsaOpt.StencilClearValue
+                    .TryGetValue(out var scv) ? scv : 0u;
+                dsa.StencilLoadOp = dsaOpt.StencilLoadOp.TryGetValue(out var slo)
+                    ? (slo == GenWebgpu.GpuLoadOp.Load ? LoadOp.Load : LoadOp.Clear)
+                    : LoadOp.Undefined;
+                dsa.StencilStoreOp = dsaOpt.StencilStoreOp.TryGetValue(out var sso)
+                    ? (sso == GenWebgpu.GpuStoreOp.Store ? StoreOp.Store : StoreOp.Discard)
+                    : StoreOp.Undefined;
+                dsa.StencilReadOnly = dsaOpt.StencilReadOnly.TryGetValue(out var sro) && sro;
+                hasDsa = true;
+            }
+
+            QuerySet* occlusionNative = null;
+            if (descriptor.OcclusionQuerySet.TryGetValue(out var oqs)
+                && oqs != null)
+            {
+                if (oqs is not SilkGpuQuerySet sqs)
+                    throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                        "BeginRenderPass: occlusion-query-set is not Silk-backed.");
+                occlusionNative = sqs.Native;
+            }
+
+            RenderPassEncoder* pass;
+            fixed (byte* labelPtr = labelBytes)
+            fixed (RenderPassColorAttachment* attsPtr = nativeAtts)
+            {
+                var desc = new RenderPassDescriptor
+                {
+                    Label = labelPtr,
+                    ColorAttachmentCount = (nuint)nativeAtts.Length,
+                    ColorAttachments = nativeAtts.Length > 0 ? attsPtr : null,
+                    DepthStencilAttachment = hasDsa ? &dsa : null,
+                    OcclusionQuerySet = occlusionNative,
+                    TimestampWrites = null,
+                };
+                pass = _backend.EnsureApi()
+                    .CommandEncoderBeginRenderPass(_encoder, &desc);
+            }
+            if (pass == null)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "BeginRenderPass: wgpu returned a null pass encoder.");
+            return new SilkGpuRenderPassEncoder(_backend, pass);
+        }
 
         public GenWebgpu.IGpuCommandBuffer Finish(
             Option<GenWebgpu.GpuCommandBufferDescriptor> descriptor)
@@ -107,26 +217,98 @@ namespace Wacs.WASI.GFX.Silk
             GenWebgpu.GpuTexelCopyBufferInfo source,
             GenWebgpu.GpuTexelCopyTextureInfo destination,
             GenWebgpu.GpuExtent3D copySize)
-            => throw new PlatformNotSupportedException(
-                "SilkGpuCommandEncoder.CopyBufferToTexture: texture "
-                + "wgpu wrapper + texel-copy descriptor decode not yet "
-                + "landed.");
+        {
+            EnsureLive();
+            var src = BuildImageCopyBuffer(source);
+            var dst = BuildImageCopyTexture(destination);
+            var size = BuildExtent(copySize);
+            _backend.EnsureApi().CommandEncoderCopyBufferToTexture(
+                _encoder, &src, &dst, &size);
+        }
 
         public void CopyTextureToBuffer(
             GenWebgpu.GpuTexelCopyTextureInfo source,
             GenWebgpu.GpuTexelCopyBufferInfo destination,
             GenWebgpu.GpuExtent3D copySize)
-            => throw new PlatformNotSupportedException(
-                "SilkGpuCommandEncoder.CopyTextureToBuffer: not yet "
-                + "landed.");
+        {
+            EnsureLive();
+            var src = BuildImageCopyTexture(source);
+            var dst = BuildImageCopyBuffer(destination);
+            var size = BuildExtent(copySize);
+            _backend.EnsureApi().CommandEncoderCopyTextureToBuffer(
+                _encoder, &src, &dst, &size);
+        }
 
         public void CopyTextureToTexture(
             GenWebgpu.GpuTexelCopyTextureInfo source,
             GenWebgpu.GpuTexelCopyTextureInfo destination,
             GenWebgpu.GpuExtent3D copySize)
-            => throw new PlatformNotSupportedException(
-                "SilkGpuCommandEncoder.CopyTextureToTexture: not yet "
-                + "landed.");
+        {
+            EnsureLive();
+            var src = BuildImageCopyTexture(source);
+            var dst = BuildImageCopyTexture(destination);
+            var size = BuildExtent(copySize);
+            _backend.EnsureApi().CommandEncoderCopyTextureToTexture(
+                _encoder, &src, &dst, &size);
+        }
+
+        private static ImageCopyTexture BuildImageCopyTexture(
+            GenWebgpu.GpuTexelCopyTextureInfo info)
+        {
+            if (info == null)
+                throw new ArgumentNullException(nameof(info));
+            if (info.Texture is not SilkGpuTexture stex)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "TexelCopyTextureInfo.texture is not Silk-backed.");
+            var origin = new Origin3D();
+            if (info.Origin.TryGetValue(out var o) && o != null)
+            {
+                if (o.X.TryGetValue(out var x)) origin.X = x;
+                if (o.Y.TryGetValue(out var y)) origin.Y = y;
+                if (o.Z.TryGetValue(out var z)) origin.Z = z;
+            }
+            return new ImageCopyTexture
+            {
+                Texture = stex.Native,
+                MipLevel = info.MipLevel.TryGetValue(out var m) ? m : 0u,
+                Origin = origin,
+                Aspect = info.Aspect.TryGetValue(out var asp)
+                    ? SilkGpuTexture.MapAspect(asp) : TextureAspect.All,
+            };
+        }
+
+        private static ImageCopyBuffer BuildImageCopyBuffer(
+            GenWebgpu.GpuTexelCopyBufferInfo info)
+        {
+            if (info == null)
+                throw new ArgumentNullException(nameof(info));
+            if (info.Buffer is not SilkGpuBuffer sb)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "TexelCopyBufferInfo.buffer is not Silk-backed.");
+            return new ImageCopyBuffer
+            {
+                Buffer = sb.Native,
+                Layout = new TextureDataLayout
+                {
+                    Offset = info.Offset.TryGetValue(out var off) ? off : 0UL,
+                    BytesPerRow = info.BytesPerRow.TryGetValue(out var bpr) ? bpr : 0u,
+                    RowsPerImage = info.RowsPerImage.TryGetValue(out var rpi) ? rpi : 0u,
+                },
+            };
+        }
+
+        private static Extent3D BuildExtent(GenWebgpu.GpuExtent3D size)
+        {
+            if (size == null)
+                throw new ArgumentNullException(nameof(size));
+            return new Extent3D
+            {
+                Width = size.Width,
+                Height = size.Height.TryGetValue(out var h) ? h : 1u,
+                DepthOrArrayLayers = size.DepthOrArrayLayers
+                    .TryGetValue(out var d) ? d : 1u,
+            };
+        }
 
         public void ClearBuffer(GenWebgpu.IGpuBuffer buffer,
             Option<ulong> offset, Option<ulong> size)
@@ -145,9 +327,18 @@ namespace Wacs.WASI.GFX.Silk
         public void ResolveQuerySet(GenWebgpu.IGpuQuerySet querySet,
             uint firstQuery, uint queryCount,
             GenWebgpu.IGpuBuffer destination, ulong destinationOffset)
-            => throw new PlatformNotSupportedException(
-                "SilkGpuCommandEncoder.ResolveQuerySet: query-set "
-                + "wgpu wrapper not yet landed.");
+        {
+            EnsureLive();
+            if (querySet is not SilkGpuQuerySet sqs)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "ResolveQuerySet: querySet is not Silk-backed.");
+            if (destination is not SilkGpuBuffer dst)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "ResolveQuerySet: destination is not Silk-backed.");
+            _backend.EnsureApi().CommandEncoderResolveQuerySet(
+                _encoder, sqs.Native, firstQuery, queryCount,
+                dst.Native, destinationOffset);
+        }
 
         public void PushDebugGroup(string groupLabel)
         {

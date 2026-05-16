@@ -762,8 +762,466 @@ namespace Wacs.WASI.GFX.Silk
         }
         public GenWebgpu.IGpuRenderPipeline CreateRenderPipeline(
             GenWebgpu.GpuRenderPipelineDescriptor descriptor)
-            => throw new PlatformNotSupportedException(
-                "SilkGpuDevice.CreateRenderPipeline: " + DispatchPending);
+        {
+            EnsureLive();
+            if (descriptor == null)
+                throw new ArgumentNullException(nameof(descriptor));
+            return CreateRenderPipelineInner(descriptor);
+        }
+
+        // Owns the lifetime of all the byte[]/array buffers that
+        // need to be pinned across DeviceCreateRenderPipeline.
+        // The wgpu call is synchronous so a stack of fixed-blocks
+        // is fine; the helper consolidates them in one place so
+        // CreateRenderPipeline + CreateRenderPipelineAsync share
+        // the dispatch body.
+        private GenWebgpu.IGpuRenderPipeline CreateRenderPipelineInner(
+            GenWebgpu.GpuRenderPipelineDescriptor descriptor)
+        {
+            var label = descriptor.Label.TryGetValue(out var l) && l != null
+                ? l : string.Empty;
+            var labelBytes = label.Length > 0
+                ? System.Text.Encoding.UTF8.GetBytes(label + "\0")
+                : null;
+
+            // ----- vertex state -----
+            var vertex = descriptor.Vertex
+                ?? throw new ArgumentNullException(
+                    nameof(descriptor) + ".Vertex");
+            if (vertex.Module is not SilkGpuShaderModule vmod)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "CreateRenderPipeline: vertex.module is not Silk-backed.");
+            var vertexEntry = vertex.EntryPoint.TryGetValue(out var ve) && ve != null
+                ? ve : "main";
+            var vertexEntryBytes = System.Text.Encoding.UTF8.GetBytes(vertexEntry + "\0");
+            // Flatten vertex buffers list — None entries become
+            // wgpu's "buffer slot unused" via stepMode =
+            // VertexBufferNotUsed. wgpu's wgpu-native distinguishes
+            // None slots that way; spec WebGPU uses null entries
+            // in the array.
+            var vertexBuffers = vertex.Buffers.TryGetValue(out var vbs) && vbs != null
+                ? vbs : Array.Empty<Option<GenWebgpu.GpuVertexBufferLayout>>();
+            var nativeBuffers = new VertexBufferLayout[vertexBuffers.Length];
+            // We need to keep the per-buffer attributes arrays
+            // pinned for the duration of the create call. Hold
+            // them in a list of byte[] + pinned attribute arrays.
+            var attributeArrays = new VertexAttribute[vertexBuffers.Length][];
+            for (int i = 0; i < vertexBuffers.Length; i++)
+            {
+                if (!vertexBuffers[i].TryGetValue(out var vb) || vb == null)
+                {
+                    nativeBuffers[i] = new VertexBufferLayout
+                    {
+                        StepMode = VertexStepMode.VertexBufferNotUsed,
+                    };
+                    attributeArrays[i] = Array.Empty<VertexAttribute>();
+                    continue;
+                }
+                var srcAttrs = vb.Attributes ?? Array.Empty<GenWebgpu.GpuVertexAttribute>();
+                var natAttrs = new VertexAttribute[srcAttrs.Length];
+                for (int j = 0; j < srcAttrs.Length; j++)
+                {
+                    natAttrs[j] = new VertexAttribute
+                    {
+                        Format = MapVertexFormat(srcAttrs[j].Format),
+                        Offset = srcAttrs[j].Offset,
+                        ShaderLocation = srcAttrs[j].ShaderLocation,
+                    };
+                }
+                attributeArrays[i] = natAttrs;
+                nativeBuffers[i] = new VertexBufferLayout
+                {
+                    ArrayStride = vb.ArrayStride,
+                    StepMode = vb.StepMode.TryGetValue(out var sm)
+                        ? (sm == GenWebgpu.GpuVertexStepMode.Vertex
+                            ? VertexStepMode.Vertex
+                            : VertexStepMode.Instance)
+                        : VertexStepMode.Vertex,
+                    AttributeCount = (nuint)natAttrs.Length,
+                    // Attributes pointer is patched in inside the
+                    // fixed scope below — we can't set it here
+                    // because the array address isn't stable yet.
+                };
+            }
+
+            // ----- primitive state -----
+            var prim = new PrimitiveState
+            {
+                Topology = PrimitiveTopology.TriangleList,
+                StripIndexFormat = IndexFormat.Undefined,
+                FrontFace = FrontFace.Ccw,
+                CullMode = CullMode.None,
+            };
+            if (descriptor.Primitive.TryGetValue(out var pp) && pp != null)
+            {
+                if (pp.Topology.TryGetValue(out var topo))
+                    prim.Topology = MapTopology(topo);
+                if (pp.StripIndexFormat.TryGetValue(out var sif))
+                    prim.StripIndexFormat = MapIndexFormat(sif);
+                if (pp.FrontFace.TryGetValue(out var ff))
+                    prim.FrontFace = ff == GenWebgpu.GpuFrontFace.Ccw
+                        ? FrontFace.Ccw : FrontFace.CW;
+                if (pp.CullMode.TryGetValue(out var cm))
+                    prim.CullMode = cm switch
+                    {
+                        GenWebgpu.GpuCullMode.None => CullMode.None,
+                        GenWebgpu.GpuCullMode.Front => CullMode.Front,
+                        GenWebgpu.GpuCullMode.Back => CullMode.Back,
+                        _ => CullMode.None,
+                    };
+            }
+
+            // ----- depth-stencil state -----
+            DepthStencilState dss = default;
+            bool hasDss = false;
+            if (descriptor.DepthStencil.TryGetValue(out var ds) && ds != null)
+            {
+                dss.Format = (TextureFormat)ds.Format;
+                dss.DepthWriteEnabled = ds.DepthWriteEnabled
+                    .TryGetValue(out var dwe) && dwe;
+                dss.DepthCompare = ds.DepthCompare.TryGetValue(out var dc)
+                    ? MapCompareFunction(dc) : CompareFunction.Undefined;
+                dss.StencilFront = BuildStencilFace(ds.StencilFront);
+                dss.StencilBack = BuildStencilFace(ds.StencilBack);
+                dss.StencilReadMask = ds.StencilReadMask.TryGetValue(out var srm)
+                    ? srm : 0xFFFFFFFFu;
+                dss.StencilWriteMask = ds.StencilWriteMask.TryGetValue(out var swm)
+                    ? swm : 0xFFFFFFFFu;
+                dss.DepthBias = ds.DepthBias.TryGetValue(out var db) ? db : 0;
+                dss.DepthBiasSlopeScale = ds.DepthBiasSlopeScale
+                    .TryGetValue(out var dbss) ? dbss : 0f;
+                dss.DepthBiasClamp = ds.DepthBiasClamp
+                    .TryGetValue(out var dbc) ? dbc : 0f;
+                hasDss = true;
+            }
+
+            // ----- multisample state -----
+            var ms = new MultisampleState
+            {
+                Count = 1,
+                Mask = 0xFFFFFFFFu,
+                AlphaToCoverageEnabled = false,
+            };
+            if (descriptor.Multisample.TryGetValue(out var msv) && msv != null)
+            {
+                if (msv.Count.TryGetValue(out var mc)) ms.Count = mc;
+                if (msv.Mask.TryGetValue(out var mm)) ms.Mask = mm;
+                if (msv.AlphaToCoverageEnabled.TryGetValue(out var atc))
+                    ms.AlphaToCoverageEnabled = atc;
+            }
+
+            // ----- fragment state -----
+            FragmentState fs = default;
+            bool hasFs = false;
+            byte[]? fragEntryBytes = null;
+            ColorTargetState[]? nativeTargets = null;
+            BlendState[]? blendStates = null;
+            SilkGpuShaderModule? fragMod = null;
+            if (descriptor.Fragment.TryGetValue(out var f2) && f2 != null)
+            {
+                if (f2.Module is not SilkGpuShaderModule fmod)
+                    throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                        "CreateRenderPipeline: fragment.module is not Silk-backed.");
+                fragMod = fmod;
+                var fragEntry = f2.EntryPoint.TryGetValue(out var fe) && fe != null
+                    ? fe : "main";
+                fragEntryBytes = System.Text.Encoding.UTF8.GetBytes(fragEntry + "\0");
+                var targets = f2.Targets ?? Array.Empty<Option<GenWebgpu.GpuColorTargetState>>();
+                nativeTargets = new ColorTargetState[targets.Length];
+                blendStates = new BlendState[targets.Length];
+                for (int i = 0; i < targets.Length; i++)
+                {
+                    if (!targets[i].TryGetValue(out var t) || t == null)
+                    {
+                        nativeTargets[i] = default;
+                        continue;
+                    }
+                    nativeTargets[i] = new ColorTargetState
+                    {
+                        Format = (TextureFormat)t.Format,
+                        WriteMask = t.WriteMask.TryGetValue(out var wm)
+                            ? (ColorWriteMask)wm : ColorWriteMask.All,
+                    };
+                    if (t.Blend.TryGetValue(out var bs) && bs != null)
+                    {
+                        blendStates[i] = new BlendState
+                        {
+                            Color = MapBlendComponent(bs.Color),
+                            Alpha = MapBlendComponent(bs.Alpha),
+                        };
+                    }
+                }
+                hasFs = true;
+            }
+
+            // ----- layout -----
+            PipelineLayout* nativeLayout = null;
+            if (descriptor.Layout
+                is GenWebgpu.GpuLayoutMode.GpuLayoutModeSpecific spec)
+            {
+                if (spec.Value is not SilkGpuPipelineLayout spl)
+                    throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                        "CreateRenderPipeline: layout.specific is not "
+                        + "a Silk-backed pipeline-layout.");
+                nativeLayout = spl.Native;
+            }
+
+            RenderPipeline* pipeline;
+            // Big fixed-stack: pin every backing array used by the
+            // descriptor + sub-records before the wgpu call.
+            fixed (byte* labelPtr = labelBytes)
+            fixed (byte* vEntryPtr = vertexEntryBytes)
+            fixed (byte* fEntryPtr = fragEntryBytes)
+            fixed (VertexBufferLayout* vbufPtr = nativeBuffers)
+            fixed (ColorTargetState* tgtsPtr = nativeTargets)
+            fixed (BlendState* blendPtr = blendStates)
+            {
+                // Patch in the per-buffer attribute pointers now
+                // that the destination buffer array is pinned.
+                var attrPins = new System.Runtime.InteropServices.GCHandle[
+                    attributeArrays.Length];
+                try
+                {
+                    for (int i = 0; i < attributeArrays.Length; i++)
+                    {
+                        attrPins[i] = System.Runtime.InteropServices.GCHandle
+                            .Alloc(attributeArrays[i],
+                                System.Runtime.InteropServices.GCHandleType.Pinned);
+                        vbufPtr[i].Attributes = (VertexAttribute*)
+                            attrPins[i].AddrOfPinnedObject();
+                    }
+                    // Patch in per-target blend pointers similarly —
+                    // wgpu wants Blend pointers, not embedded structs.
+                    if (nativeTargets != null && blendStates != null)
+                    {
+                        for (int i = 0; i < nativeTargets.Length; i++)
+                        {
+                            if (blendStates[i].Color.SrcFactor == BlendFactor.Zero
+                                && blendStates[i].Color.DstFactor == BlendFactor.Zero
+                                && blendStates[i].Alpha.SrcFactor == BlendFactor.Zero
+                                && blendStates[i].Alpha.DstFactor == BlendFactor.Zero)
+                            {
+                                // No blend was set on this target; leave
+                                // Blend pointer null (wgpu's "no blending").
+                                nativeTargets[i].Blend = null;
+                            }
+                            else
+                            {
+                                nativeTargets[i].Blend = &blendPtr[i];
+                            }
+                        }
+                    }
+
+                    var vState = new VertexState
+                    {
+                        Module = vmod.Native,
+                        EntryPoint = vEntryPtr,
+                        ConstantCount = 0,
+                        Constants = null,
+                        BufferCount = (nuint)nativeBuffers.Length,
+                        Buffers = nativeBuffers.Length > 0 ? vbufPtr : null,
+                    };
+                    if (hasFs && fragMod != null)
+                    {
+                        fs = new FragmentState
+                        {
+                            Module = fragMod.Native,
+                            EntryPoint = fEntryPtr,
+                            ConstantCount = 0,
+                            Constants = null,
+                            TargetCount = (nuint)(nativeTargets?.Length ?? 0),
+                            Targets = (nativeTargets?.Length ?? 0) > 0 ? tgtsPtr : null,
+                        };
+                    }
+                    var desc = new RenderPipelineDescriptor
+                    {
+                        Label = labelPtr,
+                        Layout = nativeLayout,
+                        Vertex = vState,
+                        Primitive = prim,
+                        DepthStencil = hasDss ? &dss : null,
+                        Multisample = ms,
+                        Fragment = hasFs ? &fs : null,
+                    };
+                    pipeline = _backend.EnsureApi()
+                        .DeviceCreateRenderPipeline(_device, &desc);
+                }
+                finally
+                {
+                    for (int i = 0; i < attrPins.Length; i++)
+                        if (attrPins[i].IsAllocated)
+                            attrPins[i].Free();
+                }
+            }
+            if (pipeline == null)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "CreateRenderPipeline: wgpu returned a null pipeline.");
+            return new SilkGpuRenderPipeline(_backend, pipeline, label);
+        }
+
+        public Result<GenWebgpu.IGpuRenderPipeline, GenWebgpu.CreatePipelineError>
+            CreateRenderPipelineAsync(GenWebgpu.GpuRenderPipelineDescriptor descriptor)
+        {
+            // wgpu-native's async variant exists but is callback-
+            // driven; the sync path completes synchronously and
+            // surfaces compile errors via error-scope. Wrap.
+            try
+            {
+                var pipeline = CreateRenderPipeline(descriptor);
+                return Result<GenWebgpu.IGpuRenderPipeline, GenWebgpu.CreatePipelineError>
+                    .FromOk(pipeline);
+            }
+            catch (System.Exception ex)
+            {
+                return Result<GenWebgpu.IGpuRenderPipeline, GenWebgpu.CreatePipelineError>
+                    .FromErr(new GenWebgpu.CreatePipelineError
+                    {
+                        Kind = new GenWebgpu.CreatePipelineErrorKind
+                            .CreatePipelineErrorKindGpuPipelineError(
+                                GenWebgpu.GpuPipelineErrorReason.Internal),
+                        Message = ex.Message ?? "create-render-pipeline failed",
+                    });
+            }
+        }
+
+        private static StencilFaceState BuildStencilFace(
+            Option<GenWebgpu.GpuStencilFaceState> opt)
+        {
+            var face = new StencilFaceState
+            {
+                Compare = CompareFunction.Always,
+                FailOp = StencilOperation.Keep,
+                DepthFailOp = StencilOperation.Keep,
+                PassOp = StencilOperation.Keep,
+            };
+            if (!opt.TryGetValue(out var v) || v == null) return face;
+            if (v.Compare.TryGetValue(out var c))
+                face.Compare = MapCompareFunction(c);
+            if (v.FailOp.TryGetValue(out var fo))
+                face.FailOp = MapStencilOp(fo);
+            if (v.DepthFailOp.TryGetValue(out var dfo))
+                face.DepthFailOp = MapStencilOp(dfo);
+            if (v.PassOp.TryGetValue(out var po))
+                face.PassOp = MapStencilOp(po);
+            return face;
+        }
+
+        private static BlendComponent MapBlendComponent(GenWebgpu.GpuBlendComponent c)
+        {
+            var bc = new BlendComponent
+            {
+                Operation = BlendOperation.Add,
+                SrcFactor = BlendFactor.One,
+                DstFactor = BlendFactor.Zero,
+            };
+            if (c == null) return bc;
+            if (c.Operation.TryGetValue(out var op))
+                bc.Operation = MapBlendOperation(op);
+            if (c.SrcFactor.TryGetValue(out var sf))
+                bc.SrcFactor = MapBlendFactor(sf);
+            if (c.DstFactor.TryGetValue(out var df))
+                bc.DstFactor = MapBlendFactor(df);
+            return bc;
+        }
+
+        private static PrimitiveTopology MapTopology(GenWebgpu.GpuPrimitiveTopology t)
+            => t switch
+            {
+                GenWebgpu.GpuPrimitiveTopology.PointList => PrimitiveTopology.PointList,
+                GenWebgpu.GpuPrimitiveTopology.LineList => PrimitiveTopology.LineList,
+                GenWebgpu.GpuPrimitiveTopology.LineStrip => PrimitiveTopology.LineStrip,
+                GenWebgpu.GpuPrimitiveTopology.TriangleList => PrimitiveTopology.TriangleList,
+                GenWebgpu.GpuPrimitiveTopology.TriangleStrip => PrimitiveTopology.TriangleStrip,
+                _ => PrimitiveTopology.TriangleList,
+            };
+
+        private static IndexFormat MapIndexFormat(GenWebgpu.GpuIndexFormat f)
+            => f == GenWebgpu.GpuIndexFormat.Uint16
+                ? IndexFormat.Uint16 : IndexFormat.Uint32;
+
+        private static BlendOperation MapBlendOperation(GenWebgpu.GpuBlendOperation o)
+            => o switch
+            {
+                GenWebgpu.GpuBlendOperation.Add => BlendOperation.Add,
+                GenWebgpu.GpuBlendOperation.Subtract => BlendOperation.Subtract,
+                GenWebgpu.GpuBlendOperation.ReverseSubtract => BlendOperation.ReverseSubtract,
+                GenWebgpu.GpuBlendOperation.Min => BlendOperation.Min,
+                GenWebgpu.GpuBlendOperation.Max => BlendOperation.Max,
+                _ => BlendOperation.Add,
+            };
+
+        private static BlendFactor MapBlendFactor(GenWebgpu.GpuBlendFactor f)
+            => f switch
+            {
+                GenWebgpu.GpuBlendFactor.Zero => BlendFactor.Zero,
+                GenWebgpu.GpuBlendFactor.One => BlendFactor.One,
+                GenWebgpu.GpuBlendFactor.Src => BlendFactor.Src,
+                GenWebgpu.GpuBlendFactor.OneMinusSrc => BlendFactor.OneMinusSrc,
+                GenWebgpu.GpuBlendFactor.SrcAlpha => BlendFactor.SrcAlpha,
+                GenWebgpu.GpuBlendFactor.OneMinusSrcAlpha => BlendFactor.OneMinusSrcAlpha,
+                GenWebgpu.GpuBlendFactor.Dst => BlendFactor.Dst,
+                GenWebgpu.GpuBlendFactor.OneMinusDst => BlendFactor.OneMinusDst,
+                GenWebgpu.GpuBlendFactor.DstAlpha => BlendFactor.DstAlpha,
+                GenWebgpu.GpuBlendFactor.OneMinusDstAlpha => BlendFactor.OneMinusDstAlpha,
+                GenWebgpu.GpuBlendFactor.SrcAlphaSaturated => BlendFactor.SrcAlphaSaturated,
+                GenWebgpu.GpuBlendFactor.Constant => BlendFactor.Constant,
+                GenWebgpu.GpuBlendFactor.OneMinusConstant => BlendFactor.OneMinusConstant,
+                _ => BlendFactor.Zero,
+            };
+
+        private static StencilOperation MapStencilOp(GenWebgpu.GpuStencilOperation o)
+            => o switch
+            {
+                GenWebgpu.GpuStencilOperation.Keep => StencilOperation.Keep,
+                GenWebgpu.GpuStencilOperation.Zero => StencilOperation.Zero,
+                GenWebgpu.GpuStencilOperation.Replace => StencilOperation.Replace,
+                GenWebgpu.GpuStencilOperation.Invert => StencilOperation.Invert,
+                GenWebgpu.GpuStencilOperation.IncrementClamp => StencilOperation.IncrementClamp,
+                GenWebgpu.GpuStencilOperation.DecrementClamp => StencilOperation.DecrementClamp,
+                GenWebgpu.GpuStencilOperation.IncrementWrap => StencilOperation.IncrementWrap,
+                GenWebgpu.GpuStencilOperation.DecrementWrap => StencilOperation.DecrementWrap,
+                _ => StencilOperation.Keep,
+            };
+
+        private static VertexFormat MapVertexFormat(GenWebgpu.GpuVertexFormat f)
+            => f switch
+            {
+                // Map by name. WIT has scalar 8-bit / 16-bit single-
+                // channel formats that wgpu-native doesn't support;
+                // those fall through to Undefined and wgpu will
+                // reject at validation with a clear error.
+                GenWebgpu.GpuVertexFormat.Uint8x2 => VertexFormat.Uint8x2,
+                GenWebgpu.GpuVertexFormat.Uint8x4 => VertexFormat.Uint8x4,
+                GenWebgpu.GpuVertexFormat.Sint8x2 => VertexFormat.Sint8x2,
+                GenWebgpu.GpuVertexFormat.Sint8x4 => VertexFormat.Sint8x4,
+                GenWebgpu.GpuVertexFormat.Unorm8x2 => VertexFormat.Unorm8x2,
+                GenWebgpu.GpuVertexFormat.Unorm8x4 => VertexFormat.Unorm8x4,
+                GenWebgpu.GpuVertexFormat.Snorm8x2 => VertexFormat.Snorm8x2,
+                GenWebgpu.GpuVertexFormat.Snorm8x4 => VertexFormat.Snorm8x4,
+                GenWebgpu.GpuVertexFormat.Uint16x2 => VertexFormat.Uint16x2,
+                GenWebgpu.GpuVertexFormat.Uint16x4 => VertexFormat.Uint16x4,
+                GenWebgpu.GpuVertexFormat.Sint16x2 => VertexFormat.Sint16x2,
+                GenWebgpu.GpuVertexFormat.Sint16x4 => VertexFormat.Sint16x4,
+                GenWebgpu.GpuVertexFormat.Unorm16x2 => VertexFormat.Unorm16x2,
+                GenWebgpu.GpuVertexFormat.Unorm16x4 => VertexFormat.Unorm16x4,
+                GenWebgpu.GpuVertexFormat.Snorm16x2 => VertexFormat.Snorm16x2,
+                GenWebgpu.GpuVertexFormat.Snorm16x4 => VertexFormat.Snorm16x4,
+                GenWebgpu.GpuVertexFormat.Float16x2 => VertexFormat.Float16x2,
+                GenWebgpu.GpuVertexFormat.Float16x4 => VertexFormat.Float16x4,
+                GenWebgpu.GpuVertexFormat.Float32 => VertexFormat.Float32,
+                GenWebgpu.GpuVertexFormat.Float32x2 => VertexFormat.Float32x2,
+                GenWebgpu.GpuVertexFormat.Float32x3 => VertexFormat.Float32x3,
+                GenWebgpu.GpuVertexFormat.Float32x4 => VertexFormat.Float32x4,
+                GenWebgpu.GpuVertexFormat.Uint32 => VertexFormat.Uint32,
+                GenWebgpu.GpuVertexFormat.Uint32x2 => VertexFormat.Uint32x2,
+                GenWebgpu.GpuVertexFormat.Uint32x3 => VertexFormat.Uint32x3,
+                GenWebgpu.GpuVertexFormat.Uint32x4 => VertexFormat.Uint32x4,
+                GenWebgpu.GpuVertexFormat.Sint32 => VertexFormat.Sint32,
+                GenWebgpu.GpuVertexFormat.Sint32x2 => VertexFormat.Sint32x2,
+                GenWebgpu.GpuVertexFormat.Sint32x3 => VertexFormat.Sint32x3,
+                GenWebgpu.GpuVertexFormat.Sint32x4 => VertexFormat.Sint32x4,
+                _ => VertexFormat.Undefined,
+            };
         public Result<GenWebgpu.IGpuComputePipeline, GenWebgpu.CreatePipelineError>
             CreateComputePipelineAsync(GenWebgpu.GpuComputePipelineDescriptor descriptor)
         {
@@ -791,10 +1249,6 @@ namespace Wacs.WASI.GFX.Silk
                     });
             }
         }
-        public Result<GenWebgpu.IGpuRenderPipeline, GenWebgpu.CreatePipelineError>
-            CreateRenderPipelineAsync(GenWebgpu.GpuRenderPipelineDescriptor descriptor)
-            => throw new PlatformNotSupportedException(
-                "SilkGpuDevice.CreateRenderPipelineAsync: " + DispatchPending);
         public GenWebgpu.IGpuCommandEncoder CreateCommandEncoder(
             Option<GenWebgpu.GpuCommandEncoderDescriptor> descriptor)
         {
@@ -823,12 +1277,87 @@ namespace Wacs.WASI.GFX.Silk
         }
         public GenWebgpu.IGpuRenderBundleEncoder CreateRenderBundleEncoder(
             GenWebgpu.GpuRenderBundleEncoderDescriptor descriptor)
-            => throw new PlatformNotSupportedException(
-                "SilkGpuDevice.CreateRenderBundleEncoder: " + DispatchPending);
+        {
+            EnsureLive();
+            if (descriptor == null)
+                throw new ArgumentNullException(nameof(descriptor));
+            var label = descriptor.Label.TryGetValue(out var l) && l != null
+                ? l : string.Empty;
+            var labelBytes = label.Length > 0
+                ? System.Text.Encoding.UTF8.GetBytes(label + "\0")
+                : null;
+            // color-formats: list<option<format>>. None entries map
+            // to TextureFormat.Undefined (wgpu's "no color
+            // attachment at this slot" marker).
+            var colorFormats = descriptor.ColorFormats
+                ?? Array.Empty<Option<GenWebgpu.GpuTextureFormat>>();
+            var nativeFormats = new TextureFormat[colorFormats.Length];
+            for (int i = 0; i < colorFormats.Length; i++)
+                nativeFormats[i] = colorFormats[i].TryGetValue(out var f)
+                    ? (TextureFormat)f : TextureFormat.Undefined;
+            RenderBundleEncoder* enc;
+            fixed (byte* labelPtr = labelBytes)
+            fixed (TextureFormat* formatsPtr = nativeFormats)
+            {
+                var desc = new RenderBundleEncoderDescriptor
+                {
+                    Label = labelPtr,
+                    ColorFormatCount = (nuint)nativeFormats.Length,
+                    ColorFormats = nativeFormats.Length > 0 ? formatsPtr : null,
+                    DepthStencilFormat = descriptor.DepthStencilFormat
+                        .TryGetValue(out var dsf)
+                        ? (TextureFormat)dsf : TextureFormat.Undefined,
+                    SampleCount = descriptor.SampleCount.TryGetValue(out var sc)
+                        ? sc : 1u,
+                    DepthReadOnly = descriptor.DepthReadOnly.TryGetValue(out var dro)
+                        && dro,
+                    StencilReadOnly = descriptor.StencilReadOnly.TryGetValue(out var sro)
+                        && sro,
+                };
+                enc = _backend.EnsureApi()
+                    .DeviceCreateRenderBundleEncoder(_device, &desc);
+            }
+            if (enc == null)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "SilkGpuDevice.CreateRenderBundleEncoder: wgpu "
+                    + "returned a null encoder.");
+            return new SilkGpuRenderBundleEncoder(_backend, enc, label);
+        }
         public Result<GenWebgpu.IGpuQuerySet, GenWebgpu.CreateQuerySetError>
             CreateQuerySet(GenWebgpu.GpuQuerySetDescriptor descriptor)
-            => throw new PlatformNotSupportedException(
-                "SilkGpuDevice.CreateQuerySet: " + DispatchPending);
+        {
+            EnsureLive();
+            if (descriptor == null)
+                throw new ArgumentNullException(nameof(descriptor));
+            var label = descriptor.Label.TryGetValue(out var l) && l != null
+                ? l : string.Empty;
+            var labelBytes = label.Length > 0
+                ? System.Text.Encoding.UTF8.GetBytes(label + "\0")
+                : null;
+            QuerySet* qs;
+            fixed (byte* labelPtr = labelBytes)
+            {
+                var desc = new QuerySetDescriptor
+                {
+                    Label = labelPtr,
+                    Type = descriptor.Type == GenWebgpu.GpuQueryType.Timestamp
+                        ? QueryType.Timestamp : QueryType.Occlusion,
+                    Count = descriptor.Count,
+                };
+                qs = _backend.EnsureApi().DeviceCreateQuerySet(_device, &desc);
+            }
+            if (qs == null)
+                return Result<GenWebgpu.IGpuQuerySet, GenWebgpu.CreateQuerySetError>
+                    .FromErr(new GenWebgpu.CreateQuerySetError
+                    {
+                        Kind = new GenWebgpu.CreateQuerySetErrorKind
+                            .CreateQuerySetErrorKindTypeError(),
+                        Message = "DeviceCreateQuerySet returned null.",
+                    });
+            return Result<GenWebgpu.IGpuQuerySet, GenWebgpu.CreateQuerySetError>
+                .FromOk(new SilkGpuQuerySet(_backend, qs,
+                    descriptor.Type, descriptor.Count, label));
+        }
 
         public void Dispose()
         {
