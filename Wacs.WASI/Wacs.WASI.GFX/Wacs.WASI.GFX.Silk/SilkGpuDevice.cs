@@ -263,15 +263,35 @@ namespace Wacs.WASI.GFX.Silk
                     + "SurfaceDescriptorFromXlibWindow / "
                     + "SurfaceDescriptorFromWaylandSurface.");
 
+            // The SDL renderer (created up-front for the CPU-path
+            // SilkSurface ctor) claims the window's content view's
+            // CAMetalLayer. Drop it before SDL_Metal_CreateView so
+            // the Metal layer the wgpu surface attaches to is the
+            // one actually visible.
+            sdlSurface.DropSdlRenderer();
+
+            // SDL_Metal_CreateView / GetLayer must run on the
+            // main thread on macOS — AppKit enforces NSView
+            // creation + window attachment on the main thread.
+            // The CLI's --windowed mode runs the wasm guest on a
+            // worker thread, so we route through the dispatcher.
             var sdl = sdlSurface.NativeSdl;
-            var view = sdl.MetalCreateView(window);
-            if (view == null)
+            void* viewOut = null;
+            void* layerOut = null;
+            sdlSurface.Dispatcher.Invoke(() =>
+            {
+                viewOut = sdl.MetalCreateView(window);
+                if (viewOut != null)
+                    layerOut = sdl.MetalGetLayer(viewOut);
+            });
+            if (viewOut == null)
                 throw new Wacs.WASI.GFX.Types.WasiGfxException(
                     "SilkGpuDevice.ConnectGraphicsContext: "
                     + "SDL_Metal_CreateView returned null. The SDL "
                     + "window may have been created without metal-"
                     + "compatible flags.");
-            var layer = sdl.MetalGetLayer(view);
+            var view = viewOut;
+            var layer = layerOut;
 
             var metalDesc = new SurfaceDescriptorFromMetalLayer
             {

@@ -56,6 +56,12 @@ namespace Wacs.WASI.GFX.Silk
         /// for the swap-chain surface.</summary>
         internal Sdl NativeSdl => _sdl;
 
+        /// <summary>The main-thread dispatcher. Exposed so the
+        /// GPU-side swap-chain bridge can route SDL_Metal_*
+        /// calls through it — AppKit on macOS requires
+        /// NSView creation/attachment on the main thread.</summary>
+        internal MainThreadDispatcher Dispatcher => _dispatcher;
+
         internal EventChannel<ResizeEvent>  ResizeChannel       { get; } = new EventChannel<ResizeEvent>();
         internal EventChannel<FrameEvent>   FrameChannel        { get; } = new EventChannel<FrameEvent>();
         internal EventChannel<PointerEvent> PointerUpChannel    { get; } = new EventChannel<PointerEvent>();
@@ -228,6 +234,33 @@ namespace Wacs.WASI.GFX.Silk
             _sdl.RenderCopy(_renderer, _texture,
                 (Rectangle<int>*)null, (Rectangle<int>*)null);
             _sdl.RenderPresent(_renderer);
+        }
+
+        /// <summary>Drop the SDL renderer + cached texture so the
+        /// window's content view is free for an SDL_Metal_View
+        /// claim. Called by the wgpu-side ConnectGraphicsContext —
+        /// the SDL renderer would otherwise hold the window's
+        /// CAMetalLayer and the wgpu surface's draw would render
+        /// to an orphan layer that never appears on screen.
+        /// Idempotent.</summary>
+        internal void DropSdlRenderer()
+        {
+            _dispatcher.Invoke(() =>
+            {
+                unsafe
+                {
+                    if (_texture != null)
+                    {
+                        _sdl.DestroyTexture(_texture);
+                        _texture = null;
+                    }
+                    if (_renderer != null)
+                    {
+                        _sdl.DestroyRenderer(_renderer);
+                        _renderer = null;
+                    }
+                }
+            });
         }
 
         public void Dispose()

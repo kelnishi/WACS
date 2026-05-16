@@ -431,7 +431,8 @@ impl Guest for Demo {
                     {
                         unreachable!("cs set_bind_group: {}", e.message);
                     }
-                    p.dispatch_workgroups(1, None, None);
+                    // 8×8 workgroup × 8×8 dispatch = 64×64 cells.
+                    p.dispatch_workgroups(8, Some(8), None);
                     p.end();
                     current_is_a = !current_is_a;
                 }
