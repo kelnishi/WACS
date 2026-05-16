@@ -10,9 +10,12 @@ From the repo root:
 
 ```bash
 dotnet run --project Wacs.Console/Wacs.Console -c Release -- \
-  run --wasi-gfx --windowed \
+  run --wasi-gfx --windowed --call start \
   Spec.Test/components/fixtures/wasi-webgpu-game-of-life-windowed/wasm/game-of-life-windowed.component.wasm
 ```
+
+(`--call start` overrides the CLI's default `_start` entrypoint —
+the WIT exports `start: func()`, no leading underscore.)
 
 A 640×640 window opens with an R-pentomino seed. The compute
 shader steps the simulation once per frame; the fragment shader
