@@ -1,0 +1,30 @@
+[package]
+name = "wasi-webgpu-hello-compute"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Parity fixture for the WACS.WASI.GFX.Webgpu compute path.
+# Exercises the full request-adapter → request-device →
+# create-buffer → create-shader-module → create-bind-group-
+# layout → create-pipeline-layout → create-bind-group →
+# create-compute-pipeline → command-encoder → begin-compute-
+# pass → set-pipeline → set-bind-group → dispatch-workgroups →
+# end → finish → queue.submit → buffer.map-async →
+# get-mapped-range chain end-to-end against a real wgpu backend.
+#
+# Kernel: add-one element-wise across a u32 array. Input is
+# written via queue.write_buffer; output is copied to a
+# staging buffer and read back via map-async; values are
+# compared and an unreachable!() traps the guest on mismatch.
+# A successful start() return signals the entire chain landed.
+
+[dependencies]
+wit-bindgen = "0.41"
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = "s"
+strip = true

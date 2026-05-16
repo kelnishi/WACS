@@ -248,13 +248,16 @@ namespace Wacs.WASI.GFX.Silk
             for (int i = 0; i < entries.Length; i++)
             {
                 var src = entries[i];
-                ref var dst = ref nativeEntries[i];
-                dst = default;
-                dst.Binding = src.Binding;
-                dst.Visibility = (ShaderStage)src.Visibility;
+                // Build each sub-struct as a local so the writes
+                // commit through cleanly. C# ref locals through
+                // nested struct fields ARE supposed to write
+                // through, but the Silk struct layout (or
+                // possibly a struct-blittability quirk) loses
+                // the nested writes — verified empirically.
+                var buffer = default(BufferBindingLayout);
                 if (src.Buffer.TryGetValue(out var bbl) && bbl != null)
                 {
-                    dst.Buffer.Type = bbl.Type.TryGetValue(out var bt)
+                    buffer.Type = bbl.Type.TryGetValue(out var bt)
                         ? bt switch
                         {
                             GenWebgpu.GpuBufferBindingType.Uniform => BufferBindingType.Uniform,
@@ -263,12 +266,13 @@ namespace Wacs.WASI.GFX.Silk
                             _ => BufferBindingType.Undefined,
                         }
                         : BufferBindingType.Uniform;
-                    dst.Buffer.HasDynamicOffset = bbl.HasDynamicOffset.TryGetValue(out var hdo) && hdo;
-                    dst.Buffer.MinBindingSize = bbl.MinBindingSize.TryGetValue(out var mbs) ? mbs : 0;
+                    buffer.HasDynamicOffset = bbl.HasDynamicOffset.TryGetValue(out var hdo) && hdo;
+                    buffer.MinBindingSize = bbl.MinBindingSize.TryGetValue(out var mbs) ? mbs : 0;
                 }
+                var sampler = default(SamplerBindingLayout);
                 if (src.Sampler.TryGetValue(out var sbl) && sbl != null)
                 {
-                    dst.Sampler.Type = sbl.Type.TryGetValue(out var st)
+                    sampler.Type = sbl.Type.TryGetValue(out var st)
                         ? st switch
                         {
                             GenWebgpu.GpuSamplerBindingType.Filtering => SamplerBindingType.Filtering,
@@ -278,9 +282,10 @@ namespace Wacs.WASI.GFX.Silk
                         }
                         : SamplerBindingType.Filtering;
                 }
+                var texture = default(TextureBindingLayout);
                 if (src.Texture.TryGetValue(out var tbl) && tbl != null)
                 {
-                    dst.Texture.SampleType = tbl.SampleType.TryGetValue(out var tst)
+                    texture.SampleType = tbl.SampleType.TryGetValue(out var tst)
                         ? tst switch
                         {
                             GenWebgpu.GpuTextureSampleType.Float => TextureSampleType.Float,
@@ -291,14 +296,15 @@ namespace Wacs.WASI.GFX.Silk
                             _ => TextureSampleType.Undefined,
                         }
                         : TextureSampleType.Float;
-                    dst.Texture.ViewDimension = MapViewDimension(
+                    texture.ViewDimension = MapViewDimension(
                         tbl.ViewDimension.TryGetValue(out var tvd)
                             ? (GenWebgpu.GpuTextureViewDimension?)tvd : null);
-                    dst.Texture.Multisampled = tbl.Multisampled.TryGetValue(out var ms) && ms;
+                    texture.Multisampled = tbl.Multisampled.TryGetValue(out var ms) && ms;
                 }
+                var storageTexture = default(StorageTextureBindingLayout);
                 if (src.StorageTexture.TryGetValue(out var stbl) && stbl != null)
                 {
-                    dst.StorageTexture.Access = stbl.Access.TryGetValue(out var sta)
+                    storageTexture.Access = stbl.Access.TryGetValue(out var sta)
                         ? sta switch
                         {
                             GenWebgpu.GpuStorageTextureAccess.WriteOnly => StorageTextureAccess.WriteOnly,
@@ -307,11 +313,20 @@ namespace Wacs.WASI.GFX.Silk
                             _ => StorageTextureAccess.Undefined,
                         }
                         : StorageTextureAccess.WriteOnly;
-                    dst.StorageTexture.Format = MapTextureFormat(stbl.Format);
-                    dst.StorageTexture.ViewDimension = MapViewDimension(
+                    storageTexture.Format = MapTextureFormat(stbl.Format);
+                    storageTexture.ViewDimension = MapViewDimension(
                         stbl.ViewDimension.TryGetValue(out var svd)
                             ? (GenWebgpu.GpuTextureViewDimension?)svd : null);
                 }
+                nativeEntries[i] = new BindGroupLayoutEntry
+                {
+                    Binding = src.Binding,
+                    Visibility = (ShaderStage)src.Visibility,
+                    Buffer = buffer,
+                    Sampler = sampler,
+                    Texture = texture,
+                    StorageTexture = storageTexture,
+                };
             }
             BindGroupLayout* bgl;
             fixed (byte* labelPtr = labelBytes)
