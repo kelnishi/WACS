@@ -118,7 +118,7 @@ namespace Wacs.Core.Types
         /// 3.2.3. Function Types
         /// Always valid
         /// </summary>
-        public class Validator : AbstractValidator<FunctionType>
+        public new class Validator : AbstractValidator<FunctionType>
         {
             public Validator()
             {

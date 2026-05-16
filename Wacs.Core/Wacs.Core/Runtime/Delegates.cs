@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
@@ -70,6 +71,19 @@ namespace Wacs.Core.Runtime
         }
 
 
+        [UnconditionalSuppressMessage("Trimming", "IL2070",
+            Justification = "delegateType.GetMethod(\"Invoke\") on a " +
+                "Delegate-derived type — Invoke is preserved by runtime " +
+                "metadata for all delegates.")]
+        [UnconditionalSuppressMessage("Trimming", "IL2075",
+            Justification = "Cascade reflection over parameter / return " +
+                "types is intentionally dynamic in this validation path; " +
+                "callers feed in delegate signatures whose component " +
+                "types are application-defined.")]
+        [UnconditionalSuppressMessage("Trimming", "IL2065",
+            Justification = "Return-type reflection for the op_Implicit " +
+                "lookup runs on a type lifted from a ReturnType property " +
+                "and can't propagate annotations back through metadata.")]
         public static void ValidateFunctionTypeCompatibility(FunctionType functionType, Type delegateType)
         {
             if (!typeof(Delegate).IsAssignableFrom(delegateType))
@@ -77,7 +91,7 @@ namespace Wacs.Core.Runtime
                 throw new ArgumentException($"The type {delegateType.Name} is not a delegate type.");
             }
 
-            MethodInfo invokeMethod = delegateType.GetMethod("Invoke");
+            MethodInfo invokeMethod = delegateType.GetMethod("Invoke")!;
             if (invokeMethod == null)
             {
                 throw new ArgumentException($"The delegate type {delegateType.Name} does not have an Invoke method.");

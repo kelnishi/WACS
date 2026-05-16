@@ -48,8 +48,8 @@ namespace Wacs.Core.Runtime
         public TableInstance this[TableAddr addr] => 
             CurrentTransaction?.Tables.GetValueOrDefault(addr)??Tables[addr.Value];
 
-        public MemoryInstance this[MemAddr addr] => 
-            CurrentTransaction?.Mems.GetValueOrDefault(addr)??Mems[addr.Value];
+        public MemoryInstance this[MemAddr addr] =>
+            (CurrentTransaction?.Mems.GetValueOrDefault(addr)??Mems[addr.Value])!;
 
         public GlobalInstance this[GlobalAddr addr] =>
             CurrentTransaction?.Globals.GetValueOrDefault(addr)??Globals[addr.Value];

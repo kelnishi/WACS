@@ -17,7 +17,12 @@
       <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.1" />
       <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
       <PackageReference Include="xunit" Version="2.9.2" />
-      <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <!-- NU1701 suppressed: xunit.runner.visualstudio 2.8.2 ships
+           only .NETFramework / net6.0 build folders, so restore against
+           netstandard2.1 reports the NETFx moniker fallback. The
+           runtime assets work fine for net8.0 test discovery. -->
+      <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2"
+                        NoWarn="NU1701">
         <PrivateAssets>all</PrivateAssets>
         <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       </PackageReference>

@@ -11,7 +11,7 @@
         <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-        <Version>0.1.0</Version>
+        <Version>0.1.1</Version>
         <RepositoryType>git</RepositoryType>
 
         <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
@@ -32,6 +32,15 @@
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
         <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
+    </ItemGroup>
+
+    <!-- Analyzer release tracking files (RS2008). Microsoft.CodeAnalysis.
+         Analyzers requires every defined DiagnosticDescriptor to appear in
+         either Shipped or Unshipped. Both files must be marked as
+         AdditionalFiles so the analyzer can read them. -->
+    <ItemGroup>
+        <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
+        <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
     </ItemGroup>
 
     <!-- Pack the analyzer .dll into the analyzers/dotnet/cs nuget folder

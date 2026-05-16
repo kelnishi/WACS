@@ -7,7 +7,19 @@
 
 using System;
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
+
+// HostInterfaceRuntime is the fallback dispatcher source-gen-
+// emitted default interface bodies call when a generated impl
+// isn't statically wired. The fallback walks loaded assemblies
+// looking for an implementer with the requested static factory
+// method. AOT-incompatible (Assembly.GetExportedTypes + reflective
+// MethodInfo.Invoke). AOT consumers should rely on the source
+// generator producing direct calls into the typed impl, which
+// bypasses this runtime helper. The public entry below carries
+// the standard annotations.
+#pragma warning disable IL2026, IL2075
 
 namespace Wacs.ComponentModel.Runtime
 {
@@ -38,6 +50,10 @@ namespace Wacs.ComponentModel.Runtime
         /// to the WIT-declared return type — codegen knows it
         /// at emit time.
         /// </summary>
+        [RequiresUnreferencedCode("Walks loaded assemblies for an " +
+            "implementer of ifaceType with a matching static factory " +
+            "method. AOT consumers should rely on source-gen-emitted " +
+            "direct calls to the typed impl, bypassing this fallback.")]
         public static object? InvokeStaticFactoryReflective(
             Type ifaceType, string methodName, object?[] args)
         {

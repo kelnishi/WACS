@@ -720,7 +720,7 @@ namespace Wacs.Core.Runtime
 
         public bool Equals(Value other) => this == other;
 
-        public override bool Equals(object obj) => obj is Value value && this == value;
+        public override bool Equals(object? obj) => obj is Value value && this == value;
 
         public override int GetHashCode() => HashCode.Combine(Type, Scalar);
         

@@ -7,9 +7,9 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
-using System.Linq.Expressions;
 using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using Wacs.ComponentModel.Runtime;
@@ -146,19 +146,13 @@ namespace Wacs.WASI.Preview2.DependencyInjection
                 opts.ValidationLevel = ValidationLevel.Strict;
             });
 
-            // Auto-detect WASI.NN.DependencyInjection: if it's on
-            // the load path, register the composite bundle so the
-            // transpiler's direct-link IL (emitted against the
-            // composite type when both packages were available at
-            // transpile time) finds the type it expects.
-            ReflectivelyAddWasiNN(services);
-
-            // Same shape for WASI.GFX.DependencyInjection — when
-            // --wasi-gfx is on the load path, the composite
-            // WasiPreview2GfxBundle is what the resolver auto-
-            // discovers and what direct-link IL is emitted
-            // against.
-            ReflectivelyAddWasiGfx(services);
+            // Walk every loaded assembly for [WasiScopeBootstrap]
+            // attributes and invoke each pointed-at registration.
+            // Each subsystem DI package (wasi-nn, wasi-gfx, future
+            // siblings) ships its own IWasiScopeBootstrap impl +
+            // assembly attribute — this scope holds no hardcoded
+            // knowledge of which subsystems exist.
+            ApplyScopeBootstraps(services);
 
             configure?.Invoke(services);
 
@@ -246,6 +240,11 @@ namespace Wacs.WASI.Preview2.DependencyInjection
             }
         }
 
+        [UnconditionalSuppressMessage("Trimming", "IL2026",
+            Justification = "Walks loaded assemblies for the " +
+                "WacsCompositeBundleAttribute. Tagged composite bundle " +
+                "types are statically referenced from their hosting DI " +
+                "sibling — same root path as ApplyScopeBootstraps above.")]
         private static IEnumerable<Type> DiscoverCompositeBundleTypes()
         {
             var seen = new HashSet<Type>();
@@ -281,300 +280,61 @@ namespace Wacs.WASI.Preview2.DependencyInjection
             return candidates.Select(c => c.Type);
         }
 
-        // Reflection-load the WASI.NN.DI assembly + run its
-        // service-collection extensions so the composite bundle
-        // and IGraphFuncs land in the scope. Mirrors what
-        // ComponentMainHost did inline pre-refactor.
+        // Walk loaded assemblies for [WasiScopeBootstrap]
+        // attributes and apply each. Each WASI subsystem DI
+        // package self-registers via this attribute; nothing
+        // here is wired by subsystem name.
         //
-        // The OnnxBackend registration runs INSIDE AddWasiNN's
-        // configure callback (instead of post-hoc mutating the
-        // singleton from `AutoRegisterOnnxBackend`) so the
-        // Configuration instance the singleton resolves is the
-        // SAME instance the backend was added to. Post-hoc
-        // mutation worked when descriptor.ImplementationInstance
-        // was reliably populated, but brittle to ordering — a
-        // pre-existing factory registration would silently put
-        // the mutated instance and the resolved instance out of
-        // sync. Configure-callback ordering avoids that class of
-        // bug entirely.
-        private static void ReflectivelyAddWasiNN(IServiceCollection services)
+        // The Activator.CreateInstance + Apply call per bootstrap
+        // is the only reflection: the type token comes from the
+        // attribute's typeof() (statically referenced from the
+        // sibling package's source, no string lookup), so the
+        // type is rooted by static reference — its parameterless
+        // constructor isn't trimmed even though the attribute's
+        // Type property is unannotated.
+        [UnconditionalSuppressMessage("Trimming", "IL2072",
+            Justification = "attr.Type comes from typeof(...) in the " +
+                "sibling assembly's [WasiScopeBootstrap(...)] argument " +
+                "— that's a static reference to the bootstrap class, so " +
+                "trimming preserves both the type and its public " +
+                "parameterless ctor.")]
+        private static void ApplyScopeBootstraps(IServiceCollection services)
         {
-            var nnAsm = TryLoadAssembly("Wacs.WASI.NN.DependencyInjection");
-            var nnExtType = nnAsm?.GetType(
-                "Wacs.WASI.NN.DependencyInjection.WasiNNServiceCollectionExtensions");
-            if (nnExtType == null) return;
-
-            // Auto-discover every wasi-nn backend assembly loaded
-            // into the AppDomain. Each backend's bindable type
-            // implements `Wacs.WASI.NN.IWasiNNBackendRegistration`
-            // and exposes a `ConfigureConfiguration(WasiNNConfiguration)`
-            // method that mutates the shared config; we instantiate
-            // each one via its parameterless ctor and chain the
-            // mutations into the AddWasiNN configure callback.
-            //
-            // Failures (assembly not loadable / type not found /
-            // Activator throws / ConfigureConfiguration throws)
-            // surface as stderr warnings — the SLM's round-13
-            // "InvalidEncoding" and round-19's "no named-model
-            // resolver configured" both root-cause faster when the
-            // load/ctor failure shows up at startup time, not at
-            // first guest call.
-            //
-            // Adding a new wasi-nn backend now requires no edit to
-            // this file: the new package's bindable implements
-            // IWasiNNBackendRegistration and gets picked up the
-            // next time the bundle scope is built.
-            var configureDelegate = BuildAutoDiscoveredCallback(nnAsm!);
-
-            // services.AddWasiNN(configure) — configure runs
-            // BEFORE TryAddSingleton(opts.Configuration), so each
-            // backend lands on the same Configuration instance
-            // GraphFuncsImpl resolves later.
-            nnExtType.GetMethod("AddWasiNN",
-                    BindingFlags.Public | BindingFlags.Static)!
-                .Invoke(null, new object?[] { services, configureDelegate });
-
-            // services.AddWasiPreview2NNBundle() — registers the
-            // composite that exposes both the Preview2 and
-            // WASI.NN [WitSource] interfaces through one CLR
-            // object.
-            nnExtType.GetMethod("AddWasiPreview2NNBundle",
-                    BindingFlags.Public | BindingFlags.Static)!
-                .Invoke(null, new object?[] { services });
-        }
-
-        // Same pattern as ReflectivelyAddWasiNN above but for
-        // WACS.WASI.GFX. The backend (SilkGfxBackend) is wired
-        // into WasiGfxAmbient by WasiGfxSilkBindable.BindToRuntime,
-        // not via a DI configure callback — so the gfx Configuration
-        // can stay at its DefaultConfiguration() defaults here.
-        // The DI registration's only job is to make the composite
-        // WasiPreview2GfxBundle resolvable; the bundle's GfxBackend
-        // forwarder picks up the ambient at first use.
-        private static void ReflectivelyAddWasiGfx(IServiceCollection services)
-        {
-            var gfxAsm = TryLoadAssembly("Wacs.WASI.GFX.DependencyInjection");
-            var gfxExtType = gfxAsm?.GetType(
-                "Wacs.WASI.GFX.DependencyInjection.WasiGfxServiceCollectionExtensions");
-            if (gfxExtType == null) return;
-
-            // services.AddWasiGfx(null) — registers
-            // WasiGfxConfiguration + WasiGfxBundle. configure=null
-            // means "use defaults"; the ambient-backend hook fills
-            // in the IBackend at runtime via the Silk bindable.
-            gfxExtType.GetMethod("AddWasiGfx",
-                    BindingFlags.Public | BindingFlags.Static)!
-                .Invoke(null, new object?[] { services, null });
-
-            // services.AddWasiPreview2GfxBundle() — registers the
-            // composite forwarding Preview2 + GFX bundle properties
-            // through one CLR object.
-            gfxExtType.GetMethod("AddWasiPreview2GfxBundle",
-                    BindingFlags.Public | BindingFlags.Static)!
-                .Invoke(null, new object?[] { services });
-        }
-
-        // Auto-discover every wasi-nn backend assembly loaded into
-        // the AppDomain and build a single combined
-        // `Action<WasiNNDependencyInjectionOptions>` that registers
-        // each backend's `IWasiNNBackendRegistration` against the
-        // DI bundle's shared `WasiNNConfiguration`.
-        //
-        // Discovery rules:
-        //   1. Enumerate all assemblies whose name starts with
-        //      "Wacs.WASI.NN." (case-insensitive). Excludes the DI
-        //      sibling (which doesn't ship a backend) and any
-        //      `.Test` assemblies.
-        //   2. For each, find every public type implementing
-        //      `Wacs.WASI.NN.IWasiNNBackendRegistration` with a
-        //      parameterless ctor.
-        //   3. Activator.CreateInstance + call
-        //      ConfigureConfiguration(opts.Configuration) per
-        //      registrant. Failures stderr-warn and skip — one
-        //      backend's ctor failure doesn't bring down scope
-        //      construction for the others.
-        //
-        // Adding a new wasi-nn backend now requires no edit to this
-        // file: the new package's bindable implements
-        // IWasiNNBackendRegistration and gets picked up the next
-        // time the bundle scope is built.
-        private static Delegate? BuildAutoDiscoveredCallback(Assembly nnAsm)
-        {
-            var optsType = nnAsm.GetType(
-                "Wacs.WASI.NN.DependencyInjection.WasiNNDependencyInjectionOptions");
-            if (optsType == null) return null;
-
-            var configProp = optsType.GetProperty("Configuration");
-            if (configProp == null) return null;
-            var configType = configProp.PropertyType;
-
-            // IWasiNNBackendRegistration lives in Wacs.WASI.NN; the
-            // DI assembly already references the core, so its
-            // referenced-assembly list points at the right version.
-            Assembly? coreAsm = TryLoadAssembly("Wacs.WASI.NN");
-            var regIface = coreAsm?.GetType(
-                "Wacs.WASI.NN.IWasiNNBackendRegistration");
-            if (regIface == null) return null;
-            var regMethod = regIface.GetMethod("ConfigureConfiguration");
-            if (regMethod == null) return null;
-
-            var registrants = DiscoverBackendRegistrants(regIface);
-            if (registrants.Count == 0) return null;
-
-            // Build an Action<opts> that walks each registrant and
-            // invokes `reg.ConfigureConfiguration(opts.Configuration)`.
-            // Pure reflection at invocation time (not Linq.Expressions)
-            // because the registrants list is dynamic — building a
-            // typed delegate against `IWasiNNBackendRegistration`
-            // doesn't gain us anything since each call is already a
-            // reflection invoke. The Action<opts> is typed against
-            // the dynamically-resolved options type so it satisfies
-            // AddWasiNN's configure parameter contract.
-            var optsParam = Expression.Parameter(optsType, "opts");
-            var configAccess = Expression.Property(optsParam, configProp);
-            // Build a non-generic body: call ApplyAll(opts.Configuration, regMethod, registrants)
-            var applyAll = typeof(WasiPreview2RuntimeScope).GetMethod(
-                nameof(ApplyAllRegistrants),
-                BindingFlags.Static | BindingFlags.NonPublic)!;
-            var call = Expression.Call(applyAll,
-                Expression.Convert(configAccess, typeof(object)),
-                Expression.Constant(regMethod, typeof(MethodInfo)),
-                Expression.Constant(registrants, typeof(List<object>)));
-            var actionType = typeof(Action<>).MakeGenericType(optsType);
-            return Expression.Lambda(actionType, call, optsParam).Compile();
-        }
-
-        // Invoke ConfigureConfiguration on every discovered
-        // registrant. Errors stderr-warn and skip so one bad
-        // registrant doesn't sink the others.
-        private static void ApplyAllRegistrants(
-            object config, MethodInfo regMethod, List<object> registrants)
-        {
-            foreach (var r in registrants)
-            {
-                try { regMethod.Invoke(r, new[] { config }); }
-                catch (TargetInvocationException ex)
-                {
-                    var inner = ex.InnerException ?? ex;
-                    Console.Error.WriteLine(
-                        "warn: " + r.GetType().FullName
-                        + ".ConfigureConfiguration threw "
-                        + inner.GetType().Name + ": " + inner.Message
-                        + ". guests requesting this backend will see "
-                        + "InvalidEncoding / NotFound errors.");
-                }
-                catch (Exception ex)
-                {
-                    Console.Error.WriteLine(
-                        "warn: " + r.GetType().FullName
-                        + ".ConfigureConfiguration failed: "
-                        + ex.GetType().Name + ": " + ex.Message);
-                }
-            }
-        }
-
-        // Walk every loaded assembly with a `Wacs.WASI.NN.*` name
-        // (excluding the DI / Test subpackages), find every public
-        // class implementing the registration interface, and
-        // instantiate via parameterless ctor. Errors stderr-warn
-        // and skip — one misbehaving backend doesn't kill the rest.
-        private static List<object> DiscoverBackendRegistrants(
-            Type regIface)
-        {
-            var result = new List<object>();
             foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
             {
                 if (asm.IsDynamic) continue;
-                string name;
-                try { name = asm.GetName().Name ?? ""; }
-                catch { continue; }
-                if (!name.StartsWith("Wacs.WASI.NN.",
-                    StringComparison.OrdinalIgnoreCase)) continue;
-                if (name.EndsWith(".DependencyInjection",
-                        StringComparison.OrdinalIgnoreCase)
-                    || name.EndsWith(".Test",
-                        StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                Type[] types;
-                try { types = asm.GetExportedTypes(); }
-                catch (ReflectionTypeLoadException ex)
-                {
-                    types = ex.Types.Where(t => t != null)
-                        .Select(t => t!).ToArray();
-                }
-                catch { continue; }
-
-                foreach (var t in types)
-                {
-                    if (t == null) continue;
-                    if (t.IsAbstract || t.IsInterface) continue;
-                    if (!regIface.IsAssignableFrom(t)) continue;
-                    if (t.GetConstructor(Type.EmptyTypes) == null) continue;
-
-                    object? instance;
-                    try { instance = Activator.CreateInstance(t); }
-                    catch (Exception ex)
-                    {
-                        Console.Error.WriteLine(
-                            "warn: wasi-nn backend " + t.FullName
-                            + " ctor failed: " + ex.GetType().Name
-                            + ": " + ex.Message
-                            + ". guests requesting this backend will "
-                            + "see InvalidEncoding / NotFound errors.");
-                        continue;
-                    }
-                    if (instance != null) result.Add(instance);
-                }
-            }
-            return result;
-        }
-
-        // Resolve a named assembly across both .NET load contexts.
-        // First tries `Assembly.Load(name)` (the default context —
-        // covers project-referenced and CLR-resolved-by-name
-        // dependencies). On miss, walks `AppDomain.CurrentDomain
-        // .GetAssemblies()` to catch assemblies already loaded into
-        // the LoadFromContext via `Assembly.LoadFrom(path)` — the
-        // path the CLI's `--bind <path>` walks. Without the fallback,
-        // `--bind /path/to/Wacs.WASI.NN.LlamaSharp.dll` populates
-        // AppDomain but the auto-wire's Assembly.Load(name) misses
-        // it, the LlamaSharp backend never registers in the DI's
-        // WasiNNConfiguration, and `compute(...)` trips NotFound at
-        // first guest call (gap 25, round-20 verification).
-        //
-        // Mirror of the round-18 fix in HostPackageResolver
-        // .TryFindResourceImpl — same AppDomain-vs-default-context
-        // split, same fallback shape.
-        private static Assembly? TryLoadAssembly(string name)
-        {
-            try
-            {
-                var asm = Assembly.Load(name);
-                if (asm != null) return asm;
-            }
-            catch { /* fall through to AppDomain walk */ }
-
-            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                if (asm.IsDynamic) continue;
+                WasiScopeBootstrapAttribute[] attrs;
                 try
                 {
-                    if (string.Equals(asm.GetName().Name, name,
-                        StringComparison.OrdinalIgnoreCase))
-                        return asm;
+                    attrs = (WasiScopeBootstrapAttribute[])asm
+                        .GetCustomAttributes(typeof(WasiScopeBootstrapAttribute),
+                            inherit: false);
                 }
                 catch
                 {
-                    // Malformed metadata on a collectable / dynamic-
-                    // but-not-flagged assembly. Skip and keep walking;
-                    // a single-asm hiccup must not blank out the
-                    // search.
+                    // Malformed metadata on a collectable / dynamic
+                    // assembly. Skip; don't blank out the search.
+                    continue;
+                }
+                foreach (var attr in attrs)
+                {
+                    try
+                    {
+                        var inst = (IWasiScopeBootstrap)Activator
+                            .CreateInstance(attr.Type)!;
+                        inst.Apply(services);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine(
+                            "warn: scope bootstrap "
+                            + attr.Type.FullName + " threw "
+                            + ex.GetType().Name + ": " + ex.Message
+                            + ". subsystem registration skipped.");
+                    }
                 }
             }
-            return null;
         }
-
         public void Dispose()
         {
             if (_disposed) return;

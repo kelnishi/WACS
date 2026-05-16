@@ -8,6 +8,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using Wacs.Core.Attributes;
 using Wacs.Core.OpCodes;
@@ -87,6 +88,11 @@ namespace Wacs.Core.Text
             return null;
         }
 
+        [UnconditionalSuppressMessage("Trimming", "IL2090",
+            Justification = "T : struct, Enum — caller passes a closed " +
+                "enum type (one of OpCode / GcCode / etc.) statically " +
+                "referenced from the dispatcher; public fields are " +
+                "preserved.")]
         private static void AddEnum<T>(Func<T, ByteCode> factory) where T : struct, Enum
         {
             var enumType = typeof(T);

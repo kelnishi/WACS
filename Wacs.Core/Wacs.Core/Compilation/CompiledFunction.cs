@@ -59,7 +59,7 @@ namespace Wacs.Core.Compilation
             Bytecode = bytecode;
             LocalsCount = localsCount;
             ParamCount = signature?.ParameterTypes.Arity ?? 0;
-            Signature = signature;
+            Signature = signature!;
             HandlerTable = handlerTable;
             DefaultLocalsTemplate = defaultLocalsTemplate;
         }

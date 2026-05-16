@@ -480,9 +480,9 @@ namespace Wacs.Transpiler.AOT.Component
                 // Free function — `this` for the typed-interface callvirt.
                 il.Emit(OpCodes.Ldarg_0);
                 il.Emit(OpCodes.Ldfld, HostBundleField);
-                il.Emit(OpCodes.Castclass, bundleType);
+                il.Emit(OpCodes.Castclass, bundleType!);
 
-                var bundleProperty = ResolveBundleProperty(bundleType,
+                var bundleProperty = ResolveBundleProperty(bundleType!,
                     binding.InterfaceType);
                 il.Emit(OpCodes.Callvirt, bundleProperty.GetGetMethod()!);
             }
@@ -673,7 +673,6 @@ namespace Wacs.Transpiler.AOT.Component
                         || IsLikelyVariantBase(
                             method.ReturnType.GetElementType()!));
 
-                int offsetSoFar = 0;
                 if (isOptionOrResultArrayReturn)
                 {
                     EmitListOfOptionOrResultReturn(il,

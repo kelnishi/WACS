@@ -83,11 +83,20 @@ namespace Wacs.Core.Types
             _build!.Add(element);
         }
 
+        // CS0465: the method name overlaps with Object.Finalize (the
+        // destructor target). Intentional — this is a sealing operation
+        // on the address space's builder, named for what it does;
+        // renaming would break consumers. The compiler concern is that a
+        // GC finalizer call would route here, but Object.Finalize is
+        // protected and this method is public + parameterless-void, so
+        // no actual collision occurs.
+#pragma warning disable CS0465
         public void Finalize()
+#pragma warning restore CS0465
         {
             if (_final)
                 throw new WasmRuntimeException("MemAddrs space already finalized.");
-            
+
             _final = true;
             _space = _build!.ToArray();
             _build = null;

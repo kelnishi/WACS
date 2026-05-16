@@ -262,25 +262,17 @@ namespace Wacs.Console.Verbs
                 // Canons / Types are IReadOnlyList<T> so .Count works
                 // as a property.
                 var coreBins = component.CoreModuleBinaries;
-                int coreCount = coreBins == null ? 0 : coreBins.Count();
+                int coreCount = coreBins.Count();
                 int nestedCount = component.NestedComponentCount;
-                int customCount = component.CustomSections == null
-                    ? 0 : component.CustomSections.Count();
-                int rawSectionCount = component.RawSections == null
-                    ? 0 : component.RawSections.Count;
-                int exportCount = component.Exports == null
-                    ? 0 : component.Exports.Count;
-                int canonCount = component.Canons == null
-                    ? 0 : component.Canons.Count;
-                int typeCount = component.Types == null
-                    ? 0 : component.Types.Count;
+                int customCount = component.CustomSections.Count();
+                int rawSectionCount = component.RawSections.Count;
+                int exportCount = component.Exports.Count;
+                int canonCount = component.Canons.Count;
+                int typeCount = component.Types.Count;
 
                 int totalCoreBytes = 0;
-                if (coreBins != null)
-                {
-                    foreach (var bin in coreBins)
-                        totalCoreBytes += bin == null ? 0 : bin.Length;
-                }
+                foreach (var bin in coreBins)
+                    totalCoreBytes += bin.Length;
 
                 System.Console.WriteLine("file              " + path);
                 System.Console.WriteLine("kind              wasm component");
@@ -298,7 +290,7 @@ namespace Wacs.Console.Verbs
             {
                 System.Console.WriteLine();
                 System.Console.WriteLine("=== component-level exports ===");
-                if (component.Exports == null || component.Exports.Count == 0)
+                if (component.Exports.Count == 0)
                 {
                     System.Console.WriteLine("  (none)");
                 }

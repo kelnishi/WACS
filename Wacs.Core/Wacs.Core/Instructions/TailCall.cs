@@ -34,7 +34,7 @@ namespace Wacs.Core.Instructions
         // tail-calls degrade to a plain host invocation followed by an
         // immediate FunctionReturn — semantically equivalent to call+return,
         // which is what the spec's tail-call proposal requires.
-        private IFunctionInstance _functionInstance;
+        private IFunctionInstance _functionInstance = null!;
 
         public InstReturnCall() : base(ByteCode.ReturnCall) 
             => IsAsync = false;
@@ -107,7 +107,7 @@ namespace Wacs.Core.Instructions
             }
         }
 
-        public override async ValueTask ExecuteAsync(ExecContext context)
+        public override ValueTask ExecuteAsync(ExecContext context)
         {
             throw new WasmRuntimeException($"Tail-call optimization targets must be synchronous.");
         }
@@ -316,7 +316,7 @@ namespace Wacs.Core.Instructions
             context.TailCall(a);
         }
 
-        public override async ValueTask ExecuteAsync(ExecContext context)
+        public override ValueTask ExecuteAsync(ExecContext context)
         {
             //Call Indirect
             //2.
@@ -368,8 +368,9 @@ namespace Wacs.Core.Instructions
                     throw new TrapException($"Instruction {Op.GetMnemonic()} failed. RecursiveType differed.");
             if (!funcInst.Type.Matches(ftExpect.Unroll.Body, context.Frame.Module.Types))
                 throw new TrapException($"Instruction {Op.GetMnemonic()} failed. Expected FunctionType differed.");
-            
+
             context.TailCall(a);
+            return default;
         }
 
         /// <summary>
@@ -524,7 +525,7 @@ namespace Wacs.Core.Instructions
             context.TailCall(a);
         }
 
-        public override async ValueTask ExecuteAsync(ExecContext context)
+        public override ValueTask ExecuteAsync(ExecContext context)
         {
             context.Assert(context.StackTopTopType() == ValType.FuncRef,
                 $"Instruction {Op.GetMnemonic()} failed. Expected FuncRef on top of stack.");
@@ -548,8 +549,9 @@ namespace Wacs.Core.Instructions
             var funcType = context.Frame.Module.Types[X].Expansion as FunctionType;
             if (!funcType!.Matches(ftActual, context.Frame.Module.Types))
                 throw new TrapException($"Instruction return_call_ref failed. Expected FunctionType differed.");
-            
+
             context.TailCall(a);
+            return default;
         }
 
         public override InstructionBase Parse(BinaryReader reader)

@@ -104,7 +104,7 @@ namespace Wacs.Core.Instructions.GC
         {
             if (arrRef.IsNullRef)
                 throw new Wacs.Core.Runtime.Types.TrapException("array.fill: null array reference");
-            var a = (StoreArray)arrRef.GcRef;
+            var a = (StoreArray)arrRef.GcRef!;
             if (d + n > a.Length)
                 throw new Wacs.Core.Runtime.Types.TrapException("array.fill: array overflow");
             if (n == 0) return;
@@ -120,8 +120,8 @@ namespace Wacs.Core.Instructions.GC
                 throw new Wacs.Core.Runtime.Types.TrapException("array.copy: null destination array");
             if (srcRef.IsNullRef)
                 throw new Wacs.Core.Runtime.Types.TrapException("array.copy: null source array");
-            var dst = (StoreArray)dstRef.GcRef;
-            var src = (StoreArray)srcRef.GcRef;
+            var dst = (StoreArray)dstRef.GcRef!;
+            var src = (StoreArray)srcRef.GcRef!;
             if (d + n > dst.Length)
                 throw new Wacs.Core.Runtime.Types.TrapException("array.copy: destination overflow");
             if (s + n > src.Length)
@@ -139,7 +139,7 @@ namespace Wacs.Core.Instructions.GC
                 throw new Wacs.Core.Runtime.Types.TrapException("array.init_data: null array reference");
             var defType = ctx.Frame.Module.Types[(TypeIdx)typeIdx];
             var arrayType = (ArrayType)defType.Expansion;
-            var a = (StoreArray)arrRef.GcRef;
+            var a = (StoreArray)arrRef.GcRef!;
             int z = arrayType.ElementType.BitWidth().ByteSize();
             var da = ctx.Frame.Module.DataAddrs[(DataIdx)dataIdx];
             var datainst = ctx.Store[da];
@@ -165,7 +165,7 @@ namespace Wacs.Core.Instructions.GC
         {
             if (arrRef.IsNullRef)
                 throw new Wacs.Core.Runtime.Types.TrapException("array.init_elem: null array reference");
-            var a = (StoreArray)arrRef.GcRef;
+            var a = (StoreArray)arrRef.GcRef!;
             var ea = ctx.Frame.Module.ElemAddrs[(ElemIdx)elemIdx];
             var eleminst = ctx.Store[ea];
             if (d + n > a.Length)
@@ -183,7 +183,7 @@ namespace Wacs.Core.Instructions.GC
         {
             if (arrRef.IsNullRef)
                 throw new Wacs.Core.Runtime.Types.TrapException("array.get_s: null reference");
-            var a = (StoreArray)arrRef.GcRef;
+            var a = (StoreArray)arrRef.GcRef!;
             if ((uint)idx >= (uint)a.Length)
                 throw new Wacs.Core.Runtime.Types.TrapException("array.get_s: out of bounds");
             var v = a[idx];
@@ -203,7 +203,7 @@ namespace Wacs.Core.Instructions.GC
         {
             if (arrRef.IsNullRef)
                 throw new Wacs.Core.Runtime.Types.TrapException("array.get_u: null reference");
-            var a = (StoreArray)arrRef.GcRef;
+            var a = (StoreArray)arrRef.GcRef!;
             if ((uint)idx >= (uint)a.Length)
                 throw new Wacs.Core.Runtime.Types.TrapException("array.get_u: out of bounds");
             var v = a[idx];

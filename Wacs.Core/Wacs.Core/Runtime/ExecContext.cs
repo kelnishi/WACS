@@ -265,7 +265,7 @@ namespace Wacs.Core.Runtime
             }
             else
             {
-                Console.Error.WriteLine($"[0x{i:x8}]     {inst.StackDiff:+####;-####;0} {inst}");
+                Console.Error.WriteLine($"[0x{i:x8}]     {inst!.StackDiff:+####;-####;0} {inst}");
             }
         }
 
@@ -579,31 +579,38 @@ namespace Wacs.Core.Runtime
             InstructionPointer = address;
         }
 
+        [UnconditionalSuppressMessage("AOT", "IL3050",
+            Justification = "Enum.GetValues(Type) instantiates a typed " +
+                "array at runtime. The six enums walked here — OpCode / " +
+                "GcCode / ExtCode / SimdCode / AtomCode / WacsCode — are " +
+                "internal opcode tables statically referenced throughout " +
+                "the dispatcher; NativeAOT compiles their array layout " +
+                "from those static uses. Safe to suppress.")]
         public void ResetStats()
         {
             Stats.Clear();
             foreach (OpCode opcode in Enum.GetValues(typeof(OpCode)))
-            { 
+            {
                 Stats[(ushort)(ByteCode)opcode] = new ExecStat();
             }
             foreach (GcCode opcode in Enum.GetValues(typeof(GcCode)))
-            { 
+            {
                 Stats[(ushort)(ByteCode)opcode] = new ExecStat();
             }
             foreach (ExtCode opcode in Enum.GetValues(typeof(ExtCode)))
-            { 
+            {
                 Stats[(ushort)(ByteCode)opcode] = new ExecStat();
             }
             foreach (SimdCode opcode in Enum.GetValues(typeof(SimdCode)))
-            { 
+            {
                 Stats[(ushort)(ByteCode)opcode] = new ExecStat();
             }
             foreach (AtomCode opcode in Enum.GetValues(typeof(AtomCode)))
-            { 
+            {
                 Stats[(ushort)(ByteCode)opcode] = new ExecStat();
             }
             foreach (WacsCode opcode in Enum.GetValues(typeof(WacsCode)))
-            { 
+            {
                 Stats[(ushort)(ByteCode)opcode] = new ExecStat();
             }
 

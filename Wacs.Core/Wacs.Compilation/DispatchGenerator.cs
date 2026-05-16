@@ -73,7 +73,11 @@ namespace Wacs.Compilation
             {
                 try
                 {
-                    Emit(spc, items);
+                    // `.Where(e => e != null)` above narrows the
+                    // elements; the analyzer can't see through the
+                    // ImmutableArray<T> generic so assert non-null
+                    // at the call site.
+                    Emit(spc, items!);
                 }
                 catch (System.Exception ex)
                 {
@@ -101,13 +105,13 @@ namespace Wacs.Compilation
             return false;
         }
 
-        private static DispatchEntry Extract(GeneratorSyntaxContext ctx, CancellationToken ct)
+        private static DispatchEntry? Extract(GeneratorSyntaxContext ctx, CancellationToken ct)
         {
             var method = (MethodDeclarationSyntax)ctx.Node;
             var symbol = ctx.SemanticModel.GetDeclaredSymbol(method, ct) as IMethodSymbol;
             if (symbol == null) return null;
 
-            AttributeData opAttr = null;
+            AttributeData? opAttr = null;
             bool isHandler = false;
             foreach (var a in symbol.GetAttributes())
             {
@@ -981,7 +985,8 @@ namespace Wacs.Compilation
 
             if (inPlace)
             {
-                string field = TypeToDataField(e.ReturnType);
+                // Non-null: TypeToDataField was checked in the `inPlace` predicate above.
+                string field = TypeToDataField(e.ReturnType)!;
                 string inPlaceTerm = inLoop ? "continue;" : $"return {pcVar};";
                 if (stackParams.Count == 2)
                 {
@@ -1389,10 +1394,10 @@ namespace Wacs.Compilation
         /// </summary>
         private static bool EmitInlinePop(StringBuilder sb, string indent, string type, string name, bool inline)
         {
-            string field = TypeToDataField(type);
+            string? field = TypeToDataField(type);
             if (!inline)
             {
-                string popOp = TypeToFastPop(type);
+                string? popOp = TypeToFastPop(type);
                 if (popOp == null) return false;
                 sb.Append(indent).AppendLine($"{type} {name} = _opStack.{popOp}();");
                 return true;
@@ -1423,7 +1428,7 @@ namespace Wacs.Compilation
             return false;
         }
 
-        private static string TypeToFastPop(string t) => t switch
+        private static string? TypeToFastPop(string t) => t switch
         {
             "int"    => "PopI32Fast",
             "uint"   => "PopU32Fast",
@@ -1436,7 +1441,7 @@ namespace Wacs.Compilation
             _ => null,
         };
 
-        private static string TypeToFastPush(string t) => t switch
+        private static string? TypeToFastPush(string t) => t switch
         {
             "int"    => "PushI32Fast",
             "uint"   => "PushU32Fast",
@@ -1456,15 +1461,15 @@ namespace Wacs.Compilation
         /// __s</c> per case regressed stack consumption. Two Unsafe.Add reads
         /// CSE to one address.
         /// </summary>
-        private static string InlinePushStatement(string type, string expr, bool inline)
+        private static string? InlinePushStatement(string type, string expr, bool inline)
         {
             if (!inline)
             {
-                string pushOp = TypeToFastPush(type);
+                string? pushOp = TypeToFastPush(type);
                 return pushOp == null ? null : $"_opStack.{pushOp}({expr});";
             }
-            string field = TypeToDataField(type);
-            string valType = TypeToValType(type);
+            string? field = TypeToDataField(type);
+            string? valType = TypeToValType(type);
             if (field != null)
             {
                 return
@@ -1494,7 +1499,7 @@ namespace Wacs.Compilation
         /// <c>Wacs.Core.Runtime.Value.Data</c>. Returns null for types that aren't
         /// representable via a Data-field read/write (V128, whole Value).
         /// </summary>
-        private static string TypeToDataField(string t) => t switch
+        private static string? TypeToDataField(string t) => t switch
         {
             "int"    => "Int32",
             "uint"   => "UInt32",
@@ -1505,7 +1510,7 @@ namespace Wacs.Compilation
             _ => null,
         };
 
-        private static string TypeToValType(string t) => t switch
+        private static string? TypeToValType(string t) => t switch
         {
             "int"    => "I32",
             "uint"   => "I32",
@@ -1593,7 +1598,7 @@ namespace Wacs.Compilation
             return sb.ToString();
         }
 
-        private static string TypeToImmReader(string t) => t switch
+        private static string? TypeToImmReader(string t) => t switch
         {
             "int"    => "ReadS32",
             "uint"   => "ReadU32",

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Wacs.Core.Attributes
 {
@@ -24,7 +25,13 @@ namespace Wacs.Core.Attributes
 
     public static class WatTokenExtension
     {
-        public static string ToWat<T>(this T v) 
+        [UnconditionalSuppressMessage("Trimming", "IL2090",
+            Justification = "T : Enum — public fields are the enum " +
+                "members, which the runtime preserves for any enum " +
+                "type that's statically referenced anywhere in the " +
+                "program. Caller-supplied T is constrained to Enum, " +
+                "so its fields are always available.")]
+        public static string ToWat<T>(this T v)
         where T: Enum
         {
             var type = typeof(T);

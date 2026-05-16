@@ -43,7 +43,7 @@ namespace Wacs.Core.Attributes
     {
         public static ValType? GetWasmType(this Type type)
         {
-            var attribute = (WasmTypeAttribute)Attribute.GetCustomAttribute(type, typeof(WasmTypeAttribute));
+            var attribute = (WasmTypeAttribute)Attribute.GetCustomAttribute(type, typeof(WasmTypeAttribute))!;
             return attribute?.Type;
         }
     }

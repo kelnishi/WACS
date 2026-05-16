@@ -223,7 +223,7 @@ namespace Wacs.Core.Instructions
             var compType = tagType.Expansion;
             var funcType = compType as FunctionType;
             //7.
-            context.Assert(context.OpStack.Count >= funcType.ParameterTypes.Arity,
+            context.Assert(context.OpStack.Count >= funcType!.ParameterTypes.Arity,
                 $"Tag {X} expected {funcType.ParameterTypes.Arity} parameters, but only {context.OpStack.Count} were provided.");
             //8.
             var valn = new Stack<Value>();
@@ -342,7 +342,7 @@ namespace Wacs.Core.Instructions
                             }
                         }
                     }
-                    blockTarget = blockTarget.EnclosingBlock;
+                    blockTarget = blockTarget!.EnclosingBlock;
                 }
                 context.FunctionReturn();
             }

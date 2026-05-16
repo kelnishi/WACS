@@ -148,7 +148,7 @@ namespace Wacs.Core
             _opStack = new FakeOpStack(this);
             
             var funcType = Types[func.TypeIndex].Expansion as FunctionType;
-            var fakeType = new FunctionType(ResultType.Empty, funcType.ResultType);
+            var fakeType = new FunctionType(ResultType.Empty, funcType!.ResultType);
 
             DummyContext = BuildDummyContext(module, ModuleInst, func);
 

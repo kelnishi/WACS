@@ -258,7 +258,7 @@ namespace Wacs.Core.Types.Defs
                     ValType.ArrayNN or
                     ValType.ExnNN or
                     ValType.NoExnNN => true,
-                _ when type.IsDefType() => types.Contains(type.Index()),
+                _ when type.IsDefType() => types!.Contains(type.Index()),
                 _ => false
             };
 

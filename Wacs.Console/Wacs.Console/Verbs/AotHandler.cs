@@ -205,7 +205,13 @@ namespace Wacs.Console.Verbs
                 if (!string.IsNullOrEmpty(outputDir) && !Directory.Exists(outputDir))
                     Directory.CreateDirectory(outputDir);
                 File.Copy(nativePath, outputAbs, overwrite: true);
-                if (!rid.StartsWith("win"))
+                // Skip if either the target RID is Windows (the
+                // produced .exe doesn't honor Unix mode bits) or
+                // the host we're running on is Windows
+                // (File.SetUnixFileMode throws PlatformNotSupported
+                // there — guard with OperatingSystem.IsWindows so
+                // the CA1416 analyzer sees the platform check).
+                if (!rid.StartsWith("win") && !OperatingSystem.IsWindows())
                 {
                     try { File.SetUnixFileMode(outputAbs,
                         UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |

@@ -12,8 +12,8 @@
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.WASI.NN.OpenVino</AssemblyName>
-        <AssemblyVersion>0.2.1</AssemblyVersion>
-        <Version>0.2.1</Version>
+        <AssemblyVersion>0.2.2</AssemblyVersion>
+        <Version>0.2.2</Version>
         <RepositoryType>git</RepositoryType>
         <!-- OpenVINO.CSharp.API targets net6.0+, so net8.0 is fine.
              Like the ORT backend we restrict to net8.0 because the
@@ -58,8 +58,15 @@
              NuGet upload limit. Consumers on those platforms
              add the matching `OpenVINO.runtime.<rid>` package
              reference manually. -->
+        <!-- NU1701 suppressed: OpenVINO.runtime.<rid> packages
+             ship native binaries only — no managed assemblies and
+             no .NETStandard / net8/9 build folder — so NuGet
+             restores them via the .NETFramework moniker and warns.
+             ExcludeAssets="compile" already prevents any managed
+             surface from being pulled. -->
         <PackageReference Include="OpenVINO.runtime.macos-arm64" Version="2026.1.0"
-                          ExcludeAssets="compile" />
+                          ExcludeAssets="compile"
+                          NoWarn="NU1701" />
     </ItemGroup>
 
 </Project>

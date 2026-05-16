@@ -28,7 +28,7 @@ namespace Wacs.Core.Types
 
         public CompositeType Expansion;
 
-        public List<DefType> SuperTypes;
+        public List<DefType> SuperTypes = null!;
 
         public DefType(RecursiveType recType, int proj, TypeIdx def)
         {

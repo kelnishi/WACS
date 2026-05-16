@@ -17,6 +17,8 @@ using System.Linq;
 using Wacs.Core;
 using Wacs.Core.Runtime;
 
+const int Trials = 7;
+
 return args.Length >= 2 && args[0] == "run"
     ? RunChild(args[1])
     : RunFreshProcesses();
@@ -80,8 +82,6 @@ static void Header()
     Console.WriteLine($"  {"runtime",-15}  {"phase",-10}  {"first(us)",10}  {"subseq-med(us)",16}");
     Console.WriteLine($"  ----------------------------------------------------------------");
 }
-
-const int Trials = 7;
 
 static void Measure(string name, byte[] bytes, int arg, bool useSwitch)
 {

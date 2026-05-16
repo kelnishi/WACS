@@ -53,7 +53,7 @@ namespace Wacs.Core.Instructions
             var exnref = ctx.OpStack.PopAny();
             if (exnref.IsNullRef)
                 throw new TrapException("throw_ref: null reference");
-            throw new WasmException((ExnInstance)exnref.GcRef);
+            throw new WasmException((ExnInstance)exnref.GcRef!);
         }
     }
 }

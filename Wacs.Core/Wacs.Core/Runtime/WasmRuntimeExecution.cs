@@ -212,7 +212,7 @@ namespace Wacs.Core.Runtime
 
                     //Flush the stack before throwing...
                     ctx.FlushCallStack();
-                    ExceptionDispatchInfo.Throw(exc);
+                    ExceptionDispatchInfo.Throw(exc!);
                 }
                 catch (TrapException exc)
                 {
@@ -379,7 +379,7 @@ namespace Wacs.Core.Runtime
                     {
                         ctx.FlushCallStack();
                     }
-                    ExceptionDispatchInfo.Throw(exc);
+                    ExceptionDispatchInfo.Throw(exc!);
                 }
                 catch (TrapException exc)
                 {

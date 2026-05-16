@@ -25,7 +25,7 @@ namespace Wacs.Core.Instructions.Memory
 {
     public class InstI32Load : InstMemoryLoad, IComplexLinkBehavior, INodeComputer<long, uint>
     {
-        private MemoryInstance cachedInstance;
+        private MemoryInstance cachedInstance = null!;
         
         public InstI32Load() : base(ValType.I32, BitWidth.U32, OpCode.I32Load) {}
 

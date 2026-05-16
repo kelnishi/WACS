@@ -184,26 +184,6 @@ namespace Wacs.Transpiler.Test
             using var ms = new MemoryStream();
             void U8(byte b) => ms.WriteByte(b);
             void Bytes(byte[] bs) => ms.Write(bs, 0, bs.Length);
-            void LebU32(uint v)
-            {
-                while (v >= 0x80) { U8((byte)(v | 0x80)); v >>= 7; }
-                U8((byte)v);
-            }
-            void Section(byte id, Action body)
-            {
-                U8(id);
-                using var sub = new MemoryStream();
-                var saved = ms;
-                var sw = sub;
-                // Write into sub, then prefix length.
-                var swRedirect = (MemoryStream)null!;
-                // Simpler: write into a temp ms, then emit length-prefixed.
-                var prev = ms.Length;
-                body();
-                // We didn't actually swap; instead, capture child writes by
-                // writing first into a temp.
-                throw new InvalidOperationException("unused");
-            }
 
             // Direct linear emit (avoids the closure-swap above).
             var hdr = new byte[] { 0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00 };

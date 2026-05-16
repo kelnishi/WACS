@@ -7,9 +7,19 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
 using Wacs.ComponentModel.Runtime;
+
+// WitContract.FromAssembly walks assembly resources + reflects
+// over [WitSource]-tagged types to rebuild the WIT shape the
+// bindings were generated against. The resource probe path
+// (Assembly.GetManifestResourceStream / .GetManifestResourceNames)
+// is trim-safe in principle but the reflective WitSource walk is
+// not. Suppressed file-wide here; the public FromAssembly entry
+// is annotated [RequiresUnreferencedCode].
+#pragma warning disable IL2026, IL2070
 using Wacs.ComponentModel.Types;
 using Wacs.ComponentModel.WIT;
 
@@ -91,6 +101,11 @@ namespace Wacs.ComponentModel.Validation
         /// linker.Validate(contract);
         /// </code></para>
         /// </summary>
+        [RequiresUnreferencedCode("Walks the assembly's manifest " +
+            "resources and reflects over [WitSource]-tagged types to " +
+            "rebuild the WIT contract. AOT consumers should ship the " +
+            "WIT bytes alongside their build-time-generated typed " +
+            "harness rather than reflecting from the bindings.")]
         public static WitContract FromAssembly(Assembly assembly,
             string resourcePrefix = "wit/")
         {

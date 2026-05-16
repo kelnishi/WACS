@@ -594,7 +594,7 @@ namespace Wacs.Transpiler.AOT.Component
                 if (!typeCache.TryGetValue(cacheKey, out var resourceType))
                 {
                     resourceType = FindResourceType(
-                        package, ifaceName!, resourceName);
+                        package!, ifaceName!, resourceName);
                     typeCache[cacheKey] = resourceType;
                 }
                 if (resourceType == null) continue;

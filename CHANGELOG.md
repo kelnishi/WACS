@@ -1,5 +1,215 @@
 # Changelog
 
+## Warning hygiene pass — WACS 0.15.21 / WACS.Cli 1.8.1 / WACS.ComponentModel 0.5.0 / WACS.ComponentModel.Bindgen.Lib 0.1.2 / WACS.HostBindings.SourceGen 0.1.1 / WACS.WASI.NN.OpenVino 0.2.2 / WACS.WASI.Preview1 0.13.1 / WACS.Transpiler.Lib 0.9.1
+
+Solution-wide warning count: **390 → 0** (100% reduction).
+Coordinated cleanup across nullable reference types (CS86xx), AOT
+trim safety (IL2xxx / IL3050), dead code (CS0162 / CS0219 /
+CS0169 / CS8321), equality / inheritance hygiene (CS0660 /
+CS0661 / CS0108 / CS0465), platform compat (CA1416), package
+restore (NU1701), analyzer release tracking (RS2008), source-gen
+WIT-style identifiers (CS8981), async-without-await (CS1998),
+analyzer version mismatch (CS9057), and several smaller
+categories.
+
+**Tests verified**: 1369+ pass across affected suites
+(`ComponentModel.Test` 354/354, `Transpiler.Test` 826/826,
+`WASI.Preview2.Test` 189/189, `WASI.NN.Test` 21/21,
+`WASI.GFX.Test` 16/16, `WASI.GFX.Webgpu.Test` 66/66,
+`WASI.GFX.Silk.Test` 3/3). Two `CallIndirect_dispatches_via_funcref_table`
+failures in `Wacs.Compilation.Test` are pre-existing on `main`,
+unaffected by this work.
+
+### What changed
+
+- **`WACS` 0.15.20 → 0.15.21** (point — internal correctness):
+  - Bulk `!` (null-forgiving) annotations across ~24 hot-loop
+    files. Per `feedback_core_perf.md`: `!` is the right tool
+    in the dispatch loop — compile-time-only assertion, zero
+    runtime IL impact.
+  - `TypeIdx` gains `Equals(object?)` + `GetHashCode()` to
+    match its existing `==` / `!=` operators (CS0660 / CS0661
+    closed by structural fix).
+  - `FunctionType.Validator` `new`-keyword on the legitimate
+    hide of `CompositeType.Validator` (CS0108).
+  - `MemAddrs.Finalize()` carries an explicit
+    `#pragma warning disable CS0465` with comment — the method
+    name overlaps `Object.Finalize` but `Object.Finalize` is
+    `protected` so no actual collision occurs; preserved for
+    API compat.
+  - `InstFusedLocalSet.cs` drops the unused `type` field.
+  - `ExecContext.ResetStats` carries
+    `[UnconditionalSuppressMessage("AOT", "IL3050")]` —
+    `Enum.GetValues(typeof(OpCode))` is safe because the
+    opcode enums are statically referenced by the dispatcher.
+  - `Runtime/Delegates.ValidateFunctionTypeCompatibility`,
+    `Runtime/Types/HostFunction` constructor +
+    `CreateConversionHelper` carry the standard
+    `[UnconditionalSuppressMessage]` set with documented
+    rationale.
+  - `Attributes/WatTokenAttribute.ToWat<T>`,
+    `OpCodes/OpCodeExtensions.LookUp<T>`,
+    `Text/Mnemonics.AddEnum<T>` — `[UnconditionalSuppressMessage]`
+    for generic-T reflection over enum field metadata.
+  - `Runtime/Equals(object?)` mismatch fixed on `Value`,
+    `OpCodes/ByteCode`, `Types/GlobalType`,
+    `Compilation/BytecodeCompiler.RefEq<T>` — `object obj`
+    parameters → `object? obj`, `(T,T)` → `(T?,T?)` to match
+    the base / interface (CS8765 / CS8767).
+  - `Instructions/InstructionBase.ExecuteAsync` +
+    `Instructions/TailCall.ExecuteAsync` (3 overrides) drop
+    the `async` modifier on methods that never await
+    (CS1998). Method-signature change in metadata
+    (`async ValueTask` → `ValueTask`); callers see identical
+    wait-semantics.
+  - `<NoWarn>CS9057</NoWarn>` — the .NET 8 SDK ships
+    analyzers built against a newer Roslyn than
+    `LangVersion 9` resolves. They don't fire on our code;
+    suppress the version-mismatch noise.
+  - New `Compatibility/AotAttributePolyfills.cs`: internal
+    polyfill for `UnconditionalSuppressMessage` /
+    `DynamicallyAccessedMembers` /
+    `DynamicallyAccessedMemberTypes` /
+    `RequiresUnreferencedCode` / `RequiresDynamicCode` when
+    targeting netstandard2.1 (where the BCL doesn't have
+    them). Wrapped in `#if !NET5_0_OR_GREATER` so the BCL
+    versions take precedence on net8.0+.
+- **`WACS.Cli` 1.8.0 → 1.8.1** (point — internal cleanup):
+  CA1416 fix in `AotHandler.SetUnixFileMode` (wrap with
+  `!OperatingSystem.IsWindows()` so the analyzer sees the
+  guard); dead null-check removal in
+  `InspectHandler.InspectComponent`.
+- **`WACS.ComponentModel` 0.4.0 → 0.5.0** (minor — new public
+  API annotations):
+  - `ComponentInstance.Instantiate(byte[]/Stream/ComponentModule)`
+    + `ComponentBridge.AsTypedInterface<T>` +
+    `AsTypedInterface(Type)` + `AsHostBundle` carry
+    `[RequiresDynamicCode]` + `[RequiresUnreferencedCode]`.
+    These paths use `MakeGenericType` /
+    `MethodInfo.MakeGenericMethod` /
+    `Activator.CreateInstance(Type)` at every WIT boundary —
+    fundamentally incompatible with NativeAOT / Unity
+    IL2CPP. The annotations make AOT consumers see clean
+    compile-time errors pointing at
+    `docs/wit-harness-plan.md` (the forward AOT path)
+    rather than runtime `ExecutionEngineException`.
+  - `WitContract.FromAssembly` +
+    `HostInterfaceRuntime.InvokeStaticFactoryReflective`
+    carry `[RequiresUnreferencedCode]` — same rationale,
+    different trim category.
+  - File-level `#pragma warning disable IL2026, IL2067, …`
+    over the interior of these four files; the public-entry
+    annotations carry the actual contract.
+  - Internal `AotAttributePolyfills.cs` synced from
+    `Wacs.Core`.
+- **`WACS.ComponentModel.Bindgen.Lib` 0.1.1 → 0.1.2** (point —
+  internal suppressions): `WitReverse.ExtractWitBytes` overloads
+  carry `[UnconditionalSuppressMessage]` for the
+  `Assembly.LoadFrom` + `GetTypes` + `GetField` chain that
+  reads transpiler-emitted `ComponentMetadata.EmbeddedWitBytes`.
+- **`WACS.HostBindings.SourceGen` 0.1.0 → 0.1.1** (point —
+  analyzer-release tracking): added
+  `AnalyzerReleases.Shipped.md` (empty) +
+  `AnalyzerReleases.Unshipped.md` (lists WACS001..WACS004
+  with category / severity). Required for the analyzer
+  NuGet to satisfy RS2008.
+- **`WACS.WASI.NN.OpenVino` 0.2.1 → 0.2.2** (point —
+  `<PackageReference … NoWarn="NU1701" />` on the
+  `OpenVINO.runtime.macos-arm64` native-only runtime — the
+  RID package legitimately ships no managed surface for the
+  target framework, NETFx-moniker restore fallback is
+  benign).
+- **`WACS.WASI.Preview1` 0.13.0 → 0.13.1** (point —
+  `<NoWarn>CS8981</NoWarn>` for the 84 WITX-mandated lower-
+  case type names (`ptr`, `fd`, `size`, `timestamp`, …);
+  `FsPath.cs:478` unreachable-code fix on the
+  netstandard2.1 leg).
+- **`WACS.Transpiler.Lib` 0.9.0 → 0.9.1** (point — `!`
+  annotations + dead-code drops: unused `offsetSoFar` in
+  `DirectLinkedImportEmit`, plus null-forgiving over the
+  IImports-walk reflection sites).
+
+Also coordinated (already bumped in earlier commits on this
+branch):
+- **`WACS.WASI.Preview2.DependencyInjection` 0.3.0** — new
+  `[WasiScopeBootstrap]` attribute + `IWasiScopeBootstrap`
+  interface; hardcoded NN / GFX paths deleted.
+- **`WACS.WASI.NN.DependencyInjection` 0.3.0** — new
+  `NNScopeBootstrap` self-registers via the attribute.
+- **`WACS.WASI.GFX.DependencyInjection` 0.1.1-preview →
+  0.2.0-preview** — new `GfxScopeBootstrap` analogously.
+- **`WACS.WASI.NN` 0.4.0 → 0.4.1** — NuGet description +
+  packed README refresh (3 backends added since last update,
+  WIT version reference corrected, Phase 2 status callout).
+
+### Forward work
+
+`docs/wit-harness-plan.md` captures the design for the next
+PR — a build-time WIT-shaped harness SourceGen that makes the
+Component Model AOT story real (Unity IL2CPP + NativeAOT both
+viable). The current PR's `[RequiresDynamicCode]` annotations
+are the honest "this path doesn't work under AOT" signal;
+the harness is the AOT-compatible path that will exist as a
+separate package surface.
+
+## WACS.WASI.Preview2.DependencyInjection 0.3.0 / WACS.WASI.NN.DependencyInjection 0.3.0 / WACS.WASI.GFX.DependencyInjection 0.2.0-preview — attribute-driven scope discovery
+
+`WasiPreview2RuntimeScope` no longer hardcodes the wasi-nn /
+wasi-gfx assembly + type + method names it used to look up at
+scope-build time. New subsystem DI packages plug in by shipping
+their own `IWasiScopeBootstrap` implementation and an
+assembly-level `[WasiScopeBootstrap(typeof(MyBootstrap))]`
+attribute; the scope walks every loaded assembly for the
+attribute and invokes each pointed-at bootstrap.
+
+This is a coordinated upgrade — Preview2.DI 0.3.0 deletes the
+hardcoded NN/GFX paths, so it must be paired with NN.DI 0.3.0
+(ships `NNScopeBootstrap` + attribute) and GFX.DI 0.2.0-preview
+(ships `GfxScopeBootstrap` + attribute). Consumers using the
+in-tree project references upgrade together; NuGet consumers
+should bump all three at once.
+
+### What changed
+
+- **`WACS.WASI.Preview2.DependencyInjection` 0.2.2 → 0.3.0**
+  (minor — behavior change): `WasiPreview2RuntimeScope` adds
+  `IWasiScopeBootstrap` interface + `WasiScopeBootstrapAttribute`
+  as public API. Deletes the previous hardcoded
+  `ReflectivelyAddWasiNN` / `ReflectivelyAddWasiGfx` /
+  `BuildAutoDiscoveredCallback` / `ApplyAllRegistrants` /
+  `DiscoverBackendRegistrants` / `TryLoadAssembly` helpers — the
+  attribute walk supersedes all of them. ~290 lines deleted.
+- **`WACS.WASI.NN.DependencyInjection` 0.2.3 → 0.3.0** (minor —
+  new public type): ships `NNScopeBootstrap : IWasiScopeBootstrap`
+  with the wasi-nn backend auto-discovery logic that previously
+  lived in Preview2.DI. The NN-specific reflection (walking for
+  `IWasiNNBackendRegistration` implementations) now lives in the
+  NN package, where the interface type can be referenced directly
+  via `typeof(IWasiNNBackendRegistration)` instead of a string-
+  based `Assembly.GetType` lookup.
+- **`WACS.WASI.GFX.DependencyInjection` 0.1.1-preview → 0.2.0-preview**
+  (minor — new public type): ships `GfxScopeBootstrap` with the
+  AddWasiGfx + AddWasiPreview2GfxBundle registration calls that
+  previously lived in Preview2.DI.
+
+### AOT correctness
+
+The new path is AOT-safe: the only reflection is
+`Activator.CreateInstance(attr.Type)`, where `attr.Type` comes
+from a `typeof(...)` token statically referenced in the sibling
+assembly's `[WasiScopeBootstrap(...)]` argument. Trimming
+preserves the type and its public parameterless constructor
+because they're rooted by static reference. The remaining
+`Assembly.GetExportedTypes` walks (composite bundle + backend
+registrant discovery) are suppressed with documented
+justifications.
+
+### Warning impact
+
+Solution-wide IL warnings: 106 → 76 (−30). The 30 warnings in
+`WasiPreview2RuntimeScope` dropped to 0; the new
+`NNScopeBootstrap` carries 0 unsuppressed warnings.
+
 ## WACS.WASI.NN 0.4.1 — Phase 2 status callout + README backend catch-up
 
 NuGet description-only refresh. No code or API change; existing

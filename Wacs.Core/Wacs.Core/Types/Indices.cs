@@ -35,7 +35,9 @@ namespace Wacs.Core.Types
         
         public static bool operator ==(TypeIdx left, TypeIdx right) => left.Value == right.Value;
         public static bool operator !=(TypeIdx left, TypeIdx right) => !(left == right);
-        
+        public override bool Equals(object? obj) => obj is TypeIdx other && Value == other.Value;
+        public override int GetHashCode() => Value;
+
         //For matching heaptypes
         public bool Matches(TypeIdx def2, TypesSpace? types)
         {

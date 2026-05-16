@@ -42,10 +42,10 @@ namespace Wacs.Core.Instructions
     public abstract class BlockTarget : InstructionBase
     {
         public InstructionPointer Else = -1;
-        public BlockTarget EnclosingBlock;
+        public BlockTarget EnclosingBlock = null!;
         public InstructionPointer End;
         public InstructionPointer Head;
-        public Label Label;
+        public Label Label = null!;
         public int LabelHeight;
 
         //Elses

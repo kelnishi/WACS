@@ -4,8 +4,8 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>9</LangVersion>
-    <AssemblyVersion>0.15.20</AssemblyVersion>
-    <Version>0.15.20</Version>
+    <AssemblyVersion>0.15.21</AssemblyVersion>
+    <Version>0.15.21</Version>
     <Authors>Kelvin Nishikawa</Authors>
     <Description>A Pure C# WebAssembly Interpreter. v0.13 introduces selectable linear-memory storage: ManagedArray (byte[], default, ~2 GiB) or NativePointer (NativeMemory.AllocZeroed, no 2 GiB cap) via RuntimeOptions.MemoryStorage. NativePointer + (memory i64) lifts the cap to WasmMaxPages64 (2^48), unlocking memory64 modules end-to-end through the interpreter and transpiler. Memory-op bounds checks moved to a wrap-safe unsigned form covering memory32 and memory64. v0.12 brought the in-process WAT/WAST parser to full parity with the binary parser — every wast in the WebAssembly spec testsuite (SIMD, GC, relaxed-SIMD, hex-float edge cases) round-trips identically through both pipelines, dropping the wasm-tools / wast2json CI dependency. v0.12.1 tracks the wasm-3.0 spec submodule to tip d7aada5: inclusive memory page-count limit (PRs #105/#106/#108), tail-call to imported host functions (PR #1872), `array.new_data` bounds (PR #1881), malformed memop reserved bits (PRs #1886/#1936), table64 u64 limits (PR #104), `(module definition …)` validate-only support, u32 offset enforcement on memory32, and `;;` line-comment CR termination.</Description>
     <TrimUnusedDependencies>true</TrimUnusedDependencies>
@@ -31,6 +31,17 @@
          emit unsafe blocks — the hot-path uses only Unsafe.Add / Unsafe.ReadUnaligned,
          which are managed intrinsics. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- CS9057 suppressed: the .NET 8 SDK ships analyzers
+         (Microsoft.Interop.ComInterfaceGenerator,
+         Microsoft.Interop.JavaScript.JSImportGenerator,
+         Microsoft.Interop.LibraryImportGenerator,
+         System.Text.Json.SourceGeneration,
+         System.Text.RegularExpressions.Generator) compiled against
+         Roslyn 4.4-4.5; LangVersion 9 resolves to an older Roslyn.
+         These analyzers don't fire on our code — we don't use the
+         features they target — but their version-check noise
+         clutters the build. -->
+    <NoWarn>$(NoWarn);CS9057</NoWarn>
   </PropertyGroup>
 
   <PropertyGroup>
