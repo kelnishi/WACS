@@ -35,6 +35,18 @@ namespace Wacs.WASI.GFX.Silk
         private SilkGpuQueue? _queueWrapper;
         private string _label = string.Empty;
         private bool _disposed;
+        // Pollables subscribed via OnuncapturederrorSubscribe. The
+        // wgpu device-level uncaptured-error callback fires on a
+        // wgpu-internal thread and signals every entry — guests
+        // that share one device but want independent error
+        // monitors can each subscribe and get their own pollable.
+        // The PfnErrorCallback delegate has to outlive the device,
+        // so the field also pins it indirectly via _uncapturedCb.
+        private readonly System.Collections.Generic.List<
+            Wacs.WASI.Preview2.Io.ManualResetPollable> _uncapturedSubs
+            = new();
+        private PfnErrorCallback? _uncapturedCb;
+        private bool _uncapturedCallbackRegistered;
 
         public SilkGpuDevice(
             SilkGpuBackend backend, Adapter* adapter, Device* device)
@@ -168,15 +180,36 @@ namespace Wacs.WASI.GFX.Silk
 
         public IPollable OnuncapturederrorSubscribe()
         {
-            // wgpu's uncaptured-error path is a registered C
-            // callback on the device; converting it to a polled
-            // wasi:io.Pollable requires routing the callback into
-            // an event ring. Defer until the wgpu-poll
-            // infrastructure lands.
-            throw new PlatformNotSupportedException(
-                "SilkGpuDevice.OnuncapturederrorSubscribe: not yet "
-                + "wired — needs wgpu-error callback → Pollable "
-                + "bridge.");
+            EnsureLive();
+            EnsureUncapturedCallbackRegistered();
+            var pollable = new Wacs.WASI.Preview2.Io.ManualResetPollable();
+            lock (_uncapturedSubs) _uncapturedSubs.Add(pollable);
+            return pollable;
+        }
+
+        private void EnsureUncapturedCallbackRegistered()
+        {
+            if (_uncapturedCallbackRegistered) return;
+            _uncapturedCallbackRegistered = true;
+            // wgpu's uncaptured-error callback fires on a wgpu-
+            // owned thread (any submission processing). Capture
+            // the device + sub-list via the field; no userdata
+            // needed.
+            _uncapturedCb = new PfnErrorCallback(
+                (ErrorType type, byte* msg, void* _) =>
+                {
+                    if (type == ErrorType.NoError) return;
+                    Wacs.WASI.Preview2.Io.ManualResetPollable[] snapshot;
+                    lock (_uncapturedSubs)
+                        snapshot = _uncapturedSubs.ToArray();
+                    foreach (var p in snapshot)
+                    {
+                        try { p.Signal(); }
+                        catch { /* swallow per-subscriber errors */ }
+                    }
+                });
+            _backend.EnsureApi().DeviceSetUncapturedErrorCallback(
+                _device, _uncapturedCb.Value, null);
         }
 
         public void ConnectGraphicsContext(
@@ -185,16 +218,109 @@ namespace Wacs.WASI.GFX.Silk
             if (context == null)
                 throw new ArgumentNullException(nameof(context));
             EnsureLive();
-            // Surface configuration: this is where the wgpu side
-            // imports the wasi-gfx context's underlying SDL window
-            // as a wgpu Surface and configures it against this
-            // device. The actual surface-import path needs the
-            // SDL native handle from the wasi-gfx side, which lives
-            // on the WasiGfxSilkBindable. Defer.
-            throw new PlatformNotSupportedException(
-                "SilkGpuDevice.ConnectGraphicsContext: not yet "
-                + "wired — needs wgpu surface-import path from "
-                + "the wasi-gfx-side SDL window handle.");
+            // Drill from the wit-generated IContext down to the
+            // SilkContext (SPI). Two wrapper shapes carry an SPI
+            // IGraphicsContext today:
+            //   - WasiGfxSilkBindable.SpiContextAdapter (interpreter)
+            //   - Wacs.WASI.GFX.DependencyInjection.Context (DI /
+            //     transpiler-direct-link)
+            // Both expose an Inner field internally.
+            Wacs.WASI.GFX.IGraphicsContext? spi = context switch
+            {
+                WasiGfxSilkBindable.SpiContextAdapter a => a.Inner,
+                global::Wacs.WASI.GFX.DependencyInjection.Context dic => dic.Inner,
+                _ => null,
+            };
+            if (spi is not SilkContext silkCtx)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "SilkGpuDevice.ConnectGraphicsContext: context "
+                    + "is not a Silk-backed wasi:graphics-context. "
+                    + "Cross-backend connections (e.g. RayLib graphics-"
+                    + "context + Silk webgpu) are not supported.");
+            if (silkCtx.Surface == null)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "SilkGpuDevice.ConnectGraphicsContext: the context "
+                    + "has no surface connected yet. Call "
+                    + "surface.connect-graphics-context first.");
+            var sdlSurface = silkCtx.Surface;
+            var window = sdlSurface.NativeWindow;
+            if (window == null)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "SilkGpuDevice.ConnectGraphicsContext: the surface "
+                    + "has no live SDL window (already disposed?).");
+
+            // Build the macOS Metal surface descriptor. The
+            // wgpu-native spec lists Metal, Windows-HWND, Xlib,
+            // Wayland, X11/XCB, Android — v1 ships macOS first;
+            // other platforms throw with a clear pointer.
+            if (!System.Runtime.InteropServices.RuntimeInformation
+                    .IsOSPlatform(System.Runtime.InteropServices.OSPlatform.OSX))
+                throw new PlatformNotSupportedException(
+                    "SilkGpuDevice.ConnectGraphicsContext: only macOS "
+                    + "(Metal-backed wgpu surface) is wired in v1. The "
+                    + "Windows/Linux paths would mirror this with "
+                    + "SurfaceDescriptorFromWindowsHwnd / "
+                    + "SurfaceDescriptorFromXlibWindow / "
+                    + "SurfaceDescriptorFromWaylandSurface.");
+
+            var sdl = sdlSurface.NativeSdl;
+            var view = sdl.MetalCreateView(window);
+            if (view == null)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "SilkGpuDevice.ConnectGraphicsContext: "
+                    + "SDL_Metal_CreateView returned null. The SDL "
+                    + "window may have been created without metal-"
+                    + "compatible flags.");
+            var layer = sdl.MetalGetLayer(view);
+
+            var metalDesc = new SurfaceDescriptorFromMetalLayer
+            {
+                Chain = new ChainedStruct
+                {
+                    SType = SType.SurfaceDescriptorFromMetalLayer,
+                },
+                Layer = layer,
+            };
+            global::Silk.NET.WebGPU.Surface* surface;
+            var sd = new SurfaceDescriptor
+            {
+                NextInChain = (ChainedStruct*)&metalDesc,
+            };
+            var instance = _backend.EnsureInstance();
+            surface = _backend.EnsureApi().InstanceCreateSurface(instance, &sd);
+            if (surface == null)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "SilkGpuDevice.ConnectGraphicsContext: wgpu "
+                    + "returned a null surface from the Metal-layer "
+                    + "descriptor.");
+
+            // Configure: preferred format, RenderAttachment usage,
+            // FIFO present mode (vsync), Auto alpha mode.
+            var format = _backend.EnsureApi()
+                .SurfaceGetPreferredFormat(surface, _adapter);
+            uint width = sdlSurface.Width;
+            uint height = sdlSurface.Height;
+            var cfg = new SurfaceConfiguration
+            {
+                Device = _device,
+                Format = format,
+                Usage = TextureUsage.RenderAttachment,
+                ViewFormatCount = 0,
+                ViewFormats = null,
+                AlphaMode = CompositeAlphaMode.Auto,
+                Width = width,
+                Height = height,
+                PresentMode = PresentMode.Fifo,
+            };
+            _backend.EnsureApi().SurfaceConfigure(surface, &cfg);
+
+            var connection = new SilkGpuConnection(_backend, this,
+                surface, view,
+                (GenWebgpu.GpuTextureFormat)format, width, height);
+            // Replace any prior connection (re-connect on the same
+            // context drops the previous swap-chain cleanly).
+            silkCtx.GpuConnection?.Dispose();
+            silkCtx.GpuConnection = connection;
         }
 
         // ===== create-* methods land in follow-up commits =====

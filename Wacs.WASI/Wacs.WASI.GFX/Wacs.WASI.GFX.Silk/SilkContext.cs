@@ -27,6 +27,12 @@ namespace Wacs.WASI.GFX.Silk
         internal byte[] BackBuffer { get; private set; } = Array.Empty<byte>();
         internal int BackBufferWidth { get; private set; }
         internal int BackBufferHeight { get; private set; }
+        /// <summary>Set by <c>SilkGpuDevice.ConnectGraphicsContext</c>
+        /// when a webgpu device takes over the frame loop. While
+        /// non-null, <see cref="GetCurrentBuffer"/> returns a GPU-
+        /// flavored abstract-buffer and <see cref="Present"/>
+        /// routes through wgpu's surface-present.</summary>
+        internal SilkGpuConnection? GpuConnection { get; set; }
 
         internal void ConnectSurface(SilkSurface surface)
         {
@@ -54,6 +60,11 @@ namespace Wacs.WASI.GFX.Silk
                 throw new WasiGfxException(
                     "context.get-current-buffer called before any "
                     + "surface was connected to this context.");
+            // GPU mode: hand back a GPU-flavored buffer that
+            // resolves to the surface's current swap-chain texture
+            // when the webgpu side lifts it via from-graphics-buffer.
+            if (GpuConnection != null)
+                return new SilkGpuAbstractBuffer(GpuConnection);
             EnsureBackBuffer();
             return new SilkAbstractBuffer(this);
         }
@@ -64,6 +75,14 @@ namespace Wacs.WASI.GFX.Silk
                 throw new WasiGfxException(
                     "context.present called before any surface "
                     + "was connected to this context.");
+            // GPU mode: present routes through wgpu's swap-chain.
+            // The SDL window's surface is already attached to wgpu
+            // via the Metal layer, so we don't also do SDL's blit.
+            if (GpuConnection != null)
+            {
+                GpuConnection.Present();
+                return;
+            }
             Surface.Blit(BackBuffer, BackBufferWidth, BackBufferHeight);
         }
 

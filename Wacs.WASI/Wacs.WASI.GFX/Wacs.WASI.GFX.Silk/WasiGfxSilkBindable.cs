@@ -174,22 +174,22 @@ namespace Wacs.WASI.GFX.Silk
         // can consume contexts the wasi-gfx interpreter binding
         // stored as SPI instances. Create() is a no-op — the
         // SPI instance is already constructed.
-        private sealed class SpiContextAdapter
+        internal sealed class SpiContextAdapter
             : Wacs.WASI.GFX.GraphicsContext.IContext
         {
-            private readonly Wacs.WASI.GFX.IGraphicsContext _inner;
+            internal Wacs.WASI.GFX.IGraphicsContext Inner { get; }
             public SpiContextAdapter(Wacs.WASI.GFX.IGraphicsContext inner)
             {
-                _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+                Inner = inner ?? throw new ArgumentNullException(nameof(inner));
             }
             public void Create() { /* already constructed */ }
             public Wacs.WASI.GFX.GraphicsContext.IAbstractBuffer
                 GetCurrentBuffer()
             {
-                var buf = _inner.GetCurrentBuffer();
+                var buf = Inner.GetCurrentBuffer();
                 return new SpiAbstractBufferAdapter(buf);
             }
-            public void Present() => _inner.Present();
+            public void Present() => Inner.Present();
         }
 
         private sealed class SpiAbstractBufferAdapter

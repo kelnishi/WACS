@@ -45,6 +45,17 @@ namespace Wacs.WASI.GFX.Silk
 
         internal uint WindowId { get; private set; }
 
+        /// <summary>The underlying SDL Window pointer. Exposed
+        /// for the wgpu-side ConnectGraphicsContext path that
+        /// needs to derive a Metal layer (macOS) or HWND/Xlib
+        /// surface (Windows/Linux) from it.</summary>
+        internal unsafe Window* NativeWindow => _window;
+
+        /// <summary>The Sdl API entry point — needed by the
+        /// wgpu side to call SDL_Metal_CreateView / GetLayer
+        /// for the swap-chain surface.</summary>
+        internal Sdl NativeSdl => _sdl;
+
         internal EventChannel<ResizeEvent>  ResizeChannel       { get; } = new EventChannel<ResizeEvent>();
         internal EventChannel<FrameEvent>   FrameChannel        { get; } = new EventChannel<FrameEvent>();
         internal EventChannel<PointerEvent> PointerUpChannel    { get; } = new EventChannel<PointerEvent>();

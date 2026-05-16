@@ -41,6 +41,12 @@
         <ProjectReference Include="..\..\Wacs.WASI.Preview2\Wacs.WASI.Preview2.DependencyInjection\Wacs.WASI.Preview2.DependencyInjection.csproj" />
         <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.0" />
 
+        <!-- Silk needs to drill from the IContext (via the DI
+             Context wrapper) to the underlying SPI IGraphicsContext
+             to wire the swap-chain. The Inner field is internal;
+             expose it to the Silk sibling. -->
+        <InternalsVisibleTo Include="Wacs.WASI.GFX.Silk" />
+
         <!-- v1 phase 1 1h: WasiPreview2GfxBundle is a partial
              class auto-completed by the CompositeBundleGenerator.
              Analyzer ref pulls the generator in at compile time;

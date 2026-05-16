@@ -153,18 +153,17 @@ namespace Wacs.WASI.GFX.Silk
                     + "cannot be lifted to a wasi:webgpu texture; "
                     + "use the frame-buffer device's "
                     + "FromGraphicsBuffer instead.");
-            // The wgpu-native swap-chain → wasi:webgpu texture
-            // lift needs surface configuration first (a Silk
-            // surface backed by SDL window, configured against
-            // the device's adapter). The lift wires alongside
-            // <c>connect-graphics-context</c>'s surface-create
-            // path; until then any IGpuAbstractBuffer would be
-            // synthetic.
-            throw new PlatformNotSupportedException(
-                "SilkGpuBackend.FromAbstractBuffer: wgpu swap-chain "
-                + "→ texture lift not yet wired. Requires a "
-                + "connect-graphics-context surface configuration "
-                + "path on the GPU device.");
+            // The buffer's connection holds the wgpu surface
+            // configured by ConnectGraphicsContext. Lifting to a
+            // texture is just SurfaceGetCurrentTexture wrapped in
+            // a SilkGpuTexture — the texture's lifetime is owned
+            // by the surface (not refcounted via our wrapper).
+            if (source is not SilkGpuAbstractBuffer sgab)
+                throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                    "SilkGpuBackend.FromAbstractBuffer: source is an "
+                    + "IGpuAbstractBuffer but not Silk-backed. Cross-"
+                    + "backend mixing is not supported.");
+            return sgab.ToCurrentTexture();
         }
 
         public void Dispose()
