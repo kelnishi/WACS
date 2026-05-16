@@ -13,7 +13,10 @@
 // primitive=Some, depth-stencil=Some (Depth24plusStencil8 +
 // stencil-front/back face states), multisample=Some. A matching
 // depth texture + depth-stencil attachment on the render pass
-// keeps wgpu-native validation happy.
+// keeps wgpu-native validation happy. Also passes an occlusion
+// query-set (wrapped around the draw) and a max-draw-count
+// validation hint to exercise the remaining render-pass-
+// descriptor fields.
 
 wit_bindgen::generate!({
     path: "wit",
@@ -188,6 +191,18 @@ impl Guest for Example {
         });
         let depth_view = depth_target.create_view(None);
 
+        // ----- occlusion query set (1 slot, exercised below) -----
+        let occlusion_qs = match device.create_query_set(
+            &webgpu::GpuQuerySetDescriptor {
+                type_: webgpu::GpuQueryType::Occlusion,
+                count: 1,
+                label: Some("occlusion-qs".to_string()),
+            },
+        ) {
+            Ok(q) => q,
+            Err(e) => unreachable!("create_query_set error: {}", e.message),
+        };
+
         // ----- readback buffer -----
         let staging = device.create_buffer(&webgpu::GpuBufferDescriptor {
             size: READBACK_BYTES,
@@ -227,14 +242,22 @@ impl Guest for Example {
                             stencil_read_only: Some(false),
                         },
                     ),
-                    occlusion_query_set: None,
+                    occlusion_query_set: Some(&occlusion_qs),
+                    // timestamp_writes left None: requires the
+                    // timestamp-query device feature, which isn't
+                    // enabled on the default adapter.
                     timestamp_writes: None,
-                    max_draw_count: None,
+                    // max-draw-count is a validation hint for
+                    // multi-draw-indirect. Pass Some(1) so the
+                    // canonical-ABI opt<u64> decoder gets exercised.
+                    max_draw_count: Some(1),
                     label: Some("render-pass".to_string()),
                 },
             );
             pass.set_pipeline(&pipeline);
+            pass.begin_occlusion_query(0);
             pass.draw(3, None, None, None);
+            pass.end_occlusion_query();
             pass.end();
         }
         encoder.copy_texture_to_buffer(

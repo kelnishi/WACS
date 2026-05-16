@@ -136,6 +136,7 @@ namespace Wacs.WASI.GFX.Webgpu
                 (h, s) => ((IGpuRenderBundle)h).SetLabel(s));
             BindGpuRenderPassEncoder(runtime, host, alloc);
             BindGpuRenderBundleEncoder(runtime, host, alloc);
+            BindGpuQuerySet(runtime, host, alloc);
 
             // v1 phase 3 session 9: graphics-context bridge.
             // [static]gpu-texture.from-graphics-buffer(buffer:
@@ -742,12 +743,20 @@ namespace Wacs.WASI.GFX.Webgpu
             runtime.BindHostFunction<Action<ExecContext,
                 int, int, int, int, int, int, int>>(
                 (Ns, "[method]gpu-device.create-query-set"),
-                (ctx, selfH, _type, _count,
-                    _lblDisc, _lblPtr, _lblLen, retArea) =>
+                (ctx, selfH, typeEnum, count,
+                    lblDisc, lblPtr, lblLen, retArea) =>
                 {
                     var dev = (IGpuDevice)host.Devices.Get(selfH);
                     var result = dev.CreateQuerySet(
-                        new Webgpu.GpuQuerySetDescriptor());
+                        new Webgpu.GpuQuerySetDescriptor
+                        {
+                            Type = (Webgpu.GpuQueryType)typeEnum,
+                            Count = unchecked((uint)count),
+                            Label = lblDisc == 0
+                                ? Option<string>.None
+                                : Option<string>.Some(
+                                    ReadUtf8(ctx, lblPtr, lblLen)),
+                        });
                     if (result.IsOk)
                     {
                         var h = host.QuerySets.Allocate(result.Ok);
@@ -1720,24 +1729,59 @@ namespace Wacs.WASI.GFX.Webgpu
                         StoreOp = (Webgpu.GpuStoreOp)mem[rec + 65],
                     });
             }
-            // occlusion-query-set / timestamp-writes / max-draw-
-            // count default None — the fixture path doesn't
-            // exercise them. Full decode is mechanical when needed;
-            // the disc bytes at the comment offsets are 0 for None.
             var descriptor = new Webgpu.GpuRenderPassDescriptor
             {
                 ColorAttachments = attachments,
                 DepthStencilAttachment = ReadOptDepthStencilAttachment(
                     ctx, p + 16, host),
-                OcclusionQuerySet = Option<IGpuQuerySet>.None,
-                TimestampWrites = Option<Webgpu.GpuRenderPassTimestampWrites>.None,
-                MaxDrawCount = Option<ulong>.None,
+                OcclusionQuerySet = mem[p + 56] == 0
+                    ? Option<IGpuQuerySet>.None
+                    : Option<IGpuQuerySet>.Some(
+                        (IGpuQuerySet)host.QuerySets.Get(
+                            ctx.ReadI32LE(p + 60))),
+                TimestampWrites = ReadOptRenderPassTimestampWrites(
+                    ctx, p + 64, host),
+                MaxDrawCount = mem[p + 88] == 0
+                    ? Option<ulong>.None
+                    : Option<ulong>.Some(
+                        unchecked((ulong)ctx.ReadI64LE(p + 96))),
                 Label = mem[p + 104] == 0
                     ? Option<string>.None
                     : Option<string>.Some(ReadUtf8(ctx,
                         ctx.ReadI32LE(p + 108), ctx.ReadI32LE(p + 112))),
             };
             return (self, descriptor);
+        }
+
+        // opt<gpu-render-pass-timestamp-writes> at offset p
+        // (24 bytes, align 4). disc @p+0; payload (20 bytes,
+        // align 4) @p+4.
+        //   @p+4  query-set u32 (4)
+        //   @p+8  beginning-of-pass-write-index opt<u32> (8)
+        //         disc@p+8 val@p+12
+        //   @p+16 end-of-pass-write-index opt<u32> (8)
+        //         disc@p+16 val@p+20
+        private static Option<Webgpu.GpuRenderPassTimestampWrites>
+            ReadOptRenderPassTimestampWrites(
+                ExecContext ctx, int p, WasiWebgpuHost host)
+        {
+            var mem = ctx.Memory();
+            if (mem[p] == 0)
+                return Option<Webgpu.GpuRenderPassTimestampWrites>.None;
+            return Option<Webgpu.GpuRenderPassTimestampWrites>.Some(
+                new Webgpu.GpuRenderPassTimestampWrites
+                {
+                    QuerySet = (IGpuQuerySet)host.QuerySets.Get(
+                        ctx.ReadI32LE(p + 4)),
+                    BeginningOfPassWriteIndex = mem[p + 8] == 0
+                        ? Option<uint>.None
+                        : Option<uint>.Some(
+                            unchecked((uint)ctx.ReadI32LE(p + 12))),
+                    EndOfPassWriteIndex = mem[p + 16] == 0
+                        ? Option<uint>.None
+                        : Option<uint>.Some(
+                            unchecked((uint)ctx.ReadI32LE(p + 20))),
+                });
         }
 
         // opt<gpu-render-pass-depth-stencil-attachment> at offset
@@ -2564,6 +2608,39 @@ namespace Wacs.WASI.GFX.Webgpu
                     ((IGpuRenderBundleEncoder)instance).SetBindGroup(
                         args.index, args.bindGroup, args.dynamicOffsets,
                         args.dynamicOffsetsStart, args.dynamicOffsetsLength));
+        }
+
+        // ----------------------------------------------------
+        //   wasi:webgpu/webgpu@0.0.1 resource gpu-query-set
+        //     destroy: func();
+        //     %type: func() -> gpu-query-type;   (enum-u8, returns i32)
+        //     count: func() -> gpu-size32-out;   (u32 → i32)
+        //     label / set-label / [resource-drop].
+        // ----------------------------------------------------
+
+        private static void BindGpuQuerySet(WasmRuntime runtime,
+            WasiWebgpuHost host, Wacs.WASI.GFX.HostBinding.Realloc alloc)
+        {
+            BindLabeled(runtime, alloc,
+                "gpu-query-set", host.QuerySets,
+                h => ((IGpuQuerySet)h).Label(),
+                (h, s) => ((IGpuQuerySet)h).SetLabel(s));
+
+            runtime.BindHostFunction<Action<ExecContext, int>>(
+                (Ns, "[method]gpu-query-set.destroy"),
+                (_, selfH) =>
+                    ((IGpuQuerySet)host.QuerySets.Get(selfH)).Destroy());
+
+            runtime.BindHostFunction<Func<ExecContext, int, int>>(
+                (Ns, "[method]gpu-query-set.type"),
+                (_, selfH) =>
+                    (int)((IGpuQuerySet)host.QuerySets.Get(selfH)).Type());
+
+            runtime.BindHostFunction<Func<ExecContext, int, int>>(
+                (Ns, "[method]gpu-query-set.count"),
+                (_, selfH) =>
+                    unchecked((int)((IGpuQuerySet)host.QuerySets.Get(selfH))
+                        .Count()));
         }
 
         // Shared `push-debug-group(label: string) / pop-debug-group() /

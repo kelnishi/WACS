@@ -147,6 +147,34 @@ namespace Wacs.WASI.GFX.Silk
                 occlusionNative = sqs.Native;
             }
 
+            RenderPassTimestampWrites tsw = default;
+            bool hasTsw = false;
+            if (descriptor.TimestampWrites.TryGetValue(out var tswOpt)
+                && tswOpt != null)
+            {
+                if (tswOpt.QuerySet is not SilkGpuQuerySet tswSet)
+                    throw new Wacs.WASI.GFX.Types.WasiGfxException(
+                        "BeginRenderPass: timestamp-writes.query-set "
+                        + "is not Silk-backed.");
+                tsw.QuerySet = tswSet.Native;
+                // wgpu-native uses u32::MAX as the sentinel for
+                // "no write at this end of the pass".
+                tsw.BeginningOfPassWriteIndex =
+                    tswOpt.BeginningOfPassWriteIndex.TryGetValue(out var bw)
+                        ? bw : uint.MaxValue;
+                tsw.EndOfPassWriteIndex =
+                    tswOpt.EndOfPassWriteIndex.TryGetValue(out var ew)
+                        ? ew : uint.MaxValue;
+                hasTsw = true;
+            }
+
+            // max-draw-count: wgpu-native's RenderPassDescriptor has
+            // no direct slot — it's a multi-draw-indirect
+            // validation hint reachable only through a chained
+            // descriptor extension. Decoded by the canonical-ABI
+            // reader so guests don't see a None where they passed
+            // Some; not plumbed to wgpu-native here.
+
             RenderPassEncoder* pass;
             fixed (byte* labelPtr = labelBytes)
             fixed (RenderPassColorAttachment* attsPtr = nativeAtts)
@@ -158,7 +186,7 @@ namespace Wacs.WASI.GFX.Silk
                     ColorAttachments = nativeAtts.Length > 0 ? attsPtr : null,
                     DepthStencilAttachment = hasDsa ? &dsa : null,
                     OcclusionQuerySet = occlusionNative,
-                    TimestampWrites = null,
+                    TimestampWrites = hasTsw ? &tsw : null,
                 };
                 pass = _backend.EnsureApi()
                     .CommandEncoderBeginRenderPass(_encoder, &desc);
