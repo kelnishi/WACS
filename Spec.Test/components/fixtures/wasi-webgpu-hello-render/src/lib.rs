@@ -14,9 +14,11 @@
 // stencil-front/back face states), multisample=Some. A matching
 // depth texture + depth-stencil attachment on the render pass
 // keeps wgpu-native validation happy. Also passes an occlusion
-// query-set (wrapped around the draw) and a max-draw-count
-// validation hint to exercise the remaining render-pass-
-// descriptor fields.
+// query-set (wrapped around the draw), a timestamp_writes
+// (begin/end timestamps into a 2-slot timestamp query-set —
+// requires required_features=[timestamp-query] when requesting
+// the device), and a max-draw-count validation hint to
+// exercise the remaining render-pass-descriptor fields.
 
 wit_bindgen::generate!({
     path: "wit",
@@ -81,7 +83,16 @@ impl Guest for Example {
             Some(a) => a,
             None => unreachable!("request_adapter returned None"),
         };
-        let device = match adapter.request_device(None) {
+        let device = match adapter.request_device(Some(
+            webgpu::GpuDeviceDescriptor {
+                required_features: Some(vec![
+                    webgpu::GpuFeatureName::TimestampQuery,
+                ]),
+                required_limits: None,
+                default_queue: None,
+                label: Some("hello-render-device".to_string()),
+            },
+        )) {
             Ok(d) => d,
             Err(e) => unreachable!("request_device error: {}", e.message),
         };
@@ -203,6 +214,18 @@ impl Guest for Example {
             Err(e) => unreachable!("create_query_set error: {}", e.message),
         };
 
+        // ----- timestamp query set (2 slots, begin + end) -----
+        let timestamp_qs = match device.create_query_set(
+            &webgpu::GpuQuerySetDescriptor {
+                type_: webgpu::GpuQueryType::Timestamp,
+                count: 2,
+                label: Some("timestamp-qs".to_string()),
+            },
+        ) {
+            Ok(q) => q,
+            Err(e) => unreachable!("create_query_set(timestamp) error: {}", e.message),
+        };
+
         // ----- readback buffer -----
         let staging = device.create_buffer(&webgpu::GpuBufferDescriptor {
             size: READBACK_BYTES,
@@ -243,10 +266,13 @@ impl Guest for Example {
                         },
                     ),
                     occlusion_query_set: Some(&occlusion_qs),
-                    // timestamp_writes left None: requires the
-                    // timestamp-query device feature, which isn't
-                    // enabled on the default adapter.
-                    timestamp_writes: None,
+                    timestamp_writes: Some(
+                        webgpu::GpuRenderPassTimestampWrites {
+                            query_set: &timestamp_qs,
+                            beginning_of_pass_write_index: Some(0),
+                            end_of_pass_write_index: Some(1),
+                        },
+                    ),
                     // max-draw-count is a validation hint for
                     // multi-draw-indirect. Pass Some(1) so the
                     // canonical-ABI opt<u64> decoder gets exercised.

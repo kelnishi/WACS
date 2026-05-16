@@ -376,22 +376,73 @@ namespace Wacs.WASI.GFX.Webgpu
             // Wire: 1 (self) + 13 (option<record>) + 1 (retArea) = 15 i32.
             // retArea: 16 bytes, align 4 (handle Ok or kind+message Err).
             //
-            // Descriptor decoding deferred — impl receives
-            // Option<GpuDeviceDescriptor>.None; nested-list +
-            // option<own<R>> + nested-record decode pairs with the
-            // create-* methods that share the same shape complexity.
+            // Required-limits is left as None — the WIT models it
+            // as `option<own<record-option-gpu-size64>>` (a host-
+            // minted resource carrying the limit overrides); guests
+            // that need explicit limits go through that resource's
+            // setter API, which isn't yet wired. required-features /
+            // default-queue / label are decoded here.
             runtime.BindHostFunction<CustomDelegates.RequestDevice>(
                 (Ns, "[method]gpu-adapter.request-device"),
-                (ctx, selfH, _od,
-                    _rfDisc, _rfPtr, _rfLen,
+                (ctx, selfH, od,
+                    rfDisc, rfPtr, rfLen,
                     _rlDisc, _rlVal,
-                    _dqDisc, _dqLDisc, _dqLPtr, _dqLLen,
-                    _lblDisc, _lblPtr, _lblLen,
+                    dqDisc, dqLDisc, dqLPtr, dqLLen,
+                    lblDisc, lblPtr, lblLen,
                     retArea) =>
                 {
                     var ad = (IGpuAdapter)host.Adapters.Get(selfH);
-                    var result = ad.RequestDevice(
-                        Option<GpuDeviceDescriptor>.None);
+                    Option<GpuDeviceDescriptor> descriptor;
+                    if (od == 0)
+                    {
+                        descriptor = Option<GpuDeviceDescriptor>.None;
+                    }
+                    else
+                    {
+                        Option<Webgpu.GpuFeatureName[]> features;
+                        if (rfDisc == 0)
+                        {
+                            features = Option<Webgpu.GpuFeatureName[]>.None;
+                        }
+                        else
+                        {
+                            var mem = ctx.Memory();
+                            var arr = new Webgpu.GpuFeatureName[rfLen];
+                            for (int i = 0; i < rfLen; i++)
+                                arr[i] = (Webgpu.GpuFeatureName)mem[rfPtr + i];
+                            features = Option<Webgpu.GpuFeatureName[]>.Some(arr);
+                        }
+                        Option<Webgpu.GpuQueueDescriptor> defaultQueue;
+                        if (dqDisc == 0)
+                        {
+                            defaultQueue = Option<Webgpu.GpuQueueDescriptor>.None;
+                        }
+                        else
+                        {
+                            defaultQueue = Option<Webgpu.GpuQueueDescriptor>.Some(
+                                new Webgpu.GpuQueueDescriptor
+                                {
+                                    Label = dqLDisc == 0
+                                        ? Option<string>.None
+                                        : Option<string>.Some(
+                                            ReadUtf8(ctx, dqLPtr, dqLLen)),
+                                });
+                        }
+                        var label = lblDisc == 0
+                            ? Option<string>.None
+                            : Option<string>.Some(
+                                ReadUtf8(ctx, lblPtr, lblLen));
+                        descriptor = Option<GpuDeviceDescriptor>.Some(
+                            new GpuDeviceDescriptor
+                            {
+                                RequiredFeatures = features,
+                                RequiredLimits =
+                                    Option<Webgpu.IRecordOptionGpuSize64>.None,
+                                DefaultQueue = defaultQueue,
+                                Label = label,
+                            });
+                    }
+                    var result = ad.RequestDevice(descriptor);
                     if (result.IsOk)
                     {
                         var handle = host.Devices.Allocate(result.Ok);

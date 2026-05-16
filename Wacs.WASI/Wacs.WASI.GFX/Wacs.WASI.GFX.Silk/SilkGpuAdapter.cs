@@ -68,27 +68,85 @@ namespace Wacs.WASI.GFX.Silk
             RequestDevice(Option<GenWebgpu.GpuDeviceDescriptor> descriptor)
         {
             EnsureLive();
-            // The descriptor's required-features / required-limits /
-            // default-queue / label decoding is deferred to a
-            // follow-up — the no-feature, default-limits path is
-            // what hello_compute needs. wgpu-native picks sensible
-            // defaults when the descriptor is zero-initialized.
-            var devDesc = default(DeviceDescriptor);
-            var dev = _backend.RequestDeviceSync(
-                _adapter, &devDesc, out var err);
-            if (dev == null)
+            // Decode required-features. required-limits stays at
+            // defaults (the WIT models limits as a host-minted
+            // resource, not in scope here). default-queue.label /
+            // label are not consumed by wgpu-native's
+            // DeviceDescriptor today, but we accept them on the wire
+            // so guests passing Some(...) don't see a behavior
+            // regression.
+            FeatureName[] features = Array.Empty<FeatureName>();
+            if (descriptor.TryGetValue(out var d) && d != null
+                && d.RequiredFeatures.TryGetValue(out var featureArr)
+                && featureArr != null && featureArr.Length > 0)
             {
-                return Result<GenWebgpu.IGpuDevice, GenWebgpu.RequestDeviceError>
-                    .FromErr(new GenWebgpu.RequestDeviceError
-                    {
-                        Kind = new GenWebgpu.RequestDeviceErrorKind
-                            .RequestDeviceErrorKindOperationError(),
-                        Message = err ?? "wgpu-native returned a null "
-                            + "device with no error message.",
-                    });
+                var mapped = new System.Collections.Generic.List<FeatureName>(
+                    featureArr.Length);
+                foreach (var f in featureArr)
+                    if (TryMapWitFeature(f, out var native))
+                        mapped.Add(native);
+                features = mapped.ToArray();
+            }
+            Device* dev;
+            fixed (FeatureName* featPtr = features)
+            {
+                var devDesc = new DeviceDescriptor
+                {
+                    RequiredFeatureCount = (nuint)features.Length,
+                    RequiredFeatures = features.Length > 0 ? featPtr : null,
+                };
+                dev = _backend.RequestDeviceSync(
+                    _adapter, &devDesc, out var err1);
+                if (dev == null)
+                    return Result<GenWebgpu.IGpuDevice, GenWebgpu.RequestDeviceError>
+                        .FromErr(new GenWebgpu.RequestDeviceError
+                        {
+                            Kind = new GenWebgpu.RequestDeviceErrorKind
+                                .RequestDeviceErrorKindOperationError(),
+                            Message = err1 ?? "wgpu-native returned a null "
+                                + "device with no error message.",
+                        });
             }
             return Result<GenWebgpu.IGpuDevice, GenWebgpu.RequestDeviceError>
                 .FromOk(new SilkGpuDevice(_backend, _adapter, dev));
+        }
+
+        // Maps gpu-feature-name (the WIT enum) to wgpu-native's
+        // FeatureName. Returns false for entries that don't have a
+        // wgpu-native counterpart — the caller drops them rather
+        // than failing the request, matching browser behavior where
+        // an unsupported `required-feature` rejects the promise but
+        // wgpu-native itself just refuses to enable that feature.
+        private static bool TryMapWitFeature(
+            GenWebgpu.GpuFeatureName name, out FeatureName fn)
+        {
+            switch (name)
+            {
+                case GenWebgpu.GpuFeatureName.DepthClipControl:
+                    fn = FeatureName.DepthClipControl; return true;
+                case GenWebgpu.GpuFeatureName.Depth32floatStencil8:
+                    fn = FeatureName.Depth32floatStencil8; return true;
+                case GenWebgpu.GpuFeatureName.TextureCompressionBc:
+                    fn = FeatureName.TextureCompressionBC; return true;
+                case GenWebgpu.GpuFeatureName.TextureCompressionEtc2:
+                    fn = FeatureName.TextureCompressionEtc2; return true;
+                case GenWebgpu.GpuFeatureName.TextureCompressionAstc:
+                    fn = FeatureName.TextureCompressionAstc; return true;
+                case GenWebgpu.GpuFeatureName.TimestampQuery:
+                    fn = FeatureName.TimestampQuery; return true;
+                case GenWebgpu.GpuFeatureName.IndirectFirstInstance:
+                    fn = FeatureName.IndirectFirstInstance; return true;
+                case GenWebgpu.GpuFeatureName.ShaderF16:
+                    fn = FeatureName.ShaderF16; return true;
+                case GenWebgpu.GpuFeatureName.Rg11b10ufloatRenderable:
+                    fn = FeatureName.RG11B10UfloatRenderable; return true;
+                case GenWebgpu.GpuFeatureName.Bgra8unormStorage:
+                    fn = FeatureName.Bgra8UnormStorage; return true;
+                case GenWebgpu.GpuFeatureName.Float32Filterable:
+                    fn = FeatureName.Float32filterable; return true;
+                default:
+                    fn = default; return false;
+            }
         }
 
         public void Dispose()
