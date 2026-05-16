@@ -840,42 +840,132 @@ namespace Wacs.WASI.GFX.Webgpu
                 });
 
             // create-texture(self, gpu-texture-descriptor) -> own<gpu-texture>
-            // Descriptor flat (18 i32) - see CustomDelegates.CreateTexture
-            // for the layout. The impl receives a default-constructed
-            // descriptor; backends that care decode the full record
-            // in a follow-up.
+            // Descriptor flat (19 i32) — see CustomDelegates.CreateTexture
+            // for the field-by-field layout.
             runtime.BindHostFunction<CustomDelegates.CreateTexture>(
                 (Ns, "[method]gpu-device.create-texture"),
-                (_, selfH,
-                    _w, _hDisc, _hVal, _dDisc, _dVal,
-                    _mipDisc, _mipVal, _smpDisc, _smpVal,
-                    _dimDisc, _dimVal, _fmt, _usage,
-                    _vfPtr, _vfLen, _lblDisc, _lblPtr, _lblLen) =>
+                (ctx, selfH,
+                    w, hDisc, hVal, dDisc, dVal,
+                    mipDisc, mipVal, smpDisc, smpVal,
+                    dimDisc, dimVal, fmt, usage,
+                    vfDisc, vfPtr, vfLen, lblDisc, lblPtr, lblLen) =>
                 {
                     var dev = (IGpuDevice)host.Devices.Get(selfH);
-                    var t = dev.CreateTexture(new Webgpu.GpuTextureDescriptor());
+                    var size = new Webgpu.GpuExtent3D
+                    {
+                        Width = unchecked((uint)w),
+                        Height = hDisc == 0
+                            ? Option<uint>.None
+                            : Option<uint>.Some(unchecked((uint)hVal)),
+                        DepthOrArrayLayers = dDisc == 0
+                            ? Option<uint>.None
+                            : Option<uint>.Some(unchecked((uint)dVal)),
+                    };
+                    // view-formats: opt<list<gpu-texture-format>>. The
+                    // enum encodes as u8 in memory; read each byte.
+                    Option<Webgpu.GpuTextureFormat[]> viewFormats;
+                    if (vfDisc == 0)
+                        viewFormats = Option<Webgpu.GpuTextureFormat[]>.None;
+                    else
+                    {
+                        var arr = new Webgpu.GpuTextureFormat[vfLen];
+                        var mem = ctx.Memory();
+                        for (int i = 0; i < vfLen; i++)
+                            arr[i] = (Webgpu.GpuTextureFormat)mem[vfPtr + i];
+                        viewFormats = Option<Webgpu.GpuTextureFormat[]>.Some(arr);
+                    }
+                    var descriptor = new Webgpu.GpuTextureDescriptor
+                    {
+                        Size = size,
+                        MipLevelCount = mipDisc == 0
+                            ? Option<uint>.None
+                            : Option<uint>.Some(unchecked((uint)mipVal)),
+                        SampleCount = smpDisc == 0
+                            ? Option<uint>.None
+                            : Option<uint>.Some(unchecked((uint)smpVal)),
+                        Dimension = dimDisc == 0
+                            ? Option<Webgpu.GpuTextureDimension>.None
+                            : Option<Webgpu.GpuTextureDimension>.Some(
+                                (Webgpu.GpuTextureDimension)dimVal),
+                        Format = (Webgpu.GpuTextureFormat)fmt,
+                        Usage = unchecked((uint)usage),
+                        ViewFormats = viewFormats,
+                        Label = lblDisc == 0
+                            ? Option<string>.None
+                            : Option<string>.Some(ReadUtf8(ctx, lblPtr, lblLen)),
+                    };
+                    var t = dev.CreateTexture(descriptor);
                     return host.Textures.Allocate(t);
                 });
 
             // create-sampler(self, option<gpu-sampler-descriptor>)
             //   -> own<gpu-sampler>
-            // Descriptor flat (25 mixed i32/f32) - see
-            // CustomDelegates.CreateSampler. Pass Option.None to the
-            // impl when opt-disc is 0 (no descriptor supplied).
+            // Flat: self + outer-disc + 9 opt<enum/u16> + 2 opt<f32> +
+            //       opt<string> = 1 + 1 + 18 + 4 + 3 = 27 with mixed
+            //       i32/f32 — see CustomDelegates.CreateSampler.
             runtime.BindHostFunction<CustomDelegates.CreateSampler>(
                 (Ns, "[method]gpu-device.create-sampler"),
-                (_, selfH, optDisc,
-                    _aud, _auv, _avd, _avv, _awd, _aww,
-                    _mfd, _mfv, _mnd, _mnv, _mid, _miv,
-                    _lminD, _lminV, _lmaxD, _lmaxV,
-                    _cmpD, _cmpV, _maD, _maV,
-                    _lblD, _lblPtr, _lblLen) =>
+                (ctx, selfH, optDisc,
+                    aud, auv, avd, avv, awd, aww,
+                    mfd, mfv, mnd, mnv, mid, miv,
+                    lminD, lminV, lmaxD, lmaxV,
+                    cmpD, cmpV, maD, maV,
+                    lblD, lblPtr, lblLen) =>
                 {
                     var dev = (IGpuDevice)host.Devices.Get(selfH);
-                    var descriptor = optDisc == 0
-                        ? Option<Webgpu.GpuSamplerDescriptor>.None
-                        : Option<Webgpu.GpuSamplerDescriptor>.Some(
-                            new Webgpu.GpuSamplerDescriptor());
+                    Option<Webgpu.GpuSamplerDescriptor> descriptor;
+                    if (optDisc == 0)
+                    {
+                        descriptor = Option<Webgpu.GpuSamplerDescriptor>.None;
+                    }
+                    else
+                    {
+                        var d = new Webgpu.GpuSamplerDescriptor
+                        {
+                            AddressModeU = aud == 0
+                                ? Option<Webgpu.GpuAddressMode>.None
+                                : Option<Webgpu.GpuAddressMode>.Some(
+                                    (Webgpu.GpuAddressMode)auv),
+                            AddressModeV = avd == 0
+                                ? Option<Webgpu.GpuAddressMode>.None
+                                : Option<Webgpu.GpuAddressMode>.Some(
+                                    (Webgpu.GpuAddressMode)avv),
+                            AddressModeW = awd == 0
+                                ? Option<Webgpu.GpuAddressMode>.None
+                                : Option<Webgpu.GpuAddressMode>.Some(
+                                    (Webgpu.GpuAddressMode)aww),
+                            MagFilter = mfd == 0
+                                ? Option<Webgpu.GpuFilterMode>.None
+                                : Option<Webgpu.GpuFilterMode>.Some(
+                                    (Webgpu.GpuFilterMode)mfv),
+                            MinFilter = mnd == 0
+                                ? Option<Webgpu.GpuFilterMode>.None
+                                : Option<Webgpu.GpuFilterMode>.Some(
+                                    (Webgpu.GpuFilterMode)mnv),
+                            MipmapFilter = mid == 0
+                                ? Option<Webgpu.GpuMipmapFilterMode>.None
+                                : Option<Webgpu.GpuMipmapFilterMode>.Some(
+                                    (Webgpu.GpuMipmapFilterMode)miv),
+                            LodMinClamp = lminD == 0
+                                ? Option<float>.None
+                                : Option<float>.Some(lminV),
+                            LodMaxClamp = lmaxD == 0
+                                ? Option<float>.None
+                                : Option<float>.Some(lmaxV),
+                            Compare = cmpD == 0
+                                ? Option<Webgpu.GpuCompareFunction>.None
+                                : Option<Webgpu.GpuCompareFunction>.Some(
+                                    (Webgpu.GpuCompareFunction)cmpV),
+                            MaxAnisotropy = maD == 0
+                                ? Option<ushort>.None
+                                : Option<ushort>.Some(unchecked((ushort)maV)),
+                            Label = lblD == 0
+                                ? Option<string>.None
+                                : Option<string>.Some(
+                                    ReadUtf8(ctx, lblPtr, lblLen)),
+                        };
+                        descriptor = Option<Webgpu.GpuSamplerDescriptor>.Some(d);
+                    }
                     var s = dev.CreateSampler(descriptor);
                     return host.Samplers.Allocate(s);
                 });

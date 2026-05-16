@@ -45,7 +45,7 @@ namespace Wacs.WASI.GFX.Webgpu
             int a08, int a09, int a10, int a11, int a12, int a13, int a14,
             int a15);
 
-        // create-texture shape: self + gpu-texture-descriptor flat (18 i32)
+        // create-texture shape: self + gpu-texture-descriptor flat (19 i32)
         // + i32 return handle.
         //   gpu-extent3-d flat = u32 + 2 opt<u32> = 5 i32
         //   + opt<u32> mip-level-count = 2 i32
@@ -53,14 +53,14 @@ namespace Wacs.WASI.GFX.Webgpu
         //   + opt<enum> dimension     = 2 i32
         //   + enum format             = 1 i32
         //   + u32 usage               = 1 i32
-        //   + list<opt<enum>> view-formats = 2 i32 (ptr, len)
+        //   + opt<list<enum>> view-formats = 3 i32 (disc, ptr, len)
         //   + opt<string> label       = 3 i32
-        //   total record = 18 i32
-        // ExecContext + 19 int → int.
+        //   total record = 19 i32
+        // ExecContext + 20 int → int.
         internal delegate int CreateTexture(ExecContext ctx,
             int a01, int a02, int a03, int a04, int a05, int a06, int a07,
             int a08, int a09, int a10, int a11, int a12, int a13, int a14,
-            int a15, int a16, int a17, int a18, int a19);
+            int a15, int a16, int a17, int a18, int a19, int a20);
 
         // create-sampler shape: self + option<gpu-sampler-descriptor>
         // (24 flat slots, mixed i32/f32) + i32 return handle.
