@@ -51,6 +51,13 @@ namespace Wacs.WASI.GFX.Silk.Test
             FixtureRunner.RunOrSkip("fixtures/hello-render.component.wasm",
                 nameof(HelloRender_FixtureRunsAgainstWgpuNative));
         }
+
+        [Fact]
+        public void GameOfLife_FixtureRunsAgainstWgpuNative()
+        {
+            FixtureRunner.RunOrSkip("fixtures/game-of-life.component.wasm",
+                nameof(GameOfLife_FixtureRunsAgainstWgpuNative));
+        }
     }
 
     /// <summary>

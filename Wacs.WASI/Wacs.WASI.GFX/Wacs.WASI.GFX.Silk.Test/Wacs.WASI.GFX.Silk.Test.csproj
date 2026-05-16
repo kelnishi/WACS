@@ -39,6 +39,10 @@
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
             <Link>fixtures\hello-render.component.wasm</Link>
         </None>
+        <None Include="..\..\..\Spec.Test\components\fixtures\wasi-webgpu-game-of-life\wasm\game-of-life.component.wasm">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <Link>fixtures\game-of-life.component.wasm</Link>
+        </None>
     </ItemGroup>
 
 </Project>
