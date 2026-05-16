@@ -1,5 +1,34 @@
 # Changelog
 
+## WACS.WASI.NN 0.4.1 — Phase 2 status callout + README backend catch-up
+
+NuGet description-only refresh. No code or API change; existing
+0.4.0 consumers can upgrade transparently.
+
+### What changed
+
+- **`WACS.WASI.NN` 0.4.0 → 0.4.1** (point — doc-driven):
+  - NuGet `<Description>` now names all six bundled backends
+    (ONNX Runtime, ONNX Runtime GenAI, ML.NET, LlamaSharp,
+    TorchSharp, OpenVINO), corrects the WIT-version reference
+    (`wasi:nn@0.2.0-rc-2024-10-28`, matches the pinned wit),
+    and adds a Phase 2 status sentence.
+  - README packed with the NuGet: package table now lists the
+    three backend siblings added since the last README refresh
+    (`OnnxRuntimeGenAI`, `TorchSharp`, `OpenVino`); encoding
+    routing table updates `pytorch` → `TorchSharpBackend`,
+    `openvino` → `OpenVinoBackend`, ggml lists both
+    `LlamaSharpBackend` + `OnnxRuntimeGenAIBackend`. Adds a
+    Standardization-status section pointing at the upstream
+    WASI Proposals.md Phase 2 listing.
+
+The seven sibling wasi-nn packages (`WACS.WASI.NN.DependencyInjection`,
+`.OnnxRuntime`, `.OnnxRuntimeGenAI`, `.MLNet`, `.LlamaSharp`,
+`.TorchSharp`, `.OpenVino`) also had a Phase 2 status sentence
+appended to their NuGet descriptions; bumps for those land with
+their next functional change rather than triggering a fan-out
+point release for description-only edits.
+
 ## WACS.WASI.GFX.Webgpu 0.1.0-preview / WACS.WASI.GFX 0.2.0-preview / WACS.WASI.GFX.Silk 0.2.0-preview / WACS.WASI.GFX.DependencyInjection 0.1.1-preview / WACS.WASI.Preview2 0.5.0 / WACS.WASI.Preview2.DependencyInjection 0.2.2 / WACS.ComponentModel 0.4.0 / WACS.Transpiler.Lib 0.9.0 / WACS.Cli 1.8.0 / WACS 0.15.20 — wasi-gfx v1 (wasi:webgpu host bindings + Phase 1/2 polish)
 
 The four `WACS.WASI.GFX.*` packages adopt a NuGet `-preview`
