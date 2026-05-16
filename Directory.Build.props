@@ -12,8 +12,14 @@
              packages the nuget.yml workflow already pushes
              (.snupkg), this makes the published packages bit-for-bit
              reproducible from a clean checkout at the corresponding
-             tagged commit. -->
-        <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+             tagged commit.
+
+             Gated on GITHUB_ACTIONS so local dev builds keep the
+             developer's workspace paths in PDBs (interactive
+             debugging works against the actual file on disk);
+             only the CI publish path produces canonical-path
+             PDBs that ship to NuGet. -->
+        <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
     </PropertyGroup>
 
 </Project>
