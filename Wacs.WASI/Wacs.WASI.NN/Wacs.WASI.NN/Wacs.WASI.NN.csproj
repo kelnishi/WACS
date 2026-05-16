@@ -6,7 +6,7 @@
         <Title>Wacs WASI Neural Network</Title>
         <PackageId>WACS.WASI.NN</PackageId>
         <Authors>Kelvin Nishikawa</Authors>
-        <Description>WASI-NN host bindings for WACS — wasi:nn@0.3.0-rc-2024-10-28 (component-model WIT) plus the legacy wasi_ephemeral_nn (WITX) ABI. Backend-agnostic core; pluggable backends (ML.NET, ONNX Runtime, LlamaSharp) ship as sibling packages.</Description>
+        <Description>WASI-NN host bindings for WACS — wasi:nn@0.2.0-rc-2024-10-28 (component-model WIT) plus the legacy wasi_ephemeral_nn (WITX) ABI. Backend-agnostic core; pluggable backends (ML.NET, ONNX Runtime, ONNX Runtime GenAI, LlamaSharp, TorchSharp, OpenVINO) ship as sibling packages. Tracks the wasi-nn proposal at WASI Phase 2 — the WIT surface may change as the proposal evolves.</Description>
         <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
         <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>

@@ -1,6 +1,14 @@
 # Changelog
 
-## WACS.WASI.GFX.Webgpu 0.1.0 / WACS.WASI.GFX 0.2.0 / WACS.WASI.GFX.Silk 0.2.0 / WACS.WASI.GFX.DependencyInjection 0.1.1 / WACS.WASI.Preview2 0.5.0 / WACS.WASI.Preview2.DependencyInjection 0.2.2 / WACS.ComponentModel 0.4.0 / WACS.Transpiler.Lib 0.9.0 / WACS.Cli 1.8.0 / WACS 0.15.20 — wasi-gfx v1 (wasi:webgpu host bindings + Phase 1/2 polish)
+## WACS.WASI.GFX.Webgpu 0.1.0-preview / WACS.WASI.GFX 0.2.0-preview / WACS.WASI.GFX.Silk 0.2.0-preview / WACS.WASI.GFX.DependencyInjection 0.1.1-preview / WACS.WASI.Preview2 0.5.0 / WACS.WASI.Preview2.DependencyInjection 0.2.2 / WACS.ComponentModel 0.4.0 / WACS.Transpiler.Lib 0.9.0 / WACS.Cli 1.8.0 / WACS 0.15.20 — wasi-gfx v1 (wasi:webgpu host bindings + Phase 1/2 polish)
+
+The four `WACS.WASI.GFX.*` packages adopt a NuGet `-preview`
+suffix to signal that the wasi-gfx proposal is at WASI Phase 2
+(not yet standardized). Consumers need `dotnet add package … --prerelease`
+to install. The wasi-nn family (also tracking a Phase 2 proposal)
+adds the same status callout in its NuGet `<Description>` but keeps
+its stable version trajectory — those packages already have shipped
+consumers.
 
 v1 release for the wasi-gfx family. The fourth wasi-gfx WIT
 package — `wasi:webgpu@0.0.1`, ~35 KB of WIT mirroring the

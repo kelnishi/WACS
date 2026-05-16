@@ -14,12 +14,16 @@ host orchestrator routes accordingly.
 | `WACS.WASI.NN` | Core: `WasiNNConfiguration`, `WasiNNHost` (`IBindable`), `IBackend` SPI, WIT + WITX bindings, source-gen `[WitSource]` interfaces under `Wacs.WASI.NN.Nn.{Tensor, Errors, Graph, Inference}`, `IdentityBackend`, `runtime.UseWasiNN(...)` extension |
 | `WACS.WASI.NN.DependencyInjection` | DI bundle for the transpiler-direct-link path: `WasiNNBundle`, `WasiPreview2NNBundle` composite, concrete resource impls (`Tensor`, `Graph`, `GraphExecutionContext`, `Error`), `services.AddWasiNN(...)` registration |
 | `WACS.WASI.NN.OnnxRuntime` | Direct ONNX Runtime backend (`graph-encoding.onnx`). Ships `WasiNNOnnxBindable` parameterless adapter for `--bind` |
+| `WACS.WASI.NN.OnnxRuntimeGenAI` | ONNX Runtime GenAI backend (`graph-encoding.ggml` named-input convention) for first-class generative LLM inference (Gemma 3, Llama, Qwen, Phi families). Exposes `"prompt"` (utf-8) and `"input_ids"` (int64) compute shapes; CoreML acceleration on osx-arm64. Ships `WasiNNOnnxGenAIBindable` |
 | `WACS.WASI.NN.MLNet` | Microsoft.ML-flavored backend wrapping ONNX Runtime under an `MLContext` lifecycle. Ships `WasiNNMLNetBindable` for `--bind` |
 | `WACS.WASI.NN.LlamaSharp` | LlamaSharp / llama.cpp backend (`graph-encoding.ggml`). Ships `WasiNNLlamaSharpBindable` with `WACS_WASINN_GGUF_DIR`-driven name registry |
+| `WACS.WASI.NN.TorchSharp` | TorchSharp / libtorch backend (`graph-encoding.pytorch`). Loads TorchScript modules via `graph.load` (bytes) or `graph.load-by-name` (registry). CPU default; swap `LibTorch-cuda-12.1` / `-macos-arm64` etc. in the consumer csproj for accelerators. Ships `WasiNNTorchSharpBindable` |
+| `WACS.WASI.NN.OpenVino` | OpenVINO backend (`graph-encoding.openvino`) via the OpenVINO.CSharp.API NuGet. Loads OpenVINO IR (xml + bin) from the wasi-nn multi-builder shape. Ships `WasiNNOpenVinoBindable`, bundles macOS arm64 runtime; other RIDs ride on system OpenVINO install |
 
 The packages are siblings — consumers wiring only one backend skip the
 others' NuGet transitives (ORT native binaries, `Microsoft.ML`,
-LlamaSharp's llama.cpp runtime).
+LlamaSharp's llama.cpp runtime, libtorch's C++ runtime, OpenVINO's
+native libs).
 
 ## Quick start
 
@@ -158,32 +162,31 @@ ownership contract.
 | Encoding | Default backend route |
 |---|---|
 | `onnx` | `OnnxBackend` (or `MLNetBackend` if both registered, last-write-wins) |
-| `tensorflow` / `tensorflowlite` | unwired in v0 — embedder provides their own `IBackend` |
-| `ggml` | `LlamaSharpBackend` via `LoadByNameBackend` slot |
-| `openvino` / `pytorch` | unwired — embedder-supplied `IBackend` |
+| `ggml` | `LlamaSharpBackend` via `LoadByNameBackend` slot; the `OnnxRuntimeGenAIBackend` also registers here (with `LoadByNameBackend`) for generative LLMs through the ONNX-Runtime stack |
+| `pytorch` | `TorchSharpBackend` (load from bytes or by name) |
+| `openvino` | `OpenVinoBackend` (loads OpenVINO IR from the multi-builder `xml + bin` shape) |
+| `tensorflow` / `tensorflowlite` | unwired — embedder provides their own `IBackend` |
 | `autodetect` | whichever backend the embedder registered for it |
 
 Encodings without a registered backend reject `graph.load` with
 `error-code.invalid-encoding`; the host never silently routes between
 encodings.
 
-### Type support (v0)
+### Type support
 
 `FP32`, `FP64`, `U8`, `I32`, `I64` round-trip through every backend.
-`FP16` and `BF16` throw `error-code.unsupported-operation` — wiring
-them needs the .NET 8 `Half` type or ORT's `Float16` struct exposed
-explicitly. Tracked for v1.
+`FP16` and `BF16` throw `error-code.unsupported-operation` — backends
+that need them have to opt in once a .NET-side half-precision exchange
+type is wired.
 
 ## Testing
 
-`Wacs.WASI.NN.Test` (and the per-backend test sibling projects) run
-24 unit tests covering the SPI surface + every error path. Real-model
-end-to-end tests need a wasm-component fixture imports wired to wasi-nn,
-plus actual ONNX / GGUF model files; those land in a follow-up under
-`Spec.Test/components/fixtures/wasi-nn-*` once the fixture build
-pipeline catches up. CI doesn't currently provision GB-scale GGUF
-files; LlamaSharp generation tests will be gated behind a
-`WACS_GGUF_MODEL_PATH` env var.
+`Wacs.WASI.NN.Test` and the per-backend test siblings cover the SPI
+surface + every error path. Real-model end-to-end tests live under
+`Spec.Test/components/fixtures/wasi-nn-*` and consume real ONNX /
+GGUF / OpenVINO / TorchScript model files; CI doesn't provision
+GB-scale models, so backend-specific generation tests gate behind
+the appropriate `WACS_*_MODEL_PATH` / `WACS_WASINN_*_DIR` env vars.
 
 ## Pinning
 
@@ -195,3 +198,10 @@ commands in `wit/deps.lock`.
 The legacy WITX is retained "for consistency only" per the upstream
 header — but real wasi-nn guests today still target it (notably most
 Rust crates predating the WIT cut). Both ABIs are first-class here.
+
+## Standardization status
+
+The wasi-nn proposal is at [WASI Phase 2](https://github.com/WebAssembly/WASI/blob/main/Proposals.md);
+the WIT surface may change as the proposal evolves toward stable
+(Phase 4). Public API stability follows that cadence — bumps follow
+upstream WIT revisions in addition to host-side changes.

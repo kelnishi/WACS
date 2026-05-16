@@ -6,14 +6,14 @@
         <Title>Wacs WASI-GFX Silk.NET/SDL backend</Title>
         <PackageId>WACS.WASI.GFX.Silk</PackageId>
         <Authors>Kelvin Nishikawa</Authors>
-        <Description>Silk.NET/SDL backend for WACS.WASI.GFX. Implements IBackend for wasi:graphics-context, wasi:frame-buffer, and wasi:surface on top of SDL2 via Silk.NET. Ships as a sibling NuGet so consumers wiring a different backend don't pull SDL's native binaries.</Description>
+        <Description>Silk.NET/SDL + wgpu-native backend for WACS.WASI.GFX. Implements IBackend for wasi:graphics-context, wasi:surface, wasi:frame-buffer, and wasi:webgpu on top of SDL2 + wgpu-native via Silk.NET. Ships as a sibling NuGet so consumers wiring a different backend don't pull SDL's or wgpu-native's binaries. Preview: tracks the wasi-gfx proposal at WASI Phase 2 — the WIT surface may change as the proposal evolves.</Description>
         <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
         <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.WASI.GFX.Silk</AssemblyName>
         <AssemblyVersion>0.2.0</AssemblyVersion>
-        <Version>0.2.0</Version>
+        <Version>0.2.0-preview</Version>
         <RepositoryType>git</RepositoryType>
         <!-- Silk.NET multi-targets net8.0; SDL native binaries
              ship in the package itself across the OSes Silk

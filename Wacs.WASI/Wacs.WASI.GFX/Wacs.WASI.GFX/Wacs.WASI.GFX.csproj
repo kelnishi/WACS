@@ -6,14 +6,14 @@
         <Title>Wacs WASI Graphics</Title>
         <PackageId>WACS.WASI.GFX</PackageId>
         <Authors>Kelvin Nishikawa</Authors>
-        <Description>WASI-GFX host bindings for WACS — wasi:graphics-context, wasi:frame-buffer, wasi:surface (all @0.0.1). Backend-agnostic core; the Silk.NET/SDL backend ships as a sibling package.</Description>
+        <Description>WASI-GFX host bindings for WACS — wasi:graphics-context, wasi:frame-buffer, wasi:surface (all @0.0.1). Backend-agnostic core; the Silk.NET/SDL backend ships as a sibling package. Preview: tracks the wasi-gfx proposal at WASI Phase 2 — the WIT surface may change as the proposal evolves.</Description>
         <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
         <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.WASI.GFX</AssemblyName>
         <AssemblyVersion>0.2.0</AssemblyVersion>
-        <Version>0.2.0</Version>
+        <Version>0.2.0-preview</Version>
         <RepositoryType>git</RepositoryType>
         <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
         <IsAotCompatible Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net7.0'))">true</IsAotCompatible>

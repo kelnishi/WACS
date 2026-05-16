@@ -6,7 +6,7 @@
         <Title>Wacs WASI-NN ONNX Runtime backend</Title>
         <PackageId>WACS.WASI.NN.OnnxRuntime</PackageId>
         <Authors>Kelvin Nishikawa</Authors>
-        <Description>ONNX Runtime backend for WACS.WASI.NN. Implements IBackend for graph-encoding.onnx via Microsoft.ML.OnnxRuntime. Ships as a sibling NuGet so consumers wiring only one backend don't pull the OnnxRuntime native binaries.</Description>
+        <Description>ONNX Runtime backend for WACS.WASI.NN. Implements IBackend for graph-encoding.onnx via Microsoft.ML.OnnxRuntime. Ships as a sibling NuGet so consumers wiring only one backend don't pull the OnnxRuntime native binaries. Tracks the wasi-nn proposal at WASI Phase 2 — the WIT surface may change as the proposal evolves.</Description>
         <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
         <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
