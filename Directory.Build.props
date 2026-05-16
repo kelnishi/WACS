@@ -1,0 +1,19 @@
+<Project>
+
+    <PropertyGroup>
+        <!-- Deterministic builds: PE timestamps + MVIDs are derived
+             from the source, not wall-clock time, so two builds of
+             the same source produce byte-identical assemblies. -->
+        <Deterministic>true</Deterministic>
+
+        <!-- CI-build flag: tells the compiler to normalize source
+             paths in PDBs/SourceLink to the canonical committed
+             layout. Combined with Deterministic + the symbol
+             packages the nuget.yml workflow already pushes
+             (.snupkg), this makes the published packages bit-for-bit
+             reproducible from a clean checkout at the corresponding
+             tagged commit. -->
+        <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+    </PropertyGroup>
+
+</Project>
