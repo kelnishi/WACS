@@ -1784,14 +1784,16 @@ namespace Wacs.WASI.GFX.Webgpu
             {
                 ColorAttachments = attachments,
                 DepthStencilAttachment = ReadOptDepthStencilAttachment(
-                    ctx, p + 16, host),
+                    ctx.DefaultMemory, p + 16,
+                    h => (IGpuTextureView)host.TextureViews.Get(h)),
                 OcclusionQuerySet = mem[p + 56] == 0
                     ? Option<IGpuQuerySet>.None
                     : Option<IGpuQuerySet>.Some(
                         (IGpuQuerySet)host.QuerySets.Get(
                             ctx.ReadI32LE(p + 60))),
                 TimestampWrites = ReadOptRenderPassTimestampWrites(
-                    ctx, p + 64, host),
+                    ctx.DefaultMemory, p + 64,
+                    h => (IGpuQuerySet)host.QuerySets.Get(h)),
                 MaxDrawCount = mem[p + 88] == 0
                     ? Option<ulong>.None
                     : Option<ulong>.Some(
@@ -1812,26 +1814,30 @@ namespace Wacs.WASI.GFX.Webgpu
         //         disc@p+8 val@p+12
         //   @p+16 end-of-pass-write-index opt<u32> (8)
         //         disc@p+16 val@p+20
-        private static Option<Webgpu.GpuRenderPassTimestampWrites>
+        internal static Option<Webgpu.GpuRenderPassTimestampWrites>
             ReadOptRenderPassTimestampWrites(
-                ExecContext ctx, int p, WasiWebgpuHost host)
+                Wacs.Core.Runtime.Types.MemoryInstance mem, int p,
+                Func<int, IGpuQuerySet> querySetLookup)
         {
-            var mem = ctx.Memory();
-            if (mem[p] == 0)
+            var data = mem.Data;
+            if (data[p] == 0)
                 return Option<Webgpu.GpuRenderPassTimestampWrites>.None;
             return Option<Webgpu.GpuRenderPassTimestampWrites>.Some(
                 new Webgpu.GpuRenderPassTimestampWrites
                 {
-                    QuerySet = (IGpuQuerySet)host.QuerySets.Get(
-                        ctx.ReadI32LE(p + 4)),
-                    BeginningOfPassWriteIndex = mem[p + 8] == 0
+                    QuerySet = querySetLookup(
+                        Wacs.ComponentModel.CanonicalABI
+                            .PrimitiveStore.ReadI32LE(mem, p + 4)),
+                    BeginningOfPassWriteIndex = data[p + 8] == 0
                         ? Option<uint>.None
                         : Option<uint>.Some(
-                            unchecked((uint)ctx.ReadI32LE(p + 12))),
-                    EndOfPassWriteIndex = mem[p + 16] == 0
+                            Wacs.ComponentModel.CanonicalABI
+                                .PrimitiveStore.ReadU32LE(mem, p + 12)),
+                    EndOfPassWriteIndex = data[p + 16] == 0
                         ? Option<uint>.None
                         : Option<uint>.Some(
-                            unchecked((uint)ctx.ReadI32LE(p + 20))),
+                            Wacs.ComponentModel.CanonicalABI
+                                .PrimitiveStore.ReadU32LE(mem, p + 20)),
                 });
         }
 
@@ -1850,48 +1856,52 @@ namespace Wacs.WASI.GFX.Webgpu
         //   @p+32 stencil-load-op opt<enum-u8> (2)
         //   @p+34 stencil-store-op opt<enum-u8> (2)
         //   @p+36 stencil-read-only opt<bool> (2)
-        private static Option<Webgpu.GpuRenderPassDepthStencilAttachment>
+        internal static Option<Webgpu.GpuRenderPassDepthStencilAttachment>
             ReadOptDepthStencilAttachment(
-                ExecContext ctx, int p, WasiWebgpuHost host)
+                Wacs.Core.Runtime.Types.MemoryInstance mem, int p,
+                Func<int, IGpuTextureView> viewLookup)
         {
-            var mem = ctx.Memory();
-            if (mem[p] == 0)
+            var data = mem.Data;
+            if (data[p] == 0)
                 return Option<Webgpu.GpuRenderPassDepthStencilAttachment>.None;
             return Option<Webgpu.GpuRenderPassDepthStencilAttachment>.Some(
                 new Webgpu.GpuRenderPassDepthStencilAttachment
                 {
-                    View = (IGpuTextureView)host.TextureViews.Get(
-                        ctx.ReadI32LE(p + 4)),
-                    DepthClearValue = mem[p + 8] == 0
+                    View = viewLookup(
+                        Wacs.ComponentModel.CanonicalABI
+                            .PrimitiveStore.ReadI32LE(mem, p + 4)),
+                    DepthClearValue = data[p + 8] == 0
                         ? Option<float>.None
-                        : Option<float>.Some(BitConverter.Int32BitsToSingle(
-                            ctx.ReadI32LE(p + 12))),
-                    DepthLoadOp = mem[p + 16] == 0
+                        : Option<float>.Some(
+                            Wacs.ComponentModel.CanonicalABI
+                                .PrimitiveStore.ReadF32LE(mem, p + 12)),
+                    DepthLoadOp = data[p + 16] == 0
                         ? Option<Webgpu.GpuLoadOp>.None
                         : Option<Webgpu.GpuLoadOp>.Some(
-                            (Webgpu.GpuLoadOp)mem[p + 17]),
-                    DepthStoreOp = mem[p + 18] == 0
+                            (Webgpu.GpuLoadOp)data[p + 17]),
+                    DepthStoreOp = data[p + 18] == 0
                         ? Option<Webgpu.GpuStoreOp>.None
                         : Option<Webgpu.GpuStoreOp>.Some(
-                            (Webgpu.GpuStoreOp)mem[p + 19]),
-                    DepthReadOnly = mem[p + 20] == 0
+                            (Webgpu.GpuStoreOp)data[p + 19]),
+                    DepthReadOnly = data[p + 20] == 0
                         ? Option<bool>.None
-                        : Option<bool>.Some(mem[p + 21] != 0),
-                    StencilClearValue = mem[p + 24] == 0
+                        : Option<bool>.Some(data[p + 21] != 0),
+                    StencilClearValue = data[p + 24] == 0
                         ? Option<uint>.None
                         : Option<uint>.Some(
-                            unchecked((uint)ctx.ReadI32LE(p + 28))),
-                    StencilLoadOp = mem[p + 32] == 0
+                            Wacs.ComponentModel.CanonicalABI
+                                .PrimitiveStore.ReadU32LE(mem, p + 28)),
+                    StencilLoadOp = data[p + 32] == 0
                         ? Option<Webgpu.GpuLoadOp>.None
                         : Option<Webgpu.GpuLoadOp>.Some(
-                            (Webgpu.GpuLoadOp)mem[p + 33]),
-                    StencilStoreOp = mem[p + 34] == 0
+                            (Webgpu.GpuLoadOp)data[p + 33]),
+                    StencilStoreOp = data[p + 34] == 0
                         ? Option<Webgpu.GpuStoreOp>.None
                         : Option<Webgpu.GpuStoreOp>.Some(
-                            (Webgpu.GpuStoreOp)mem[p + 35]),
-                    StencilReadOnly = mem[p + 36] == 0
+                            (Webgpu.GpuStoreOp)data[p + 35]),
+                    StencilReadOnly = data[p + 36] == 0
                         ? Option<bool>.None
-                        : Option<bool>.Some(mem[p + 37] != 0),
+                        : Option<bool>.Some(data[p + 37] != 0),
                 });
         }
 
@@ -2070,9 +2080,9 @@ namespace Wacs.WASI.GFX.Webgpu
                 : Option<string>.Some(ReadUtf8(ctx,
                     ctx.ReadI32LE(p + 192), ctx.ReadI32LE(p + 196)));
 
-            var primitive = ReadOptPrimitiveState(ctx, p + 40);
-            var depthStencil = ReadOptDepthStencilState(ctx, p + 52);
-            var multisample = ReadOptMultisampleState(ctx, p + 120);
+            var primitive = ReadOptPrimitiveState(ctx.DefaultMemory, p + 40);
+            var depthStencil = ReadOptDepthStencilState(ctx.DefaultMemory, p + 52);
+            var multisample = ReadOptMultisampleState(ctx.DefaultMemory, p + 120);
 
             var descriptor = new Webgpu.GpuRenderPipelineDescriptor
             {
@@ -2095,34 +2105,34 @@ namespace Wacs.WASI.GFX.Webgpu
         //     @p+5 front-face opt<enum-u8> (2)
         //     @p+7 cull-mode opt<enum-u8> (2)
         //     @p+9 unclipped-depth opt<bool> (2)
-        private static Option<Webgpu.GpuPrimitiveState>
-            ReadOptPrimitiveState(ExecContext ctx, int p)
+        internal static Option<Webgpu.GpuPrimitiveState>
+            ReadOptPrimitiveState(Wacs.Core.Runtime.Types.MemoryInstance mem, int p)
         {
-            var mem = ctx.Memory();
-            if (mem[p] == 0)
+            var data = mem.Data;
+            if (data[p] == 0)
                 return Option<Webgpu.GpuPrimitiveState>.None;
             return Option<Webgpu.GpuPrimitiveState>.Some(
                 new Webgpu.GpuPrimitiveState
                 {
-                    Topology = mem[p + 1] == 0
+                    Topology = data[p + 1] == 0
                         ? Option<Webgpu.GpuPrimitiveTopology>.None
                         : Option<Webgpu.GpuPrimitiveTopology>.Some(
-                            (Webgpu.GpuPrimitiveTopology)mem[p + 2]),
-                    StripIndexFormat = mem[p + 3] == 0
+                            (Webgpu.GpuPrimitiveTopology)data[p + 2]),
+                    StripIndexFormat = data[p + 3] == 0
                         ? Option<Webgpu.GpuIndexFormat>.None
                         : Option<Webgpu.GpuIndexFormat>.Some(
-                            (Webgpu.GpuIndexFormat)mem[p + 4]),
-                    FrontFace = mem[p + 5] == 0
+                            (Webgpu.GpuIndexFormat)data[p + 4]),
+                    FrontFace = data[p + 5] == 0
                         ? Option<Webgpu.GpuFrontFace>.None
                         : Option<Webgpu.GpuFrontFace>.Some(
-                            (Webgpu.GpuFrontFace)mem[p + 6]),
-                    CullMode = mem[p + 7] == 0
+                            (Webgpu.GpuFrontFace)data[p + 6]),
+                    CullMode = data[p + 7] == 0
                         ? Option<Webgpu.GpuCullMode>.None
                         : Option<Webgpu.GpuCullMode>.Some(
-                            (Webgpu.GpuCullMode)mem[p + 8]),
-                    UnclippedDepth = mem[p + 9] == 0
+                            (Webgpu.GpuCullMode)data[p + 8]),
+                    UnclippedDepth = data[p + 9] == 0
                         ? Option<bool>.None
-                        : Option<bool>.Some(mem[p + 10] != 0),
+                        : Option<bool>.Some(data[p + 10] != 0),
                 });
         }
 
@@ -2138,44 +2148,50 @@ namespace Wacs.WASI.GFX.Webgpu
         //   @p+44 depth-bias opt<s32> (8 bytes)
         //   @p+52 depth-bias-slope-scale opt<f32> (8 bytes)
         //   @p+60 depth-bias-clamp opt<f32> (8 bytes)
-        private static Option<Webgpu.GpuDepthStencilState>
-            ReadOptDepthStencilState(ExecContext ctx, int p)
+        internal static Option<Webgpu.GpuDepthStencilState>
+            ReadOptDepthStencilState(Wacs.Core.Runtime.Types.MemoryInstance mem, int p)
         {
-            var mem = ctx.Memory();
-            if (mem[p] == 0)
+            var data = mem.Data;
+            if (data[p] == 0)
                 return Option<Webgpu.GpuDepthStencilState>.None;
             return Option<Webgpu.GpuDepthStencilState>.Some(
                 new Webgpu.GpuDepthStencilState
                 {
-                    Format = (Webgpu.GpuTextureFormat)mem[p + 4],
-                    DepthWriteEnabled = mem[p + 5] == 0
+                    Format = (Webgpu.GpuTextureFormat)data[p + 4],
+                    DepthWriteEnabled = data[p + 5] == 0
                         ? Option<bool>.None
-                        : Option<bool>.Some(mem[p + 6] != 0),
-                    DepthCompare = mem[p + 7] == 0
+                        : Option<bool>.Some(data[p + 6] != 0),
+                    DepthCompare = data[p + 7] == 0
                         ? Option<Webgpu.GpuCompareFunction>.None
                         : Option<Webgpu.GpuCompareFunction>.Some(
-                            (Webgpu.GpuCompareFunction)mem[p + 8]),
-                    StencilFront = ReadOptStencilFaceState(ctx, p + 9),
-                    StencilBack  = ReadOptStencilFaceState(ctx, p + 18),
-                    StencilReadMask = mem[p + 28] == 0
+                            (Webgpu.GpuCompareFunction)data[p + 8]),
+                    StencilFront = ReadOptStencilFaceState(mem, p + 9),
+                    StencilBack  = ReadOptStencilFaceState(mem, p + 18),
+                    StencilReadMask = data[p + 28] == 0
                         ? Option<uint>.None
                         : Option<uint>.Some(
-                            unchecked((uint)ctx.ReadI32LE(p + 32))),
-                    StencilWriteMask = mem[p + 36] == 0
+                            Wacs.ComponentModel.CanonicalABI
+                                .PrimitiveStore.ReadU32LE(mem, p + 32)),
+                    StencilWriteMask = data[p + 36] == 0
                         ? Option<uint>.None
                         : Option<uint>.Some(
-                            unchecked((uint)ctx.ReadI32LE(p + 40))),
-                    DepthBias = mem[p + 44] == 0
+                            Wacs.ComponentModel.CanonicalABI
+                                .PrimitiveStore.ReadU32LE(mem, p + 40)),
+                    DepthBias = data[p + 44] == 0
                         ? Option<int>.None
-                        : Option<int>.Some(ctx.ReadI32LE(p + 48)),
-                    DepthBiasSlopeScale = mem[p + 52] == 0
+                        : Option<int>.Some(
+                            Wacs.ComponentModel.CanonicalABI
+                                .PrimitiveStore.ReadI32LE(mem, p + 48)),
+                    DepthBiasSlopeScale = data[p + 52] == 0
                         ? Option<float>.None
-                        : Option<float>.Some(BitConverter.Int32BitsToSingle(
-                            ctx.ReadI32LE(p + 56))),
-                    DepthBiasClamp = mem[p + 60] == 0
+                        : Option<float>.Some(
+                            Wacs.ComponentModel.CanonicalABI
+                                .PrimitiveStore.ReadF32LE(mem, p + 56)),
+                    DepthBiasClamp = data[p + 60] == 0
                         ? Option<float>.None
-                        : Option<float>.Some(BitConverter.Int32BitsToSingle(
-                            ctx.ReadI32LE(p + 64))),
+                        : Option<float>.Some(
+                            Wacs.ComponentModel.CanonicalABI
+                                .PrimitiveStore.ReadF32LE(mem, p + 64)),
                 });
         }
 
@@ -2185,31 +2201,31 @@ namespace Wacs.WASI.GFX.Webgpu
         //   @p+3 fail-op opt<enum-u8> (2)
         //   @p+5 depth-fail-op opt<enum-u8> (2)
         //   @p+7 pass-op opt<enum-u8> (2)
-        private static Option<Webgpu.GpuStencilFaceState>
-            ReadOptStencilFaceState(ExecContext ctx, int p)
+        internal static Option<Webgpu.GpuStencilFaceState>
+            ReadOptStencilFaceState(Wacs.Core.Runtime.Types.MemoryInstance mem, int p)
         {
-            var mem = ctx.Memory();
-            if (mem[p] == 0)
+            var data = mem.Data;
+            if (data[p] == 0)
                 return Option<Webgpu.GpuStencilFaceState>.None;
             return Option<Webgpu.GpuStencilFaceState>.Some(
                 new Webgpu.GpuStencilFaceState
                 {
-                    Compare = mem[p + 1] == 0
+                    Compare = data[p + 1] == 0
                         ? Option<Webgpu.GpuCompareFunction>.None
                         : Option<Webgpu.GpuCompareFunction>.Some(
-                            (Webgpu.GpuCompareFunction)mem[p + 2]),
-                    FailOp = mem[p + 3] == 0
+                            (Webgpu.GpuCompareFunction)data[p + 2]),
+                    FailOp = data[p + 3] == 0
                         ? Option<Webgpu.GpuStencilOperation>.None
                         : Option<Webgpu.GpuStencilOperation>.Some(
-                            (Webgpu.GpuStencilOperation)mem[p + 4]),
-                    DepthFailOp = mem[p + 5] == 0
+                            (Webgpu.GpuStencilOperation)data[p + 4]),
+                    DepthFailOp = data[p + 5] == 0
                         ? Option<Webgpu.GpuStencilOperation>.None
                         : Option<Webgpu.GpuStencilOperation>.Some(
-                            (Webgpu.GpuStencilOperation)mem[p + 6]),
-                    PassOp = mem[p + 7] == 0
+                            (Webgpu.GpuStencilOperation)data[p + 6]),
+                    PassOp = data[p + 7] == 0
                         ? Option<Webgpu.GpuStencilOperation>.None
                         : Option<Webgpu.GpuStencilOperation>.Some(
-                            (Webgpu.GpuStencilOperation)mem[p + 8]),
+                            (Webgpu.GpuStencilOperation)data[p + 8]),
                 });
         }
 
@@ -2218,26 +2234,28 @@ namespace Wacs.WASI.GFX.Webgpu
         //   @p+4  count opt<u32> (8 bytes)
         //   @p+12 mask opt<u32> (8 bytes)
         //   @p+20 alpha-to-coverage-enabled opt<bool> (2 bytes)
-        private static Option<Webgpu.GpuMultisampleState>
-            ReadOptMultisampleState(ExecContext ctx, int p)
+        internal static Option<Webgpu.GpuMultisampleState>
+            ReadOptMultisampleState(Wacs.Core.Runtime.Types.MemoryInstance mem, int p)
         {
-            var mem = ctx.Memory();
-            if (mem[p] == 0)
+            var data = mem.Data;
+            if (data[p] == 0)
                 return Option<Webgpu.GpuMultisampleState>.None;
             return Option<Webgpu.GpuMultisampleState>.Some(
                 new Webgpu.GpuMultisampleState
                 {
-                    Count = mem[p + 4] == 0
+                    Count = data[p + 4] == 0
                         ? Option<uint>.None
                         : Option<uint>.Some(
-                            unchecked((uint)ctx.ReadI32LE(p + 8))),
-                    Mask = mem[p + 12] == 0
+                            Wacs.ComponentModel.CanonicalABI
+                                .PrimitiveStore.ReadU32LE(mem, p + 8)),
+                    Mask = data[p + 12] == 0
                         ? Option<uint>.None
                         : Option<uint>.Some(
-                            unchecked((uint)ctx.ReadI32LE(p + 16))),
-                    AlphaToCoverageEnabled = mem[p + 20] == 0
+                            Wacs.ComponentModel.CanonicalABI
+                                .PrimitiveStore.ReadU32LE(mem, p + 16)),
+                    AlphaToCoverageEnabled = data[p + 20] == 0
                         ? Option<bool>.None
-                        : Option<bool>.Some(mem[p + 21] != 0),
+                        : Option<bool>.Some(data[p + 21] != 0),
                 });
         }
 
