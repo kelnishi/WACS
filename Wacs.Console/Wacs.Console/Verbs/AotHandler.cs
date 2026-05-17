@@ -79,6 +79,8 @@ namespace Wacs.Console.Verbs
                     DataStorage = "static",
                     Wasi = opts.Wasi,
                     Wasip2 = opts.Wasip2,
+                    Harness = opts.Harness,
+                    WitDir = opts.WitDir,
                 };
                 int buildRc = BuildHandler.Execute(buildOpts);
                 if (buildRc != 0)

@@ -1,5 +1,75 @@
 # Changelog
 
+## WACS.Cli 1.10.0 / WACS.Transpiler.Lib 0.10.1 — `--harness` / `--wit-dir` on aot + build
+
+Both transpile-side CLI verbs (`wacs aot`, `wacs build`) gain
+two new flags that resolve the harness contract WIT text and
+forward it through `TranspilerOptions.HarnessContractText`:
+
+- **`--harness <path.dll>`** — loads a built harness assembly
+  (produced by `wacs harness`), reads its embedded
+  `_WitContract` static field via reflection, threads the text
+  into the transpile pipeline.
+- **`--wit-dir <dir>`** — concatenates every `.wit` under the
+  directory (matching the embedding shape `HarnessEmitter` uses).
+  In-process equivalent of `--harness`: no `.dll` build step
+  required, useful during iteration.
+
+The two flags are mutually exclusive.
+
+**End-to-end verified**:
+```
+$ wacs harness hello-spike/wit -o hello.harness.dll
+$ wasm-tools component embed wit/ hello.component.wasm \
+    --world hello -o hello-with-witsection.wasm
+$ wacs build --wasip2 --harness hello.harness.dll \
+    -o out.dll hello-with-witsection.wasm
+wrote out.dll (138 functions, 263ms)
+$ wacs build --wasip2 --harness richer.harness.dll \
+    -o should-fail.dll hello-with-witsection.wasm
+error: component transpilation failed: Component does not match harness WIT contract:
+  world name: harness expects 'richer', component declares 'hello'.
+  export 'add': declared in harness, missing from component.
+  export 'normalize-or-fail': declared in harness, missing from component.
+  export 'greet': present in component, not declared in harness.
+```
+
+**Caveat surfaced during E2E test, fixed in this slice (Transpiler.Lib
+0.10.1 point bump)**: the v0 validator requires the component
+binary to carry a `component-type:*` custom section (the
+wit-component convention). Rust components built straight to
+`wasm32-wasip2` via cargo don't emit one. Previously the
+validator silently skipped when the section was missing, giving
+a false-positive pass; now it throws with an actionable message
+pointing at `wasm-tools component embed`. Deriving the world
+from the component's primary type / export sections (instead of
+a custom section) is a follow-up — needs `BinaryWitDecoder` to
+grow a new entry point.
+
+**Deferred from the outer ring**: the transpiler doesn't yet
+emit `implements I{World}` on the transpiled output. That's the
+"symmetric engines at the CLR-interface level" piece — requires
+weaving the harness's `I{World}` reference into
+`ComponentExportsEmit`'s class-definition pipeline (~600 LOC of
+coordinated transpiler-internals work). Embedders today get
+typed call sites on the interpreter side via the harness +
+contract validation on the transpiler side; CLR-interface-level
+sharing across engines is the natural v2 close.
+
+### What changed
+
+- **`WACS.Cli` 1.9.0 → 1.10.0** (minor — two new flags on aot +
+  build verbs): `AotOptions.Harness` + `AotOptions.WitDir` (and
+  the same on `BuildOptions`). `BuildHandler.BuildTranspilerOptions`
+  gains `ResolveHarnessContractText(BuildOptions)` — loads
+  harness `.dll` via `AssemblyLoadContext.LoadFromAssemblyPath` +
+  reflects `_WitContract`, or walks the directory concatenating
+  every `*.wit`.
+- **`WACS.Transpiler.Lib` 0.10.0 → 0.10.1** (point — validation
+  correctness): swap silent-skip for typed throw when
+  `HarnessContractText` is set but the component binary carries
+  no `component-type:*` custom section.
+
 ## WACS.Transpiler.Lib 0.10.0 — compile-time harness contract validation
 
 `TranspilerOptions` gains a `HarnessContractText` property — when

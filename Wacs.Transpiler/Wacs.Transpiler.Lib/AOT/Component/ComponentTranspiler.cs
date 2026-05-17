@@ -167,9 +167,29 @@ namespace Wacs.Transpiler.AOT.Component
             // against the component's WIT custom section before any
             // IL is emitted. Mismatch throws InvalidOperationException
             // with a typed report listing every difference.
-            if (options?.HarnessContractText is { Length: > 0 } contract
-                && parsed.DecodedWit != null)
+            //
+            // Caveat (v0): contract validation requires the component
+            // binary to carry a `component-type:*` custom section
+            // (the wit-component convention). Rust components built
+            // straight to `wasm32-wasip2` via cargo don't emit one —
+            // run them through `wasm-tools component embed` first to
+            // get the custom section, or use `wit-component new`. The
+            // alternative — deriving the world from the component's
+            // primary type/export sections — is a follow-up (BinaryWitDecoder
+            // would need a new entry point). For now, request without
+            // a usable decoded WIT fails loudly rather than silently
+            // skipping; users see a clear actionable message instead
+            // of a false-positive validation pass.
+            if (options?.HarnessContractText is { Length: > 0 } contract)
             {
+                if (parsed.DecodedWit == null)
+                {
+                    throw new System.InvalidOperationException(
+                        "Harness contract validation requested but the component "
+                        + "binary carries no `component-type:*` custom section. "
+                        + "Run the component through `wasm-tools component embed` "
+                        + "to add one, or omit the harness flag for this build.");
+                }
                 var diffs = WitContractCompare.Diff(contract, parsed.DecodedWit);
                 if (diffs.Count > 0)
                 {
