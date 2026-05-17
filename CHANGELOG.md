@@ -1,5 +1,62 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Lib 0.13.0 — direct `option<T>` / `result<T,E>` / `tuple<...>` returns
+
+Anonymous aggregate types are now valid as the direct return of
+an export — no record wrapper required.
+
+```wit
+world directs {
+    export find-positive:    func(value: s32)    -> option<u32>;
+    export ensure-non-empty: func(value: string) -> option<string>;
+    export parse-int:        func(text: string)  -> result<u32, string>;
+    export coord-named:      func(x: u32, y: u32, label: string) -> tuple<u32, u32, string>;
+}
+```
+
+### How it works
+
+The named-record / named-variant return path lifts via the
+per-type `Lift{Name}` static method registered during
+`LiftEmit.EmitLifts`. Anonymous aggregates have no name to
+register under, so we emit a synthetic per-export
+`Lift__ret_<exportName>` static method that calls
+`LiftEmit.EmitLiftField` at offset 0 over the retArea pointer.
+The wrapper then takes the same `EmitLiftReturnViaRetArea`
+path the named-type returns use — including the
+`NeedsPostReturn` cabi_post cleanup when the type transitively
+carries strings or lists.
+
+### What changed
+
+- **`WorldHarnessEmit.cs`**:
+  - `BuildFunctionExport` widens its indirect-aggregate-return
+    case to also accept `CtOptionType` / `CtResultType` /
+    `CtTupleType` — they get `LoweredReturn = int` and the
+    transitive `NeedsPostReturn` check.
+  - New per-export emission step: for each export whose return
+    derefs to option / result / tuple, define
+    `Lift__ret_<name>(MemoryInstance, int)` private static
+    method that calls `LiftEmit.EmitLiftField(ret, 0, …)` and
+    returns.
+  - `EmitFlatLowered` dispatches option/result/tuple returns to
+    `EmitLiftReturnViaRetArea` using the new
+    `fe.ReturnLiftMethod`.
+  - `FunctionExport` carries the optional `ReturnLiftMethod`
+    reference.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-direct-returns/`
+  — four exports covering direct `option<u32>` (numeric),
+  `option<string>` (reference + string-bearing cabi_post),
+  `result<u32, string>` (Ok + Err with realloc'd error string),
+  and `tuple<u32, u32, string>` (mixed value+ref tuple).
+
+**17/17 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.20.0` →
+`WACS-ComponentModel-v0.21.0` (minor — capability shift on
+Harness.Lib).
+
 ## WACS.ComponentModel.Harness.Lib 0.12.0 — strings + lists in PARAMS (lower path)
 
 Harness emitter now lowers `string` and `list<T>` arguments on the

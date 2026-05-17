@@ -152,6 +152,31 @@ namespace Wacs.ComponentModel.Harness.Lib
             // validate at runtime.
             EmitWitContractField(typeBuilder, contractText);
 
+            // For exports whose direct return is an anonymous
+            // aggregate (option / result / tuple), emit a per-export
+            // synthetic Lift method so the wrapper can use the same
+            // retArea-tail path the named record/variant returns use.
+            foreach (var fe in funcExports)
+            {
+                if (fe.Spec.HasNoResult) continue;
+                var ret = CanonicalAbi.Deref(fe.Spec.Result!);
+                if (ret is CtOptionType || ret is CtResultType || ret is CtTupleType)
+                {
+                    var clr = WitTypeEmit.MapClrType(ret, registry, $"return of '{fe.Name}'");
+                    var mb = typeBuilder.DefineMethod(
+                        "Lift__ret_" + fe.Name.Replace('-', '_'),
+                        MethodAttributes.Private | MethodAttributes.Static | MethodAttributes.HideBySig,
+                        clr,
+                        new[] { typeof(MemoryInstance), typeof(int) });
+                    mb.DefineParameter(1, ParameterAttributes.None, "memory");
+                    mb.DefineParameter(2, ParameterAttributes.None, "ptr");
+                    var il = mb.GetILGenerator();
+                    LiftEmit.EmitLiftField(il, ret, 0, registry, liftMethods);
+                    il.Emit(OpCodes.Ret);
+                    fe.ReturnLiftMethod = mb;
+                }
+            }
+
             var ctor = EmitConstructor(typeBuilder, runtimeField, memoryField, reallocField, funcExports);
             EmitLoadFrom(typeBuilder, ctor, funcExports);
             foreach (var fe in funcExports)
@@ -225,6 +250,11 @@ namespace Wacs.ComponentModel.Harness.Lib
 
             public FieldBuilder InvokerField = null!;
             public FieldBuilder? PostInvokerField;
+            // For anonymous-aggregate direct returns (option<T>,
+            // result<T,E>, tuple<...>) we emit a per-export Lift
+            // helper since these have no name to register under in
+            // the world-level liftMethods dictionary.
+            public MethodBuilder? ReturnLiftMethod;
         }
 
         private static FunctionExport BuildFunctionExport(string witName, CtFunctionType fn, TypeRegistry registry)
@@ -268,17 +298,18 @@ namespace Wacs.ComponentModel.Harness.Lib
                     fe.LoweredReturn = typeof(int);
                     fe.NeedsPostReturn = true;
                 }
-                else if (r is CtRecordType || r is CtVariantType || r is CtListType)
+                else if (r is CtRecordType || r is CtVariantType || r is CtListType
+                         || r is CtOptionType || r is CtResultType || r is CtTupleType)
                 {
                     // Aggregate return — wasm returns a ret-area i32
                     // pointing at the value laid out per canonical ABI.
                     // NeedsPostReturn iff the value transitively
                     // contains strings or lists (those carry pointers
                     // that need cabi_post freeing). Pure-primitive
-                    // records / variants are inert and don't need a
-                    // post-return call. Lists ALWAYS need post-return
-                    // (the element-array body lives on the wasm-side
-                    // heap allocator).
+                    // records / variants / options / results / tuples
+                    // are inert and don't need a post-return call.
+                    // Lists ALWAYS need post-return (the element-array
+                    // body lives on the wasm-side heap allocator).
                     fe.LoweredReturn = typeof(int);
                     fe.NeedsPostReturn = ContainsStringOrList(r);
                 }
@@ -728,6 +759,11 @@ namespace Wacs.ComponentModel.Harness.Lib
             if (retDeref is CtListType list)
             {
                 EmitLiftListReturn(il, fe, list, memoryField, registry, liftMethods);
+                return;
+            }
+            if (retDeref is CtOptionType || retDeref is CtResultType || retDeref is CtTupleType)
+            {
+                EmitLiftReturnViaRetArea(il, fe, memoryField, fe.ReturnLiftMethod!);
                 return;
             }
 

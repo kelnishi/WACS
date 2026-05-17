@@ -1,0 +1,15 @@
+package wacs:direct-returns-spike;
+
+world directs {
+    /// Direct option<u32> return — no record wrapper.
+    export find-positive: func(value: s32) -> option<u32>;
+
+    /// Direct option<string> return.
+    export ensure-non-empty: func(value: string) -> option<string>;
+
+    /// Direct result<u32, string> return.
+    export parse-int: func(text: string) -> result<u32, string>;
+
+    /// Direct tuple<u32, u32, string> return.
+    export coord-named: func(x: u32, y: u32, label: string) -> tuple<u32, u32, string>;
+}
