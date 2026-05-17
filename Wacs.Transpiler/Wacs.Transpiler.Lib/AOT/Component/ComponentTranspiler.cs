@@ -162,6 +162,23 @@ namespace Wacs.Transpiler.AOT.Component
         {
             var parsed = Parse(componentStream);
 
+            // Harness contract validation — when the embedder passed
+            // a HarnessContractText via TranspilerOptions, diff it
+            // against the component's WIT custom section before any
+            // IL is emitted. Mismatch throws InvalidOperationException
+            // with a typed report listing every difference.
+            if (options?.HarnessContractText is { Length: > 0 } contract
+                && parsed.DecodedWit != null)
+            {
+                var diffs = WitContractCompare.Diff(contract, parsed.DecodedWit);
+                if (diffs.Count > 0)
+                {
+                    var msg = "Component does not match harness WIT contract:\n  "
+                        + string.Join("\n  ", diffs);
+                    throw new System.InvalidOperationException(msg);
+                }
+            }
+
             // Composer mode: outer has zero core modules + at
             // least one nested component. Recursively transpile
             // each nested component into its own assembly, then

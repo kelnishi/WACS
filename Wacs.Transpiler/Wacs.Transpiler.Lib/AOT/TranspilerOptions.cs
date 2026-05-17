@@ -129,6 +129,24 @@ namespace Wacs.Transpiler.AOT
         public TranspilerCapabilities GcTypeChecking { get; set; } = TranspilerCapabilities.None;
 
         /// <summary>
+        /// Optional harness WIT contract — when set, the transpiler
+        /// parses this text + the loaded component's WIT custom
+        /// section and validates the world / export set structurally
+        /// before any IL is emitted. Mismatch throws
+        /// <see cref="System.InvalidOperationException"/> with a
+        /// typed diff describing what differs.
+        ///
+        /// <para>The expected source: the
+        /// <c>_WitContract</c> static field emitted on every harness
+        /// `.dll` by <c>WACS.ComponentModel.Harness.Lib</c>.
+        /// Threading the same text both ways means the harness and
+        /// the transpiled assembly share one contract — a binary
+        /// shape drift gets caught at build time, not at the typed
+        /// call site.</para>
+        /// </summary>
+        public string? HarnessContractText { get; set; }
+
+        /// <summary>
         /// Pre-built resolver derived from <see cref="HostPackages"/>.
         /// The component transpiler builds this once per
         /// <c>TranspileSingleModule</c> call (eagerly walking each

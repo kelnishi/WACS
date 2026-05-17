@@ -1,5 +1,53 @@
 # Changelog
 
+## WACS.Transpiler.Lib 0.10.0 — compile-time harness contract validation
+
+`TranspilerOptions` gains a `HarnessContractText` property — when
+set, the transpiler diffs the supplied WIT text against the loaded
+component's WIT custom section before any IL is emitted, and
+throws `InvalidOperationException` with a typed report listing
+every mismatch.
+
+The expected source for that text is the `_WitContract` static
+field every `WACS.ComponentModel.Harness.Lib`-emitted harness
+carries (per the previous slice). Threading it both ways binds
+the harness and transpiled output to one canonical contract — a
+binary shape drift gets caught at build time, not at the typed
+call site.
+
+New module: `Wacs.Transpiler.AOT.Component.WitContractCompare`.
+v0 scope:
+- World name match (kebab-case).
+- Export set match (added / dropped exports flagged).
+- Per-export signature: param arity, per-param type, return type,
+  via deep structural equality on the resolved `CtValType` tree
+  (records, variants, options, results, tuples, lists, primitives).
+  Records / variants compare on field / case names + types.
+- Imports not compared (the harness asserts what embedders invoke,
+  not what the component imports — that's a follow-up).
+- Diagnostic messages render short WIT-ish forms per mismatch.
+
+The transpiler emits-an-`implements I{World}` step on the
+transpiled assembly + CLI wiring follow in the next two
+checkpoints.
+
+Family tag: `WACS-Transpiler-v0.9.0` → `WACS-Transpiler-v0.10.0`
+(minor — new public API on TranspilerOptions, new public type).
+
+### What changed
+
+- **`WACS.Transpiler.Lib` 0.9.1 → 0.10.0** (minor — new public
+  API): adds `TranspilerOptions.HarnessContractText`,
+  `WitContractCompare.Diff(string, CtPackage)`,
+  `WitContractCompare.TypesEqual` recursion. Wired in
+  `ComponentTranspiler.TranspileSingleModule` between `Parse` and
+  the composer / single-module branch.
+- **Spec.Test**: csproj excludes
+  `components/fixtures/wit-harness-spike-*/**/*.cs` from the
+  default compile + None globs so the wit-harness fixtures'
+  subprojects (Aot.Spike, Generated.Validate) don't pollute
+  Spec.Test's assembly.
+
 ## WACS.ComponentModel.Harness.Lib 0.3.0 — `_WitContract` + symmetric `I{World}` interface
 
 Harness emitter now produces two pieces of contract scaffolding
