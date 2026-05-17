@@ -387,18 +387,26 @@ namespace Wacs.ComponentModel.Harness.Lib
             ILGenerator il, CtVariantType variant, TypeRegistry registry,
             System.Collections.Generic.Dictionary<CtValType, MethodBuilder> liftMethods)
         {
-            // Strategy: read disc, then a series of compare-and-branch
-            // blocks per case. Falls through to throw on unknown disc.
+            // Strategy: read disc (sized 1/2/4 per case count), then
+            // a series of compare-and-branch blocks per case. Falls
+            // through to throw on unknown disc.
             int payloadOffset = CanonicalAbi.VariantPayloadOffset(variant);
             int discSize = CanonicalAbi.VariantDiscSize(variant.Cases.Count);
-            if (discSize != 1)
-                throw new NotSupportedException(
-                    $"Variant '{variant.Name}' needs disc width {discSize}; v0.2 supports 1-byte discriminators only.");
 
-            var discLocal = il.DeclareLocal(typeof(byte));
+            var discLocal = il.DeclareLocal(typeof(int));
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldarg_1);
-            il.Emit(OpCodes.Call, MemoryHelpers_ReadU8);
+            switch (discSize)
+            {
+                case 1: il.Emit(OpCodes.Call, MemoryHelpers_ReadU8); break;
+                case 2:
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadI16LE);
+                    il.Emit(OpCodes.Conv_U2);
+                    break;
+                case 4: il.Emit(OpCodes.Call, MemoryHelpers_ReadI32LE); break;
+                default:
+                    throw new NotSupportedException($"Unsupported disc width {discSize}.");
+            }
             il.Emit(OpCodes.Stloc, discLocal);
 
             // Build labels per case + a final "throw on unknown" label.

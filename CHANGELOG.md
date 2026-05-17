@@ -1,5 +1,18 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Lib 0.25.1 — multi-byte variant disc (Item 5b)
+
+`EmitVariantLift` no longer refuses variants with more than
+256 cases. Discriminator is now read at the canonical-ABI
+width (1 / 2 / 4 bytes) via the appropriate
+`MemoryHelpers.Read{U8,I16LE,I32LE}` helper, with `Conv_U2`
+on the 16-bit path for proper unsigned widening. Lower side
+already pushed `Ldc_I4 i` which is correct for any disc size
+since wasm widens to i32 at the boundary.
+
+No new fixture — variants with 257+ cases are pathological;
+the change just unblocks them if they appear.
+
 ## WACS.ComponentModel.Harness.Lib 0.25.0 — lift list-element symmetry (Item 4)
 
 `list<T>` lift now covers every flat-lowerable element type, not
