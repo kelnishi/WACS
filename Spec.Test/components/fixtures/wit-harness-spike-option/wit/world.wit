@@ -1,0 +1,10 @@
+package wacs:option-spike;
+
+world picker {
+    record snapshot {
+        maybe-num: option<u32>,
+        maybe-name: option<string>,
+    }
+
+    export pick: func(want-num: u32, want-name: u32) -> snapshot;
+}

@@ -353,6 +353,20 @@ namespace Wacs.ComponentModel.Harness.Lib
                     throw new NotSupportedException(
                         $"Anonymous flag types not supported in v0.2 ({context}).");
 
+                case CtOptionType opt:
+                    // option<T>:
+                    //   - T is a CLR value type (int, enum, struct) →
+                    //     Nullable<T>; HasValue maps to the some/none
+                    //     disc.
+                    //   - T is a reference type (string, class, array)
+                    //     → T itself with null carrying the "none"
+                    //     signal. Saves the Nullable<T> wrapper for
+                    //     types that already have a null sentinel.
+                    var innerClr = MapClrType(opt.Inner, registry, $"{context} option<T>");
+                    return innerClr.IsValueType
+                        ? typeof(System.Nullable<>).MakeGenericType(innerClr)
+                        : innerClr;
+
                 default:
                     throw new NotSupportedException(
                         $"Harness emitter v0.2 does not yet support {deref.GetType().Name} ({context}).");

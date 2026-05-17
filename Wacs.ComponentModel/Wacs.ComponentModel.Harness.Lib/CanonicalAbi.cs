@@ -80,6 +80,18 @@ namespace Wacs.ComponentModel.Harness.Lib
                         return (w, w);
                     }
 
+                case CtOptionType opt:
+                    {
+                        // option<T> = variant { none, some(T) }.
+                        // 1-byte disc + payload at align_up(1, T_align)
+                        // + size T_size, total aligned to max(disc, T_align).
+                        var (innerSize, innerAlign) = Layout(opt.Inner);
+                        int payloadOffset = AlignUp(1, innerAlign);
+                        int totalAlign = Math.Max(1, innerAlign);
+                        int totalSize = AlignUp(payloadOffset + innerSize, totalAlign);
+                        return (totalSize, totalAlign);
+                    }
+
                 default:
                     throw new NotSupportedException(
                         $"CanonicalAbi.Layout: {t.GetType().Name} not supported in harness v0.2.");

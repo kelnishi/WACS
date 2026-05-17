@@ -149,10 +149,68 @@ namespace Wacs.ComponentModel.Harness.Lib
                         return;
                     }
 
+                case CtOptionType opt:
+                    EmitLiftOption(il, opt, offset, registry, liftMethods);
+                    return;
+
                 default:
                     throw new NotSupportedException(
                         $"LiftEmit v0.2 does not support {deref.GetType().Name}.");
             }
+        }
+
+        /// <summary>
+        /// Emit IL lifting an <c>option&lt;T&gt;</c> at <c>(arg.1 +
+        /// offset)</c>. Read disc byte; on 0 push none (null for
+        /// reference T, default <c>Nullable&lt;T&gt;</c> for value
+        /// T); on 1 lift T at the payload offset and wrap if T is
+        /// a value type. Leaves the option-typed value on the stack.
+        /// </summary>
+        private static void EmitLiftOption(
+            ILGenerator il, CtOptionType opt, int offset, TypeRegistry registry,
+            System.Collections.Generic.Dictionary<string, MethodBuilder> liftMethods)
+        {
+            var innerClr = WitTypeEmit.MapClrType(opt.Inner, registry, "option inner");
+            int payloadOffset = offset + CanonicalAbi.AlignUp(1, CanonicalAbi.AlignOf(opt.Inner));
+
+            var disc = il.DeclareLocal(typeof(byte));
+            il.Emit(OpCodes.Ldarg_0);
+            EmitOffsetPush(il, offset);
+            il.Emit(OpCodes.Call, MemoryHelpers_ReadU8);
+            il.Emit(OpCodes.Stloc, disc);
+
+            var noneLabel = il.DefineLabel();
+            var endLabel = il.DefineLabel();
+            il.Emit(OpCodes.Ldloc, disc);
+            il.Emit(OpCodes.Brfalse, noneLabel);
+
+            // some(T)
+            EmitLiftField(il, opt.Inner, payloadOffset, registry, liftMethods);
+            if (innerClr.IsValueType)
+            {
+                // wrap in Nullable<T>
+                var nullableT = typeof(System.Nullable<>).MakeGenericType(innerClr);
+                var ctor = nullableT.GetConstructor(new[] { innerClr })!;
+                il.Emit(OpCodes.Newobj, ctor);
+            }
+            il.Emit(OpCodes.Br, endLabel);
+
+            // none
+            il.MarkLabel(noneLabel);
+            if (innerClr.IsValueType)
+            {
+                var nullableT = typeof(System.Nullable<>).MakeGenericType(innerClr);
+                var defaultLocal = il.DeclareLocal(nullableT);
+                il.Emit(OpCodes.Ldloca, defaultLocal);
+                il.Emit(OpCodes.Initobj, nullableT);
+                il.Emit(OpCodes.Ldloc, defaultLocal);
+            }
+            else
+            {
+                il.Emit(OpCodes.Ldnull);
+            }
+
+            il.MarkLabel(endLabel);
         }
 
         /// <summary>

@@ -1,5 +1,59 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Lib 0.10.0 — `option<T>`
+
+Harness emitter handles WIT `option<T>` for both value-type and
+reference-type inner shapes:
+
+```wit
+world picker {
+    record snapshot {
+        maybe-num: option<u32>,
+        maybe-name: option<string>,
+    }
+    export pick: func(want-num: u32, want-name: u32) -> snapshot;
+}
+```
+
+CLR mapping:
+- **`option<u32>`** → `System.Nullable<uint>` (value-type inner).
+  None reads as `null`, Some as the wrapped value via `HasValue`.
+- **`option<string>`** → `string` with `null` sentinel
+  (reference-type inner — no wrapper needed).
+
+Canonical-ABI layout: 1-byte discriminator at offset 0, then the
+payload aligned per the inner type's alignment. Lift walks the
+discriminator, branches on `0` (none → `null` / `default`) vs
+`1` (some → lifts the inner T, optionally `Nullable.ctor` wraps
+for value types). `cabi_post` cleanup walks into a present
+option's inner T when it contains strings or lists.
+
+### What changed
+
+- **`CanonicalAbi.cs`** — `Layout` handles `CtOptionType` with
+  the disc-then-payload pattern.
+- **`WitTypeEmit.cs`** — `MapClrType` returns
+  `Nullable<innerClr>` for value-type inner, plain `innerClr`
+  for reference-type inner.
+- **`LiftEmit.cs`** — `EmitLiftField` adds `CtOptionType` case
+  delegating to new `EmitLiftOption` helper (reads disc, two
+  branches, lifts inner, conditionally wraps in `Nullable<T>`
+  via `.ctor(T)`).
+- **`WorldHarnessEmit.cs`** — `ContainsStringOrList` recurses
+  into `CtOptionType.Inner`, so cabi_post correctly walks
+  options containing strings/lists.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-option/` —
+  Rust returns conditional `Some`/`None` based on input flags.
+  Test asserts `pick(1,1) → (42, "hi")`, `pick(0,0) → (null,
+  null)`, and mixed `pick(1,0) → (42, null)`.
+
+**13/13 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.17.0` →
+`WACS-ComponentModel-v0.18.0` (minor — capability shift on
+Harness.Lib).
+
 ## WACS.ComponentModel.Harness.Lib 0.9.0 — `enum` + `flags`
 
 Harness emitter handles WIT `enum` and `flags` declarations:

@@ -327,6 +327,7 @@ namespace Wacs.ComponentModel.Harness.Lib
                     foreach (var c in v.Cases)
                         if (c.Payload != null && ContainsStringOrList(c.Payload)) return true;
                     return false;
+                case CtOptionType opt: return ContainsStringOrList(opt.Inner);
                 default: return false;
             }
         }
