@@ -1,5 +1,93 @@
 # Changelog
 
+## WACS.ComponentModel 0.7.0 / WACS.Transpiler.Lib 0.10.4 — primary-section decode for canon-lifted components (richer fixture)
+
+v1 follow-up to the primary-section decode work. Extends
+`BinaryWitDecoder.DecodeFromComponentBinary` to track the
+component function index space across additional sections so
+exports routed through canon.lift + sort=Core aliases (the
+typical `wasm-tools component new` shape, including the
+richer-spike fixture) resolve their type idx and surface in the
+diff.
+
+**End-to-end verified on cargo-built richer fixture (NO
+`wasm-tools component embed` step):**
+```
+$ wacs build --wasip2 --harness richer.harness.dll \
+    -o out.dll richer.component.wasm
+wrote out.dll (21 functions, 220ms)
+$ wacs build --wasip2 --harness hello.harness.dll \
+    -o sf.dll richer.component.wasm
+error: ...
+  export 'greet': declared in harness, missing from component.
+  export 'add': present in component, not declared in harness.
+  export 'normalize-or-fail': present in component, not declared in harness.
+```
+
+### New decoder sections
+
+- **Canon section** — `DecodeCanonSection` reads canon.lift entries
+  (recording the source type idx in the func index space) +
+  canon.lower (consumes wire format, no component-func-space
+  contribution — produces core funcs) + resource.new / drop / rep
+  intrinsics (consume wire format, no contribution). canonopts
+  parsing covers the common opt tags (string-encoding,
+  memory/realloc/post-return refs, async, callback,
+  always-task-return).
+- **Alias section** — `DecodeAliasSection` consumes wire format
+  with correct sort-first / target-second ordering; sort=Func
+  aliases (interface-export, core-instance-export, outer)
+  contribute uint.MaxValue slots so the func index space stays
+  aligned, but type isn't recoverable for them without chasing
+  the alias chain. Sort=Core / Type / Instance / Component
+  aliases skip without contribution.
+- **Export-as-rebinding** — primary-component exports of
+  sort=Func re-bind the source func at a new component-func
+  index (per wasm-tools' `$"#funcN name"` annotations). The
+  decoder translates the source idx through the current
+  funcTable to capture the type, then appends a new slot —
+  matching the binary's index space exactly.
+
+### World-level type-ref binding in WitContractCompare
+
+`WitResolver` only binds CtTypeRefs declared inside interfaces.
+The primary-section decoder places named types in `world.Types`,
+which WitResolver ignores. Added `BindWorldLevelTypeRefs` to
+`WitContractCompare`: walks each world's named types + binds
+matching CtTypeRefs in the world's export / import signatures
+(recursively through records, variants, lists, options, results,
+tuples). Without this, comparisons against primary-decoded
+packages would always diff structural-record-vs-CtTypeRef even
+when the underlying types matched.
+
+### Still gap: hello-style components with many sort=Func aliases
+
+The hello fixture (Rust + cargo-built wasm32-wasip2 binding to
+~13 WASI interfaces) still falls through to the "no custom
+section" error — the canon.lift for "greet" lands at a func idx
+the export references, but the cascading sort=Func aliases from
+the WASI instance imports either alter the index space ordering
+in ways the decoder doesn't track or trigger a canonopts shape
+v0 doesn't recognize. Investigation deferred; `wasm-tools
+component embed` remains the workaround for those.
+
+### What changed
+
+- **`WACS.ComponentModel` 0.6.0 → 0.7.0** (minor — canon /
+  alias / export-rebinding logic added to
+  `BinaryWitDecoder.DecodeFromComponentBinary`): new private
+  helpers `DecodeCanonSection` (with `SkipCanonOpts`),
+  `DecodeAliasSection`, `ContributeImportsToFuncTable`,
+  `DecodePrimaryExportSection`.
+- **`WACS.Transpiler.Lib` 0.10.3 → 0.10.4** (point — validator
+  resolves world-level type refs): `WitContractCompare.Diff`
+  calls `BindWorldLevelTypeRefs` on both expected + actual
+  packages before structural comparison.
+
+Family tags: `WACS-ComponentModel-v0.10.0` → `WACS-ComponentModel-v0.11.0`
+(minor — capability shift); `WACS-Transpiler-v0.10.1` →
+`WACS-Transpiler-v0.10.2` (point).
+
 ## WACS.ComponentModel 0.6.0 / WACS.Transpiler.Lib 0.10.3 — primary-section WIT decode (partial)
 
 New entry point `BinaryWitDecoder.DecodeFromComponentBinary(byte[])`

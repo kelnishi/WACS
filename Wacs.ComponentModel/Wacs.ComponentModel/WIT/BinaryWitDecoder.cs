@@ -101,6 +101,16 @@ namespace Wacs.ComponentModel.WIT
             // sees the slots in the same order the binary did.
             var decls = new List<InnerDecl>();
 
+            // Component-level FUNCTION index space — separate from
+            // the type space. Populated by function imports + canon
+            // entries (lift/lower) + function aliases. Each entry
+            // tracks the TYPE INDEX of the function it represents
+            // (uint.MaxValue when unknown — e.g. an alias the
+            // decoder didn't follow). Used to translate
+            // export-of-sort-Func indices (which reference this
+            // space) to type indices (which BuildWorld resolves).
+            var funcTable = new List<uint>();
+
             while (!reader.AtEnd)
             {
                 var id = (ComponentSectionId)reader.ReadByte();
@@ -113,14 +123,262 @@ namespace Wacs.ComponentModel.WIT
                         break;
                     case ComponentSectionId.Import:
                         DecodePrimaryImportExportSection(payloadBytes, decls, import: true);
+                        ContributeImportsToFuncTable(payloadBytes, funcTable);
                         break;
                     case ComponentSectionId.Export:
-                        DecodePrimaryImportExportSection(payloadBytes, decls, import: false);
+                        // Exports of sort=Func re-bind the source
+                        // func at a new component-func index. The
+                        // type carries through — we can record it
+                        // by translating the source idx through the
+                        // CURRENT funcTable before adding a new
+                        // slot. Other sorts don't contribute to
+                        // the func index space.
+                        DecodePrimaryExportSection(payloadBytes, decls, funcTable);
+                        break;
+                    case ComponentSectionId.Canon:
+                        DecodeCanonSection(payloadBytes, funcTable);
+                        break;
+                    case ComponentSectionId.Alias:
+                        DecodeAliasSection(payloadBytes, funcTable);
                         break;
                 }
             }
 
-            return BuildPackageFromPrimary(decls);
+            // Translate every export-of-sort-Func TypeIdx (which is
+            // really a func-instance idx in the primary form) into a
+            // type-table idx via the func table. Exports whose func
+            // entry has unknown type drop out — they reference
+            // something we couldn't resolve (aliased imports, etc.).
+            var rewritten = new List<InnerDecl>(decls.Count);
+            foreach (var d in decls)
+            {
+                if (d is InnerExport ie && ie.SortByte == SortFunc)
+                {
+                    if (ie.TypeIdx < funcTable.Count
+                        && funcTable[(int)ie.TypeIdx] != uint.MaxValue)
+                    {
+                        rewritten.Add(new InnerExport(ie.Name,
+                            funcTable[(int)ie.TypeIdx], SortFunc));
+                    }
+                    // else: drop the export (caller sees an empty world,
+                    // falls back to the typed "no custom section" error).
+                }
+                else
+                {
+                    rewritten.Add(d);
+                }
+            }
+
+            return BuildPackageFromPrimary(rewritten);
+        }
+
+        /// <summary>
+        /// Walk an Import section to populate the function index
+        /// space. Func imports (sort=Func) get their type idx
+        /// recorded; other sorts are skipped — the import index
+        /// space is sort-segregated so imports of other sorts don't
+        /// claim func indices.
+        /// </summary>
+        private static void ContributeImportsToFuncTable(
+            byte[] payload, List<uint> funcTable)
+        {
+            var r = new ComponentBinaryReader(payload);
+            var count = r.ReadVarU32();
+            for (uint i = 0; i < count; i++)
+            {
+                var decl = ReadImportOrExport(r, import: true);
+                if (decl is InnerImport ii && ii.SortByte == SortFunc)
+                    funcTable.Add(ii.TypeIdx);
+            }
+        }
+
+        /// <summary>
+        /// Walk an Export section. Each entry becomes an
+        /// <see cref="InnerExport"/> in the synthetic decl list; for
+        /// exports of sort=Func, the export ALSO re-binds the source
+        /// func under a new component-func index (per wasm-tools'
+        /// `$"#funcN name"` annotations — exports of funcs allocate
+        /// a fresh slot whose type carries through). Translate the
+        /// source idx through the current funcTable to capture the
+        /// type, then append a new slot.
+        ///
+        /// <para>This is the export-as-rebinding behavior the
+        /// canon-tracking decoder needs to keep funcTable indices
+        /// aligned with the binary's component func index space.</para>
+        /// </summary>
+        private static void DecodePrimaryExportSection(
+            byte[] payload, List<InnerDecl> decls, List<uint> funcTable)
+        {
+            var r = new ComponentBinaryReader(payload);
+            var count = r.ReadVarU32();
+            for (uint i = 0; i < count; i++)
+            {
+                var decl = ReadImportOrExport(r, import: false);
+                decls.Add(decl);
+                if (decl is InnerExport ie && ie.SortByte == SortFunc)
+                {
+                    var srcType = (ie.TypeIdx < funcTable.Count)
+                        ? funcTable[(int)ie.TypeIdx]
+                        : uint.MaxValue;
+                    funcTable.Add(srcType);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Decode a Canon section, recording canon.lift entries (the
+        /// component-binary path most exports flow through). Each
+        /// canon entry contributes one slot to the function index
+        /// space; lift entries carry their type idx directly. Other
+        /// canon shapes (lower, resource.new, etc.) currently record
+        /// uint.MaxValue (unknown type) — exports landing on those
+        /// drop out of validation, surfaced via the empty-world
+        /// fallback. Lifting that needs the lower-source type
+        /// chain through component-level types.
+        /// </summary>
+        private static void DecodeCanonSection(byte[] payload, List<uint> funcTable)
+        {
+            var r = new ComponentBinaryReader(payload);
+            var count = r.ReadVarU32();
+            for (uint i = 0; i < count; i++)
+            {
+                var tag = r.ReadByte();
+                switch (tag)
+                {
+                    case 0x00:
+                        // canon.lift: 0x00 0x00 core-func-idx canonopts type-idx
+                        r.ReadByte();             // 0x00 sub-tag
+                        r.ReadVarU32();           // core func idx
+                        SkipCanonOpts(r);
+                        var typeIdx = r.ReadVarU32();
+                        funcTable.Add(typeIdx);
+                        break;
+                    case 0x01:
+                        // canon.lower: 0x01 0x00 component-func-idx canonopts
+                        r.ReadByte();             // 0x01 sub-tag
+                        r.ReadVarU32();           // component func idx
+                        SkipCanonOpts(r);
+                        // lower produces a CORE function, not a
+                        // component function — no func-index-space
+                        // contribution.
+                        break;
+                    case 0x02:
+                        // resource.new: 0x02 typeidx → func
+                        r.ReadVarU32();
+                        funcTable.Add(uint.MaxValue);
+                        break;
+                    case 0x03:
+                        // resource.drop: 0x03 valtype → func
+                        ReadValType(r);
+                        funcTable.Add(uint.MaxValue);
+                        break;
+                    case 0x04:
+                        // resource.rep: 0x04 typeidx → func
+                        r.ReadVarU32();
+                        funcTable.Add(uint.MaxValue);
+                        break;
+                    case 0x05:
+                        // resource.drop async: 0x05 typeidx → func
+                        r.ReadVarU32();
+                        funcTable.Add(uint.MaxValue);
+                        break;
+                    default:
+                        // Thread builtins, task/future/stream intrinsics
+                        // (Component Model async preview). Wire format
+                        // varies per kind and isn't structurally
+                        // decodable without their full spec coverage.
+                        // Bail loudly so the empty-world fallback
+                        // fires and the user sees the actionable error
+                        // rather than a silently miscounted func table.
+                        throw new FormatException(
+                            $"Canon intrinsic tag 0x{tag:X2} not yet supported in primary-section decode.");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Skip a canonopts vector. Format: vec(canonopt) where
+        /// canonopt is a 1-byte tag with variable payload. v0 walks
+        /// known tags; unknown tags throw FormatException so we
+        /// don't silently desync the rest of the parse.
+        /// </summary>
+        private static void SkipCanonOpts(ComponentBinaryReader r)
+        {
+            var optCount = r.ReadVarU32();
+            for (uint i = 0; i < optCount; i++)
+            {
+                var opt = r.ReadByte();
+                switch (opt)
+                {
+                    case 0x00: // string-encoding utf8
+                    case 0x01: // string-encoding utf16
+                    case 0x02: // string-encoding latin1-utf16
+                        break;
+                    case 0x03: // (memory N)
+                    case 0x04: // (realloc N)
+                    case 0x05: // (post-return N)
+                        r.ReadVarU32();
+                        break;
+                    case 0x06: // async
+                    case 0x07: // callback N
+                        if (opt == 0x07) r.ReadVarU32();
+                        break;
+                    case 0x08: // always-task-return
+                        break;
+                    default:
+                        throw new FormatException(
+                            $"Unknown canonopt tag 0x{opt:X2} in Canon section.");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Decode an Alias section. Wire format per
+        /// wasm-encoder/component:
+        /// <code>
+        ///   alias := sort target target-payload
+        ///   sort  := 0x00 inner-core-sort | 0x01..0x05 component-sort
+        /// </code>
+        /// Aliases that target a Func sort contribute to the
+        /// component function index space; their type isn't directly
+        /// recoverable without resolving the aliased entity (core
+        /// instance export, outer scope), so they're marked
+        /// <c>uint.MaxValue</c> — exports landing on those drop out
+        /// of validation. Aliases of other sorts are skipped for
+        /// payload but don't contribute to the func index space.
+        /// </summary>
+        private static void DecodeAliasSection(byte[] payload, List<uint> funcTable)
+        {
+            var r = new ComponentBinaryReader(payload);
+            var count = r.ReadVarU32();
+            for (uint i = 0; i < count; i++)
+            {
+                var sort = r.ReadByte();
+                // If sort=Core (0x00), an inner core-sort byte
+                // follows before the target tag.
+                if (sort == SortCore) r.ReadByte();
+
+                var target = r.ReadByte();
+                switch (target)
+                {
+                    case 0x00: // instance-export
+                        r.ReadVarU32(); // instance idx
+                        r.ReadName();   // export name
+                        break;
+                    case 0x01: // core-instance-export
+                        r.ReadVarU32(); // core instance idx
+                        r.ReadName();   // export name
+                        break;
+                    case 0x02: // outer
+                        r.ReadVarU32(); // outer count
+                        r.ReadVarU32(); // outer idx
+                        break;
+                    default:
+                        throw new FormatException(
+                            $"Unknown alias target tag 0x{target:X2}.");
+                }
+                if (sort == SortFunc) funcTable.Add(uint.MaxValue);
+            }
         }
 
         /// <summary>

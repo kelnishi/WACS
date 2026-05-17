@@ -60,6 +60,21 @@ namespace Wacs.Transpiler.AOT.Component
                 return diffs;
             }
 
+            // The actual package may come pre-resolved (custom-section
+            // path runs WitResolver elsewhere) or unresolved (primary-
+            // section decode produces CtTypeRefs without Target set).
+            // Resolve here idempotently so TypesEqual's Deref hop
+            // finds the structural body on both sides.
+            WitResolver.Resolve(new[] { actualWit });
+
+            // WitResolver only binds CtTypeRefs declared inside
+            // interfaces. The primary-section decoder places named
+            // types in `world.Types`, which WitResolver ignores.
+            // Walk the world's named types and bind any matching
+            // CtTypeRefs in the world's export / import signatures.
+            BindWorldLevelTypeRefs(actualWit);
+            BindWorldLevelTypeRefs(expectedPkg);
+
             var expectedWorld = expectedPkg.Worlds.FirstOrDefault();
             var actualWorld = actualWit.Worlds.FirstOrDefault();
             if (expectedWorld == null)
@@ -250,6 +265,73 @@ namespace Wacs.Transpiler.AOT.Component
             while (t is CtTypeRef r && r.Target != null)
                 t = r.Target.Type;
             return t;
+        }
+
+        /// <summary>
+        /// Walk every world in <paramref name="pkg"/> and bind
+        /// unresolved <see cref="CtTypeRef"/>s in the world's import
+        /// / export signatures against the world's own
+        /// <see cref="CtWorldType.Types"/> entries. Closes the gap
+        /// <see cref="WitResolver"/> leaves for primary-section-
+        /// decoded packages where named types live at world scope
+        /// rather than inside interfaces.
+        /// </summary>
+        private static void BindWorldLevelTypeRefs(CtPackage pkg)
+        {
+            foreach (var world in pkg.Worlds)
+            {
+                if (world.Types.Count == 0) continue;
+                var byName = world.Types.ToDictionary(n => n.Name, n => n);
+                foreach (var port in world.Exports)
+                    BindPort(port.Spec, byName);
+                foreach (var port in world.Imports)
+                    BindPort(port.Spec, byName);
+                foreach (var nt in world.Types)
+                    BindTypeRefsIn(nt.Type, byName);
+            }
+        }
+
+        private static void BindPort(CtExternType spec, IDictionary<string, CtNamedType> byName)
+        {
+            if (spec is CtExternFunc fn)
+            {
+                foreach (var p in fn.Function.Params)
+                    BindTypeRefsIn(p.Type, byName);
+                if (fn.Function.Result != null)
+                    BindTypeRefsIn(fn.Function.Result, byName);
+                if (fn.Function.NamedResults != null)
+                    foreach (var r in fn.Function.NamedResults)
+                        BindTypeRefsIn(r.Type, byName);
+            }
+            // Inline interfaces / interface refs at world scope:
+            // not yet bound here. Surface as "not validated" in v0.
+        }
+
+        private static void BindTypeRefsIn(CtValType t, IDictionary<string, CtNamedType> byName)
+        {
+            switch (t)
+            {
+                case CtTypeRef r when r.Target == null:
+                    if (byName.TryGetValue(r.Name, out var target))
+                        r.Target = target;
+                    return;
+                case CtListType l: BindTypeRefsIn(l.Element, byName); return;
+                case CtOptionType o: BindTypeRefsIn(o.Inner, byName); return;
+                case CtResultType res:
+                    if (res.Ok != null) BindTypeRefsIn(res.Ok, byName);
+                    if (res.Err != null) BindTypeRefsIn(res.Err, byName);
+                    return;
+                case CtTupleType tup:
+                    foreach (var e in tup.Elements) BindTypeRefsIn(e, byName);
+                    return;
+                case CtRecordType rec:
+                    foreach (var f in rec.Fields) BindTypeRefsIn(f.Type, byName);
+                    return;
+                case CtVariantType v:
+                    foreach (var c in v.Cases)
+                        if (c.Payload != null) BindTypeRefsIn(c.Payload, byName);
+                    return;
+            }
         }
 
         /// <summary>
