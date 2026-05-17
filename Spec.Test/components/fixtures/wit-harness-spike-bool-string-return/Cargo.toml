@@ -1,0 +1,17 @@
+[package]
+name = "wit-harness-spike-bool-string-return"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+wit-bindgen = "0.41"
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = "s"
+strip = true
+panic = "abort"
+lto = true

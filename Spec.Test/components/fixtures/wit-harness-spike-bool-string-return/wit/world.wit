@@ -1,0 +1,5 @@
+package wacs:bool-string-spike;
+
+world ops {
+    export greet: func(use-comma: bool) -> string;
+}

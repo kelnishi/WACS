@@ -1,0 +1,10 @@
+package wacs:string-variant-spike;
+
+world messages {
+    variant message {
+        hello(string),
+        silence,
+    }
+
+    export pick: func(want-hello: u32) -> message;
+}

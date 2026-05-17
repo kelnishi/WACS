@@ -1,5 +1,66 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Lib 0.7.0 — small wins batch (bool params, direct string return, string-in-variant)
+
+Three smaller follow-ups bundled in one slice. The harness
+emitter's "real-world WIT" coverage is meaningfully wider:
+
+### 1. bool params + missing small-integer primitives
+
+`MapPrimitiveToClrType` (the LOWERED-shape mapper used by
+`AppendLoweredType`) was missing many primitive kinds — only
+S32/U32/S64/U64/F32/F64. Now covers:
+- `bool` → `int` (lowers as i32 0/1; CLR bool on the stack is
+  already i4-sized so no explicit conv emit needed at the
+  param-pushing site)
+- `s8` / `u8` / `s16` / `u16` / `char` → `int` (all lower to i32)
+- The wider numeric types (s64/u64/f32/f64) unchanged.
+
+User-facing type (`MapClrType` in `WitTypeEmit`) already returned
+the natural CLR primitive for each — `typeof(bool)`, `typeof(byte)`,
+etc. The fix lets the lowered-type bookkeeping not throw.
+
+### 2. Direct string return (`func() -> string`)
+
+Previously fell into `EmitFlatLowered`'s `CtPrimType` branch
+which returned the int retArea pointer as if it were the result.
+Now special-cases `CtPrim.String`:
+
+```csharp
+if (retPrim.Kind == CtPrim.String) {
+    EmitLiftStringReturn(il, fe, memoryField);
+    return;
+}
+```
+
+New `EmitLiftStringReturn` mirrors the string-out tail of the
+existing `EmitStringInStringOut` special path: stash retArea,
+read (ptr, len), `StringCoding.LiftUtf8`, call cabi_post, return.
+
+### 3. Strings in variant payloads
+
+No code changes — fixture-only coverage. The existing
+infrastructure (variant lift + `EmitLiftField` string case)
+already composed correctly.
+
+### What changed
+
+- **`WACS.ComponentModel.Harness.Lib` 0.6.0 → 0.7.0** (minor —
+  new primitive-type coverage + direct string return):
+  `MapPrimitiveToClrType` extended; `EmitFlatLowered` adds the
+  string-return branch; new `EmitLiftStringReturn` helper.
+- **Fixtures**:
+  - `wit-harness-spike-string-variant/` — string in variant
+    payload (`variant message { hello(string), silence }`).
+  - `wit-harness-spike-bool-string-return/` — bool param + direct
+    string return (`greet(use-comma: bool) -> string`).
+
+**All 8 fixtures pass**: hello, richer, string-record, list-record,
+list-return, list-variant, string-variant, bool-string-return.
+
+Family tag: `WACS-ComponentModel-v0.14.0` → `WACS-ComponentModel-v0.15.0`
+(minor — capability shift on Harness.Lib).
+
 ## Fixture coverage: list&lt;T&gt; in variant payload
 
 New regression fixture

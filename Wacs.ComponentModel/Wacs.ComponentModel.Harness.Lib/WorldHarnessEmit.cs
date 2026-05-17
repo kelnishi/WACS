@@ -340,10 +340,15 @@ namespace Wacs.ComponentModel.Harness.Lib
             {
                 return p.Kind switch
                 {
-                    CtPrim.S32 => typeof(int),
-                    CtPrim.U32 => typeof(int),
-                    CtPrim.S64 => typeof(long),
-                    CtPrim.U64 => typeof(long),
+                    // Bool lowers to i32 (0 / 1) at the wasm
+                    // boundary. CLR bool on the stack is already
+                    // i4-sized, so the wrapper's ldarg of a bool
+                    // arg is directly assignable to the invoker's
+                    // int slot — no explicit conv emit needed.
+                    CtPrim.Bool => typeof(int),
+                    CtPrim.S8 or CtPrim.U8 or CtPrim.S16 or CtPrim.U16
+                        or CtPrim.S32 or CtPrim.U32 or CtPrim.Char => typeof(int),
+                    CtPrim.S64 or CtPrim.U64 => typeof(long),
                     CtPrim.F32 => typeof(float),
                     CtPrim.F64 => typeof(double),
                     _ => throw new NotSupportedException(
@@ -669,9 +674,17 @@ namespace Wacs.ComponentModel.Harness.Lib
             }
 
             var retDeref = CanonicalAbi.Deref(fe.Spec.Result!);
-            if (retDeref is CtPrimType)
+            if (retDeref is CtPrimType retPrim)
             {
-                // Direct primitive — invoker already produced the value.
+                if (retPrim.Kind == CtPrim.String)
+                {
+                    // String return is indirect (retArea ptr → (ptr, len)).
+                    // The invoker returned an i32 retArea; lift via
+                    // ReadI32LE + StringCoding.LiftUtf8 + cabi_post.
+                    EmitLiftStringReturn(il, fe, memoryField);
+                    return;
+                }
+                // Other primitives — invoker already produced the value.
                 il.Emit(OpCodes.Ret);
                 return;
             }
@@ -706,6 +719,58 @@ namespace Wacs.ComponentModel.Harness.Lib
         /// pre-emitted Lift method (lists are anonymous structural
         /// types — no per-type Lift method to register).
         /// </summary>
+        /// <summary>
+        /// Direct string-return tail: stash retArea, read (ptr, len)
+        /// from the area, lift via <see cref="StringCoding.LiftUtf8"/>,
+        /// stash result, call <c>cabi_post_&lt;name&gt;</c>, push
+        /// result, return. Mirrors the string-out half of
+        /// <c>EmitStringInStringOut</c> but starts from the
+        /// invoker's already-on-stack i32 result.
+        /// </summary>
+        private static void EmitLiftStringReturn(
+            ILGenerator il, FunctionExport fe, FieldBuilder memoryField)
+        {
+            var retArea = il.DeclareLocal(typeof(int));
+            il.Emit(OpCodes.Stloc, retArea);
+
+            // outPtr = ReadI32LE(_memory, retArea);
+            var outPtr = il.DeclareLocal(typeof(int));
+            il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+            il.Emit(OpCodes.Ldloc, retArea);
+            il.Emit(OpCodes.Call,
+                typeof(MemoryHelpers).GetMethod(nameof(MemoryHelpers.ReadI32LE))!);
+            il.Emit(OpCodes.Stloc, outPtr);
+
+            // outLen = ReadI32LE(_memory, retArea + 4);
+            var outLen = il.DeclareLocal(typeof(int));
+            il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+            il.Emit(OpCodes.Ldloc, retArea);
+            il.Emit(OpCodes.Ldc_I4_4);
+            il.Emit(OpCodes.Add);
+            il.Emit(OpCodes.Call,
+                typeof(MemoryHelpers).GetMethod(nameof(MemoryHelpers.ReadI32LE))!);
+            il.Emit(OpCodes.Stloc, outLen);
+
+            // string result = StringCoding.LiftUtf8(_memory, outPtr, outLen);
+            var result = il.DeclareLocal(typeof(string));
+            il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+            il.Emit(OpCodes.Ldloc, outPtr);
+            il.Emit(OpCodes.Ldloc, outLen);
+            il.Emit(OpCodes.Call,
+                typeof(StringCoding).GetMethod(nameof(StringCoding.LiftUtf8))!);
+            il.Emit(OpCodes.Stloc, result);
+
+            if (fe.NeedsPostReturn && fe.PostInvokerField != null)
+            {
+                il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, fe.PostInvokerField);
+                il.Emit(OpCodes.Ldloc, retArea);
+                il.Emit(OpCodes.Callvirt, typeof(Action<int>).GetMethod("Invoke")!);
+            }
+
+            il.Emit(OpCodes.Ldloc, result);
+            il.Emit(OpCodes.Ret);
+        }
+
         private static void EmitLiftListReturn(
             ILGenerator il, FunctionExport fe, CtListType list,
             FieldBuilder memoryField, TypeRegistry registry,
