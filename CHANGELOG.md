@@ -1,5 +1,57 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Lib 0.14.0 / WACS.ComponentModel.Harness.Runtime 0.6.0 — enum + flags + tuple direct PARAMS
+
+Direct params can now be `enum`, `flags`, or `tuple<...>` — they
+flatten to one or more i32 slots on the invoker stack.
+
+```wit
+world classifier {
+    enum priority { low, normal, high }
+    flags channels { email, sms, push, webhook }
+
+    export rank: func(p: priority, ch: channels) -> u32;
+    export render-point: func(p: tuple<u32, u32, string>) -> string;
+}
+```
+
+- **Enum / flags** flatten to one i32 — `Ldarg` pushes the
+  CLR enum value (whose stack repr is the underlying int).
+- **Tuple** flattens to the concatenation of its elements'
+  flat lowerings. For primitive / enum / flag / string
+  elements, the wrapper IL reads each item via a closed
+  generic helper on `WitTupleAccess` (e.g.
+  `WitTupleAccess.Item3<uint, uint, string>`) — calling a
+  generic static method side-steps a PersistedAssemblyBuilder
+  bug where `Ldfld` against a closed runtime ValueTuple field
+  serializes the open generic's token, producing
+  `MissingFieldException` at JIT time.
+
+### What changed
+
+- **`Wacs.ComponentModel.Harness.Runtime`** — new
+  `WitTupleAccess` static class with `Item1..Item7` generic
+  accessors for `ValueTuple<...>` arities 1..7.
+- **`WorldHarnessEmit.cs`**:
+  - `IsFlatLowerable` accepts enum / flags / tuple-of-flat.
+  - `AppendLoweredType` flattens enum / flags to one i32, tuple
+    to recursed-per-element.
+  - `EmitFlattenedArg` dispatches enum / flags to `Ldarg`,
+    tuples to per-item `WitTupleAccess.ItemN` accessor calls
+    (with inline `LowerUtf8` per string element).
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-aggregate-params/`
+  — `rank(priority, channels)` exercises enum + flags as
+  separate params, `render-point(tuple<u32, u32, string>)`
+  exercises tuple-of-mixed (two primitives + a string) as a
+  single param.
+
+**18/18 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.21.0` →
+`WACS-ComponentModel-v0.22.0` (minor — capability shift on
+Harness.Lib + new Harness.Runtime public API).
+
 ## WACS.ComponentModel.Harness.Lib 0.13.0 — direct `option<T>` / `result<T,E>` / `tuple<...>` returns
 
 Anonymous aggregate types are now valid as the direct return of

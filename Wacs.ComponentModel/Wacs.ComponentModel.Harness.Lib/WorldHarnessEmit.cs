@@ -346,6 +346,17 @@ namespace Wacs.ComponentModel.Harness.Lib
                 sink.Add(typeof(int));  // count
                 return;
             }
+            if (deref is CtEnumType || deref is CtFlagsType)
+            {
+                sink.Add(typeof(int));
+                return;
+            }
+            if (deref is CtTupleType tup)
+            {
+                foreach (var e in tup.Elements)
+                    AppendLoweredType(sink, e, $"{context} → tuple element");
+                return;
+            }
             if (deref is CtRecordType rec)
             {
                 foreach (var f in rec.Fields)
@@ -678,6 +689,14 @@ namespace Wacs.ComponentModel.Harness.Lib
             var d = CanonicalAbi.Deref(t);
             if (d is CtPrimType) return true;  // primitives + strings (strings lower to (ptr,len))
             if (d is CtListType list) return IsFlatLowerable(list.Element);
+            if (d is CtEnumType) return true;  // single i32 disc
+            if (d is CtFlagsType) return true; // single i32 bits
+            if (d is CtTupleType tup)
+            {
+                foreach (var e in tup.Elements)
+                    if (!IsFlatLowerable(e)) return false;
+                return true;
+            }
             if (d is CtRecordType rec)
             {
                 foreach (var f in rec.Fields)
@@ -927,6 +946,63 @@ namespace Wacs.ComponentModel.Harness.Lib
             if (d is CtListType list)
             {
                 EmitLowerListArg(il, argIdx, list, memoryField, reallocField, registry);
+                return;
+            }
+            if (d is CtEnumType || d is CtFlagsType)
+            {
+                // CLR enum value on the stack IS its underlying integer;
+                // no conversion needed before pushing into the i32 slot.
+                EmitLdarg(il, argIdx);
+                return;
+            }
+            if (d is CtTupleType tup)
+            {
+                // Reflection.Emit's Ldfld with a closed runtime
+                // ValueTuple generic produces a missing MemberRef
+                // token (PersistedAssemblyBuilder serializes the
+                // open generic field). Calling a generic static
+                // accessor on Harness.Runtime side-steps the issue:
+                // the JIT closes the method's generics from the
+                // call-site arg's type, returning the right element.
+                var tupleClr = WitTypeEmit.MapClrType(d, registry, "tuple param");
+                var elemClrs = tupleClr.GetGenericArguments();
+                for (int i = 0; i < tup.Elements.Count; i++)
+                {
+                    var accessorOpen = typeof(Wacs.ComponentModel.Harness.WitTupleAccess)
+                        .GetMethods(BindingFlags.Public | BindingFlags.Static)
+                        .First(m => m.Name == "Item" + (i + 1)
+                                    && m.GetGenericArguments().Length == elemClrs.Length);
+                    var accessor = accessorOpen.MakeGenericMethod(elemClrs);
+
+                    var elemD = CanonicalAbi.Deref(tup.Elements[i]);
+                    if (elemD is CtPrimType ep && ep.Kind == CtPrim.String)
+                    {
+                        var strLocal = il.DeclareLocal(typeof(string));
+                        EmitLdarg(il, argIdx);
+                        il.Emit(OpCodes.Call, accessor);
+                        il.Emit(OpCodes.Stloc, strLocal);
+                        var ptr = il.DeclareLocal(typeof(int));
+                        var len = il.DeclareLocal(typeof(int));
+                        il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                        il.Emit(OpCodes.Ldloc, strLocal);
+                        il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, reallocField);
+                        il.Emit(OpCodes.Ldloca, ptr);
+                        il.Emit(OpCodes.Ldloca, len);
+                        il.Emit(OpCodes.Call, StringCoding_LowerUtf8);
+                        il.Emit(OpCodes.Ldloc, ptr);
+                        il.Emit(OpCodes.Ldloc, len);
+                    }
+                    else if (elemD is CtPrimType || elemD is CtEnumType || elemD is CtFlagsType)
+                    {
+                        EmitLdarg(il, argIdx);
+                        il.Emit(OpCodes.Call, accessor);
+                    }
+                    else
+                    {
+                        throw new NotSupportedException(
+                            $"Tuple element of type {elemD.GetType().Name} not yet supported in lower path.");
+                    }
+                }
                 return;
             }
             if (d is CtRecordType rec)

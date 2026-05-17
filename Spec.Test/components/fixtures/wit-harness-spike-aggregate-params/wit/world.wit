@@ -1,0 +1,13 @@
+package wacs:aggregate-params-spike;
+
+world classifier {
+    enum priority { low, normal, high }
+    flags channels { email, sms, push, webhook }
+
+    /// enum + flags + primitive in, primitive out.
+    export rank: func(p: priority, ch: channels) -> u32;
+
+    /// tuple<u32, u32, string> in, string out — exercises tuple
+    /// lower with mixed value + reference elements.
+    export render-point: func(p: tuple<u32, u32, string>) -> string;
+}
