@@ -1,5 +1,52 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Lib 0.8.0 / WACS.ComponentModel.Harness.Runtime 0.4.0 — full primitive width matrix + list&lt;string&gt; / list&lt;record&gt;
+
+Harness lift IL now covers every WIT primitive (bool, s8, u8, s16,
+u16, s32, u32, s64, u64, f32, f64, char, string). Previously only
+s32/u32/string went through correctly in records; other widths
+threw at emit. Plus two more list-element shapes (string, record)
+got fixture coverage via the existing infrastructure.
+
+**Three new fixtures** validate the broader coverage:
+
+| Fixture | Shape | Notes |
+|---|---|---|
+| `list-string` | `list<string>` return | string elements via existing EmitLiftElementAt |
+| `list-record-of` | `list<record>` return | record elements via existing Lift{Name} delegation |
+| `primitives` | record of all 10 primitives | exercises new width support — bool / s8 / u8 / s16 / u16 / s64 / u64 / f32 / f64 / char |
+
+The primitives fixture's Rust returns:
+```rust
+Sample {
+    flag: true, small_s: -7, small_u: 200,
+    med_s: -1000, med_u: 50000,
+    big_s: -9_000_000_000, big_u: 18_000_000_000_000_000_000,
+    single: 3.14, double: 2.718281828, letter: 'Z',
+}
+```
+All 10 fields round-trip exactly through the emitted Lift method.
+
+### What changed
+
+- **`WACS.ComponentModel.Harness.Runtime` 0.3.0 → 0.4.0** (minor —
+  new public API surface): `MemoryHelpers` gains `ReadI16LE` /
+  `WriteI16LE`, `ReadI64LE` / `WriteI64LE`, `ReadF32LE` /
+  `WriteF32LE`, `ReadF64LE` / `WriteF64LE`. The F32/F64 helpers
+  use `BitConverter.{SingleToInt32Bits, DoubleToInt64Bits}` to
+  reuse the integer LE path.
+- **`WACS.ComponentModel.Harness.Lib` 0.7.0 → 0.8.0** (minor —
+  full primitive-width lift): `LiftEmit.EmitLiftPrimitive` +
+  `EmitLiftElementAt` extended for bool / s8 / u8 / s16 / u16 /
+  s64 / u64 / f32 / f64 / char. Signed narrow widths get
+  `Conv_I1` after `ReadU8`; unsigned ushort/char get `Conv_U2`
+  after `ReadI16LE`. F32/F64 go through dedicated helpers.
+
+**11/11 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.15.0` → `WACS-ComponentModel-v0.16.0`
+(minor — capability shift on both Harness.Runtime + Harness.Lib).
+
 ## WACS.ComponentModel.Harness.Lib 0.7.0 — small wins batch (bool params, direct string return, string-in-variant)
 
 Three smaller follow-ups bundled in one slice. The harness

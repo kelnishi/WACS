@@ -1,0 +1,18 @@
+package wacs:primitives-spike;
+
+world stats {
+    record sample {
+        flag: bool,
+        small-s: s8,
+        small-u: u8,
+        med-s: s16,
+        med-u: u16,
+        big-s: s64,
+        big-u: u64,
+        single: f32,
+        double: f64,
+        letter: char,
+    }
+
+    export get-sample: func() -> sample;
+}

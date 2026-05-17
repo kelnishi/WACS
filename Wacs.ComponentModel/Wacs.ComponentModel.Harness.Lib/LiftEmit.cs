@@ -30,6 +30,14 @@ namespace Wacs.ComponentModel.Harness.Lib
             typeof(MemoryHelpers).GetMethod(nameof(MemoryHelpers.ReadI32LE))!;
         private static readonly MethodInfo MemoryHelpers_ReadU8 =
             typeof(MemoryHelpers).GetMethod(nameof(MemoryHelpers.ReadU8))!;
+        private static readonly MethodInfo MemoryHelpers_ReadI16LE =
+            typeof(MemoryHelpers).GetMethod(nameof(MemoryHelpers.ReadI16LE))!;
+        private static readonly MethodInfo MemoryHelpers_ReadI64LE =
+            typeof(MemoryHelpers).GetMethod(nameof(MemoryHelpers.ReadI64LE))!;
+        private static readonly MethodInfo MemoryHelpers_ReadF32LE =
+            typeof(MemoryHelpers).GetMethod(nameof(MemoryHelpers.ReadF32LE))!;
+        private static readonly MethodInfo MemoryHelpers_ReadF64LE =
+            typeof(MemoryHelpers).GetMethod(nameof(MemoryHelpers.ReadF64LE))!;
         private static readonly MethodInfo StringCoding_LiftUtf8 =
             typeof(StringCoding).GetMethod(nameof(StringCoding.LiftUtf8))!;
 
@@ -330,11 +338,39 @@ namespace Wacs.ComponentModel.Harness.Lib
             // then ptr+offset incrementally; instead build it inline.
             switch (deref)
             {
+                case CtPrimType prim when prim.Kind is CtPrim.Bool or CtPrim.S8 or CtPrim.U8:
+                    il.Emit(OpCodes.Ldloc, memoryLocal);
+                    EmitElementPtr(il, listPtr, indexLocal, elemSize);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadU8);
+                    if (prim.Kind == CtPrim.S8)
+                        il.Emit(OpCodes.Conv_I1);
+                    return;
+                case CtPrimType prim when prim.Kind is CtPrim.S16 or CtPrim.U16 or CtPrim.Char:
+                    il.Emit(OpCodes.Ldloc, memoryLocal);
+                    EmitElementPtr(il, listPtr, indexLocal, elemSize);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadI16LE);
+                    if (prim.Kind == CtPrim.U16 || prim.Kind == CtPrim.Char)
+                        il.Emit(OpCodes.Conv_U2);
+                    return;
                 case CtPrimType prim when prim.Kind is CtPrim.S32 or CtPrim.U32:
-                    // ReadI32LE(memory, listPtr + i * 4)
                     il.Emit(OpCodes.Ldloc, memoryLocal);
                     EmitElementPtr(il, listPtr, indexLocal, elemSize);
                     il.Emit(OpCodes.Call, MemoryHelpers_ReadI32LE);
+                    return;
+                case CtPrimType prim when prim.Kind is CtPrim.S64 or CtPrim.U64:
+                    il.Emit(OpCodes.Ldloc, memoryLocal);
+                    EmitElementPtr(il, listPtr, indexLocal, elemSize);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadI64LE);
+                    return;
+                case CtPrimType prim when prim.Kind == CtPrim.F32:
+                    il.Emit(OpCodes.Ldloc, memoryLocal);
+                    EmitElementPtr(il, listPtr, indexLocal, elemSize);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadF32LE);
+                    return;
+                case CtPrimType prim when prim.Kind == CtPrim.F64:
+                    il.Emit(OpCodes.Ldloc, memoryLocal);
+                    EmitElementPtr(il, listPtr, indexLocal, elemSize);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadF64LE);
                     return;
                 case CtPrimType prim when prim.Kind == CtPrim.String:
                     // LiftUtf8(memory, ReadI32LE(memory, elemPtr+0), ReadI32LE(memory, elemPtr+4))
@@ -405,11 +441,46 @@ namespace Wacs.ComponentModel.Harness.Lib
         {
             switch (prim.Kind)
             {
+                case CtPrim.Bool:
+                case CtPrim.S8:
+                case CtPrim.U8:
+                    il.Emit(OpCodes.Ldarg_0);
+                    EmitOffsetPush(il, offset);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadU8);
+                    if (prim.Kind == CtPrim.S8)
+                        il.Emit(OpCodes.Conv_I1);   // U8 → S8 narrowing for sign-correctness
+                    // Bool / U8 / S8 leave CLR primitive on stack.
+                    return;
+                case CtPrim.S16:
+                case CtPrim.U16:
+                case CtPrim.Char:
+                    il.Emit(OpCodes.Ldarg_0);
+                    EmitOffsetPush(il, offset);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadI16LE);
+                    if (prim.Kind == CtPrim.U16 || prim.Kind == CtPrim.Char)
+                        il.Emit(OpCodes.Conv_U2);
+                    return;
                 case CtPrim.S32:
                 case CtPrim.U32:
                     il.Emit(OpCodes.Ldarg_0);
                     EmitOffsetPush(il, offset);
                     il.Emit(OpCodes.Call, MemoryHelpers_ReadI32LE);
+                    return;
+                case CtPrim.S64:
+                case CtPrim.U64:
+                    il.Emit(OpCodes.Ldarg_0);
+                    EmitOffsetPush(il, offset);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadI64LE);
+                    return;
+                case CtPrim.F32:
+                    il.Emit(OpCodes.Ldarg_0);
+                    EmitOffsetPush(il, offset);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadF32LE);
+                    return;
+                case CtPrim.F64:
+                    il.Emit(OpCodes.Ldarg_0);
+                    EmitOffsetPush(il, offset);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadF64LE);
                     return;
                 case CtPrim.String:
                     // Strings are stored as (ptr, len) — two i32s at
