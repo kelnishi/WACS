@@ -12,8 +12,8 @@
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.ComponentModel</AssemblyName>
-        <AssemblyVersion>0.5.1</AssemblyVersion>
-        <Version>0.5.1</Version>
+        <AssemblyVersion>0.5.2</AssemblyVersion>
+        <Version>0.5.2</Version>
         <RepositoryType>git</RepositoryType>
         <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
         <IsAotCompatible>true</IsAotCompatible>
@@ -44,6 +44,10 @@
            EmitWorldShellFile and friends) to validate naming conventions
            and individual file emissions in isolation. -->
       <InternalsVisibleTo Include="Wacs.ComponentModel.Test" />
+      <!-- Harness.Lib needs NameMangler (kebab → PascalCase / CamelCase)
+           to derive C# identifiers from WIT names — single source of
+           truth across emission paths. -->
+      <InternalsVisibleTo Include="Wacs.ComponentModel.Harness.Lib" />
     </ItemGroup>
 
 </Project>

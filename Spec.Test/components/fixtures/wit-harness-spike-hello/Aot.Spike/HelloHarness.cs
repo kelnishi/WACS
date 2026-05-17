@@ -6,12 +6,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
-using System.IO;
-using System.Linq;
-using System.Text;
 using Wacs.ComponentModel.Harness;
-using Wacs.ComponentModel.Runtime.Parser;
-using Wacs.Core;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 
@@ -59,83 +54,21 @@ namespace WitHarnessSpike.Aot
         /// </summary>
         public static HelloHarness LoadFrom(byte[] componentBytes)
         {
-            if (componentBytes == null)
-                throw new ArgumentNullException(nameof(componentBytes));
+            var loaded = HarnessLoader.Load(componentBytes, BindWasiStubs);
+            var memory = HarnessLoader.RequireMemoryExport(loaded.Runtime, loaded.Module, "memory");
+            var reallocAddr   = HarnessLoader.RequireFunctionExport(loaded.Module, "cabi_realloc");
+            var greetAddr     = HarnessLoader.RequireFunctionExport(loaded.Module, "greet");
+            var postGreetAddr = HarnessLoader.RequireFunctionExport(loaded.Module, "cabi_post_greet");
 
-            // 1. Parse the .component.wasm wrapper. AOT-safe —
-            //    pure byte walk, no reflection.
-            Wacs.ComponentModel.Runtime.ComponentModule component;
-            using (var ms = new MemoryStream(componentBytes))
-                component = ComponentBinaryParser.Parse(ms);
+            // CreateInvokerFunc is generic over the wasm function's
+            // param / return arity; all the generic instantiations
+            // used here are statically rooted at this call site for
+            // AOT.
+            var realloc = loaded.Runtime.CreateInvokerFunc<int, int, int, int, int>(reallocAddr);
+            var greet = loaded.Runtime.CreateInvokerFunc<int, int, int>(greetAddr);
+            var postGreet = loaded.Runtime.CreateInvokerAction<int>(postGreetAddr);
 
-            // 2. Extract the main core module (the first one — for
-            //    a single-greet world there's exactly one). A
-            //    real harness would walk the component's
-            //    `core instance` declarations to pick the right
-            //    one; the spike hardcodes "first".
-            var coreModuleBytes = component.CoreModuleBinaries.First();
-
-            // 3. Parse + instantiate that core module via
-            //    Wacs.Core. AOT-safe — typed runtime.
-            var runtime = new WasmRuntime();
-            BindWasiStubs(runtime);
-            Module coreModule;
-            using (var coreMs = new MemoryStream(coreModuleBytes))
-                coreModule = BinaryModuleParser.ParseWasm(coreMs);
-            var moduleInst = runtime.InstantiateModule(coreModule);
-            runtime.RegisterModule("hello", moduleInst);
-
-            // 4. Look up the four exports we need. Memory + three
-            //    canonical-ABI functions.
-            MemoryInstance? memory = null;
-            FuncAddr? reallocAddr = null;
-            FuncAddr? greetAddr = null;
-            FuncAddr? postGreetAddr = null;
-            foreach (var export in moduleInst.Exports)
-            {
-                switch (export.Name)
-                {
-                    case "memory":
-                        if (export.Value is ExternalValue.Memory mem)
-                            memory = runtime.RuntimeStore[mem.Address];
-                        break;
-                    case "cabi_realloc":
-                        if (export.Value is ExternalValue.Function r)
-                            reallocAddr = r.Address;
-                        break;
-                    case "greet":
-                        if (export.Value is ExternalValue.Function g)
-                            greetAddr = g.Address;
-                        break;
-                    case "cabi_post_greet":
-                        if (export.Value is ExternalValue.Function p)
-                            postGreetAddr = p.Address;
-                        break;
-                }
-            }
-
-            if (memory is null)
-                throw new InvalidDataException("Component's main core module exports no 'memory'.");
-            if (reallocAddr is null)
-                throw new InvalidDataException("Component's main core module exports no 'cabi_realloc'.");
-            if (greetAddr is null)
-                throw new InvalidDataException("Component's main core module exports no 'greet'.");
-            if (postGreetAddr is null)
-                throw new InvalidDataException("Component's main core module exports no 'cabi_post_greet'.");
-
-            // 5. Cache typed invoker delegates. CreateInvokerFunc
-            //    is a generic over the wasm function's parameter
-            //    + return arity; all the generic instantiations
-            //    used here are statically rooted by these call
-            //    sites at AOT-compile time.
-            var realloc = runtime.CreateInvokerFunc<int, int, int, int, int>(
-                reallocAddr.Value);
-            var greet = runtime.CreateInvokerFunc<int, int, int>(
-                greetAddr.Value);
-            var postGreet = runtime.CreateInvokerAction<int>(
-                postGreetAddr.Value);
-
-            return new HelloHarness(runtime, memory, realloc, greet, postGreet);
+            return new HelloHarness(loaded.Runtime, memory, realloc, greet, postGreet);
         }
 
         /// <summary>

@@ -31,6 +31,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.ComponentModel.Parser"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.ComponentModel.Harness.Runtime", "Wacs.ComponentModel\Wacs.ComponentModel.Harness.Runtime\Wacs.ComponentModel.Harness.Runtime.csproj", "{406F8E84-12D3-4F47-BF34-1E2A81AD5A6D}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.ComponentModel.Harness.Lib", "Wacs.ComponentModel\Wacs.ComponentModel.Harness.Lib\Wacs.ComponentModel.Harness.Lib.csproj", "{287A08DF-EC94-4C2E-AE0C-715550037115}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.ComponentModel.Test", "Wacs.ComponentModel\Wacs.ComponentModel.Test\Wacs.ComponentModel.Test.csproj", "{3A1F1B47-654C-436C-BE0E-158A923AACF3}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Wacs.ComponentModel.Bindgen.Lib", "Wacs.ComponentModel\Wacs.ComponentModel.Bindgen.Lib\Wacs.ComponentModel.Bindgen.Lib.csproj", "{4E155331-7FAC-4011-BFA6-F11704476918}"
@@ -153,6 +155,10 @@ Global
 		{406F8E84-12D3-4F47-BF34-1E2A81AD5A6D}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{406F8E84-12D3-4F47-BF34-1E2A81AD5A6D}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{406F8E84-12D3-4F47-BF34-1E2A81AD5A6D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{287A08DF-EC94-4C2E-AE0C-715550037115}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{287A08DF-EC94-4C2E-AE0C-715550037115}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{287A08DF-EC94-4C2E-AE0C-715550037115}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{287A08DF-EC94-4C2E-AE0C-715550037115}.Release|Any CPU.Build.0 = Release|Any CPU
 		{3A1F1B47-654C-436C-BE0E-158A923AACF3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{3A1F1B47-654C-436C-BE0E-158A923AACF3}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{3A1F1B47-654C-436C-BE0E-158A923AACF3}.Release|Any CPU.ActiveCfg = Release|Any CPU

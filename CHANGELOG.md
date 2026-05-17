@@ -1,5 +1,87 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Lib 0.1.0 / WACS.ComponentModel.Harness.Runtime 0.2.0 / WACS.ComponentModel 0.5.2 — IL-emitting harness generator
+
+`WACS.ComponentModel.Harness.Lib` is the third sibling in the
+ComponentModel family this round — the IL emitter that takes a
+WIT contract and produces a `.dll` containing a typed harness
+class. Built on `PersistedAssemblyBuilder` (.NET 9), targets
+net9.0, matches the architectural shape `Wacs.Transpiler.Lib`
+already uses for the wasm → IL direction.
+
+Single emission core behind three ergonomic surfaces — the
+`wacs harness gen` distribution flow (file/stream output) and the
+`wacs run --wit-dir` / `wacs transpile --wit-dir` in-process
+flows (memory output) all funnel through the same builder pass:
+
+- `HarnessEmitter.EmitToFile(witDir, outPath)` — saves a `.dll`.
+- `HarnessEmitter.EmitToStream(witDir, stream)` — lowest-level.
+- `HarnessEmitter.EmitInMemory(witDir) → Assembly` — `Save` to
+  a `MemoryStream`, then `AssemblyLoadContext.LoadFromStream` for
+  immediate use, mirroring `Wacs.Transpiler.Lib`'s `Bake` shape.
+
+v0 emits the spike's `func(string) -> string` shape end-to-end:
+the IL builds a sealed `HelloHarness` class with five private
+readonly fields (runtime + memory + cabi_realloc invoker + per-
+export invoker + per-export `cabi_post_*` invoker), a private
+ctor, a public static `LoadFrom(byte[], Action<WasmRuntime>?)`
+factory that funnels through `HarnessLoader`, and a public typed
+`Greet(string) -> string` method that calls
+`StringCoding.LowerUtf8` / `MemoryHelpers.ReadI32LE` /
+`StringCoding.LiftUtf8` from `Harness.Runtime`. Records, variants,
+multi-result returns, list types, and inline-interface exports
+throw `NotSupportedException` at emit time — loud failure beats
+silent mis-emission, and these gaps close as the richer fixture
+exercises them.
+
+**Validation**: a new console
+`Spec.Test/components/fixtures/wit-harness-spike-hello/Generated.Validate/`
+emits `HelloHarness` in-memory from the spike's `wit/world.wit`,
+loads the spike's `hello.component.wasm` via reflection-driven
+`LoadFrom`, calls `Greet("World")`, and asserts the result equals
+`"Hello, World!"` — same output the hand-written spike emits.
+The generated harness is functionally equivalent to the
+hand-written one in `Aot.Spike/HelloHarness.cs` (post the
+HarnessLoader refactor in this same commit).
+
+`Harness.Runtime` minor-bumps to 0.2.0 for the new
+`HarnessLoader` + `LoadedComponent` public API surface — the
+load + export-resolution boilerplate every emitted `LoadFrom`
+calls into. `Wacs.ComponentModel` point-bumps to 0.5.2 for the
+new `InternalsVisibleTo Wacs.ComponentModel.Harness.Lib`
+attribute (Harness.Lib needs `NameMangler` for kebab → PascalCase
+identifier conversion, kept as a single source of truth).
+
+Family tag: `WACS-ComponentModel-v0.6.0` → `WACS-ComponentModel-v0.7.0`
+(minor — new sibling package).
+
+### What changed
+
+- **`WACS.ComponentModel.Harness.Lib` 0.1.0** (new package):
+  `HarnessEmitter.cs` + `HarnessOptions.cs` + `WorldHarnessEmit.cs`
+  (~570 LOC total). Targets net9.0 for `PersistedAssemblyBuilder`.
+  Internal-visible to `Wacs.ComponentModel.Harness.Lib.Test`.
+- **`WACS.ComponentModel.Harness.Runtime` 0.1.0 → 0.2.0** (minor —
+  public API addition): adds `HarnessLoader` (parse + instantiate
+  + register), `HarnessLoader.RequireMemoryExport`,
+  `HarnessLoader.RequireFunctionExport`, and the
+  `LoadedComponent(WasmRuntime, ModuleInstance)` return shape.
+  Used by both the refactored hand-written spike and the IL
+  emitted by `Harness.Lib`.
+- **`WACS.ComponentModel` 0.5.1 → 0.5.2** (point — metadata): adds
+  `InternalsVisibleTo Wacs.ComponentModel.Harness.Lib` so the
+  emitter can reuse `NameMangler` for kebab → PascalCase /
+  CamelCase conversions.
+- **Spike**: `Aot.Spike/HelloHarness.cs` collapsed from ~250 →
+  ~85 LOC by routing through `Wacs.ComponentModel.Harness.HarnessLoader`.
+  Cleared the un-needed `using` lines; AOT-publish + native run
+  still emit `"Hello, World!"`.
+- **Spike validation**:
+  `Spec.Test/components/fixtures/wit-harness-spike-hello/Generated.Validate/`
+  (new console fixture, net9.0) — emits HelloHarness via
+  `HarnessEmitter.EmitInMemory`, drives via reflection, asserts
+  result against hand-written spike's output.
+
 ## WACS.ComponentModel.Harness.Runtime 0.1.0 — canonical-ABI primitives
 
 New sibling package in the ComponentModel family. Carries the
