@@ -1,5 +1,65 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Lib 0.26.0 — variant/result mismatched-width join (Item 5a)
+
+`result<T, E>` and `variant` lower now handle mismatched flat
+slot widths between cases via the canonical-ABI join algorithm.
+
+```wit
+export upgrade: func(input: result<u32, u64>) -> u64;
+```
+
+`result<u32, u64>` flattens to `[i32 disc, i64]`. The Ok branch
+lowers its u32 payload and the wrapper IL widens it to i64
+(`Conv_U8`) before the invoker call; the Err branch already
+matches.
+
+### How it works
+
+- `ComputeVariantJoinedSlots` no longer throws on mismatched
+  per-position types — it calls the new `JoinSlotTypes(a, b)`
+  helper which implements the canonical-ABI rule: equal → equal,
+  `(i32, f32)` → i32, otherwise i64.
+- New `EmitWidenLastSlot(il, caseSlots, joinedSlots)` is called
+  after a case's payload lowering pushes its values. v1 widens
+  only the trailing slot (the most common single-payload
+  pattern); intermediate-slot mismatches throw at emit time.
+- New `EmitJoinConvert(from, to)` covers `int → long`
+  (`Conv_U8`), `float → double` (`Conv_R8`), `float → long`
+  (BitConverter.SingleToInt32Bits + `Conv_U8`), `double → long`
+  (BitConverter.DoubleToInt64Bits). Other combinations throw
+  until they're needed.
+- `AppendLoweredType`'s `CtResultType` branch now produces the
+  joined slot shape rather than picking one side, so the
+  invoker delegate type matches what the lower IL pushes.
+
+### What changed
+
+- **`WorldHarnessEmit.cs`**:
+  - `ComputeVariantJoinedSlots` uses `JoinSlotTypes` instead of
+    strict equality.
+  - New `JoinSlotTypes`, `EmitJoinConvert`, `EmitWidenLastSlot`
+    helpers.
+  - `EmitLowerResultArg` computes the joined shape and emits
+    widening after each branch's payload lowering.
+  - `EmitLowerVariantArg` per-case body widens after its
+    payload lowering.
+  - `IsFlatLowerable` for `CtResultType` no longer requires
+    `SlotsMatch`.
+  - `AppendLoweredType` for `CtResultType` computes the joined
+    shape across both sides.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-join-widening/`
+  — `upgrade(result<u32, u64>) -> u64`. Ok(7) widens to i64
+  and Rust adds 1 → 8. Err(5000) is already i64 and multiplies
+  by 2 → 10000.
+
+**31/31 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.33.0` →
+`WACS-ComponentModel-v0.34.0` (minor — capability shift on
+Harness.Lib).
+
 ## WACS.ComponentModel.Harness.Lib 0.25.1 — multi-byte variant disc (Item 5b)
 
 `EmitVariantLift` no longer refuses variants with more than

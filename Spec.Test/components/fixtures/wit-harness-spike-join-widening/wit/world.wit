@@ -1,0 +1,7 @@
+package wacs:join-widening-spike;
+
+world adder {
+    /// result<u32, u64> — joined flat slot is i64; Ok branch must
+    /// widen the u32 to i64 before pushing.
+    export upgrade: func(input: result<u32, u64>) -> u64;
+}

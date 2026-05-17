@@ -12,8 +12,8 @@
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.ComponentModel.Harness.Lib</AssemblyName>
-        <AssemblyVersion>0.25.1</AssemblyVersion>
-        <Version>0.25.1</Version>
+        <AssemblyVersion>0.26.0</AssemblyVersion>
+        <Version>0.26.0</Version>
         <RepositoryType>git</RepositoryType>
         <TargetFramework>net9.0</TargetFramework>
         <GeneratePackageOnBuild>true</GeneratePackageOnBuild>

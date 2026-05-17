@@ -574,11 +574,24 @@ namespace Wacs.ComponentModel.Harness.Lib
             if (deref is CtResultType res)
             {
                 sink.Add(typeof(int));  // disc
-                // Joined slot shape — for v1, the present side's flat
-                // (or empty if both elided). IsFlatLowerable has
-                // already vetted matching widths.
-                if (res.Ok != null) AppendLoweredType(sink, res.Ok, $"{context} → result ok");
-                else if (res.Err != null) AppendLoweredType(sink, res.Err, $"{context} → result err");
+                // Joined slot shape — per-position join across Ok / Err.
+                // For mismatched widths the canonical-ABI join widens
+                // (i32 + i64 → i64, etc.) so the invoker delegate
+                // slot type matches what each branch's lower IL pushes
+                // after EmitWidenLastSlot fires.
+                var okSlots = new List<Type>();
+                if (res.Ok != null) AppendLoweredType(okSlots, res.Ok, $"{context} → result ok");
+                var errSlots = new List<Type>();
+                if (res.Err != null) AppendLoweredType(errSlots, res.Err, $"{context} → result err");
+                int n = Math.Max(okSlots.Count, errSlots.Count);
+                for (int i = 0; i < n; i++)
+                {
+                    Type? j = null;
+                    if (i < okSlots.Count) j = okSlots[i];
+                    if (i < errSlots.Count)
+                        j = j == null ? errSlots[i] : JoinSlotTypes(j, errSlots[i]);
+                    sink.Add(j!);
+                }
                 return;
             }
             if (deref is CtVariantType variant)
@@ -1019,8 +1032,11 @@ namespace Wacs.ComponentModel.Harness.Lib
                     if (!IsFlatLowerable(res.Err)) return false;
                     AppendLoweredType(errFlat, res.Err, "result err");
                 }
-                return okFlat.Count == 0 || errFlat.Count == 0
-                    || SlotsMatch(okFlat, errFlat);
+                // Joined shape always exists — JoinSlotTypes handles
+                // mismatched widths. v1 widens only the trailing
+                // slot; multi-slot intermediate mismatches throw at
+                // emit time via EmitWidenLastSlot.
+                return true;
             }
             if (d is CtTupleType tup)
             {
@@ -1074,15 +1090,28 @@ namespace Wacs.ComponentModel.Harness.Lib
                 {
                     if (i >= s.Count) continue;
                     if (slotType == null) slotType = s[i];
-                    else if (slotType != s[i])
-                        throw new NotSupportedException(
-                            $"Variant '{variant.Name}' joined slot {i}: mismatched case types " +
-                            $"({slotType} vs {s[i]}); the harness v1 join algorithm requires matching " +
-                            $"types per slot.");
+                    else slotType = JoinSlotTypes(slotType, s[i]);
                 }
                 joined.Add(slotType!);
             }
             return joined;
+        }
+
+        /// <summary>
+        /// Canonical-ABI variant flat-slot join. Per spec: equal →
+        /// equal; (i32, f32) → i32; otherwise → i64. Bit-cast cases
+        /// (e.g., joining f32+i32 returns i32 — the f32 is
+        /// reinterpreted bit-wise) are accepted at the type level
+        /// here; the IL emitter throws if a case requires a
+        /// reinterpret conv we don't yet emit.
+        /// </summary>
+        private static Type JoinSlotTypes(Type a, Type b)
+        {
+            if (a == b) return a;
+            if ((a == typeof(int) && b == typeof(float)) ||
+                (a == typeof(float) && b == typeof(int)))
+                return typeof(int);
+            return typeof(long);
         }
 
         private static bool SlotsMatch(List<Type> a, List<Type> b)
@@ -1091,6 +1120,83 @@ namespace Wacs.ComponentModel.Harness.Lib
             for (int i = 0; i < a.Count; i++)
                 if (a[i] != b[i]) return false;
             return true;
+        }
+
+        /// <summary>
+        /// After a case's payload lowering has pushed its slots
+        /// onto the stack, widen the LAST slot to match the joined
+        /// shape's slot type. v1 only handles the case where the
+        /// mismatch is on the final slot (the most common
+        /// single-payload pattern like <c>result&lt;u32, u64&gt;</c>).
+        /// Padding for cases shorter than the joined shape is
+        /// emitted separately by the caller.
+        /// </summary>
+        private static void EmitWidenLastSlot(
+            ILGenerator il, List<Type> caseSlots, List<Type> joinedSlots)
+        {
+            // Verify every-but-last slot already matches (we can
+            // only convert the value currently on top of the stack
+            // without restructuring the case-lowering IL).
+            int sharedCount = Math.Min(caseSlots.Count, joinedSlots.Count);
+            for (int i = 0; i < sharedCount - 1; i++)
+            {
+                if (caseSlots[i] != joinedSlots[i])
+                    throw new NotSupportedException(
+                        $"Variant/result join mismatch at slot {i} (intermediate slot " +
+                        $"widening not yet supported; only the trailing slot can be widened).");
+            }
+            if (caseSlots.Count > 0 && sharedCount > 0
+                && caseSlots[sharedCount - 1] != joinedSlots[sharedCount - 1])
+            {
+                EmitJoinConvert(il,
+                    caseSlots[sharedCount - 1], joinedSlots[sharedCount - 1]);
+            }
+        }
+
+        /// <summary>
+        /// Emit a numeric conversion to make a case's slot value
+        /// match the joined slot type. Supports the common widening
+        /// patterns:
+        /// <list type="bullet">
+        ///   <item><description>int → long (Conv_U8)</description></item>
+        ///   <item><description>float → double (Conv_R8)</description></item>
+        ///   <item><description>float → long (BitConverter.SingleToInt32Bits then Conv_U8)</description></item>
+        ///   <item><description>double → long (BitConverter.DoubleToInt64Bits)</description></item>
+        /// </list>
+        /// Throws if the conv combination isn't (yet) implemented.
+        /// </summary>
+        private static void EmitJoinConvert(ILGenerator il, Type from, Type to)
+        {
+            if (from == to) return;
+            if (from == typeof(int) && to == typeof(long))
+            {
+                il.Emit(OpCodes.Conv_U8);
+                return;
+            }
+            if (from == typeof(float) && to == typeof(double))
+            {
+                il.Emit(OpCodes.Conv_R8);
+                return;
+            }
+            if (from == typeof(float) && to == typeof(long))
+            {
+                il.Emit(OpCodes.Call,
+                    typeof(BitConverter).GetMethod(nameof(BitConverter.SingleToInt32Bits),
+                        new[] { typeof(float) })!);
+                il.Emit(OpCodes.Conv_U8);
+                return;
+            }
+            if (from == typeof(double) && to == typeof(long))
+            {
+                il.Emit(OpCodes.Call,
+                    typeof(BitConverter).GetMethod(nameof(BitConverter.DoubleToInt64Bits),
+                        new[] { typeof(double) })!);
+                return;
+            }
+            if (from == typeof(int) && to == typeof(int))
+                return;
+            throw new NotSupportedException(
+                $"Variant join slot conv {from} → {to} not yet supported.");
         }
 
         private static Type ResolveReturnClrType(CtFunctionType fn, TypeRegistry registry)
@@ -1769,9 +1875,24 @@ namespace Wacs.ComponentModel.Harness.Lib
                 .MakeGenericType(okClr, errClr);
 
             // Joined slot shape (excludes disc; disc is always int).
-            var joinedSlots = new List<Type>();
-            if (res.Ok != null) AppendLoweredType(joinedSlots, res.Ok, "result joined");
-            else if (res.Err != null) AppendLoweredType(joinedSlots, res.Err, "result joined");
+            // For mismatched-width result<T,E>, per-position join
+            // widens narrower slots (e.g., u32 + u64 → i64). Each
+            // case branch emits a slot-by-slot conversion after the
+            // payload lowering pushes its own-width values.
+            var okSlots = new List<Type>();
+            if (res.Ok != null) AppendLoweredType(okSlots, res.Ok, "result ok");
+            var errSlots = new List<Type>();
+            if (res.Err != null) AppendLoweredType(errSlots, res.Err, "result err");
+            int joinedLen = Math.Max(okSlots.Count, errSlots.Count);
+            var joinedSlots = new List<Type>(joinedLen);
+            for (int i = 0; i < joinedLen; i++)
+            {
+                Type? j = null;
+                if (i < okSlots.Count) j = okSlots[i];
+                if (i < errSlots.Count)
+                    j = j == null ? errSlots[i] : JoinSlotTypes(j, errSlots[i]);
+                joinedSlots.Add(j!);
+            }
 
             var isOkGetter = resultType.GetProperty("IsOk")!.GetGetMethod()!;
             var okValueGetter = resultType.GetProperty("OkValue")!.GetGetMethod()!;
@@ -1793,6 +1914,7 @@ namespace Wacs.ComponentModel.Harness.Lib
                 var okLocal = il.DeclareLocal(okClr);
                 il.Emit(OpCodes.Stloc, okLocal);
                 EmitLowerInnerFromLocal(il, okLocal, res.Ok, memoryField, reallocField, registry);
+                EmitWidenLastSlot(il, okSlots, joinedSlots);
             }
             else
             {
@@ -1811,6 +1933,7 @@ namespace Wacs.ComponentModel.Harness.Lib
                 var errLocal = il.DeclareLocal(errClr);
                 il.Emit(OpCodes.Stloc, errLocal);
                 EmitLowerInnerFromLocal(il, errLocal, res.Err, memoryField, reallocField, registry);
+                EmitWidenLastSlot(il, errSlots, joinedSlots);
             }
             else
             {
@@ -1882,6 +2005,7 @@ namespace Wacs.ComponentModel.Harness.Lib
                     var payloadLocal = il.DeclareLocal(payloadClr);
                     il.Emit(OpCodes.Stloc, payloadLocal);
                     EmitLowerInnerFromLocal(il, payloadLocal, c.Payload, memoryField, reallocField, registry);
+                    EmitWidenLastSlot(il, thisCaseSlots, joinedSlots);
                 }
                 // Zero-pad trailing slots this case doesn't fill.
                 for (int s = thisCaseSlots.Count; s < joinedSlots.Count; s++)
