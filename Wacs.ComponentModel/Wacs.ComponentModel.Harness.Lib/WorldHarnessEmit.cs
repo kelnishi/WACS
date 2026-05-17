@@ -58,12 +58,22 @@ namespace Wacs.ComponentModel.Harness.Lib
         public static TypeBuilder EmitWorldHarness(
             ModuleBuilder module, CtWorldType world, HarnessOptions opts)
         {
+            // Pass A: emit CLR types for every world-level record /
+            // variant declared. Records of primitives + variants of
+            // unit/primitive/record cases are supported in v0.2.
+            var registry = WitTypeEmit.EmitWorldTypes(module, world, opts);
+
             var worldPascal = NameMangler.ToPascalCase(world.Name);
             var typeName = $"{opts.Namespace}.{worldPascal}Harness";
 
             var typeBuilder = module.DefineType(
                 typeName,
                 TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.BeforeFieldInit);
+
+            // Pass B: emit Lift{TypeName} private static helpers on
+            // the harness class for every named record / variant.
+            // Per-export wrappers call these for return lifts.
+            var liftMethods = LiftEmit.EmitLifts(typeBuilder, world, registry);
 
             // Collect the function exports we'll emit wrappers for.
             // (Interface exports — `export wasi:foo/iface` — defer to
@@ -73,7 +83,7 @@ namespace Wacs.ComponentModel.Harness.Lib
             {
                 if (port.Spec is CtExternFunc fn)
                 {
-                    funcExports.Add(BuildFunctionExport(port.Name, fn.Function));
+                    funcExports.Add(BuildFunctionExport(port.Name, fn.Function, registry));
                 }
                 else
                 {
@@ -114,7 +124,7 @@ namespace Wacs.ComponentModel.Harness.Lib
             var ctor = EmitConstructor(typeBuilder, runtimeField, memoryField, reallocField, funcExports);
             EmitLoadFrom(typeBuilder, ctor, funcExports);
             foreach (var fe in funcExports)
-                EmitTypedWrapper(typeBuilder, memoryField, reallocField, fe);
+                EmitTypedWrapper(typeBuilder, memoryField, reallocField, fe, registry, liftMethods);
 
             typeBuilder.CreateType();
             return typeBuilder;
@@ -139,7 +149,7 @@ namespace Wacs.ComponentModel.Harness.Lib
             public FieldBuilder? PostInvokerField;
         }
 
-        private static FunctionExport BuildFunctionExport(string witName, CtFunctionType fn)
+        private static FunctionExport BuildFunctionExport(string witName, CtFunctionType fn, TypeRegistry registry)
         {
             var fe = new FunctionExport
             {
@@ -148,9 +158,10 @@ namespace Wacs.ComponentModel.Harness.Lib
                 Spec = fn,
             };
 
-            // Lower params via canonical-ABI rules. v0 handles only
-            // `string` (→ two i32: ptr, len) and primitives that map
-            // 1:1 to a core wasm type. Other shapes throw.
+            // Lower params via canonical-ABI rules. v0.2 handles
+            // primitives (1:1), strings (→ ptr+len), and records of
+            // primitives (recursively flattened). Lists, options,
+            // results, variants-by-value (rare in real WIT) throw.
             var loweredParams = new List<Type>();
             foreach (var p in fn.Params)
                 AppendLoweredType(loweredParams, p.Type, $"parameter '{p.Name}' of '{witName}'");
@@ -170,7 +181,7 @@ namespace Wacs.ComponentModel.Harness.Lib
             }
             else
             {
-                var r = fn.Result!;
+                var r = CanonicalAbi.Deref(fn.Result!);
                 if (IsStringType(r))
                 {
                     // String return is indirect — the function returns an
@@ -178,6 +189,18 @@ namespace Wacs.ComponentModel.Harness.Lib
                     // owns the freeing via cabi_post_<name>.
                     fe.LoweredReturn = typeof(int);
                     fe.NeedsPostReturn = true;
+                }
+                else if (r is CtRecordType || r is CtVariantType)
+                {
+                    // Aggregate return — wasm returns a ret-area i32
+                    // pointing at the value laid out per canonical ABI.
+                    // NeedsPostReturn iff the value transitively
+                    // contains strings or lists (those carry pointers
+                    // that need cabi_post freeing). Pure-primitive
+                    // records / variants are inert and don't need a
+                    // post-return call.
+                    fe.LoweredReturn = typeof(int);
+                    fe.NeedsPostReturn = ContainsStringOrList(r);
                 }
                 else
                 {
@@ -190,15 +213,54 @@ namespace Wacs.ComponentModel.Harness.Lib
             return fe;
         }
 
+        /// <summary>
+        /// Recursively flatten a WIT type into the wasm-level i32/i64/
+        /// f32/f64 args its canonical-ABI lowering uses. Strings → two
+        /// i32 (ptr, len). Records of primitives → one slot per field.
+        /// Nested records → recurse. Variants/lists throw (v0.2 doesn't
+        /// pass them by-value yet).
+        /// </summary>
         private static void AppendLoweredType(List<Type> sink, CtValType wit, string context)
         {
-            if (IsStringType(wit))
+            var deref = CanonicalAbi.Deref(wit);
+            if (IsStringType(deref))
             {
                 sink.Add(typeof(int));  // ptr
                 sink.Add(typeof(int));  // len
                 return;
             }
-            sink.Add(MapPrimitiveToClrType(wit, context));
+            if (deref is CtRecordType rec)
+            {
+                foreach (var f in rec.Fields)
+                    AppendLoweredType(sink, f.Type, $"{context} → field '{f.Name}'");
+                return;
+            }
+            sink.Add(MapPrimitiveToClrType(deref, context));
+        }
+
+        /// <summary>
+        /// True if <paramref name="t"/> transitively contains a
+        /// <c>string</c> or <c>list&lt;...&gt;</c> — i.e. carries
+        /// memory the canonical ABI requires a cabi_post_* call to
+        /// free.
+        /// </summary>
+        private static bool ContainsStringOrList(CtValType t)
+        {
+            var d = CanonicalAbi.Deref(t);
+            switch (d)
+            {
+                case CtPrimType p: return p.Kind == CtPrim.String;
+                case CtListType: return true;
+                case CtRecordType rec:
+                    foreach (var f in rec.Fields)
+                        if (ContainsStringOrList(f.Type)) return true;
+                    return false;
+                case CtVariantType v:
+                    foreach (var c in v.Cases)
+                        if (c.Payload != null && ContainsStringOrList(c.Payload)) return true;
+                    return false;
+                default: return false;
+            }
         }
 
         private static bool IsStringType(CtValType t) =>
@@ -418,13 +480,13 @@ namespace Wacs.ComponentModel.Harness.Lib
         private static void EmitTypedWrapper(
             TypeBuilder typeBuilder,
             FieldBuilder memoryField, FieldBuilder reallocField,
-            FunctionExport fe)
+            FunctionExport fe,
+            TypeRegistry registry,
+            System.Collections.Generic.Dictionary<string, MethodBuilder> liftMethods)
         {
             // Compute C# method signature from the WIT spec.
-            var paramTypes = fe.Spec.Params.Select(p => MapHostParamType(p.Type)).ToArray();
-            var returnType = fe.Spec.HasNoResult
-                ? typeof(void)
-                : IsStringType(fe.Spec.Result!) ? typeof(string) : MapPrimitiveToClrType(fe.Spec.Result!, "return");
+            var paramTypes = fe.Spec.Params.Select(p => MapHostParamType(p.Type, registry)).ToArray();
+            var returnType = ResolveReturnClrType(fe.Spec, registry);
 
             var method = typeBuilder.DefineMethod(
                 fe.PascalName,
@@ -438,9 +500,11 @@ namespace Wacs.ComponentModel.Harness.Lib
 
             var il = method.GetILGenerator();
 
-            // For v0 (single string-in, string-out), emit the exact
-            // shape the hand-written HelloHarness.Greet uses.
-            // TODO generalize when richer fixtures land.
+            // String-in / string-out — the spike fixture's exact shape.
+            // Kept as a focused path until the generic flat-lowered
+            // emitter handles strings too (deferred — string lower needs
+            // ptr+len in the flat lowering, which the generic path
+            // doesn't yet thread through).
             if (fe.Spec.Params.Count == 1 && IsStringType(fe.Spec.Params[0].Type)
                 && fe.Spec.Result is not null && IsStringType(fe.Spec.Result))
             {
@@ -448,9 +512,153 @@ namespace Wacs.ComponentModel.Harness.Lib
                 return;
             }
 
+            // Generic flat-lowered case (v0.2): primitive / record-of-
+            // primitives params, primitive / record / variant return.
+            if (AllParamsAreFlatLowerable(fe.Spec) && !fe.NeedsPostReturn)
+            {
+                EmitFlatLowered(il, fe, memoryField, registry, liftMethods);
+                return;
+            }
+
             throw new NotSupportedException(
-                $"Harness emitter v0 only implements `func(string) -> string` exports; "
-                + $"'{fe.Name}' has a different shape.");
+                $"Harness emitter v0.2 doesn't yet support export '{fe.Name}' — "
+                + $"params/return outside the supported flat-lowered shape.");
+        }
+
+        private static bool AllParamsAreFlatLowerable(CtFunctionType fn)
+        {
+            foreach (var p in fn.Params)
+                if (!IsFlatLowerable(p.Type)) return false;
+            return true;
+        }
+
+        private static bool IsFlatLowerable(CtValType t)
+        {
+            var d = CanonicalAbi.Deref(t);
+            if (d is CtPrimType prim)
+            {
+                return prim.Kind != CtPrim.String;  // string is "flat" (ptr+len) but handled specially
+            }
+            if (d is CtRecordType rec)
+            {
+                foreach (var f in rec.Fields)
+                    if (!IsFlatLowerable(f.Type)) return false;
+                return true;
+            }
+            return false;
+        }
+
+        private static Type ResolveReturnClrType(CtFunctionType fn, TypeRegistry registry)
+        {
+            if (fn.HasNoResult) return typeof(void);
+            var d = CanonicalAbi.Deref(fn.Result!);
+            return IsStringType(d) ? typeof(string) : WitTypeEmit.MapClrType(d, registry, "return");
+        }
+
+        /// <summary>
+        /// Generic flat-lowered wrapper emission: walk each typed
+        /// param, push its lowered primitive fields onto the invoker
+        /// call stack, call the invoker, then lift the return (direct
+        /// primitive or indirect record/variant via the registered
+        /// Lift{Name} helper).
+        /// </summary>
+        private static void EmitFlatLowered(
+            ILGenerator il, FunctionExport fe, FieldBuilder memoryField,
+            TypeRegistry registry,
+            System.Collections.Generic.Dictionary<string, MethodBuilder> liftMethods)
+        {
+            // Push `this._invoker_<name>` onto the stack first; we
+            // then push the lowered args and finally callvirt.
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, fe.InvokerField);
+
+            // For each user-facing arg slot, push lowered primitive(s).
+            for (int i = 0; i < fe.Spec.Params.Count; i++)
+            {
+                int argIdx = i + 1;  // Ldarg_0 is `this`.
+                EmitFlattenedArg(il, argIdx, fe.Spec.Params[i].Type, registry);
+            }
+
+            // Call the invoker.
+            il.Emit(OpCodes.Callvirt, fe.InvokerType.GetMethod("Invoke")!);
+
+            // Lift the return.
+            if (fe.Spec.HasNoResult)
+            {
+                il.Emit(OpCodes.Pop);  // there shouldn't be anything; safety.
+                il.Emit(OpCodes.Ret);
+                return;
+            }
+
+            var retDeref = CanonicalAbi.Deref(fe.Spec.Result!);
+            if (retDeref is CtPrimType)
+            {
+                // Direct primitive — invoker already produced the value.
+                il.Emit(OpCodes.Ret);
+                return;
+            }
+            if (retDeref is CtRecordType rec)
+            {
+                // The invoker returned a retArea i32 pointer; the
+                // record lives at that address. Stash the ptr, then
+                // call LiftRecord(memory, ptr).
+                var retArea = il.DeclareLocal(typeof(int));
+                il.Emit(OpCodes.Stloc, retArea);
+                il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                il.Emit(OpCodes.Ldloc, retArea);
+                il.Emit(OpCodes.Call, liftMethods[rec.Name]);
+                il.Emit(OpCodes.Ret);
+                return;
+            }
+            if (retDeref is CtVariantType variant)
+            {
+                var retArea = il.DeclareLocal(typeof(int));
+                il.Emit(OpCodes.Stloc, retArea);
+                il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                il.Emit(OpCodes.Ldloc, retArea);
+                il.Emit(OpCodes.Call, liftMethods[variant.Name]);
+                il.Emit(OpCodes.Ret);
+                return;
+            }
+
+            throw new NotSupportedException(
+                $"Flat-lowered return path doesn't yet support {retDeref.GetType().Name}.");
+        }
+
+        /// <summary>
+        /// Push the lowered primitive args of one user-facing
+        /// parameter onto the IL stack. Primitive → bare ldarg.
+        /// Record → for each field, recursively load via the field
+        /// getter, then flatten the field.
+        /// </summary>
+        private static void EmitFlattenedArg(ILGenerator il, int argIdx, CtValType t, TypeRegistry registry)
+        {
+            var d = CanonicalAbi.Deref(t);
+            if (d is CtPrimType prim && prim.Kind != CtPrim.String)
+            {
+                EmitLdarg(il, argIdx);
+                return;
+            }
+            if (d is CtRecordType rec)
+            {
+                var getters = registry.RecordGetters[rec.Name];
+                foreach (var f in rec.Fields)
+                {
+                    // For each field: load arg, call getter, recurse.
+                    EmitLdarg(il, argIdx);
+                    il.Emit(OpCodes.Callvirt, getters[f.Name]);
+                    // If the field is itself a primitive, this is enough;
+                    // for nested records, the getter returns the nested
+                    // record and we'd need to recurse. v0.2 supports
+                    // depth-1 only — IsFlatLowerable already vetted this.
+                    if (CanonicalAbi.Deref(f.Type) is not CtPrimType)
+                        throw new NotSupportedException(
+                            "Nested records in flat-lowered params not supported in v0.2.");
+                }
+                return;
+            }
+            throw new NotSupportedException(
+                $"EmitFlattenedArg v0.2 doesn't support {d.GetType().Name}.");
         }
 
         private static void EmitStringInStringOut(
@@ -513,11 +721,13 @@ namespace Wacs.ComponentModel.Harness.Lib
         // ===== Helpers =====
 
         // The user-facing C# type for a parameter — string for WIT string,
-        // primitive otherwise. (List + record + variant: future.)
-        private static Type MapHostParamType(CtValType t)
+        // primitive for WIT primitives, emitted CLR record/variant
+        // type for those.
+        private static Type MapHostParamType(CtValType t, TypeRegistry registry)
         {
-            if (IsStringType(t)) return typeof(string);
-            return MapPrimitiveToClrType(t, "parameter");
+            var d = CanonicalAbi.Deref(t);
+            if (IsStringType(d)) return typeof(string);
+            return WitTypeEmit.MapClrType(d, registry, "parameter");
         }
 
         /// <summary>

@@ -38,5 +38,15 @@ namespace Wacs.ComponentModel.Harness
             data[offset + 2] = unchecked((byte)(value >> 16));
             data[offset + 3] = unchecked((byte)(value >> 24));
         }
+
+        public static byte ReadU8(MemoryInstance memory, int offset)
+        {
+            return memory.Data[offset];
+        }
+
+        public static void WriteU8(MemoryInstance memory, int offset, byte value)
+        {
+            memory.Data[offset] = value;
+        }
     }
 }

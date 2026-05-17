@@ -1,5 +1,84 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Lib 0.2.0 / WACS.ComponentModel.Harness.Runtime 0.3.0 — records + variants
+
+Harness emitter expands to handle WIT records + variants
+end-to-end, validated against a new richer fixture:
+`Spec.Test/components/fixtures/wit-harness-spike-richer/` —
+multi-export world with `record vec2 { x: s32, y: s32 }`,
+`variant outcome { success(vec2), invalid }`, and two exports:
+
+```wit
+export add: func(a: vec2, b: vec2) -> vec2;
+export normalize-or-fail: func(v: vec2) -> outcome;
+```
+
+The generated `RicherHarness` runs the same three assertions the
+hand-shaped reference would: `add(Vec2(1,2), Vec2(3,4)) →
+Vec2(4,6)`, `normalize-or-fail(Vec2(0,0)) → Outcome.Invalid`,
+`normalize-or-fail(Vec2(7,-3)) → Outcome.Success(Vec2(1,-1))`.
+
+### What the emitter learned
+
+- **`CanonicalAbi.cs`** — layout rules: record + variant size /
+  alignment, record field offsets, variant disc width
+  (1 / 2 / 4 bytes by case count), variant payload offset
+  (padded to max-case-align). Single-source for emitters so layout
+  math stays consistent across lift / lower paths.
+- **`WitTypeEmit.cs`** — record types as sealed CLR classes with
+  positional ctor + readonly properties; variants as abstract
+  base + nested sealed subclasses per case (`Outcome.Success`,
+  `Outcome.Invalid`). `TypeRegistry` stashes ctor / getter
+  references so cross-type IL works without TypeBuilder-after-bake
+  reflection.
+- **`LiftEmit.cs`** — per-named-type private static `Lift{Name}`
+  helpers on the harness. Variant lift dispatches via discriminator
+  Beq chain, lifts payload, newobjs the matching subclass; throws
+  `InvalidDataException` on unknown discriminator.
+- **`WorldHarnessEmit.cs`** — generic flat-lowered wrapper path:
+  for each user-facing param, unwrap fields into the lowered
+  primitive call args (record's `a` becomes `a.X, a.Y`); for
+  record / variant returns, treat the invoker return as an
+  indirect ret-area i32 and call the registered `Lift{Name}` to
+  produce the typed value. Strings still take the dedicated
+  string-in / string-out path.
+
+Aggregate-return cabi_post detection: returns containing strings
+or lists transitively get a `cabi_post_*` invoker; pure-primitive
+records / variants don't (Rust + wit-bindgen don't emit
+`cabi_post_*` for those — `wasm-tools print` on richer.component.wasm
+confirms no `cabi_post_add` or `cabi_post_normalize-or-fail`).
+
+### What still throws
+
+The v0.2 emitter intentionally fails loud on:
+- Strings, lists, options, results, nested records inside
+  records, multi-results.
+- Inline-interface exports (`export wasi:foo/iface`).
+- Variants with > 256 cases (1-byte discriminator assumed).
+- Resource handles, flags, enums.
+
+These light up the next fixture pass; each closes incrementally.
+
+`Harness.Runtime` minor-bumps to 0.3.0 — adds
+`MemoryHelpers.ReadU8` / `WriteU8` (variant discriminator
+reads). Family tag: `WACS-ComponentModel-v0.7.0` →
+`WACS-ComponentModel-v0.8.0` (minor — capability shift on
+Harness.Lib + Harness.Runtime).
+
+### What changed
+
+- **`WACS.ComponentModel.Harness.Lib` 0.1.0 → 0.2.0** (minor —
+  records + variants): `CanonicalAbi.cs`, `WitTypeEmit.cs`,
+  `LiftEmit.cs` (new); `WorldHarnessEmit.cs` substantially expanded
+  (~+200 LOC) — generic flat-lowered path + lifted-return dispatch.
+- **`WACS.ComponentModel.Harness.Runtime` 0.2.0 → 0.3.0** (minor —
+  public API addition): `MemoryHelpers.ReadU8` / `WriteU8`.
+- **New fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-richer/` —
+  Rust + WIT + built `.component.wasm` (13.7 KB, no WASI imports)
+  + `Generated.Validate` console.
+
 ## WACS.ComponentModel.Harness.Lib 0.1.0 / WACS.ComponentModel.Harness.Runtime 0.2.0 / WACS.ComponentModel 0.5.2 — IL-emitting harness generator
 
 `WACS.ComponentModel.Harness.Lib` is the third sibling in the
