@@ -1,0 +1,21 @@
+package wacs:interface-types-spike;
+
+interface geometry {
+    record point { x: u32, y: u32 }
+    enum quadrant { ne, nw, sw, se }
+    variant region {
+        empty,
+        point-only(point),
+        labeled(string),
+    }
+
+    classify: func(p: point) -> quadrant;
+    describe: func(r: region) -> string;
+}
+
+world cartographer {
+    /// Interface declares its own record/enum/variant types. They
+    /// emit into the interface's own C# namespace; the harness
+    /// methods take fully-qualified references.
+    export geometry;
+}

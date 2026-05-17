@@ -1,5 +1,95 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Lib 0.22.0 — interface-level types (Slice C)
+
+Records / variants / enums / flags declared inside an exported
+interface emit into the interface's own C# sub-namespace,
+keeping interface-local names from colliding with world-level
+names (or other interfaces' same-named types).
+
+```wit
+interface geometry {
+    record point { x: u32, y: u32 }
+    enum quadrant { ne, nw, sw, se }
+    variant region {
+        empty,
+        point-only(point),
+        labeled(string),
+    }
+    classify: func(p: point) -> quadrant;
+    describe: func(r: region) -> string;
+}
+
+world cartographer { export geometry; }
+```
+
+Emits:
+
+```
+WitHarnessSpike.InterfaceTypes.Generated
+├── CartographerHarness
+│     ├── WacsInterfaceTypesSpikeGeometry_Classify(Point) -> Quadrant
+│     └── WacsInterfaceTypesSpikeGeometry_Describe(Region) -> string
+└── WacsInterfaceTypesSpikeGeometry
+      ├── Point
+      ├── Quadrant
+      └── Region (with nested Empty / PointOnly / Labeled case classes)
+```
+
+### Structural refactor
+
+`TypeRegistry` flipped from string-keyed to **structural-type-
+reference-keyed** for all dictionaries (`Records`, `Variants`,
+`Enums`, `Flags`, `RecordCtors`, `RecordGetters`, `VariantCases`,
+`VariantCaseCtors`). Two interfaces both declaring `error` no
+longer collide because the CtRecordType / CtVariantType
+references are unique per WIT declaration.
+
+Same refactor for `liftMethods` dictionary in `LiftEmit` — now
+`Dictionary<CtValType, MethodBuilder>` keyed by the structural
+type. Lift method names use the TypeBuilder's `FullName` (with
+`.` → `_`) to keep them unique even when type short names match
+across interfaces.
+
+`EmitWorldTypes` now walks an `EnumerateAllTypes(world, opts)`
+sequence that yields `(CtNamedType, csharpNamespace)` pairs —
+world types get `opts.Namespace`, interface-export types get
+`opts.Namespace + "." + HarnessNaming.InterfaceSegment(iface)`.
+
+### What changed
+
+- **`WitTypeEmit.cs`**:
+  - `TypeRegistry` keys flipped to structural-type references.
+  - `EmitWorldTypes` walks `EnumerateAllTypes` so interface
+    types are emitted into their own sub-namespace.
+  - New `EnumerateAllTypes(world, opts)` helper.
+  - Dead `PrimitiveAliases` write site removed.
+- **`LiftEmit.cs`** — lift methods keyed by structural type
+  reference; unique method-name synthesis via
+  `UniqueLiftMethodName(tb)`.
+- **`WorldHarnessEmit.cs`**:
+  - All `registry.X[name]` sites changed to `registry.X[type]`.
+  - `BuildInterfaceExports` drops the interface-types refusal
+    (now handled by Slice C); resource refusal remains until
+    Slice D.
+  - `MapPrimitiveToClrType` widened to accept `CtEnumType` /
+    `CtFlagsType` (lowered to `int`).
+  - `EmitFlatLowered` direct-return branch handles enum / flags
+    (invoker's int is stack-compatible with the wrapper's
+    enum-typed Ret slot).
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-interface-types/`
+  — `geometry` interface with `point` (record), `quadrant`
+  (enum direct return), `region` (variant with payload + unit
+  cases). Validator asserts all three types live in the
+  expected sub-namespace and round-trip through both exports.
+
+**27/27 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.29.0` →
+`WACS-ComponentModel-v0.30.0` (minor — capability shift on
+Harness.Lib).
+
 ## WACS.ComponentModel.Harness.Lib 0.21.0 — function-only interface exports (Slices A + B)
 
 Interface exports now flow through to the harness. Function-only

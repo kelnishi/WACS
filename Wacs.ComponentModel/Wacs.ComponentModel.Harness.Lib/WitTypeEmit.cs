@@ -7,6 +7,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
 using Wacs.ComponentModel.CSharpEmit;
@@ -42,37 +43,42 @@ namespace Wacs.ComponentModel.Harness.Lib
         {
             var registry = new TypeRegistry();
 
+            // Collect every named type the harness needs to emit, paired
+            // with the C# namespace it goes in: world types live at the
+            // world namespace; interface-export types live at
+            // <world-namespace>.<interface-segment> (one Pascal token per
+            // interface — WacsCliRun, WasiIoStreams).
+            var allTypes = EnumerateAllTypes(world, opts).ToList();
+
             // Pass 1: define the type shells so forward references
-            // (variant payload → record, etc.) have something to bind to.
-            // Enums + flags emit eagerly as complete enum types (no
-            // payloads, no forward refs to chase) so they're added
-            // straight into the registry as runtime types.
-            foreach (var named in world.Types)
+            // (variant payload → record, etc.) have something to bind
+            // to. Enums + flags emit eagerly as complete enum types
+            // (no payloads, no forward refs to chase).
+            foreach (var (named, ns) in allTypes)
             {
                 var structural = CanonicalAbi.Deref(named.Type);
                 switch (structural)
                 {
                     case CtRecordType rec:
-                        var recName = $"{opts.Namespace}.{NameMangler.ToPascalCase(named.Name)}";
-                        registry.Records[named.Name] = module.DefineType(
-                            recName,
+                        registry.Records[rec] = module.DefineType(
+                            $"{ns}.{NameMangler.ToPascalCase(named.Name)}",
                             TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.BeforeFieldInit);
                         break;
                     case CtVariantType variant:
-                        var varName = $"{opts.Namespace}.{NameMangler.ToPascalCase(named.Name)}";
-                        registry.Variants[named.Name] = module.DefineType(
-                            varName,
+                        registry.Variants[variant] = module.DefineType(
+                            $"{ns}.{NameMangler.ToPascalCase(named.Name)}",
                             TypeAttributes.Public | TypeAttributes.Abstract);
                         break;
                     case CtEnumType en:
-                        registry.Enums[named.Name] = EmitEnumType(module, opts.Namespace, named.Name, en);
+                        registry.Enums[en] = EmitEnumType(module, ns, named.Name, en);
                         break;
                     case CtFlagsType fl:
-                        registry.Flags[named.Name] = EmitFlagsType(module, opts.Namespace, named.Name, fl);
+                        registry.Flags[fl] = EmitFlagsType(module, ns, named.Name, fl);
                         break;
                     case CtPrimType:
-                        // Type alias to a primitive — no CLR type to emit; lookups go straight to the primitive CLR type.
-                        registry.PrimitiveAliases[named.Name] = structural;
+                        // Type alias to a primitive — no CLR type to
+                        // emit; lookups go straight to the primitive
+                        // CLR type via MapClrType's prim case.
                         break;
                     default:
                         throw new NotSupportedException(
@@ -81,18 +87,17 @@ namespace Wacs.ComponentModel.Harness.Lib
             }
 
             // Pass 2: fill in record fields + variant case hierarchies.
-            foreach (var named in world.Types)
+            foreach (var (named, _) in allTypes)
             {
                 var structural = CanonicalAbi.Deref(named.Type);
                 if (structural is CtRecordType rec)
-                    PopulateRecord(registry.Records[named.Name], rec, registry);
+                    PopulateRecord(registry.Records[rec], rec, registry);
                 else if (structural is CtVariantType variant)
-                    PopulateVariant(registry.Variants[named.Name], variant, registry);
+                    PopulateVariant(registry.Variants[variant], variant, registry);
             }
 
             // Pass 3: finalize the variant case subclasses (CreateType
             // on inner-most first), then variant bases, then records.
-            // Inner sealed subclasses must finalize before their parent.
             foreach (var (_, subs) in registry.VariantCases)
                 foreach (var sub in subs.Values)
                     sub.CreateType();
@@ -102,6 +107,33 @@ namespace Wacs.ComponentModel.Harness.Lib
                 r.CreateType();
 
             return registry;
+        }
+
+        /// <summary>
+        /// Enumerate every named type the harness needs to emit, paired
+        /// with the C# namespace it should live in. World-level types
+        /// land at <see cref="HarnessOptions.Namespace"/>; interface-
+        /// export types land at <c>{Namespace}.{InterfaceSegment}</c>.
+        /// </summary>
+        internal static IEnumerable<(CtNamedType Named, string Namespace)> EnumerateAllTypes(
+            CtWorldType world, HarnessOptions opts)
+        {
+            foreach (var t in world.Types)
+                yield return (t, opts.Namespace);
+
+            foreach (var port in world.Exports)
+            {
+                CtInterfaceType? iface = port.Spec switch
+                {
+                    CtExternInterfaceRef iref => iref.Target,
+                    CtExternInlineInterface inline => inline.Interface,
+                    _ => null,
+                };
+                if (iface == null) continue;
+                var ifaceNs = $"{opts.Namespace}.{HarnessNaming.InterfaceSegment(iface)}";
+                foreach (var t in iface.Types)
+                    yield return (t, ifaceNs);
+            }
         }
 
         /// <summary>
@@ -190,7 +222,7 @@ namespace Wacs.ComponentModel.Harness.Lib
                 prop.SetGetMethod(getter);
                 getters[f.Name] = getter;
             }
-            registry.RecordGetters[rec.Name] = getters;
+            registry.RecordGetters[rec] = getters;
 
             // Positional ctor: takes all fields, assigns backings.
             var ctor = tb.DefineConstructor(
@@ -208,7 +240,7 @@ namespace Wacs.ComponentModel.Harness.Lib
                 cil.Emit(OpCodes.Stfld, fields[i]);
             }
             cil.Emit(OpCodes.Ret);
-            registry.RecordCtors[rec.Name] = ctor;
+            registry.RecordCtors[rec] = ctor;
         }
 
         private static void PopulateVariant(TypeBuilder tb, CtVariantType variant, TypeRegistry registry)
@@ -284,8 +316,8 @@ namespace Wacs.ComponentModel.Harness.Lib
                     subCtors[c.Name] = ctor;
                 }
             }
-            registry.VariantCases[variant.Name] = subs;
-            registry.VariantCaseCtors[variant.Name] = subCtors;
+            registry.VariantCases[variant] = subs;
+            registry.VariantCaseCtors[variant] = subCtors;
         }
 
         /// <summary>
@@ -320,13 +352,13 @@ namespace Wacs.ComponentModel.Harness.Lib
                     };
 
                 case CtRecordType rec:
-                    if (registry.Records.TryGetValue(rec.Name, out var recBuilder))
+                    if (registry.Records.TryGetValue(rec, out var recBuilder))
                         return recBuilder;
                     throw new NotSupportedException(
                         $"Anonymous record types not supported in v0.2 ({context}).");
 
                 case CtVariantType variant:
-                    if (registry.Variants.TryGetValue(variant.Name, out var varBuilder))
+                    if (registry.Variants.TryGetValue(variant, out var varBuilder))
                         return varBuilder;
                     throw new NotSupportedException(
                         $"Anonymous variant types not supported in v0.2 ({context}).");
@@ -342,13 +374,13 @@ namespace Wacs.ComponentModel.Harness.Lib
                     return elem.MakeArrayType();
 
                 case CtEnumType en:
-                    if (registry.Enums.TryGetValue(en.Name, out var enType))
+                    if (registry.Enums.TryGetValue(en, out var enType))
                         return enType;
                     throw new NotSupportedException(
                         $"Anonymous enum types not supported in v0.2 ({context}).");
 
                 case CtFlagsType fl:
-                    if (registry.Flags.TryGetValue(fl.Name, out var flType))
+                    if (registry.Flags.TryGetValue(fl, out var flType))
                         return flType;
                     throw new NotSupportedException(
                         $"Anonymous flag types not supported in v0.2 ({context}).");
@@ -433,19 +465,20 @@ namespace Wacs.ComponentModel.Harness.Lib
     /// </summary>
     internal sealed class TypeRegistry
     {
-        public Dictionary<string, TypeBuilder> Records { get; } = new();
-        public Dictionary<string, ConstructorBuilder> RecordCtors { get; } = new();
-        // Record name → (field name → getter MethodBuilder).
-        public Dictionary<string, Dictionary<string, MethodBuilder>> RecordGetters { get; } = new();
-        public Dictionary<string, TypeBuilder> Variants { get; } = new();
-        public Dictionary<string, Dictionary<string, TypeBuilder>> VariantCases { get; } = new();
-        // Variant name → (case name → ctor). Unit-case ctors are parameterless;
-        // payload-case ctors take one arg of the payload's CLR type.
-        public Dictionary<string, Dictionary<string, ConstructorBuilder>> VariantCaseCtors { get; } = new();
-        public Dictionary<string, CtValType> PrimitiveAliases { get; } = new();
+        // All registries key by the structural type reference (not
+        // by WIT name string). The parser creates one structural
+        // type per WIT declaration, so reference identity gives us
+        // collision-free keys even when two interfaces both declare
+        // a type called "error".
+        public Dictionary<CtRecordType, TypeBuilder> Records { get; } = new();
+        public Dictionary<CtRecordType, ConstructorBuilder> RecordCtors { get; } = new();
+        public Dictionary<CtRecordType, Dictionary<string, MethodBuilder>> RecordGetters { get; } = new();
+        public Dictionary<CtVariantType, TypeBuilder> Variants { get; } = new();
+        public Dictionary<CtVariantType, Dictionary<string, TypeBuilder>> VariantCases { get; } = new();
+        public Dictionary<CtVariantType, Dictionary<string, ConstructorBuilder>> VariantCaseCtors { get; } = new();
         // Enums + flags emit eagerly to full Types (no forward refs);
         // stored as runtime System.Type rather than TypeBuilder.
-        public Dictionary<string, Type> Enums { get; } = new();
-        public Dictionary<string, Type> Flags { get; } = new();
+        public Dictionary<CtEnumType, Type> Enums { get; } = new();
+        public Dictionary<CtFlagsType, Type> Flags { get; } = new();
     }
 }

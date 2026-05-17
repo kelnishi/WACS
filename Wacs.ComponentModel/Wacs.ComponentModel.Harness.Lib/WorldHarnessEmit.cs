@@ -304,20 +304,16 @@ namespace Wacs.ComponentModel.Harness.Lib
             List<FunctionExport> sink, CtInterfaceType iface, TypeRegistry registry)
         {
             // Refuse interfaces with resource declarations until Slice
-            // D lands. Other interface-level types (records, variants,
-            // enums, flags) need Slice C type-namespace work and will
-            // surface naturally when we hit a fixture that uses them.
+            // D lands. Plain interface-level types (records, variants,
+            // enums, flags) are handled by Slice C via the registry
+            // walking interface-export types alongside world types.
             foreach (var t in iface.Types)
             {
-                if (t.Type is CtResourceType)
+                if (CanonicalAbi.Deref(t.Type) is CtResourceType)
                     throw new NotSupportedException(
                         $"Interface '{iface.Name}' declares resource '{t.Name}'; " +
                         "resource support is the next slice (D).");
             }
-            if (iface.Types.Count > 0)
-                throw new NotSupportedException(
-                    $"Interface '{iface.Name}' declares types; " +
-                    "interface-level type emission is Slice C.");
 
             var ifaceBase = EntryPoints.InterfaceBase(iface);
             foreach (var ifn in iface.Functions)
@@ -532,6 +528,13 @@ namespace Wacs.ComponentModel.Harness.Lib
                         $"Harness emitter v0 does not yet support {p.Kind} ({context})."),
                 };
             }
+            // Enums + flags lower to a single i32 — wasm widens any
+            // smaller backing width to i32 at the boundary. The CLR
+            // wrapper's enum-typed return is stack-compatible with
+            // the i32 the invoker produces, so no explicit conv is
+            // needed at the lift site.
+            if (t is CtEnumType || t is CtFlagsType)
+                return typeof(int);
             throw new NotSupportedException(
                 $"Harness emitter v0 does not yet support {t.GetType().Name} ({context}).");
         }
@@ -767,7 +770,7 @@ namespace Wacs.ComponentModel.Harness.Lib
             FieldBuilder memoryField, FieldBuilder reallocField,
             FunctionExport fe,
             TypeRegistry registry,
-            System.Collections.Generic.Dictionary<string, MethodBuilder> liftMethods)
+            System.Collections.Generic.Dictionary<CtValType, MethodBuilder> liftMethods)
         {
             // Compute C# method signature from the WIT spec.
             var paramTypes = fe.Spec.Params.Select(p => MapHostParamType(p.Type, registry)).ToArray();
@@ -944,7 +947,7 @@ namespace Wacs.ComponentModel.Harness.Lib
             ILGenerator il, FunctionExport fe,
             FieldBuilder memoryField, FieldBuilder reallocField,
             TypeRegistry registry,
-            System.Collections.Generic.Dictionary<string, MethodBuilder> liftMethods)
+            System.Collections.Generic.Dictionary<CtValType, MethodBuilder> liftMethods)
         {
             // Push `this._invoker_<name>` onto the stack first; we
             // then push the lowered args and finally callvirt.
@@ -987,12 +990,12 @@ namespace Wacs.ComponentModel.Harness.Lib
             }
             if (retDeref is CtRecordType rec)
             {
-                EmitLiftReturnViaRetArea(il, fe, memoryField, liftMethods[rec.Name]);
+                EmitLiftReturnViaRetArea(il, fe, memoryField, liftMethods[rec]);
                 return;
             }
             if (retDeref is CtVariantType variant)
             {
-                EmitLiftReturnViaRetArea(il, fe, memoryField, liftMethods[variant.Name]);
+                EmitLiftReturnViaRetArea(il, fe, memoryField, liftMethods[variant]);
                 return;
             }
             if (retDeref is CtListType list)
@@ -1003,6 +1006,13 @@ namespace Wacs.ComponentModel.Harness.Lib
             if (retDeref is CtOptionType || retDeref is CtResultType || retDeref is CtTupleType)
             {
                 EmitLiftReturnViaRetArea(il, fe, memoryField, fe.ReturnLiftMethod!);
+                return;
+            }
+            if (retDeref is CtEnumType || retDeref is CtFlagsType)
+            {
+                // Invoker returned the int underlying — stack-
+                // compatible with the wrapper's enum-typed Ret slot.
+                il.Emit(OpCodes.Ret);
                 return;
             }
 
@@ -1076,7 +1086,7 @@ namespace Wacs.ComponentModel.Harness.Lib
         private static void EmitLiftListReturn(
             ILGenerator il, FunctionExport fe, CtListType list,
             FieldBuilder memoryField, TypeRegistry registry,
-            System.Collections.Generic.Dictionary<string, MethodBuilder> liftMethods)
+            System.Collections.Generic.Dictionary<CtValType, MethodBuilder> liftMethods)
         {
             var retArea = il.DeclareLocal(typeof(int));
             il.Emit(OpCodes.Stloc, retArea);
@@ -1210,7 +1220,7 @@ namespace Wacs.ComponentModel.Harness.Lib
                 // the same field-type dispatch. Strings, lists, enums,
                 // flags, tuples (and nested records of those) all work
                 // by reusing the per-element lower path above.
-                var getters = registry.RecordGetters[rec.Name];
+                var getters = registry.RecordGetters[rec];
                 foreach (var f in rec.Fields)
                 {
                     EmitFlattenRecordField(il, argIdx, getters[f.Name], f.Type,
@@ -1352,7 +1362,7 @@ namespace Wacs.ComponentModel.Harness.Lib
             if (d is CtRecordType nested)
             {
                 // Re-dispatch: load the local's getters per field.
-                var getters = registry.RecordGetters[nested.Name];
+                var getters = registry.RecordGetters[nested];
                 foreach (var f in nested.Fields)
                 {
                     // synth: we have the nested instance in `local`,
@@ -1631,7 +1641,7 @@ namespace Wacs.ComponentModel.Harness.Lib
             TypeRegistry registry)
         {
             var joinedSlots = ComputeVariantJoinedSlots(variant);
-            var caseSubclasses = registry.VariantCases[variant.Name];
+            var caseSubclasses = registry.VariantCases[variant];
 
             var caseLabels = new System.Reflection.Emit.Label[variant.Cases.Count];
             for (int i = 0; i < variant.Cases.Count; i++)
@@ -1731,7 +1741,7 @@ namespace Wacs.ComponentModel.Harness.Lib
                 // flatten. Reuses EmitFlattenSubRecordField which
                 // already handles primitives, strings, enums, flags,
                 // nested lists, tuples, and nested records.
-                var getters = registry.RecordGetters[rec.Name];
+                var getters = registry.RecordGetters[rec];
                 foreach (var f in rec.Fields)
                     EmitFlattenSubRecordField(il, valueLocal, getters[f.Name], f.Type,
                         memoryField, reallocField, registry);
@@ -2291,11 +2301,11 @@ namespace Wacs.ComponentModel.Harness.Lib
             TypeRegistry registry)
         {
             var fieldOffsets = CanonicalAbi.RecordFieldOffsets(rec);
-            var getters = registry.RecordGetters[rec.Name];
+            var getters = registry.RecordGetters[rec];
 
             // Pull the element record into a local once, reused per
             // field write.
-            var recClr = registry.Records[rec.Name];
+            var recClr = registry.Records[rec];
             var recLocal = il.DeclareLocal(recClr);
             il.Emit(OpCodes.Ldloc, arrLocal);
             il.Emit(OpCodes.Ldloc, iLocal);

@@ -48,42 +48,66 @@ namespace Wacs.ComponentModel.Harness.Lib
         /// link to the same emitted helpers by lookup in the registry.
         /// Returns a map from WIT type name to the emitted lift method.
         /// </summary>
-        public static System.Collections.Generic.Dictionary<string, MethodBuilder> EmitLifts(
+        public static System.Collections.Generic.Dictionary<CtValType, MethodBuilder> EmitLifts(
             TypeBuilder harnessType, CtWorldType world, TypeRegistry registry)
         {
-            var liftMethods = new System.Collections.Generic.Dictionary<string, MethodBuilder>();
+            var liftMethods = new System.Collections.Generic.Dictionary<CtValType, MethodBuilder>();
 
             // Pass 1: define method signatures so cross-calls resolve.
-            foreach (var named in world.Types)
+            // Walks the registry directly so interface-declared types
+            // get lifts alongside world-level types. Method names use
+            // the TypeBuilder's short name (which incorporates the
+            // interface namespace dot-segment) with dots collapsed,
+            // ensuring uniqueness even when two interfaces declare a
+            // same-named type.
+            foreach (var (rec, tb) in registry.Records)
             {
-                var structural = CanonicalAbi.Deref(named.Type);
-                if (structural is not (CtRecordType or CtVariantType)) continue;
-                var clr = WitTypeEmit.MapClrType(structural, registry, $"lift signature for '{named.Name}'");
+                var clr = WitTypeEmit.MapClrType(rec, registry, $"lift signature for record");
                 var mb = harnessType.DefineMethod(
-                    "Lift" + NameMangler.ToPascalCase(named.Name),
+                    UniqueLiftMethodName(tb),
                     MethodAttributes.Private | MethodAttributes.Static | MethodAttributes.HideBySig,
                     clr,
                     new[] { typeof(MemoryInstance), typeof(int) });
                 mb.DefineParameter(1, ParameterAttributes.None, "memory");
                 mb.DefineParameter(2, ParameterAttributes.None, "ptr");
-                liftMethods[named.Name] = mb;
+                liftMethods[rec] = mb;
+            }
+            foreach (var (variant, tb) in registry.Variants)
+            {
+                var clr = WitTypeEmit.MapClrType(variant, registry, $"lift signature for variant");
+                var mb = harnessType.DefineMethod(
+                    UniqueLiftMethodName(tb),
+                    MethodAttributes.Private | MethodAttributes.Static | MethodAttributes.HideBySig,
+                    clr,
+                    new[] { typeof(MemoryInstance), typeof(int) });
+                mb.DefineParameter(1, ParameterAttributes.None, "memory");
+                mb.DefineParameter(2, ParameterAttributes.None, "ptr");
+                liftMethods[variant] = mb;
             }
 
             // Pass 2: fill bodies.
-            foreach (var named in world.Types)
+            foreach (var (rec, mb) in liftMethods)
             {
-                var structural = CanonicalAbi.Deref(named.Type);
-                if (!liftMethods.TryGetValue(named.Name, out var mb)) continue;
-
                 var il = mb.GetILGenerator();
-                if (structural is CtRecordType rec)
-                    EmitRecordLift(il, rec, registry, liftMethods);
-                else if (structural is CtVariantType variant)
-                    EmitVariantLift(il, variant, registry, liftMethods);
+                if (rec is CtRecordType r)
+                    EmitRecordLift(il, r, registry, liftMethods);
+                else if (rec is CtVariantType v)
+                    EmitVariantLift(il, v, registry, liftMethods);
                 il.Emit(OpCodes.Ret);
             }
 
             return liftMethods;
+        }
+
+        private static string UniqueLiftMethodName(TypeBuilder tb)
+        {
+            // tb.Name is the type's short name (without namespace);
+            // for interface-typed records that already lives in a
+            // sub-namespace (e.g. "Error" inside ns
+            // "...Generated.WasiIoStreams"), tb.FullName carries the
+            // interface segment. Use FullName minus the assembly's
+            // common prefix to avoid collisions.
+            return "Lift_" + tb.FullName!.Replace('.', '_');
         }
 
         /// <summary>
@@ -100,7 +124,7 @@ namespace Wacs.ComponentModel.Harness.Lib
         /// </summary>
         public static void EmitLiftField(
             ILGenerator il, CtValType fieldType, int offset, TypeRegistry registry,
-            System.Collections.Generic.Dictionary<string, MethodBuilder> liftMethods)
+            System.Collections.Generic.Dictionary<CtValType, MethodBuilder> liftMethods)
         {
             var deref = CanonicalAbi.Deref(fieldType);
             switch (deref)
@@ -110,7 +134,7 @@ namespace Wacs.ComponentModel.Harness.Lib
                     return;
 
                 case CtRecordType rec:
-                    if (!liftMethods.TryGetValue(rec.Name, out var recLift))
+                    if (!liftMethods.TryGetValue(rec, out var recLift))
                         throw new InvalidOperationException(
                             $"No Lift method registered for record '{rec.Name}'.");
                     il.Emit(OpCodes.Ldarg_0);
@@ -119,7 +143,7 @@ namespace Wacs.ComponentModel.Harness.Lib
                     return;
 
                 case CtVariantType variant:
-                    if (!liftMethods.TryGetValue(variant.Name, out var varLift))
+                    if (!liftMethods.TryGetValue(variant, out var varLift))
                         throw new InvalidOperationException(
                             $"No Lift method registered for variant '{variant.Name}'.");
                     il.Emit(OpCodes.Ldarg_0);
@@ -176,7 +200,7 @@ namespace Wacs.ComponentModel.Harness.Lib
         /// </summary>
         private static void EmitLiftOption(
             ILGenerator il, CtOptionType opt, int offset, TypeRegistry registry,
-            System.Collections.Generic.Dictionary<string, MethodBuilder> liftMethods)
+            System.Collections.Generic.Dictionary<CtValType, MethodBuilder> liftMethods)
         {
             var innerClr = WitTypeEmit.MapClrType(opt.Inner, registry, "option inner");
             int payloadOffset = offset + CanonicalAbi.AlignUp(1, CanonicalAbi.AlignOf(opt.Inner));
@@ -231,7 +255,7 @@ namespace Wacs.ComponentModel.Harness.Lib
         /// </summary>
         private static void EmitLiftResult(
             ILGenerator il, CtResultType res, int offset, TypeRegistry registry,
-            System.Collections.Generic.Dictionary<string, MethodBuilder> liftMethods)
+            System.Collections.Generic.Dictionary<CtValType, MethodBuilder> liftMethods)
         {
             var okClr = res.Ok == null
                 ? typeof(System.ValueTuple)
@@ -287,7 +311,7 @@ namespace Wacs.ComponentModel.Harness.Lib
         /// </summary>
         private static void EmitLiftTuple(
             ILGenerator il, CtTupleType tup, int offset, TypeRegistry registry,
-            System.Collections.Generic.Dictionary<string, MethodBuilder> liftMethods)
+            System.Collections.Generic.Dictionary<CtValType, MethodBuilder> liftMethods)
         {
             int[] elemOffsets = CanonicalAbi.TupleElementOffsets(tup);
             for (int i = 0; i < tup.Elements.Count; i++)
@@ -344,7 +368,7 @@ namespace Wacs.ComponentModel.Harness.Lib
 
         private static void EmitRecordLift(
             ILGenerator il, CtRecordType rec, TypeRegistry registry,
-            System.Collections.Generic.Dictionary<string, MethodBuilder> liftMethods)
+            System.Collections.Generic.Dictionary<CtValType, MethodBuilder> liftMethods)
         {
             var offsets = CanonicalAbi.RecordFieldOffsets(rec);
 
@@ -356,12 +380,12 @@ namespace Wacs.ComponentModel.Harness.Lib
 
             // Newobj the record class. Constructor token stashed by
             // WitTypeEmit when it emitted the type.
-            il.Emit(OpCodes.Newobj, registry.RecordCtors[rec.Name]);
+            il.Emit(OpCodes.Newobj, registry.RecordCtors[rec]);
         }
 
         private static void EmitVariantLift(
             ILGenerator il, CtVariantType variant, TypeRegistry registry,
-            System.Collections.Generic.Dictionary<string, MethodBuilder> liftMethods)
+            System.Collections.Generic.Dictionary<CtValType, MethodBuilder> liftMethods)
         {
             // Strategy: read disc, then a series of compare-and-branch
             // blocks per case. Falls through to throw on unknown disc.
@@ -394,7 +418,7 @@ namespace Wacs.ComponentModel.Harness.Lib
             il.Emit(OpCodes.Br, defaultLabel);
 
             // Per-case body: lift payload (if any) and newobj subclass.
-            var caseCtors = registry.VariantCaseCtors[variant.Name];
+            var caseCtors = registry.VariantCaseCtors[variant];
             foreach (var (idx, c) in EnumerateIndexed(variant.Cases))
             {
                 il.MarkLabel(caseLabels[idx]);
@@ -424,7 +448,7 @@ namespace Wacs.ComponentModel.Harness.Lib
         /// </summary>
         private static void EmitLiftList(
             ILGenerator il, CtListType list, int offset, TypeRegistry registry,
-            System.Collections.Generic.Dictionary<string, MethodBuilder> liftMethods)
+            System.Collections.Generic.Dictionary<CtValType, MethodBuilder> liftMethods)
         {
             // Field-level lifts run inside static Lift{Name} methods
             // where arg.0 is the MemoryInstance and arg.1 is the
@@ -453,7 +477,7 @@ namespace Wacs.ComponentModel.Harness.Lib
             ILGenerator il, CtListType list, LocalBuilder memoryLocal,
             LocalBuilder basePtr, int baseOffset,
             TypeRegistry registry,
-            System.Collections.Generic.Dictionary<string, MethodBuilder> liftMethods)
+            System.Collections.Generic.Dictionary<CtValType, MethodBuilder> liftMethods)
         {
             // 1. Read list ptr + count via the memory local (works
             //    for both static Lift methods where arg.0 is memory
@@ -530,7 +554,7 @@ namespace Wacs.ComponentModel.Harness.Lib
             ILGenerator il, CtValType elemType, LocalBuilder memoryLocal,
             LocalBuilder listPtr, LocalBuilder indexLocal,
             TypeRegistry registry,
-            System.Collections.Generic.Dictionary<string, MethodBuilder> liftMethods)
+            System.Collections.Generic.Dictionary<CtValType, MethodBuilder> liftMethods)
         {
             var deref = CanonicalAbi.Deref(elemType);
             int elemSize = CanonicalAbi.SizeOf(deref);
@@ -591,7 +615,7 @@ namespace Wacs.ComponentModel.Harness.Lib
                     il.Emit(OpCodes.Call, StringCoding_LiftUtf8);
                     return;
                 case CtRecordType rec:
-                    if (!liftMethods.TryGetValue(rec.Name, out var recLift))
+                    if (!liftMethods.TryGetValue(rec, out var recLift))
                         throw new InvalidOperationException(
                             $"No Lift method registered for record '{rec.Name}'.");
                     il.Emit(OpCodes.Ldloc, memoryLocal);
@@ -599,7 +623,7 @@ namespace Wacs.ComponentModel.Harness.Lib
                     il.Emit(OpCodes.Call, recLift);
                     return;
                 case CtVariantType variant:
-                    if (!liftMethods.TryGetValue(variant.Name, out var varLift))
+                    if (!liftMethods.TryGetValue(variant, out var varLift))
                         throw new InvalidOperationException(
                             $"No Lift method registered for variant '{variant.Name}'.");
                     il.Emit(OpCodes.Ldloc, memoryLocal);
