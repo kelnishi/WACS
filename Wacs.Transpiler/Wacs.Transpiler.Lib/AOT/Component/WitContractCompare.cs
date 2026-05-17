@@ -73,8 +73,15 @@ namespace Wacs.Transpiler.AOT.Component
                 return diffs;
             }
 
-            // World names: kebab-case match.
-            if (!string.Equals(expectedWorld.Name, actualWorld.Name, StringComparison.Ordinal))
+            // World names: kebab-case match. Exception: when the
+            // decoder couldn't recover the actual world name from
+            // the binary and synthesized "root" (the primary-section
+            // fallback path's default), treat it as a wildcard
+            // rather than reporting a name mismatch — the export-
+            // shape comparison below is the actual validity signal.
+            bool actualIsSynthesizedRoot = string.Equals(actualWorld.Name, "root", StringComparison.Ordinal);
+            if (!actualIsSynthesizedRoot
+                && !string.Equals(expectedWorld.Name, actualWorld.Name, StringComparison.Ordinal))
             {
                 diffs.Add($"world name: harness expects '{expectedWorld.Name}', "
                     + $"component declares '{actualWorld.Name}'.");

@@ -68,6 +68,77 @@ namespace Wacs.ComponentModel.WIT
         private const byte SortInstance  = 0x05;
 
         /// <summary>
+        /// Decode a full <c>.component.wasm</c> binary's primary
+        /// type/import/export sections into a synthetic
+        /// <see cref="CtPackage"/>. Designed for components that
+        /// don't carry a <c>component-type:*</c> custom section
+        /// (cargo-built <c>wasm32-wasip2</c> output, anything not
+        /// run through <c>wit-component embed</c>) — their world
+        /// lives in the primary sections directly.
+        ///
+        /// <para>The synthesized world is named <c>root</c> in
+        /// package <c>root:component</c>, matching the convention
+        /// <c>wasm-tools print</c> uses when no qualified name is
+        /// available. Returns <c>null</c> on shapes the decoder
+        /// can't process structurally; the caller should fall
+        /// back to whatever it would have done absent a contract.</para>
+        /// </summary>
+        public static CtPackage? DecodeFromComponentBinary(byte[] componentBytes)
+        {
+            if (componentBytes == null) throw new ArgumentNullException(nameof(componentBytes));
+
+            var reader = new ComponentBinaryReader(componentBytes);
+            if (!TryReadPreamble(reader)) return null;
+
+            // Component-level type index space is populated in FILE
+            // ORDER across all sections — a Type section contributes
+            // entries, then an Import section's Type-sort imports
+            // contribute more, then another Type section adds more,
+            // etc. Real components interleave Type + Import sections
+            // (e.g. richer-spike: type record → import "vec2" type →
+            // type variant referencing the named vec2). Collect into
+            // ONE ordered InnerDecl list so BuildWorld's pass-1
+            // sees the slots in the same order the binary did.
+            var decls = new List<InnerDecl>();
+
+            while (!reader.AtEnd)
+            {
+                var id = (ComponentSectionId)reader.ReadByte();
+                var size = reader.ReadVarU32();
+                var payloadBytes = reader.ReadBytes((int)size);
+                switch (id)
+                {
+                    case ComponentSectionId.Type:
+                        DecodeTypeSectionAsInnerDecls(payloadBytes, decls);
+                        break;
+                    case ComponentSectionId.Import:
+                        DecodePrimaryImportExportSection(payloadBytes, decls, import: true);
+                        break;
+                    case ComponentSectionId.Export:
+                        DecodePrimaryImportExportSection(payloadBytes, decls, import: false);
+                        break;
+                }
+            }
+
+            return BuildPackageFromPrimary(decls);
+        }
+
+        /// <summary>
+        /// Read a Type section's entries straight into the shared
+        /// InnerDecl stream (wrapping each as an
+        /// <see cref="InnerType"/>) so the primary-section decoder
+        /// preserves cross-section declaration order.
+        /// </summary>
+        private static void DecodeTypeSectionAsInnerDecls(
+            byte[] payload, List<InnerDecl> decls)
+        {
+            var r = new ComponentBinaryReader(payload);
+            var count = r.ReadVarU32();
+            for (uint i = 0; i < count; i++)
+                decls.Add(new InnerType(ReadType(r)));
+        }
+
+        /// <summary>
         /// Decode a <c>component-type:*</c> custom section payload
         /// into a <see cref="CtPackage"/>. Returns <c>null</c> for
         /// inputs the decoder recognizes but can't structurally
@@ -614,10 +685,64 @@ namespace Wacs.ComponentModel.WIT
             }
         }
 
+        /// <summary>
+        /// Decode the primary component's Import or Export section
+        /// by delegating each entry to <see cref="ReadImportOrExport"/>
+        /// (the same per-decl reader the wrapper-internal walker uses).
+        /// Returns a list of <see cref="InnerImport"/> / <see cref="InnerExport"/>
+        /// the synthetic <see cref="BuildPackageFromPrimary"/> can stitch
+        /// into a <see cref="NestedComponentOrInstance"/>.
+        ///
+        /// <para>Replaces the older single-export
+        /// <see cref="DecodeTopLevelExports"/> for the primary path —
+        /// that one's per-entry "optional type ascription" handling
+        /// only worked for sections with exactly one entry. Real
+        /// components have many; <see cref="ReadImportOrExport"/>
+        /// reads the exact wire-format spec'd <c>importdesc</c> /
+        /// <c>exportdesc</c> (handling TypeBounds for sort=Type
+        /// imports, etc.) so multi-entry sections parse cleanly.</para>
+        /// </summary>
+        private static void DecodePrimaryImportExportSection(
+            byte[] payload, List<InnerDecl> output, bool import)
+        {
+            var r = new ComponentBinaryReader(payload);
+            var count = r.ReadVarU32();
+            for (uint i = 0; i < count; i++)
+                output.Add(ReadImportOrExport(r, import));
+        }
+
         // -----------------------------------------------------------------
         // CtPackage / CtWorld builder — project the nested
         // representation onto the Types-layer universe.
         // -----------------------------------------------------------------
+
+        /// <summary>
+        /// Build a synthetic <see cref="CtPackage"/> from the primary
+        /// component's type / import / export sections. Synthesizes a
+        /// world named <c>root</c> in package <c>root:component</c>
+        /// (matching <c>wasm-tools print</c>'s default naming).
+        /// Delegates to <see cref="BuildWorld"/> by wrapping the
+        /// primary data as a synthetic <see cref="NestedComponentOrInstance"/>
+        /// — every type in the type table becomes an <see cref="InnerType"/>
+        /// in declaration order (so indices stay aligned), followed by
+        /// the imports + exports as <see cref="InnerImport"/> /
+        /// <see cref="InnerExport"/>.
+        /// </summary>
+        private static CtPackage? BuildPackageFromPrimary(List<InnerDecl> decls)
+        {
+            // BuildWorld's typeSpace pass walks decls in order, so
+            // <decls> already represents the binary's component-type
+            // index space. The flat type table BuildWorld takes as a
+            // fourth arg is just the structural types; since we don't
+            // separate them here, pass an empty list (BuildWorld only
+            // uses it for outer-aliasing edge cases the primary case
+            // doesn't hit).
+            var synthetic = new NestedComponentOrInstance(isInstance: false, decls);
+            var pkgName = new CtPackageName("root", new[] { "component" }, null);
+            var world = BuildWorld(pkgName, "root", synthetic, new List<NestedType>());
+            return new CtPackage(pkgName, Array.Empty<CtInterfaceType>(),
+                                 new[] { world });
+        }
 
         private static CtPackage? BuildPackage(
             List<NestedType> typeTable,

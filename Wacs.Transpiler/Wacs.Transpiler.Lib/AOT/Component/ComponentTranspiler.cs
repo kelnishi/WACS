@@ -102,7 +102,19 @@ namespace Wacs.Transpiler.AOT.Component
         /// </summary>
         public static ComponentTranspilationResult Parse(Stream stream)
         {
-            var component = ComponentBinaryParser.Parse(stream);
+            // Buffer the stream into a byte[] up front so the
+            // primary-section decoder fallback can re-read after
+            // ComponentBinaryParser has consumed the stream. Pure
+            // overhead for callers that have a seekable stream
+            // anyway; keeps the API simple.
+            byte[] componentBytes;
+            using (var buf = new MemoryStream())
+            {
+                stream.CopyTo(buf);
+                componentBytes = buf.ToArray();
+            }
+            using var componentStream = new MemoryStream(componentBytes, writable: false);
+            var component = ComponentBinaryParser.Parse(componentStream);
 
             var cores = new List<WacsCoreModule>();
             foreach (var bytes in component.CoreModuleBinaries)
@@ -127,8 +139,32 @@ namespace Wacs.Transpiler.AOT.Component
                 try { decoded = BinaryWitDecoder.DecodeComponentType(wit); }
                 catch (System.FormatException) { decoded = null; }
             }
+            if (decoded == null || !HasExports(decoded))
+            {
+                // Fallback for components without a usable
+                // `component-type:*` custom section: decode straight
+                // from the primary component sections. Works for
+                // shapes where exports point directly at type
+                // indices; cargo-built `wasm32-wasip2` output that
+                // routes exports through canonical-function aliases
+                // currently surfaces as an empty world here, in
+                // which case validation downstream falls back to
+                // the typed "no custom section" error.
+                CtPackage? primary = null;
+                try { primary = BinaryWitDecoder.DecodeFromComponentBinary(componentBytes); }
+                catch (System.FormatException) { primary = null; }
+                if (primary != null && HasExports(primary))
+                    decoded = primary;
+            }
 
             return new ComponentTranspilationResult(component, cores, wit, decoded);
+        }
+
+        private static bool HasExports(CtPackage pkg)
+        {
+            foreach (var w in pkg.Worlds)
+                if (w.Exports.Count > 0) return true;
+            return false;
         }
 
         /// <summary>Convenience overload — read from a path.</summary>

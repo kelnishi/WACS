@@ -1,5 +1,80 @@
 # Changelog
 
+## WACS.ComponentModel 0.6.0 / WACS.Transpiler.Lib 0.10.3 — primary-section WIT decode (partial)
+
+New entry point `BinaryWitDecoder.DecodeFromComponentBinary(byte[])`
+derives a `CtPackage` from the primary type / import / export
+sections of a component binary — fallback for components without
+a `component-type:*` custom section (the cargo-built
+`wasm32-wasip2` case the previous slice surfaced as a documented
+limitation).
+
+`ComponentTranspiler.Parse` now calls this fallback when the
+custom-section decode is absent or yields an empty world. The
+validator's world-name check additionally treats `"root"`
+(the synthesized default the primary decoder uses when no
+qualified name is available in the binary) as a wildcard,
+delegating the actual validity signal to the export comparison.
+
+**Verified end-to-end on cargo-built hello fixture (no `wasm-tools
+component embed` step):**
+```
+$ wacs build --wasip2 --harness hello.harness.dll \
+    -o out.dll hello.component.wasm
+wrote out.dll (138 functions, 296ms)
+$ wacs build --wasip2 --harness richer.harness.dll \
+    -o sf.dll hello.component.wasm
+error: ...
+  export 'add': declared in harness, missing from component.
+  export 'normalize-or-fail': declared in harness, missing from component.
+  export 'greet': present in component, not declared in harness.
+```
+
+### What still doesn't decode (and why)
+
+Components routing exports through canonical-function aliases
+(the typical `wasm-tools component new` output and richer-spike's
+shape) trip `BuildWorld`'s assumption that export indices point
+directly at type-indexed function types. In primary-section form
+those indices reference the function index space — populated by
+canon.lift / canon.lower / alias-from-core-instance — which the
+v0 decoder doesn't track. Such components surface as an empty
+world; the fallback in `Parse` then yields the existing typed
+"no custom section" error from validation.
+
+Lifting this needs ~300-500 LOC: track the function index space
+across Canon, Alias, and Import sections; map each canon.lift's
+function index to its type index; resolve export-of-sort-Func
+through that map. Tracked as v1 work.
+
+Other shapes that don't decode in v0:
+- Multiple Type/Import section interleaving where the index
+  space ordering matters (decoder does preserve file order; this
+  works) but Alias sections also contribute to the index space
+  (decoder doesn't track those yet).
+- Nested-component types in the primary type section.
+- Inline interface re-exports.
+
+### What changed
+
+- **`WACS.ComponentModel` 0.5.2 → 0.6.0** (minor — new public API):
+  `BinaryWitDecoder.DecodeFromComponentBinary(byte[])`, plus
+  internal helpers `DecodeTypeSectionAsInnerDecls`,
+  `DecodePrimaryImportExportSection`, `BuildPackageFromPrimary`.
+  Reuses the existing `ReadImportOrExport` for import/export
+  parsing — single source for the wire format.
+- **`WACS.Transpiler.Lib` 0.10.2 → 0.10.3** (point — fallback
+  wiring + validator world-name leniency): `ComponentTranspiler.Parse`
+  buffers the stream so the fallback can re-decode, and falls
+  through to `DecodeFromComponentBinary` when the custom-section
+  decode is absent or empty. `WitContractCompare.Diff` skips the
+  world-name comparison when the actual world is named `"root"`
+  (the synthesized default).
+
+Family tags: `WACS-ComponentModel-v0.9.0` → `WACS-ComponentModel-v0.10.0`
+(minor — capability shift); `WACS-Transpiler-v0.10.0` →
+`WACS-Transpiler-v0.10.1` (point).
+
 ## WACS.Transpiler.Lib 0.10.2 — imports validation in WitContractCompare
 
 Extends the contract diff to cover imports. v0 rule (per
