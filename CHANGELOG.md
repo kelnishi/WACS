@@ -1,5 +1,58 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Lib 0.19.0 — `list<tuple>` + `list<option>` as direct PARAMS
+
+Two more list-element shapes round-trip through the lower path:
+
+```wit
+export tuple-list-sum:    func(pairs: list<tuple<u32, u32>>)     -> u32;
+export tuple-list-format: func(items: list<tuple<u32, string>>)  -> string;
+export option-list-sum:   func(values: list<option<u32>>)        -> u32;
+```
+
+### How it works
+
+`EmitLowerListElement` gains two new branches:
+
+- **`CtTupleType` (list element):** writes each tuple element to
+  the per-element slot at its in-tuple offset (computed via
+  `CanonicalAbi.TupleElementOffsets`). Per-element-type
+  dispatch picks the matching `MemoryHelpers.Write*` helper;
+  string elements lower through `LowerUtf8` first and the
+  `(ptr, len)` pair is written into the slot's offset and
+  offset+4.
+- **`CtOptionType` (list element):** writes 1-byte disc at slot
+  offset 0, then for Some writes the inner value at
+  `align_up(1, T_align)` via the new `EmitWriteSimpleAt`
+  helper. None just writes disc=0 — the payload area stays as
+  the realloc'd zero-bytes.
+
+The new `EmitLdelemForType` helper picks the right `Ldelem_*`
+opcode based on element CLR type (covers struct elements like
+`Nullable<T>` and `ValueTuple<...>` via the generic `Ldelem,
+elemType` form).
+
+### What changed
+
+- **`WorldHarnessEmit.cs`**:
+  - `EmitLowerListElement` adds `CtTupleType` and `CtOptionType`
+    cases.
+  - New helpers: `EmitLowerTupleElement`,
+    `EmitWriteTupleElementPrim`, `EmitLowerOptionElement`,
+    `EmitWriteSimpleAt`, `EmitLdelemForType`.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-list-aggregate-params/`
+  — three exports covering `list<tuple<u32, u32>>` (pure
+  numeric tuple), `list<tuple<u32, string>>` (mixed-element
+  tuple with realloc per element), and `list<option<u32>>`
+  (mixed None / Some).
+
+**24/24 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.26.0` →
+`WACS-ComponentModel-v0.27.0` (minor — capability shift on
+Harness.Lib).
+
 ## WACS.ComponentModel.Harness.Lib 0.18.0 — `variant` + `result<T,E>` as direct PARAMS
 
 Variants and results can now flow as direct params per the

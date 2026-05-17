@@ -1,0 +1,12 @@
+package wacs:list-aggregate-params-spike;
+
+world router {
+    /// list<tuple<...>> as direct PARAM — each tuple's elements
+    /// written in canonical layout per slot offset.
+    export tuple-list-sum: func(pairs: list<tuple<u32, u32>>) -> u32;
+    export tuple-list-format: func(items: list<tuple<u32, string>>) -> string;
+
+    /// list<option<T>> as direct PARAM — each option's disc + payload
+    /// written in canonical layout per slot offset.
+    export option-list-sum: func(values: list<option<u32>>) -> u32;
+}

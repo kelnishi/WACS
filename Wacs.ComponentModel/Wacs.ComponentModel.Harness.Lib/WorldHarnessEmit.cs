@@ -1841,8 +1841,360 @@ namespace Wacs.ComponentModel.Harness.Lib
                     elemSize, memoryField, reallocField, registry);
                 return;
             }
+            if (elemType is CtTupleType tup)
+            {
+                EmitLowerTupleElement(il, tup, arrLocal, iLocal, basePtr,
+                    elemSize, memoryField, reallocField, registry);
+                return;
+            }
+            if (elemType is CtOptionType opt)
+            {
+                EmitLowerOptionElement(il, opt, arrLocal, iLocal, basePtr,
+                    elemSize, memoryField, reallocField, registry);
+                return;
+            }
             throw new NotSupportedException(
                 $"List-element lower for {elemType.GetType().Name} not yet supported.");
+        }
+
+        /// <summary>
+        /// Write a tuple-typed list element to wasm memory at
+        /// <c>basePtr + i * elemSize</c>. Walks each element, computes
+        /// its in-tuple offset via
+        /// <see cref="CanonicalAbi.TupleElementOffsets"/>, and writes
+        /// the value via the matching MemoryHelpers.Write* helper.
+        /// String elements lower via LowerUtf8 and write (ptr, len)
+        /// at the slot's offset and offset+4.
+        /// </summary>
+        private static void EmitLowerTupleElement(
+            ILGenerator il, CtTupleType tup,
+            LocalBuilder arrLocal, LocalBuilder iLocal, LocalBuilder basePtr,
+            int elemSize,
+            FieldBuilder memoryField, FieldBuilder reallocField,
+            TypeRegistry registry)
+        {
+            var tupleClr = WitTypeEmit.MapClrType(tup, registry, "list element tuple");
+            var elemClrs = tupleClr.GetGenericArguments();
+            var elemOffsets = CanonicalAbi.TupleElementOffsets(tup);
+
+            // Pull array[i] (a ValueTuple struct) into a local once.
+            var tupLocal = il.DeclareLocal(tupleClr);
+            il.Emit(OpCodes.Ldloc, arrLocal);
+            il.Emit(OpCodes.Ldloc, iLocal);
+            EmitLdelemForType(il, tupleClr);
+            il.Emit(OpCodes.Stloc, tupLocal);
+
+            for (int i = 0; i < tup.Elements.Count; i++)
+            {
+                var elemD = CanonicalAbi.Deref(tup.Elements[i]);
+                int slotOffset = elemOffsets[i];
+                var accessorOpen = typeof(Wacs.ComponentModel.Harness.WitTupleAccess)
+                    .GetMethods(BindingFlags.Public | BindingFlags.Static)
+                    .First(m => m.Name == "Item" + (i + 1)
+                                && m.GetGenericArguments().Length == elemClrs.Length);
+                var accessor = accessorOpen.MakeGenericMethod(elemClrs);
+
+                if (elemD is CtPrimType ep)
+                {
+                    EmitWriteTupleElementPrim(il, ep, memoryField, reallocField,
+                        tupLocal, accessor, basePtr, iLocal, elemSize, slotOffset);
+                    continue;
+                }
+                if (elemD is CtEnumType || elemD is CtFlagsType)
+                {
+                    // Underlying int written via WriteI32LE.
+                    il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                    EmitElementAddr(il, basePtr, iLocal, elemSize, slotOffset);
+                    il.Emit(OpCodes.Ldloc, tupLocal);
+                    il.Emit(OpCodes.Call, accessor);
+                    il.Emit(OpCodes.Call, MemoryHelpers_WriteI32LE);
+                    continue;
+                }
+                throw new NotSupportedException(
+                    $"Tuple element of type {elemD.GetType().Name} not supported in list<tuple> element-write.");
+            }
+        }
+
+        private static void EmitWriteTupleElementPrim(
+            ILGenerator il, CtPrimType prim,
+            FieldBuilder memoryField, FieldBuilder reallocField,
+            LocalBuilder tupLocal, MethodInfo accessor,
+            LocalBuilder basePtr, LocalBuilder iLocal, int elemSize, int slotOffset)
+        {
+            switch (prim.Kind)
+            {
+                case CtPrim.Bool:
+                case CtPrim.S8:
+                case CtPrim.U8:
+                    il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                    EmitElementAddr(il, basePtr, iLocal, elemSize, slotOffset);
+                    il.Emit(OpCodes.Ldloc, tupLocal);
+                    il.Emit(OpCodes.Call, accessor);
+                    il.Emit(OpCodes.Call, MemoryHelpers_WriteU8);
+                    return;
+                case CtPrim.S16:
+                case CtPrim.U16:
+                case CtPrim.Char:
+                    il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                    EmitElementAddr(il, basePtr, iLocal, elemSize, slotOffset);
+                    il.Emit(OpCodes.Ldloc, tupLocal);
+                    il.Emit(OpCodes.Call, accessor);
+                    il.Emit(OpCodes.Call, MemoryHelpers_WriteI16LE);
+                    return;
+                case CtPrim.S32:
+                case CtPrim.U32:
+                    il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                    EmitElementAddr(il, basePtr, iLocal, elemSize, slotOffset);
+                    il.Emit(OpCodes.Ldloc, tupLocal);
+                    il.Emit(OpCodes.Call, accessor);
+                    il.Emit(OpCodes.Call, MemoryHelpers_WriteI32LE);
+                    return;
+                case CtPrim.S64:
+                case CtPrim.U64:
+                    il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                    EmitElementAddr(il, basePtr, iLocal, elemSize, slotOffset);
+                    il.Emit(OpCodes.Ldloc, tupLocal);
+                    il.Emit(OpCodes.Call, accessor);
+                    il.Emit(OpCodes.Call, MemoryHelpers_WriteI64LE);
+                    return;
+                case CtPrim.F32:
+                    il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                    EmitElementAddr(il, basePtr, iLocal, elemSize, slotOffset);
+                    il.Emit(OpCodes.Ldloc, tupLocal);
+                    il.Emit(OpCodes.Call, accessor);
+                    il.Emit(OpCodes.Call, MemoryHelpers_WriteF32LE);
+                    return;
+                case CtPrim.F64:
+                    il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                    EmitElementAddr(il, basePtr, iLocal, elemSize, slotOffset);
+                    il.Emit(OpCodes.Ldloc, tupLocal);
+                    il.Emit(OpCodes.Call, accessor);
+                    il.Emit(OpCodes.Call, MemoryHelpers_WriteF64LE);
+                    return;
+                case CtPrim.String:
+                    {
+                        var ptr = il.DeclareLocal(typeof(int));
+                        var len = il.DeclareLocal(typeof(int));
+                        il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                        il.Emit(OpCodes.Ldloc, tupLocal);
+                        il.Emit(OpCodes.Call, accessor);
+                        il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, reallocField);
+                        il.Emit(OpCodes.Ldloca, ptr);
+                        il.Emit(OpCodes.Ldloca, len);
+                        il.Emit(OpCodes.Call, StringCoding_LowerUtf8);
+                        il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                        EmitElementAddr(il, basePtr, iLocal, elemSize, slotOffset);
+                        il.Emit(OpCodes.Ldloc, ptr);
+                        il.Emit(OpCodes.Call, MemoryHelpers_WriteI32LE);
+                        il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                        EmitElementAddr(il, basePtr, iLocal, elemSize, slotOffset + 4);
+                        il.Emit(OpCodes.Ldloc, len);
+                        il.Emit(OpCodes.Call, MemoryHelpers_WriteI32LE);
+                        return;
+                    }
+            }
+            throw new NotSupportedException(
+                $"Tuple element prim {prim.Kind} not supported in list<tuple> element-write.");
+        }
+
+        /// <summary>
+        /// Write an option-typed list element to wasm memory at
+        /// <c>basePtr + i * elemSize</c>. Layout: 1-byte disc at
+        /// offset 0, payload at <c>align_up(1, T_align)</c>. None
+        /// writes disc=0 + zero-bytes for the payload area; Some
+        /// writes disc=1 + the inner value.
+        /// </summary>
+        private static void EmitLowerOptionElement(
+            ILGenerator il, CtOptionType opt,
+            LocalBuilder arrLocal, LocalBuilder iLocal, LocalBuilder basePtr,
+            int elemSize,
+            FieldBuilder memoryField, FieldBuilder reallocField,
+            TypeRegistry registry)
+        {
+            var innerD = CanonicalAbi.Deref(opt.Inner);
+            var innerClr = WitTypeEmit.MapClrType(innerD, registry, "list element option inner");
+            int payloadOffset = CanonicalAbi.AlignUp(1, CanonicalAbi.AlignOf(innerD));
+
+            // Pull the option arg out of the array into a typed local.
+            var optType = innerClr.IsValueType
+                ? typeof(System.Nullable<>).MakeGenericType(innerClr)
+                : innerClr;
+            var optLocal = il.DeclareLocal(optType);
+            il.Emit(OpCodes.Ldloc, arrLocal);
+            il.Emit(OpCodes.Ldloc, iLocal);
+            EmitLdelemForType(il, optType);
+            il.Emit(OpCodes.Stloc, optLocal);
+
+            // Branch on present.
+            var noneLabel = il.DefineLabel();
+            var endLabel = il.DefineLabel();
+            if (innerClr.IsValueType)
+            {
+                il.Emit(OpCodes.Ldloca, optLocal);
+                var hasValue = optType.GetProperty("HasValue")!.GetGetMethod()!;
+                il.Emit(OpCodes.Call, hasValue);
+            }
+            else
+            {
+                il.Emit(OpCodes.Ldloc, optLocal);
+                il.Emit(OpCodes.Ldnull);
+                il.Emit(OpCodes.Ceq);
+                il.Emit(OpCodes.Ldc_I4_0);
+                il.Emit(OpCodes.Ceq);
+            }
+            il.Emit(OpCodes.Brfalse, noneLabel);
+
+            // Some: write disc=1
+            il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+            EmitElementAddr(il, basePtr, iLocal, elemSize, 0);
+            il.Emit(OpCodes.Ldc_I4_1);
+            il.Emit(OpCodes.Conv_U1);
+            il.Emit(OpCodes.Call, MemoryHelpers_WriteU8);
+
+            // Write inner value at payloadOffset.
+            // Unwrap Nullable<T> first if value type.
+            if (innerClr.IsValueType)
+            {
+                il.Emit(OpCodes.Ldloca, optLocal);
+                var getValue = optType.GetProperty("Value")!.GetGetMethod()!;
+                il.Emit(OpCodes.Call, getValue);
+            }
+            else
+            {
+                il.Emit(OpCodes.Ldloc, optLocal);
+            }
+            var innerLocal = il.DeclareLocal(innerClr);
+            il.Emit(OpCodes.Stloc, innerLocal);
+            EmitWriteSimpleAt(il, innerD, memoryField, reallocField,
+                innerLocal, basePtr, iLocal, elemSize, payloadOffset);
+            il.Emit(OpCodes.Br, endLabel);
+
+            // None: write disc=0 (payload area is left as-is from realloc,
+            // which is zero-initialized).
+            il.MarkLabel(noneLabel);
+            il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+            EmitElementAddr(il, basePtr, iLocal, elemSize, 0);
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Conv_U1);
+            il.Emit(OpCodes.Call, MemoryHelpers_WriteU8);
+
+            il.MarkLabel(endLabel);
+        }
+
+        /// <summary>
+        /// Write a primitive / string value held in a local to wasm
+        /// memory at <c>basePtr + i*elemSize + offset</c>. Helper
+        /// shared by option/tuple element writers when the inner
+        /// type is simple (no further nesting).
+        /// </summary>
+        private static void EmitWriteSimpleAt(
+            ILGenerator il, CtValType valueType,
+            FieldBuilder memoryField, FieldBuilder reallocField,
+            LocalBuilder valueLocal,
+            LocalBuilder basePtr, LocalBuilder iLocal, int elemSize, int offset)
+        {
+            if (valueType is CtPrimType prim)
+            {
+                switch (prim.Kind)
+                {
+                    case CtPrim.Bool:
+                    case CtPrim.S8:
+                    case CtPrim.U8:
+                        il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                        EmitElementAddr(il, basePtr, iLocal, elemSize, offset);
+                        il.Emit(OpCodes.Ldloc, valueLocal);
+                        il.Emit(OpCodes.Call, MemoryHelpers_WriteU8);
+                        return;
+                    case CtPrim.S16:
+                    case CtPrim.U16:
+                    case CtPrim.Char:
+                        il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                        EmitElementAddr(il, basePtr, iLocal, elemSize, offset);
+                        il.Emit(OpCodes.Ldloc, valueLocal);
+                        il.Emit(OpCodes.Call, MemoryHelpers_WriteI16LE);
+                        return;
+                    case CtPrim.S32:
+                    case CtPrim.U32:
+                        il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                        EmitElementAddr(il, basePtr, iLocal, elemSize, offset);
+                        il.Emit(OpCodes.Ldloc, valueLocal);
+                        il.Emit(OpCodes.Call, MemoryHelpers_WriteI32LE);
+                        return;
+                    case CtPrim.S64:
+                    case CtPrim.U64:
+                        il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                        EmitElementAddr(il, basePtr, iLocal, elemSize, offset);
+                        il.Emit(OpCodes.Ldloc, valueLocal);
+                        il.Emit(OpCodes.Call, MemoryHelpers_WriteI64LE);
+                        return;
+                    case CtPrim.F32:
+                        il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                        EmitElementAddr(il, basePtr, iLocal, elemSize, offset);
+                        il.Emit(OpCodes.Ldloc, valueLocal);
+                        il.Emit(OpCodes.Call, MemoryHelpers_WriteF32LE);
+                        return;
+                    case CtPrim.F64:
+                        il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                        EmitElementAddr(il, basePtr, iLocal, elemSize, offset);
+                        il.Emit(OpCodes.Ldloc, valueLocal);
+                        il.Emit(OpCodes.Call, MemoryHelpers_WriteF64LE);
+                        return;
+                    case CtPrim.String:
+                        {
+                            var ptr = il.DeclareLocal(typeof(int));
+                            var len = il.DeclareLocal(typeof(int));
+                            il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                            il.Emit(OpCodes.Ldloc, valueLocal);
+                            il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, reallocField);
+                            il.Emit(OpCodes.Ldloca, ptr);
+                            il.Emit(OpCodes.Ldloca, len);
+                            il.Emit(OpCodes.Call, StringCoding_LowerUtf8);
+                            il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                            EmitElementAddr(il, basePtr, iLocal, elemSize, offset);
+                            il.Emit(OpCodes.Ldloc, ptr);
+                            il.Emit(OpCodes.Call, MemoryHelpers_WriteI32LE);
+                            il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                            EmitElementAddr(il, basePtr, iLocal, elemSize, offset + 4);
+                            il.Emit(OpCodes.Ldloc, len);
+                            il.Emit(OpCodes.Call, MemoryHelpers_WriteI32LE);
+                            return;
+                        }
+                }
+            }
+            if (valueType is CtEnumType || valueType is CtFlagsType)
+            {
+                il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                EmitElementAddr(il, basePtr, iLocal, elemSize, offset);
+                il.Emit(OpCodes.Ldloc, valueLocal);
+                il.Emit(OpCodes.Call, MemoryHelpers_WriteI32LE);
+                return;
+            }
+            throw new NotSupportedException(
+                $"EmitWriteSimpleAt doesn't support {valueType.GetType().Name}.");
+        }
+
+        private static void EmitLdelemForType(ILGenerator il, Type elemClrType)
+        {
+            if (elemClrType == typeof(int) || elemClrType == typeof(uint))
+                il.Emit(OpCodes.Ldelem_I4);
+            else if (elemClrType == typeof(long) || elemClrType == typeof(ulong))
+                il.Emit(OpCodes.Ldelem_I8);
+            else if (elemClrType == typeof(float))
+                il.Emit(OpCodes.Ldelem_R4);
+            else if (elemClrType == typeof(double))
+                il.Emit(OpCodes.Ldelem_R8);
+            else if (elemClrType == typeof(byte))
+                il.Emit(OpCodes.Ldelem_U1);
+            else if (elemClrType == typeof(sbyte))
+                il.Emit(OpCodes.Ldelem_I1);
+            else if (elemClrType == typeof(short))
+                il.Emit(OpCodes.Ldelem_I2);
+            else if (elemClrType == typeof(ushort))
+                il.Emit(OpCodes.Ldelem_U2);
+            else if (!elemClrType.IsValueType)
+                il.Emit(OpCodes.Ldelem_Ref);
+            else
+                il.Emit(OpCodes.Ldelem, elemClrType);   // struct elements (Nullable<T>, ValueTuple<…>)
         }
 
         /// <summary>
