@@ -7,6 +7,7 @@
 
 using System;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using Wacs.ComponentModel.Harness.Lib;
 
@@ -104,7 +105,50 @@ namespace WitHarnessSpike.Richer.Generated.Validate
                     return 1;
                 }
 
-                Console.WriteLine("PASS — record + variant paths all green.");
+                // === Test 4: IRicher interface emitted + harness implements ===
+                var ifaceType = asm.GetType("WitHarnessSpike.Richer.Generated.IRicher")
+                    ?? throw new InvalidOperationException("IRicher interface not found.");
+                if (!ifaceType.IsAssignableFrom(harnessType))
+                {
+                    Console.Error.WriteLine($"FAIL: RicherHarness does not implement IRicher");
+                    return 1;
+                }
+                var ifaceMethods = ifaceType.GetMethods();
+                Console.WriteLine($"IRicher methods: {string.Join(", ", ifaceMethods.Select(m => m.Name))}");
+                // Cast harness to interface + invoke Add through it.
+                var asInterface = harness;  // implicit upcast — harness is the concrete type
+                var addThroughIface = ifaceType.GetMethod("Add")!;
+                var ifaceSum = addThroughIface.Invoke(asInterface, new object?[] {
+                    vec2Ctor.Invoke(new object?[] { 10, 20 }),
+                    vec2Ctor.Invoke(new object?[] { 30, 40 }),
+                })!;
+                var ifaceSumX = (int)vec2Type.GetProperty("X")!.GetValue(ifaceSum)!;
+                var ifaceSumY = (int)vec2Type.GetProperty("Y")!.GetValue(ifaceSum)!;
+                Console.WriteLine($"IRicher.Add(Vec2(10,20), Vec2(30,40)) = Vec2({ifaceSumX}, {ifaceSumY})");
+                if (ifaceSumX != 40 || ifaceSumY != 60)
+                {
+                    Console.Error.WriteLine($"FAIL: expected Vec2(40, 60) via IRicher, got Vec2({ifaceSumX}, {ifaceSumY})");
+                    return 1;
+                }
+
+                // === Test 5: _WitContract embedded + non-empty ===
+                var contractField = harnessType.GetField("_WitContract",
+                    BindingFlags.Public | BindingFlags.Static);
+                if (contractField == null)
+                {
+                    Console.Error.WriteLine($"FAIL: _WitContract static field not found");
+                    return 1;
+                }
+                var contractText = (string?)contractField.GetValue(null);
+                if (string.IsNullOrEmpty(contractText) || !contractText.Contains("world richer"))
+                {
+                    Console.Error.WriteLine($"FAIL: _WitContract empty or missing world declaration");
+                    Console.Error.WriteLine($"  contents: {contractText}");
+                    return 1;
+                }
+                Console.WriteLine($"_WitContract: {contractText.Length} chars, includes 'world richer'");
+
+                Console.WriteLine("PASS — record + variant + interface + contract paths all green.");
                 return 0;
             }
             catch (Exception ex)

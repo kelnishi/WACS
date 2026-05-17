@@ -67,7 +67,16 @@ namespace Wacs.ComponentModel.Harness.Lib
 
             var packages = WitLoader.LoadDirectoryTree(witDirectory);
             WitResolver.Resolve(packages);
-            EmitToStream(packages, output, options);
+
+            // Capture the WIT text for `_WitContract` embedding.
+            // Concatenate every .wit file under the directory tree
+            // (recurse to match WitLoader). Lossless round-trip:
+            // the transpiler's contract validator parses this back
+            // via WitParser to diff against the component binary's
+            // WIT custom section.
+            var contractText = ConcatenateWitFiles(witDirectory);
+
+            EmitToStream(packages, output, options, contractText);
         }
 
         /// <summary>
@@ -76,8 +85,19 @@ namespace Wacs.ComponentModel.Harness.Lib
         /// in-memory (e.g. an IDE integration, the
         /// <c>wacs transpile</c> verb threading the same parse
         /// through both the transpiler and the contract validator).
+        ///
+        /// <para>The optional <paramref name="contractText"/> is the
+        /// raw WIT source the emitted harness embeds as
+        /// <c>_WitContract</c>. When unsupplied (e.g. tooling that
+        /// only has the parsed model, no source text), the harness
+        /// embeds an empty contract; downstream validators must
+        /// degrade gracefully.</para>
         /// </summary>
-        public static void EmitToStream(System.Collections.Generic.IReadOnlyList<CtPackage> packages, Stream output, HarnessOptions? options = null)
+        public static void EmitToStream(
+            System.Collections.Generic.IReadOnlyList<CtPackage> packages,
+            Stream output,
+            HarnessOptions? options = null,
+            string? contractText = null)
         {
             if (packages == null) throw new ArgumentNullException(nameof(packages));
             if (output == null) throw new ArgumentNullException(nameof(output));
@@ -95,9 +115,22 @@ namespace Wacs.ComponentModel.Harness.Lib
             var pab = new PersistedAssemblyBuilder(assemblyName, typeof(object).Assembly);
             var module = pab.DefineDynamicModule(assemblyName.Name!);
 
-            WorldHarnessEmit.EmitWorldHarness(module, world, options);
+            WorldHarnessEmit.EmitWorldHarness(module, world, options, contractText ?? string.Empty);
 
             pab.Save(output);
+        }
+
+        private static string ConcatenateWitFiles(string witDirectory)
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (var path in System.IO.Directory.EnumerateFiles(
+                witDirectory, "*.wit", System.IO.SearchOption.AllDirectories))
+            {
+                sb.AppendLine("// === " + System.IO.Path.GetRelativePath(witDirectory, path) + " ===");
+                sb.Append(System.IO.File.ReadAllText(path));
+                sb.AppendLine();
+            }
+            return sb.ToString();
         }
     }
 }

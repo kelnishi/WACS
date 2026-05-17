@@ -1,5 +1,57 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Lib 0.3.0 — `_WitContract` + symmetric `I{World}` interface
+
+Harness emitter now produces two pieces of contract scaffolding
+on every harness assembly:
+
+1. **`I{World}` interface** — emitted alongside the harness class,
+   carries one abstract method per WIT export with the same name
+   + signature as the typed wrapper. The harness class implements
+   it implicitly (Virtual+Final+NewSlot on the wrapper methods).
+   The symmetric counterpart for the transpiler-emitted class is
+   the next slice: both engines implement the same `I{World}`,
+   so embedder call sites are engine-agnostic per the
+   `feedback_symmetric_engines` invariant.
+
+2. **`public static readonly string _WitContract`** — embeds the
+   raw WIT source the emit consumed (concatenated from every
+   `.wit` under the input directory, recursively). The transpiler's
+   future `AddHarnessContract` reads this string at compile time
+   to diff against the loaded component's WIT custom section;
+   a runtime `LoadFrom`-time validator could do the same via
+   reflection.
+
+Surface change on `HarnessEmitter.EmitToStream(packages, ...)`:
+new optional `contractText` parameter. Default empty when callers
+have no source text to embed. The directory-input overload
+threads the WIT source through automatically.
+
+Validation extended on
+`Spec.Test/components/fixtures/wit-harness-spike-richer/Generated.Validate/`:
+five tests now green — add, two normalize-or-fail cases, IRicher
+interface cast + invocation, and `_WitContract` presence /
+length / contents (297 chars, contains `"world richer"`). The
+hello fixture's validator also still passes — the existing typed
+methods on its harness satisfy the synthesized `IHello` interface
+without changes.
+
+Family tag: `WACS-ComponentModel-v0.8.0` → `WACS-ComponentModel-v0.9.0`
+(minor — capability shift on Harness.Lib).
+
+### What changed
+
+- **`WACS.ComponentModel.Harness.Lib` 0.2.0 → 0.3.0** (minor —
+  new emitted shape, new optional API parameter): adds
+  `EmitWorldInterface` + `EmitWitContractField` in
+  `WorldHarnessEmit.cs`; `HarnessEmitter.EmitToStream(packages, ...)`
+  gains an optional `contractText` parameter. Typed-wrapper
+  methods now carry `Virtual | Final | NewSlot` so they implement
+  the `I{World}` interface implicitly.
+- **Spike validators**: richer's `Generated.Validate` adds two
+  new assertions (interface cast + invocation, `_WitContract`
+  presence + content).
+
 ## WACS.Cli 1.9.0 — `wacs harness` verb
 
 New CLI verb:

@@ -56,7 +56,8 @@ namespace Wacs.ComponentModel.Harness.Lib
         private static readonly Type CabiReallocInvokerType = typeof(Func<int, int, int, int, int>);
 
         public static TypeBuilder EmitWorldHarness(
-            ModuleBuilder module, CtWorldType world, HarnessOptions opts)
+            ModuleBuilder module, CtWorldType world, HarnessOptions opts,
+            string contractText)
         {
             // Pass A: emit CLR types for every world-level record /
             // variant declared. Records of primitives + variants of
@@ -64,11 +65,22 @@ namespace Wacs.ComponentModel.Harness.Lib
             var registry = WitTypeEmit.EmitWorldTypes(module, world, opts);
 
             var worldPascal = NameMangler.ToPascalCase(world.Name);
+            var interfaceName = $"{opts.Namespace}.I{worldPascal}";
             var typeName = $"{opts.Namespace}.{worldPascal}Harness";
+
+            // Pass A2: emit the I{World} symmetric interface. Both
+            // the harness class (interpreter side) and the future
+            // transpiler-emitted class (AOT side) implement this
+            // surface, so embedder code can swap engines without
+            // touching call sites — per the
+            // `feedback_symmetric_engines` invariant.
+            var interfaceBuilder = EmitWorldInterface(module, world, registry, interfaceName);
 
             var typeBuilder = module.DefineType(
                 typeName,
-                TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.BeforeFieldInit);
+                TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.BeforeFieldInit,
+                parent: typeof(object),
+                interfaces: new[] { interfaceBuilder });
 
             // Pass B: emit Lift{TypeName} private static helpers on
             // the harness class for every named record / variant.
@@ -121,13 +133,67 @@ namespace Wacs.ComponentModel.Harness.Lib
                 }
             }
 
+            // _WitContract: public static readonly string carrying
+            // the raw WIT source. Transpiler-side AddHarnessContract
+            // reads this at compile time to diff against the loaded
+            // component's WIT custom section; LoadFrom can also
+            // validate at runtime.
+            EmitWitContractField(typeBuilder, contractText);
+
             var ctor = EmitConstructor(typeBuilder, runtimeField, memoryField, reallocField, funcExports);
             EmitLoadFrom(typeBuilder, ctor, funcExports);
             foreach (var fe in funcExports)
                 EmitTypedWrapper(typeBuilder, memoryField, reallocField, fe, registry, liftMethods);
 
+            // Finalize: interface first (so the harness's CreateType
+            // sees the interface's methods bound), then the harness.
+            interfaceBuilder.CreateType();
             typeBuilder.CreateType();
             return typeBuilder;
+        }
+
+        private static TypeBuilder EmitWorldInterface(
+            ModuleBuilder module, CtWorldType world, TypeRegistry registry, string interfaceName)
+        {
+            var iface = module.DefineType(
+                interfaceName,
+                TypeAttributes.Public | TypeAttributes.Interface | TypeAttributes.Abstract);
+
+            foreach (var port in world.Exports)
+            {
+                if (port.Spec is not CtExternFunc fn) continue;
+
+                var methodName = NameMangler.ToPascalCase(port.Name);
+                var paramTypes = fn.Function.Params.Select(p => MapHostParamType(p.Type, registry)).ToArray();
+                var returnType = ResolveReturnClrType(fn.Function, registry);
+
+                var method = iface.DefineMethod(
+                    methodName,
+                    MethodAttributes.Public | MethodAttributes.Abstract
+                        | MethodAttributes.Virtual | MethodAttributes.HideBySig
+                        | MethodAttributes.NewSlot,
+                    returnType,
+                    paramTypes);
+
+                for (int i = 0; i < fn.Function.Params.Count; i++)
+                    method.DefineParameter(i + 1, ParameterAttributes.None,
+                        NameMangler.ToCamelCase(fn.Function.Params[i].Name));
+            }
+
+            return iface;
+        }
+
+        private static void EmitWitContractField(TypeBuilder tb, string contractText)
+        {
+            var field = tb.DefineField(
+                "_WitContract", typeof(string),
+                FieldAttributes.Public | FieldAttributes.Static | FieldAttributes.InitOnly);
+
+            var cctor = tb.DefineTypeInitializer();
+            var il = cctor.GetILGenerator();
+            il.Emit(OpCodes.Ldstr, contractText);
+            il.Emit(OpCodes.Stsfld, field);
+            il.Emit(OpCodes.Ret);
         }
 
         // ===== Per-export metadata =====
@@ -488,9 +554,16 @@ namespace Wacs.ComponentModel.Harness.Lib
             var paramTypes = fe.Spec.Params.Select(p => MapHostParamType(p.Type, registry)).ToArray();
             var returnType = ResolveReturnClrType(fe.Spec, registry);
 
+            // Virtual + Final + NewSlot: required for the method to
+            // implicitly implement the matching I{World} interface
+            // method (Reflection.Emit needs the slot to be allocated;
+            // Final keeps the class sealed-method behavior C# users
+            // expect for non-extensible harness types).
             var method = typeBuilder.DefineMethod(
                 fe.PascalName,
-                MethodAttributes.Public | MethodAttributes.HideBySig,
+                MethodAttributes.Public | MethodAttributes.HideBySig
+                    | MethodAttributes.Virtual | MethodAttributes.Final
+                    | MethodAttributes.NewSlot,
                 returnType,
                 paramTypes);
 
