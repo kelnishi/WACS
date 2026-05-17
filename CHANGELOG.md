@@ -1,5 +1,36 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Lib 0.26.1 — diagnostics for unimplemented niches (Item 3 close-out)
+
+Tightens the error messages on two niches the harness emitter
+doesn't yet implement, and documents the status:
+
+- **Multi-return / named results** — verified that the WIT spec
+  has dropped this in favor of `func() -> tuple<...>` /
+  `func() -> record { ... }`; `wit-bindgen` 0.41 rejects the
+  old `(a: T, b: U)` syntax at WIT parse time. The
+  `BuildFunctionExport` throw is now annotated as a defensive
+  guard rather than a TODO.
+- **MAX_FLAT_PARAMS overflow** — beyond the BCL `Func<…>` /
+  `Action<…>` arity ceiling, the canonical-ABI prescribes an
+  indirect param area (single i32 ptr to a memory area
+  holding the lowered values at canonical offsets). The
+  harness emitter doesn't yet emit that mode; the diagnostic
+  in `MakeInvokerDelegateType` now calls this out explicitly.
+  Practical impact: real-world WIT exports rarely flatten past
+  16 slots; the BCL `Func<,,,,,,,,,,,,,,,,>` arity-17 ceiling
+  is well above what wit-bindgen produces in practice.
+
+Item 5c (alt string encodings — UTF-16, Latin1+UTF-16) is
+similarly deferred: `wit-bindgen` doesn't expose the
+`string-encoding` canon option, so we can't build a test
+fixture without going around the standard toolchain.
+`StringCoding.LiftUtf8` / `LowerUtf8` are isolated per the
+`feedback_js_string_externref` memory, so a future slice can
+add the encoding switch as a new `HarnessOptions` knob plus
+matching helper methods without touching the lift / lower IL
+sites.
+
 ## WACS.ComponentModel.Harness.Lib 0.26.0 — variant/result mismatched-width join (Item 5a)
 
 `result<T, E>` and `variant` lower now handle mismatched flat

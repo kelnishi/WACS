@@ -492,9 +492,16 @@ namespace Wacs.ComponentModel.Harness.Lib
             }
             else if (fn.NamedResults != null)
             {
+                // Multi-return / named results was removed from the
+                // WIT spec — replaced by `func() -> tuple<...>` /
+                // `record { … }`. wit-bindgen 0.41 rejects the old
+                // syntax at WIT parse time, so this branch is
+                // effectively unreachable from a normally-built
+                // component. Kept as a defensive guard.
                 throw new NotSupportedException(
-                    $"Harness emitter v0 does not yet support named (multi-) results "
-                    + $"on export '{witName}'.");
+                    $"Harness emitter does not support named (multi-) results " +
+                    $"on export '{witName}' — WIT spec dropped this in favor of " +
+                    $"tuple / record returns.");
             }
             else
             {
@@ -739,11 +746,21 @@ namespace Wacs.ComponentModel.Harness.Lib
 
         private static Type MakeInvokerDelegateType(Type[] paramTypes, Type? returnType)
         {
+            // Note: the canonical-ABI MAX_FLAT_PARAMS limit is 16,
+            // past which the wasm boundary expects an indirect
+            // param-area (single i32 ptr). The harness emitter
+            // doesn't yet support that indirect-param mode — when
+            // emitted, this throws with a clear message rather
+            // than producing a mismatched delegate type. Practical
+            // impact is small: real-world WIT exports rarely
+            // flatten past 16 slots.
             if (returnType == null)
             {
                 if (paramTypes.Length >= OpenActions.Length)
                     throw new NotSupportedException(
-                        $"Lowered param arity {paramTypes.Length} exceeds Action<…> BCL ceiling ({OpenActions.Length - 1}).");
+                        $"Lowered param arity {paramTypes.Length} exceeds Action<…> BCL ceiling " +
+                        $"({OpenActions.Length - 1}). Canonical-ABI MAX_FLAT_PARAMS overflow " +
+                        $"(indirect param area) is not yet supported by the harness emitter.");
                 if (paramTypes.Length == 0) return typeof(Action);
                 return OpenActions[paramTypes.Length].MakeGenericType(paramTypes);
             }
@@ -751,7 +768,9 @@ namespace Wacs.ComponentModel.Harness.Lib
             int funcIndex = all.Length - 1;  // Func<TResult> is OpenFuncs[0]
             if (funcIndex < 0 || funcIndex >= OpenFuncs.Length)
                 throw new NotSupportedException(
-                    $"Lowered param+return arity {all.Length} exceeds Func<…> BCL ceiling ({OpenFuncs.Length}).");
+                    $"Lowered param+return arity {all.Length} exceeds Func<…> BCL ceiling " +
+                    $"({OpenFuncs.Length}). Canonical-ABI MAX_FLAT_PARAMS overflow " +
+                    $"(indirect param area) is not yet supported by the harness emitter.");
             return OpenFuncs[funcIndex].MakeGenericType(all);
         }
 
