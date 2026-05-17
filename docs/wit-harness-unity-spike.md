@@ -203,20 +203,80 @@ consumers because the new package gates `IsAotCompatible` to
 net8.0 only — finding C remains open against the existing
 `Wacs.ComponentModel` csproj.
 
-## Next steps (per the original plan)
+## Productionization status
+
+**Shipped in the `wit-harness-spike` arc (9 checkpoint commits):**
 
 - [x] Hand-written harness compiles + NativeAOT-publishes + runs.
-- [ ] Verify on Unity IL2CPP (drop `Wacs.Core` + the harness into
-  a minimal Unity project, build for an IL2CPP-target platform,
-  run on device).
-- [ ] Address findings A–D, particularly A (the IL2CPP blocker
-  for any binding side that touches WASI).
-- [ ] `WACS.ComponentModel.Harness.Runtime` — extract the
-  canonical-ABI memory readers/writers + the
-  `ComponentLoader.Load` / `WitContractCompare.Match` shape
-  from this spike.
-- [ ] `WACS.ComponentModel.Harness.SourceGen` — emit the shape
-  above from a WIT contract.
-- [ ] `docs/WIT_HARNESS_USAGE.md` — embedder guide.
-- [ ] `Spec.Test/components/fixtures/unity-harness-demo/` — full
-  IL2CPP demo project.
+- [x] `WACS.ComponentModel.Parser 0.1.0` — AOT-safe parser split
+  out of `Wacs.ComponentModel` (closes finding D above; harness
+  consumers no longer pull the reflective surface).
+- [x] `WACS.ComponentModel.Harness.Runtime 0.3.0` — canonical-ABI
+  primitives (`MemoryHelpers`, `StringCoding`), `HarnessLoader`
+  (parse + instantiate + export resolution helpers the emitted
+  `LoadFrom` calls into).
+- [x] `WACS.ComponentModel.Harness.Lib 0.3.0` — IL emitter
+  (PersistedAssemblyBuilder, net9.0). Handles primitives,
+  records of primitives, variants of {unit, primitive, record}
+  cases, string-in/string-out exports. Emits a `I{World}`
+  symmetric interface alongside `{World}Harness`, plus a
+  `_WitContract` static field carrying the raw WIT source.
+- [x] `WACS.Cli 1.10.0` — `wacs harness <wit-dir> -o <out.dll>`
+  verb; `--harness` / `--wit-dir` flags on `wacs aot` + `wacs build`
+  that thread the contract through to the transpiler.
+- [x] `WACS.Transpiler.Lib 0.10.2` — compile-time WIT contract
+  validation via `TranspilerOptions.HarnessContractText` +
+  `WitContractCompare.Diff`. Exports + imports diffed
+  structurally; typed mismatch report; throws before any IL is
+  emitted on contract drift.
+- [x] Richer fixture
+  (`Spec.Test/components/fixtures/wit-harness-spike-richer/`):
+  multi-export world with record + variant, generated-validate
+  console asserts behavioral equivalence to a hand-shaped
+  reference.
+
+**Deferred (next-mile v1/v2 work; tracked here so the gaps
+stay explicit):**
+
+- [ ] Unity IL2CPP verification on-device. Skipped per user
+  direction once the NativeAOT spike passed — IL2CPP and
+  NativeAOT share the no-`MakeGenericType` / no-runtime-emit
+  constraints the spike exercised.
+- [ ] **`BinaryWitDecoder` primary-section decode**: existing
+  `BuildPackage` is hardcoded for `wit-component`'s nested-
+  wrapper encoding. Cargo-built `wasm32-wasip2` components don't
+  ship that wrapper; their WIT lives in the primary
+  type/export sections. Today's workaround: run
+  `wasm-tools component embed` to add the section. Lifting this
+  needs ~200-400 LOC of new decoder logic.
+- [ ] **Transpiler emits `implements I{World}`**: the
+  CLR-interface-level engine-symmetry payoff. Requires either
+  cross-assembly type sharing (transpiler references the
+  harness's `Vec2` / `Outcome` types) or a translation layer
+  at the interface boundary. ~500-1000 LOC coupled to
+  `ComponentExportsEmit`'s 3281-LOC class-emission pipeline.
+  Embedders today get typed call sites via the interpreter
+  harness + compile-time validation via `--harness` on
+  transpile; this closes the cross-engine identity gap.
+- [ ] **More WIT shapes in records / variants** — strings, lists,
+  options, results, nested records inside records. Each is an
+  incremental emitter addition (~200 LOC per shape).
+- [ ] **Interface-reference imports** in the validator: the
+  v0 diff surfaces these as "not validated" rather than
+  matching them. Needs WIT-side interface resolution.
+- [ ] **Runtime-side validation in `HarnessLoader.Load`**:
+  embedded `_WitContract` + `BinaryWitDecoder` + the same
+  `WitContractCompare` machinery. Has a dependency cost
+  (`Harness.Runtime` would need to pull `Wacs.ComponentModel`'s
+  WIT-parser surface).
+- [ ] **`wacs run --harness` / `--wit-dir`** — only meaningful
+  once primary-section decode or runtime-validation lands;
+  without those it's a no-op on cargo-built fixtures.
+- [ ] **`WACS.ComponentModel.Harness.SourceGen`** — Roslyn
+  source-gen variant of the same emit core, for embedders who
+  prefer the build-time-codegen workflow over a generated
+  `.dll`. The CLI verb is the high-value distribution path; the
+  source-gen is additive.
+- [ ] **`docs/WIT_HARNESS_USAGE.md`** — embedder guide.
+- [ ] **`Spec.Test/components/fixtures/unity-harness-demo/`** —
+  full IL2CPP demo project.
