@@ -1,5 +1,65 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Lib 0.15.0 — records-of-aggregates as PARAMS + full Func/Action arity range
+
+The flat-lowered record param path now handles fields of any
+supported flat-lowerable type — strings, lists, enums, flags,
+tuples, and nested records. Previously each field had to be a
+primitive.
+
+```wit
+record dimensions { width: u32, height: u32 }
+record parcel {
+    name: string,
+    tags: list<string>,
+    size: dimensions,
+}
+export describe: func(p: parcel) -> string;
+```
+
+### How it works
+
+- `EmitFlattenedArg`'s record branch now dispatches each field
+  through new `EmitFlattenRecordField`, which: for primitives /
+  enums / flags just calls the getter and pushes the result;
+  for strings calls the getter then runs `LowerUtf8`; for lists
+  / nested records / tuples stashes the getter's result into a
+  typed local and re-dispatches via `EmitFlattenLocal`. The
+  local-based dispatch mirrors the arg-slot-based one but reads
+  from a fresh local — needed so we can repeatedly access the
+  same nested record's fields via the same instance, rather
+  than calling the outer getter multiple times.
+- `EmitLowerListFromLocal` mirrors `EmitLowerListArg` but takes
+  a local for the array source rather than an arg index. Used
+  when a list comes out of a record field or tuple element.
+- `MakeInvokerDelegateType` widened to cover every `Func<…>` /
+  `Action<…>` arity the BCL exposes (Action arity 0..16, Func
+  arity 1..17 type args). Records-with-strings + lists quickly
+  blow past the old 4-param ceiling — a parcel with name +
+  tags + size lowers to 6 i32s of params + 1 i32 of retArea.
+
+### What changed
+
+- **`WorldHarnessEmit.cs`**:
+  - `EmitFlattenedArg` record branch routes each field through
+    new `EmitFlattenRecordField`.
+  - New helpers: `EmitFlattenRecordField`, `EmitFlattenLocal`,
+    `EmitFlattenSubRecordField`, `EmitLowerListFromLocal`.
+  - `MakeInvokerDelegateType` replaced its 4-param ceiling with
+    `OpenActions` / `OpenFuncs` lookup tables covering the full
+    BCL Action / Func arity range.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-record-params/`
+  — `describe(parcel)` where parcel = (string, list&lt;string&gt;,
+  nested-record). Lowers to 6 i32 slots; returns a string
+  formatted from all fields.
+
+**19/19 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.22.0` →
+`WACS-ComponentModel-v0.23.0` (minor — capability shift on
+Harness.Lib).
+
 ## WACS.ComponentModel.Harness.Lib 0.14.0 / WACS.ComponentModel.Harness.Runtime 0.6.0 — enum + flags + tuple direct PARAMS
 
 Direct params can now be `enum`, `flags`, or `tuple<...>` — they

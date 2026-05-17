@@ -428,32 +428,67 @@ namespace Wacs.ComponentModel.Harness.Lib
                 $"Harness emitter v0 does not yet support {t.GetType().Name} ({context}).");
         }
 
+        // Open generic Action / Func types indexed by arity. Arity 0
+        // for Action is the parameterless typeof(Action); arity 1 for
+        // Func is typeof(Func<TResult>).
+        private static readonly Type[] OpenActions =
+        {
+            typeof(Action),
+            typeof(Action<>),
+            typeof(Action<,>),
+            typeof(Action<,,>),
+            typeof(Action<,,,>),
+            typeof(Action<,,,,>),
+            typeof(Action<,,,,,>),
+            typeof(Action<,,,,,,>),
+            typeof(Action<,,,,,,,>),
+            typeof(Action<,,,,,,,,>),
+            typeof(Action<,,,,,,,,,>),
+            typeof(Action<,,,,,,,,,,>),
+            typeof(Action<,,,,,,,,,,,>),
+            typeof(Action<,,,,,,,,,,,,>),
+            typeof(Action<,,,,,,,,,,,,,>),
+            typeof(Action<,,,,,,,,,,,,,,>),
+            typeof(Action<,,,,,,,,,,,,,,,>),
+        };
+        private static readonly Type[] OpenFuncs =
+        {
+            // Func<TResult> .. Func<T1..T16, TResult>
+            typeof(Func<>),
+            typeof(Func<,>),
+            typeof(Func<,,>),
+            typeof(Func<,,,>),
+            typeof(Func<,,,,>),
+            typeof(Func<,,,,,>),
+            typeof(Func<,,,,,,>),
+            typeof(Func<,,,,,,,>),
+            typeof(Func<,,,,,,,,>),
+            typeof(Func<,,,,,,,,,>),
+            typeof(Func<,,,,,,,,,,>),
+            typeof(Func<,,,,,,,,,,,>),
+            typeof(Func<,,,,,,,,,,,,>),
+            typeof(Func<,,,,,,,,,,,,,>),
+            typeof(Func<,,,,,,,,,,,,,,>),
+            typeof(Func<,,,,,,,,,,,,,,,>),
+            typeof(Func<,,,,,,,,,,,,,,,,>),
+        };
+
         private static Type MakeInvokerDelegateType(Type[] paramTypes, Type? returnType)
         {
             if (returnType == null)
             {
-                return paramTypes.Length switch
-                {
-                    0 => typeof(Action),
-                    1 => typeof(Action<>).MakeGenericType(paramTypes),
-                    2 => typeof(Action<,>).MakeGenericType(paramTypes),
-                    3 => typeof(Action<,,>).MakeGenericType(paramTypes),
-                    4 => typeof(Action<,,,>).MakeGenericType(paramTypes),
-                    _ => throw new NotSupportedException(
-                        $"Harness emitter v0 supports up to 4 lowered params for void returns."),
-                };
+                if (paramTypes.Length >= OpenActions.Length)
+                    throw new NotSupportedException(
+                        $"Lowered param arity {paramTypes.Length} exceeds Action<…> BCL ceiling ({OpenActions.Length - 1}).");
+                if (paramTypes.Length == 0) return typeof(Action);
+                return OpenActions[paramTypes.Length].MakeGenericType(paramTypes);
             }
             var all = paramTypes.Append(returnType).ToArray();
-            return all.Length switch
-            {
-                1 => typeof(Func<>).MakeGenericType(all),
-                2 => typeof(Func<,>).MakeGenericType(all),
-                3 => typeof(Func<,,>).MakeGenericType(all),
-                4 => typeof(Func<,,,>).MakeGenericType(all),
-                5 => typeof(Func<,,,,>).MakeGenericType(all),
-                _ => throw new NotSupportedException(
-                    $"Harness emitter v0 supports up to 4 lowered params for value returns."),
-            };
+            int funcIndex = all.Length - 1;  // Func<TResult> is OpenFuncs[0]
+            if (funcIndex < 0 || funcIndex >= OpenFuncs.Length)
+                throw new NotSupportedException(
+                    $"Lowered param+return arity {all.Length} exceeds Func<…> BCL ceiling ({OpenFuncs.Length}).");
+            return OpenFuncs[funcIndex].MakeGenericType(all);
         }
 
         // ===== Constructor =====
@@ -1007,24 +1042,255 @@ namespace Wacs.ComponentModel.Harness.Lib
             }
             if (d is CtRecordType rec)
             {
+                // Records-as-params flatten field-by-field per canonical
+                // ABI. For each field: load the arg, call the getter to
+                // pull the field value out, then flatten that value via
+                // the same field-type dispatch. Strings, lists, enums,
+                // flags, tuples (and nested records of those) all work
+                // by reusing the per-element lower path above.
                 var getters = registry.RecordGetters[rec.Name];
                 foreach (var f in rec.Fields)
                 {
-                    // For each field: load arg, call getter, recurse.
-                    EmitLdarg(il, argIdx);
-                    il.Emit(OpCodes.Callvirt, getters[f.Name]);
-                    // If the field is itself a primitive, this is enough;
-                    // for nested records, the getter returns the nested
-                    // record and we'd need to recurse. v0.2 supports
-                    // depth-1 only — IsFlatLowerable already vetted this.
-                    if (CanonicalAbi.Deref(f.Type) is not CtPrimType)
-                        throw new NotSupportedException(
-                            "Nested aggregates in flat-lowered record params not supported.");
+                    EmitFlattenRecordField(il, argIdx, getters[f.Name], f.Type,
+                        memoryField, reallocField, registry);
                 }
                 return;
             }
             throw new NotSupportedException(
                 $"EmitFlattenedArg doesn't support {d.GetType().Name}.");
+        }
+
+        /// <summary>
+        /// Pull a field out of a record-typed arg and flatten it onto
+        /// the invoker stack. Stashes the getter result into a local
+        /// of the field's CLR type and dispatches via the same
+        /// type-tree the top-level arg flattening uses — so nested
+        /// records, strings-in-records, lists-in-records, enums /
+        /// flags / tuples in records all work without duplicating
+        /// the per-shape lower IL.
+        /// </summary>
+        private static void EmitFlattenRecordField(
+            ILGenerator il, int recordArgIdx, MethodInfo getter, CtValType fieldType,
+            FieldBuilder memoryField, FieldBuilder reallocField,
+            TypeRegistry registry)
+        {
+            var d = CanonicalAbi.Deref(fieldType);
+
+            // Primitive (non-string): getter result is the slot value.
+            if (d is CtPrimType pp && pp.Kind != CtPrim.String)
+            {
+                EmitLdarg(il, recordArgIdx);
+                il.Emit(OpCodes.Callvirt, getter);
+                return;
+            }
+            // Enum / flags: same — getter's return is already the int.
+            if (d is CtEnumType || d is CtFlagsType)
+            {
+                EmitLdarg(il, recordArgIdx);
+                il.Emit(OpCodes.Callvirt, getter);
+                return;
+            }
+            // String field → LowerUtf8 on the getter's string result.
+            if (d is CtPrimType sp && sp.Kind == CtPrim.String)
+            {
+                var strLocal = il.DeclareLocal(typeof(string));
+                EmitLdarg(il, recordArgIdx);
+                il.Emit(OpCodes.Callvirt, getter);
+                il.Emit(OpCodes.Stloc, strLocal);
+                var ptr = il.DeclareLocal(typeof(int));
+                var len = il.DeclareLocal(typeof(int));
+                il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                il.Emit(OpCodes.Ldloc, strLocal);
+                il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, reallocField);
+                il.Emit(OpCodes.Ldloca, ptr);
+                il.Emit(OpCodes.Ldloca, len);
+                il.Emit(OpCodes.Call, StringCoding_LowerUtf8);
+                il.Emit(OpCodes.Ldloc, ptr);
+                il.Emit(OpCodes.Ldloc, len);
+                return;
+            }
+            // List, nested record, tuple → stash into a typed local
+            // then re-dispatch via the synthetic-arg pattern.
+            var fieldClr = WitTypeEmit.MapClrType(d, registry, "record field as param");
+            var local = il.DeclareLocal(fieldClr);
+            EmitLdarg(il, recordArgIdx);
+            il.Emit(OpCodes.Callvirt, getter);
+            il.Emit(OpCodes.Stloc, local);
+            EmitFlattenLocal(il, local, d, memoryField, reallocField, registry);
+        }
+
+        /// <summary>
+        /// Flatten a value stored in a local onto the invoker stack
+        /// using the same per-shape dispatch as the top-level arg
+        /// path. Used for record-of-{list, tuple, nested-record}
+        /// where we need to act on a stashed sub-value rather than
+        /// an arg slot.
+        /// </summary>
+        private static void EmitFlattenLocal(
+            ILGenerator il, LocalBuilder local, CtValType t,
+            FieldBuilder memoryField, FieldBuilder reallocField,
+            TypeRegistry registry)
+        {
+            var d = CanonicalAbi.Deref(t);
+            if (d is CtListType list)
+            {
+                EmitLowerListFromLocal(il, local, list, memoryField, reallocField, registry);
+                return;
+            }
+            if (d is CtTupleType tup)
+            {
+                var tupleClr = WitTypeEmit.MapClrType(d, registry, "tuple param");
+                var elemClrs = tupleClr.GetGenericArguments();
+                for (int i = 0; i < tup.Elements.Count; i++)
+                {
+                    var accessorOpen = typeof(Wacs.ComponentModel.Harness.WitTupleAccess)
+                        .GetMethods(BindingFlags.Public | BindingFlags.Static)
+                        .First(m => m.Name == "Item" + (i + 1)
+                                    && m.GetGenericArguments().Length == elemClrs.Length);
+                    var accessor = accessorOpen.MakeGenericMethod(elemClrs);
+                    var elemD = CanonicalAbi.Deref(tup.Elements[i]);
+                    if (elemD is CtPrimType ep && ep.Kind == CtPrim.String)
+                    {
+                        var strLocal = il.DeclareLocal(typeof(string));
+                        il.Emit(OpCodes.Ldloc, local);
+                        il.Emit(OpCodes.Call, accessor);
+                        il.Emit(OpCodes.Stloc, strLocal);
+                        var ptr = il.DeclareLocal(typeof(int));
+                        var len = il.DeclareLocal(typeof(int));
+                        il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                        il.Emit(OpCodes.Ldloc, strLocal);
+                        il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, reallocField);
+                        il.Emit(OpCodes.Ldloca, ptr);
+                        il.Emit(OpCodes.Ldloca, len);
+                        il.Emit(OpCodes.Call, StringCoding_LowerUtf8);
+                        il.Emit(OpCodes.Ldloc, ptr);
+                        il.Emit(OpCodes.Ldloc, len);
+                    }
+                    else if (elemD is CtPrimType || elemD is CtEnumType || elemD is CtFlagsType)
+                    {
+                        il.Emit(OpCodes.Ldloc, local);
+                        il.Emit(OpCodes.Call, accessor);
+                    }
+                    else
+                    {
+                        throw new NotSupportedException(
+                            $"Tuple element of type {elemD.GetType().Name} not supported in record-of-tuple param.");
+                    }
+                }
+                return;
+            }
+            if (d is CtRecordType nested)
+            {
+                // Re-dispatch: load the local's getters per field.
+                var getters = registry.RecordGetters[nested.Name];
+                foreach (var f in nested.Fields)
+                {
+                    // synth: we have the nested instance in `local`,
+                    // need to invoke its getter then flatten the
+                    // result. Use a synthetic helper that uses ldloc.
+                    EmitFlattenSubRecordField(il, local, getters[f.Name], f.Type,
+                        memoryField, reallocField, registry);
+                }
+                return;
+            }
+            throw new NotSupportedException(
+                $"EmitFlattenLocal doesn't support {d.GetType().Name}.");
+        }
+
+        private static void EmitFlattenSubRecordField(
+            ILGenerator il, LocalBuilder recordLocal, MethodInfo getter, CtValType fieldType,
+            FieldBuilder memoryField, FieldBuilder reallocField,
+            TypeRegistry registry)
+        {
+            var d = CanonicalAbi.Deref(fieldType);
+            if (d is CtPrimType pp && pp.Kind != CtPrim.String)
+            {
+                il.Emit(OpCodes.Ldloc, recordLocal);
+                il.Emit(OpCodes.Callvirt, getter);
+                return;
+            }
+            if (d is CtEnumType || d is CtFlagsType)
+            {
+                il.Emit(OpCodes.Ldloc, recordLocal);
+                il.Emit(OpCodes.Callvirt, getter);
+                return;
+            }
+            if (d is CtPrimType sp && sp.Kind == CtPrim.String)
+            {
+                var strLocal = il.DeclareLocal(typeof(string));
+                il.Emit(OpCodes.Ldloc, recordLocal);
+                il.Emit(OpCodes.Callvirt, getter);
+                il.Emit(OpCodes.Stloc, strLocal);
+                var ptr = il.DeclareLocal(typeof(int));
+                var len = il.DeclareLocal(typeof(int));
+                il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                il.Emit(OpCodes.Ldloc, strLocal);
+                il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, reallocField);
+                il.Emit(OpCodes.Ldloca, ptr);
+                il.Emit(OpCodes.Ldloca, len);
+                il.Emit(OpCodes.Call, StringCoding_LowerUtf8);
+                il.Emit(OpCodes.Ldloc, ptr);
+                il.Emit(OpCodes.Ldloc, len);
+                return;
+            }
+            var fieldClr = WitTypeEmit.MapClrType(d, registry, "record field as param");
+            var local = il.DeclareLocal(fieldClr);
+            il.Emit(OpCodes.Ldloc, recordLocal);
+            il.Emit(OpCodes.Callvirt, getter);
+            il.Emit(OpCodes.Stloc, local);
+            EmitFlattenLocal(il, local, d, memoryField, reallocField, registry);
+        }
+
+        /// <summary>
+        /// Lower a <c>list&lt;T&gt;</c> stored in a local (rather than
+        /// an arg slot) — mirrors <see cref="EmitLowerListArg"/> but
+        /// uses the supplied local as the source array. Used when a
+        /// list value comes from a record field or tuple element.
+        /// </summary>
+        private static void EmitLowerListFromLocal(
+            ILGenerator il, LocalBuilder arrLocal, CtListType list,
+            FieldBuilder memoryField, FieldBuilder reallocField,
+            TypeRegistry registry)
+        {
+            var elemDeref = CanonicalAbi.Deref(list.Element);
+            int elemSize = CanonicalAbi.SizeOf(elemDeref);
+            int elemAlign = CanonicalAbi.AlignOf(elemDeref);
+            var countLocal = il.DeclareLocal(typeof(int));
+            il.Emit(OpCodes.Ldloc, arrLocal);
+            il.Emit(OpCodes.Ldlen);
+            il.Emit(OpCodes.Conv_I4);
+            il.Emit(OpCodes.Stloc, countLocal);
+
+            var basePtr = il.DeclareLocal(typeof(int));
+            il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, reallocField);
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Ldc_I4, elemAlign);
+            il.Emit(OpCodes.Ldloc, countLocal);
+            il.Emit(OpCodes.Ldc_I4, elemSize);
+            il.Emit(OpCodes.Mul);
+            il.Emit(OpCodes.Callvirt, typeof(Func<int, int, int, int, int>).GetMethod("Invoke")!);
+            il.Emit(OpCodes.Stloc, basePtr);
+
+            var iLocal = il.DeclareLocal(typeof(int));
+            il.Emit(OpCodes.Ldc_I4_0); il.Emit(OpCodes.Stloc, iLocal);
+            var loopHead = il.DefineLabel();
+            var loopCond = il.DefineLabel();
+            il.Emit(OpCodes.Br, loopCond);
+            il.MarkLabel(loopHead);
+            EmitLowerListElement(il, elemDeref, arrLocal, iLocal, basePtr,
+                elemSize, memoryField, reallocField);
+            il.Emit(OpCodes.Ldloc, iLocal);
+            il.Emit(OpCodes.Ldc_I4_1);
+            il.Emit(OpCodes.Add);
+            il.Emit(OpCodes.Stloc, iLocal);
+            il.MarkLabel(loopCond);
+            il.Emit(OpCodes.Ldloc, iLocal);
+            il.Emit(OpCodes.Ldloc, countLocal);
+            il.Emit(OpCodes.Blt, loopHead);
+
+            il.Emit(OpCodes.Ldloc, basePtr);
+            il.Emit(OpCodes.Ldloc, countLocal);
         }
 
         /// <summary>
