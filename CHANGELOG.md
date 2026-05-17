@@ -1,5 +1,31 @@
 # Changelog
 
+## Fixture coverage: list&lt;T&gt; in variant payload
+
+New regression fixture
+(`Spec.Test/components/fixtures/wit-harness-spike-list-variant/`)
+validates that lists nested inside variant payloads work
+end-to-end via the existing infrastructure (variant lift +
+field-level list lift). No Harness.Lib code changes required:
+the prior slices (records + variants + lists in record fields)
+composed correctly to cover this shape.
+
+```wit
+world streams {
+    variant payload {
+        numbers(list<u32>),
+        empty,
+    }
+    export get-payload: func(want-numbers: u32) -> payload;
+}
+```
+
+Rust impl returns `Numbers(vec![7,14,21,28])` or `Empty` based on
+the flag. The emitted harness round-trips both cases — variant
+discriminator dispatch + `EmitLiftField` recursing into
+`EmitLiftList` for the payload + `cabi_post_get-payload` to free
+the element-array body.
+
 ## WACS.ComponentModel.Harness.Lib 0.6.0 — direct `list<T>` return value
 
 Harness emitter handles `list<T>` as a direct export return (not

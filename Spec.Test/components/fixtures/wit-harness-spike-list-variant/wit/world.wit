@@ -1,0 +1,10 @@
+package wacs:list-variant-spike;
+
+world streams {
+    variant payload {
+        numbers(list<u32>),
+        empty,
+    }
+
+    export get-payload: func(want-numbers: u32) -> payload;
+}
