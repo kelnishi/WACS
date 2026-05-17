@@ -97,7 +97,7 @@ namespace Wacs.Transpiler.AOT.Component
                     diffs.Add($"export '{name}': declared in harness, missing from component.");
                     continue;
                 }
-                CompareFunctionSignatures(name, expectedFn, actualFn, diffs);
+                CompareFunctionSignatures("export", name, expectedFn, actualFn, diffs);
             }
             foreach (var name in actualExports.Keys)
             {
@@ -105,16 +105,54 @@ namespace Wacs.Transpiler.AOT.Component
                     diffs.Add($"export '{name}': present in component, not declared in harness.");
             }
 
+            // Imports comparison: every WIT-declared import must be
+            // present in the binary with matching signature. The
+            // reverse direction (component imports not in WIT) is
+            // intentionally NOT a hard mismatch — wit-bindgen
+            // auto-bundles WASI imports the harness can't realistically
+            // pre-declare, and the user supplies them via the
+            // LoadFrom `bindImports` callback. v0 only checks
+            // inline-Func imports; interface-reference imports
+            // (`import wasi:io/poll@0.2.0`) are reported as a
+            // currently-unvalidated shape so the user knows the
+            // check isn't covering them.
+            var expectedFnImports = expectedWorld.Imports
+                .Where(p => p.Spec is CtExternFunc)
+                .ToDictionary(p => p.Name, p => ((CtExternFunc)p.Spec).Function);
+            var actualFnImports = actualWorld.Imports
+                .Where(p => p.Spec is CtExternFunc)
+                .ToDictionary(p => p.Name, p => ((CtExternFunc)p.Spec).Function);
+
+            foreach (var (name, expectedFn) in expectedFnImports)
+            {
+                if (!actualFnImports.TryGetValue(name, out var actualFn))
+                {
+                    diffs.Add($"import '{name}': declared in harness, missing from component.");
+                    continue;
+                }
+                CompareFunctionSignatures("import", name, expectedFn, actualFn, diffs);
+            }
+
+            // Surface harness-declared interface imports as
+            // "not validated" so the user knows the contract
+            // includes shapes outside the v0 diff. Avoids silent
+            // partial-coverage.
+            foreach (var p in expectedWorld.Imports)
+            {
+                if (p.Spec is CtExternInterfaceRef)
+                    diffs.Add($"import '{p.Name}' (interface ref): v0 validator does not yet compare interface-import shapes.");
+            }
+
             return diffs;
         }
 
         private static void CompareFunctionSignatures(
-            string exportName, CtFunctionType expected, CtFunctionType actual,
+            string kind, string portName, CtFunctionType expected, CtFunctionType actual,
             List<string> diffs)
         {
             if (expected.Params.Count != actual.Params.Count)
             {
-                diffs.Add($"export '{exportName}': param arity differs "
+                diffs.Add($"{kind} '{portName}': param arity differs "
                     + $"(harness {expected.Params.Count}, component {actual.Params.Count}).");
                 return;
             }
@@ -125,7 +163,7 @@ namespace Wacs.Transpiler.AOT.Component
                 var ap = actual.Params[i];
                 if (!TypesEqual(ep.Type, ap.Type))
                 {
-                    diffs.Add($"export '{exportName}' param {i} ('{ep.Name}' / '{ap.Name}'): "
+                    diffs.Add($"{kind} '{portName}' param {i} ('{ep.Name}' / '{ap.Name}'): "
                         + $"type differs (harness {Describe(ep.Type)}, component {Describe(ap.Type)}).");
                 }
             }
@@ -133,11 +171,11 @@ namespace Wacs.Transpiler.AOT.Component
             var er = expected.Result;
             var ar = actual.Result;
             if (er == null && ar != null)
-                diffs.Add($"export '{exportName}': harness expects no return, component returns {Describe(ar)}.");
+                diffs.Add($"{kind} '{portName}': harness expects no return, component returns {Describe(ar)}.");
             else if (er != null && ar == null)
-                diffs.Add($"export '{exportName}': harness expects return {Describe(er)}, component returns none.");
+                diffs.Add($"{kind} '{portName}': harness expects return {Describe(er)}, component returns none.");
             else if (er != null && ar != null && !TypesEqual(er, ar))
-                diffs.Add($"export '{exportName}': return type differs "
+                diffs.Add($"{kind} '{portName}': return type differs "
                     + $"(harness {Describe(er)}, component {Describe(ar)}).");
         }
 

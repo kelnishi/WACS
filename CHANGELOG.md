@@ -1,5 +1,64 @@
 # Changelog
 
+## WACS.Transpiler.Lib 0.10.2 — imports validation in WitContractCompare
+
+Extends the contract diff to cover imports. v0 rule (per
+`docs/wit-harness-plan.md` §"Validation contract"):
+
+- Every WIT-declared inline-function import (`import name: func(...)`)
+  must be present in the component with a matching signature.
+  Missing or mismatched imports surface as typed messages.
+- The reverse direction — component imports not declared in the
+  harness — is intentionally NOT a hard mismatch. wit-bindgen
+  auto-bundles WASI imports the harness can't realistically pre-
+  declare; embedders supply those via `LoadFrom`'s `bindImports`
+  callback.
+- Interface-reference imports (`import wasi:io/poll@0.2.0`) on the
+  harness side surface as a "not validated in v0" diagnostic so
+  the user knows the check isn't covering them silently. Lifting
+  this needs WIT-side interface resolution + per-method signature
+  walking; tracked as the next-mile follow-up.
+
+`CompareFunctionSignatures` generalizes its diagnostic prefix
+from hardcoded "export" to a `kind` parameter ("export" or
+"import") so messages read correctly for both directions.
+
+Spike fixtures unaffected — both `hello.wit` and `richer.wit`
+declare zero imports, so the new code path has nothing to flag
+on existing diff invocations. Transpiler.Test 57/57 still green.
+
+### Two follow-ups investigated + documented this round (deferred)
+
+- **`BinaryWitDecoder` primary-section decode**: the existing
+  `BuildPackage` is hardcoded for wit-component's
+  nested-wrapper encoding (a wrapper `ComponentType` whose
+  inner `ComponentType` describes the world). Cargo-built
+  `wasm32-wasip2` components don't ship that wrapper — their
+  world is in the primary type/export sections directly.
+  Passing the full binary to the existing decoder returns
+  null (no wrapper to find). A proper fix is ~200-400 LOC of
+  new decoder logic walking the primary component sections.
+  Today's workaround: `wasm-tools component embed` adds the
+  custom section, then validation works.
+- **Transpiler emits `implements I{World}`**: the
+  symmetric-engines payoff at the CLR-interface level needs
+  either cross-assembly type sharing (transpiler references
+  the harness's emitted `Vec2` / `Outcome` types instead of
+  emitting its own) or a translation layer at the interface
+  boundary. Either path is ~500-1000 LOC and tightly coupled
+  to `ComponentExportsEmit`'s 3281-LOC class-emission
+  pipeline. Embedders today still get typed call sites via
+  the interpreter harness + compile-time WIT-shape validation
+  via `--harness` on transpile; CLR-interface-level identity
+  across engines is the natural v2 close.
+
+### What changed
+
+- **`WACS.Transpiler.Lib` 0.10.1 → 0.10.2** (point — additional
+  validation cases): `WitContractCompare.Diff` adds imports
+  comparison; `CompareFunctionSignatures` gains a `kind`
+  parameter for export/import diagnostic prefixing.
+
 ## WACS.Cli 1.10.0 / WACS.Transpiler.Lib 0.10.1 — `--harness` / `--wit-dir` on aot + build
 
 Both transpile-side CLI verbs (`wacs aot`, `wacs build`) gain
