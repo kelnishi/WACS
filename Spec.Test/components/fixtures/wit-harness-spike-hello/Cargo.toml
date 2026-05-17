@@ -1,0 +1,24 @@
+[package]
+name = "wit-harness-spike-hello"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Spike fixture for the WIT-shaped harness work — the smallest
+# valid component-model surface (single export, string in /
+# string out). Used to verify the harness's canonical-ABI
+# lift/lower for strings under NativeAOT + Unity IL2CPP
+# without dragging in the WIT-type complexity of bigger
+# fixtures.
+
+[dependencies]
+wit-bindgen = "0.41"
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = "s"
+strip = true
+panic = "abort"
+lto = true

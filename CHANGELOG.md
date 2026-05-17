@@ -1,5 +1,93 @@
 # Changelog
 
+## WACS.ComponentModel.Parser 0.1.0 / WACS.ComponentModel 0.5.1 — AOT-safe parser split
+
+`WACS.ComponentModel.Parser` is a new sibling package in the
+ComponentModel family. It carries the AOT-safe binary parser
+(`Wacs.ComponentModel.Runtime.Parser.*` — ten section readers,
+`ComponentBinaryParser`, `ComponentBinaryReader`) plus the typed
+output model (`Wacs.ComponentModel.Runtime.ComponentModule`) — pure
+byte walkers, no reflection, multi-target net8.0 + netstandard2.1
+with `IsAotCompatible` gated to net8.0.
+
+Existing `WACS.ComponentModel` (point bumped to 0.5.1) becomes a
+downstream consumer via project reference — the type names,
+namespaces, and `using` statements are unchanged for callers who
+take both packages transitively. Callers who want *only* the
+parser (the wit-harness consumers, per
+`docs/wit-harness-plan.md` and the closeout
+`docs/wit-harness-unity-spike.md` finding D) can now reference
+`WACS.ComponentModel.Parser` standalone and avoid pulling the
+reflective `ComponentInstance` / `ComponentBridge` /
+`HostInterfaceRuntime` surface (which carries
+`[RequiresDynamicCode]` + `[RequiresUnreferencedCode]` and isn't
+viable on Unity IL2CPP).
+
+The `WACS.ComponentModel.Parser` package is the first chunk of
+`docs/wit-harness-plan.md` productionization — Harness.Runtime
+and Harness.Lib will reference it directly.
+
+### What changed
+
+- **`WACS.ComponentModel.Parser` 0.1.0** (new package): split from
+  `Wacs.ComponentModel`. Contains
+  `Wacs.ComponentModel/Runtime/Parser/*.cs` (10 files, ~1900 LOC)
+  + `Wacs.ComponentModel/Runtime/ComponentModule.cs` (~530 LOC).
+- **`WACS.ComponentModel` 0.5.0 → 0.5.1** (point — transparent
+  refactor): adds a project reference to
+  `Wacs.ComponentModel.Parser`; the moved types remain
+  transitively visible to consumers. `Wacs.ComponentModel/WIT/BinaryWitDecoder.cs`
+  + `Wacs.ComponentModel/Runtime/ComponentInstance.cs` still use
+  the parser types unchanged.
+- **Spike**: `Spec.Test/components/fixtures/wit-harness-spike-hello/Aot.Spike/`
+  switches from referencing `WACS.ComponentModel` to
+  `WACS.ComponentModel.Parser` — drops the
+  `[RequiresDynamicCode]` surface from its AOT call graph and
+  resolves the prior `NETSDK1210` warning the
+  unconditional `IsAotCompatible` in `Wacs.ComponentModel` produced.
+
+Family tag: `WACS-ComponentModel-v0.4.0` → `WACS-ComponentModel-v0.5.0`
+(minor — new sibling package counts as a capability shift for the
+family).
+
+## WACS 0.15.22 — `CreateInvokerFunc<…,TResult>` unboxes via `Value`
+
+`WasmRuntime.CreateInvokerFunc<…,TResult>` (every arity, 0–9 args)
+wrapped the wasm return in `Value` (per `Delegates.AnonymousFunctionFromType`),
+boxed it via `DynamicInvoke`, and then attempted `(TResult)boxed`. For
+primitive `TResult` (e.g. `int`), that's an unbox-to-primitive against
+a boxed `Value` struct — `InvalidCastException` at every call.
+
+Added a `UnboxReturn<TResult>` helper that drops the `Value` wrapper
+by reading `Value.Scalar` — the existing discriminator-driven switch
+that already returns the typed field for `I32` / `I64` / `F32` /
+`F64` / `V128` / refs. The standard `(TResult)object` unbox then
+matches whatever primitive `Scalar` returned. When `TResult == Value`
+(the shape existing `BindingTests` use — bind to `Func<…, Value>`
+and lift via Value's implicit operators at the call site, e.g.
+`(int)invoker(1)`), the helper returns the boxed `Value` straight
+through. When the boxed object is *not* a `Value` (host-function
+returns flow through as primitives), the helper falls through to a
+direct `(TResult)boxed` unbox. Every `CreateInvokerFunc` arity
+(0–9 args) now routes through it.
+
+Surfaced by the wit-harness AOT spike (Package 3 of
+`docs/wit-harness-plan.md`): the spike's canonical-ABI call into the
+component's `cabi_realloc` / `greet` / `cabi_post_greet` exports
+needed typed `Func<int, int, int, int, int>` etc. delegates, which
+hit the bug on the first invocation. Hand-written harness now runs
+end-to-end on both `dotnet run` and a NativeAOT-published native
+binary, returning the expected `"Hello, World!"`.
+
+`CreateInvokerAction` is unaffected — the void-return path doesn't
+unbox.
+
+### What changed
+
+- **`WACS` 0.15.21 → 0.15.22** (point — bug fix):
+  - `WasmRuntimeExecution.cs` adds `UnboxReturn<TResult>` and routes
+    every `CreateInvokerFunc` overload through it.
+
 ## Warning hygiene pass — WACS 0.15.21 / WACS.Cli 1.8.1 / WACS.ComponentModel 0.5.0 / WACS.ComponentModel.Bindgen.Lib 0.1.2 / WACS.HostBindings.SourceGen 0.1.1 / WACS.WASI.NN.OpenVino 0.2.2 / WACS.WASI.Preview1 0.13.1 / WACS.Transpiler.Lib 0.9.1
 
 Solution-wide warning count: **390 → 0** (100% reduction).

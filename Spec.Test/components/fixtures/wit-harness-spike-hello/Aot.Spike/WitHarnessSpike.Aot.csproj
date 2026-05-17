@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net8.0</TargetFramework>
+        <ImplicitUsings>disable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <LangVersion>latest</LangVersion>
+        <RootNamespace>WitHarnessSpike.Aot</RootNamespace>
+        <AssemblyName>WitHarnessSpike.Aot</AssemblyName>
+
+        <!-- IL2CPP-equivalent NativeAOT analysis. We want every
+             trim / dynamic-code warning surfaced here — the spike's
+             whole point is to surface what would break under
+             IL2CPP. -->
+        <PublishAot>true</PublishAot>
+        <IsAotCompatible>true</IsAotCompatible>
+        <TrimMode>full</TrimMode>
+        <InvariantGlobalization>true</InvariantGlobalization>
+
+        <!-- Ship the .component.wasm alongside the binary so the
+             AOT-published binary can find it at runtime. -->
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="..\wasm\hello.component.wasm">
+            <Link>hello.component.wasm</Link>
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </None>
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- Wacs.Core for the runtime; Wacs.ComponentModel.Parser
+             (split out for exactly this reason) for the AOT-safe
+             byte walker. The reflective ComponentInstance /
+             ComponentBridge surface in Wacs.ComponentModel is
+             intentionally NOT referenced — the harness pattern
+             retires it under NativeAOT / IL2CPP. -->
+        <ProjectReference Include="..\..\..\..\..\Wacs.Core\Wacs.Core\Wacs.Core.csproj" />
+        <ProjectReference Include="..\..\..\..\..\Wacs.ComponentModel\Wacs.ComponentModel.Parser\Wacs.ComponentModel.Parser.csproj" />
+    </ItemGroup>
+
+</Project>
