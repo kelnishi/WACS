@@ -1,5 +1,49 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Runtime 0.1.0 — canonical-ABI primitives
+
+New sibling package in the ComponentModel family. Carries the
+AOT-safe canonical-ABI runtime primitives that emitted harness IL
+calls at component-load time. v0 surface (kept minimal —
+intentionally what the wit-harness-spike-hello fixture exercises;
+grows as the richer fixture surfaces what's missing):
+
+- **`MemoryHelpers`** — little-endian `ReadI32LE` / `WriteI32LE`
+  over `MemoryInstance.Data`. The canonical ABI mandates LE on
+  every numeric width; one call site per access in emitted IL.
+- **`StringCoding`** — `LiftUtf8(memory, ptr, byteLen) -> string`
+  for strings flowing wasm → host, and `LowerUtf8(memory, value,
+  cabiRealloc, out ptr, out byteLen)` for strings flowing host →
+  wasm. UTF-16 + Latin1 canonical-ABI encodings deferred to v0.2
+  when the richer fixture surfaces them.
+
+Validation: the spike's hand-written `HelloHarness` refactored to
+call into `MemoryHelpers.ReadI32LE` / `StringCoding.LiftUtf8` /
+`StringCoding.LowerUtf8` instead of inline helpers. Both
+`dotnet run` and the NativeAOT-published native binary still emit
+`"Hello, World!"`.
+
+`WitContract` / `WitContractDiff` / `WitContractMismatchException`
+are deliberately deferred to the next slice — they'll land
+together with the Harness.Lib emitter that populates them, so the
+shape is validated against an actual consumer before shipping.
+
+Multi-target net8.0 + netstandard2.1; `IsAotCompatible` gated to
+net8.0.
+
+Family tag: `WACS-ComponentModel-v0.5.0` → `WACS-ComponentModel-v0.6.0`
+(minor — second new sibling package this round).
+
+### What changed
+
+- **`WACS.ComponentModel.Harness.Runtime` 0.1.0** (new package):
+  `MemoryHelpers.cs` (~30 LOC), `StringCoding.cs` (~70 LOC),
+  csproj depending on `Wacs.Core` + `Wacs.ComponentModel.Parser`.
+- **Spike** (`Aot.Spike/HelloHarness.cs`): refactored to call into
+  `Wacs.ComponentModel.Harness.MemoryHelpers` /
+  `Wacs.ComponentModel.Harness.StringCoding`; inline `ReadI32LE`
+  + `Encoding.UTF8.*` removed. Csproj gains the new ProjectReference.
+
 ## WACS.ComponentModel.Parser 0.1.0 / WACS.ComponentModel 0.5.1 — AOT-safe parser split
 
 `WACS.ComponentModel.Parser` is a new sibling package in the

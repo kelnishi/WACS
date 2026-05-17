@@ -9,6 +9,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Text;
+using Wacs.ComponentModel.Harness;
 using Wacs.ComponentModel.Runtime.Parser;
 using Wacs.Core;
 using Wacs.Core.Runtime;
@@ -145,30 +146,20 @@ namespace WitHarnessSpike.Aot
         {
             if (name == null) throw new ArgumentNullException(nameof(name));
 
-            // Lower the input string: allocate space in linear
-            // memory via cabi_realloc, copy UTF-8 bytes in.
-            var utf8 = Encoding.UTF8.GetBytes(name);
-            int inPtr = _reallocInvoke(
-                /*old=*/ 0, /*oldLen=*/ 0,
-                /*align=*/ 1, /*newLen=*/ utf8.Length);
-            if (inPtr == 0)
-                throw new OutOfMemoryException("cabi_realloc returned 0 for the input string.");
-
-            // Direct write into the wasm linear memory's backing
-            // byte[]. MemoryInstance.Data is byte[]; AOT-clean.
-            utf8.CopyTo(_memory.Data, inPtr);
+            // Lower the input string via Harness.Runtime.
+            StringCoding.LowerUtf8(_memory, name, _reallocInvoke,
+                out int inPtr, out int inByteLen);
 
             // Call greet. Returns the address of an 8-byte
             // (ptr, len) tuple inside linear memory describing the
             // returned string's location + length.
-            int retArea = _greetInvoke(inPtr, utf8.Length);
+            int retArea = _greetInvoke(inPtr, inByteLen);
 
-            // Lift the return: read 8 bytes from retArea (two
-            // little-endian i32: ptr then len).
-            int outPtr = ReadI32LE(_memory, retArea);
-            int outLen = ReadI32LE(_memory, retArea + 4);
-            string result = Encoding.UTF8.GetString(
-                _memory.Data, outPtr, outLen);
+            // Lift the return: read (ptr, len) via Harness.Runtime
+            // canonical-ABI memory helpers, then decode UTF-8.
+            int outPtr = MemoryHelpers.ReadI32LE(_memory, retArea);
+            int outLen = MemoryHelpers.ReadI32LE(_memory, retArea + 4);
+            string result = StringCoding.LiftUtf8(_memory, outPtr, outLen);
 
             // Free the returned string's memory.
             _postGreetInvoke(retArea);
@@ -181,15 +172,6 @@ namespace WitHarnessSpike.Aot
         // harness ever needs explicit teardown (e.g., for unit-test
         // scope isolation), add an Unload() that drops references
         // explicitly.
-
-        private static int ReadI32LE(MemoryInstance mem, int offset)
-        {
-            var data = mem.Data;
-            return data[offset]
-                | (data[offset + 1] << 8)
-                | (data[offset + 2] << 16)
-                | (data[offset + 3] << 24);
-        }
 
         /// <summary>
         /// Bind a stub for every WASI host function the main core
