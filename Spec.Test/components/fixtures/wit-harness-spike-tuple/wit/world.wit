@@ -1,0 +1,10 @@
+package wacs:tuple-spike;
+
+world tagger {
+    record entry {
+        coord: tuple<u32, u32>,
+        labeled: tuple<string, u32>,
+    }
+
+    export tag: func(x: u32, y: u32) -> entry;
+}

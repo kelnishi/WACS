@@ -153,6 +153,14 @@ namespace Wacs.ComponentModel.Harness.Lib
                     EmitLiftOption(il, opt, offset, registry, liftMethods);
                     return;
 
+                case CtResultType res:
+                    EmitLiftResult(il, res, offset, registry, liftMethods);
+                    return;
+
+                case CtTupleType tup:
+                    EmitLiftTuple(il, tup, offset, registry, liftMethods);
+                    return;
+
                 default:
                     throw new NotSupportedException(
                         $"LiftEmit v0.2 does not support {deref.GetType().Name}.");
@@ -211,6 +219,94 @@ namespace Wacs.ComponentModel.Harness.Lib
             }
 
             il.MarkLabel(endLabel);
+        }
+
+        /// <summary>
+        /// Emit IL lifting a <c>result&lt;TOk, TErr&gt;</c> at
+        /// <c>(arg.1 + offset)</c>. Read disc, branch on 0 (Ok) or
+        /// 1 (Err); for present sides, lift the payload at the
+        /// aligned payload offset and call the matching factory; for
+        /// elided sides, push <c>default(ValueTuple)</c>. Leaves a
+        /// <c>WitResult&lt;TOk, TErr&gt;</c> on the stack.
+        /// </summary>
+        private static void EmitLiftResult(
+            ILGenerator il, CtResultType res, int offset, TypeRegistry registry,
+            System.Collections.Generic.Dictionary<string, MethodBuilder> liftMethods)
+        {
+            var okClr = res.Ok == null
+                ? typeof(System.ValueTuple)
+                : WitTypeEmit.MapClrType(res.Ok, registry, "result ok");
+            var errClr = res.Err == null
+                ? typeof(System.ValueTuple)
+                : WitTypeEmit.MapClrType(res.Err, registry, "result err");
+            var resultType = typeof(Wacs.ComponentModel.Harness.WitResult<,>)
+                .MakeGenericType(okClr, errClr);
+            var okFactory = resultType.GetMethod("Ok", BindingFlags.Public | BindingFlags.Static)!;
+            var errFactory = resultType.GetMethod("Err", BindingFlags.Public | BindingFlags.Static)!;
+
+            int okAlign = res.Ok != null ? CanonicalAbi.AlignOf(res.Ok) : 1;
+            int errAlign = res.Err != null ? CanonicalAbi.AlignOf(res.Err) : 1;
+            int payloadOffset = offset + CanonicalAbi.AlignUp(1, Math.Max(okAlign, errAlign));
+
+            var disc = il.DeclareLocal(typeof(byte));
+            il.Emit(OpCodes.Ldarg_0);
+            EmitOffsetPush(il, offset);
+            il.Emit(OpCodes.Call, MemoryHelpers_ReadU8);
+            il.Emit(OpCodes.Stloc, disc);
+
+            var errLabel = il.DefineLabel();
+            var endLabel = il.DefineLabel();
+            il.Emit(OpCodes.Ldloc, disc);
+            il.Emit(OpCodes.Brtrue, errLabel);
+
+            // ok branch (disc == 0)
+            if (res.Ok != null)
+                EmitLiftField(il, res.Ok, payloadOffset, registry, liftMethods);
+            else
+                EmitDefaultValueTuple(il);
+            il.Emit(OpCodes.Call, okFactory);
+            il.Emit(OpCodes.Br, endLabel);
+
+            // err branch (disc == 1)
+            il.MarkLabel(errLabel);
+            if (res.Err != null)
+                EmitLiftField(il, res.Err, payloadOffset, registry, liftMethods);
+            else
+                EmitDefaultValueTuple(il);
+            il.Emit(OpCodes.Call, errFactory);
+
+            il.MarkLabel(endLabel);
+        }
+
+        /// <summary>
+        /// Emit IL lifting a <c>tuple&lt;T1, T2, …&gt;</c> at
+        /// <c>(arg.1 + offset)</c>. Walks the per-element offsets,
+        /// lifts each element to the stack in declaration order, then
+        /// constructs the closed <c>ValueTuple&lt;…&gt;</c> via its
+        /// positional ctor. Leaves the tuple-typed value on the stack.
+        /// </summary>
+        private static void EmitLiftTuple(
+            ILGenerator il, CtTupleType tup, int offset, TypeRegistry registry,
+            System.Collections.Generic.Dictionary<string, MethodBuilder> liftMethods)
+        {
+            int[] elemOffsets = CanonicalAbi.TupleElementOffsets(tup);
+            for (int i = 0; i < tup.Elements.Count; i++)
+                EmitLiftField(il, tup.Elements[i], offset + elemOffsets[i], registry, liftMethods);
+
+            var tupleClr = WitTypeEmit.MapClrType(tup, registry, "tuple");
+            var elemClrs = new Type[tup.Elements.Count];
+            for (int i = 0; i < tup.Elements.Count; i++)
+                elemClrs[i] = WitTypeEmit.MapClrType(tup.Elements[i], registry, $"tuple element {i}");
+            var ctor = tupleClr.GetConstructor(elemClrs)!;
+            il.Emit(OpCodes.Newobj, ctor);
+        }
+
+        private static void EmitDefaultValueTuple(ILGenerator il)
+        {
+            var local = il.DeclareLocal(typeof(System.ValueTuple));
+            il.Emit(OpCodes.Ldloca, local);
+            il.Emit(OpCodes.Initobj, typeof(System.ValueTuple));
+            il.Emit(OpCodes.Ldloc, local);
         }
 
         /// <summary>

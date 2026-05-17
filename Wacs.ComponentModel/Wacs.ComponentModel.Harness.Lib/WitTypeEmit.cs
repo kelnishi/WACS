@@ -367,6 +367,40 @@ namespace Wacs.ComponentModel.Harness.Lib
                         ? typeof(System.Nullable<>).MakeGenericType(innerClr)
                         : innerClr;
 
+                case CtResultType res:
+                    {
+                        // Elided sides → System.ValueTuple (empty struct).
+                        var okClr = res.Ok == null
+                            ? typeof(System.ValueTuple)
+                            : MapClrType(res.Ok, registry, $"{context} result ok");
+                        var errClr = res.Err == null
+                            ? typeof(System.ValueTuple)
+                            : MapClrType(res.Err, registry, $"{context} result err");
+                        return typeof(Wacs.ComponentModel.Harness.WitResult<,>)
+                            .MakeGenericType(okClr, errClr);
+                    }
+
+                case CtTupleType tup:
+                    {
+                        if (tup.Elements.Count < 1 || tup.Elements.Count > 7)
+                            throw new NotSupportedException(
+                                $"Harness emitter v1 supports tuple arities 1..7 (got {tup.Elements.Count}, {context}).");
+                        var elemClrs = new Type[tup.Elements.Count];
+                        for (int i = 0; i < tup.Elements.Count; i++)
+                            elemClrs[i] = MapClrType(tup.Elements[i], registry, $"{context} tuple element {i}");
+                        return tup.Elements.Count switch
+                        {
+                            1 => typeof(ValueTuple<>).MakeGenericType(elemClrs),
+                            2 => typeof(ValueTuple<,>).MakeGenericType(elemClrs),
+                            3 => typeof(ValueTuple<,,>).MakeGenericType(elemClrs),
+                            4 => typeof(ValueTuple<,,,>).MakeGenericType(elemClrs),
+                            5 => typeof(ValueTuple<,,,,>).MakeGenericType(elemClrs),
+                            6 => typeof(ValueTuple<,,,,,>).MakeGenericType(elemClrs),
+                            7 => typeof(ValueTuple<,,,,,,>).MakeGenericType(elemClrs),
+                            _ => throw new NotSupportedException(),
+                        };
+                    }
+
                 default:
                     throw new NotSupportedException(
                         $"Harness emitter v0.2 does not yet support {deref.GetType().Name} ({context}).");

@@ -92,6 +92,25 @@ namespace Wacs.ComponentModel.Harness.Lib
                         return (totalSize, totalAlign);
                     }
 
+                case CtResultType res:
+                    {
+                        // result<T, E> = variant { ok(T?), err(E?) }.
+                        // Same shape as a 2-case variant; either side
+                        // may be elided (treated as size 0 / align 1).
+                        int okSize = 0, okAlign = 1, errSize = 0, errAlign = 1;
+                        if (res.Ok != null) (okSize, okAlign) = Layout(res.Ok);
+                        if (res.Err != null) (errSize, errAlign) = Layout(res.Err);
+                        int maxCaseAlign = Math.Max(okAlign, errAlign);
+                        int maxCaseSize = Math.Max(okSize, errSize);
+                        int payloadOffset = AlignUp(1, maxCaseAlign);
+                        int totalAlign = Math.Max(1, maxCaseAlign);
+                        int totalSize = AlignUp(payloadOffset + maxCaseSize, totalAlign);
+                        return (totalSize, totalAlign);
+                    }
+
+                case CtTupleType tup:
+                    return LayoutTuple(tup);
+
                 default:
                     throw new NotSupportedException(
                         $"CanonicalAbi.Layout: {t.GetType().Name} not supported in harness v0.2.");
@@ -186,6 +205,40 @@ namespace Wacs.ComponentModel.Harness.Lib
             }
             running = AlignUp(running, maxAlign);
             return (running, maxAlign);
+        }
+
+        private static (int Size, int Align) LayoutTuple(CtTupleType tup)
+        {
+            int running = 0;
+            int maxAlign = 1;
+            foreach (var e in tup.Elements)
+            {
+                var (size, align) = Layout(e);
+                if (align > maxAlign) maxAlign = align;
+                running = AlignUp(running, align);
+                running += size;
+            }
+            running = AlignUp(running, maxAlign);
+            return (running, maxAlign);
+        }
+
+        /// <summary>
+        /// Per-element offsets for a tuple in declaration order. Same
+        /// rule as <see cref="RecordFieldOffsets"/>: positional packing
+        /// with per-element alignment padding.
+        /// </summary>
+        public static int[] TupleElementOffsets(CtTupleType tup)
+        {
+            var offsets = new int[tup.Elements.Count];
+            int running = 0;
+            for (int i = 0; i < tup.Elements.Count; i++)
+            {
+                var (size, align) = Layout(tup.Elements[i]);
+                running = AlignUp(running, align);
+                offsets[i] = running;
+                running += size;
+            }
+            return offsets;
         }
 
         private static (int Size, int Align) LayoutVariant(CtVariantType variant)

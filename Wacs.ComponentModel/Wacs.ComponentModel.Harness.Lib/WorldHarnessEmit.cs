@@ -328,6 +328,14 @@ namespace Wacs.ComponentModel.Harness.Lib
                         if (c.Payload != null && ContainsStringOrList(c.Payload)) return true;
                     return false;
                 case CtOptionType opt: return ContainsStringOrList(opt.Inner);
+                case CtResultType res:
+                    if (res.Ok != null && ContainsStringOrList(res.Ok)) return true;
+                    if (res.Err != null && ContainsStringOrList(res.Err)) return true;
+                    return false;
+                case CtTupleType tup:
+                    foreach (var e in tup.Elements)
+                        if (ContainsStringOrList(e)) return true;
+                    return false;
                 default: return false;
             }
         }

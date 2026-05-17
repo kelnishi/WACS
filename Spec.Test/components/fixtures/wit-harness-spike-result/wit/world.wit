@@ -1,0 +1,11 @@
+package wacs:result-spike;
+
+world parser {
+    record outcome {
+        from-positive: result<u32, string>,
+        from-negative: result<u32, string>,
+        empty-check: result,
+    }
+
+    export parse: func() -> outcome;
+}

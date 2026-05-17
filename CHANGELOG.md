@@ -1,5 +1,91 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Lib 0.11.0 / WACS.ComponentModel.Harness.Runtime 0.5.0 — `result<T,E>` + `tuple<...>`
+
+Harness emitter handles WIT `result<T, E>` and `tuple<T1, T2, …>`,
+both with their lift IL plus CLR-type surface.
+
+### `tuple<…>`
+
+```wit
+record entry {
+    coord: tuple<u32, u32>,
+    labeled: tuple<string, u32>,
+}
+```
+
+- **CLR mapping**: closed `System.ValueTuple<T1, T2, …>` for
+  arities 1..7. The BCL ValueTuple struct gives us positional
+  `.Item1`/`.Item2`/… access matching WIT tuple semantics with
+  no per-type emission needed.
+- **Layout**: identical packing rule to records (positional
+  fields with per-element alignment padding); shared via the
+  new `TupleElementOffsets` helper alongside the existing
+  `RecordFieldOffsets`.
+- **Lift**: walk per-element offsets, push each element on the
+  stack via `EmitLiftField`, then `newobj
+  ValueTuple<…>..ctor(T1, T2, …)`.
+
+### `result<T, E>`
+
+```wit
+record outcome {
+    from-positive: result<u32, string>,
+    from-negative: result<u32, string>,
+    empty-check:   result,
+}
+```
+
+- **CLR mapping**: new `WitResult<TOk, TErr>` struct in
+  `Wacs.ComponentModel.Harness.Runtime`. Elided sides
+  (`result`, `result<T>`, `result<_, E>`) substitute
+  `System.ValueTuple` (the empty struct) for the missing side
+  — no separate sentinel type needed.
+- **Layout**: 2-case-variant shape (1-byte disc + `max(ok_size,
+  err_size)` at the aligned payload offset). Elided sides
+  contribute size 0 / align 1.
+- **Lift**: read disc, branch on `0` (Ok) / `1` (Err); for each
+  present side lift the payload at the aligned offset and call
+  `WitResult<…>.Ok(T)` / `Err(E)` static factory; for elided
+  sides push `default(ValueTuple)`.
+
+### What changed
+
+- **`Wacs.ComponentModel.Harness.Runtime`** — new
+  `WitResult<TOk, TErr>` public struct (`IsOk`, `OkValue`,
+  `ErrValue`, static `Ok`/`Err` factories,
+  `ToString → Ok(...)/Err(...)`).
+- **`CanonicalAbi.cs`** — `Layout` handles `CtTupleType` (via
+  new `LayoutTuple` helper, mirroring `LayoutRecord`) and
+  `CtResultType` (2-case variant shape). Adds
+  `TupleElementOffsets` public helper.
+- **`WitTypeEmit.cs`** — `MapClrType` returns the closed
+  `ValueTuple<…>` for tuples and the closed `WitResult<TOk,
+  TErr>` for results.
+- **`LiftEmit.cs`** — `EmitLiftField` dispatches `CtTupleType`
+  to new `EmitLiftTuple` (per-element lift +
+  `newobj ValueTuple<…>..ctor`) and `CtResultType` to new
+  `EmitLiftResult` (disc branch + factory calls + elided-side
+  `default(ValueTuple)` via new `EmitDefaultValueTuple`).
+- **`WorldHarnessEmit.cs`** — `ContainsStringOrList` recurses
+  into tuple elements + result Ok/Err sides, so cabi_post
+  correctly walks tuples / results carrying strings or lists.
+- **Fixtures**:
+  - `Spec.Test/components/fixtures/wit-harness-spike-tuple/` —
+    `tuple<u32, u32>` + `tuple<string, u32>` inside a record;
+    asserts both numeric tuple and string-bearing tuple lift
+    plus the CLR types match `ValueTuple<,>`.
+  - `Spec.Test/components/fixtures/wit-harness-spike-result/` —
+    Ok payload (`result<u32, string>` → `Ok(42)`), Err payload
+    (`Err("not a positive integer")`), and the empty-elided
+    form (`result` → `WitResult<ValueTuple, ValueTuple>`).
+
+**15/15 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.18.0` →
+`WACS-ComponentModel-v0.19.0` (minor — capability shift on
+Harness.Lib + new Harness.Runtime public API).
+
 ## WACS.ComponentModel.Harness.Lib 0.10.0 — `option<T>`
 
 Harness emitter handles WIT `option<T>` for both value-type and
