@@ -158,6 +158,45 @@ namespace Wacs.ComponentModel.Harness.Lib
                 }
             }
 
+            // Per-resource: drop delegate field on the harness. The
+            // wasm-side drop export is at "<iface>#[resource-drop]<name>".
+            // Wrapper IL that returns a resource pushes this field
+            // before newobj-ing the resource class.
+            var resourceDrops = new List<ResourceDrop>();
+            foreach (var port in world.Exports)
+            {
+                CtInterfaceType? iface = port.Spec switch
+                {
+                    CtExternInterfaceRef iref => iref.Target,
+                    CtExternInlineInterface inline => inline.Interface,
+                    _ => null,
+                };
+                if (iface == null) continue;
+                foreach (var t in iface.Types)
+                {
+                    if (CanonicalAbi.Deref(t.Type) is not CtResourceType res) continue;
+                    var slug = HarnessNaming.InterfaceFunctionSlug(iface, t.Name);
+                    var field = typeBuilder.DefineField(
+                        "_drop_" + slug, typeof(Action<int>),
+                        FieldAttributes.Private | FieldAttributes.InitOnly);
+                    // The canonical-ABI `[resource-drop]<name>`
+                    // adapter is a SYNTHETIC component-level binding
+                    // that WACS's component runtime doesn't yet
+                    // surface as a host-callable export. The real
+                    // core export is `<iface>#[dtor]<name>` — the
+                    // guest-emitted destructor that runs cleanup
+                    // when a resource is freed. Calling it directly
+                    // skips the handle-table lookup (fine in the
+                    // rep-as-handle model) and runs the user-side
+                    // Drop impl. Revisit when WACS implements a
+                    // proper component-instance handle table.
+                    var wasmName = EntryPoints.InterfaceBase(iface)
+                        + "#[dtor]" + t.Name;
+                    resourceDrops.Add(new ResourceDrop(res, wasmName, field));
+                    registry.HarnessDropFields[res] = field;
+                }
+            }
+
             // _WitContract: public static readonly string carrying
             // the raw WIT source. Transpiler-side AddHarnessContract
             // reads this at compile time to diff against the loaded
@@ -190,8 +229,9 @@ namespace Wacs.ComponentModel.Harness.Lib
                 }
             }
 
-            var ctor = EmitConstructor(typeBuilder, runtimeField, memoryField, reallocField, funcExports);
-            EmitLoadFrom(typeBuilder, ctor, funcExports);
+            var ctor = EmitConstructor(typeBuilder, runtimeField, memoryField, reallocField,
+                funcExports, resourceDrops);
+            EmitLoadFrom(typeBuilder, ctor, funcExports, resourceDrops);
             foreach (var fe in funcExports)
                 EmitTypedWrapper(typeBuilder, memoryField, reallocField, fe, registry, liftMethods);
 
@@ -270,6 +310,27 @@ namespace Wacs.ComponentModel.Harness.Lib
 
         // ===== Per-export metadata =====
 
+        /// <summary>
+        /// Per-resource drop-delegate metadata. Each resource declared
+        /// in an exported interface gets a private <c>_drop_*</c> field
+        /// on the harness; LoadFrom resolves the wasm-side
+        /// <c>[resource-drop]</c> export and constructs the Action&lt;int&gt;
+        /// invoker. Wrapper IL that lifts a resource return reads
+        /// this field to pass to the resource class's ctor.
+        /// </summary>
+        private sealed class ResourceDrop
+        {
+            public CtResourceType Resource { get; }
+            public string WasmName { get; }
+            public FieldBuilder Field { get; }
+            public ResourceDrop(CtResourceType resource, string wasmName, FieldBuilder field)
+            {
+                Resource = resource;
+                WasmName = wasmName;
+                Field = field;
+            }
+        }
+
         private sealed class FunctionExport
         {
             public string Name = "";          // C#-safe slug for field naming (kebab → snake)
@@ -303,18 +364,6 @@ namespace Wacs.ComponentModel.Harness.Lib
         private static void BuildInterfaceExports(
             List<FunctionExport> sink, CtInterfaceType iface, TypeRegistry registry)
         {
-            // Refuse interfaces with resource declarations until Slice
-            // D lands. Plain interface-level types (records, variants,
-            // enums, flags) are handled by Slice C via the registry
-            // walking interface-export types alongside world types.
-            foreach (var t in iface.Types)
-            {
-                if (CanonicalAbi.Deref(t.Type) is CtResourceType)
-                    throw new NotSupportedException(
-                        $"Interface '{iface.Name}' declares resource '{t.Name}'; " +
-                        "resource support is the next slice (D).");
-            }
-
             var ifaceBase = EntryPoints.InterfaceBase(iface);
             foreach (var ifn in iface.Functions)
             {
@@ -432,6 +481,11 @@ namespace Wacs.ComponentModel.Harness.Lib
                 sink.Add(typeof(int));
                 return;
             }
+            if (deref is CtResourceType || deref is CtOwnType || deref is CtBorrowType)
+            {
+                sink.Add(typeof(int));  // i32 handle
+                return;
+            }
             if (deref is CtOptionType opt)
             {
                 sink.Add(typeof(int));  // disc
@@ -535,6 +589,13 @@ namespace Wacs.ComponentModel.Harness.Lib
             // needed at the lift site.
             if (t is CtEnumType || t is CtFlagsType)
                 return typeof(int);
+            // Resource handles (own / borrow / bare resource ref)
+            // lower to a single i32. The wrapper IL wraps the int
+            // into a resource class instance via the resource's
+            // ctor (Slice D); for borrows the wrapper does NOT
+            // capture drop ownership.
+            if (t is CtResourceType || t is CtOwnType || t is CtBorrowType)
+                return typeof(int);
             throw new NotSupportedException(
                 $"Harness emitter v0 does not yet support {t.GetType().Name} ({context}).");
         }
@@ -607,9 +668,10 @@ namespace Wacs.ComponentModel.Harness.Lib
         private static ConstructorBuilder EmitConstructor(
             TypeBuilder typeBuilder,
             FieldBuilder runtimeField, FieldBuilder memoryField, FieldBuilder reallocField,
-            List<FunctionExport> funcExports)
+            List<FunctionExport> funcExports, List<ResourceDrop> resourceDrops)
         {
-            // Build param list: runtime, memory, realloc, [invoker, post?] per export.
+            // Build param list: runtime, memory, realloc,
+            // [invoker, post?] per export, [drop] per resource.
             var paramTypes = new List<Type>
             {
                 typeof(WasmRuntime),
@@ -621,6 +683,8 @@ namespace Wacs.ComponentModel.Harness.Lib
                 paramTypes.Add(fe.InvokerType);
                 if (fe.NeedsPostReturn) paramTypes.Add(typeof(Action<int>));
             }
+            foreach (var _ in resourceDrops)
+                paramTypes.Add(typeof(Action<int>));
 
             var ctor = typeBuilder.DefineConstructor(
                 MethodAttributes.Private | MethodAttributes.HideBySig
@@ -629,11 +693,9 @@ namespace Wacs.ComponentModel.Harness.Lib
                 paramTypes.ToArray());
 
             var il = ctor.GetILGenerator();
-            // base ctor
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Call, typeof(object).GetConstructor(Type.EmptyTypes)!);
 
-            // Assign fields in declared order.
             int argIdx = 1;
             EmitStoreFromArg(il, runtimeField, argIdx++);
             EmitStoreFromArg(il, memoryField, argIdx++);
@@ -644,6 +706,8 @@ namespace Wacs.ComponentModel.Harness.Lib
                 if (fe.NeedsPostReturn)
                     EmitStoreFromArg(il, fe.PostInvokerField!, argIdx++);
             }
+            foreach (var rd in resourceDrops)
+                EmitStoreFromArg(il, rd.Field, argIdx++);
 
             il.Emit(OpCodes.Ret);
             return ctor;
@@ -661,7 +725,8 @@ namespace Wacs.ComponentModel.Harness.Lib
         private static void EmitLoadFrom(
             TypeBuilder typeBuilder,
             ConstructorBuilder ctor,
-            List<FunctionExport> funcExports)
+            List<FunctionExport> funcExports,
+            List<ResourceDrop> resourceDrops)
         {
             var loadFrom = typeBuilder.DefineMethod(
                 "LoadFrom",
@@ -748,6 +813,23 @@ namespace Wacs.ComponentModel.Harness.Lib
                 perExportLocals.Add((invokerLocal, postLocal));
             }
 
+            // Per-resource drop invoker.
+            var dropLocals = new List<LocalBuilder>();
+            foreach (var rd in resourceDrops)
+            {
+                var dropAddrLocal = il.DeclareLocal(typeof(FuncAddr));
+                il.Emit(OpCodes.Ldloc, moduleLocal);
+                il.Emit(OpCodes.Ldstr, rd.WasmName);
+                il.Emit(OpCodes.Call, HarnessLoader_RequireFunctionExport);
+                il.Emit(OpCodes.Stloc, dropAddrLocal);
+
+                var dropLocal = il.DeclareLocal(typeof(Action<int>));
+                EmitCreateInvokerFunc(il, runtimeLocal, dropAddrLocal,
+                    new[] { typeof(int) }, null);
+                il.Emit(OpCodes.Stloc, dropLocal);
+                dropLocals.Add(dropLocal);
+            }
+
             // Construct harness instance. The ctor's metadata token is
             // available directly via the ConstructorBuilder — no
             // GetConstructor lookup needed on an in-flight TypeBuilder.
@@ -759,6 +841,8 @@ namespace Wacs.ComponentModel.Harness.Lib
                 il.Emit(OpCodes.Ldloc, invoker);
                 if (post != null) il.Emit(OpCodes.Ldloc, post);
             }
+            foreach (var drop in dropLocals)
+                il.Emit(OpCodes.Ldloc, drop);
             il.Emit(OpCodes.Newobj, ctor);
             il.Emit(OpCodes.Ret);
         }
@@ -837,6 +921,7 @@ namespace Wacs.ComponentModel.Harness.Lib
             if (d is CtListType list) return IsFlatLowerable(list.Element);
             if (d is CtEnumType) return true;  // single i32 disc
             if (d is CtFlagsType) return true; // single i32 bits
+            if (d is CtResourceType || d is CtOwnType || d is CtBorrowType) return true;  // i32 handle
             if (d is CtOptionType opt) return IsFlatLowerable(opt.Inner);
             if (d is CtResultType res)
             {
@@ -1015,6 +1100,22 @@ namespace Wacs.ComponentModel.Harness.Lib
                 il.Emit(OpCodes.Ret);
                 return;
             }
+            {
+                var resRet = TryGetResource(retDeref);
+                if (resRet != null)
+                {
+                    // Stack has the int handle from the invoker. Push
+                    // the drop delegate field, then newobj the resource
+                    // class (which takes (int handle, Action<int> drop)).
+                    var resCtor = registry.ResourceCtors[resRet];
+                    var dropFld = registry.HarnessDropFields[resRet];
+                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Ldfld, dropFld);
+                    il.Emit(OpCodes.Newobj, resCtor);
+                    il.Emit(OpCodes.Ret);
+                    return;
+                }
+            }
 
             throw new NotSupportedException(
                 $"Flat-lowered return path doesn't yet support {retDeref.GetType().Name}.");
@@ -1184,6 +1285,18 @@ namespace Wacs.ComponentModel.Harness.Lib
                 // no conversion needed before pushing into the i32 slot.
                 EmitLdarg(il, argIdx);
                 return;
+            }
+            {
+                var resArg = TryGetResource(d);
+                if (resArg != null)
+                {
+                    // Resource arg: extract _handle int from the
+                    // resource class instance and push onto stack.
+                    var handleField = registry.ResourceHandleFields[resArg];
+                    EmitLdarg(il, argIdx);
+                    il.Emit(OpCodes.Ldfld, handleField);
+                    return;
+                }
             }
             if (d is CtOptionType opt)
             {
@@ -2578,6 +2691,20 @@ namespace Wacs.ComponentModel.Harness.Lib
             var d = CanonicalAbi.Deref(t);
             if (IsStringType(d)) return typeof(string);
             return WitTypeEmit.MapClrType(d, registry, "parameter");
+        }
+
+        /// <summary>
+        /// Unwrap own&lt;R&gt; / borrow&lt;R&gt; / a bare resource ref to
+        /// the underlying <see cref="CtResourceType"/>. Returns null
+        /// when the input doesn't resolve to a resource — lets callers
+        /// "is this a resource-like type?" without nested casts.
+        /// </summary>
+        private static CtResourceType? TryGetResource(CtValType t)
+        {
+            t = CanonicalAbi.Deref(t);
+            if (t is CtOwnType own) t = CanonicalAbi.Deref(own.Resource);
+            else if (t is CtBorrowType brw) t = CanonicalAbi.Deref(brw.Resource);
+            return t as CtResourceType;
         }
 
         /// <summary>

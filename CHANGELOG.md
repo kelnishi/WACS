@@ -1,5 +1,116 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Lib 0.23.0 — resource scaffolding (Slice D)
+
+Resources can now flow through the harness emit-side. Each
+WIT `resource <name>` declaration emits a sealed CLR class
+in the interface's namespace:
+
+```wit
+interface store {
+    resource bucket;
+    open: func(name: string) -> bucket;
+}
+```
+
+```csharp
+namespace WitHarnessSpike.ResourceBasic.Generated.WacsResourceBasicSpikeStore
+{
+    public sealed class Bucket : IDisposable
+    {
+        public int Handle { get; }
+        public void Dispose();
+    }
+}
+
+// In the harness:
+public Bucket WacsResourceBasicSpikeStore_Open(string name) => …;
+```
+
+### How it works
+
+- **Resource class** emits with `_handle` (int) + `_drop`
+  (Action&lt;int&gt;) fields, internal `(handle, drop)` ctor,
+  public `Handle` getter, and `Dispose()` that calls drop
+  once and zeros the handle (subsequent Dispose calls no-op).
+- **Per-resource drop field** on the harness: `_drop_<slug>`
+  holds the wasm-side drop invoker. LoadFrom resolves
+  `<iface>#[dtor]<name>` (the guest's destructor) and binds
+  it. Wrapper IL that lifts a resource return pushes this
+  field before `newobj`-ing the resource class.
+- **Resource lift / lower**:
+  - Lift: invoker returns an int (handle), wrapper IL
+    constructs `new Bucket(handle, _drop_bucket)`.
+  - Lower: extract `_handle` from the resource instance and
+    push as int (Slice E will exercise this with method params).
+- **`MapPrimitiveToClrType`** / `IsFlatLowerable` /
+  `AppendLoweredType` treat `CtResourceType` / `CtOwnType` /
+  `CtBorrowType` as i32 handles at the wasm boundary.
+- New `TryGetResource(t)` helper drills through `own<R>` /
+  `borrow<R>` / bare resource refs to the underlying
+  `CtResourceType` so lift/lower can dispatch.
+
+### Runtime caveat
+
+WACS's component runtime doesn't yet implement the
+canonical-ABI exported-resource handle table — `canon
+resource.new` / `resource.rep` are parsed (for index-space
+accounting) but not constructed as runtime adapters. The
+harness wires its drop call to the core `<iface>#[dtor]<name>`
+export directly, skipping the table lookup.
+
+For the Slice D fixture to instantiate, the validator's
+`bindImports` callback stubs the two component-level
+`[export]<iface>.[resource-new|drop]<name>` host imports
+using a rep-as-handle 1:1 mapping (handle == rep, so the
+dtor receives a real rep pointer when invoked). When WACS
+implements proper resource handle tables, these stubs go
+away and the harness can call `[resource-drop]<name>` (the
+canonical adapter that handles the table lookup) instead.
+
+### What changed
+
+- **`WitTypeEmit.cs`** —
+  - `TypeRegistry` gains `Resources`, `ResourceCtors`,
+    `ResourceHandleFields`, `HarnessDropFields` dictionaries.
+  - `EmitWorldTypes` registers `CtResourceType` shells in
+    Pass 1 alongside records/variants/enums/flags.
+  - New `PopulateResource(tb, res, registry)` emits the
+    sealed class: `_handle` + `_drop` fields, internal
+    (handle, drop) ctor, public `Dispose()` with idempotent
+    drop-and-zero, public `Handle` getter.
+  - `MapClrType` resolves `CtResourceType` / `CtOwnType` /
+    `CtBorrowType` to the resource's `TypeBuilder`.
+- **`CanonicalAbi.cs`** — `Layout` treats resource handle
+  types as `(4, 4)` (a single i32).
+- **`WorldHarnessEmit.cs`** —
+  - `BuildInterfaceExports` drops the resource refusal.
+  - New `ResourceDrop` struct tracks per-resource drop
+    metadata.
+  - Per-export field allocation now also walks
+    interface-export resources and creates `_drop_*` fields.
+  - `EmitConstructor` + `EmitLoadFrom` thread the drop
+    invokers through.
+  - `MapPrimitiveToClrType` / `IsFlatLowerable` /
+    `AppendLoweredType` accept resource-like types.
+  - `EmitFlattenedArg` extracts `_handle` for resource
+    params (lower path).
+  - `EmitFlatLowered` direct-return branch lifts a resource
+    int into a CLR class instance with the drop field.
+  - New `TryGetResource(t)` helper.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-resource-basic/`
+  — `store` interface declares an opaque `bucket` resource
+  + `open` free function. Validator opens, asserts non-zero
+  handle, disposes (handle zeros, no exception), and runs
+  through a `using` block.
+
+**28/28 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.30.0` →
+`WACS-ComponentModel-v0.31.0` (minor — capability shift on
+Harness.Lib).
+
 ## WACS.ComponentModel.Harness.Lib 0.22.0 — interface-level types (Slice C)
 
 Records / variants / enums / flags declared inside an exported

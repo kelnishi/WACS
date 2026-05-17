@@ -111,6 +111,13 @@ namespace Wacs.ComponentModel.Harness.Lib
                 case CtTupleType tup:
                     return LayoutTuple(tup);
 
+                // own<R> / borrow<R> / a bare resource reference all
+                // serialize to a single i32 handle on the wasm side.
+                case CtResourceType:
+                case CtOwnType:
+                case CtBorrowType:
+                    return (4, 4);
+
                 default:
                     throw new NotSupportedException(
                         $"CanonicalAbi.Layout: {t.GetType().Name} not supported in harness v0.2.");

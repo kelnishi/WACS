@@ -72,6 +72,11 @@ namespace Wacs.ComponentModel.Harness.Lib
                     case CtEnumType en:
                         registry.Enums[en] = EmitEnumType(module, ns, named.Name, en);
                         break;
+                    case CtResourceType res:
+                        registry.Resources[res] = module.DefineType(
+                            $"{ns}.{NameMangler.ToPascalCase(named.Name)}",
+                            TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.BeforeFieldInit);
+                        break;
                     case CtFlagsType fl:
                         registry.Flags[fl] = EmitFlagsType(module, ns, named.Name, fl);
                         break;
@@ -94,10 +99,13 @@ namespace Wacs.ComponentModel.Harness.Lib
                     PopulateRecord(registry.Records[rec], rec, registry);
                 else if (structural is CtVariantType variant)
                     PopulateVariant(registry.Variants[variant], variant, registry);
+                else if (structural is CtResourceType res)
+                    PopulateResource(registry.Resources[res], res, registry);
             }
 
             // Pass 3: finalize the variant case subclasses (CreateType
-            // on inner-most first), then variant bases, then records.
+            // on inner-most first), then variant bases, then records,
+            // then resources.
             foreach (var (_, subs) in registry.VariantCases)
                 foreach (var sub in subs.Values)
                     sub.CreateType();
@@ -105,8 +113,87 @@ namespace Wacs.ComponentModel.Harness.Lib
                 v.CreateType();
             foreach (var r in registry.Records.Values)
                 r.CreateType();
+            foreach (var r in registry.Resources.Values)
+                r.CreateType();
 
             return registry;
+        }
+
+        /// <summary>
+        /// Emit a resource class: sealed, IDisposable, with internal
+        /// <c>_handle</c> + <c>_drop</c> fields and a public Dispose()
+        /// that calls drop and zeros the handle. The (handle, drop)
+        /// ctor is internal — only the harness's wrapper IL constructs
+        /// resource instances (e.g., when lifting a return).
+        /// </summary>
+        private static void PopulateResource(TypeBuilder tb, CtResourceType res, TypeRegistry registry)
+        {
+            tb.AddInterfaceImplementation(typeof(IDisposable));
+
+            var handleField = tb.DefineField("_handle", typeof(int),
+                FieldAttributes.Private);
+            var dropField = tb.DefineField("_drop", typeof(Action<int>),
+                FieldAttributes.Private | FieldAttributes.InitOnly);
+            registry.ResourceHandleFields[res] = handleField;
+
+            // Internal ctor (int handle, Action<int> drop)
+            var ctor = tb.DefineConstructor(
+                MethodAttributes.Assembly | MethodAttributes.HideBySig
+                    | MethodAttributes.SpecialName | MethodAttributes.RTSpecialName,
+                CallingConventions.HasThis,
+                new[] { typeof(int), typeof(Action<int>) });
+            var cil = ctor.GetILGenerator();
+            cil.Emit(OpCodes.Ldarg_0);
+            cil.Emit(OpCodes.Call, typeof(object).GetConstructor(Type.EmptyTypes)!);
+            cil.Emit(OpCodes.Ldarg_0);
+            cil.Emit(OpCodes.Ldarg_1);
+            cil.Emit(OpCodes.Stfld, handleField);
+            cil.Emit(OpCodes.Ldarg_0);
+            cil.Emit(OpCodes.Ldarg_2);
+            cil.Emit(OpCodes.Stfld, dropField);
+            cil.Emit(OpCodes.Ret);
+            registry.ResourceCtors[res] = ctor;
+
+            // public void Dispose() {
+            //     if (_handle != 0) _drop(_handle);
+            //     _handle = 0;
+            // }
+            var dispose = tb.DefineMethod("Dispose",
+                MethodAttributes.Public | MethodAttributes.Virtual | MethodAttributes.HideBySig
+                    | MethodAttributes.NewSlot | MethodAttributes.Final,
+                typeof(void), Type.EmptyTypes);
+            var dil = dispose.GetILGenerator();
+            var skipDrop = dil.DefineLabel();
+            // if (_handle != 0)
+            dil.Emit(OpCodes.Ldarg_0);
+            dil.Emit(OpCodes.Ldfld, handleField);
+            dil.Emit(OpCodes.Brfalse, skipDrop);
+            // _drop(_handle);
+            dil.Emit(OpCodes.Ldarg_0);
+            dil.Emit(OpCodes.Ldfld, dropField);
+            dil.Emit(OpCodes.Ldarg_0);
+            dil.Emit(OpCodes.Ldfld, handleField);
+            dil.Emit(OpCodes.Callvirt, typeof(Action<int>).GetMethod("Invoke")!);
+            dil.MarkLabel(skipDrop);
+            // _handle = 0;
+            dil.Emit(OpCodes.Ldarg_0);
+            dil.Emit(OpCodes.Ldc_I4_0);
+            dil.Emit(OpCodes.Stfld, handleField);
+            dil.Emit(OpCodes.Ret);
+            tb.DefineMethodOverride(dispose, typeof(IDisposable).GetMethod(nameof(IDisposable.Dispose))!);
+
+            // public int Handle => _handle;  (read-only; needed for
+            // lower IL to extract the handle when passing as an arg)
+            var handleProp = tb.DefineProperty("Handle", PropertyAttributes.None,
+                typeof(int), null);
+            var getter = tb.DefineMethod("get_Handle",
+                MethodAttributes.Public | MethodAttributes.HideBySig | MethodAttributes.SpecialName,
+                typeof(int), Type.EmptyTypes);
+            var gil = getter.GetILGenerator();
+            gil.Emit(OpCodes.Ldarg_0);
+            gil.Emit(OpCodes.Ldfld, handleField);
+            gil.Emit(OpCodes.Ret);
+            handleProp.SetGetMethod(getter);
         }
 
         /// <summary>
@@ -385,6 +472,18 @@ namespace Wacs.ComponentModel.Harness.Lib
                     throw new NotSupportedException(
                         $"Anonymous flag types not supported in v0.2 ({context}).");
 
+                case CtResourceType res:
+                    if (registry.Resources.TryGetValue(res, out var resBuilder))
+                        return resBuilder;
+                    throw new InvalidOperationException(
+                        $"Unregistered resource '{res.Name}' ({context}).");
+
+                case CtOwnType own:
+                    return MapClrType(own.Resource, registry, $"{context} own<R>");
+
+                case CtBorrowType brw:
+                    return MapClrType(brw.Resource, registry, $"{context} borrow<R>");
+
                 case CtOptionType opt:
                     // option<T>:
                     //   - T is a CLR value type (int, enum, struct) →
@@ -480,5 +579,18 @@ namespace Wacs.ComponentModel.Harness.Lib
         // stored as runtime System.Type rather than TypeBuilder.
         public Dictionary<CtEnumType, Type> Enums { get; } = new();
         public Dictionary<CtFlagsType, Type> Flags { get; } = new();
+        // Resources emit as sealed CLR classes implementing IDisposable.
+        // The (int handle, Action<int> drop) ctor is the only way to
+        // construct one — lift sites pass the resource's drop delegate
+        // held by the harness instance.
+        public Dictionary<CtResourceType, TypeBuilder> Resources { get; } = new();
+        // Per-resource ctor: (int handle, Action<int> drop) → resource.
+        public Dictionary<CtResourceType, ConstructorBuilder> ResourceCtors { get; } = new();
+        // Per-resource _handle field (so lift/lower can read/write it).
+        public Dictionary<CtResourceType, FieldBuilder> ResourceHandleFields { get; } = new();
+        // Per-resource Action<int> drop field on the harness class.
+        // Wrapper IL that lifts a resource return pushes this field
+        // before newobj-ing the resource class.
+        public Dictionary<CtResourceType, FieldBuilder> HarnessDropFields { get; } = new();
     }
 }
