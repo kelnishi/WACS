@@ -1,5 +1,86 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Lib 0.24.0 — resource methods (Slice E)
+
+Resource methods — constructors, instance methods, static
+methods — now emit as harness methods.
+
+```wit
+interface counter {
+    resource counter {
+        constructor(initial: u32);
+        increment: func() -> u32;
+        get-value: func() -> u32;
+        merge: static func(a: u32, b: u32) -> u32;
+    }
+}
+```
+
+```csharp
+public sealed class DemoHarness
+{
+    public Counter WacsResourceMethodsSpikeCounter_NewCounter(uint initial);
+    public uint    WacsResourceMethodsSpikeCounter_Counter_Increment(Counter self);
+    public uint    WacsResourceMethodsSpikeCounter_Counter_GetValue(Counter self);
+    public uint    WacsResourceMethodsSpikeCounter_Counter_Merge(uint a, uint b);
+}
+```
+
+### How it works
+
+- **Constructor**: patched function-spec sets `Result = the
+  resource type`, so the existing resource-return lift path
+  (lift int handle → newobj `Bucket(handle, _drop)`) fires.
+  PascalName uses `New<Resource>` form (e.g.
+  `WacsResourceMethodsSpikeCounter_NewCounter`).
+- **Instance method**: a synthetic `self: <ResourceType>` param
+  is prepended to the function spec. The lower path extracts
+  `self.Handle` (via the public getter — `_handle` field is
+  private to the resource class so cross-class IL can't
+  `Ldfld` it) and pushes it as the first lowered i32. Wasm-side
+  name: `<iface>#[method]<resource>.<method>`.
+- **Static method**: emits like a regular function on the
+  harness; no `self` injection. Wasm-side name:
+  `<iface>#[static]<resource>.<method>`.
+
+### Layout note
+
+For v1, resource methods land flat on the harness (taking the
+resource as first arg for instance methods). The agreed nested
+layout (`bucket.Read(len)` instead of `harness.Bucket_Read(b,
+len)`) requires a back-ref pattern from the resource class to
+the harness, which would force a multi-phase emission
+restructure. Deferred to a future refactor; the wasm-side
+plumbing is identical so the surface change is purely user-
+facing.
+
+### What changed
+
+- **`WorldHarnessEmit.cs`**:
+  - `BuildInterfaceExports` walks `iface.Types`' resources and
+    for each `CtResourceMethod` builds a `FunctionExport` with
+    the appropriate wasm name (`[constructor]<name>` /
+    `[method]<name>.<m>` / `[static]<name>.<m>`) and PascalName.
+  - Constructor patches `Result = res` so the resource-return
+    lift fires after the invoker call.
+  - Instance methods get `self: <res>` prepended via new
+    `PrependSelfParam` helper.
+  - Lower path for resource args switched from private
+    `_handle` Ldfld to public `Handle` Callvirt — `_handle`
+    isn't visible to cross-class wrapper IL.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-resource-methods/`
+  — `counter` resource with constructor, two instance methods
+  (increment, get-value), and a static method (merge).
+  Validator builds a counter, increments three times,
+  reads value, calls merge, disposes.
+
+**29/29 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.31.0` →
+`WACS-ComponentModel-v0.32.0` (minor — capability shift on
+Harness.Lib closing the v1 interface-export arc).
+
 ## WACS.ComponentModel.Harness.Lib 0.23.0 — resource scaffolding (Slice D)
 
 Resources can now flow through the harness emit-side. Each

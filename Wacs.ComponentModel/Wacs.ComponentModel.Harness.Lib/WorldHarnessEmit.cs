@@ -373,6 +373,85 @@ namespace Wacs.ComponentModel.Harness.Lib
                 sink.Add(BuildFunctionExport(ifn.Name, ifn.Type, registry,
                     wasmName: wasmName, pascalName: pascal, slug: slug));
             }
+
+            // Resource methods — emit constructors / instance methods /
+            // static methods as flat methods on the harness for v1.
+            // (Future refactor: nest instance methods on the resource
+            // class itself once the harness back-ref pattern is wired.)
+            foreach (var t in iface.Types)
+            {
+                if (CanonicalAbi.Deref(t.Type) is not CtResourceType res) continue;
+                var ifaceSeg = HarnessNaming.InterfaceSegment(iface);
+                var resourcePascal = NameMangler.ToPascalCase(t.Name);
+                foreach (var m in res.Methods)
+                {
+                    string wasmTag, methodKey;
+                    switch (m.Kind)
+                    {
+                        case CtResourceMethodKind.Constructor:
+                            wasmTag = "[constructor]" + t.Name;
+                            methodKey = "new-" + t.Name;
+                            break;
+                        case CtResourceMethodKind.Static:
+                            wasmTag = "[static]" + t.Name + "." + m.Name;
+                            methodKey = t.Name + "-" + m.Name;
+                            break;
+                        case CtResourceMethodKind.Instance:
+                            wasmTag = "[method]" + t.Name + "." + m.Name;
+                            methodKey = t.Name + "-" + m.Name;
+                            break;
+                        default:
+                            throw new NotSupportedException(
+                                $"Unknown resource method kind {m.Kind}.");
+                    }
+                    var wasmName = ifaceBase + "#" + wasmTag;
+                    var pascal = ifaceSeg + "_" +
+                        (m.Kind == CtResourceMethodKind.Constructor
+                            ? "New" + resourcePascal
+                            : resourcePascal + "_" + NameMangler.ToPascalCase(m.Name!));
+                    var slug = HarnessNaming.InterfaceFunctionSlug(iface, methodKey);
+
+                    // Instance methods receive an implicit `self`
+                    // resource handle as the first lowered arg. We
+                    // inject a synthetic param at the head of the
+                    // function spec so AppendLoweredType / wrapper
+                    // IL handle it uniformly.
+                    var fn = m.Kind switch
+                    {
+                        CtResourceMethodKind.Instance =>
+                            PrependSelfParam(m.Function, res),
+                        // Constructors return the resource implicitly
+                        // (WIT spec has no `-> type` syntax for them).
+                        // Patch the function spec to set Result = the
+                        // resource type so the existing resource-return
+                        // lift path (i32 → newobj resource class) fires.
+                        CtResourceMethodKind.Constructor =>
+                            new CtFunctionType(m.Function.Params, res, null),
+                        _ => m.Function,
+                    };
+
+                    sink.Add(BuildFunctionExport(methodKey, fn, registry,
+                        wasmName: wasmName, pascalName: pascal, slug: slug));
+                }
+            }
+        }
+
+        /// <summary>
+        /// Prepend a synthetic <c>self</c> param of the resource type
+        /// to a function's params — used for instance-method lowering,
+        /// where wasm expects the resource handle as the first
+        /// lowered i32. The host-facing C# wrapper will accept the
+        /// resource class instance as its first arg and the lower
+        /// path extracts <c>_handle</c>.
+        /// </summary>
+        private static CtFunctionType PrependSelfParam(CtFunctionType fn, CtResourceType res)
+        {
+            var p = new List<CtFuncParam>(fn.Params.Count + 1)
+            {
+                new CtFuncParam("self", res),
+            };
+            p.AddRange(fn.Params);
+            return new CtFunctionType(p, fn.Result, fn.NamedResults);
         }
 
         private static FunctionExport BuildFunctionExport(
@@ -1290,11 +1369,14 @@ namespace Wacs.ComponentModel.Harness.Lib
                 var resArg = TryGetResource(d);
                 if (resArg != null)
                 {
-                    // Resource arg: extract _handle int from the
-                    // resource class instance and push onto stack.
-                    var handleField = registry.ResourceHandleFields[resArg];
+                    // Resource arg: extract the handle via the
+                    // public `Handle` getter. (The underlying
+                    // `_handle` field is private, so cross-class
+                    // emit IL can't Ldfld it directly.)
+                    var resClr = registry.Resources[resArg];
+                    var handleGet = resClr.GetMethod("get_Handle")!;
                     EmitLdarg(il, argIdx);
-                    il.Emit(OpCodes.Ldfld, handleField);
+                    il.Emit(OpCodes.Callvirt, handleGet);
                     return;
                 }
             }
