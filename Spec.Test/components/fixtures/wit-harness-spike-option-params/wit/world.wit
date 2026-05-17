@@ -1,0 +1,9 @@
+package wacs:option-params-spike;
+
+world greeter {
+    /// option<u32> as direct param (2 i32: disc + value).
+    export double-or: func(value: option<u32>, fallback: u32) -> u32;
+
+    /// option<string> as direct param (3 i32: disc + ptr + len).
+    export greet: func(name: option<string>) -> string;
+}

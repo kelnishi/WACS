@@ -1,5 +1,50 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Lib 0.16.0 — `option<T>` as direct PARAM
+
+`option<T>` is now a valid direct param shape. The canonical-ABI
+flat lowering for `option<T>` is `(i32 disc, T_flat…)`:
+
+```wit
+export double-or: func(value: option<u32>, fallback: u32) -> u32;
+export greet:     func(name: option<string>) -> string;
+```
+
+### How it works
+
+- `IsFlatLowerable` accepts options whose inner type is itself
+  flat-lowerable.
+- `AppendLoweredType` flattens an option to `[int (disc), ...T_flat]`.
+- `EmitLowerOptionArg` branches on the arg's presence
+  (`Nullable<T>.HasValue` for value types, `!= null` for
+  reference types). The Some path pushes `disc=1` then runs
+  the inner lower (re-using LowerUtf8 for strings, direct
+  `Ldloc` for primitives/enums/flags). The None path pushes
+  `disc=0` followed by zero-defaults for each inner flat slot
+  (via the new `EmitDefaultForSlot` helper covering int / long
+  / float / double).
+- New `EmitLdarga` helper for loading struct arg addresses
+  (needed for `Nullable<T>.HasValue` and `.Value`).
+
+### What changed
+
+- **`WorldHarnessEmit.cs`**:
+  - `IsFlatLowerable` + `AppendLoweredType` extend to
+    `CtOptionType`.
+  - New `EmitLowerOptionArg`, `EmitLowerInnerFromLocal`,
+    `EmitDefaultForSlot`, `EmitLdarga` helpers.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-option-params/`
+  — `double-or(option<u32>, u32) -> u32` (value-type inner)
+  and `greet(option<string>) -> string` (reference-type inner
+  with string lower in the Some path).
+
+**20/20 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.23.0` →
+`WACS-ComponentModel-v0.24.0` (minor — capability shift on
+Harness.Lib).
+
 ## WACS.ComponentModel.Harness.Lib 0.15.0 — records-of-aggregates as PARAMS + full Func/Action arity range
 
 The flat-lowered record param path now handles fields of any

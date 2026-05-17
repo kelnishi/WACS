@@ -351,6 +351,12 @@ namespace Wacs.ComponentModel.Harness.Lib
                 sink.Add(typeof(int));
                 return;
             }
+            if (deref is CtOptionType opt)
+            {
+                sink.Add(typeof(int));  // disc
+                AppendLoweredType(sink, opt.Inner, $"{context} → option<T>");
+                return;
+            }
             if (deref is CtTupleType tup)
             {
                 foreach (var e in tup.Elements)
@@ -726,6 +732,7 @@ namespace Wacs.ComponentModel.Harness.Lib
             if (d is CtListType list) return IsFlatLowerable(list.Element);
             if (d is CtEnumType) return true;  // single i32 disc
             if (d is CtFlagsType) return true; // single i32 bits
+            if (d is CtOptionType opt) return IsFlatLowerable(opt.Inner);
             if (d is CtTupleType tup)
             {
                 foreach (var e in tup.Elements)
@@ -988,6 +995,11 @@ namespace Wacs.ComponentModel.Harness.Lib
                 // CLR enum value on the stack IS its underlying integer;
                 // no conversion needed before pushing into the i32 slot.
                 EmitLdarg(il, argIdx);
+                return;
+            }
+            if (d is CtOptionType opt)
+            {
+                EmitLowerOptionArg(il, argIdx, opt, memoryField, reallocField, registry);
                 return;
             }
             if (d is CtTupleType tup)
@@ -1291,6 +1303,127 @@ namespace Wacs.ComponentModel.Harness.Lib
 
             il.Emit(OpCodes.Ldloc, basePtr);
             il.Emit(OpCodes.Ldloc, countLocal);
+        }
+
+        /// <summary>
+        /// Lower an option&lt;T&gt; arg per the canonical-ABI flat
+        /// shape: <c>(i32 disc, T_flat…)</c>. None pushes
+        /// <c>(0, zeros for T_flat slots)</c>; Some pushes
+        /// <c>(1, T's lowered values)</c>. Works for any T whose
+        /// flat lowering is known (primitives, strings, enum, flags).
+        /// </summary>
+        private static void EmitLowerOptionArg(
+            ILGenerator il, int argIdx, CtOptionType opt,
+            FieldBuilder memoryField, FieldBuilder reallocField,
+            TypeRegistry registry)
+        {
+            var innerD = CanonicalAbi.Deref(opt.Inner);
+            var innerClr = WitTypeEmit.MapClrType(innerD, registry, "option inner");
+            // Compute the inner type's flat slot shape.
+            var innerSlots = new List<Type>();
+            AppendLoweredType(innerSlots, innerD, "option inner");
+
+            var noneLabel = il.DefineLabel();
+            var endLabel = il.DefineLabel();
+
+            // Branch on "has value".
+            if (innerClr.IsValueType)
+            {
+                // arg is Nullable<T>; HasValue via ldarga + call.
+                EmitLdarga(il, argIdx);
+                var hasValue = typeof(System.Nullable<>).MakeGenericType(innerClr)
+                    .GetProperty("HasValue")!.GetGetMethod()!;
+                il.Emit(OpCodes.Call, hasValue);
+            }
+            else
+            {
+                // arg is a reference; null is None.
+                EmitLdarg(il, argIdx);
+                il.Emit(OpCodes.Ldnull);
+                il.Emit(OpCodes.Ceq);
+                il.Emit(OpCodes.Ldc_I4_0);
+                il.Emit(OpCodes.Ceq);  // !(arg == null) → HasValue
+            }
+            il.Emit(OpCodes.Brfalse, noneLabel);
+
+            // Some: push disc=1, then lower the inner value.
+            il.Emit(OpCodes.Ldc_I4_1);
+            if (innerClr.IsValueType)
+            {
+                // Unwrap Nullable<T> → T, stash to local of inner CLR
+                // type, then re-use the lower path via a synthetic
+                // "arg" — easiest: a local-based dispatcher mirroring
+                // the arg-based one for the few inner shapes that
+                // matter.
+                EmitLdarga(il, argIdx);
+                var nullableT = typeof(System.Nullable<>).MakeGenericType(innerClr);
+                var getValue = nullableT.GetProperty("Value")!.GetGetMethod()!;
+                il.Emit(OpCodes.Call, getValue);
+                var innerLocal = il.DeclareLocal(innerClr);
+                il.Emit(OpCodes.Stloc, innerLocal);
+                EmitLowerInnerFromLocal(il, innerLocal, innerD, memoryField, reallocField);
+            }
+            else
+            {
+                // Reference type: just stash and reuse local lower.
+                var innerLocal = il.DeclareLocal(innerClr);
+                EmitLdarg(il, argIdx);
+                il.Emit(OpCodes.Stloc, innerLocal);
+                EmitLowerInnerFromLocal(il, innerLocal, innerD, memoryField, reallocField);
+            }
+            il.Emit(OpCodes.Br, endLabel);
+
+            // None: push disc=0, then zeros for each flat slot.
+            il.MarkLabel(noneLabel);
+            il.Emit(OpCodes.Ldc_I4_0);
+            foreach (var slot in innerSlots)
+                EmitDefaultForSlot(il, slot);
+
+            il.MarkLabel(endLabel);
+        }
+
+        private static void EmitLowerInnerFromLocal(
+            ILGenerator il, LocalBuilder valueLocal, CtValType innerType,
+            FieldBuilder memoryField, FieldBuilder reallocField)
+        {
+            var d = CanonicalAbi.Deref(innerType);
+            if (d is CtPrimType prim && prim.Kind == CtPrim.String)
+            {
+                var ptr = il.DeclareLocal(typeof(int));
+                var len = il.DeclareLocal(typeof(int));
+                il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                il.Emit(OpCodes.Ldloc, valueLocal);
+                il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, reallocField);
+                il.Emit(OpCodes.Ldloca, ptr);
+                il.Emit(OpCodes.Ldloca, len);
+                il.Emit(OpCodes.Call, StringCoding_LowerUtf8);
+                il.Emit(OpCodes.Ldloc, ptr);
+                il.Emit(OpCodes.Ldloc, len);
+                return;
+            }
+            if (d is CtPrimType || d is CtEnumType || d is CtFlagsType)
+            {
+                il.Emit(OpCodes.Ldloc, valueLocal);
+                return;
+            }
+            throw new NotSupportedException(
+                $"option<T> with inner type {d.GetType().Name} not yet supported in lower path.");
+        }
+
+        private static void EmitDefaultForSlot(ILGenerator il, Type slot)
+        {
+            if (slot == typeof(int)) { il.Emit(OpCodes.Ldc_I4_0); return; }
+            if (slot == typeof(long)) { il.Emit(OpCodes.Ldc_I8, 0L); return; }
+            if (slot == typeof(float)) { il.Emit(OpCodes.Ldc_R4, 0f); return; }
+            if (slot == typeof(double)) { il.Emit(OpCodes.Ldc_R8, 0.0); return; }
+            throw new NotSupportedException(
+                $"No default emit known for flat slot type {slot}.");
+        }
+
+        private static void EmitLdarga(ILGenerator il, int idx)
+        {
+            if (idx <= byte.MaxValue) il.Emit(OpCodes.Ldarga_S, (byte)idx);
+            else il.Emit(OpCodes.Ldarga, (short)idx);
         }
 
         /// <summary>
