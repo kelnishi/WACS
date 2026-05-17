@@ -1,5 +1,56 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Lib 0.25.0 — lift list-element symmetry (Item 4)
+
+`list<T>` lift now covers every flat-lowerable element type, not
+just primitives + named records / variants. Closes the asymmetry
+where lower handled `list<option>` / `list<tuple>` but lift threw.
+
+```wit
+export sparse-values: func() -> list<option<u32>>;
+export pairs:         func() -> list<tuple<u32, string>>;
+export signals:       func() -> list<signal>;          // signal is an enum
+```
+
+### How it works
+
+`EmitLiftElementAt` gains cases for `CtEnumType`, `CtFlagsType`,
+`CtListType` (nested), `CtOptionType`, `CtResultType`,
+`CtTupleType`. For enum / flags the integer is read directly via
+a new `EmitReadIntegerAtElement` helper. For nested lists the
+element's `(ptr, count)` pair is read and the inner lift goes
+through `EmitLiftListFromBase`. For option / result / tuple the
+element address is stashed into a local and dispatched to a
+new general-purpose `EmitLiftFromBase` walker.
+
+`EmitLiftFromBase` mirrors `EmitLiftField` but takes the
+memory + base ptr via locals instead of the fixed arg-slot
+contract, so it can chain offsets from any starting address.
+
+### What changed
+
+- **`LiftEmit.cs`**:
+  - `EmitLiftElementAt` adds the five missing element-type
+    cases.
+  - New `EmitReadIntegerAtElement`,
+    `EmitElementPtrOffset` element-context helpers.
+  - New `EmitLiftFromBase` parallel walker (memory + basePtr
+    + offset addressing) with private helpers
+    `EmitLiftPrimitiveFromBase`, `EmitReadIntegerAtBase`,
+    `EmitLiftOptionFromBase`, `EmitLiftResultFromBase`,
+    `EmitLiftTupleFromBase`.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-list-aggregate-lift/`
+  — sparse-values (list&lt;option&lt;u32&gt;&gt;), pairs
+  (list&lt;tuple&lt;u32, string&gt;&gt;), signals
+  (list&lt;enum&gt;).
+
+**30/30 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.32.0` →
+`WACS-ComponentModel-v0.33.0` (minor — capability shift on
+Harness.Lib).
+
 ## WACS.ComponentModel.Harness.Lib 0.24.0 — resource methods (Slice E)
 
 Resource methods — constructors, instance methods, static

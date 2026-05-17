@@ -1,0 +1,14 @@
+package wacs:list-aggregate-lift-spike;
+
+world collector {
+    enum signal { off, low, high }
+
+    /// list<option<u32>> — option as list element via lift
+    export sparse-values: func() -> list<option<u32>>;
+
+    /// list<tuple<u32, string>> — tuple as list element via lift
+    export pairs: func() -> list<tuple<u32, string>>;
+
+    /// list<enum> — enum as list element via lift
+    export signals: func() -> list<signal>;
+}

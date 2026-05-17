@@ -630,10 +630,356 @@ namespace Wacs.ComponentModel.Harness.Lib
                     EmitElementPtr(il, listPtr, indexLocal, elemSize);
                     il.Emit(OpCodes.Call, varLift);
                     return;
+                case CtEnumType en:
+                    EmitReadIntegerAtElement(il, memoryLocal, listPtr, indexLocal, elemSize, 0,
+                        CanonicalAbi.VariantDiscSize(en.Cases.Count));
+                    return;
+                case CtFlagsType fl:
+                    EmitReadIntegerAtElement(il, memoryLocal, listPtr, indexLocal, elemSize, 0,
+                        CanonicalAbi.FlagsByteWidth(fl.Flags.Count));
+                    return;
+                case CtListType nestedList:
+                {
+                    // Element occupies 8 bytes (ptr, count). Stash
+                    // elemPtr into a local + reuse the from-base
+                    // list lifter.
+                    var elemPtrLocal = il.DeclareLocal(typeof(int));
+                    EmitElementPtr(il, listPtr, indexLocal, elemSize);
+                    il.Emit(OpCodes.Stloc, elemPtrLocal);
+                    EmitLiftListFromBase(il, nestedList, memoryLocal, elemPtrLocal, 0,
+                        registry, liftMethods);
+                    return;
+                }
+                case CtOptionType opt:
+                case CtResultType:
+                case CtTupleType:
+                {
+                    // For composite shapes inside a list element,
+                    // stash the element's start address and delegate
+                    // to the generic "lift from base" walker that
+                    // handles offset arithmetic.
+                    var elemPtrLocal = il.DeclareLocal(typeof(int));
+                    EmitElementPtr(il, listPtr, indexLocal, elemSize);
+                    il.Emit(OpCodes.Stloc, elemPtrLocal);
+                    EmitLiftFromBase(il, deref, memoryLocal, elemPtrLocal, 0,
+                        registry, liftMethods);
+                    return;
+                }
                 default:
                     throw new NotSupportedException(
                         $"Lift of list element type {deref.GetType().Name} not yet supported.");
             }
+        }
+
+        /// <summary>
+        /// Read an unsigned integer of width 1/2/4 at
+        /// <c>(memoryLocal, listPtr + i*elemSize + offset)</c>.
+        /// Element-context counterpart of <see cref="EmitReadIntegerWidth"/>.
+        /// </summary>
+        private static void EmitReadIntegerAtElement(
+            ILGenerator il, LocalBuilder memoryLocal,
+            LocalBuilder listPtr, LocalBuilder indexLocal,
+            int elemSize, int offsetWithinElem, int width)
+        {
+            switch (width)
+            {
+                case 1:
+                    il.Emit(OpCodes.Ldloc, memoryLocal);
+                    EmitElementPtrOffset(il, listPtr, indexLocal, elemSize, offsetWithinElem);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadU8);
+                    return;
+                case 2:
+                    il.Emit(OpCodes.Ldloc, memoryLocal);
+                    EmitElementPtrOffset(il, listPtr, indexLocal, elemSize, offsetWithinElem);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadI16LE);
+                    il.Emit(OpCodes.Conv_U2);
+                    return;
+                case 4:
+                    il.Emit(OpCodes.Ldloc, memoryLocal);
+                    EmitElementPtrOffset(il, listPtr, indexLocal, elemSize, offsetWithinElem);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadI32LE);
+                    return;
+                default:
+                    throw new NotSupportedException($"Unsupported integer width {width}.");
+            }
+        }
+
+        private static void EmitElementPtrOffset(
+            ILGenerator il, LocalBuilder listPtr, LocalBuilder indexLocal,
+            int elemSize, int offsetWithinElem)
+        {
+            EmitElementPtr(il, listPtr, indexLocal, elemSize);
+            if (offsetWithinElem != 0)
+            {
+                il.Emit(OpCodes.Ldc_I4, offsetWithinElem);
+                il.Emit(OpCodes.Add);
+            }
+        }
+
+        /// <summary>
+        /// Lift a value at <c>(memoryLocal, basePtr + offset)</c>.
+        /// Mirrors <see cref="EmitLiftField"/> but takes the memory
+        /// + ptr via locals rather than the fixed arg-slot contract.
+        /// Used by list-element lifts when the element type is a
+        /// composite (option / result / tuple) whose payload offsets
+        /// chain off the element's start address.
+        /// </summary>
+        public static void EmitLiftFromBase(
+            ILGenerator il, CtValType valueType,
+            LocalBuilder memoryLocal, LocalBuilder basePtr, int offset,
+            TypeRegistry registry,
+            System.Collections.Generic.Dictionary<CtValType, MethodBuilder> liftMethods)
+        {
+            var d = CanonicalAbi.Deref(valueType);
+            switch (d)
+            {
+                case CtPrimType prim:
+                    EmitLiftPrimitiveFromBase(il, prim, memoryLocal, basePtr, offset);
+                    return;
+                case CtRecordType rec:
+                    if (!liftMethods.TryGetValue(rec, out var recLift))
+                        throw new InvalidOperationException(
+                            $"No Lift method registered for record '{rec.Name}'.");
+                    il.Emit(OpCodes.Ldloc, memoryLocal);
+                    EmitBaseOffsetPush(il, basePtr, offset);
+                    il.Emit(OpCodes.Call, recLift);
+                    return;
+                case CtVariantType variant:
+                    if (!liftMethods.TryGetValue(variant, out var varLift))
+                        throw new InvalidOperationException(
+                            $"No Lift method registered for variant '{variant.Name}'.");
+                    il.Emit(OpCodes.Ldloc, memoryLocal);
+                    EmitBaseOffsetPush(il, basePtr, offset);
+                    il.Emit(OpCodes.Call, varLift);
+                    return;
+                case CtEnumType en:
+                    EmitReadIntegerAtBase(il, memoryLocal, basePtr, offset,
+                        CanonicalAbi.VariantDiscSize(en.Cases.Count));
+                    return;
+                case CtFlagsType fl:
+                    EmitReadIntegerAtBase(il, memoryLocal, basePtr, offset,
+                        CanonicalAbi.FlagsByteWidth(fl.Flags.Count));
+                    return;
+                case CtListType list:
+                    EmitLiftListFromBase(il, list, memoryLocal, basePtr, offset, registry, liftMethods);
+                    return;
+                case CtOptionType opt:
+                    EmitLiftOptionFromBase(il, opt, memoryLocal, basePtr, offset, registry, liftMethods);
+                    return;
+                case CtResultType res:
+                    EmitLiftResultFromBase(il, res, memoryLocal, basePtr, offset, registry, liftMethods);
+                    return;
+                case CtTupleType tup:
+                    EmitLiftTupleFromBase(il, tup, memoryLocal, basePtr, offset, registry, liftMethods);
+                    return;
+                default:
+                    throw new NotSupportedException(
+                        $"EmitLiftFromBase doesn't support {d.GetType().Name}.");
+            }
+        }
+
+        private static void EmitLiftPrimitiveFromBase(
+            ILGenerator il, CtPrimType prim, LocalBuilder memoryLocal,
+            LocalBuilder basePtr, int offset)
+        {
+            switch (prim.Kind)
+            {
+                case CtPrim.Bool:
+                case CtPrim.S8:
+                case CtPrim.U8:
+                    il.Emit(OpCodes.Ldloc, memoryLocal);
+                    EmitBaseOffsetPush(il, basePtr, offset);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadU8);
+                    if (prim.Kind == CtPrim.S8) il.Emit(OpCodes.Conv_I1);
+                    return;
+                case CtPrim.S16:
+                case CtPrim.U16:
+                case CtPrim.Char:
+                    il.Emit(OpCodes.Ldloc, memoryLocal);
+                    EmitBaseOffsetPush(il, basePtr, offset);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadI16LE);
+                    if (prim.Kind == CtPrim.U16 || prim.Kind == CtPrim.Char)
+                        il.Emit(OpCodes.Conv_U2);
+                    return;
+                case CtPrim.S32:
+                case CtPrim.U32:
+                    il.Emit(OpCodes.Ldloc, memoryLocal);
+                    EmitBaseOffsetPush(il, basePtr, offset);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadI32LE);
+                    return;
+                case CtPrim.S64:
+                case CtPrim.U64:
+                    il.Emit(OpCodes.Ldloc, memoryLocal);
+                    EmitBaseOffsetPush(il, basePtr, offset);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadI64LE);
+                    return;
+                case CtPrim.F32:
+                    il.Emit(OpCodes.Ldloc, memoryLocal);
+                    EmitBaseOffsetPush(il, basePtr, offset);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadF32LE);
+                    return;
+                case CtPrim.F64:
+                    il.Emit(OpCodes.Ldloc, memoryLocal);
+                    EmitBaseOffsetPush(il, basePtr, offset);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadF64LE);
+                    return;
+                case CtPrim.String:
+                    il.Emit(OpCodes.Ldloc, memoryLocal);   // memory for LiftUtf8
+                    il.Emit(OpCodes.Ldloc, memoryLocal);   // ptr load
+                    EmitBaseOffsetPush(il, basePtr, offset);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadI32LE);
+                    il.Emit(OpCodes.Ldloc, memoryLocal);   // len load
+                    EmitBaseOffsetPush(il, basePtr, offset + 4);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadI32LE);
+                    il.Emit(OpCodes.Call, StringCoding_LiftUtf8);
+                    return;
+                default:
+                    throw new NotSupportedException(
+                        $"EmitLiftPrimitiveFromBase doesn't support {prim.Kind}.");
+            }
+        }
+
+        private static void EmitReadIntegerAtBase(
+            ILGenerator il, LocalBuilder memoryLocal, LocalBuilder basePtr,
+            int offset, int width)
+        {
+            switch (width)
+            {
+                case 1:
+                    il.Emit(OpCodes.Ldloc, memoryLocal);
+                    EmitBaseOffsetPush(il, basePtr, offset);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadU8);
+                    return;
+                case 2:
+                    il.Emit(OpCodes.Ldloc, memoryLocal);
+                    EmitBaseOffsetPush(il, basePtr, offset);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadI16LE);
+                    il.Emit(OpCodes.Conv_U2);
+                    return;
+                case 4:
+                    il.Emit(OpCodes.Ldloc, memoryLocal);
+                    EmitBaseOffsetPush(il, basePtr, offset);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadI32LE);
+                    return;
+                default:
+                    throw new NotSupportedException($"Unsupported integer width {width}.");
+            }
+        }
+
+        private static void EmitLiftOptionFromBase(
+            ILGenerator il, CtOptionType opt,
+            LocalBuilder memoryLocal, LocalBuilder basePtr, int offset,
+            TypeRegistry registry,
+            System.Collections.Generic.Dictionary<CtValType, MethodBuilder> liftMethods)
+        {
+            var innerClr = WitTypeEmit.MapClrType(opt.Inner, registry, "option inner");
+            int payloadOffset = offset + CanonicalAbi.AlignUp(1, CanonicalAbi.AlignOf(opt.Inner));
+
+            var disc = il.DeclareLocal(typeof(byte));
+            il.Emit(OpCodes.Ldloc, memoryLocal);
+            EmitBaseOffsetPush(il, basePtr, offset);
+            il.Emit(OpCodes.Call, MemoryHelpers_ReadU8);
+            il.Emit(OpCodes.Stloc, disc);
+
+            var noneLabel = il.DefineLabel();
+            var endLabel = il.DefineLabel();
+            il.Emit(OpCodes.Ldloc, disc);
+            il.Emit(OpCodes.Brfalse, noneLabel);
+
+            // Some
+            EmitLiftFromBase(il, opt.Inner, memoryLocal, basePtr, payloadOffset, registry, liftMethods);
+            if (innerClr.IsValueType)
+            {
+                var nullableT = typeof(System.Nullable<>).MakeGenericType(innerClr);
+                var ctor = nullableT.GetConstructor(new[] { innerClr })!;
+                il.Emit(OpCodes.Newobj, ctor);
+            }
+            il.Emit(OpCodes.Br, endLabel);
+
+            // None
+            il.MarkLabel(noneLabel);
+            if (innerClr.IsValueType)
+            {
+                var nullableT = typeof(System.Nullable<>).MakeGenericType(innerClr);
+                var defaultLocal = il.DeclareLocal(nullableT);
+                il.Emit(OpCodes.Ldloca, defaultLocal);
+                il.Emit(OpCodes.Initobj, nullableT);
+                il.Emit(OpCodes.Ldloc, defaultLocal);
+            }
+            else
+            {
+                il.Emit(OpCodes.Ldnull);
+            }
+
+            il.MarkLabel(endLabel);
+        }
+
+        private static void EmitLiftResultFromBase(
+            ILGenerator il, CtResultType res,
+            LocalBuilder memoryLocal, LocalBuilder basePtr, int offset,
+            TypeRegistry registry,
+            System.Collections.Generic.Dictionary<CtValType, MethodBuilder> liftMethods)
+        {
+            var okClr = res.Ok == null
+                ? typeof(System.ValueTuple)
+                : WitTypeEmit.MapClrType(res.Ok, registry, "result ok");
+            var errClr = res.Err == null
+                ? typeof(System.ValueTuple)
+                : WitTypeEmit.MapClrType(res.Err, registry, "result err");
+            var resultType = typeof(Wacs.ComponentModel.Harness.WitResult<,>)
+                .MakeGenericType(okClr, errClr);
+            var okFactory = resultType.GetMethod("Ok", BindingFlags.Public | BindingFlags.Static)!;
+            var errFactory = resultType.GetMethod("Err", BindingFlags.Public | BindingFlags.Static)!;
+
+            int okAlign = res.Ok != null ? CanonicalAbi.AlignOf(res.Ok) : 1;
+            int errAlign = res.Err != null ? CanonicalAbi.AlignOf(res.Err) : 1;
+            int payloadOffset = offset + CanonicalAbi.AlignUp(1, Math.Max(okAlign, errAlign));
+
+            var disc = il.DeclareLocal(typeof(byte));
+            il.Emit(OpCodes.Ldloc, memoryLocal);
+            EmitBaseOffsetPush(il, basePtr, offset);
+            il.Emit(OpCodes.Call, MemoryHelpers_ReadU8);
+            il.Emit(OpCodes.Stloc, disc);
+
+            var errLabel = il.DefineLabel();
+            var endLabel = il.DefineLabel();
+            il.Emit(OpCodes.Ldloc, disc);
+            il.Emit(OpCodes.Brtrue, errLabel);
+
+            if (res.Ok != null)
+                EmitLiftFromBase(il, res.Ok, memoryLocal, basePtr, payloadOffset, registry, liftMethods);
+            else
+                EmitDefaultValueTuple(il);
+            il.Emit(OpCodes.Call, okFactory);
+            il.Emit(OpCodes.Br, endLabel);
+
+            il.MarkLabel(errLabel);
+            if (res.Err != null)
+                EmitLiftFromBase(il, res.Err, memoryLocal, basePtr, payloadOffset, registry, liftMethods);
+            else
+                EmitDefaultValueTuple(il);
+            il.Emit(OpCodes.Call, errFactory);
+
+            il.MarkLabel(endLabel);
+        }
+
+        private static void EmitLiftTupleFromBase(
+            ILGenerator il, CtTupleType tup,
+            LocalBuilder memoryLocal, LocalBuilder basePtr, int offset,
+            TypeRegistry registry,
+            System.Collections.Generic.Dictionary<CtValType, MethodBuilder> liftMethods)
+        {
+            int[] elemOffsets = CanonicalAbi.TupleElementOffsets(tup);
+            for (int i = 0; i < tup.Elements.Count; i++)
+                EmitLiftFromBase(il, tup.Elements[i], memoryLocal, basePtr,
+                    offset + elemOffsets[i], registry, liftMethods);
+
+            var tupleClr = WitTypeEmit.MapClrType(tup, registry, "tuple");
+            var elemClrs = new Type[tup.Elements.Count];
+            for (int i = 0; i < tup.Elements.Count; i++)
+                elemClrs[i] = WitTypeEmit.MapClrType(tup.Elements[i], registry, $"tuple element {i}");
+            var ctor = tupleClr.GetConstructor(elemClrs)!;
+            il.Emit(OpCodes.Newobj, ctor);
         }
 
         private static void EmitElementPtr(
