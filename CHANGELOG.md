@@ -1,5 +1,70 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Lib 0.6.0 — direct `list<T>` return value
+
+Harness emitter handles `list<T>` as a direct export return (not
+nested in a record). Closes a real-world WIT shape:
+`export get-numbers: func() -> list<u32>`,
+`export get-titles: func() -> list<string>`, etc.
+
+**End-to-end verified on a new fixture**
+(`Spec.Test/components/fixtures/wit-harness-spike-list-return/`):
+
+```wit
+world numbers {
+    export get-numbers: func() -> list<u32>;
+}
+```
+
+Rust returns `vec![100, 200, 300, 400]`. Emitted
+`NumbersHarness.GetNumbers()` returns `uint[] { 100, 200, 300, 400 }`
+and calls `cabi_post_get-numbers` to free the element-array body.
+
+### Refactor: `EmitLiftListFromBase` parameterized over memory local
+
+The field-level list lift (called from a static `Lift{Name}`
+method where `arg.0 = MemoryInstance`) and the wrapper-instance
+list lift (called from the typed wrapper method where
+`arg.0 = this`) need the SAME element-walking IL but DIFFERENT
+sources for the `MemoryInstance` reference. `EmitLiftListFromBase`
++ `EmitLiftElementAt` now take a `memoryLocal` parameter; each
+call site sets it up from its own source:
+- Static Lift methods: `memoryLocal = arg.0`
+- Instance wrappers: `memoryLocal = this._memory`
+
+Caught a subtle bug in the v0.5.0 emission where I'd assumed
+`Ldarg_0 = memory` universally; the instance wrapper for direct
+list return tried to call `MemoryHelpers.ReadI32LE(harness, ptr)`
+and read random memory addresses. The new param explicitly
+threads memory through every path.
+
+### What changed
+
+- **`WACS.ComponentModel.Harness.Lib` 0.5.0 → 0.6.0** (minor —
+  direct list return + memory-local refactor):
+  - `WorldHarnessEmit.BuildFunctionExport` recognizes `CtListType`
+    return as indirect (retArea ptr, `NeedsPostReturn = true`).
+  - `WorldHarnessEmit.EmitFlatLowered` adds `CtListType` return
+    branch → calls new `EmitLiftListReturn` helper.
+  - `EmitLiftListReturn` stashes retArea, loads memory from the
+    instance field, calls `LiftEmit.EmitLiftListFromBase` then
+    `cabi_post_<name>`.
+  - `LiftEmit.EmitLiftListFromBase` made public, takes a
+    `memoryLocal` parameter.
+  - `LiftEmit.EmitLiftElementAt` takes a `memoryLocal` parameter
+    (previously assumed `arg.0`).
+  - `LiftEmit.EmitLiftList` (field-level entry point) sets up a
+    `memoryLocal` from `arg.0` to satisfy the new contract.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-list-return/`
+  — Rust + WIT + built `.component.wasm` + Generated.Validate
+  asserting `get-numbers() == [100, 200, 300, 400]`.
+- **Regression-checked**: hello, richer, string-record, list-record
+  all 4 existing fixtures still pass.
+
+Family tag: `WACS-ComponentModel-v0.13.0` → `WACS-ComponentModel-v0.14.0`
+(minor — capability shift on Harness.Lib).
+
 ## WACS.ComponentModel.Harness.Lib 0.5.0 — `list<T>` lift in record fields
 
 Harness emitter extends to handle `list<T>` fields inside records

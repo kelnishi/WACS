@@ -256,7 +256,7 @@ namespace Wacs.ComponentModel.Harness.Lib
                     fe.LoweredReturn = typeof(int);
                     fe.NeedsPostReturn = true;
                 }
-                else if (r is CtRecordType || r is CtVariantType)
+                else if (r is CtRecordType || r is CtVariantType || r is CtListType)
                 {
                     // Aggregate return — wasm returns a ret-area i32
                     // pointing at the value laid out per canonical ABI.
@@ -264,7 +264,9 @@ namespace Wacs.ComponentModel.Harness.Lib
                     // contains strings or lists (those carry pointers
                     // that need cabi_post freeing). Pure-primitive
                     // records / variants are inert and don't need a
-                    // post-return call.
+                    // post-return call. Lists ALWAYS need post-return
+                    // (the element-array body lives on the wasm-side
+                    // heap allocator).
                     fe.LoweredReturn = typeof(int);
                     fe.NeedsPostReturn = ContainsStringOrList(r);
                 }
@@ -683,9 +685,55 @@ namespace Wacs.ComponentModel.Harness.Lib
                 EmitLiftReturnViaRetArea(il, fe, memoryField, liftMethods[variant.Name]);
                 return;
             }
+            if (retDeref is CtListType list)
+            {
+                EmitLiftListReturn(il, fe, list, memoryField, registry, liftMethods);
+                return;
+            }
 
             throw new NotSupportedException(
                 $"Flat-lowered return path doesn't yet support {retDeref.GetType().Name}.");
+        }
+
+        /// <summary>
+        /// Direct list-return tail: stash retArea, lift the list
+        /// inline via <see cref="LiftEmit.EmitLiftListFromBase"/>
+        /// (treating retArea as the base ptr at offset 0), capture
+        /// the typed <c>T[]</c>, call <c>cabi_post_&lt;name&gt;</c>
+        /// to free the element-array body + retArea, then return
+        /// the array. Mirrors <see cref="EmitLiftReturnViaRetArea"/>
+        /// but uses the inline list-from-base helper instead of a
+        /// pre-emitted Lift method (lists are anonymous structural
+        /// types — no per-type Lift method to register).
+        /// </summary>
+        private static void EmitLiftListReturn(
+            ILGenerator il, FunctionExport fe, CtListType list,
+            FieldBuilder memoryField, TypeRegistry registry,
+            System.Collections.Generic.Dictionary<string, MethodBuilder> liftMethods)
+        {
+            var retArea = il.DeclareLocal(typeof(int));
+            il.Emit(OpCodes.Stloc, retArea);
+            // The wrapper's arg.0 is `this`, not memory — load
+            // memory from the field into a local so EmitLiftListFromBase
+            // can use the same memoryLocal contract field-level lifts use.
+            var memoryLocal = il.DeclareLocal(typeof(MemoryInstance));
+            il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+            il.Emit(OpCodes.Stloc, memoryLocal);
+
+            LiftEmit.EmitLiftListFromBase(il, list, memoryLocal, retArea, 0, registry, liftMethods);
+
+            if (fe.NeedsPostReturn && fe.PostInvokerField != null)
+            {
+                var arrClr = WitTypeEmit.MapClrType(list, registry, "list return");
+                var arr = il.DeclareLocal(arrClr);
+                il.Emit(OpCodes.Stloc, arr);
+                il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, fe.PostInvokerField);
+                il.Emit(OpCodes.Ldloc, retArea);
+                il.Emit(OpCodes.Callvirt, typeof(Action<int>).GetMethod("Invoke")!);
+                il.Emit(OpCodes.Ldloc, arr);
+            }
+
+            il.Emit(OpCodes.Ret);
         }
 
         /// <summary>

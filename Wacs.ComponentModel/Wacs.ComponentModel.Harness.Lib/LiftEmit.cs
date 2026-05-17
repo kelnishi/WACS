@@ -206,39 +206,61 @@ namespace Wacs.ComponentModel.Harness.Lib
         /// <summary>
         /// Emit IL that lifts a <c>list&lt;T&gt;</c> field at
         /// <c>(memory, ptr+offset)</c>. The list itself is stored as
-        /// (ptr, count) — two i32s at the field's offset. The
-        /// element array body lives at the read ptr; we allocate a
-        /// CLR <c>T[]</c>, walk count elements (each at
-        /// <c>ptr + i * elemSize</c>), lift each into the array,
-        /// and leave the array on the stack.
-        ///
-        /// <para>v0 covers element types the existing
-        /// <see cref="EmitLiftField"/> already handles — primitives
-        /// (s32/u32/string), records, variants. Nested lists
-        /// (<c>list&lt;list&lt;T&gt;&gt;</c>) work via the same
-        /// recursion. The 8-byte (ptr, count) stride for nested
-        /// list elements lifts cleanly because <c>SizeOf(list)</c>
-        /// already reports 8.</para>
+        /// (ptr, count) — two i32s at the field's offset. Delegates
+        /// to <see cref="EmitLiftListFromBase"/> which takes the
+        /// base pointer as a local; this overload supplies arg.1
+        /// (the field-level lift contract) via a temporary copy.
         /// </summary>
         private static void EmitLiftList(
             ILGenerator il, CtListType list, int offset, TypeRegistry registry,
             System.Collections.Generic.Dictionary<string, MethodBuilder> liftMethods)
         {
-            // 1. Read ptr + count.
-            var ptr = il.DeclareLocal(typeof(int));
+            // Field-level lifts run inside static Lift{Name} methods
+            // where arg.0 is the MemoryInstance and arg.1 is the
+            // ptr. Stash both as locals and delegate to the
+            // base-pointer overload.
+            var memoryLocal = il.DeclareLocal(typeof(MemoryInstance));
             il.Emit(OpCodes.Ldarg_0);
-            EmitOffsetPush(il, offset);
+            il.Emit(OpCodes.Stloc, memoryLocal);
+            var basePtr = il.DeclareLocal(typeof(int));
+            il.Emit(OpCodes.Ldarg_1);
+            il.Emit(OpCodes.Stloc, basePtr);
+            EmitLiftListFromBase(il, list, memoryLocal, basePtr, offset, registry, liftMethods);
+        }
+
+        /// <summary>
+        /// Lift a <c>list&lt;T&gt;</c> reading its (ptr, count) pair
+        /// from <c>(memory, basePtr+baseOffset)</c>. Allocates a CLR
+        /// <c>T[]</c>, walks <c>count</c> elements (each at
+        /// <c>ptr + i * elemSize</c>), and leaves the array on the
+        /// stack. Used by both the field-level lift (where basePtr
+        /// is a copy of arg.1, baseOffset is the field's offset) and
+        /// the direct-return lift (where basePtr is the retArea
+        /// pointer, baseOffset is 0).
+        /// </summary>
+        public static void EmitLiftListFromBase(
+            ILGenerator il, CtListType list, LocalBuilder memoryLocal,
+            LocalBuilder basePtr, int baseOffset,
+            TypeRegistry registry,
+            System.Collections.Generic.Dictionary<string, MethodBuilder> liftMethods)
+        {
+            // 1. Read list ptr + count via the memory local (works
+            //    for both static Lift methods where arg.0 is memory
+            //    and instance wrappers where memory comes from a
+            //    field via a separate local).
+            var ptr = il.DeclareLocal(typeof(int));
+            il.Emit(OpCodes.Ldloc, memoryLocal);
+            EmitBaseOffsetPush(il, basePtr, baseOffset);
             il.Emit(OpCodes.Call, MemoryHelpers_ReadI32LE);
             il.Emit(OpCodes.Stloc, ptr);
 
             var count = il.DeclareLocal(typeof(int));
-            il.Emit(OpCodes.Ldarg_0);
-            EmitOffsetPush(il, offset + 4);
+            il.Emit(OpCodes.Ldloc, memoryLocal);
+            EmitBaseOffsetPush(il, basePtr, baseOffset + 4);
             il.Emit(OpCodes.Call, MemoryHelpers_ReadI32LE);
             il.Emit(OpCodes.Stloc, count);
 
-            // 2. Allocate T[] of length count. Leaves array on stack;
-            //    stash to a local for the loop.
+            // 2. Allocate T[count] + stash to a local for the loop.
             var elemClr = WitTypeEmit.MapClrType(list.Element, registry,
                 "list element");
             var arr = il.DeclareLocal(elemClr.MakeArrayType());
@@ -246,7 +268,7 @@ namespace Wacs.ComponentModel.Harness.Lib
             il.Emit(OpCodes.Newarr, elemClr);
             il.Emit(OpCodes.Stloc, arr);
 
-            // 3. for (i = 0; i < count; i++) { arr[i] = LiftElem(ptr + i*size) }
+            // 3. for (i = 0; i < count; i++) arr[i] = lift(ptr + i*size)
             var i = il.DeclareLocal(typeof(int));
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Stloc, i);
@@ -254,26 +276,13 @@ namespace Wacs.ComponentModel.Harness.Lib
             var loopHead = il.DefineLabel();
             var loopCond = il.DefineLabel();
             il.Emit(OpCodes.Br, loopCond);
-
             il.MarkLabel(loopHead);
 
-            // arr[i] =
             il.Emit(OpCodes.Ldloc, arr);
             il.Emit(OpCodes.Ldloc, i);
-
-            // Recurse into the element lift. EmitLiftField expects
-            // memory in arg slot 0 and ptr in arg slot 1; the
-            // element's "ptr" for THIS list element is
-            // (listPtr + i*elemSize). Since EmitLiftField pulls
-            // ldarg.1 directly (via EmitOffsetPush) we need a
-            // different shape for elements — emit inline here using
-            // a swapped-in element pointer.
-            EmitLiftElementAt(il, list.Element, ptr, i, registry, liftMethods);
-
-            // stelem the lifted value into arr[i]
+            EmitLiftElementAt(il, list.Element, memoryLocal, ptr, i, registry, liftMethods);
             EmitStelem(il, elemClr);
 
-            // i++
             il.Emit(OpCodes.Ldloc, i);
             il.Emit(OpCodes.Ldc_I4_1);
             il.Emit(OpCodes.Add);
@@ -284,8 +293,18 @@ namespace Wacs.ComponentModel.Harness.Lib
             il.Emit(OpCodes.Ldloc, count);
             il.Emit(OpCodes.Blt, loopHead);
 
-            // 4. Leave arr on stack.
             il.Emit(OpCodes.Ldloc, arr);
+        }
+
+        private static void EmitBaseOffsetPush(
+            ILGenerator il, LocalBuilder basePtr, int offset)
+        {
+            il.Emit(OpCodes.Ldloc, basePtr);
+            if (offset != 0)
+            {
+                il.Emit(OpCodes.Ldc_I4, offset);
+                il.Emit(OpCodes.Add);
+            }
         }
 
         /// <summary>
@@ -297,8 +316,9 @@ namespace Wacs.ComponentModel.Harness.Lib
         /// field-level lift uses.
         /// </summary>
         private static void EmitLiftElementAt(
-            ILGenerator il, CtValType elemType, LocalBuilder listPtr,
-            LocalBuilder indexLocal, TypeRegistry registry,
+            ILGenerator il, CtValType elemType, LocalBuilder memoryLocal,
+            LocalBuilder listPtr, LocalBuilder indexLocal,
+            TypeRegistry registry,
             System.Collections.Generic.Dictionary<string, MethodBuilder> liftMethods)
         {
             var deref = CanonicalAbi.Deref(elemType);
@@ -312,19 +332,19 @@ namespace Wacs.ComponentModel.Harness.Lib
             {
                 case CtPrimType prim when prim.Kind is CtPrim.S32 or CtPrim.U32:
                     // ReadI32LE(memory, listPtr + i * 4)
-                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Ldloc, memoryLocal);
                     EmitElementPtr(il, listPtr, indexLocal, elemSize);
                     il.Emit(OpCodes.Call, MemoryHelpers_ReadI32LE);
                     return;
                 case CtPrimType prim when prim.Kind == CtPrim.String:
                     // LiftUtf8(memory, ReadI32LE(memory, elemPtr+0), ReadI32LE(memory, elemPtr+4))
-                    il.Emit(OpCodes.Ldarg_0); // memory for LiftUtf8
+                    il.Emit(OpCodes.Ldloc, memoryLocal); // memory for LiftUtf8
                     // ptr
-                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Ldloc, memoryLocal);
                     EmitElementPtr(il, listPtr, indexLocal, elemSize);
                     il.Emit(OpCodes.Call, MemoryHelpers_ReadI32LE);
                     // len
-                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Ldloc, memoryLocal);
                     EmitElementPtr(il, listPtr, indexLocal, elemSize);
                     il.Emit(OpCodes.Ldc_I4_4);
                     il.Emit(OpCodes.Add);
@@ -335,7 +355,7 @@ namespace Wacs.ComponentModel.Harness.Lib
                     if (!liftMethods.TryGetValue(rec.Name, out var recLift))
                         throw new InvalidOperationException(
                             $"No Lift method registered for record '{rec.Name}'.");
-                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Ldloc, memoryLocal);
                     EmitElementPtr(il, listPtr, indexLocal, elemSize);
                     il.Emit(OpCodes.Call, recLift);
                     return;
@@ -343,7 +363,7 @@ namespace Wacs.ComponentModel.Harness.Lib
                     if (!liftMethods.TryGetValue(variant.Name, out var varLift))
                         throw new InvalidOperationException(
                             $"No Lift method registered for variant '{variant.Name}'.");
-                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Ldloc, memoryLocal);
                     EmitElementPtr(il, listPtr, indexLocal, elemSize);
                     il.Emit(OpCodes.Call, varLift);
                     return;

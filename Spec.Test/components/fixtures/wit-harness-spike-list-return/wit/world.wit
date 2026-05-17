@@ -1,0 +1,5 @@
+package wacs:list-return-spike;
+
+world numbers {
+    export get-numbers: func() -> list<u32>;
+}
