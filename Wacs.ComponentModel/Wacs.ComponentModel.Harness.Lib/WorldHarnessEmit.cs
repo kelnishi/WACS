@@ -357,6 +357,23 @@ namespace Wacs.ComponentModel.Harness.Lib
                 AppendLoweredType(sink, opt.Inner, $"{context} → option<T>");
                 return;
             }
+            if (deref is CtResultType res)
+            {
+                sink.Add(typeof(int));  // disc
+                // Joined slot shape — for v1, the present side's flat
+                // (or empty if both elided). IsFlatLowerable has
+                // already vetted matching widths.
+                if (res.Ok != null) AppendLoweredType(sink, res.Ok, $"{context} → result ok");
+                else if (res.Err != null) AppendLoweredType(sink, res.Err, $"{context} → result err");
+                return;
+            }
+            if (deref is CtVariantType variant)
+            {
+                sink.Add(typeof(int));  // disc (wasm boundary widens to i32)
+                var joined = ComputeVariantJoinedSlots(variant);
+                sink.AddRange(joined);
+                return;
+            }
             if (deref is CtTupleType tup)
             {
                 foreach (var e in tup.Elements)
@@ -733,6 +750,26 @@ namespace Wacs.ComponentModel.Harness.Lib
             if (d is CtEnumType) return true;  // single i32 disc
             if (d is CtFlagsType) return true; // single i32 bits
             if (d is CtOptionType opt) return IsFlatLowerable(opt.Inner);
+            if (d is CtResultType res)
+            {
+                // v1: both sides must have either matching flat shape
+                // or one side elided. Mismatched-width joins (e.g.
+                // result<u32, u64>) not yet supported.
+                var okFlat = new List<Type>();
+                var errFlat = new List<Type>();
+                if (res.Ok != null)
+                {
+                    if (!IsFlatLowerable(res.Ok)) return false;
+                    AppendLoweredType(okFlat, res.Ok, "result ok");
+                }
+                if (res.Err != null)
+                {
+                    if (!IsFlatLowerable(res.Err)) return false;
+                    AppendLoweredType(errFlat, res.Err, "result err");
+                }
+                return okFlat.Count == 0 || errFlat.Count == 0
+                    || SlotsMatch(okFlat, errFlat);
+            }
             if (d is CtTupleType tup)
             {
                 foreach (var e in tup.Elements)
@@ -745,7 +782,63 @@ namespace Wacs.ComponentModel.Harness.Lib
                     if (!IsFlatLowerable(f.Type)) return false;
                 return true;
             }
+            if (d is CtVariantType variant)
+            {
+                foreach (var c in variant.Cases)
+                    if (c.Payload != null && !IsFlatLowerable(c.Payload)) return false;
+                // v1: cases must have matching slot types at each
+                // shared position (cautious join — no type widening).
+                try { ComputeVariantJoinedSlots(variant); return true; }
+                catch (NotSupportedException) { return false; }
+            }
             return false;
+        }
+
+        /// <summary>
+        /// Compute the canonical-ABI joined flat slot shape for a
+        /// variant (excluding the leading discriminator). For each
+        /// slot position, every case that has a slot at that position
+        /// must contribute the same CLR slot type — otherwise the
+        /// strict v1 form refuses (full join-algorithm widening is
+        /// deferred to a later slice).
+        /// </summary>
+        private static List<Type> ComputeVariantJoinedSlots(CtVariantType variant)
+        {
+            var caseSlots = new List<List<Type>>(variant.Cases.Count);
+            foreach (var c in variant.Cases)
+            {
+                var slots = new List<Type>();
+                if (c.Payload != null)
+                    AppendLoweredType(slots, c.Payload, $"variant '{variant.Name}' case '{c.Name}'");
+                caseSlots.Add(slots);
+            }
+            int maxLen = 0;
+            foreach (var s in caseSlots) if (s.Count > maxLen) maxLen = s.Count;
+            var joined = new List<Type>(maxLen);
+            for (int i = 0; i < maxLen; i++)
+            {
+                Type? slotType = null;
+                foreach (var s in caseSlots)
+                {
+                    if (i >= s.Count) continue;
+                    if (slotType == null) slotType = s[i];
+                    else if (slotType != s[i])
+                        throw new NotSupportedException(
+                            $"Variant '{variant.Name}' joined slot {i}: mismatched case types " +
+                            $"({slotType} vs {s[i]}); the harness v1 join algorithm requires matching " +
+                            $"types per slot.");
+                }
+                joined.Add(slotType!);
+            }
+            return joined;
+        }
+
+        private static bool SlotsMatch(List<Type> a, List<Type> b)
+        {
+            if (a.Count != b.Count) return false;
+            for (int i = 0; i < a.Count; i++)
+                if (a[i] != b[i]) return false;
+            return true;
         }
 
         private static Type ResolveReturnClrType(CtFunctionType fn, TypeRegistry registry)
@@ -1000,6 +1093,16 @@ namespace Wacs.ComponentModel.Harness.Lib
             if (d is CtOptionType opt)
             {
                 EmitLowerOptionArg(il, argIdx, opt, memoryField, reallocField, registry);
+                return;
+            }
+            if (d is CtResultType res)
+            {
+                EmitLowerResultArg(il, argIdx, res, memoryField, reallocField, registry);
+                return;
+            }
+            if (d is CtVariantType variant)
+            {
+                EmitLowerVariantArg(il, argIdx, variant, memoryField, reallocField, registry);
                 return;
             }
             if (d is CtTupleType tup)
@@ -1378,6 +1481,161 @@ namespace Wacs.ComponentModel.Harness.Lib
             il.Emit(OpCodes.Ldc_I4_0);
             foreach (var slot in innerSlots)
                 EmitDefaultForSlot(il, slot);
+
+            il.MarkLabel(endLabel);
+        }
+
+        /// <summary>
+        /// Lower a <c>result&lt;TOk, TErr&gt;</c> arg per canonical-ABI
+        /// flat shape: <c>(i32 disc, ...joined-payload)</c>. Disc 0 =
+        /// Ok, 1 = Err. For v1 the joined slots equal whichever
+        /// side has a payload (or both, if they have identical flat
+        /// shapes); mismatched widths throw at <c>IsFlatLowerable</c>
+        /// time. Elided sides on the non-active branch push zero
+        /// defaults for the joined slot shape.
+        /// </summary>
+        private static void EmitLowerResultArg(
+            ILGenerator il, int argIdx, CtResultType res,
+            FieldBuilder memoryField, FieldBuilder reallocField,
+            TypeRegistry registry)
+        {
+            var okClr = res.Ok == null
+                ? typeof(System.ValueTuple)
+                : WitTypeEmit.MapClrType(res.Ok, registry, "result ok");
+            var errClr = res.Err == null
+                ? typeof(System.ValueTuple)
+                : WitTypeEmit.MapClrType(res.Err, registry, "result err");
+            var resultType = typeof(Wacs.ComponentModel.Harness.WitResult<,>)
+                .MakeGenericType(okClr, errClr);
+
+            // Joined slot shape (excludes disc; disc is always int).
+            var joinedSlots = new List<Type>();
+            if (res.Ok != null) AppendLoweredType(joinedSlots, res.Ok, "result joined");
+            else if (res.Err != null) AppendLoweredType(joinedSlots, res.Err, "result joined");
+
+            var isOkGetter = resultType.GetProperty("IsOk")!.GetGetMethod()!;
+            var okValueGetter = resultType.GetProperty("OkValue")!.GetGetMethod()!;
+            var errValueGetter = resultType.GetProperty("ErrValue")!.GetGetMethod()!;
+
+            var errLabel = il.DefineLabel();
+            var endLabel = il.DefineLabel();
+
+            EmitLdarga(il, argIdx);
+            il.Emit(OpCodes.Call, isOkGetter);
+            il.Emit(OpCodes.Brfalse, errLabel);
+
+            // Ok: disc = 0
+            il.Emit(OpCodes.Ldc_I4_0);
+            if (res.Ok != null)
+            {
+                EmitLdarga(il, argIdx);
+                il.Emit(OpCodes.Call, okValueGetter);
+                var okLocal = il.DeclareLocal(okClr);
+                il.Emit(OpCodes.Stloc, okLocal);
+                EmitLowerInnerFromLocal(il, okLocal, res.Ok, memoryField, reallocField);
+            }
+            else
+            {
+                // Ok is elided; push zero defaults for joined shape
+                foreach (var slot in joinedSlots) EmitDefaultForSlot(il, slot);
+            }
+            il.Emit(OpCodes.Br, endLabel);
+
+            // Err: disc = 1
+            il.MarkLabel(errLabel);
+            il.Emit(OpCodes.Ldc_I4_1);
+            if (res.Err != null)
+            {
+                EmitLdarga(il, argIdx);
+                il.Emit(OpCodes.Call, errValueGetter);
+                var errLocal = il.DeclareLocal(errClr);
+                il.Emit(OpCodes.Stloc, errLocal);
+                EmitLowerInnerFromLocal(il, errLocal, res.Err, memoryField, reallocField);
+            }
+            else
+            {
+                foreach (var slot in joinedSlots) EmitDefaultForSlot(il, slot);
+            }
+
+            il.MarkLabel(endLabel);
+        }
+
+        /// <summary>
+        /// Lower a variant arg per canonical-ABI flat shape:
+        /// <c>(i32 disc, ...joined-slots)</c>. Disc is the ordinal
+        /// case index. Dispatches via <c>isinst</c> on each case
+        /// subclass; the matched case lifts its payload (if any)
+        /// to the stack, then zero-pads the trailing joined slots
+        /// the case doesn't fill. Falls through to throw on an
+        /// instance that matches no case (defensive — won't happen
+        /// for a well-typed harness call).
+        /// </summary>
+        private static void EmitLowerVariantArg(
+            ILGenerator il, int argIdx, CtVariantType variant,
+            FieldBuilder memoryField, FieldBuilder reallocField,
+            TypeRegistry registry)
+        {
+            var joinedSlots = ComputeVariantJoinedSlots(variant);
+            var caseSubclasses = registry.VariantCases[variant.Name];
+
+            var caseLabels = new System.Reflection.Emit.Label[variant.Cases.Count];
+            for (int i = 0; i < variant.Cases.Count; i++)
+                caseLabels[i] = il.DefineLabel();
+            var defaultLabel = il.DefineLabel();
+            var endLabel = il.DefineLabel();
+
+            // Per-case isinst dispatch.
+            for (int i = 0; i < variant.Cases.Count; i++)
+            {
+                var caseSub = caseSubclasses[variant.Cases[i].Name];
+                EmitLdarg(il, argIdx);
+                il.Emit(OpCodes.Isinst, caseSub);
+                il.Emit(OpCodes.Brtrue, caseLabels[i]);
+            }
+            il.Emit(OpCodes.Br, defaultLabel);
+
+            // Per-case body.
+            for (int i = 0; i < variant.Cases.Count; i++)
+            {
+                il.MarkLabel(caseLabels[i]);
+                var c = variant.Cases[i];
+
+                // Push disc = case index.
+                il.Emit(OpCodes.Ldc_I4, i);
+
+                // Compute this case's slot list to know how much
+                // we fill vs how much we pad.
+                var thisCaseSlots = new List<Type>();
+                if (c.Payload != null)
+                    AppendLoweredType(thisCaseSlots, c.Payload, $"variant case '{c.Name}'");
+
+                if (c.Payload != null)
+                {
+                    var caseSub = caseSubclasses[c.Name];
+                    var payloadClr = WitTypeEmit.MapClrType(c.Payload, registry,
+                        $"variant case '{c.Name}' payload");
+                    // Cast and load Value.
+                    EmitLdarg(il, argIdx);
+                    il.Emit(OpCodes.Castclass, caseSub);
+                    var valueGetter = caseSub.GetMethod("get_Value")!;
+                    il.Emit(OpCodes.Callvirt, valueGetter);
+                    var payloadLocal = il.DeclareLocal(payloadClr);
+                    il.Emit(OpCodes.Stloc, payloadLocal);
+                    EmitLowerInnerFromLocal(il, payloadLocal, c.Payload, memoryField, reallocField);
+                }
+                // Zero-pad trailing slots this case doesn't fill.
+                for (int s = thisCaseSlots.Count; s < joinedSlots.Count; s++)
+                    EmitDefaultForSlot(il, joinedSlots[s]);
+
+                il.Emit(OpCodes.Br, endLabel);
+            }
+
+            il.MarkLabel(defaultLabel);
+            il.Emit(OpCodes.Ldstr,
+                "No matching case for variant '" + variant.Name + "' instance.");
+            il.Emit(OpCodes.Newobj,
+                typeof(InvalidOperationException).GetConstructor(new[] { typeof(string) })!);
+            il.Emit(OpCodes.Throw);
 
             il.MarkLabel(endLabel);
         }

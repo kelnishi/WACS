@@ -1,0 +1,15 @@
+package wacs:variant-params-spike;
+
+world router {
+    variant signal {
+        silence,
+        ping,
+        message(string),
+    }
+
+    /// variant as direct PARAM. silence/ping have no payload;
+    /// message carries a string. Joined flat shape = [disc i32,
+    /// ptr i32, len i32]; non-message cases zero-pad the trailing
+    /// (ptr, len) slots.
+    export describe-signal: func(s: signal) -> string;
+}

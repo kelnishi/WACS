@@ -1,0 +1,14 @@
+package wacs:result-params-spike;
+
+world dispatcher {
+    /// result<u32, u32> as direct param — joined flat shape
+    /// = [disc i32, i32]; both sides have identical width.
+    export prefer-ok: func(input: result<u32, u32>) -> u32;
+
+    /// result<string, string> as direct param — joined flat
+    /// shape = [disc i32, ptr i32, len i32].
+    export render: func(input: result<string, string>) -> string;
+
+    /// result (both elided) — flat shape = [disc i32].
+    export note: func(input: result) -> u32;
+}

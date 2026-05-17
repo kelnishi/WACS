@@ -1,5 +1,70 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Lib 0.18.0 — `variant` + `result<T,E>` as direct PARAMS
+
+Variants and results can now flow as direct params per the
+canonical-ABI flat shape `(i32 disc, …joined-payload)`. This
+closes out the most architecturally complex remaining gap on
+the lower path.
+
+```wit
+variant signal { silence, ping, message(string) }
+
+export describe-signal: func(s: signal) -> string;
+export prefer-ok:       func(input: result<u32, u32>)       -> u32;
+export render:          func(input: result<string, string>) -> string;
+export note:            func(input: result)                 -> u32;
+```
+
+### How it works
+
+- **Result lower** (`EmitLowerResultArg`):
+  reads `WitResult<TOk, TErr>.IsOk` via `Call` on the getter,
+  branches; the Ok branch pushes `disc=0` then runs the inner
+  lower for the present side (or zeros for elided); same shape
+  for Err on `disc=1`. v1 requires matching flat shape between
+  Ok and Err sides (or one elided) — full join-algorithm
+  widening is deferred.
+- **Variant lower** (`EmitLowerVariantArg`):
+  per-case `isinst` dispatch on the variant base reference;
+  each matched case pushes its ordinal disc, then loads
+  `Value` from the case subclass (if payload-bearing), stashes
+  it to a local, and runs the per-type lower. Trailing joined
+  slots the case doesn't fill get zero-padded via
+  `EmitDefaultForSlot`.
+- **`ComputeVariantJoinedSlots`** — strict join algorithm: at
+  each slot position, every case that has a slot at that
+  position must contribute the same CLR slot type. Throws
+  `NotSupportedException` on mismatched cases (the IsFlatLowerable
+  check catches this early so it surfaces at harness-emit
+  time, not at JIT).
+
+### What changed
+
+- **`WorldHarnessEmit.cs`**:
+  - `IsFlatLowerable` accepts `CtResultType` (matching flat
+    shapes / one elided) and `CtVariantType` (via the join
+    check).
+  - `AppendLoweredType` flattens result + variant per the
+    above rules.
+  - New helpers: `EmitLowerResultArg`, `EmitLowerVariantArg`,
+    `ComputeVariantJoinedSlots`, `SlotsMatch`.
+- **Fixtures**:
+  - `Spec.Test/components/fixtures/wit-harness-spike-result-params/`
+    — `prefer-ok(result<u32, u32>)`, `render(result<string,
+    string>)`, `note(result)` covering matching u32 widths,
+    matching string widths, and both-elided.
+  - `Spec.Test/components/fixtures/wit-harness-spike-variant-params/`
+    — `describe-signal(signal)` where signal has two unit
+    cases and one string-payload case; exercises the zero-pad
+    path for unit cases.
+
+**23/23 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.25.0` →
+`WACS-ComponentModel-v0.26.0` (minor — capability shift on
+Harness.Lib closing the variant/result lower gap).
+
 ## WACS.ComponentModel.Harness.Lib 0.17.0 — `list<record>` as direct PARAM
 
 Per-element canonical layout writes — `list<record>` can now flow
