@@ -1291,7 +1291,7 @@ namespace Wacs.ComponentModel.Harness.Lib
             il.Emit(OpCodes.Br, loopCond);
             il.MarkLabel(loopHead);
             EmitLowerListElement(il, elemDeref, arrLocal, iLocal, basePtr,
-                elemSize, memoryField, reallocField);
+                elemSize, memoryField, reallocField, registry);
             il.Emit(OpCodes.Ldloc, iLocal);
             il.Emit(OpCodes.Ldc_I4_1);
             il.Emit(OpCodes.Add);
@@ -1498,7 +1498,7 @@ namespace Wacs.ComponentModel.Harness.Lib
             il.MarkLabel(loopHead);
 
             EmitLowerListElement(il, elemDeref, arrLocal, iLocal, basePtr,
-                elemSize, memoryField, reallocField);
+                elemSize, memoryField, reallocField, registry);
 
             il.Emit(OpCodes.Ldloc, iLocal);
             il.Emit(OpCodes.Ldc_I4_1);
@@ -1525,7 +1525,8 @@ namespace Wacs.ComponentModel.Harness.Lib
             ILGenerator il, CtValType elemType,
             LocalBuilder arrLocal, LocalBuilder iLocal, LocalBuilder basePtr,
             int elemSize,
-            FieldBuilder memoryField, FieldBuilder reallocField)
+            FieldBuilder memoryField, FieldBuilder reallocField,
+            TypeRegistry registry)
         {
             // address = basePtr + i * elemSize
             if (elemType is CtPrimType prim)
@@ -1576,8 +1577,142 @@ namespace Wacs.ComponentModel.Harness.Lib
                         return;
                 }
             }
+            if (elemType is CtRecordType rec)
+            {
+                EmitLowerRecordElement(il, rec, arrLocal, iLocal, basePtr,
+                    elemSize, memoryField, reallocField, registry);
+                return;
+            }
             throw new NotSupportedException(
                 $"List-element lower for {elemType.GetType().Name} not yet supported.");
+        }
+
+        /// <summary>
+        /// Write a record-typed list element to wasm memory at
+        /// <c>basePtr + i * elemSize</c>. Walks each field, computes
+        /// its in-record offset, and writes via the matching
+        /// MemoryHelpers.Write* helper. Strings inside the record
+        /// recursively lower via LowerUtf8 then the (ptr, len) pair
+        /// is written into the corresponding slot offsets.
+        /// </summary>
+        private static void EmitLowerRecordElement(
+            ILGenerator il, CtRecordType rec,
+            LocalBuilder arrLocal, LocalBuilder iLocal, LocalBuilder basePtr,
+            int elemSize,
+            FieldBuilder memoryField, FieldBuilder reallocField,
+            TypeRegistry registry)
+        {
+            var fieldOffsets = CanonicalAbi.RecordFieldOffsets(rec);
+            var getters = registry.RecordGetters[rec.Name];
+
+            // Pull the element record into a local once, reused per
+            // field write.
+            var recClr = registry.Records[rec.Name];
+            var recLocal = il.DeclareLocal(recClr);
+            il.Emit(OpCodes.Ldloc, arrLocal);
+            il.Emit(OpCodes.Ldloc, iLocal);
+            il.Emit(OpCodes.Ldelem_Ref);
+            il.Emit(OpCodes.Stloc, recLocal);
+
+            for (int fi = 0; fi < rec.Fields.Count; fi++)
+            {
+                var f = rec.Fields[fi];
+                var fd = CanonicalAbi.Deref(f.Type);
+                int fieldOffset = fieldOffsets[fi];
+                EmitLowerRecordFieldToMemory(il, fd, getters[f.Name], recLocal,
+                    basePtr, iLocal, elemSize, fieldOffset,
+                    memoryField, reallocField);
+            }
+        }
+
+        /// <summary>
+        /// Write a single record-field value into wasm memory at
+        /// <c>basePtr + i*elemSize + fieldOffset</c>.
+        /// </summary>
+        private static void EmitLowerRecordFieldToMemory(
+            ILGenerator il, CtValType fieldType, MethodInfo getter, LocalBuilder recLocal,
+            LocalBuilder basePtr, LocalBuilder iLocal, int elemSize, int fieldOffset,
+            FieldBuilder memoryField, FieldBuilder reallocField)
+        {
+            if (fieldType is CtPrimType prim)
+            {
+                switch (prim.Kind)
+                {
+                    case CtPrim.Bool:
+                    case CtPrim.S8:
+                    case CtPrim.U8:
+                        il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                        EmitElementAddr(il, basePtr, iLocal, elemSize, fieldOffset);
+                        il.Emit(OpCodes.Ldloc, recLocal);
+                        il.Emit(OpCodes.Callvirt, getter);
+                        il.Emit(OpCodes.Call, MemoryHelpers_WriteU8);
+                        return;
+                    case CtPrim.S16:
+                    case CtPrim.U16:
+                    case CtPrim.Char:
+                        il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                        EmitElementAddr(il, basePtr, iLocal, elemSize, fieldOffset);
+                        il.Emit(OpCodes.Ldloc, recLocal);
+                        il.Emit(OpCodes.Callvirt, getter);
+                        il.Emit(OpCodes.Call, MemoryHelpers_WriteI16LE);
+                        return;
+                    case CtPrim.S32:
+                    case CtPrim.U32:
+                        il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                        EmitElementAddr(il, basePtr, iLocal, elemSize, fieldOffset);
+                        il.Emit(OpCodes.Ldloc, recLocal);
+                        il.Emit(OpCodes.Callvirt, getter);
+                        il.Emit(OpCodes.Call, MemoryHelpers_WriteI32LE);
+                        return;
+                    case CtPrim.S64:
+                    case CtPrim.U64:
+                        il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                        EmitElementAddr(il, basePtr, iLocal, elemSize, fieldOffset);
+                        il.Emit(OpCodes.Ldloc, recLocal);
+                        il.Emit(OpCodes.Callvirt, getter);
+                        il.Emit(OpCodes.Call, MemoryHelpers_WriteI64LE);
+                        return;
+                    case CtPrim.F32:
+                        il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                        EmitElementAddr(il, basePtr, iLocal, elemSize, fieldOffset);
+                        il.Emit(OpCodes.Ldloc, recLocal);
+                        il.Emit(OpCodes.Callvirt, getter);
+                        il.Emit(OpCodes.Call, MemoryHelpers_WriteF32LE);
+                        return;
+                    case CtPrim.F64:
+                        il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                        EmitElementAddr(il, basePtr, iLocal, elemSize, fieldOffset);
+                        il.Emit(OpCodes.Ldloc, recLocal);
+                        il.Emit(OpCodes.Callvirt, getter);
+                        il.Emit(OpCodes.Call, MemoryHelpers_WriteF64LE);
+                        return;
+                    case CtPrim.String:
+                        {
+                            // Lower the string via LowerUtf8, then write
+                            // (ptr, len) into the slot at fieldOffset.
+                            var ptr = il.DeclareLocal(typeof(int));
+                            var len = il.DeclareLocal(typeof(int));
+                            il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                            il.Emit(OpCodes.Ldloc, recLocal);
+                            il.Emit(OpCodes.Callvirt, getter);
+                            il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, reallocField);
+                            il.Emit(OpCodes.Ldloca, ptr);
+                            il.Emit(OpCodes.Ldloca, len);
+                            il.Emit(OpCodes.Call, StringCoding_LowerUtf8);
+                            il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                            EmitElementAddr(il, basePtr, iLocal, elemSize, fieldOffset);
+                            il.Emit(OpCodes.Ldloc, ptr);
+                            il.Emit(OpCodes.Call, MemoryHelpers_WriteI32LE);
+                            il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+                            EmitElementAddr(il, basePtr, iLocal, elemSize, fieldOffset + 4);
+                            il.Emit(OpCodes.Ldloc, len);
+                            il.Emit(OpCodes.Call, MemoryHelpers_WriteI32LE);
+                            return;
+                        }
+                }
+            }
+            throw new NotSupportedException(
+                $"Lower-to-memory of record field of type {fieldType.GetType().Name} not yet supported.");
         }
 
         private static void EmitElementAddr(

@@ -1,5 +1,48 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Lib 0.17.0 — `list<record>` as direct PARAM
+
+Per-element canonical layout writes — `list<record>` can now flow
+as a direct param, with each element's record laid out in linear
+memory per the canonical-ABI offsets and strings inside the record
+recursively lowered via `cabi_realloc`.
+
+```wit
+record item { sku: string, qty: u32 }
+export inventory-value: func(items: list<item>, unit-price: u32) -> u32;
+export inventory-summary: func(items: list<item>) -> string;
+```
+
+### How it works
+
+`EmitLowerListElement` gained a `CtRecordType` branch that pulls
+the per-index element via `Ldelem_Ref`, stashes to a typed local,
+then walks each record field. For each primitive field, it writes
+via the matching `MemoryHelpers.Write*` helper at the field's
+canonical offset within the per-element slot. String fields lower
+through `LowerUtf8` first and the produced `(ptr, len)` pair is
+written into the slot's offset and offset+4.
+
+### What changed
+
+- **`WorldHarnessEmit.cs`**:
+  - `EmitLowerListElement` adds a `CtRecordType` case calling
+    new `EmitLowerRecordElement` + per-field
+    `EmitLowerRecordFieldToMemory`. Signature widened to thread
+    `TypeRegistry` through (needed for the record's CLR-type
+    lookup and getters).
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-list-record-param/`
+  — `item { sku: string, qty: u32 }`; `inventory-value` returns
+  sum of qty * unit-price, `inventory-summary` formats each
+  element. Tests non-empty + empty list paths.
+
+**21/21 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.24.0` →
+`WACS-ComponentModel-v0.25.0` (minor — capability shift on
+Harness.Lib).
+
 ## WACS.ComponentModel.Harness.Lib 0.16.0 — `option<T>` as direct PARAM
 
 `option<T>` is now a valid direct param shape. The canonical-ABI
