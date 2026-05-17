@@ -1,5 +1,70 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Lib 0.12.0 — strings + lists in PARAMS (lower path)
+
+Harness emitter now lowers `string` and `list<T>` arguments on the
+way IN to a wasm export. The existing `EmitStringInStringOut`
+special path handled exactly one shape (`func(s: string) -> string`);
+this slice generalises the lower side so the same lift/lower
+plumbing covers strings + lists in arbitrary param positions.
+
+```wit
+world repeater {
+    export shout: func(name: string, count: u32) -> string;
+    export length-of: func(text: string) -> u32;
+    export sum: func(values: list<u32>) -> u32;
+    export total-chars: func(words: list<string>) -> u32;
+}
+```
+
+### How it works
+
+- **String params** → call `StringCoding.LowerUtf8(memory, str,
+  cabi_realloc, out ptr, out len)`, push `(ptr, len)` onto the
+  invoker's argument stack. Memory allocated by `cabi_realloc`
+  is conceptually owned by the call site — wasm-side allocator
+  reclaims it on its own schedule, matching the existing
+  string-in-string-out path.
+- **List params** (`list<T>`) → call `cabi_realloc(0, 0, elemAlign,
+  count * elemSize)` to get a base pointer, walk each element
+  writing it into linear memory via the matching `MemoryHelpers.Write*`
+  helper (`WriteU8`/`WriteI16LE`/`WriteI32LE`/`WriteI64LE`/
+  `WriteF32LE`/`WriteF64LE`), push `(basePtr, count)`. For
+  `list<string>`, each element recurses through `LowerUtf8` and
+  the produced `(innerPtr, innerLen)` pair is written into the
+  per-element slot.
+
+### What changed
+
+- **`WorldHarnessEmit.cs`**:
+  - `IsFlatLowerable` now accepts strings and lists (recursively
+    on the element type).
+  - `AppendLoweredType` flattens `list<T>` to two i32s (ptr,
+    count); strings already flattened that way.
+  - `EmitFlatLowered` threads `reallocField` through to
+    `EmitFlattenedArg`.
+  - `EmitFlattenedArg` dispatches string params to new
+    `EmitLowerStringArg` and list params to new
+    `EmitLowerListArg`.
+  - `EmitLowerListArg` emits the allocate-loop-push pattern,
+    delegating to `EmitLowerListElement` for each WIT element
+    width (primitives + string).
+  - New `MemoryHelpers_Write*` MethodInfo statics (`WriteU8`,
+    `WriteI16LE`, `WriteI32LE`, `WriteI64LE`, `WriteF32LE`,
+    `WriteF64LE`).
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-lower-params/`
+  — `shout`, `length-of`, `sum`, `total-chars`. Covers
+  multi-string params, string + primitive return, `list<u32>`,
+  zero-length list lower, and `list<string>` (the most complex
+  per-element path).
+
+**16/16 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.19.0` →
+`WACS-ComponentModel-v0.20.0` (minor — capability shift on
+Harness.Lib).
+
 ## WACS.ComponentModel.Harness.Lib 0.11.0 / WACS.ComponentModel.Harness.Runtime 0.5.0 — `result<T,E>` + `tuple<...>`
 
 Harness emitter handles WIT `result<T, E>` and `tuple<T1, T2, …>`,

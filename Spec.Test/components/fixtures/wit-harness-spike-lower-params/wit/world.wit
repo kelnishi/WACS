@@ -1,0 +1,17 @@
+package wacs:lower-params-spike;
+
+world repeater {
+    /// String + primitive in, string out — forces the generic
+    /// lower path (the existing 1-string-in / 1-string-out
+    /// special case doesn't match because of the extra param).
+    export shout: func(name: string, count: u32) -> string;
+
+    /// String in, primitive out — also off the special path.
+    export length-of: func(text: string) -> u32;
+
+    /// list<u32> in, primitive out.
+    export sum: func(values: list<u32>) -> u32;
+
+    /// list<string> in, primitive out.
+    export total-chars: func(words: list<string>) -> u32;
+}
