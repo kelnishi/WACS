@@ -63,6 +63,23 @@ namespace Wacs.ComponentModel.Harness.Lib
                 case CtVariantType variant:
                     return LayoutVariant(variant);
 
+                case CtEnumType en:
+                    {
+                        // Enum is a payload-less variant — disc width
+                        // (1 / 2 / 4) based on case count.
+                        var w = VariantDiscSize(en.Cases.Count);
+                        return (w, w);
+                    }
+
+                case CtFlagsType fl:
+                    {
+                        // Flags pack one bit per flag, rounded up to
+                        // byte / ushort / uint storage. ≤ 8 → 1 byte,
+                        // ≤ 16 → 2 bytes, else 4.
+                        var w = FlagsByteWidth(fl.Flags.Count);
+                        return (w, w);
+                    }
+
                 default:
                     throw new NotSupportedException(
                         $"CanonicalAbi.Layout: {t.GetType().Name} not supported in harness v0.2.");
@@ -100,6 +117,22 @@ namespace Wacs.ComponentModel.Harness.Lib
             if (caseCount <= 256) return 1;
             if (caseCount <= 65536) return 2;
             return 4;
+        }
+
+        /// <summary>
+        /// Flags backing byte width: ≤ 8 bits → 1 byte, ≤ 16 → 2 bytes,
+        /// ≤ 32 → 4 bytes. Larger flag sets aren't currently supported
+        /// by the harness emitter.
+        /// </summary>
+        public static int FlagsByteWidth(int flagCount)
+        {
+            if (flagCount <= 0)
+                throw new ArgumentOutOfRangeException(nameof(flagCount));
+            if (flagCount <= 8) return 1;
+            if (flagCount <= 16) return 2;
+            if (flagCount <= 32) return 4;
+            throw new NotSupportedException(
+                $"Harness emitter v0 supports flag sets up to 32 bits (got {flagCount}).");
         }
 
         /// <summary>

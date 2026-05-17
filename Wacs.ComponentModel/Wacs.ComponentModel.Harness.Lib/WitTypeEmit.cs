@@ -44,6 +44,9 @@ namespace Wacs.ComponentModel.Harness.Lib
 
             // Pass 1: define the type shells so forward references
             // (variant payload → record, etc.) have something to bind to.
+            // Enums + flags emit eagerly as complete enum types (no
+            // payloads, no forward refs to chase) so they're added
+            // straight into the registry as runtime types.
             foreach (var named in world.Types)
             {
                 var structural = CanonicalAbi.Deref(named.Type);
@@ -60,6 +63,12 @@ namespace Wacs.ComponentModel.Harness.Lib
                         registry.Variants[named.Name] = module.DefineType(
                             varName,
                             TypeAttributes.Public | TypeAttributes.Abstract);
+                        break;
+                    case CtEnumType en:
+                        registry.Enums[named.Name] = EmitEnumType(module, opts.Namespace, named.Name, en);
+                        break;
+                    case CtFlagsType fl:
+                        registry.Flags[named.Name] = EmitFlagsType(module, opts.Namespace, named.Name, fl);
                         break;
                     case CtPrimType:
                         // Type alias to a primitive — no CLR type to emit; lookups go straight to the primitive CLR type.
@@ -94,6 +103,60 @@ namespace Wacs.ComponentModel.Harness.Lib
 
             return registry;
         }
+
+        /// <summary>
+        /// Emit a CLR enum type for a WIT <c>enum</c> declaration.
+        /// Backing storage width (byte / ushort / uint) is sized to
+        /// the case count per the canonical-ABI discriminant rule —
+        /// matches what the lift IL will read from memory.
+        /// </summary>
+        private static Type EmitEnumType(
+            ModuleBuilder module, string @namespace, string witName, CtEnumType en)
+        {
+            var underlying = EnumUnderlyingForCases(en.Cases.Count);
+            var typeName = $"{@namespace}.{NameMangler.ToPascalCase(witName)}";
+            var eb = module.DefineEnum(typeName, TypeAttributes.Public, underlying);
+            for (int i = 0; i < en.Cases.Count; i++)
+            {
+                object value = underlying == typeof(byte) ? (object)(byte)i
+                    : underlying == typeof(ushort) ? (object)(ushort)i
+                    : (object)(uint)i;
+                eb.DefineLiteral(NameMangler.ToPascalCase(en.Cases[i]), value);
+            }
+            return eb.CreateType()!;
+        }
+
+        /// <summary>
+        /// Emit a CLR <c>[Flags]</c> enum for a WIT <c>flags</c>
+        /// declaration. Each flag is a 1-bit literal at bit position
+        /// matching its declaration order; backing width is byte /
+        /// ushort / uint sized to the flag count (≤ 8 / ≤ 16 / ≤ 32).
+        /// </summary>
+        private static Type EmitFlagsType(
+            ModuleBuilder module, string @namespace, string witName, CtFlagsType fl)
+        {
+            var width = CanonicalAbi.FlagsByteWidth(fl.Flags.Count);
+            Type underlying = width == 1 ? typeof(byte) : width == 2 ? typeof(ushort) : typeof(uint);
+            var typeName = $"{@namespace}.{NameMangler.ToPascalCase(witName)}";
+            var eb = module.DefineEnum(typeName, TypeAttributes.Public, underlying);
+
+            var flagsAttrCtor = typeof(FlagsAttribute).GetConstructor(Type.EmptyTypes)!;
+            eb.SetCustomAttribute(new CustomAttributeBuilder(flagsAttrCtor, Array.Empty<object>()));
+
+            for (int i = 0; i < fl.Flags.Count; i++)
+            {
+                object value = underlying == typeof(byte) ? (object)(byte)(1 << i)
+                    : underlying == typeof(ushort) ? (object)(ushort)(1 << i)
+                    : (object)(uint)(1u << i);
+                eb.DefineLiteral(NameMangler.ToPascalCase(fl.Flags[i]), value);
+            }
+            return eb.CreateType()!;
+        }
+
+        private static Type EnumUnderlyingForCases(int count) =>
+            count <= 256 ? typeof(byte)
+            : count <= 65536 ? typeof(ushort)
+            : typeof(uint);
 
         private static void PopulateRecord(TypeBuilder tb, CtRecordType rec, TypeRegistry registry)
         {
@@ -278,6 +341,18 @@ namespace Wacs.ComponentModel.Harness.Lib
                     var elem = MapClrType(list.Element, registry, $"{context} list element");
                     return elem.MakeArrayType();
 
+                case CtEnumType en:
+                    if (registry.Enums.TryGetValue(en.Name, out var enType))
+                        return enType;
+                    throw new NotSupportedException(
+                        $"Anonymous enum types not supported in v0.2 ({context}).");
+
+                case CtFlagsType fl:
+                    if (registry.Flags.TryGetValue(fl.Name, out var flType))
+                        return flType;
+                    throw new NotSupportedException(
+                        $"Anonymous flag types not supported in v0.2 ({context}).");
+
                 default:
                     throw new NotSupportedException(
                         $"Harness emitter v0.2 does not yet support {deref.GetType().Name} ({context}).");
@@ -320,5 +395,9 @@ namespace Wacs.ComponentModel.Harness.Lib
         // payload-case ctors take one arg of the payload's CLR type.
         public Dictionary<string, Dictionary<string, ConstructorBuilder>> VariantCaseCtors { get; } = new();
         public Dictionary<string, CtValType> PrimitiveAliases { get; } = new();
+        // Enums + flags emit eagerly to full Types (no forward refs);
+        // stored as runtime System.Type rather than TypeBuilder.
+        public Dictionary<string, Type> Enums { get; } = new();
+        public Dictionary<string, Type> Flags { get; } = new();
     }
 }

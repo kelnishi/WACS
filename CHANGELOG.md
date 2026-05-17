@@ -1,5 +1,58 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Lib 0.9.0 — `enum` + `flags`
+
+Harness emitter handles WIT `enum` and `flags` declarations:
+
+```wit
+world security {
+    enum severity { info, warning, critical }
+    flags permissions { read, write, execute, delete }
+    record status { sev: severity, perms: permissions }
+    export get-status: func() -> status;
+}
+```
+
+Both shapes emit as native CLR enums:
+- **`Severity`**: byte underlying, no `[Flags]` — three literals
+  at sequential ordinals (`Info=0`, `Warning=1`, `Critical=2`).
+- **`Permissions`**: byte underlying, `[Flags]` attribute — bit
+  literals (`Read=1`, `Write=2`, `Execute=4`, `Delete=8`).
+  Combined values render naturally via `ToString()`:
+  `Read|Write` → `"Read, Write"`.
+
+Backing-width selection per canonical-ABI:
+- Enum: 1 byte if `≤ 256` cases, 2 bytes if `≤ 65536`, else 4.
+  Same width rule as variant discriminator.
+- Flags: 1 byte if `≤ 8` flags, 2 bytes if `≤ 16`, 4 if `≤ 32`.
+
+### What changed
+
+- **`CanonicalAbi.cs`** — adds `CtEnumType` + `CtFlagsType` layout
+  cases; new `FlagsByteWidth` helper.
+- **`WitTypeEmit.cs`** — `EmitWorldTypes` Pass-1 now emits enum +
+  flags eagerly as complete `Type` instances (no two-pass needed
+  — enum values are constants, no forward refs). New
+  `EmitEnumType` and `EmitFlagsType` helpers using
+  `ModuleBuilder.DefineEnum` + `DefineLiteral`. Flags get
+  `FlagsAttribute` applied. `MapClrType` looks up enum / flags
+  types from the registry.
+- **`LiftEmit.cs`** — `EmitLiftField` adds `CtEnumType` +
+  `CtFlagsType` cases delegating to new `EmitReadIntegerWidth`
+  helper (reads 1 / 2 / 4 bytes by backing width; the resulting
+  integer is stelem / stfld-compatible with the enum-typed slot
+  directly, no explicit boxing/conversion needed).
+- **`TypeRegistry`** — gains `Enums` and `Flags` dictionaries.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-enum-flags/`
+  — Rust returns `severity=warning` + `perms=Read|Write`. Test
+  asserts both numeric values + ToString rendering.
+
+**12/12 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.16.0` → `WACS-ComponentModel-v0.17.0`
+(minor — capability shift on Harness.Lib).
+
 ## WACS.ComponentModel.Harness.Lib 0.8.0 / WACS.ComponentModel.Harness.Runtime 0.4.0 — full primitive width matrix + list&lt;string&gt; / list&lt;record&gt;
 
 Harness lift IL now covers every WIT primitive (bool, s8, u8, s16,

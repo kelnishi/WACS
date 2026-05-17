@@ -131,9 +131,58 @@ namespace Wacs.ComponentModel.Harness.Lib
                     EmitLiftList(il, list, offset, registry, liftMethods);
                     return;
 
+                case CtEnumType en:
+                    {
+                        // CLR enums on the stack are their underlying
+                        // integer type — no explicit conv between the
+                        // integer load and the enum-typed field's
+                        // stelem / stfld. Width sized to case count.
+                        var width = CanonicalAbi.VariantDiscSize(en.Cases.Count);
+                        EmitReadIntegerWidth(il, offset, width);
+                        return;
+                    }
+
+                case CtFlagsType fl:
+                    {
+                        var width = CanonicalAbi.FlagsByteWidth(fl.Flags.Count);
+                        EmitReadIntegerWidth(il, offset, width);
+                        return;
+                    }
+
                 default:
                     throw new NotSupportedException(
                         $"LiftEmit v0.2 does not support {deref.GetType().Name}.");
+            }
+        }
+
+        /// <summary>
+        /// Read an unsigned integer at <c>(memory, arg.1 + offset)</c>
+        /// sized 1 / 2 / 4 bytes. Used for enum discriminators + flags
+        /// backing storage — the CLR enum-typed field's stfld accepts
+        /// the matching underlying integer directly.
+        /// </summary>
+        private static void EmitReadIntegerWidth(ILGenerator il, int offset, int width)
+        {
+            switch (width)
+            {
+                case 1:
+                    il.Emit(OpCodes.Ldarg_0);
+                    EmitOffsetPush(il, offset);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadU8);
+                    return;
+                case 2:
+                    il.Emit(OpCodes.Ldarg_0);
+                    EmitOffsetPush(il, offset);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadI16LE);
+                    il.Emit(OpCodes.Conv_U2);
+                    return;
+                case 4:
+                    il.Emit(OpCodes.Ldarg_0);
+                    EmitOffsetPush(il, offset);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadI32LE);
+                    return;
+                default:
+                    throw new NotSupportedException($"Unsupported integer width {width}.");
             }
         }
 
