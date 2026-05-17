@@ -12,8 +12,8 @@
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.ComponentModel</AssemblyName>
-        <AssemblyVersion>0.7.0</AssemblyVersion>
-        <Version>0.7.0</Version>
+        <AssemblyVersion>0.7.1</AssemblyVersion>
+        <Version>0.7.1</Version>
         <RepositoryType>git</RepositoryType>
         <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
         <IsAotCompatible>true</IsAotCompatible>
@@ -48,6 +48,10 @@
            to derive C# identifiers from WIT names — single source of
            truth across emission paths. -->
       <InternalsVisibleTo Include="Wacs.ComponentModel.Harness.Lib" />
+      <!-- Transpiler.Lib's HarnessAssemblyBinder + HarnessImplEmit
+           also need NameMangler — same kebab→Pascal/Camel naming
+           must agree with what Harness.Lib emitted. -->
+      <InternalsVisibleTo Include="Wacs.Transpiler.Lib" />
     </ItemGroup>
 
 </Project>

@@ -147,6 +147,30 @@ namespace Wacs.Transpiler.AOT
         public string? HarnessContractText { get; set; }
 
         /// <summary>
+        /// Path to the harness <c>.dll</c> the transpiled assembly
+        /// should reference. When set (typically together with
+        /// <see cref="HarnessContractText"/>), the transpiler:
+        /// <list type="number">
+        /// <item><description>Loads the harness assembly via
+        /// <see cref="System.Runtime.Loader.AssemblyLoadContext.LoadFromAssemblyPath"/>
+        /// and pre-registers its named types (records / variants /
+        /// enums) with <c>ComponentExportsEmit</c>'s emitted-types
+        /// cache — so signatures use the harness's
+        /// <c>Vec2</c> / <c>Outcome</c> rather than emitting
+        /// transpiler-owned duplicates.</description></item>
+        /// <item><description>Emits a sealed
+        /// <c>{World}HarnessImpl</c> class on the transpiled
+        /// assembly that implements the harness's <c>I{World}</c>
+        /// interface by forwarding each method to
+        /// <c>ComponentExports</c>'s static methods. Embedders
+        /// instantiate this class and program against the harness
+        /// interface — engine-agnostic call sites per
+        /// <c>feedback_symmetric_engines</c>.</description></item>
+        /// </list>
+        /// </summary>
+        public string? HarnessAssemblyPath { get; set; }
+
+        /// <summary>
         /// Pre-built resolver derived from <see cref="HostPackages"/>.
         /// The component transpiler builds this once per
         /// <c>TranspileSingleModule</c> call (eagerly walking each

@@ -425,14 +425,34 @@ namespace Wacs.Transpiler.AOT.Component
             // Pre-bake metadata accessors: this composition step adds more
             // types to the still-open builder before SaveAssembly. Touching
             // the public type accessors would prematurely freeze it.
+            // If the embedder passed a harness assembly via
+            // TranspilerOptions.HarnessAssemblyPath, load it and
+            // pre-register its named types (records / variants /
+            // enums) with the emit cache so method signatures use
+            // the harness's Vec2 / Outcome rather than transpiler-
+            // owned duplicates. Enables CLR-level engine symmetry:
+            // the transpiled output and the interpreter harness
+            // share one type universe.
+            HarnessAssemblyBinder? harnessBinder = null;
+            Dictionary<string, System.Type>? harnessPreRegistered = null;
+            if (!string.IsNullOrEmpty(options?.HarnessAssemblyPath))
+            {
+                harnessBinder = HarnessAssemblyBinder.TryLoad(
+                    options!.HarnessAssemblyPath!);
+                if (harnessBinder != null && harnessBinder.NamedTypes.Count > 0)
+                    harnessPreRegistered = new Dictionary<string, System.Type>(harnessBinder.NamedTypes);
+            }
+
             Dictionary<string, System.Type> componentNamedTypes = new();
+            System.Type? componentExportsType = null;
             if (result.ExportsInterfaceBuilder != null && result.ModuleClassBuilder != null)
             {
-                ComponentExportsEmit.EmitComponentExportsClass(
+                componentExportsType = ComponentExportsEmit.EmitComponentExportsClass(
                     result.ModuleBuilder, assemblyNamespace,
                     parsed.Component, result.ExportsInterfaceBuilder,
                     result.ModuleClassBuilder, out componentNamedTypes,
-                    decodedWit);
+                    decodedWit,
+                    preRegisteredTypes: harnessPreRegistered);
                 // Prime ExportInterfaceEmit's per-module type registry
                 // so its TypeRef → Type lookups don't fall back to
                 // ModuleBuilder.GetType (unimplemented on PAB).
@@ -440,6 +460,20 @@ namespace Wacs.Transpiler.AOT.Component
                     result.ModuleBuilder,
                     componentNamedTypes,
                     assemblyNamespace);
+            }
+
+            // Harness-symmetric wrapper: when the embedder supplied
+            // a harness assembly via TranspilerOptions.HarnessAssemblyPath,
+            // emit a {World}HarnessImpl that implements the
+            // harness's I{World} interface by forwarding to
+            // ComponentExports's static methods. Engine choice
+            // (interpreter via {World}Harness.LoadFrom vs
+            // transpiler via this wrapper) becomes a deployment
+            // detail — same I{World} surface either way.
+            if (harnessBinder != null && componentExportsType != null)
+            {
+                HarnessImplEmit.Emit(result.ModuleBuilder, assemblyNamespace,
+                    harnessBinder, componentExportsType);
             }
 
             // Phase B chain mode: emit [WitSource]-tagged

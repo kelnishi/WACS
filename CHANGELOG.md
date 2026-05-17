@@ -1,5 +1,82 @@
 # Changelog
 
+## WACS.Transpiler.Lib 0.11.0 / WACS.ComponentModel 0.7.1 — harness implementation emit infrastructure
+
+Plumbing for the symmetric-engines payoff: when the transpiler is
+given a harness assembly via the new
+`TranspilerOptions.HarnessAssemblyPath`, it loads the harness,
+discovers its `I{World}` interface + named-type classes
+(`Vec2`, `Outcome`, etc.), and is now wired to emit a
+`{World}HarnessImpl` wrapper class that implements `I{World}` by
+forwarding to `ComponentExports`'s static methods.
+
+The CLI's existing `--harness <dll>` flag on `wacs build` /
+`wacs aot` already populates the new option transparently — no
+new flags.
+
+**Architectural shape**:
+- **`HarnessAssemblyBinder`** loads the harness `.dll` via
+  `AssemblyLoadContext.Default.LoadFromAssemblyPath`, parses the
+  embedded `_WitContract` to recover the harness's authored world
+  name (the transpiler must use the HARNESS's world name to find
+  the `I{World}` interface, not the loaded component's possibly-
+  synthesized name).
+- **`ComponentExportsEmit.EmitComponentExportsClass`** gains a
+  `preRegisteredTypes` parameter that seeds the emitted-types
+  cache. When set, signatures use the harness's `Vec2` / `Outcome`
+  rather than emitting transpiler-owned duplicates — no
+  translation layer needed at the interface boundary.
+- **`HarnessImplEmit`** emits the `{World}HarnessImpl` class:
+  sealed, public, parameterless ctor, instance methods (Virtual+
+  Final+NewSlot) forwarding to the matching `ComponentExports`
+  static method. Methods without a match emit a
+  `NotImplementedException`-throwing body so the interface
+  contract stays structurally complete.
+
+**Known gap (the reason this is "infrastructure" rather than a
+working end-to-end):**
+
+`ComponentExportsEmit.IsEmittable` rejects today's spike fixtures:
+
+- **richer** (`add(vec2, vec2) -> vec2`): record params aren't
+  in the v0 emittable set (only primitives, list-of-prim, and
+  resource-handle params pass).
+- **hello** (`greet(string) -> string`): the string-param shape
+  isn't in v0 either (the predicate accepts string RETURNS but
+  rejects string PARAMS).
+
+Both gating predicates are pre-existing transpiler limitations
+that predate the harness work. With them in place,
+`ComponentExports` doesn't emit a method matching `IHello.Greet`
+or `IRicher.Add`, so `HarnessImpl` has nothing to forward to.
+The plumbing is verified to load the harness correctly and gate
+on `componentExportsType != null` cleanly — no errors, no spam.
+
+**Next slice**: extend `ComponentExportsEmit.IsEmittable` (+ the
+per-export emit body) to handle record + string params. That's a
+focused 200-400 LOC extension of an existing module that
+automatically unlocks `HarnessImpl` for these fixtures. Tracked
+separately from task 64 since it's a transpiler-internals slice
+rather than a harness-side one.
+
+### What changed
+
+- **`WACS.Transpiler.Lib` 0.10.4 → 0.11.0** (minor — new public
+  API): `TranspilerOptions.HarnessAssemblyPath`,
+  `ComponentExportsEmit.EmitComponentExportsClass` gains an
+  optional `preRegisteredTypes` parameter, internal
+  `HarnessAssemblyBinder` + `HarnessImplEmit`. `BuildHandler`
+  threads `--harness` through.
+- **`WACS.ComponentModel` 0.7.0 → 0.7.1** (point — metadata):
+  adds `InternalsVisibleTo Wacs.Transpiler.Lib` so the
+  Transpiler.Lib helpers can reuse `NameMangler` (kebab →
+  PascalCase) — same naming must agree with what
+  `Harness.Lib` emitted into the harness assembly.
+
+Family tags: `WACS-Transpiler-v0.10.2` → `WACS-Transpiler-v0.11.0`
+(minor — capability shift); `WACS-ComponentModel-v0.11.0` →
+`WACS-ComponentModel-v0.11.1` (point).
+
 ## WACS.ComponentModel 0.7.0 / WACS.Transpiler.Lib 0.10.4 — primary-section decode for canon-lifted components (richer fixture)
 
 v1 follow-up to the primary-section decode work. Extends

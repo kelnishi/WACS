@@ -463,6 +463,13 @@ namespace Wacs.Console.Verbs
                 AssemblyName = string.IsNullOrEmpty(opts.AssemblyName) ? null : opts.AssemblyName,
                 Emission = ParseEmissionTarget(opts.Emission),
                 HarnessContractText = ResolveHarnessContractText(opts),
+                // --harness <dll> also triggers the harness-impl
+                // wrapper emission (transpiled output implements
+                // the harness's I{World}). --wit-dir alone is
+                // validation-only — no .dll to reference.
+                HarnessAssemblyPath = string.IsNullOrEmpty(opts.Harness)
+                    ? null
+                    : Path.GetFullPath(opts.Harness),
             };
         }
 

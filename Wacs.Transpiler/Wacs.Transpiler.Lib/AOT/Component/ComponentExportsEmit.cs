@@ -73,9 +73,19 @@ namespace Wacs.Transpiler.AOT.Component
             Type coreIExports,
             Type coreModuleClass,
             out Dictionary<string, Type> emittedTypes,
-            CtPackage? decodedWit = null)
+            CtPackage? decodedWit = null,
+            IReadOnlyDictionary<string, Type>? preRegisteredTypes = null)
         {
-            emittedTypes = new Dictionary<string, Type>();
+            // Pre-registered types (typically from a harness assembly
+            // the embedder wants the transpiled output to reference)
+            // seed the emitted-types cache so the inner EmitNamedType
+            // logic skips re-emitting them — signatures use the
+            // harness's Vec2 / Outcome rather than transpiler-owned
+            // duplicates. Harness consumers can then cast the
+            // transpiled output to the harness's I{World} cleanly.
+            emittedTypes = preRegisteredTypes != null
+                ? new Dictionary<string, Type>(preRegisteredTypes)
+                : new Dictionary<string, Type>();
             var emittable = FindEmittableExports(component);
             if (emittable.Count == 0) return null;
 
