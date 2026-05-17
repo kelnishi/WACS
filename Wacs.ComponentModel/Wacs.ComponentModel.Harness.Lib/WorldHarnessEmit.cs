@@ -1107,52 +1107,14 @@ namespace Wacs.ComponentModel.Harness.Lib
             }
             if (d is CtTupleType tup)
             {
-                // Reflection.Emit's Ldfld with a closed runtime
-                // ValueTuple generic produces a missing MemberRef
-                // token (PersistedAssemblyBuilder serializes the
-                // open generic field). Calling a generic static
-                // accessor on Harness.Runtime side-steps the issue:
-                // the JIT closes the method's generics from the
-                // call-site arg's type, returning the right element.
+                // Stash arg into a typed ValueTuple<...> local and
+                // dispatch through the local-based tuple flattener,
+                // which handles any element type.
                 var tupleClr = WitTypeEmit.MapClrType(d, registry, "tuple param");
-                var elemClrs = tupleClr.GetGenericArguments();
-                for (int i = 0; i < tup.Elements.Count; i++)
-                {
-                    var accessorOpen = typeof(Wacs.ComponentModel.Harness.WitTupleAccess)
-                        .GetMethods(BindingFlags.Public | BindingFlags.Static)
-                        .First(m => m.Name == "Item" + (i + 1)
-                                    && m.GetGenericArguments().Length == elemClrs.Length);
-                    var accessor = accessorOpen.MakeGenericMethod(elemClrs);
-
-                    var elemD = CanonicalAbi.Deref(tup.Elements[i]);
-                    if (elemD is CtPrimType ep && ep.Kind == CtPrim.String)
-                    {
-                        var strLocal = il.DeclareLocal(typeof(string));
-                        EmitLdarg(il, argIdx);
-                        il.Emit(OpCodes.Call, accessor);
-                        il.Emit(OpCodes.Stloc, strLocal);
-                        var ptr = il.DeclareLocal(typeof(int));
-                        var len = il.DeclareLocal(typeof(int));
-                        il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
-                        il.Emit(OpCodes.Ldloc, strLocal);
-                        il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, reallocField);
-                        il.Emit(OpCodes.Ldloca, ptr);
-                        il.Emit(OpCodes.Ldloca, len);
-                        il.Emit(OpCodes.Call, StringCoding_LowerUtf8);
-                        il.Emit(OpCodes.Ldloc, ptr);
-                        il.Emit(OpCodes.Ldloc, len);
-                    }
-                    else if (elemD is CtPrimType || elemD is CtEnumType || elemD is CtFlagsType)
-                    {
-                        EmitLdarg(il, argIdx);
-                        il.Emit(OpCodes.Call, accessor);
-                    }
-                    else
-                    {
-                        throw new NotSupportedException(
-                            $"Tuple element of type {elemD.GetType().Name} not yet supported in lower path.");
-                    }
-                }
+                var tupLocal = il.DeclareLocal(tupleClr);
+                EmitLdarg(il, argIdx);
+                il.Emit(OpCodes.Stloc, tupLocal);
+                EmitFlattenLocal(il, tupLocal, d, memoryField, reallocField, registry);
                 return;
             }
             if (d is CtRecordType rec)
@@ -1288,8 +1250,16 @@ namespace Wacs.ComponentModel.Harness.Lib
                     }
                     else
                     {
-                        throw new NotSupportedException(
-                            $"Tuple element of type {elemD.GetType().Name} not supported in record-of-tuple param.");
+                        // List / record / nested tuple / option — pull
+                        // the element out via the accessor into a typed
+                        // local and recurse via EmitFlattenLocal.
+                        var elemClr = elemClrs[i];
+                        var elemLocal = il.DeclareLocal(elemClr);
+                        il.Emit(OpCodes.Ldloc, local);
+                        il.Emit(OpCodes.Call, accessor);
+                        il.Emit(OpCodes.Stloc, elemLocal);
+                        EmitFlattenLocal(il, elemLocal, elemD,
+                            memoryField, reallocField, registry);
                     }
                 }
                 return;
@@ -1464,7 +1434,7 @@ namespace Wacs.ComponentModel.Harness.Lib
                 il.Emit(OpCodes.Call, getValue);
                 var innerLocal = il.DeclareLocal(innerClr);
                 il.Emit(OpCodes.Stloc, innerLocal);
-                EmitLowerInnerFromLocal(il, innerLocal, innerD, memoryField, reallocField);
+                EmitLowerInnerFromLocal(il, innerLocal, innerD, memoryField, reallocField, registry);
             }
             else
             {
@@ -1472,7 +1442,7 @@ namespace Wacs.ComponentModel.Harness.Lib
                 var innerLocal = il.DeclareLocal(innerClr);
                 EmitLdarg(il, argIdx);
                 il.Emit(OpCodes.Stloc, innerLocal);
-                EmitLowerInnerFromLocal(il, innerLocal, innerD, memoryField, reallocField);
+                EmitLowerInnerFromLocal(il, innerLocal, innerD, memoryField, reallocField, registry);
             }
             il.Emit(OpCodes.Br, endLabel);
 
@@ -1532,7 +1502,7 @@ namespace Wacs.ComponentModel.Harness.Lib
                 il.Emit(OpCodes.Call, okValueGetter);
                 var okLocal = il.DeclareLocal(okClr);
                 il.Emit(OpCodes.Stloc, okLocal);
-                EmitLowerInnerFromLocal(il, okLocal, res.Ok, memoryField, reallocField);
+                EmitLowerInnerFromLocal(il, okLocal, res.Ok, memoryField, reallocField, registry);
             }
             else
             {
@@ -1550,7 +1520,7 @@ namespace Wacs.ComponentModel.Harness.Lib
                 il.Emit(OpCodes.Call, errValueGetter);
                 var errLocal = il.DeclareLocal(errClr);
                 il.Emit(OpCodes.Stloc, errLocal);
-                EmitLowerInnerFromLocal(il, errLocal, res.Err, memoryField, reallocField);
+                EmitLowerInnerFromLocal(il, errLocal, res.Err, memoryField, reallocField, registry);
             }
             else
             {
@@ -1621,7 +1591,7 @@ namespace Wacs.ComponentModel.Harness.Lib
                     il.Emit(OpCodes.Callvirt, valueGetter);
                     var payloadLocal = il.DeclareLocal(payloadClr);
                     il.Emit(OpCodes.Stloc, payloadLocal);
-                    EmitLowerInnerFromLocal(il, payloadLocal, c.Payload, memoryField, reallocField);
+                    EmitLowerInnerFromLocal(il, payloadLocal, c.Payload, memoryField, reallocField, registry);
                 }
                 // Zero-pad trailing slots this case doesn't fill.
                 for (int s = thisCaseSlots.Count; s < joinedSlots.Count; s++)
@@ -1642,7 +1612,8 @@ namespace Wacs.ComponentModel.Harness.Lib
 
         private static void EmitLowerInnerFromLocal(
             ILGenerator il, LocalBuilder valueLocal, CtValType innerType,
-            FieldBuilder memoryField, FieldBuilder reallocField)
+            FieldBuilder memoryField, FieldBuilder reallocField,
+            TypeRegistry? registry = null)
         {
             var d = CanonicalAbi.Deref(innerType);
             if (d is CtPrimType prim && prim.Kind == CtPrim.String)
@@ -1662,6 +1633,28 @@ namespace Wacs.ComponentModel.Harness.Lib
             if (d is CtPrimType || d is CtEnumType || d is CtFlagsType)
             {
                 il.Emit(OpCodes.Ldloc, valueLocal);
+                return;
+            }
+            if (d is CtListType list && registry != null)
+            {
+                EmitLowerListFromLocal(il, valueLocal, list, memoryField, reallocField, registry);
+                return;
+            }
+            if (d is CtRecordType rec && registry != null)
+            {
+                // Record-as-inner: pull each field via getter, then
+                // flatten. Reuses EmitFlattenSubRecordField which
+                // already handles primitives, strings, enums, flags,
+                // nested lists, tuples, and nested records.
+                var getters = registry.RecordGetters[rec.Name];
+                foreach (var f in rec.Fields)
+                    EmitFlattenSubRecordField(il, valueLocal, getters[f.Name], f.Type,
+                        memoryField, reallocField, registry);
+                return;
+            }
+            if (d is CtTupleType tup && registry != null)
+            {
+                EmitFlattenLocal(il, valueLocal, d, memoryField, reallocField, registry);
                 return;
             }
             throw new NotSupportedException(

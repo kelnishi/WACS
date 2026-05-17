@@ -1,5 +1,62 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Lib 0.20.0 — option/tuple of aggregate-inner direct PARAMS
+
+option / tuple direct params with aggregate inner types
+(list, record, nested tuple) now round-trip through the lower
+path:
+
+```wit
+record line { text: string, weight: u32 }
+
+export sum-or-default: func(maybe-values: option<list<u32>>, fallback: u32) -> u32;
+export format-line:    func(maybe-line: option<line>)                      -> string;
+export weighted-sum:   func(p: tuple<u32, list<u32>>)                      -> u32;
+```
+
+### How it works
+
+- **`EmitLowerInnerFromLocal`** (used by option / result / variant
+  payload lower) gains aggregate dispatch: `CtListType` →
+  `EmitLowerListFromLocal`, `CtRecordType` → walk the
+  record's getters via `EmitFlattenSubRecordField`,
+  `CtTupleType` → `EmitFlattenLocal`. The registry param is
+  now threaded through (was nullable before — now passed by
+  every caller).
+- **Top-level `EmitFlattenedArg` tuple branch** simplified: stash
+  the arg into a typed `ValueTuple<…>` local and dispatch
+  through `EmitFlattenLocal`, which now handles every element
+  type — primitives, strings, enums, flags, lists, nested
+  records, nested tuples. Removes the duplicated element-by-
+  element lower IL from the tuple arg branch.
+- **`EmitFlattenLocal` tuple branch** extended to handle list /
+  record / nested-tuple elements: extract the element via the
+  WitTupleAccess accessor into a typed local and recurse via
+  `EmitFlattenLocal`.
+
+### What changed
+
+- **`WorldHarnessEmit.cs`**:
+  - `EmitLowerInnerFromLocal` dispatches list / record / tuple
+    inner types when the registry is supplied. All callers
+    (option / result / variant payload lower) thread it through.
+  - Top-level tuple-arg lower in `EmitFlattenedArg` replaced
+    with stash-to-local + `EmitFlattenLocal` dispatch.
+  - `EmitFlattenLocal` tuple branch handles non-primitive
+    element types by recursing.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-aggregate-inner-params/`
+  — `sum-or-default(option<list<u32>>, u32)`,
+  `format-line(option<line>)`, `weighted-sum(tuple<u32,
+  list<u32>>)`. Five distinct cases including Some / None and
+  list-in-tuple.
+
+**25/25 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.27.0` →
+`WACS-ComponentModel-v0.28.0` (minor — capability shift on
+Harness.Lib).
+
 ## WACS.ComponentModel.Harness.Lib 0.19.0 — `list<tuple>` + `list<option>` as direct PARAMS
 
 Two more list-element shapes round-trip through the lower path:
