@@ -1,0 +1,5 @@
+package wacs:list-string-spike;
+
+world catalog {
+    export get-titles: func() -> list<string>;
+}
