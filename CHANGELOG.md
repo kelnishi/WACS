@@ -1,5 +1,92 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Lib 0.21.0 — function-only interface exports (Slices A + B)
+
+Interface exports now flow through to the harness. Function-only
+interfaces (no resources, no own type declarations) surface as
+flat methods on the harness class, prefixed with the interface's
+PascalCase segment. Resource + interface-level-type support lands
+in Slices C–E.
+
+```wit
+package wacs:interface-export-spike;
+
+interface ops {
+    add: func(a: u32, b: u32) -> u32;
+    swap: func(a: u32, b: u32) -> tuple<u32, u32>;
+}
+
+world calculator {
+    export ops;                       // function-only interface
+    export bake: func() -> u32;       // free function
+}
+```
+
+Emits a harness with three flat methods:
+
+```csharp
+public sealed class CalculatorHarness : ICalculator
+{
+    public uint Bake() => …;
+    public uint WacsInterfaceExportSpikeOps_Add(uint a, uint b) => …;
+    public ValueTuple<uint, uint> WacsInterfaceExportSpikeOps_Swap(uint a, uint b) => …;
+}
+```
+
+Per-interface namespace segments (`WasiCliRun`, etc.) collapse the
+multi-part package + interface name into one Pascal token — this
+contrasts with the transpiler-side `NameMangler.InterfaceNamespace`
+which uses full dotted namespaces. Resource-bearing interfaces
+will get nested `Exports` classes in a later slice; that's where
+the per-interface segment also becomes the C# namespace for
+interface-declared types.
+
+### How it works
+
+- **`HarnessNaming.InterfaceSegment(iface)`** — produces
+  `WacsInterfaceExportSpikeOps` from `wacs:interface-export-spike/ops`.
+- **`HarnessNaming.InterfaceFunctionPascal(iface, fnKebab)`** —
+  joins segment + `_` + Pascal(fn) for the C# method name.
+- **`HarnessNaming.InterfaceFunctionSlug(iface, fnKebab)`** —
+  C#-safe field slug (replaces `-`/`/`/`:`/`@`/`#` with `_`),
+  used for `_invoke_*` / `_post_*` field names.
+- **`FunctionExport.WasmName`** (new field) — the exact wasm-side
+  export string (`<iface-base>#<fn-kebab>` for interface
+  functions, plain witName for free functions). The
+  `RequireFunctionExport` and `cabi_post_*` lookup sites use
+  this instead of `Name`, which now carries only the C#-safe
+  slug.
+
+### What changed
+
+- **`Wacs.ComponentModel.Harness.Lib/HarnessNaming.cs`** — new
+  helper module.
+- **`WorldHarnessEmit.cs`**:
+  - `FunctionExport` gains `WasmName` (separates wasm-side
+    name from C#-safe slug).
+  - `BuildFunctionExport` accepts optional `wasmName`,
+    `pascalName`, `slug` for interface callers.
+  - New `BuildInterfaceExports` walks an interface's functions
+    and builds one `FunctionExport` per. Refuses interfaces
+    that declare their own types (Slice C) or resources
+    (Slice D).
+  - Exports loop dispatches on `CtExternFunc` /
+    `CtExternInterfaceRef` / `CtExternInlineInterface`.
+  - `EmitWorldInterface` mirrors the dispatch so the `IWorld`
+    C# interface includes interface-export functions.
+  - Wasm-side export lookups (`RequireFunctionExport`,
+    `cabi_post_*`) read `fe.WasmName`.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-interface-export/`
+  — `calculator` world with an `ops` interface (`add`, `swap`)
+  plus free function `bake`.
+
+**26/26 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.28.0` →
+`WACS-ComponentModel-v0.29.0` (minor — capability shift on
+Harness.Lib).
+
 ## WACS.ComponentModel.Harness.Lib 0.20.0 — option/tuple of aggregate-inner direct PARAMS
 
 option / tuple direct params with aggregate inner types

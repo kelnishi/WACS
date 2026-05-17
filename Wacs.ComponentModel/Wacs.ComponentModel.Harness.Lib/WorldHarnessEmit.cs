@@ -99,21 +99,34 @@ namespace Wacs.ComponentModel.Harness.Lib
             // Per-export wrappers call these for return lifts.
             var liftMethods = LiftEmit.EmitLifts(typeBuilder, world, registry);
 
-            // Collect the function exports we'll emit wrappers for.
-            // (Interface exports — `export wasi:foo/iface` — defer to
-            // a future slice; v0 handles only `export name: func(...)`.)
+            // Collect function exports we'll emit wrappers for. Three
+            // shapes: world-level free functions (`export bake: func()`),
+            // named interface refs (`export wasi:cli/run@0.2.0`), and
+            // inline interface bodies. Function-only interfaces flatten
+            // onto the harness with PascalName like "WasiCliRun_Run";
+            // resource-bearing interfaces will get nested Exports classes
+            // in a later slice.
             var funcExports = new List<FunctionExport>();
             foreach (var port in world.Exports)
             {
-                if (port.Spec is CtExternFunc fn)
+                switch (port.Spec)
                 {
-                    funcExports.Add(BuildFunctionExport(port.Name, fn.Function, registry));
-                }
-                else
-                {
-                    throw new NotSupportedException(
-                        $"Harness emitter v0 supports only inline-function exports; "
-                        + $"export '{port.Name}' is a {port.Spec.GetType().Name}.");
+                    case CtExternFunc fn:
+                        funcExports.Add(BuildFunctionExport(port.Name, fn.Function, registry));
+                        break;
+                    case CtExternInterfaceRef iref:
+                        if (iref.Target == null)
+                            throw new InvalidOperationException(
+                                $"Interface export '{port.Name}' has no resolved target.");
+                        BuildInterfaceExports(funcExports, iref.Target, registry);
+                        break;
+                    case CtExternInlineInterface inline:
+                        BuildInterfaceExports(funcExports, inline.Interface, registry);
+                        break;
+                    default:
+                        throw new NotSupportedException(
+                            $"Harness emitter does not yet support export '{port.Name}' " +
+                            $"of kind {port.Spec.GetType().Name}.");
                 }
             }
 
@@ -198,26 +211,48 @@ namespace Wacs.ComponentModel.Harness.Lib
 
             foreach (var port in world.Exports)
             {
-                if (port.Spec is not CtExternFunc fn) continue;
-
-                var methodName = NameMangler.ToPascalCase(port.Name);
-                var paramTypes = fn.Function.Params.Select(p => MapHostParamType(p.Type, registry)).ToArray();
-                var returnType = ResolveReturnClrType(fn.Function, registry);
-
-                var method = iface.DefineMethod(
-                    methodName,
-                    MethodAttributes.Public | MethodAttributes.Abstract
-                        | MethodAttributes.Virtual | MethodAttributes.HideBySig
-                        | MethodAttributes.NewSlot,
-                    returnType,
-                    paramTypes);
-
-                for (int i = 0; i < fn.Function.Params.Count; i++)
-                    method.DefineParameter(i + 1, ParameterAttributes.None,
-                        NameMangler.ToCamelCase(fn.Function.Params[i].Name));
+                switch (port.Spec)
+                {
+                    case CtExternFunc fn:
+                        EmitInterfaceMethod(iface, registry,
+                            NameMangler.ToPascalCase(port.Name), fn.Function);
+                        break;
+                    case CtExternInterfaceRef iref when iref.Target != null:
+                        foreach (var ifn in iref.Target.Functions)
+                            EmitInterfaceMethod(iface, registry,
+                                HarnessNaming.InterfaceFunctionPascal(iref.Target, ifn.Name),
+                                ifn.Type);
+                        break;
+                    case CtExternInlineInterface inline:
+                        foreach (var ifn in inline.Interface.Functions)
+                            EmitInterfaceMethod(iface, registry,
+                                HarnessNaming.InterfaceFunctionPascal(inline.Interface, ifn.Name),
+                                ifn.Type);
+                        break;
+                }
             }
 
             return iface;
+        }
+
+        private static void EmitInterfaceMethod(
+            TypeBuilder iface, TypeRegistry registry,
+            string methodName, CtFunctionType fn)
+        {
+            var paramTypes = fn.Params.Select(p => MapHostParamType(p.Type, registry)).ToArray();
+            var returnType = ResolveReturnClrType(fn, registry);
+
+            var method = iface.DefineMethod(
+                methodName,
+                MethodAttributes.Public | MethodAttributes.Abstract
+                    | MethodAttributes.Virtual | MethodAttributes.HideBySig
+                    | MethodAttributes.NewSlot,
+                returnType,
+                paramTypes);
+
+            for (int i = 0; i < fn.Params.Count; i++)
+                method.DefineParameter(i + 1, ParameterAttributes.None,
+                    NameMangler.ToCamelCase(fn.Params[i].Name));
         }
 
         private static void EmitWitContractField(TypeBuilder tb, string contractText)
@@ -237,8 +272,9 @@ namespace Wacs.ComponentModel.Harness.Lib
 
         private sealed class FunctionExport
         {
-            public string Name = "";          // WIT name (kebab-case)
-            public string PascalName = "";    // C# method name
+            public string Name = "";          // C#-safe slug for field naming (kebab → snake)
+            public string PascalName = "";    // C# method name on the harness
+            public string WasmName = "";      // Exact wasm-side export name (e.g. "wasi:cli/run@0.2.0#run")
             public CtFunctionType Spec = null!;
 
             // Invoker delegate type (e.g. Func<int,int,int>) and the
@@ -257,12 +293,61 @@ namespace Wacs.ComponentModel.Harness.Lib
             public MethodBuilder? ReturnLiftMethod;
         }
 
-        private static FunctionExport BuildFunctionExport(string witName, CtFunctionType fn, TypeRegistry registry)
+        /// <summary>
+        /// For each function in <paramref name="iface"/>, build a
+        /// <see cref="FunctionExport"/> with the proper wasm-side
+        /// export name (<c>&lt;iface-base&gt;#&lt;fn-kebab&gt;</c>) and a
+        /// Pascal-cased C# method name (<c>WasiCliRun_Run</c>).
+        /// Interface-level types are not yet emitted — that's Slice C.
+        /// </summary>
+        private static void BuildInterfaceExports(
+            List<FunctionExport> sink, CtInterfaceType iface, TypeRegistry registry)
+        {
+            // Refuse interfaces with resource declarations until Slice
+            // D lands. Other interface-level types (records, variants,
+            // enums, flags) need Slice C type-namespace work and will
+            // surface naturally when we hit a fixture that uses them.
+            foreach (var t in iface.Types)
+            {
+                if (t.Type is CtResourceType)
+                    throw new NotSupportedException(
+                        $"Interface '{iface.Name}' declares resource '{t.Name}'; " +
+                        "resource support is the next slice (D).");
+            }
+            if (iface.Types.Count > 0)
+                throw new NotSupportedException(
+                    $"Interface '{iface.Name}' declares types; " +
+                    "interface-level type emission is Slice C.");
+
+            var ifaceBase = EntryPoints.InterfaceBase(iface);
+            foreach (var ifn in iface.Functions)
+            {
+                var wasmName = ifaceBase + "#" + ifn.Name;
+                var pascal = HarnessNaming.InterfaceFunctionPascal(iface, ifn.Name);
+                var slug = HarnessNaming.InterfaceFunctionSlug(iface, ifn.Name);
+                sink.Add(BuildFunctionExport(ifn.Name, ifn.Type, registry,
+                    wasmName: wasmName, pascalName: pascal, slug: slug));
+            }
+        }
+
+        private static FunctionExport BuildFunctionExport(
+            string witName, CtFunctionType fn, TypeRegistry registry,
+            string? wasmName = null, string? pascalName = null, string? slug = null)
         {
             var fe = new FunctionExport
             {
-                Name = witName,
-                PascalName = NameMangler.ToPascalCase(witName),
+                // Slug is used for field naming — must be a valid C#
+                // identifier suffix. For free functions, kebab→snake
+                // already does that; for interface exports, the
+                // caller passes a sanitized form
+                // ("wasi_cli_run_v0_2_0_run").
+                Name = slug ?? witName,
+                PascalName = pascalName ?? NameMangler.ToPascalCase(witName),
+                // Wasm-side export name — exact string used by
+                // RequireFunctionExport. For free functions this
+                // equals witName; for interface exports the caller
+                // passes "<iface-base>#<fn-kebab>".
+                WasmName = wasmName ?? witName,
                 Spec = fn,
             };
 
@@ -634,7 +719,7 @@ namespace Wacs.ComponentModel.Harness.Lib
             {
                 var addrLocal = il.DeclareLocal(typeof(FuncAddr));
                 il.Emit(OpCodes.Ldloc, moduleLocal);
-                il.Emit(OpCodes.Ldstr, fe.Name);
+                il.Emit(OpCodes.Ldstr, fe.WasmName);
                 il.Emit(OpCodes.Call, HarnessLoader_RequireFunctionExport);
                 il.Emit(OpCodes.Stloc, addrLocal);
 
@@ -647,7 +732,7 @@ namespace Wacs.ComponentModel.Harness.Lib
                 {
                     var postAddrLocal = il.DeclareLocal(typeof(FuncAddr));
                     il.Emit(OpCodes.Ldloc, moduleLocal);
-                    il.Emit(OpCodes.Ldstr, "cabi_post_" + fe.Name);
+                    il.Emit(OpCodes.Ldstr, "cabi_post_" + fe.WasmName);
                     il.Emit(OpCodes.Call, HarnessLoader_RequireFunctionExport);
                     il.Emit(OpCodes.Stloc, postAddrLocal);
 
