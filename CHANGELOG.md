@@ -1,5 +1,81 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Lib 0.4.0 — strings in record fields (lift)
+
+Harness emitter extends to handle string fields inside records on
+the LIFT path (records flowing wasm → host). The most common
+real-world WIT shape this unblocks: things like
+`record task { id: u32, title: string }`,
+`record greeting { message: string, count: u32 }`.
+
+**End-to-end verified on a new fixture**
+(`Spec.Test/components/fixtures/wit-harness-spike-string-record/`):
+
+```wit
+world greeter {
+    record greeting {
+        message: string,
+        count: u32,
+    }
+    export greet: func() -> greeting;
+}
+```
+
+Rust impl returns `Greeting { message: "Hello, World!", count: 42 }`.
+The emitted `GreeterHarness.Greet()` returns the typed
+`Greeting(Message="Hello, World!", Count=42)` and calls
+`cabi_post_greet` to free the retArea + the string body.
+
+### What changed
+
+- **`LiftEmit.EmitLiftPrimitive`** — adds the `CtPrim.String`
+  case: reads ptr + len (two i32s at the field's offset / offset+4)
+  + calls `StringCoding.LiftUtf8(memory, ptr, len)`. The string
+  body's lifetime stays managed by the owning record/variant's
+  `cabi_post_<name>` call at the export-method level.
+- **`WorldHarnessEmit.EmitFlatLowered`** — gate loosened: removes
+  the `!fe.NeedsPostReturn` exclusion so records / variants
+  containing strings can take the flat-lowered path. New
+  `EmitLiftReturnViaRetArea` helper centralizes the
+  "stash retArea → lift → optional cabi_post → return lifted"
+  shape that both `CtRecordType` and `CtVariantType` returns now
+  share.
+
+### Existing fixtures (regression-checked, both green)
+
+- `wit-harness-spike-hello` — `greet(string) -> string` still
+  works via the dedicated string-in-string-out path.
+- `wit-harness-spike-richer` — records + variants without strings
+  still work (NeedsPostReturn=false → cabi_post call elided).
+
+### What still throws
+
+- Strings in RECORD / VARIANT PARAMS (lower path) — the indirect
+  param lowering for pointer-content records needs a different
+  emission shape (allocate via cabi_realloc, write fields,
+  including realloc-allocating any nested string bodies, pass
+  the resulting ptr). Tracked for follow-up.
+- `list<T>` anywhere — layout primitive (8-byte ptr+len) is
+  already in CanonicalAbi, but lift IL needs to walk the element
+  array + per-element lift. Next slice of task #65.
+- `option<T>`, `result<T, E>`, `tuple<...>` as record/variant
+  payloads.
+
+Family tag: `WACS-ComponentModel-v0.11.1` → `WACS-ComponentModel-v0.12.0`
+(minor — capability shift on Harness.Lib).
+
+### What changed
+
+- **`WACS.ComponentModel.Harness.Lib` 0.3.0 → 0.4.0** (minor —
+  records-with-string lift): `LiftEmit.EmitLiftPrimitive` adds
+  `CtPrim.String` case; `WorldHarnessEmit.EmitFlatLowered` loses
+  the `!NeedsPostReturn` gate + factors the indirect-return tail
+  into `EmitLiftReturnViaRetArea`.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-string-record/`
+  — Rust + WIT + 40 KB `.component.wasm` + Generated.Validate
+  console asserting `greet() == Greeting('Hello, World!', 42)`.
+
 ## WACS.Transpiler.Lib 0.11.0 / WACS.ComponentModel 0.7.1 — harness implementation emit infrastructure
 
 Plumbing for the symmetric-engines payoff: when the transpiler is

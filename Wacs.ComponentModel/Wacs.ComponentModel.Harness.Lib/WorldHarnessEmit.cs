@@ -585,9 +585,12 @@ namespace Wacs.ComponentModel.Harness.Lib
                 return;
             }
 
-            // Generic flat-lowered case (v0.2): primitive / record-of-
+            // Generic flat-lowered case: primitive / record-of-
             // primitives params, primitive / record / variant return.
-            if (AllParamsAreFlatLowerable(fe.Spec) && !fe.NeedsPostReturn)
+            // NeedsPostReturn (string-containing returns) handled
+            // inline by EmitFlatLowered — calls cabi_post_<name>
+            // after lifting.
+            if (AllParamsAreFlatLowerable(fe.Spec))
             {
                 EmitFlatLowered(il, fe, memoryField, registry, liftMethods);
                 return;
@@ -672,30 +675,55 @@ namespace Wacs.ComponentModel.Harness.Lib
             }
             if (retDeref is CtRecordType rec)
             {
-                // The invoker returned a retArea i32 pointer; the
-                // record lives at that address. Stash the ptr, then
-                // call LiftRecord(memory, ptr).
-                var retArea = il.DeclareLocal(typeof(int));
-                il.Emit(OpCodes.Stloc, retArea);
-                il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
-                il.Emit(OpCodes.Ldloc, retArea);
-                il.Emit(OpCodes.Call, liftMethods[rec.Name]);
-                il.Emit(OpCodes.Ret);
+                EmitLiftReturnViaRetArea(il, fe, memoryField, liftMethods[rec.Name]);
                 return;
             }
             if (retDeref is CtVariantType variant)
             {
-                var retArea = il.DeclareLocal(typeof(int));
-                il.Emit(OpCodes.Stloc, retArea);
-                il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
-                il.Emit(OpCodes.Ldloc, retArea);
-                il.Emit(OpCodes.Call, liftMethods[variant.Name]);
-                il.Emit(OpCodes.Ret);
+                EmitLiftReturnViaRetArea(il, fe, memoryField, liftMethods[variant.Name]);
                 return;
             }
 
             throw new NotSupportedException(
                 $"Flat-lowered return path doesn't yet support {retDeref.GetType().Name}.");
+        }
+
+        /// <summary>
+        /// Emit the indirect-return tail: stash the retArea pointer
+        /// the invoker returned, call the lift helper, capture the
+        /// typed value, optionally call <c>cabi_post_&lt;name&gt;</c>
+        /// to free the retArea + any heap memory the lift consumed
+        /// (string bodies, list elements), then return the typed
+        /// value. Assumes the invoker's result (the int retArea
+        /// ptr) is already on the stack.
+        /// </summary>
+        private static void EmitLiftReturnViaRetArea(
+            ILGenerator il, FunctionExport fe, FieldBuilder memoryField,
+            MethodBuilder liftMethod)
+        {
+            var retArea = il.DeclareLocal(typeof(int));
+            il.Emit(OpCodes.Stloc, retArea);
+
+            // Lift the typed value first (before freeing memory it
+            // may have read from).
+            il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, memoryField);
+            il.Emit(OpCodes.Ldloc, retArea);
+            il.Emit(OpCodes.Call, liftMethod);
+
+            if (fe.NeedsPostReturn && fe.PostInvokerField != null)
+            {
+                // Stash the lifted result (records and variants are
+                // reference types — independent of the freed memory
+                // — so we can safely free the retArea now).
+                var lifted = il.DeclareLocal(liftMethod.ReturnType);
+                il.Emit(OpCodes.Stloc, lifted);
+                il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, fe.PostInvokerField);
+                il.Emit(OpCodes.Ldloc, retArea);
+                il.Emit(OpCodes.Callvirt, typeof(Action<int>).GetMethod("Invoke")!);
+                il.Emit(OpCodes.Ldloc, lifted);
+            }
+
+            il.Emit(OpCodes.Ret);
         }
 
         /// <summary>

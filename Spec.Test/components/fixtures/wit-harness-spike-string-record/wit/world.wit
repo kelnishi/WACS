@@ -1,0 +1,10 @@
+package wacs:string-record-spike;
+
+world greeter {
+    record greeting {
+        message: string,
+        count: u32,
+    }
+
+    export greet: func() -> greeting;
+}

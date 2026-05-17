@@ -30,6 +30,8 @@ namespace Wacs.ComponentModel.Harness.Lib
             typeof(MemoryHelpers).GetMethod(nameof(MemoryHelpers.ReadI32LE))!;
         private static readonly MethodInfo MemoryHelpers_ReadU8 =
             typeof(MemoryHelpers).GetMethod(nameof(MemoryHelpers.ReadU8))!;
+        private static readonly MethodInfo StringCoding_LiftUtf8 =
+            typeof(StringCoding).GetMethod(nameof(StringCoding.LiftUtf8))!;
 
         /// <summary>
         /// Walk the world's named types and emit one
@@ -206,6 +208,23 @@ namespace Wacs.ComponentModel.Harness.Lib
                     il.Emit(OpCodes.Ldarg_0);
                     EmitOffsetPush(il, offset);
                     il.Emit(OpCodes.Call, MemoryHelpers_ReadI32LE);
+                    return;
+                case CtPrim.String:
+                    // Strings are stored as (ptr, len) — two i32s at
+                    // 4-byte alignment. Read both, then decode UTF-8
+                    // via StringCoding.LiftUtf8(memory, ptr, len).
+                    // The string body's lifetime is managed by the
+                    // owning record/variant's cabi_post_<name> call
+                    // at the export-method level (NeedsPostReturn=true
+                    // when the return transitively contains strings).
+                    il.Emit(OpCodes.Ldarg_0);           // memory (for LiftUtf8 — pushed first)
+                    il.Emit(OpCodes.Ldarg_0);           // memory (for ReadI32LE ptr)
+                    EmitOffsetPush(il, offset);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadI32LE); // → ptr on stack
+                    il.Emit(OpCodes.Ldarg_0);           // memory (for ReadI32LE len)
+                    EmitOffsetPush(il, offset + 4);
+                    il.Emit(OpCodes.Call, MemoryHelpers_ReadI32LE); // → len on stack
+                    il.Emit(OpCodes.Call, StringCoding_LiftUtf8);   // (memory, ptr, len) → string
                     return;
                 default:
                     throw new NotSupportedException(
