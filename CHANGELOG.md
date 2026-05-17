@@ -1,5 +1,79 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Lib 0.5.0 — `list<T>` lift in record fields
+
+Harness emitter extends to handle `list<T>` fields inside records
+on the LIFT path. Unblocks WIT shapes like
+`record bag { values: list<u32>, count: u32 }`,
+`record event-log { entries: list<string> }`,
+`record query-result { rows: list<row> }`.
+
+**End-to-end verified on a new fixture**
+(`Spec.Test/components/fixtures/wit-harness-spike-list-record/`):
+
+```wit
+world numbers {
+    record bag {
+        values: list<u32>,
+        count: u32,
+    }
+    export get-bag: func() -> bag;
+}
+```
+
+Rust impl returns `Bag { values: vec![10, 20, 30, 40, 50], count: 5 }`.
+Emitted `NumbersHarness.GetBag()` returns
+`Bag(Values=[10,20,30,40,50], Count=5)` and calls `cabi_post_get-bag`
+to free the retArea + element-array body.
+
+### What changed
+
+- **`CanonicalAbi`** — adds `CtListType` layout (8 bytes, 4-align,
+  matching the (ptr, count) pair shape).
+- **`WitTypeEmit.MapClrType`** — maps `list<T>` to `T[]` (chose
+  arrays over `IReadOnlyList<T>` so the lift loop can use
+  `newarr` + `stelem` without an extra wrapper).
+- **`LiftEmit.EmitLiftField`** — adds `CtListType` case
+  delegating to new `EmitLiftList`.
+- **`LiftEmit.EmitLiftList`** — reads ptr + count from the field
+  offset, allocates a `T[]` of length count, loops `0..count`
+  lifting each element from `(listPtr + i * elemSize)`.
+- **`LiftEmit.EmitLiftElementAt`** — element-level lift
+  parameterized over a runtime (listPtr, indexLocal) pair rather
+  than the static (arg.1, offset) pair the field-level lift uses.
+  Covers primitive / string / record / variant element types.
+- **`LiftEmit.EmitStelem`** — picks the right `Stelem_*` opcode
+  for primitive widths + falls back to `Stelem` for reference /
+  struct elements.
+
+### What still throws (next slices of #65)
+
+- Lists as direct return / param values (not nested inside a
+  record). Same lift logic applies — needs `CtListType` handling
+  in `BuildFunctionExport`'s return-type branch + an outer
+  list-lift helper.
+- Lists in variant payloads. Same `EmitLiftField` extension,
+  just needs the variant payload case to call into it.
+- Strings + lists in record/variant PARAMS (lower path). The
+  indirect-ptr emission is a bigger structural change — defer.
+- Nested lists (`list<list<T>>`). The recursive shape probably
+  works but isn't exercised by current fixtures.
+
+Family tag: `WACS-ComponentModel-v0.12.0` → `WACS-ComponentModel-v0.13.0`
+(minor — capability shift on Harness.Lib).
+
+### What changed
+
+- **`WACS.ComponentModel.Harness.Lib` 0.4.0 → 0.5.0** (minor —
+  list lift in record fields): `CanonicalAbi.cs` adds list layout;
+  `WitTypeEmit.cs` adds list CLR mapping;
+  `LiftEmit.cs` adds `EmitLiftList` + `EmitLiftElementAt` +
+  `EmitStelem` helpers.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-list-record/`
+  — Rust + WIT + built `.component.wasm` + Generated.Validate
+  asserting `get-bag() == Bag([10,20,30,40,50], 5)`.
+
 ## WACS.ComponentModel.Harness.Lib 0.4.0 — strings in record fields (lift)
 
 Harness emitter extends to handle string fields inside records on

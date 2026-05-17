@@ -1,0 +1,10 @@
+package wacs:list-record-spike;
+
+world numbers {
+    record bag {
+        values: list<u32>,
+        count: u32,
+    }
+
+    export get-bag: func() -> bag;
+}

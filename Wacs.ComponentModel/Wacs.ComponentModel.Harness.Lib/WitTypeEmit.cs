@@ -268,6 +268,16 @@ namespace Wacs.ComponentModel.Harness.Lib
                     throw new NotSupportedException(
                         $"Anonymous variant types not supported in v0.2 ({context}).");
 
+                case CtListType list:
+                    // list<T> exposes as T[] — most direct CLR shape
+                    // for the canonical-ABI "contiguous array of
+                    // element-typed slots" model. IReadOnlyList<T>
+                    // would carry better immutability semantics but
+                    // arrays let the lift emit a single newarr +
+                    // stelem loop without an extra wrapper.
+                    var elem = MapClrType(list.Element, registry, $"{context} list element");
+                    return elem.MakeArrayType();
+
                 default:
                     throw new NotSupportedException(
                         $"Harness emitter v0.2 does not yet support {deref.GetType().Name} ({context}).");

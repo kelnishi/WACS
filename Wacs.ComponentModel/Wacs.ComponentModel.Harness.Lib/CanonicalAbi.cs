@@ -50,6 +50,13 @@ namespace Wacs.ComponentModel.Harness.Lib
                         _ => throw new NotSupportedException($"Unhandled primitive {prim.Kind}."),
                     };
 
+                case CtListType:
+                    // list<T> in memory is (ptr, count) — two i32s.
+                    // The element array's body lives at ptr; size +
+                    // alignment of the list-typed field itself is
+                    // the ptr+count pair, independent of T's size.
+                    return (8, 4);
+
                 case CtRecordType rec:
                     return LayoutRecord(rec);
 
