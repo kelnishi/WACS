@@ -29,8 +29,8 @@
          library); the tool command users type is still `wacs`. -->
     <PackageId>WACS.Cli</PackageId>
     <Title>WACS CLI</Title>
-    <Version>1.8.1</Version>
-    <AssemblyVersion>1.8.1</AssemblyVersion>
+    <Version>1.9.0</Version>
+    <AssemblyVersion>1.9.0</AssemblyVersion>
     <FileVersion>1.4.1</FileVersion>
     <Description>WACS unified WebAssembly toolchain: run, build, aot, inspect, bindgen. v1.3 picks up WACS.Transpiler.Lib v0.7's PersistedAssemblyBuilder migration + RVA-mapped data segments, so `wacs build` produces ~11% smaller .dlls and the new EmissionTarget.Auto default cuts cold start by ~50% on the common module shapes. The `wacs aot` verb produces self-contained NativeAOT native binaries from a wasm input in one shot, with --wasi / --wasip2 baking in WASI Preview 1 / Preview 2 hosts. Supersedes wasm-transpile (WACS.Transpiler).</Description>
     <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
@@ -69,6 +69,9 @@
          WACS.ComponentModel.Bindgen tool (`wit-bindgen-wacs`) is
          deprecated in favor of this verb. -->
     <ProjectReference Include="..\..\Wacs.ComponentModel\Wacs.ComponentModel.Bindgen.Lib\Wacs.ComponentModel.Bindgen.Lib.csproj" />
+    <!-- Powers the `wacs harness` verb — emit a typed WIT-harness
+         .dll from a WIT directory, AOT- / IL2CPP-clean consumption. -->
+    <ProjectReference Include="..\..\Wacs.ComponentModel\Wacs.ComponentModel.Harness.Lib\Wacs.ComponentModel.Harness.Lib.csproj" />
     <!-- Compile-referenced so RunHandler can construct the typed
          WasiPreview2RuntimeScope (which owns the DI scope that
          pre-binds every *Bindings.BindToRuntime against the

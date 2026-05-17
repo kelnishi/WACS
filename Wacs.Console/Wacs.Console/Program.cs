@@ -99,7 +99,7 @@ namespace Wacs.Console
 
             var parsed = parser.ParseArguments<
                 RunOptions, BuildOptions, AotOptions, InspectOptions,
-                BindgenOptions, Wast2JsonOptions>(verbArgs);
+                BindgenOptions, HarnessOptions, Wast2JsonOptions>(verbArgs);
 
             return parsed.MapResult(
                 (RunOptions o) =>
@@ -111,6 +111,7 @@ namespace Wacs.Console
                 (AotOptions o) => AotHandler.Execute(o),
                 (InspectOptions o) => InspectHandler.Execute(o),
                 (BindgenOptions o) => BindgenHandler.Execute(o),
+                (HarnessOptions o) => HarnessHandler.Execute(o),
                 (Wast2JsonOptions o) => Wast2JsonHandler.Execute(o),
                 _ => 1);
         }

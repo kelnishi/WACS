@@ -1,5 +1,50 @@
 # Changelog
 
+## WACS.Cli 1.9.0 — `wacs harness` verb
+
+New CLI verb:
+
+```
+wacs harness <wit-dir> -o <out.dll>
+       [--namespace <ns>]
+       [--assembly-name <name>]
+```
+
+Thin wrapper over `HarnessEmitter.EmitToFile` — takes a directory
+of `.wit` files (recurses into `deps/` per the existing
+`WitLoader.LoadDirectoryTree` convention) and emits a typed
+harness `.dll` consumers can reference directly. Defaults:
+namespace `Wacs.ComponentModel.Harness.Generated`, assembly name
+derived from the world's PascalCase + `"Harness"`.
+
+The in-memory side of the same emit core (the
+`HarnessEmitter.EmitInMemory` shape) lights up future
+`wacs run --wit-dir` / `wacs transpile --wit-dir` flows — deferred
+to a separate slice, since they need design beyond the verb shape
+(what does "run" mean for a pure-export component? validate then
+invoke a named export? both?). The persisted verb is the
+high-value piece for the v0 distribution flow regardless.
+
+Drive-tested against both spike fixtures:
+- `wacs harness hello-spike/wit -o /tmp/hello.harness.dll` →
+  3.5 KB `.dll` carrying `HelloHarness` with `LoadFrom` + `Greet`.
+- `wacs harness richer-spike/wit -o /tmp/richer.harness.dll` →
+  4 KB `.dll` carrying `RicherHarness` + `Vec2` + `Outcome` +
+  `Outcome.Success` / `Outcome.Invalid` + `LoadFrom` + `Add` +
+  `NormalizeOrFail`.
+
+The persisted .dll uses the same `PersistedAssemblyBuilder` pass
+as the in-memory path the `Generated.Validate` consoles exercise;
+both surfaces share one emit core, so functional equivalence
+follows from the in-memory tests.
+
+### What changed
+
+- **`WACS.Cli` 1.8.1 → 1.9.0** (minor — new verb): adds
+  `Verbs/HarnessOptions.cs` + `Verbs/HarnessHandler.cs`, wires
+  into `Program.cs`'s ParseArguments+MapResult. Project reference
+  added to `Wacs.ComponentModel.Harness.Lib`.
+
 ## WACS.ComponentModel.Harness.Lib 0.2.0 / WACS.ComponentModel.Harness.Runtime 0.3.0 — records + variants
 
 Harness emitter expands to handle WIT records + variants
