@@ -15,8 +15,8 @@
         <!-- Package identity -->
         <PackageId>WACS.Transpiler.Lib</PackageId>
         <Title>WACS Transpiler (Library)</Title>
-        <Version>0.12.0</Version>
-        <AssemblyVersion>0.12.0</AssemblyVersion>
+        <Version>0.13.0</Version>
+        <AssemblyVersion>0.13.0</AssemblyVersion>
         <Authors>Kelvin Nishikawa</Authors>
         <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
         <Description>Library API for WACS.Transpiler — programmatic ahead-of-time WebAssembly-to-.NET IL transpilation, plus seamless loading of saved transpiled assemblies. v0.7.2 fixes a re-instantiation bug where Module classes with active data segments would come up zeroed on the second `Activator.CreateInstance` because spec §4.5.4 segment-drop emptied the process-wide ModuleInit registry. Module ctors now restore from `ModuleInitData.SavedDataSegments` before each CopyDataSegment so every fresh instance sees its memory initialized. v0.7 retires Lokad.ILPack for PersistedAssemblyBuilder (.NET 9), moves WASM data segments + the codec blob to RVA-mapped initialized data (62.5% smaller than the prior base64-in-#US path, true zero-copy from PE pages to ModuleInitData via UnmanagedMemoryStream), and introduces EmissionTarget.Auto as the new default — promotes to AotLinked when the module fits a conservative envelope (compute / memory / globals / tables + active+passive segments / multi-memory / local tags / imported functions), falling back to Standard otherwise. ~50% first-trial cold-start cut on promoted modules. ImportDispatcher now throws on missing handlers by default (lenient: true opts out). v0.6 consumed the Branch Hinting proposal's metadata.code.branch_hint custom section. v0.5 added the AotLinked emission target, stable AssemblyName, and the [WacsTranspiledImports] / [WacsImportNames] emission used by WACS.HostBindings.SourceGen.</Description>

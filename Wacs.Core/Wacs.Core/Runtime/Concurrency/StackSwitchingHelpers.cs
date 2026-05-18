@@ -14,6 +14,7 @@
 
 using System;
 using System.Collections.Generic;
+using Wacs.Core.Instructions;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
@@ -50,6 +51,22 @@ namespace Wacs.Core.Runtime.Concurrency
             if (exec == null)
                 throw new NotSupportedException(NoHostContextMessage);
             return exec;
+        }
+
+        // Convert the transpiler-passed handler-tag indices to
+        // StackSwitchHandler[] for ResumeHandlerFrame storage.
+        // Label is a dummy zero — transpiler-installed frames
+        // use HandlerTargets=null and the CIL catch arm owns the
+        // dispatch label.
+        private static StackSwitchHandler[] TagsToHandlers(int[] tagIdxs)
+        {
+            var arr = new StackSwitchHandler[tagIdxs.Length];
+            for (int i = 0; i < tagIdxs.Length; i++)
+                arr[i] = new StackSwitchHandler(
+                    (TagIdx)(uint)tagIdxs[i],
+                    (LabelIdx)(uint)0,
+                    onSwitch: false);
+            return arr;
         }
 
         /// <summary>
@@ -128,6 +145,286 @@ namespace Wacs.Core.Runtime.Concurrency
             for (int i = 0; i < payload.Length; i++)
                 stack.Push(payload[i]);
             throw new SuspensionException(tagAddr, stack);
+        }
+
+        /// <summary>
+        /// <c>resume $ct handler*</c>: install the handlers as a
+        /// transpiler-installed frame, invoke the continuation's
+        /// inner function via the runtime, and on normal return
+        /// pop the function's <c>t2*</c> results.
+        ///
+        /// <para>A <c>SuspensionException</c> raised during
+        /// invocation is intercepted by
+        /// <see cref="SuspensionDispatcher"/>; if the suspend's
+        /// tag matches one of <paramref name="handlers"/>, the
+        /// dispatcher unwinds the call stack to this resume's
+        /// install depth, pops the handler frame, marks the cont
+        /// Completed, and returns false — letting the CLR
+        /// propagate the exception up to the caller's emitted
+        /// try/catch where the actual branch to the wasm handler
+        /// label is performed.</para>
+        /// </summary>
+        public static Value[] Resume(
+            ExecContext? exec, int typeIdx,
+            Value[] args, Value contRef,
+            int[] handlerTagIdxs)
+        {
+            var handlers = TagsToHandlers(handlerTagIdxs);
+            var ctx = RequireExec(exec);
+            if (contRef.IsNullRef)
+                throw new TrapException("resume: null continuation reference.");
+            var cont = contRef.GcRef as ContInstance
+                       ?? throw new TrapException(
+                           "resume: ref does not point to a continuation.");
+            if (cont.State != ContState.Fresh)
+                throw new TrapException(
+                    $"resume: continuation is not resumable (state {cont.State}).");
+
+            // Push BoundArgs from any prior cont.bind, then the
+            // caller-supplied args in order — the inner function
+            // pops them as its parameters.
+            foreach (var bound in cont.BoundArgs)
+                ctx.OpStack.PushValue(bound);
+            for (int i = 0; i < args.Length; i++)
+                ctx.OpStack.PushValue(args[i]);
+
+            if (!ctx.Store.Contains(cont.Function))
+                throw new TrapException(
+                    $"resume: function address {cont.Function} is not in the store.");
+            var funcInst = ctx.Store[cont.Function];
+            var ft = (funcInst.Type as FunctionType)
+                     ?? throw new TrapException(
+                         "resume: continuation inner func is not a FunctionType.");
+
+            // HandlerTargets=null marks the frame as transpiler-
+            // installed; SuspensionDispatcher.TryHandle will
+            // unwind + return false rather than dispatch.
+            var frame = new ResumeHandlerFrame(
+                handlers, handlerTargets: null,
+                installFrameDepth: ctx.StackHeight + 1,
+                cont: cont);
+            ctx.ActiveResumeHandlers.Push(frame);
+            cont.State = ContState.Running;
+            try
+            {
+                ctx.InvokeResolved(funcInst);
+            }
+            catch
+            {
+                if (ctx.ActiveResumeHandlers.Count > 0
+                    && ReferenceEquals(ctx.ActiveResumeHandlers.Peek(), frame))
+                    ctx.ActiveResumeHandlers.Pop();
+                cont.State = ContState.Completed;
+                throw;
+            }
+
+            cont.State = ContState.Completed;
+            if (ctx.ActiveResumeHandlers.Count > 0
+                && ReferenceEquals(ctx.ActiveResumeHandlers.Peek(), frame))
+                ctx.ActiveResumeHandlers.Pop();
+
+            // Pop t2* results from the opstack.
+            int rArity = ft.ResultType.Arity;
+            var results = new Value[rArity];
+            for (int i = rArity - 1; i >= 0; i--)
+                results[i] = ctx.OpStack.PopAny();
+            return results;
+        }
+
+        /// <summary>
+        /// <c>resume_throw $ct $tag handler*</c>: allocate an
+        /// exception from the tag + payload values, install
+        /// handlers as transpiler-installed, invoke the cont's
+        /// function, and inject the exception at function entry
+        /// via <c>InstThrowRef.ExecuteInstruction</c>. The exception
+        /// unwinds the cont's frame and continues up through the
+        /// caller's enclosing try chain.
+        /// </summary>
+        public static Value[] ResumeThrow(
+            ExecContext? exec, int typeIdx, int tagIdxValue,
+            Value[] excArgs, Value contRef,
+            int[] handlerTagIdxs)
+        {
+            var handlers = TagsToHandlers(handlerTagIdxs);
+            var ctx = RequireExec(exec);
+            if (contRef.IsNullRef)
+                throw new TrapException("resume_throw: null continuation reference.");
+            var cont = contRef.GcRef as ContInstance
+                       ?? throw new TrapException(
+                           "resume_throw: ref does not point to a continuation.");
+            if (cont.State != ContState.Fresh)
+                throw new TrapException(
+                    $"resume_throw: continuation is not resumable (state {cont.State}).");
+
+            var tagIdx = (TagIdx)(uint)tagIdxValue;
+            if (!ctx.Frame.Module.TagAddrs.Contains(tagIdx))
+                throw new TrapException(
+                    $"resume_throw: tag {tagIdx} not addressable in this frame's module.");
+            var tagAddr = ctx.Frame.Module.TagAddrs[tagIdx];
+
+            // Allocate the exn from the payload values.
+            var fields = new Stack<Value>();
+            for (int i = 0; i < excArgs.Length; i++)
+                fields.Push(excArgs[i]);
+            var exnAddr = ctx.Store.AllocateExn(tagAddr, fields);
+            var exn = ctx.Store[exnAddr];
+
+            foreach (var bound in cont.BoundArgs)
+                ctx.OpStack.PushValue(bound);
+
+            if (!ctx.Store.Contains(cont.Function))
+                throw new TrapException(
+                    $"resume_throw: function address {cont.Function} is not in the store.");
+            var funcInst = ctx.Store[cont.Function];
+
+            var frame = new ResumeHandlerFrame(
+                handlers, handlerTargets: null,
+                installFrameDepth: ctx.StackHeight + 1,
+                cont: cont);
+            ctx.ActiveResumeHandlers.Push(frame);
+            cont.State = ContState.Running;
+            try
+            {
+                ctx.InvokeResolved(funcInst);
+            }
+            catch
+            {
+                if (ctx.ActiveResumeHandlers.Count > 0
+                    && ReferenceEquals(ctx.ActiveResumeHandlers.Peek(), frame))
+                    ctx.ActiveResumeHandlers.Pop();
+                cont.State = ContState.Completed;
+                throw;
+            }
+
+            // Inject the exception inside the cont's frame and
+            // run throw_ref's unwind. This always either
+            // propagates the WasmException (caught upstream by a
+            // try_table or surfacing as Unhandled) or hits a
+            // catch — never returns normally on this path.
+            ctx.OpStack.PushValue(new Value(ValType.Exn, exn));
+            InstThrowRef.ExecuteInstruction(ctx);
+            // Unreachable: ExecuteInstruction either branches to
+            // a catch (control transferred) or throws.
+            return Array.Empty<Value>();
+        }
+
+        /// <summary>
+        /// Catch-arm helper: scan a SuspensionException's tag
+        /// against the resume's tag-index list. Returns the
+        /// matching handler index or -1 if none — the emitted CIL
+        /// switches on the result, dispatching to the per-handler
+        /// label or rethrowing.
+        /// </summary>
+        public static int FindHandlerMatch(
+            ExecContext? exec, int[] handlerTagIdxs, SuspensionException ex)
+        {
+            var ctx = RequireExec(exec);
+            for (int i = 0; i < handlerTagIdxs.Length; i++)
+            {
+                var ti = (TagIdx)(uint)handlerTagIdxs[i];
+                if (!ctx.Frame.Module.TagAddrs.Contains(ti)) continue;
+                var ta = ctx.Frame.Module.TagAddrs[ti];
+                if (ta.Equals(ex.Tag)) return i;
+            }
+            return -1;
+        }
+
+        /// <summary>
+        /// Catch-arm helper: allocate the one-shot reified
+        /// continuation placeholder and return it together with
+        /// the suspend's payload values. The returned array's
+        /// layout is <c>[payload0, payload1, …, reifiedCont]</c>
+        /// — the emitted CIL unbox-fans the payload values to
+        /// the CIL stack per tag's param types and pushes the
+        /// reified cont as the trailing slot.
+        /// </summary>
+        public static Value[] ReifyHandlerArgs(
+            ExecContext? exec, Value contRef, SuspensionException ex)
+        {
+            var ctx = RequireExec(exec);
+            var cont = contRef.GcRef as ContInstance
+                       ?? throw new TrapException(
+                           "reify: ref does not point to a continuation.");
+            var dead = ctx.Store.AllocateContinuation(
+                cont.ContTypeIndex, cont.Function);
+            dead.State = ContState.Completed;
+
+            // Payload was pushed onto SuspensionException's Stack
+            // in source order; popping gives reverse order. Build
+            // the array in source order (matching what the wasm
+            // handler label expects to arrive in).
+            int n = ex.Payload.Count;
+            var arr = new Value[n + 1];
+            // Snapshot to an array since we mutate the stack.
+            var snapshot = ex.Payload.ToArray();
+            // Stack.ToArray() returns top-first, but the source
+            // order for a handler arrival is bottom-first — reverse.
+            for (int i = 0; i < n; i++)
+                arr[i] = snapshot[n - 1 - i];
+            arr[n] = new Value(ValType.ContRefNN, dead);
+            return arr;
+        }
+
+        /// <summary>
+        /// <c>switch $ct $tag</c>: symmetric switch. Pop the
+        /// target continuation, reify the current computation as
+        /// a one-shot Completed placeholder, push args + the
+        /// placeholder onto the opstack, invoke the target's
+        /// function via the runtime. Switch does NOT install a
+        /// new handler frame; suspends inside the switched-to
+        /// cont continue up through whatever handler chain is
+        /// already in scope.
+        /// </summary>
+        public static Value[] Switch(
+            ExecContext? exec, int typeIdx, int tagIdxValue,
+            Value[] args, Value contRef)
+        {
+            var ctx = RequireExec(exec);
+            if (contRef.IsNullRef)
+                throw new TrapException("switch: null continuation reference.");
+            var target = contRef.GcRef as ContInstance
+                         ?? throw new TrapException(
+                             "switch: ref does not point to a continuation.");
+            if (target.State != ContState.Fresh)
+                throw new TrapException(
+                    $"switch: continuation is not resumable (state {target.State}).");
+
+            // One-shot reified self.
+            var placeholder = ctx.Store.AllocateContinuation(
+                target.ContTypeIndex, target.Function);
+            placeholder.State = ContState.Completed;
+
+            foreach (var bound in target.BoundArgs)
+                ctx.OpStack.PushValue(bound);
+            for (int i = 0; i < args.Length; i++)
+                ctx.OpStack.PushValue(args[i]);
+            ctx.OpStack.PushValue(new Value(ValType.ContRefNN, placeholder));
+
+            if (!ctx.Store.Contains(target.Function))
+                throw new TrapException(
+                    $"switch: function address {target.Function} is not in the store.");
+            var funcInst = ctx.Store[target.Function];
+            var ft = (funcInst.Type as FunctionType)
+                     ?? throw new TrapException(
+                         "switch: continuation inner func is not a FunctionType.");
+
+            target.State = ContState.Running;
+            try
+            {
+                ctx.InvokeResolved(funcInst);
+            }
+            catch
+            {
+                target.State = ContState.Completed;
+                throw;
+            }
+            target.State = ContState.Completed;
+
+            int rArity = ft.ResultType.Arity;
+            var results = new Value[rArity];
+            for (int i = rArity - 1; i >= 0; i--)
+                results[i] = ctx.OpStack.PopAny();
+            return results;
         }
     }
 }

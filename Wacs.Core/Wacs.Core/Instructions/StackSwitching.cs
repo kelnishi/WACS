@@ -759,11 +759,18 @@ namespace Wacs.Core.Instructions
 
             // One-shot semantics: the suspended continuation
             // cannot be re-resumed in this build. Mark the
-            // ContInstance Completed and present a fresh
-            // already-Completed ContInstance to the handler so
-            // its type-shape is satisfied; the handler can detect
-            // the dead cont via its State field.
+            // ContInstance Completed.
             matched.Continuation.State = ContState.Completed;
+
+            // Transpiler-installed frame: the matching dispatch
+            // lives in the emitted CIL's catch arm, not here. We
+            // unwound the call stack and consumed the handler
+            // frame; signal "not handled" so the CLR propagates
+            // SuspensionException up to the transpiled caller.
+            if (matched.IsTranspilerInstalled)
+                return false;
+
+            // Interpreter-installed frame: dispatch inline.
             var deadCont = context.Store.AllocateContinuation(
                 matched.Continuation.ContTypeIndex,
                 matched.Continuation.Function);
@@ -776,7 +783,7 @@ namespace Wacs.Core.Instructions
             context.OpStack.PushValue(new Value(ValType.ContRefNN, deadCont));
 
             // Branch to the precomputed handler label.
-            InstBranch.ExecuteInstruction(context, matched.HandlerTargets[matchedHandlerIdx]);
+            InstBranch.ExecuteInstruction(context, matched.HandlerTargets![matchedHandlerIdx]);
             return true;
         }
     }

@@ -428,15 +428,17 @@ namespace Wacs.Transpiler.AOT
 
             var op = inst.Op.x00;
 
-            // Stack Switching opcodes that the transpiler emits
-            // (cont.new / cont.bind / suspend). Resume / resume_throw
-            // / switch fall through to the HasEmitter false path
-            // and route the enclosing function to interpreter
-            // fallback.
+            // Stack Switching opcodes. All six emit CIL —
+            // resume / resume_throw wrap their helper calls in a
+            // try/catch + tag-dispatch arm that branches to
+            // enclosing wasm handler labels via the block stack.
             if (StackSwitchingEmitter.CanEmit(op))
             {
                 TrackStackSwitchingStackEffect(inst, before: true);
-                StackSwitchingEmitter.Emit(il, inst, _moduleInst);
+                StackSwitchingEmitter.Emit(il, inst, _moduleInst,
+                    _blockStack,
+                    inc => _tryDepth += inc,
+                    dec => _tryDepth -= dec);
                 TrackStackSwitchingStackEffect(inst, before: false);
                 // suspend never returns normally — mark unreachable.
                 if (op == WasmOpCode.Suspend)
@@ -1739,6 +1741,47 @@ namespace Wacs.Transpiler.AOT
         }
 
         /// <summary>Track 0xFC prefix (extension) instruction stack effects.</summary>
+        private FunctionType ResolveContInnerFt(int typeIdx)
+        {
+            var def = _moduleInst.Types[(TypeIdx)typeIdx];
+            if (def.Expansion is Wacs.Core.Types.ContType ct
+                && _moduleInst.Types[ct.FuncTypeRef.Index()].Expansion is FunctionType ftInner)
+                return ftInner;
+            if (def.Expansion is FunctionType ft) return ft;
+            throw new TranspilerException(
+                $"Type {typeIdx} does not resolve to a function type.");
+        }
+
+        private int ResolveTagParamCount(int tagIdx)
+        {
+            int imported = 0;
+            foreach (var imp in _moduleInst.Repr.Imports)
+                if (imp.Desc is Wacs.Core.Module.ImportDesc.TagDesc) imported++;
+            FunctionType? ft;
+            if (tagIdx < imported)
+            {
+                int seen = 0; ft = null;
+                foreach (var imp in _moduleInst.Repr.Imports)
+                {
+                    if (imp.Desc is Wacs.Core.Module.ImportDesc.TagDesc td)
+                    {
+                        if (seen == tagIdx)
+                        {
+                            ft = _moduleInst.Types[td.TagDef.TypeIndex].Expansion as FunctionType;
+                            break;
+                        }
+                        seen++;
+                    }
+                }
+            }
+            else
+            {
+                var tag = _moduleInst.Repr.Tags[tagIdx - imported];
+                ft = _moduleInst.Types[tag.TypeIndex].Expansion as FunctionType;
+            }
+            return ft?.ParameterTypes.Arity ?? 0;
+        }
+
         private void TrackStackSwitchingStackEffect(InstructionBase inst, bool before)
         {
             switch (inst)
@@ -1766,6 +1809,59 @@ namespace Wacs.Transpiler.AOT
                     else
                     {
                         _cilValidator.Push(typeof(Value));
+                    }
+                    break;
+                }
+                case InstResume re:
+                {
+                    // [t1*, cont:Value] -> [t2*] on normal exit.
+                    var contFt = ResolveContInnerFt(re.TypeIndex);
+                    if (before)
+                    {
+                        _cilValidator.Pop(typeof(Value), "resume cont");
+                        _cilValidator.Pop(contFt.ParameterTypes.Arity, "resume args");
+                    }
+                    else
+                    {
+                        for (int i = 0; i < contFt.ResultType.Arity; i++)
+                            _cilValidator.Push(typeof(int));
+                    }
+                    break;
+                }
+                case InstResumeThrow rt:
+                {
+                    // [t*, cont:Value] -> [t2*] (mostly unreachable
+                    // — the throw injection unwinds, but validator
+                    // needs height tracking for code following).
+                    var contFt = ResolveContInnerFt(rt.TypeIndex);
+                    var excTagParams = ResolveTagParamCount(rt.TagIndex);
+                    if (before)
+                    {
+                        _cilValidator.Pop(typeof(Value), "resume_throw cont");
+                        _cilValidator.Pop(excTagParams, "resume_throw args");
+                    }
+                    else
+                    {
+                        for (int i = 0; i < contFt.ResultType.Arity; i++)
+                            _cilValidator.Push(typeof(int));
+                    }
+                    break;
+                }
+                case InstSwitch sw:
+                {
+                    // [t1*, cont:Value] -> [t2*]; t1* = tag.params - 1.
+                    int t1 = ResolveTagParamCount(sw.TagIndex) - 1;
+                    if (t1 < 0) t1 = 0;
+                    var contFt = ResolveContInnerFt(sw.TypeIndex);
+                    if (before)
+                    {
+                        _cilValidator.Pop(typeof(Value), "switch cont");
+                        _cilValidator.Pop(t1, "switch args");
+                    }
+                    else
+                    {
+                        for (int i = 0; i < contFt.ResultType.Arity; i++)
+                            _cilValidator.Push(typeof(int));
                     }
                     break;
                 }

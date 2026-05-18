@@ -32,13 +32,29 @@ namespace Wacs.Core.Runtime.Concurrency
     public sealed class ResumeHandlerFrame
     {
         public readonly StackSwitchHandler[] Handlers;
-        public readonly BlockTarget?[] HandlerTargets;
+
+        /// <summary>
+        /// Per-handler precomputed wasm-side branch target. Null
+        /// entries (or a null array) mark the frame as
+        /// transpiler-installed: the matching dispatch lives in
+        /// the emitted CIL's try/catch arm, not in the interpreter,
+        /// so <see cref="SuspensionDispatcher"/> unwinds to the
+        /// install frame and lets the exception propagate up
+        /// rather than executing an interpreter branch.
+        /// </summary>
+        public readonly BlockTarget?[]? HandlerTargets;
         public readonly int InstallFrameDepth;
         public readonly ContInstance Continuation;
 
+        /// <summary>
+        /// True when this frame was installed from emitted
+        /// transpiler IL — the surrounding CIL owns the dispatch.
+        /// </summary>
+        public bool IsTranspilerInstalled => HandlerTargets is null;
+
         public ResumeHandlerFrame(
             StackSwitchHandler[] handlers,
-            BlockTarget?[] handlerTargets,
+            BlockTarget?[]? handlerTargets,
             int installFrameDepth,
             ContInstance cont)
         {

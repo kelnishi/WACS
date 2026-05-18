@@ -66,8 +66,8 @@ namespace Wacs.Transpiler.Test
                   (func (export ""go"") (result i32)
                     (resume $ct (cont.new $ct (ref.func $produce)))))";
             var (poly, aot, fallbacks) = RunBoth(src, "go");
-            Assert.True(fallbacks > 0,
-                "expected cont.* function to fall back to interpreter");
+            // All six cont.* opcodes now emit CIL.
+            Assert.Equal(0, fallbacks);
             Assert.Equal(poly.Data.Int32, aot.Data.Int32);
             Assert.Equal(7, aot.Data.Int32);
         }
@@ -91,7 +91,7 @@ namespace Wacs.Transpiler.Test
                       return)
                     drop))";
             var (poly, aot, fallbacks) = RunBoth(src, "go");
-            Assert.True(fallbacks > 0);
+            Assert.Equal(0, fallbacks);
             Assert.Equal(poly.Data.Int32, aot.Data.Int32);
             Assert.Equal(42, aot.Data.Int32);
         }
@@ -115,7 +115,7 @@ namespace Wacs.Transpiler.Test
                       i32.const 0
                       return)))";
             var (poly, aot, fallbacks) = RunBoth(src, "go");
-            Assert.True(fallbacks > 0);
+            Assert.Equal(0, fallbacks);
             Assert.Equal(poly.Data.Int32, aot.Data.Int32);
             Assert.Equal(77, aot.Data.Int32);
         }
@@ -184,7 +184,7 @@ namespace Wacs.Transpiler.Test
                       return)
                     drop))";
             var (poly, aot, fallbacks) = RunBoth(src, "go");
-            Assert.True(fallbacks > 0);
+            Assert.Equal(0, fallbacks);
             Assert.Equal(poly.Data.Int32, aot.Data.Int32);
             Assert.Equal(33, aot.Data.Int32);
         }

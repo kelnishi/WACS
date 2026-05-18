@@ -1,5 +1,76 @@
 # Changelog
 
+## WACS 0.21.0 / WACS.Transpiler.Lib 0.13.0 — Stack Switching CIL emit (all 6 opcodes)
+
+Closes the remaining three transpiler emitters: `resume`,
+`resume_throw`, and `switch` now produce CIL that mirrors the
+interpreter's runtime behavior. Every cont.* opcode emits real
+IL — no function containing them falls back to interpreter
+execution anymore (in mixed mode). Standalone mode remains
+gated on a separate self-contained continuation runtime.
+
+### `switch`
+
+Straight-line: pack t1* args + cont into the helper call,
+unpack the target cont's t2* results on normal completion.
+No new handler frame installed — suspends inherit the
+caller's chain.
+
+### `resume` / `resume_throw`
+
+Wraps the helper call in a CIL try/catch +
+tag-dispatch arm, modeled on `ExceptionEmitter.EmitTryTable`:
+
+1. Save t1* args + cont to typed locals; pack t1* into
+   `Value[]`; build a parallel `int[]` of handler tag indices.
+2. `BeginExceptionBlock`; call helper which installs the
+   handler frame as transpiler-installed
+   (`HandlerTargets=null`) and invokes the cont's function.
+3. Store normal-completion results.
+4. `BeginCatchBlock(SuspensionException)`: call
+   `FindHandlerMatch` to identify the matched handler index
+   (or -1). Per-handler compare-and-`Leave` chain → dispatch
+   labels; `Rethrow` if no match.
+5. `EndExceptionBlock`; `Br endLabel` to bypass dispatch.
+6. Per-handler dispatch label: call `ReifyHandlerArgs` to
+   build the payload + one-shot reified-cont array; unbox
+   payload values onto the CIL stack typed per the handler's
+   tag params; push the reified cont; `Br` to the wasm
+   enclosing handler label via `ControlEmitter.PeekLabel`.
+7. `endLabel`: unpack normal-completion results from the
+   helper's `Value[]` to typed CIL stack values.
+
+### Dispatcher: transpiler-installed frames
+
+`ResumeHandlerFrame.IsTranspilerInstalled` (= `HandlerTargets is null`)
+distinguishes the two installation paths.
+`SuspensionDispatcher.TryHandle` now handles the
+transpiler-installed case by unwinding the call stack to the
+install frame, popping the matched handler, and returning
+`false` — letting the CLR propagate `SuspensionException` up
+to the transpiled caller's CIL catch arm. The interpreter
+path keeps its existing precomputed `BlockTarget` branch
+behavior.
+
+### New helpers in `StackSwitchingHelpers`
+
+- `Resume(ExecContext?, int typeIdx, Value[] args, Value cont, int[] handlerTagIdxs) → Value[]`
+- `ResumeThrow(ExecContext?, int typeIdx, int tagIdxValue, Value[] excArgs, Value cont, int[] handlerTagIdxs) → Value[]`
+- `Switch(ExecContext?, int typeIdx, int tagIdxValue, Value[] args, Value cont) → Value[]`
+- `FindHandlerMatch(ExecContext?, int[] handlerTagIdxs, SuspensionException) → int` (catch-arm support)
+- `ReifyHandlerArgs(ExecContext?, Value cont, SuspensionException) → Value[]` (catch-arm support)
+
+### Tests
+
+`StackSwitchingEquivalenceTests` previously asserted
+`fallbacks > 0` (cont.* known to fall back); now asserts
+`fallbacks == 0` for all five tests including
+producer/consumer suspend/resume, resume_throw with
+try_table catch, and switch with inherited handler chain.
+
+832 transpiler + 511 Wacs.Core + 380 ComponentModel tests
+green.
+
 ## WACS 0.20.0 / WACS.Transpiler.Lib 0.12.0 — Stack Switching CIL emit (3 of 6 opcodes)
 
 Promotes the transpiler from "fallback only" to "real CIL emit"
