@@ -200,14 +200,24 @@ namespace Wacs.ComponentModel.Harness.Lib
                     var dropField = typeBuilder.DefineField(
                         "_drop_" + slug, typeof(Action<int>),
                         FieldAttributes.Private | FieldAttributes.InitOnly);
+                    // Per-resource host-side handle space; allocated
+                    // in the harness ctor (not threaded through
+                    // LoadFrom — it's a pure allocation). Lift own
+                    // calls NewOwn on this; Resource.Dispose calls
+                    // DropOwn through the captured _hostTable field.
+                    var hostTableField = typeBuilder.DefineField(
+                        "_hostTable_" + slug,
+                        typeof(Wacs.ComponentModel.Harness.Runtime.HostHandleTable),
+                        FieldAttributes.Private | FieldAttributes.InitOnly);
                     var dropWasmName = "[resource-drop]" + t.Name;
                     var dropWasmModule = "[export]" + EntryPoints.InterfaceBase(iface);
                     var dtorWasmName = EntryPoints.InterfaceBase(iface) + "#[dtor]" + t.Name;
                     resourceDrops.Add(new ResourceDrop(res,
                         dtorWasmName, dropWasmModule, dropWasmName,
-                        dtorField, dropField));
+                        dtorField, dropField, hostTableField));
                     registry.HarnessDropFields[res] = dropField;
                     registry.HarnessDtorFields[res] = dtorField;
+                    registry.HarnessHostTableFields[res] = hostTableField;
                 }
             }
 
@@ -346,10 +356,16 @@ namespace Wacs.ComponentModel.Harness.Lib
             public string DropWasmModule { get; }
             public string DropWasmName { get; }
             public FieldBuilder DropField { get; }
+            // Host-side handle table — instantiated by the harness
+            // ctor (no LoadFrom plumbing needed). Lift IL allocates
+            // host handles through this; Resource.Dispose returns
+            // them to the freelist.
+            public FieldBuilder HostTableField { get; }
             public ResourceDrop(CtResourceType resource,
                                 string dtorWasmName,
                                 string dropWasmModule, string dropWasmName,
-                                FieldBuilder dtorField, FieldBuilder dropField)
+                                FieldBuilder dtorField, FieldBuilder dropField,
+                                FieldBuilder hostTableField)
             {
                 Resource = resource;
                 DtorWasmName = dtorWasmName;
@@ -357,6 +373,7 @@ namespace Wacs.ComponentModel.Harness.Lib
                 DropWasmName = dropWasmName;
                 DtorField = dtorField;
                 DropField = dropField;
+                HostTableField = hostTableField;
             }
         }
 
@@ -855,6 +872,15 @@ namespace Wacs.ComponentModel.Harness.Lib
             {
                 EmitStoreFromArg(il, rd.DtorField, argIdx++);
                 EmitStoreFromArg(il, rd.DropField, argIdx++);
+                // _hostTable_<slug> = new HostHandleTable();
+                // (Allocated inline — the host-side table is pure
+                // bookkeeping with no constructor dependencies, so
+                // there's no reason to plumb it through LoadFrom.)
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Newobj,
+                    typeof(Wacs.ComponentModel.Harness.Runtime.HostHandleTable)
+                        .GetConstructor(Type.EmptyTypes)!);
+                il.Emit(OpCodes.Stfld, rd.HostTableField);
             }
 
             il.Emit(OpCodes.Ret);
@@ -1370,15 +1396,51 @@ namespace Wacs.ComponentModel.Harness.Lib
                 var resRet = TryGetResource(retDeref);
                 if (resRet != null)
                 {
-                    // Stack has the int handle from the invoker.
-                    // Push (dtor, drop) delegate fields, then
-                    // newobj the resource class
-                    // (which takes (int handle, Action<int> dtor, Action<int> drop)).
+                    if (retDeref is CtBorrowType)
+                    {
+                        // borrow<R> return — wrap the rep directly in
+                        // Borrowed<TResource> with no host-table
+                        // entry. The wasm side keeps the underlying
+                        // resource alive for the duration of this
+                        // call's transfer; the host doesn't take
+                        // lifetime responsibility for borrows.
+                        var resClr = registry.Resources[resRet];
+                        var borrowedConstructed = typeof(Wacs.ComponentModel.Harness.Runtime.Borrowed<>)
+                            .MakeGenericType(resClr);
+                        var openBorrowedCtor = typeof(Wacs.ComponentModel.Harness.Runtime.Borrowed<>)
+                            .GetConstructor(new[] { typeof(int) })!;
+                        var borrowedCtor = TypeBuilder.GetConstructor(borrowedConstructed, openBorrowedCtor);
+                        il.Emit(OpCodes.Newobj, borrowedCtor);
+                        il.Emit(OpCodes.Ret);
+                        return;
+                    }
+
+                    // Own (or bare resource ref): wasm returned rep
+                    // on the stack. Mint a fresh host handle via
+                    // _hostTable_<slug>.NewOwn(rep), then newobj the
+                    // resource class with (hostHandle, rep, dtor,
+                    // drop, hostTable).
                     var resCtor = registry.ResourceCtors[resRet];
                     var dtorFld = registry.HarnessDtorFields[resRet];
                     var dropFld = registry.HarnessDropFields[resRet];
+                    var hostTableFld = registry.HarnessHostTableFields[resRet];
+                    var newOwnMi = typeof(Wacs.ComponentModel.Harness.Runtime.HostHandleTable)
+                        .GetMethod(nameof(Wacs.ComponentModel.Harness.Runtime.HostHandleTable.NewOwn))!;
+
+                    // Stash rep so we can push it twice (once to
+                    // NewOwn, once into the Resource ctor).
+                    var repLocal = il.DeclareLocal(typeof(int));
+                    il.Emit(OpCodes.Stloc, repLocal);
+
+                    // hostHandle = _hostTable.NewOwn(rep);
+                    il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, hostTableFld);
+                    il.Emit(OpCodes.Ldloc, repLocal);
+                    il.Emit(OpCodes.Callvirt, newOwnMi);
+                    // Stack: hostHandle
+                    il.Emit(OpCodes.Ldloc, repLocal);                        // rep
                     il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, dtorFld);
                     il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, dropFld);
+                    il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, hostTableFld);
                     il.Emit(OpCodes.Newobj, resCtor);
                     il.Emit(OpCodes.Ret);
                     return;
@@ -1558,14 +1620,32 @@ namespace Wacs.ComponentModel.Harness.Lib
                 var resArg = TryGetResource(d);
                 if (resArg != null)
                 {
-                    // Resource arg: extract the handle via the
-                    // public `Handle` getter. (The underlying
-                    // `_handle` field is private, so cross-class
-                    // emit IL can't Ldfld it directly.)
-                    var resClr = registry.Resources[resArg];
-                    var handleGet = resClr.GetMethod("get_Handle")!;
+                    if (d is CtBorrowType)
+                    {
+                        // borrow<R> arg: lifted as Borrowed<TR> on
+                        // the C# side. ldfld pops the struct value
+                        // off the stack and pushes the Rep field —
+                        // exactly the wasm-side handle the canonical
+                        // ABI wants.
+                        var resClr = registry.Resources[resArg];
+                        var borrowedConstructed = typeof(Wacs.ComponentModel.Harness.Runtime.Borrowed<>)
+                            .MakeGenericType(resClr);
+                        var openRepField = typeof(Wacs.ComponentModel.Harness.Runtime.Borrowed<>)
+                            .GetField(nameof(Wacs.ComponentModel.Harness.Runtime.Borrowed<object>.Rep))!;
+                        var repField = TypeBuilder.GetField(borrowedConstructed, openRepField);
+                        EmitLdarg(il, argIdx);
+                        il.Emit(OpCodes.Ldfld, repField);
+                        return;
+                    }
+
+                    // Own (or bare ref): extract the wasm-side rep
+                    // via the public Rep getter. (Handle returns the
+                    // host-side identity now — lower IL needs the
+                    // rep the wasm guest expects.)
+                    var ownResClr = registry.Resources[resArg];
+                    var repGet = ownResClr.GetMethod("get_Rep")!;
                     EmitLdarg(il, argIdx);
-                    il.Emit(OpCodes.Callvirt, handleGet);
+                    il.Emit(OpCodes.Callvirt, repGet);
                     return;
                 }
             }

@@ -120,30 +120,56 @@ namespace Wacs.ComponentModel.Harness.Lib
         }
 
         /// <summary>
-        /// Emit a resource class: sealed, IDisposable, with internal
-        /// <c>_handle</c> + <c>_drop</c> fields and a public Dispose()
-        /// that calls drop and zeros the handle. The (handle, drop)
-        /// ctor is internal — only the harness's wrapper IL constructs
-        /// resource instances (e.g., when lifting a return).
+        /// Emit a resource class: sealed, IDisposable, with the
+        /// host-side handle space layered on top of the wasm-side
+        /// rep. Fields: _hostHandle (the user-visible identity,
+        /// allocated by HostHandleTable), _rep (the wasm-side
+        /// representation, used by lower IL), _dtor + _drop (the
+        /// two top-level calls Dispose makes), and _hostTable
+        /// (where Dispose returns the host handle to the freelist).
         /// </summary>
+        /// <remarks>
+        /// The (hostHandle, rep, dtor, drop, hostTable) ctor is
+        /// internal — only the harness's lift IL constructs
+        /// instances. Splitting the host-side and wasm-side handle
+        /// spaces decouples user-visible identity from wasm's
+        /// rep-reuse behavior; the wasm side stays rep-as-handle
+        /// (required for wit-bindgen 0.41 Rust guest compatibility).
+        /// </remarks>
         private static void PopulateResource(TypeBuilder tb, CtResourceType res, TypeRegistry registry)
         {
             tb.AddInterfaceImplementation(typeof(IDisposable));
 
-            var handleField = tb.DefineField("_handle", typeof(int),
+            // Host-side identity, allocated from a per-resource
+            // HostHandleTable. Zeroed after Dispose so the
+            // idempotent-dispose guard short-circuits.
+            var hostHandleField = tb.DefineField("_hostHandle", typeof(int),
                 FieldAttributes.Private);
+            // Wasm-side rep, captured at lift time. Passed to dtor
+            // + drop on Dispose; read by lower IL when this resource
+            // is passed back to wasm as a parameter.
+            var repField = tb.DefineField("_rep", typeof(int),
+                FieldAttributes.Private | FieldAttributes.InitOnly);
             // _dtor: the guest's <iface>#[dtor]<name> wasm export —
             // runs the user-side Drop impl with the rep.
             var dtorField = tb.DefineField("_dtor", typeof(Action<int>),
                 FieldAttributes.Private | FieldAttributes.InitOnly);
             // _drop: the canonical-ABI [resource-drop]<name> adapter
             // (host-bound via CanonResourceBinder) that removes the
-            // slot from the runtime's handle table.
+            // slot from the runtime's wasm-side handle table.
             var dropField = tb.DefineField("_drop", typeof(Action<int>),
                 FieldAttributes.Private | FieldAttributes.InitOnly);
-            registry.ResourceHandleFields[res] = handleField;
+            // Host table reference so Dispose can return the
+            // host handle to the freelist.
+            var hostTableField = tb.DefineField("_hostTable",
+                typeof(Wacs.ComponentModel.Harness.Runtime.HostHandleTable),
+                FieldAttributes.Private | FieldAttributes.InitOnly);
+            registry.ResourceHandleFields[res] = hostHandleField;
+            registry.ResourceRepFields[res] = repField;
 
-            // Internal ctor (int handle, Action<int> dtor, Action<int> drop).
+            // Internal ctor (int hostHandle, int rep,
+            //                Action<int> dtor, Action<int> drop,
+            //                HostHandleTable hostTable).
             // Dispose runs dtor THEN drop — keeping the two wasm-side
             // calls top-level (not nested) sidesteps a WACS runtime
             // re-entrancy bug where the canon-adapter invoking the
@@ -152,21 +178,28 @@ namespace Wacs.ComponentModel.Harness.Lib
                 MethodAttributes.Assembly | MethodAttributes.HideBySig
                     | MethodAttributes.SpecialName | MethodAttributes.RTSpecialName,
                 CallingConventions.HasThis,
-                new[] { typeof(int), typeof(Action<int>), typeof(Action<int>) });
+                new[] {
+                    typeof(int), typeof(int),
+                    typeof(Action<int>), typeof(Action<int>),
+                    typeof(Wacs.ComponentModel.Harness.Runtime.HostHandleTable),
+                });
             var cil = ctor.GetILGenerator();
             cil.Emit(OpCodes.Ldarg_0);
             cil.Emit(OpCodes.Call, typeof(object).GetConstructor(Type.EmptyTypes)!);
-            cil.Emit(OpCodes.Ldarg_0); cil.Emit(OpCodes.Ldarg_1); cil.Emit(OpCodes.Stfld, handleField);
-            cil.Emit(OpCodes.Ldarg_0); cil.Emit(OpCodes.Ldarg_2); cil.Emit(OpCodes.Stfld, dtorField);
-            cil.Emit(OpCodes.Ldarg_0); cil.Emit(OpCodes.Ldarg_3); cil.Emit(OpCodes.Stfld, dropField);
+            cil.Emit(OpCodes.Ldarg_0); cil.Emit(OpCodes.Ldarg_1); cil.Emit(OpCodes.Stfld, hostHandleField);
+            cil.Emit(OpCodes.Ldarg_0); cil.Emit(OpCodes.Ldarg_2); cil.Emit(OpCodes.Stfld, repField);
+            cil.Emit(OpCodes.Ldarg_0); cil.Emit(OpCodes.Ldarg_3); cil.Emit(OpCodes.Stfld, dtorField);
+            cil.Emit(OpCodes.Ldarg_0); cil.Emit(OpCodes.Ldarg_S, (byte)4); cil.Emit(OpCodes.Stfld, dropField);
+            cil.Emit(OpCodes.Ldarg_0); cil.Emit(OpCodes.Ldarg_S, (byte)5); cil.Emit(OpCodes.Stfld, hostTableField);
             cil.Emit(OpCodes.Ret);
             registry.ResourceCtors[res] = ctor;
 
             // public void Dispose() {
-            //     if (_handle != 0) {
-            //         _dtor(_handle);    // run guest cleanup (rep == handle in v1)
-            //         _drop(_handle);    // free the handle-table slot
-            //         _handle = 0;
+            //     if (_hostHandle != 0) {
+            //         _hostTable.DropOwn(_hostHandle);  // return host slot to freelist
+            //         _dtor(_rep);                       // run guest cleanup
+            //         _drop(_rep);                       // free wasm-side handle-table slot
+            //         _hostHandle = 0;                   // idempotent guard
             //     }
             // }
             var dispose = tb.DefineMethod("Dispose",
@@ -176,35 +209,59 @@ namespace Wacs.ComponentModel.Harness.Lib
             var dil = dispose.GetILGenerator();
             var skipDrop = dil.DefineLabel();
             var invokeAction = typeof(Action<int>).GetMethod("Invoke")!;
+            var dropOwnMi = typeof(Wacs.ComponentModel.Harness.Runtime.HostHandleTable)
+                .GetMethod(nameof(Wacs.ComponentModel.Harness.Runtime.HostHandleTable.DropOwn))!;
             dil.Emit(OpCodes.Ldarg_0);
-            dil.Emit(OpCodes.Ldfld, handleField);
+            dil.Emit(OpCodes.Ldfld, hostHandleField);
             dil.Emit(OpCodes.Brfalse, skipDrop);
-            // _dtor(_handle)
+            // _hostTable.DropOwn(_hostHandle); — pops the int rep
+            // return value, we don't need it (we use _rep directly).
+            dil.Emit(OpCodes.Ldarg_0); dil.Emit(OpCodes.Ldfld, hostTableField);
+            dil.Emit(OpCodes.Ldarg_0); dil.Emit(OpCodes.Ldfld, hostHandleField);
+            dil.Emit(OpCodes.Callvirt, dropOwnMi);
+            dil.Emit(OpCodes.Pop);
+            // _dtor(_rep)
             dil.Emit(OpCodes.Ldarg_0); dil.Emit(OpCodes.Ldfld, dtorField);
-            dil.Emit(OpCodes.Ldarg_0); dil.Emit(OpCodes.Ldfld, handleField);
+            dil.Emit(OpCodes.Ldarg_0); dil.Emit(OpCodes.Ldfld, repField);
             dil.Emit(OpCodes.Callvirt, invokeAction);
-            // _drop(_handle)
+            // _drop(_rep)
             dil.Emit(OpCodes.Ldarg_0); dil.Emit(OpCodes.Ldfld, dropField);
-            dil.Emit(OpCodes.Ldarg_0); dil.Emit(OpCodes.Ldfld, handleField);
+            dil.Emit(OpCodes.Ldarg_0); dil.Emit(OpCodes.Ldfld, repField);
             dil.Emit(OpCodes.Callvirt, invokeAction);
-            // _handle = 0
-            dil.Emit(OpCodes.Ldarg_0); dil.Emit(OpCodes.Ldc_I4_0); dil.Emit(OpCodes.Stfld, handleField);
+            // _hostHandle = 0
+            dil.Emit(OpCodes.Ldarg_0); dil.Emit(OpCodes.Ldc_I4_0); dil.Emit(OpCodes.Stfld, hostHandleField);
             dil.MarkLabel(skipDrop);
             dil.Emit(OpCodes.Ret);
             tb.DefineMethodOverride(dispose, typeof(IDisposable).GetMethod(nameof(IDisposable.Dispose))!);
 
-            // public int Handle => _handle;  (read-only; needed for
-            // lower IL to extract the handle when passing as an arg)
-            var handleProp = tb.DefineProperty("Handle", PropertyAttributes.None,
-                typeof(int), null);
-            var getter = tb.DefineMethod("get_Handle",
+            // public int Handle => _hostHandle;  — host-side identity,
+            // decoupled from wasm rep. Stable to use as a dictionary
+            // key; reused via freelist after Dispose.
+            EmitIntGetter(tb, "Handle", hostHandleField);
+
+            // public int Rep => _rep;  — wasm-side representation,
+            // used by lower IL when passing this resource as an own
+            // parameter, and exposed for code that wants to construct
+            // a Borrowed<R> view by hand.
+            EmitIntGetter(tb, "Rep", repField);
+        }
+
+        /// <summary>
+        /// Emit a public read-only <c>int</c> property on
+        /// <paramref name="tb"/> that returns the given backing
+        /// field. Shared by Resource's Handle + Rep accessors.
+        /// </summary>
+        private static void EmitIntGetter(TypeBuilder tb, string name, FieldBuilder backing)
+        {
+            var prop = tb.DefineProperty(name, PropertyAttributes.None, typeof(int), null);
+            var getter = tb.DefineMethod("get_" + name,
                 MethodAttributes.Public | MethodAttributes.HideBySig | MethodAttributes.SpecialName,
                 typeof(int), Type.EmptyTypes);
             var gil = getter.GetILGenerator();
             gil.Emit(OpCodes.Ldarg_0);
-            gil.Emit(OpCodes.Ldfld, handleField);
+            gil.Emit(OpCodes.Ldfld, backing);
             gil.Emit(OpCodes.Ret);
-            handleProp.SetGetMethod(getter);
+            prop.SetGetMethod(getter);
         }
 
         /// <summary>
@@ -493,7 +550,20 @@ namespace Wacs.ComponentModel.Harness.Lib
                     return MapClrType(own.Resource, registry, $"{context} own<R>");
 
                 case CtBorrowType brw:
-                    return MapClrType(brw.Resource, registry, $"{context} borrow<R>");
+                    {
+                        // borrow<R> presents as Borrowed<TR> in C# —
+                        // a readonly struct with no Dispose, so user
+                        // code can't accidentally release a handle it
+                        // doesn't own. Generic instantiation against
+                        // the resource's TypeBuilder works fine across
+                        // the dynamic-assembly boundary; the harness's
+                        // newobj / ldfld IL uses TypeBuilder.GetConstructor
+                        // + TypeBuilder.GetField to address the
+                        // constructed type's members.
+                        var resClr = MapClrType(brw.Resource, registry, $"{context} borrow<R>");
+                        return typeof(Wacs.ComponentModel.Harness.Runtime.Borrowed<>)
+                            .MakeGenericType(resClr);
+                    }
 
                 case CtOptionType opt:
                     // option<T>:
@@ -597,8 +667,12 @@ namespace Wacs.ComponentModel.Harness.Lib
         public Dictionary<CtResourceType, TypeBuilder> Resources { get; } = new();
         // Per-resource ctor: (int handle, Action<int> drop) → resource.
         public Dictionary<CtResourceType, ConstructorBuilder> ResourceCtors { get; } = new();
-        // Per-resource _handle field (so lift/lower can read/write it).
+        // Per-resource _hostHandle field — host-side identity used
+        // by the public Handle property and Dispose's table cleanup.
         public Dictionary<CtResourceType, FieldBuilder> ResourceHandleFields { get; } = new();
+        // Per-resource _rep field — wasm-side representation, used
+        // by lower IL when this resource is passed back to wasm.
+        public Dictionary<CtResourceType, FieldBuilder> ResourceRepFields { get; } = new();
         // Per-resource Action<int> drop field on the harness class
         // (the canonical [resource-drop] adapter — table cleanup).
         // Wrapper IL that lifts a resource return pushes this
@@ -609,5 +683,9 @@ namespace Wacs.ComponentModel.Harness.Lib
         // Dispose calls dtor + drop in sequence; both must be passed
         // at lift time.
         public Dictionary<CtResourceType, FieldBuilder> HarnessDtorFields { get; } = new();
+        // Per-resource HostHandleTable field on the harness class —
+        // allocated in the harness ctor, captured by Resource via
+        // its _hostTable field, used by lift IL's NewOwn call.
+        public Dictionary<CtResourceType, FieldBuilder> HarnessHostTableFields { get; } = new();
     }
 }

@@ -61,8 +61,10 @@ interface-level):
    forward references resolve. Enums and flags emit eagerly as
    complete CLR types (no payloads, no forward refs).
 2. **Bodies** — record fields + ctor + getters; variant cases
-   as nested sealed subclasses; resource `_handle` field +
-   `IDisposable` Dispose + `(handle, drop)` constructor.
+   as nested sealed subclasses; resource class with
+   `_hostHandle / _rep / _dtor / _drop / _hostTable` fields,
+   `IDisposable` Dispose, `(hostHandle, rep, dtor, drop, hostTable)`
+   constructor, and `Handle` / `Rep` public getters.
 
 The `TypeRegistry` keys all dictionaries by **structural type
 reference** (`Dictionary<CtRecordType, TypeBuilder>`, etc.) not
@@ -135,9 +137,14 @@ WitHarnessSpike.ResourceMethods.Generated
 │   └── WacsResourceMethodsSpikeCounter_Counter_Merge(uint, uint) -> uint   (static)
 └── WacsResourceMethodsSpikeCounter
     └── Counter : IDisposable
-        ├── int Handle { get; }
+        ├── int Handle { get; }    — host-side identity
+        ├── int Rep    { get; }    — wasm-side handle
         └── void Dispose()
 ```
+
+`borrow<R>` parameters and returns surface as
+`Wacs.ComponentModel.Harness.Runtime.Borrowed<R>` — a
+`readonly struct` with `int Rep` and no `Dispose`.
 
 The interface-segment Pascal-cases the package's namespace +
 path + name into one token (`wacs:resource-methods-spike/counter`
@@ -159,58 +166,147 @@ WIT resources are opaque handles owned by either the wasm guest
 or the host runtime. Across the wasm boundary they're just i32
 indices into a per-component-instance handle table.
 
-The harness emits one sealed CLR class per `CtResourceType`:
+WACS layers **two** handle spaces around that boundary, for
+reasons explained below:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  host C#  ──  Resource.Handle = HOST handle (1, 2, 3, …)    │
+│  HostHandleTable ──  hostHandle → rep                       │
+├─────────────────────────────────────────────────────────────┤
+│  harness lower  ──  Resource.Rep = WASM rep (= handle)      │
+│  CanonResourceBinder + ResourceHandleTable (rep-as-handle)  │
+├─────────────────────────────────────────────────────────────┤
+│  wasm guest  ──  treats handle and rep as the same int      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Wasm-side: rep-as-handle (CanonResourceBinder)
+
+`Wacs.Core.Runtime.CanonResourceBinder` walks the inner core
+module's imports for the `("[export]<iface>", "[resource-*]<name>")`
+shape and binds three adapters against a per-resource
+`ResourceHandleTable`:
+
+- `[resource-new]<name>(rep) -> handle` — register rep, return
+  `rep` (1:1).
+- `[resource-drop]<name>(handle)` — remove the slot.
+- `[resource-rep]<name>(handle) -> rep` — return `handle`.
+
+Both `HarnessLoader.Load` and `ComponentInstance.Instantiate`
+call `BindImports` before instantiating the core module, then
+`ResolveDtorTrampolines` after — the dtor isn't exported until
+the inner module is wired. The drop adapter is split from the
+dtor invocation so the two wasm-side calls stay top-level (a
+re-entrant wasm-from-host-from-wasm dispatch trips WACS's frame
+stack today).
+
+Why rep-as-handle? wit-bindgen 0.41 Rust guests don't import
+`[resource-rep]` when emitting their instance-method wrappers —
+they stash `(handle == rep)` in static state and dereference it
+directly. Returning fresh handles from `[resource-new]` would
+break them. Other toolchains may differ; the binder is the
+single place to swap behavior if a future codegen wants
+separate handles inside the wasm.
+
+### Host-side: independent handle space (HostHandleTable)
+
+`Wacs.ComponentModel.Harness.Runtime.HostHandleTable` sits one
+layer above and allocates user-visible handles independently of
+rep: auto-increment counter (skipping the 0 sentinel) + LIFO
+freelist for recycled slots. Each resource type gets its own
+table, allocated inline in the harness ctor.
+
+The emitted Resource class carries both quantities:
 
 ```csharp
 public sealed class Bucket : IDisposable
 {
-    private int _handle;
+    private int _hostHandle;        // host-side identity
+    private readonly int _rep;      // wasm-side handle
+    private readonly Action<int> _dtor;
     private readonly Action<int> _drop;
+    private readonly HostHandleTable _hostTable;
 
-    internal Bucket(int handle, Action<int> drop) { _handle = handle; _drop = drop; }
-    public int Handle => _handle;
+    internal Bucket(int hostHandle, int rep, Action<int> dtor,
+                    Action<int> drop, HostHandleTable hostTable)
+    { _hostHandle = hostHandle; _rep = rep;
+      _dtor = dtor; _drop = drop; _hostTable = hostTable; }
+
+    public int Handle => _hostHandle;   // for dictionary keys, equality
+    public int Rep    => _rep;          // for hand-rolled Borrowed<R>
+
     public void Dispose()
     {
-        if (_handle != 0) _drop(_handle);
-        _handle = 0;   // idempotent
+        if (_hostHandle != 0)
+        {
+            _hostTable.DropOwn(_hostHandle);   // freelist
+            _dtor(_rep);                        // run guest cleanup
+            _drop(_rep);                        // free wasm slot
+            _hostHandle = 0;                    // idempotent guard
+        }
     }
 }
 ```
 
-- The harness holds one `Action<int>` drop delegate per
-  resource type, resolved during `LoadFrom` from the
-  guest-emitted `<iface>#[dtor]<resource>` core export.
-- When a free function or constructor returns a resource, the
-  wrapper IL takes the int handle off the invoker's stack,
-  pushes the drop delegate field, and `newobj`s the resource
-  class.
-- When a resource flows in as a param, the lower path extracts
-  `_handle` via the public `Handle` getter (cross-class IL
-  can't `Ldfld` the private backing).
-- `Dispose()` calls drop once and zeros the handle so repeated
-  calls (e.g., from `using` + explicit Dispose) are safe.
+- Lift `own<R>` return: invoker pushes rep → harness calls
+  `hostTable.NewOwn(rep)` to mint a fresh host handle → `newobj
+  Resource(hostHandle, rep, dtor, drop, hostTable)`.
+- Lower `own<R>` arg: extract `Resource.Rep` (public getter) and
+  push to wasm.
+- `Dispose()` returns the host slot to the freelist, then runs
+  the dtor and the canon `[resource-drop]` adapter as two
+  top-level wasm calls.
 
-### Runtime gap on the handle table
+Decoupling identity from rep means:
 
-The canonical ABI prescribes per-instance handle tables managed
-by the runtime: `canon resource.new(rep) -> handle` allocates a
-slot; `canon resource.rep(handle) -> rep` looks up; `canon
-resource.drop(handle)` removes the slot and runs the dtor. WACS's
-component runtime currently **counts these adapters for
-index-space accounting but doesn't bind them** as runtime
-intrinsics. Fixtures work around this by injecting host stubs
-during `bindImports`:
+- The user sees stable, monotonic handles in `Resource.Handle`
+  regardless of whether the wasm allocator reuses the same
+  pointer across drop/new cycles.
+- Two `new()` calls that happen to receive the same rep value
+  still yield distinct host handles — the table never confuses
+  them.
+
+### Borrow vs own — type-distinct, not value-tagged
+
+The companion type for `borrow<R>` in WIT is `Borrowed<TR>`, a
+`readonly struct` that wraps the rep with no host-table entry:
 
 ```csharp
-runtime.BindHostFunction<Func<ExecContext, int, int>>(
-    ("[export]wacs:resource-basic-spike/store", "[resource-new]bucket"),
-    (_, rep) => rep);   // rep-as-handle 1:1
+public readonly struct Borrowed<T> where T : class
+{
+    public readonly int Rep;
+    public Borrowed(int rep) { Rep = rep; }
+}
 ```
 
-This is a real WACS-runtime gap (separate from the harness) —
-fixing it lets the harness drop the stubs and the emitter wires
-`Dispose` to `[resource-drop]<name>` (the canonical adapter)
-instead of the guest dtor directly.
+Crucially, `Borrowed<T>` is **not** `IDisposable`. User code
+that took a borrow can't accidentally call `Dispose()` on it —
+that would invoke the dtor + drop on a resource the host
+doesn't own, which is a use-after-free on the lender.
+
+- Lift `borrow<R>` return: `newobj Borrowed<TR>(rep)` — no
+  table interaction, no allocation tracking.
+- Lower `borrow<R>` arg: `ldfld Borrowed<TR>.Rep` directly off
+  the struct on the stack.
+
+To pass an owned `Resource<R>` as a borrow parameter, user code
+constructs the struct explicitly: `new Borrowed<Bucket>(bucket.Rep)`.
+Future ergonomic surface (an implicit converter or a `Borrow()`
+helper on Resource) can land additively.
+
+### What's still deferred
+
+- **Call-scope borrow invalidation** — refusing to dereference
+  a `Borrowed<T>` after the lending call returned. Needs an
+  `ExecContext` hook the runtime doesn't expose yet; the
+  type-level distinction in v2 is the safety floor.
+- **Cross-instance handle transfer** — handing handles between
+  composed component instances. Static composition via
+  `wasm-tools compose` already works through the wasm boundary;
+  dynamic host-mediated composition would build on the v2
+  foundation (one `HostHandleTable` per (instance, resource)
+  pair, plus borrow tracking across instance boundaries).
 
 ## What the harness can't yet do
 
@@ -233,12 +329,12 @@ scope — that's a separate WACS-runtime track.
 | Lift path | ~99% |
 | Lower path | ~96% (intermediate-slot variant width-join + a few `list<aggregate>` element-writes deferred) |
 | Export shapes | ~99% (multi-return moot) |
-| Resource lifecycle (emit) | ~95% (nested layout deferred) |
-| Resource lifecycle (runtime) | ~50% (handle table gap) |
+| Resource lifecycle (emit) | ~98% (own + borrow type-distinct; nested layout deferred) |
+| Resource lifecycle (runtime) | ~85% (canon adapters bound; call-scope borrow invalidation deferred) |
 | Canonical-ABI plumbing | ~85% (MAX_FLAT_PARAMS + alt encodings missing) |
 | Async / WASIp3 | 0% (out of scope) |
 
-**Overall harness-side: ~96%, 31 fixtures pass.**
+**Overall harness-side: ~97%, 32 fixtures pass.**
 
 ## Fixture as proof — anatomy of a slice
 

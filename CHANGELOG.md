@@ -1,5 +1,88 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Runtime 0.7.0 / WACS.ComponentModel.Harness.Lib 0.27.0 — separate host handle space + Borrowed&lt;T&gt;
+
+Layers an independent host-side handle space over the existing
+WASM-side `ResourceHandleTable` (which stays rep-as-handle for
+wit-bindgen 0.41 Rust guest compatibility). Adds a type-distinct
+`Borrowed<T>` companion to the emitted Resource class so borrow
+mishandling is caught at compile time, not at runtime.
+
+### What changed
+
+- **`WACS.ComponentModel.Harness.Runtime` 0.7.0** — new public
+  `HostHandleTable` (auto-increment counter + freelist,
+  `NewOwn`/`Rep`/`DropOwn`) and `readonly struct Borrowed<T>`
+  (wraps the wasm rep, no `IDisposable`). Both AOT-clean.
+- **`WACS.ComponentModel.Harness.Lib` 0.27.0** — emitted Resource
+  class now has `(int hostHandle, int rep, Action<int> dtor,
+  Action<int> drop, HostHandleTable hostTable)` constructor;
+  `Handle` returns the host-side identity (decoupled from rep
+  reuse) and a new `Rep` property exposes the wasm-side value
+  for hand-rolled `Borrowed<R>` construction. `borrow<R>` in WIT
+  maps to `Borrowed<TR>` in C# at all call boundaries (params
+  and returns).
+
+### Architecture
+
+Two handle spaces, layered. The runtime keeps a wasm-side
+`ResourceHandleTable` per resource (rep-as-handle, bound by
+`CanonResourceBinder` as the `[resource-new]` / `[resource-drop]`
+adapter target). The harness adds a `HostHandleTable` per
+resource type on top — fresh handles allocated from an
+auto-increment counter, recycled through a freelist on
+`DropOwn`. User code sees only the host handle via
+`Resource.Handle`; lower IL uses `Resource.Rep` to talk to wasm.
+
+### Why two layers
+
+- wit-bindgen 0.41 Rust guests assume `handle == rep` for
+  exported resources (they don't import `[resource-rep]`, they
+  dereference `handle` directly). Keeping the wasm side
+  rep-as-handle preserves compatibility without forking the
+  toolchain.
+- Decoupling host-side identity gives `Resource.Handle` stable
+  semantics independent of how the guest reuses rep values
+  (which can be the same allocator address across drop/new
+  pairs). Two `new()` calls that happen to receive the same rep
+  still yield distinct host handles.
+- Type-level borrow safety: `Borrowed<T>` has no `Dispose`, so
+  user code that took a borrow can't accidentally release the
+  lender's resource. Soundness-tightening on the host side —
+  the wasm-side dtor invocation still goes through the canon
+  `[resource-drop]` adapter unchanged.
+
+### Deferred (scoped for follow-up)
+
+- **Call-scope borrow invalidation** — refusing to use a
+  `Borrowed<T>` after the lending call returned. Needs an
+  `ExecContext` hook the runtime doesn't expose yet.
+- **Cross-instance handle namespacing** — handing handles
+  between composed component instances. Static composition via
+  `wasm-tools compose` already works; dynamic composition would
+  build on this v2 foundation.
+
+### Tests
+
+- 11 new `HostHandleTableTests` (fresh handles, freelist reuse,
+  double-drop guard).
+- 4 new `BorrowHarnessEmitTests` (Borrowed signature on params
+  + returns, no Dispose, Handle+Rep both surface).
+- All 380 `Wacs.ComponentModel.Test` tests green.
+- All 3 resource fixtures green: `canon-resource-roundtrip`
+  (now reports host handles 1, 2 with freelist reuse instead
+  of rep heap addresses), `wit-harness-spike-resource-methods`
+  (own params via `get_Rep`), `wit-harness-spike-resource-basic`
+  (idempotent `Dispose` still no-op).
+
+### Misc
+
+- `Wacs.ComponentModel.Test.csproj` bumped to `net9.0` to
+  reference `Wacs.ComponentModel.Harness.Lib`.
+- `Spec.Test.csproj` excludes `canon-resource-roundtrip/**/*.cs`
+  from its default glob (fixture ships its own `Generated.Validate`
+  subproject — pre-existing oversight from 0.6.0).
+
 ## WACS.ComponentModel.Harness.Lib 0.26.1 — diagnostics for unimplemented niches (Item 3 close-out)
 
 Tightens the error messages on two niches the harness emitter
