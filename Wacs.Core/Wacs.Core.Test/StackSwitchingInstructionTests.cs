@@ -176,7 +176,6 @@ namespace Wacs.Core.Test
         /// carry no fallback semantics.
         /// </summary>
         [Theory]
-        [InlineData(typeof(InstResume))]
         [InlineData(typeof(InstResumeThrow))]
         [InlineData(typeof(InstSwitch))]
         public void Execute_throws_NotImplemented(System.Type instType)

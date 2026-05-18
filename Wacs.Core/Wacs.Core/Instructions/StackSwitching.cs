@@ -273,6 +273,15 @@ namespace Wacs.Core.Instructions
 
         private TypeIdx X;
         public StackSwitchHandler[] Handlers = Array.Empty<StackSwitchHandler>();
+
+        /// <summary>
+        /// Per-handler precomputed branch target — resolved at Link
+        /// time from the <see cref="StackSwitchHandler.Label"/>
+        /// LabelIdx so the SuspensionException catch arm can fast-
+        /// branch without re-walking the link-label stack.
+        /// </summary>
+        public BlockTarget?[] HandlerTargets = Array.Empty<BlockTarget?>();
+
         public int TypeIndex => X.Value;
 
         public override void Validate(IWasmValidationContext context)
@@ -301,8 +310,71 @@ namespace Wacs.Core.Instructions
             context.OpStack.PushResult(ft.ResultType);
         }
 
-        public override void Execute(ExecContext context) =>
-            throw new NotImplementedException("resume is not implemented.");
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            _ = base.Link(context, pointer);
+            HandlerTargets = new BlockTarget?[Handlers.Length];
+            for (int i = 0; i < Handlers.Length; i++)
+            {
+                HandlerTargets[i] = InstBranch.PrecomputeStack(context, Handlers[i].Label);
+            }
+            return this;
+        }
+
+        public override void Execute(ExecContext context)
+        {
+            context.Assert(context.OpStack.Count > 0,
+                "resume: empty operand stack.");
+            var contVal = context.OpStack.PopRefType();
+            if (contVal.IsNullRef)
+                throw new TrapException("resume: null continuation reference.");
+            var cont = contVal.GcRef as ContInstance;
+            context.Assert(cont,
+                "resume: ref does not point to a continuation.");
+            if (cont!.State != ContState.Fresh)
+                throw new TrapException(
+                    $"resume: continuation is not resumable (state {cont.State}).");
+
+            // Inject the cont's bound prefix args before the
+            // function call pops its parameters: the remaining
+            // params are already on opstack from the caller.
+            foreach (var arg in cont.BoundArgs)
+                context.OpStack.PushValue(arg);
+
+            context.Assert(context.Store.Contains(cont.Function),
+                $"resume: function address {cont.Function} is not in the store.");
+            var funcInst = context.Store[cont.Function];
+
+            // Install the handler frame BEFORE invoking. A
+            // suspend raised inside the call walks the resume-
+            // handler stack; install depth is the post-push call-
+            // stack height (i.e., the frame the resumed function
+            // will run in).
+            context.ActiveResumeHandlers.Push(
+                new ResumeHandlerFrame(
+                    Handlers, HandlerTargets, context.StackHeight + 1, cont));
+            cont.State = ContState.Running;
+            try
+            {
+                context.InvokeResolved(funcInst);
+            }
+            catch
+            {
+                // If the invoke itself fails (e.g., wrong arity),
+                // pop the just-installed handler so the next
+                // suspend doesn't see a stale frame.
+                if (context.ActiveResumeHandlers.Count > 0)
+                    context.ActiveResumeHandlers.Pop();
+                cont.State = ContState.Completed;
+                throw;
+            }
+            // The handler frame remains active while the resumed
+            // function executes (frame is now on the call stack);
+            // FunctionReturn prunes it when the call unwinds. The
+            // cont's state transitions to Completed lazily — see
+            // the SuspensionException catch in the interpreter
+            // loop and the FunctionReturn pruning above.
+        }
 
         public override InstructionBase Parse(BinaryReader reader)
         {
@@ -472,6 +544,83 @@ namespace Wacs.Core.Instructions
         {
             writer.WriteLeb128_u32((uint)X.Value);
             writer.WriteLeb128_u32(Tag.Value);
+        }
+    }
+
+    /// <summary>
+    /// Static dispatcher used by the interpreter loop's
+    /// <c>SuspensionException</c> catch arm. Walks the active
+    /// resume-handler stack top-down looking for a matching tag;
+    /// on a hit, unwinds the call stack back to the installing
+    /// frame, pops the matched resume handler, pushes the
+    /// suspend payload + the (one-shot) reified continuation, and
+    /// branches to the handler's precomputed label target.
+    /// Returns true iff the suspension was consumed.
+    /// </summary>
+    internal static class SuspensionDispatcher
+    {
+        public static bool TryHandle(ExecContext context, SuspensionException ex)
+        {
+            // Walk active resume handlers top-down to find one
+            // whose tag matches. The first hit wins (innermost
+            // enclosing handler).
+            int matchedHandlerIdx = -1;
+            ResumeHandlerFrame? matched = null;
+            foreach (var rhf in context.ActiveResumeHandlers)
+            {
+                for (int i = 0; i < rhf.Handlers.Length; i++)
+                {
+                    var ta = context.Frame.Module.TagAddrs.Contains(rhf.Handlers[i].Tag)
+                        ? context.Frame.Module.TagAddrs[rhf.Handlers[i].Tag]
+                        : default;
+                    if (ta.Equals(ex.Tag))
+                    {
+                        matched = rhf;
+                        matchedHandlerIdx = i;
+                        break;
+                    }
+                }
+                if (matched is not null) break;
+            }
+            if (matched is null) return false;
+
+            // Unwind call frames until we're back at the resume's
+            // installing frame (depth == matched.InstallFrameDepth
+            // - 1, since the resume's call pushed one frame).
+            int targetDepth = matched.InstallFrameDepth - 1;
+            while (context.StackHeight > targetDepth)
+                context.FunctionReturn();
+
+            // FunctionReturn auto-prunes ActiveResumeHandlers, so
+            // the matched frame should already be off the stack —
+            // belt-and-braces: pop it explicitly if still on top.
+            if (context.ActiveResumeHandlers.Count > 0
+                && ReferenceEquals(context.ActiveResumeHandlers.Peek(), matched))
+            {
+                context.ActiveResumeHandlers.Pop();
+            }
+
+            // One-shot semantics: the suspended continuation
+            // cannot be re-resumed in this build. Mark the
+            // ContInstance Completed and present a fresh
+            // already-Completed ContInstance to the handler so
+            // its type-shape is satisfied; the handler can detect
+            // the dead cont via its State field.
+            matched.Continuation.State = ContState.Completed;
+            var deadCont = context.Store.AllocateContinuation(
+                matched.Continuation.ContTypeIndex,
+                matched.Continuation.Function);
+            deadCont.State = ContState.Completed;
+
+            // Push suspend payload (tag's params, in stack order)
+            // then the reified continuation reference.
+            while (ex.Payload.Count > 0)
+                context.OpStack.PushValue(ex.Payload.Pop());
+            context.OpStack.PushValue(new Value(ValType.ContRefNN, deadCont));
+
+            // Branch to the precomputed handler label.
+            InstBranch.ExecuteInstruction(context, matched.HandlerTargets[matchedHandlerIdx]);
+            return true;
         }
     }
 }

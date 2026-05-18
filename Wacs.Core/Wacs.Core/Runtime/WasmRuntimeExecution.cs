@@ -19,6 +19,7 @@ using System.Runtime.ExceptionServices;
 using System.Threading.Tasks;
 using Wacs.Core.Instructions;
 using Wacs.Core.OpCodes;
+using Wacs.Core.Runtime.Concurrency;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Utilities;
@@ -550,6 +551,13 @@ namespace Wacs.Core.Runtime
                         else
                             inst.Execute(ctx);
                     }
+                    catch (SuspensionException se) when (SuspensionDispatcher.TryHandle(ctx, se))
+                    {
+                        // Handled — control unwound + branched to
+                        // the resume's matching handler label. The
+                        // outer loop reloads ctx._currentSequence /
+                        // InstructionPointer on the next iteration.
+                    }
                     catch (Wacs.Core.Runtime.Types.TrapException te) when (te.WasmFrames == null)
                     {
                         te.WasmFrames = ctx.SnapshotCallStack(inst);
@@ -585,6 +593,13 @@ namespace Wacs.Core.Runtime
                             await inst.ExecuteAsync(ctx);
                         else
                             inst.Execute(ctx);
+                    }
+                    catch (SuspensionException se) when (SuspensionDispatcher.TryHandle(ctx, se))
+                    {
+                        // Handled — control unwound + branched to
+                        // the resume's matching handler label. The
+                        // outer loop reloads ctx._currentSequence /
+                        // InstructionPointer on the next iteration.
                     }
                     catch (Wacs.Core.Runtime.Types.TrapException te) when (te.WasmFrames == null)
                     {
@@ -640,10 +655,16 @@ namespace Wacs.Core.Runtime
                     if (inst.Nop)
                         continue;
 
-                    if (inst.IsAsync)
-                        await inst.ExecuteAsync(ctx);
-                    else
-                        inst.Execute(ctx);
+                    try
+                    {
+                        if (inst.IsAsync)
+                            await inst.ExecuteAsync(ctx);
+                        else
+                            inst.Execute(ctx);
+                    }
+                    catch (SuspensionException se) when (SuspensionDispatcher.TryHandle(ctx, se))
+                    {
+                    }
 
                     ctx.InstructionTimer.Stop();
                     ctx.steps += inst.Size;
@@ -661,10 +682,16 @@ namespace Wacs.Core.Runtime
                     if (inst.Nop)
                         continue;
 
-                    if (inst.IsAsync)
-                        await inst.ExecuteAsync(ctx);
-                    else
-                        inst.Execute(ctx);
+                    try
+                    {
+                        if (inst.IsAsync)
+                            await inst.ExecuteAsync(ctx);
+                        else
+                            inst.Execute(ctx);
+                    }
+                    catch (SuspensionException se) when (SuspensionDispatcher.TryHandle(ctx, se))
+                    {
+                    }
 
                     ctx.InstructionTimer.Stop();
                     ctx.steps += inst.Size;
@@ -682,10 +709,16 @@ namespace Wacs.Core.Runtime
                     if (inst.Nop)
                         continue;
 
-                    if (inst.IsAsync)
-                        await inst.ExecuteAsync(ctx);
-                    else
-                        inst.Execute(ctx);
+                    try
+                    {
+                        if (inst.IsAsync)
+                            await inst.ExecuteAsync(ctx);
+                        else
+                            inst.Execute(ctx);
+                    }
+                    catch (SuspensionException se) when (SuspensionDispatcher.TryHandle(ctx, se))
+                    {
+                    }
                     ctx.InstructionTimer.Stop();
                     ctx.steps += inst.Size;
                 }

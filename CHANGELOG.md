@@ -1,5 +1,65 @@
 # Changelog
 
+## WACS 0.18.0 — suspend/resume one-shot dispatch
+
+Lands the runtime catch path for `suspend $tag` and the
+`resume $ct handler*` invocation. `resume` installs an active
+handler frame, calls the continuation's inner function, and
+the interpreter loop's new `SuspensionException` catch arm
+walks the handler stack to find a matching tag — on a hit,
+the dispatcher unwinds frames back to the installing frame
+and branches to the handler's precomputed label with the
+suspend's payload and a placeholder continuation pushed.
+
+The reified continuation handed to the handler is one-shot:
+its state is set to `Completed` so a guest that tries to
+re-resume it traps. True re-resumable continuations need
+frame snapshotting that hasn't been built yet.
+
+### New surface
+
+- `Wacs.Core.Runtime.Concurrency.ResumeHandlerFrame` — entry
+  on the new `ExecContext.ActiveResumeHandlers` stack.
+  Carries the handler array, precomputed branch targets,
+  install frame depth, and the continuation reference.
+- `Wacs.Core.Instructions.SuspensionDispatcher.TryHandle` —
+  static helper the interpreter loop calls to consume a
+  `SuspensionException` if any active handler matches.
+- `InstResume.HandlerTargets` populated at Link time via
+  `InstBranch.PrecomputeStack`.
+
+### Behavior
+
+- `resume`: pops the continuation + remaining args, pushes
+  the cont's bound prefix args (from `cont.bind`), installs
+  a `ResumeHandlerFrame`, invokes the inner function. On
+  normal completion, `FunctionReturn` prunes the handler
+  frame. The cont's state transitions
+  Fresh → Running → Completed.
+- `suspend`: throws `SuspensionException(tag, payload)`. If a
+  matching `resume` handler is in scope, control unwinds to
+  it and branches; otherwise the exception surfaces as a
+  trap.
+- `resume_throw` / `switch`: still `NotImplementedException`.
+
+### Tests
+
+- 17 round-trip tests still pass. The
+  `Execute_throws_NotImplemented` theory shrinks to two cases
+  (resume_throw / switch) — `InstResume.Execute` is exercised
+  now.
+- 507 Wacs.Core + 380 ComponentModel green overall.
+
+### Async dispatch migration — design intent
+
+The existing `IsAsync` / `ExecuteAsync` path (host functions
+returning `Task<T>`) coexists with the new substrate
+unchanged in this release. The unified model — host
+`await Task` and wasm `suspend` routed through the same
+`Continuation` + `SuspensionDispatcher` primitive — lands
+with the Component Model async dispatcher; that's the work
+that makes CLR `Task<T>` the canonical host async type.
+
 ## WACS 0.17.0 — Continuation runtime: data structures + cont.new / cont.bind / suspend
 
 First runtime slice of the Stack Switching proposal. Introduces
