@@ -20,8 +20,6 @@ namespace Wacs.Core.Types.Defs
         StructSt = 0x5F, // -0xdf
         FuncFt   = 0x60, // -0xe0
 
-        // Stack Switching proposal — verify against current spec
-        // submodule HEAD before merge.
         ContCt   = 0x5D, // -0xdd
     }
 }

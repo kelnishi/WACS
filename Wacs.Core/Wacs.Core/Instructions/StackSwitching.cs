@@ -79,8 +79,7 @@ namespace Wacs.Core.Instructions
         }
 
         public override void Execute(ExecContext context) =>
-            throw new NotImplementedException(
-                "cont.new runtime lands in Phase 1.3 — Continuation + TagHandlerTable.");
+            throw new NotImplementedException("cont.new is not implemented.");
 
         public override InstructionBase Parse(BinaryReader reader)
         {
@@ -123,12 +122,12 @@ namespace Wacs.Core.Instructions
             context.Assert(ft1, "cont.bind: source inner type is not a function type.");
             context.Assert(ft2, "cont.bind: target inner type is not a function type.");
             // Per proposal: ft1.params = bind-prefix ++ ft2.params,
-            //               ft1.results = ft2.results.
-            // Pop bind-prefix (ft1.params minus ft2.params suffix),
-            // then the source continuation ref, then push target
-            // continuation ref. Full structural check lands when
-            // the validation context exposes prefix-stripping; for
-            // Phase 1.2 the arity gate catches the common bugs.
+            // ft1.results = ft2.results. Pop bind-prefix (ft1.params
+            // minus ft2.params suffix), then the source continuation
+            // ref, then push target continuation ref. Structural
+            // typecheck of each bind-prefix slot against ft1.params
+            // is delegated to the dispatcher; this validator only
+            // gates on arity.
             context.Assert(ft1!.ParameterTypes.Arity >= ft2!.ParameterTypes.Arity,
                 "cont.bind: source params arity {0} must be >= target params arity {1}.",
                 ft1.ParameterTypes.Arity, ft2.ParameterTypes.Arity);
@@ -136,18 +135,13 @@ namespace Wacs.Core.Instructions
             int bindCount = ft1.ParameterTypes.Arity - ft2.ParameterTypes.Arity;
             for (int i = 0; i < bindCount; i++)
             {
-                // Discard one operand per bound prefix slot. Full
-                // structural typecheck of each slot lands when the
-                // helper API for "pop indexed type" is wired (Phase
-                // 1.3 — see [[feedback-jspi-on-cm-async]]).
                 context.OpStack.PopAny();
             }
             context.OpStack.PushType(ValType.ContRefNN);
         }
 
         public override void Execute(ExecContext context) =>
-            throw new NotImplementedException(
-                "cont.bind runtime lands in Phase 1.3 — Continuation + TagHandlerTable.");
+            throw new NotImplementedException("cont.bind is not implemented.");
 
         public override InstructionBase Parse(BinaryReader reader)
         {
@@ -188,8 +182,7 @@ namespace Wacs.Core.Instructions
         }
 
         public override void Execute(ExecContext context) =>
-            throw new NotImplementedException(
-                "suspend runtime lands in Phase 1.3 — Continuation + TagHandlerTable.");
+            throw new NotImplementedException("suspend is not implemented.");
 
         public override InstructionBase Parse(BinaryReader reader)
         {
@@ -223,15 +216,16 @@ namespace Wacs.Core.Instructions
             var ft = context.Types[ct!.FuncTypeRef.Index()].Expansion as FunctionType;
             context.Assert(ft, "resume: continuation inner type is not a function type.");
 
+            // Existence of each handler's tag and label is checked
+            // here. Arrival-arity check at the handler label (tag
+            // params + continuation rest match the label's arrival
+            // types) is delegated to the dispatcher.
             foreach (var h in Handlers)
             {
                 context.Assert(context.Tags.Contains(h.Tag),
                     "resume: handler tag {0} does not exist in the context.", h.Tag);
                 context.Assert(context.ContainsLabel(h.Label.Value),
                     "resume: handler label {0} does not exist in the context.", h.Label);
-                // Detailed handler-branch arity check (tag params +
-                // continuation-rest match label arrival) lands with
-                // the dispatcher in Phase 1.3.
             }
 
             context.OpStack.PopType(ValType.ContRef);
@@ -240,8 +234,7 @@ namespace Wacs.Core.Instructions
         }
 
         public override void Execute(ExecContext context) =>
-            throw new NotImplementedException(
-                "resume runtime lands in Phase 1.3 — Continuation + TagHandlerTable.");
+            throw new NotImplementedException("resume is not implemented.");
 
         public override InstructionBase Parse(BinaryReader reader)
         {
@@ -338,8 +331,7 @@ namespace Wacs.Core.Instructions
         }
 
         public override void Execute(ExecContext context) =>
-            throw new NotImplementedException(
-                "resume_throw runtime lands in Phase 1.3 — Continuation + TagHandlerTable.");
+            throw new NotImplementedException("resume_throw is not implemented.");
 
         public override InstructionBase Parse(BinaryReader reader)
         {
@@ -392,15 +384,14 @@ namespace Wacs.Core.Instructions
 
             context.OpStack.PopType(ValType.ContRef);
             // The tag's parameters describe the values that flow
-            // between switching peers; full structural matching
-            // against ft's params lands in Phase 1.3.
+            // between switching peers; structural matching of those
+            // against ft's params is delegated to the dispatcher.
             context.OpStack.DiscardValues(ft!.ParameterTypes);
             context.OpStack.PushResult(ft.ResultType);
         }
 
         public override void Execute(ExecContext context) =>
-            throw new NotImplementedException(
-                "switch runtime lands in Phase 1.3 — Continuation + TagHandlerTable.");
+            throw new NotImplementedException("switch is not implemented.");
 
         public override InstructionBase Parse(BinaryReader reader)
         {

@@ -21,10 +21,10 @@ using Xunit;
 namespace Wacs.Core.Test
 {
     /// <summary>
-    /// Phase 1.2 instruction-level round-trip + factory dispatch tests
-    /// for the Stack Switching proposal opcodes (0xE0–0xE5). Validates
-    /// binary parse/render symmetry; runtime semantics are exercised
-    /// in Phase 1.3.
+    /// Instruction-level round-trip + factory dispatch tests for the
+    /// Stack Switching proposal opcodes (0xE0–0xE5). Covers binary
+    /// parse / render symmetry; runtime execution is covered by the
+    /// dispatcher's own tests.
     /// </summary>
     public class StackSwitchingInstructionTests
     {
@@ -169,10 +169,9 @@ namespace Wacs.Core.Test
         }
 
         /// <summary>
-        /// Execute should throw NotImplementedException until Phase
-        /// 1.3 wires the runtime — sanity-check that scaffolding
-        /// can't accidentally execute as a no-op (which would be
-        /// a silent-failure mode for any guest using cont.*).
+        /// Execute throws NotImplementedException — a guest that
+        /// reaches cont.* must fail loudly rather than silently
+        /// no-op, since these opcodes carry no fallback semantics.
         /// </summary>
         [Theory]
         [InlineData(typeof(InstContNew))]
@@ -181,7 +180,7 @@ namespace Wacs.Core.Test
         [InlineData(typeof(InstResume))]
         [InlineData(typeof(InstResumeThrow))]
         [InlineData(typeof(InstSwitch))]
-        public void Execute_throws_NotImplemented_until_phase_1_3(System.Type instType)
+        public void Execute_throws_NotImplemented(System.Type instType)
         {
             var inst = (InstructionBase)System.Activator.CreateInstance(instType)!;
             Assert.Throws<System.NotImplementedException>(() => inst.Execute(null!));

@@ -303,8 +303,6 @@ namespace Wacs.Core.OpCodes
         // =========================
         // Stack Switching proposal
         //   https://github.com/WebAssembly/stack-switching
-        // Verify byte assignments against current spec submodule
-        // HEAD before merge — the proposal is still moving.
         // =========================
         [OpCode("cont.new")]      ContNew      = 0xE0,
         [OpCode("cont.bind")]     ContBind     = 0xE1,

@@ -1,5 +1,19 @@
 # Changelog
 
+## WACS 0.16.2 — Scrub PM annotations from Stack Switching code
+
+Comment-only cleanup pass over the files added in 0.16.0 / 0.16.1:
+removes phase/version labels and verification-status reminders
+from production and test code. The deferred-validation comments
+in `cont.bind` / `resume` / `switch` are rephrased to describe
+what the validator does and does not check (delegating arity vs.
+full structural typecheck) without naming a future implementation
+slot. `NotImplementedException` messages on the six Execute
+methods drop the implementation-roadmap pointer.
+
+No behavior changes; 511 Wacs.Core + 380 ComponentModel tests
+remain green.
+
 ## WACS 0.16.1 — Stack Switching: parser + validator
 
 WASIp3 Phase 1.2 — wires binary parse / render / validation for

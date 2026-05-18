@@ -262,8 +262,7 @@ namespace Wacs.Core.Instructions
             OpCode.I64Extend16S      => InstI64SignExtend.I64Extend16S,
             OpCode.I64Extend32S      => InstI64SignExtend.I64Extend32S,
 
-            //Stack Switching (Phase 1.2 — Parse + Validate only;
-            // Execute throws NotImplementedException until 1.3.)
+            //Stack Switching
             OpCode.ContNew           => new InstContNew(),
             OpCode.ContBind          => new InstContBind(),
             OpCode.Suspend           => new InstSuspend(),
