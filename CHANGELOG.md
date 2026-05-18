@@ -48,7 +48,7 @@ followed by guidance on the AOT-safe rewrite options
 
 516 Wacs.Core tests pass (515 + 1 new gated test).
 
-## WACS.Transpiler.Lib 0.15.0 — Stack Switching standalone-mode dispatch (Slice B.2)
+## WACS.Transpiler.Lib 0.12.4 — Stack Switching standalone-mode dispatch (Slice B.2)
 
 Transpiler now generates one `StandaloneContInvoker` subclass
 per unique continuation typeidx in a module. Each generated
@@ -118,7 +118,7 @@ Asserts the expected value.
 `Store.AllocateExn`. Multi-result continuations also remain
 gated. Both are bounded follow-ups.
 
-## WACS 0.24.0 — Standalone Cont Invoker contract (Slice B.2 v0)
+## WACS 0.16.12 — Standalone Cont Invoker contract (Slice B.2 v0)
 
 Establishes the AOT-safe dispatch contract for standalone-mode
 `resume` / `resume_throw` / `switch`. The transpiler-side
@@ -188,9 +188,9 @@ subclass instance. This is bounded work — parallels how the
 transpiler already generates per-function methods — but
 genuinely a separate slice.
 
-## WACS 0.23.0 / WACS.Transpiler.Lib 0.14.1 — Stack Switching helpers go AOT-safe
+## WACS 0.16.11 / WACS.Transpiler.Lib 0.12.3 — Stack Switching helpers go AOT-safe
 
-Replaces the runtime reflection the 0.22.0 helpers used to
+Replaces the runtime reflection the 0.16.10 helpers used to
 access ThinContext fields with interface dispatch. AOT
 publish of `Wacs.Core` is back at zero analyzer warnings on
 the stack-switching code path.
@@ -228,7 +228,7 @@ the stack-switching code path.
 - 833 transpiler + 511 Wacs.Core + 380 ComponentModel tests
   green.
 
-## WACS 0.22.0 / WACS.Transpiler.Lib 0.14.0 — Stack Switching standalone-mode parity (3 of 6 ops)
+## WACS 0.16.10 / WACS.Transpiler.Lib 0.12.2 — Stack Switching standalone-mode parity (3 of 6 ops)
 
 Closes the standalone-mode gap for `cont.new`, `cont.bind`, and
 `suspend`: transpiled `Module` classes instantiated via
@@ -298,7 +298,7 @@ work tracked separately.
 - 833 transpiler + 511 Wacs.Core + 380 ComponentModel tests
   green.
 
-## WACS 0.21.0 / WACS.Transpiler.Lib 0.13.0 — Stack Switching CIL emit (all 6 opcodes)
+## WACS 0.16.9 / WACS.Transpiler.Lib 0.12.1 — Stack Switching CIL emit (all 6 opcodes)
 
 Closes the remaining three transpiler emitters: `resume`,
 `resume_throw`, and `switch` now produce CIL that mirrors the
@@ -369,7 +369,7 @@ try_table catch, and switch with inherited handler chain.
 832 transpiler + 511 Wacs.Core + 380 ComponentModel tests
 green.
 
-## WACS 0.20.0 / WACS.Transpiler.Lib 0.12.0 — Stack Switching CIL emit (3 of 6 opcodes)
+## WACS 0.16.8 / WACS.Transpiler.Lib 0.12.0 — Stack Switching CIL emit (3 of 6 opcodes)
 
 Promotes the transpiler from "fallback only" to "real CIL emit"
 for three of the six stack switching opcodes:
@@ -451,7 +451,7 @@ is wired and which is not.
 
 830 transpiler + 511 Wacs.Core + 380 ComponentModel tests green.
 
-## WACS 0.19.2 — `resume_throw` runtime parity
+## WACS 0.16.7 — `resume_throw` runtime parity
 
 Brings `resume_throw $ct $tag handler*` (0xE4) to runtime
 parity with `resume` and `switch`. `InstResumeThrow.Execute`
@@ -493,7 +493,7 @@ WASIp3 cancellation semantics need.
 
 511 Wacs.Core + 380 ComponentModel + 826 Transpiler tests green.
 
-## WACS 0.19.1 — `switch` runtime parity
+## WACS 0.16.6 — `switch` runtime parity
 
 Brings `switch $ct $tag` (0xE5) to runtime parity with `resume`.
 `InstSwitch.Execute` was `NotImplementedException`; now it pops
@@ -525,7 +525,7 @@ consumer-trampoline shape exercised by the new test.
 
 511 Wacs.Core + 380 ComponentModel + 826 Transpiler tests green.
 
-## WACS 0.19.0 — Stack Switching: WAT parsing + end-to-end execution tests
+## WACS 0.16.5 — Stack Switching: WAT parsing + end-to-end execution tests
 
 Adds the text-format parser entries that allow hand-written WAT
 modules to use the six Stack Switching opcodes plus the
@@ -592,13 +592,13 @@ fallback rather than a generic "unsupported opcode" rejection.
   opcodes for diagnostics.
 - Behavior unchanged at the user level: a function containing
   any cont.* opcode falls back to the interpreter, which since
-  WACS 0.17.0 / 0.18.0 implements
+  WACS 0.16.3 / 0.16.4 implements
   `cont.new` / `cont.bind` / `suspend` / `resume` end-to-end
   with one-shot semantics.
 
 826 transpiler tests still green.
 
-## WACS 0.18.0 — suspend/resume one-shot dispatch
+## WACS 0.16.4 — suspend/resume one-shot dispatch
 
 Lands the runtime catch path for `suspend $tag` and the
 `resume $ct handler*` invocation. `resume` installs an active
@@ -658,7 +658,7 @@ unchanged in this release. The unified model — host
 with the Component Model async dispatcher; that's the work
 that makes CLR `Task<T>` the canonical host async type.
 
-## WACS 0.17.0 — Continuation runtime: data structures + cont.new / cont.bind / suspend
+## WACS 0.16.3 — Continuation runtime: data structures + cont.new / cont.bind / suspend
 
 First runtime slice of the Stack Switching proposal. Introduces
 the `Wacs.Core.Runtime.Concurrency` namespace, allocates
