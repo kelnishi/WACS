@@ -310,6 +310,9 @@ namespace Wacs.Core.Types.Defs
                     StructType => ofType == ValType.Struct || ValType.Struct.IsSubType(ofType, types),
                     ArrayType => ofType == ValType.Array || ValType.Array.IsSubType(ofType, types),
                     FunctionType => ofType == ValType.Func || ValType.Func.IsSubType(ofType, types),
+                    ContType => ofType == ValType.ContRef
+                                || ofType == ValType.ContRefNN
+                                || ValType.ContRef.IsSubType(ofType, types),
                     _ => throw new InvalidDataException($"Unknown CompositeType: {typeDef.Expansion}")
                 };
             }

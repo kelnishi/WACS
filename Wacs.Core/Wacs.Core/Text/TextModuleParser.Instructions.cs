@@ -267,6 +267,12 @@ namespace Wacs.Core.Text
                 case "try_table":
                     ParseTryTableFolded(fctx, node, output);
                     return;
+                case "resume":
+                    ParseResumeFolded(fctx, node, output, isThrow: false);
+                    return;
+                case "resume_throw":
+                    ParseResumeFolded(fctx, node, output, isThrow: true);
+                    return;
             }
 
             // General folded form: (op imm* foldedInstr*)
@@ -316,6 +322,76 @@ namespace Wacs.Core.Text
             {
                 fctx.LabelStack.RemoveAt(fctx.LabelStack.Count - 1);
             }
+        }
+
+        /// <summary>
+        /// Folded form of <c>resume</c> and <c>resume_throw</c>:
+        /// <c>(resume $ct (on $tag $label)* operand*)</c> /
+        /// <c>(resume_throw $ct $tag (on $tag $label)* operand*)</c>.
+        /// Lowers to the binary form via <c>DecodeViaBinary</c>.
+        /// </summary>
+        private static void ParseResumeFolded(
+            TextFunctionContext fctx, SExpr node, List<InstructionBase> output, bool isThrow)
+        {
+            int i = 1;
+            uint contTypeIdx = ResolveNamespaceIdx(
+                fctx.Module.Types, node.Children[i++], "type");
+            uint throwTagIdx = 0;
+            if (isThrow)
+            {
+                throwTagIdx = ResolveNamespaceIdx(
+                    fctx.Module.Tags, node.Children[i++], "tag");
+            }
+
+            // Collect on-tag handler clauses: (on $tag $label) and
+            // (on $tag $label switch).
+            var handlers = new List<(uint tag, uint label, bool onSwitch)>();
+            while (i < node.Children.Count
+                   && node.Children[i].Kind == SExprKind.List
+                   && node.Children[i].Head != null
+                   && node.Children[i].Head!.Token.Kind == TokenKind.Keyword
+                   && node.Children[i].Head!.AtomText() == "on")
+            {
+                var clause = node.Children[i++];
+                if (clause.Children.Count < 3)
+                    throw new FormatException(
+                        $"line {clause.Token.Line}: (on …) expects $tag $label [switch]");
+                uint tagIdx = ResolveNamespaceIdx(
+                    fctx.Module.Tags, clause.Children[1], "tag");
+                uint labelIdx = ResolveLabel(fctx, clause.Children[2]);
+                bool onSwitch = clause.Children.Count > 3
+                                && clause.Children[3].Kind == SExprKind.Atom
+                                && clause.Children[3].AtomText() == "switch";
+                handlers.Add((tagIdx, labelIdx, onSwitch));
+            }
+
+            // Remaining children are operand sub-forms — they
+            // execute first so their results land on the operand
+            // stack below the resume's immediates.
+            while (i < node.Children.Count)
+            {
+                var child = node.Children[i++];
+                if (child.Kind != SExprKind.List)
+                    throw new FormatException(
+                        $"line {child.Token.Line}: folded resume operand must be a sub-form");
+                ParseFoldedInstruction(fctx, child, output);
+            }
+
+            var inst = DecodeViaBinary(
+                isThrow ? (ByteCode)OpCode.ResumeThrow : (ByteCode)OpCode.Resume,
+                w =>
+                {
+                    w.WriteLeb128U32(contTypeIdx);
+                    if (isThrow) w.WriteLeb128U32(throwTagIdx);
+                    w.WriteLeb128U32((uint)handlers.Count);
+                    foreach (var (tag, label, onSwitch) in handlers)
+                    {
+                        w.Write((byte)(onSwitch ? 0x01 : 0x00));
+                        w.WriteLeb128U32(tag);
+                        w.WriteLeb128U32(label);
+                    }
+                });
+            output.Add(inst);
         }
 
         /// <summary>
@@ -793,6 +869,30 @@ namespace Wacs.Core.Text
                 }
                 case "throw_ref":
                     return SpecFactory.Factory.CreateInstruction((ByteCode)OpCode.ThrowRef);
+                case "cont.new":
+                {
+                    uint ti = ResolveNamespaceIdx(fctx.Module.Types, ReadImmIdxAtom(parent, ref i, kw), "type");
+                    return DecodeViaBinary((ByteCode)OpCode.ContNew, w => w.WriteLeb128U32(ti));
+                }
+                case "cont.bind":
+                {
+                    uint ti1 = ResolveNamespaceIdx(fctx.Module.Types, ReadImmIdxAtom(parent, ref i, kw), "type");
+                    uint ti2 = ResolveNamespaceIdx(fctx.Module.Types, ReadImmIdxAtom(parent, ref i, kw), "type");
+                    return DecodeViaBinary((ByteCode)OpCode.ContBind,
+                        w => { w.WriteLeb128U32(ti1); w.WriteLeb128U32(ti2); });
+                }
+                case "suspend":
+                {
+                    uint tagIdx = ResolveNamespaceIdx(fctx.Module.Tags, ReadImmIdxAtom(parent, ref i, kw), "tag");
+                    return DecodeViaBinary((ByteCode)OpCode.Suspend, w => w.WriteLeb128U32(tagIdx));
+                }
+                case "switch":
+                {
+                    uint ti = ResolveNamespaceIdx(fctx.Module.Types, ReadImmIdxAtom(parent, ref i, kw), "type");
+                    uint tagIdx = ResolveNamespaceIdx(fctx.Module.Tags, ReadImmIdxAtom(parent, ref i, kw), "tag");
+                    return DecodeViaBinary((ByteCode)OpCode.Switch,
+                        w => { w.WriteLeb128U32(ti); w.WriteLeb128U32(tagIdx); });
+                }
                 case "return_call_indirect":
                 {
                     uint tableIdx = 0;

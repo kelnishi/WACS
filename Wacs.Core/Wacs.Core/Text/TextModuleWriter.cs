@@ -948,6 +948,9 @@ namespace Wacs.Core.Text
                     WriteFieldType(w, at.ElementType);
                     w.Write(')');
                     break;
+                case ContType cont:
+                    w.Write($"(cont {cont.FuncTypeRef.Index().Value})");
+                    break;
                 default:
                     throw new InvalidDataException(
                         $"Unknown CompositeType {body?.GetType().Name}");

@@ -167,6 +167,10 @@ namespace Wacs.Core.Bin
                     w.Write((byte)CompType.ArrayAt);
                     WriteFieldType(w, at.ElementType);
                     break;
+                case ContType cont:
+                    w.Write((byte)CompType.ContCt);
+                    ValTypeWriter.WriteDefType(w, cont.FuncTypeRef);
+                    break;
                 default:
                     throw new InvalidDataException($"Unknown CompositeType {ct?.GetType().Name}");
             }

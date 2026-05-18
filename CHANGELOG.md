@@ -1,5 +1,55 @@
 # Changelog
 
+## WACS 0.19.0 — Stack Switching: WAT parsing + end-to-end execution tests
+
+Adds the text-format parser entries that allow hand-written WAT
+modules to use the six Stack Switching opcodes plus the
+`(cont $ft)` type form, and lands the producer/consumer
+co-routine tests proving the suspend/resume substrate works
+end-to-end. Also closes a `Unknown CompositeType: ContType` gap
+in `ValType.IsSubType`'s DefType arm that surfaced once the
+text parser made it easy to land a module-typed cont through
+validation.
+
+### Text parser
+
+- `(type $ct (cont $ft))` — continuation type form in the type
+  section.
+- Plain instruction keywords: `cont.new $ct`, `cont.bind $ct1
+  $ct2`, `suspend $tag`, `switch $ct $tag`.
+- Folded forms for `resume` / `resume_throw`:
+  `(resume $ct (on $tag $label)* operand*)`,
+  `(resume_throw $ct $tag (on $tag $label)* operand*)`. The
+  `(on … switch)` variant is recognized via a trailing
+  `switch` keyword inside the clause.
+
+### Type system
+
+- `ValType.IsSubType` DefType arm now handles `ContType` —
+  matches against `ValType.ContRef` / `ContRefNN`.
+- `TypeWriters.WriteCompositeType` and
+  `TextModuleWriter.WriteCompositeBody` round-trip `ContType`
+  via `CompType.ContCt = 0x5D` (binary) and `(cont N)` (text).
+
+### Execution tests
+
+Four new `Wacs.Core.Test.StackSwitchingExecutionTests`:
+
+- `Resume_runs_continuation_to_completion` — `cont.new` + bare
+  `resume` runs the wrapped function and returns its result.
+- `Suspend_branches_to_matching_on_handler_with_payload` —
+  full producer/consumer: producer suspends with a tag, the
+  on-tag handler captures the payload and returns it.
+- `Unhandled_suspend_propagates_as_trap` — a suspend whose
+  tag isn't installed by any active resume frame surfaces as
+  a trap.
+- `Second_resume_of_already_handled_cont_traps` — the
+  one-shot continuation handed to a handler can't be
+  re-resumed; the second resume sees a non-Fresh cont and
+  traps.
+
+511 Wacs.Core + 380 ComponentModel + 826 Transpiler tests green.
+
 ## WACS.Transpiler.Lib 0.11.1 — Stack Switching extension point + intentional interpreter fallback
 
 Documents the transpiler's handling of the six Stack Switching
