@@ -27,38 +27,38 @@ using WasmOpCode = Wacs.Core.OpCodes.OpCode;
 namespace Wacs.Transpiler.AOT.Emitters
 {
     /// <summary>
-    /// CIL emission for the WebAssembly Stack Switching opcodes
-    /// — three of six today.
+    /// CIL emission for all six WebAssembly Stack Switching
+    /// opcodes via <see cref="StackSwitchingHelpers"/>:
+    /// <c>cont.new</c>, <c>cont.bind</c>, <c>suspend</c>,
+    /// <c>resume</c>, <c>resume_throw</c>, <c>switch</c>.
     ///
-    /// <para><strong>Emitted</strong> (call out to
-    /// <see cref="StackSwitchingHelpers"/>):
-    /// <c>cont.new</c>, <c>cont.bind</c>, <c>suspend</c>. These
-    /// three are straight-line operations with no non-local
-    /// control transfer back into the caller: cont.new and
-    /// cont.bind allocate a ContInstance and return a Value;
-    /// suspend throws a SuspensionException that propagates up.
-    /// The emitted IL packs CIL-stack operands into Values,
-    /// calls the helper, and unpacks the result.</para>
+    /// <para>The first three are straight-line — the emitted IL
+    /// packs CIL-stack operands into Values, calls the helper,
+    /// and unpacks the result.</para>
     ///
-    /// <para><strong>Not yet emitted</strong> (functions
-    /// containing them fall back to interpreter execution):
-    /// <c>resume</c>, <c>resume_throw</c>, <c>switch</c>. These
-    /// invoke a continuation's function and route any
-    /// SuspensionException back to enclosing handler labels in
-    /// the caller's own CIL body — same try/catch + Leave-to-
-    /// dispatch-label pattern <c>ExceptionEmitter.EmitTryTable</c>
-    /// uses for try_table. Substantial separate work.</para>
+    /// <para><c>resume</c> / <c>resume_throw</c> wrap their
+    /// helper call in a CIL try/catch + tag-dispatch arm,
+    /// modeled on <c>ExceptionEmitter.EmitTryTable</c>: a
+    /// <see cref="SuspensionException"/> escaping the helper is
+    /// inspected against the resume's handler-tag list and
+    /// either branched to a per-handler dispatch label (which
+    /// pushes the reified payload + cont onto the CIL stack and
+    /// <c>Br</c>'s to the wasm enclosing handler label) or
+    /// rethrown.</para>
     ///
-    /// <para><strong>Mixed-mode only.</strong> The helpers
-    /// require a live <c>ThinContext.ExecContext</c>. Standalone
-    /// mode raises <see cref="NotSupportedException"/> with an
-    /// explanatory message from the helpers themselves.</para>
+    /// <para><strong>Mode-aware helpers.</strong> Helpers
+    /// receive the <c>ThinContext</c> directly and branch on
+    /// <c>ExecContext != null</c>: mixed mode uses the runtime's
+    /// Store / Frame / OpStack; standalone mode uses
+    /// <c>ContinuationStore</c> + <c>Tags[]</c> from the
+    /// ThinContext. Standalone <c>cont.new</c> / <c>cont.bind</c>
+    /// / <c>suspend</c> work today; <c>resume</c> /
+    /// <c>resume_throw</c> / <c>switch</c> in standalone surface
+    /// <see cref="NotSupportedException"/> until the reflection-
+    /// based delegate-marshal dispatch lands.</para>
     /// </summary>
     internal static class StackSwitchingEmitter
     {
-        private static readonly FieldInfo ExecContextField =
-            typeof(ThinContext).GetField(nameof(ThinContext.ExecContext))!;
-
         private static readonly MethodInfo ContNewMethod =
             typeof(StackSwitchingHelpers).GetMethod(
                 nameof(StackSwitchingHelpers.ContNew),
@@ -178,7 +178,6 @@ namespace Wacs.Transpiler.AOT.Emitters
             var funcLocal = il.DeclareLocal(typeof(Value));
             il.Emit(OpCodes.Stloc, funcLocal);
             il.Emit(OpCodes.Ldarg_0);
-            il.Emit(OpCodes.Ldfld, ExecContextField);
             il.Emit(OpCodes.Ldc_I4, inst.TypeIndex);
             il.Emit(OpCodes.Ldloc, funcLocal);
             il.Emit(OpCodes.Call, ContNewMethod);
@@ -237,7 +236,6 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Stloc, arrLocal);
 
             il.Emit(OpCodes.Ldarg_0);
-            il.Emit(OpCodes.Ldfld, ExecContextField);
             il.Emit(OpCodes.Ldc_I4, inst.TypeIndex2);
             il.Emit(OpCodes.Ldloc, contLocal);
             il.Emit(OpCodes.Ldloc, arrLocal);
@@ -281,7 +279,6 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Stloc, arrLocal);
 
             il.Emit(OpCodes.Ldarg_0);
-            il.Emit(OpCodes.Ldfld, ExecContextField);
             il.Emit(OpCodes.Ldc_I4, inst.TagIndex);
             il.Emit(OpCodes.Ldloc, arrLocal);
             il.Emit(OpCodes.Call, SuspendMethod);
@@ -332,7 +329,6 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Stloc, argsLocal);
 
             il.Emit(OpCodes.Ldarg_0);
-            il.Emit(OpCodes.Ldfld, ExecContextField);
             il.Emit(OpCodes.Ldc_I4, inst.TypeIndex);
             il.Emit(OpCodes.Ldc_I4, inst.TagIndex);
             il.Emit(OpCodes.Ldloc, argsLocal);
@@ -370,7 +366,6 @@ namespace Wacs.Transpiler.AOT.Emitters
                 emitHelperCall: (saveArgsLocal, saveContLocal, saveHandlersLocal) =>
                 {
                     il.Emit(OpCodes.Ldarg_0);
-                    il.Emit(OpCodes.Ldfld, ExecContextField);
                     il.Emit(OpCodes.Ldc_I4, inst.TypeIndex);
                     il.Emit(OpCodes.Ldloc, saveArgsLocal);
                     il.Emit(OpCodes.Ldloc, saveContLocal);
@@ -401,7 +396,6 @@ namespace Wacs.Transpiler.AOT.Emitters
                 emitHelperCall: (saveArgsLocal, saveContLocal, saveHandlersLocal) =>
                 {
                     il.Emit(OpCodes.Ldarg_0);
-                    il.Emit(OpCodes.Ldfld, ExecContextField);
                     il.Emit(OpCodes.Ldc_I4, inst.TypeIndex);
                     il.Emit(OpCodes.Ldc_I4, inst.TagIndex);
                     il.Emit(OpCodes.Ldloc, saveArgsLocal);
@@ -489,7 +483,6 @@ namespace Wacs.Transpiler.AOT.Emitters
             // Find matching handler via helper:
             //   FindHandlerMatch(ctx.ExecContext, handlersLocal, exnLocal)
             il.Emit(OpCodes.Ldarg_0);
-            il.Emit(OpCodes.Ldfld, ExecContextField);
             il.Emit(OpCodes.Ldloc, handlersLocal);
             il.Emit(OpCodes.Ldloc, exnLocal);
             il.Emit(OpCodes.Call, FindHandlerMatchMethod);
@@ -533,7 +526,6 @@ namespace Wacs.Transpiler.AOT.Emitters
                 // arr = ReifyHandlerArgs(ctx.ExecContext,
                 //                        contLocal, exnLocal)
                 il.Emit(OpCodes.Ldarg_0);
-                il.Emit(OpCodes.Ldfld, ExecContextField);
                 il.Emit(OpCodes.Ldloc, contLocal);
                 il.Emit(OpCodes.Ldloc, exnLocal);
                 il.Emit(OpCodes.Call, ReifyHandlerArgsMethod);

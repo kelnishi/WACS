@@ -90,6 +90,15 @@ namespace Wacs.Transpiler.AOT
         // (compare caught exception's tag to the expected one).
         public TagInstance[] Tags = System.Array.Empty<TagInstance>();
 
+        // === Continuations ===
+        // Module-local ContInstance allocator. Always populated;
+        // standalone mode uses it as the sole continuation store,
+        // mixed mode uses it as a fallback when ExecContext is
+        // present but the helper opted out of routing through
+        // Store.AllocateContinuation.
+        public readonly Wacs.Core.Runtime.Concurrency.ContinuationStore Continuations
+            = new Wacs.Core.Runtime.Concurrency.ContinuationStore();
+
         // === Function dispatch ===
         // ImportDelegates: typed delegates for imported functions.
         // Filled by the implementor at load time. Each delegate's signature matches

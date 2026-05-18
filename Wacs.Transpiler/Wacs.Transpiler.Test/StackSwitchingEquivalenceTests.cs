@@ -121,6 +121,48 @@ namespace Wacs.Transpiler.Test
         }
 
         /// <summary>
+        /// Standalone-mode: the transpiled Module class
+        /// instantiated via <c>Activator.CreateInstance</c>
+        /// without a host runtime must still be able to execute
+        /// the standalone-supported cont.* opcodes (cont.new,
+        /// cont.bind, suspend). The Slice-B helpers use
+        /// ThinContext.Continuations + reflection-based
+        /// delegate extraction from the funcref. Resume / throw
+        /// / switch in standalone surface
+        /// <see cref="System.NotSupportedException"/> with a
+        /// clear message — a future slice adds delegate-marshal
+        /// dispatch.
+        /// </summary>
+        [Fact]
+        public void Standalone_cont_new_via_module_class()
+        {
+            var src = @"
+                (module
+                  (type $ft (func (result i32)))
+                  (type $ct (cont $ft))
+                  (func $body (result i32) i32.const 1)
+                  (elem declare func $body)
+                  (func (export ""make_cont"") (result i32)
+                    (drop (cont.new $ct (ref.func $body)))
+                    i32.const 7))";
+
+            // Build using the transpiler runtime but invoke via
+            // the standalone TranspiledModuleWrapper, which uses
+            // Activator.CreateInstance and does NOT populate
+            // ThinContext.ExecContext.
+            var rt = new WasmRuntime();
+            var inst = rt.InstantiateModule(TextModuleParser.ParseWat(src));
+            var transpiler = new ModuleTranspiler();
+            var result = transpiler.Transpile(inst, rt);
+            Assert.Equal(0, result.FallbackCount);
+
+            var wrapper = new TranspiledModuleWrapper(result);
+            wrapper.Instantiate();
+            var got = wrapper.InvokeExport("make_cont", new Value[0]);
+            Assert.Equal(7, got[0].Data.Int32);
+        }
+
+        /// <summary>
         /// A function whose only stack-switching ops are
         /// <c>cont.new</c>, <c>cont.bind</c>, and <c>suspend</c>
         /// must transpile with no fallback — those three opcodes

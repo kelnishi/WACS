@@ -1,5 +1,75 @@
 # Changelog
 
+## WACS 0.22.0 / WACS.Transpiler.Lib 0.14.0 — Stack Switching standalone-mode parity (3 of 6 ops)
+
+Closes the standalone-mode gap for `cont.new`, `cont.bind`, and
+`suspend`: transpiled `Module` classes instantiated via
+`Activator.CreateInstance` (no host `WasmRuntime`) can now
+execute these three opcodes through emitted CIL. The helpers
+branch on `ExecContext != null` and use `ThinContext`-local
+state when standalone.
+
+### Mode-aware helpers
+
+`StackSwitchingHelpers.{ContNew, ContBind, Suspend, Resume,
+ResumeThrow, Switch, FindHandlerMatch, ReifyHandlerArgs}` now
+take `object thinCtx` (the transpiler's `ThinContext`) directly
+and extract the optional `ExecContext` via reflection, keeping
+`Wacs.Core` free of a `Wacs.Transpiler.Lib` dependency.
+
+- **Mixed mode** (`ExecContext != null`): unchanged behavior
+  — uses runtime's `Store` + `Frame` + `OpStack`.
+- **Standalone mode** (`ExecContext == null`):
+  - `cont.new`: extracts the function delegate from the
+    funcref's `GcRef` via duck-typed reflection on a `Target`
+    field (works against `Wacs.Transpiler.AOT.DelegateRef`
+    without referencing the type); falls back to
+    `ThinContext.FuncTable[Data.Ptr]`. Allocates via
+    `ThinContext.Continuations.Allocate(typeIdx, delegate)`.
+  - `cont.bind`: allocates the new continuation via
+    `ThinContext.Continuations`, preserves the source's
+    delegate reference.
+  - `suspend`: synthesizes a `TagAddr` from the raw tag index
+    so the in-module CIL catch arm can match against the
+    same value (no `Store` renumbering between throw and
+    catch in a single module).
+
+### New infrastructure
+
+- `Wacs.Core.Runtime.Concurrency.ContinuationStore` —
+  Module-local allocator parallel to `Store`'s continuation
+  list, used in standalone mode.
+- `ContInstance` gains a second constructor taking
+  `System.Delegate` for standalone allocation; the new
+  `StandaloneDelegate` field carries the function reference
+  when `Function` (FuncAddr) is unused.
+- `ThinContext.Continuations` — always-populated
+  `ContinuationStore` field.
+
+### Still gated on a future slice
+
+`resume`, `resume_throw`, and `switch` in standalone mode
+surface `NotSupportedException` with the explanatory message
+`"Standalone-mode transpiled modules do not yet support
+resume / resume_throw / switch — these ops invoke the
+continuation's function which currently requires the runtime's
+interpreter dispatch."` Closing this gap requires reflection-
+based delegate marshaling: `delegate.DynamicInvoke(ctx,
+args…)` with arg/result conversion between `Value` and the
+delegate's typed CLR parameters; a small but real piece of
+work tracked separately.
+
+### Tests
+
+- New `Standalone_cont_new_via_module_class` —
+  `TranspiledModuleWrapper.Instantiate()` + `InvokeExport()`
+  on a module that uses `cont.new` + `ref.func`; asserts the
+  result. Confirms the standalone path through the runtime
+  helpers and reflection-based delegate extraction.
+- 5 existing `StackSwitchingEquivalenceTests` still pass.
+- 833 transpiler + 511 Wacs.Core + 380 ComponentModel tests
+  green.
+
 ## WACS 0.21.0 / WACS.Transpiler.Lib 0.13.0 — Stack Switching CIL emit (all 6 opcodes)
 
 Closes the remaining three transpiler emitters: `resume`,

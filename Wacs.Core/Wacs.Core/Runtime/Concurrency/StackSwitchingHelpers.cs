@@ -30,14 +30,25 @@ namespace Wacs.Core.Runtime.Concurrency
     /// CLR arguments (instead of popping from the interpreter's
     /// OpStack) and to be safely callable from emitted IL.
     ///
-    /// <para>All helpers require a live <see cref="ExecContext"/>
-    /// (mixed-mode hosting via a <see cref="WasmRuntime"/>). In
-    /// standalone-mode transpiled modules — where <c>ExecContext</c>
-    /// is null — they throw <see cref="NotSupportedException"/>
-    /// with an explanatory message. A standalone-friendly
-    /// continuation runtime (Module-local ContinuationStore + a
-    /// delegate-based function-dispatch path) is a separate
-    /// design effort.</para>
+    /// <para>Helpers take an opaque <c>object</c> for the
+    /// transpiler's ThinContext (so this assembly doesn't depend
+    /// on Wacs.Transpiler.Lib) and reflectively extract the
+    /// <c>ExecContext</c> + <c>ContinuationStore</c> fields. Each
+    /// op branches on availability:</para>
+    ///
+    /// <list type="bullet">
+    ///   <item><b>Mixed mode</b> (ExecContext != null): use the
+    ///     runtime's Store + Frame + OpStack — identical to the
+    ///     interpreter's <c>Inst*.Execute</c> path.</item>
+    ///   <item><b>Standalone mode</b> (ExecContext == null): use
+    ///     the Module-local <c>ContinuationStore</c> + Tags array
+    ///     on ThinContext. <c>cont.new</c> / <c>cont.bind</c> /
+    ///     <c>suspend</c> work without ExecContext. <c>resume</c>
+    ///     / <c>resume_throw</c> / <c>switch</c> still throw
+    ///     <see cref="NotSupportedException"/> — they need
+    ///     reflection-based delegate marshaling that is a
+    ///     separate slice.</item>
+    /// </list>
     /// </summary>
     public static class StackSwitchingHelpers
     {
@@ -46,11 +57,68 @@ namespace Wacs.Core.Runtime.Concurrency
             "for runtime support. Standalone-mode transpiled modules do not yet " +
             "include a self-contained continuation runtime.";
 
+        private const string StandaloneInvokeUnsupported =
+            "Standalone-mode transpiled modules do not yet support resume / " +
+            "resume_throw / switch — these ops invoke the continuation's " +
+            "function which currently requires the runtime's interpreter dispatch.";
+
         private static ExecContext RequireExec(ExecContext? exec)
         {
             if (exec == null)
                 throw new NotSupportedException(NoHostContextMessage);
             return exec;
+        }
+
+        // Reflection cache for ThinContext access — keeps this
+        // assembly free of a Wacs.Transpiler.Lib dependency.
+        private static System.Reflection.FieldInfo? _execField;
+        private static System.Reflection.FieldInfo? _continuationsField;
+        private static System.Reflection.FieldInfo? _tagsField;
+        private static System.Reflection.FieldInfo? _funcTableField;
+
+        private static ExecContext? GetExec(object thinCtx)
+        {
+            if (thinCtx == null) return null;
+            _execField ??= thinCtx.GetType().GetField("ExecContext")
+                ?? throw new InvalidOperationException(
+                    "ThinContext is missing the ExecContext field.");
+            return (ExecContext?)_execField.GetValue(thinCtx);
+        }
+
+        private static ContinuationStore GetContinuations(object thinCtx)
+        {
+            _continuationsField ??= thinCtx.GetType().GetField("Continuations")
+                ?? throw new InvalidOperationException(
+                    "ThinContext is missing the Continuations field.");
+            return (ContinuationStore)_continuationsField.GetValue(thinCtx)!;
+        }
+
+        private static TagInstance[] GetTags(object thinCtx)
+        {
+            _tagsField ??= thinCtx.GetType().GetField("Tags")
+                ?? throw new InvalidOperationException(
+                    "ThinContext is missing the Tags field.");
+            return (TagInstance[])_tagsField.GetValue(thinCtx)!;
+        }
+
+        private static Delegate[] GetFuncTable(object thinCtx)
+        {
+            _funcTableField ??= thinCtx.GetType().GetField("FuncTable")
+                ?? throw new InvalidOperationException(
+                    "ThinContext is missing the FuncTable field.");
+            return (Delegate[])_funcTableField.GetValue(thinCtx)!;
+        }
+
+        // Standalone funcref carries a Wacs.Transpiler.Lib
+        // DelegateRef in Value.GcRef whose Target is the function
+        // delegate. Wacs.Core can't take a hard dependency on
+        // Wacs.Transpiler.Lib, so extract by reflection on the
+        // public "Target" field — duck-typed.
+        private static Delegate? ExtractDelegateRefTarget(IGcRef? gcRef)
+        {
+            if (gcRef == null) return null;
+            var f = gcRef.GetType().GetField("Target");
+            return f?.GetValue(gcRef) as Delegate;
         }
 
         // Convert the transpiler-passed handler-tag indices to
@@ -74,16 +142,42 @@ namespace Wacs.Core.Runtime.Concurrency
         /// a Fresh continuation tied to that function, push a
         /// non-nullable continuation ref.
         /// </summary>
-        public static Value ContNew(ExecContext? exec, int typeIdx, Value funcRef)
+        public static Value ContNew(object thinCtx, int typeIdx, Value funcRef)
         {
-            var ctx = RequireExec(exec);
             if (funcRef.IsNullRef)
                 throw new TrapException("cont.new: null function reference.");
-            var funcAddr = funcRef.GetFuncAddr(ctx.Frame.Module.Types);
-            if (!ctx.Store.Contains(funcAddr))
-                throw new TrapException(
-                    $"cont.new: function address {funcAddr} is not in the store.");
-            var contInst = ctx.Store.AllocateContinuation((TypeIdx)typeIdx, funcAddr);
+
+            var exec = GetExec(thinCtx);
+            ContInstance contInst;
+            if (exec != null)
+            {
+                // Mixed mode: allocate via the runtime's Store so
+                // interpreter and transpiled callers share state.
+                var funcAddr = funcRef.GetFuncAddr(exec.Frame.Module.Types);
+                if (!exec.Store.Contains(funcAddr))
+                    throw new TrapException(
+                        $"cont.new: function address {funcAddr} is not in the store.");
+                contInst = exec.Store.AllocateContinuation((TypeIdx)typeIdx, funcAddr);
+            }
+            else
+            {
+                // Standalone: stash the delegate from the funcref
+                // (set by RefFunc / call_indirect's table entry).
+                var del = ExtractDelegateRefTarget(funcRef.GcRef);
+                if (del == null)
+                {
+                    // Some standalone refs carry the funcidx in
+                    // Data.Ptr and the delegate is reachable via
+                    // FuncTable.
+                    var ft = GetFuncTable(thinCtx);
+                    long idx = funcRef.Data.Ptr;
+                    if (idx >= 0 && idx < ft.Length) del = ft[idx];
+                }
+                if (del == null)
+                    throw new TrapException(
+                        "cont.new: standalone funcref has no resolvable delegate.");
+                contInst = GetContinuations(thinCtx).Allocate((TypeIdx)typeIdx, del);
+            }
             return new Value(ValType.ContRefNN, contInst);
         }
 
@@ -98,10 +192,9 @@ namespace Wacs.Core.Runtime.Concurrency
         /// right order.
         /// </summary>
         public static Value ContBind(
-            ExecContext? exec, int targetTypeIdx,
+            object thinCtx, int targetTypeIdx,
             Value contRef, Value[] prefixArgs)
         {
-            var ctx = RequireExec(exec);
             if (contRef.IsNullRef)
                 throw new TrapException("cont.bind: null continuation reference.");
             var source = contRef.GcRef as ContInstance
@@ -111,8 +204,23 @@ namespace Wacs.Core.Runtime.Concurrency
                 throw new TrapException(
                     $"cont.bind: continuation is not fresh (state {source.State}).");
 
-            var bound = ctx.Store.AllocateContinuation(
-                (TypeIdx)targetTypeIdx, source.Function);
+            var exec = GetExec(thinCtx);
+            ContInstance bound;
+            if (exec != null && source.StandaloneDelegate == null)
+            {
+                bound = exec.Store.AllocateContinuation(
+                    (TypeIdx)targetTypeIdx, source.Function);
+            }
+            else
+            {
+                // Standalone or mixed mode with a source that
+                // came from a standalone allocation — keep the
+                // delegate so future invocations route the same way.
+                var store = GetContinuations(thinCtx);
+                bound = source.StandaloneDelegate != null
+                    ? store.Allocate((TypeIdx)targetTypeIdx, source.StandaloneDelegate)
+                    : store.Allocate((TypeIdx)targetTypeIdx, source.Function);
+            }
             bound.BoundArgs.AddRange(source.BoundArgs);
             bound.BoundArgs.AddRange(prefixArgs);
             source.State = ContState.Completed;
@@ -126,17 +234,31 @@ namespace Wacs.Core.Runtime.Concurrency
         /// produced (last-pushed first when iterating the
         /// returned Stack).
         /// </summary>
-        public static void Suspend(ExecContext? exec, int tagIdxValue, Value[] payload)
+        public static void Suspend(object thinCtx, int tagIdxValue, Value[] payload)
         {
-            var ctx = RequireExec(exec);
-            var tagIdx = (TagIdx)(uint)tagIdxValue;
-            if (!ctx.Frame.Module.TagAddrs.Contains(tagIdx))
-                throw new TrapException(
-                    $"suspend: tag {tagIdx} not addressable in this frame's module.");
-            var tagAddr = ctx.Frame.Module.TagAddrs[tagIdx];
-            if (!ctx.Store.Contains(tagAddr))
-                throw new TrapException(
-                    $"suspend: tag address {tagAddr} is not in the store.");
+            var exec = GetExec(thinCtx);
+            TagAddr tagAddr;
+            if (exec != null)
+            {
+                var tagIdx = (TagIdx)(uint)tagIdxValue;
+                if (!exec.Frame.Module.TagAddrs.Contains(tagIdx))
+                    throw new TrapException(
+                        $"suspend: tag {tagIdx} not addressable in this frame's module.");
+                tagAddr = exec.Frame.Module.TagAddrs[tagIdx];
+                if (!exec.Store.Contains(tagAddr))
+                    throw new TrapException(
+                        $"suspend: tag address {tagAddr} is not in the store.");
+            }
+            else
+            {
+                // Standalone: synthesize a TagAddr from the tag
+                // index so the catch arm can compare against a
+                // similarly-synthesized value. The transpiled
+                // catch in the same module sees the same idx
+                // because no Store-renumbering happens between
+                // throw and catch.
+                tagAddr = new TagAddr(tagIdxValue);
+            }
 
             // Build a stack of payload values matching the order
             // the interpreter would have left them after
@@ -165,12 +287,15 @@ namespace Wacs.Core.Runtime.Concurrency
         /// label is performed.</para>
         /// </summary>
         public static Value[] Resume(
-            ExecContext? exec, int typeIdx,
+            object thinCtx, int typeIdx,
             Value[] args, Value contRef,
             int[] handlerTagIdxs)
         {
+            var exec = GetExec(thinCtx);
+            if (exec == null)
+                throw new NotSupportedException(StandaloneInvokeUnsupported);
+            var ctx = exec;
             var handlers = TagsToHandlers(handlerTagIdxs);
-            var ctx = RequireExec(exec);
             if (contRef.IsNullRef)
                 throw new TrapException("resume: null continuation reference.");
             var cont = contRef.GcRef as ContInstance
@@ -241,12 +366,15 @@ namespace Wacs.Core.Runtime.Concurrency
         /// caller's enclosing try chain.
         /// </summary>
         public static Value[] ResumeThrow(
-            ExecContext? exec, int typeIdx, int tagIdxValue,
+            object thinCtx, int typeIdx, int tagIdxValue,
             Value[] excArgs, Value contRef,
             int[] handlerTagIdxs)
         {
+            var exec = GetExec(thinCtx);
+            if (exec == null)
+                throw new NotSupportedException(StandaloneInvokeUnsupported);
+            var ctx = exec;
             var handlers = TagsToHandlers(handlerTagIdxs);
-            var ctx = RequireExec(exec);
             if (contRef.IsNullRef)
                 throw new TrapException("resume_throw: null continuation reference.");
             var cont = contRef.GcRef as ContInstance
@@ -316,9 +444,19 @@ namespace Wacs.Core.Runtime.Concurrency
         /// label or rethrowing.
         /// </summary>
         public static int FindHandlerMatch(
-            ExecContext? exec, int[] handlerTagIdxs, SuspensionException ex)
+            object thinCtx, int[] handlerTagIdxs, SuspensionException ex)
         {
-            var ctx = RequireExec(exec);
+            var exec = GetExec(thinCtx);
+            if (exec == null)
+            {
+                // Standalone path: tag identity = raw int value
+                // synthesized in Suspend. ex.Tag.Value matches the
+                // handler's tag idx directly.
+                for (int i = 0; i < handlerTagIdxs.Length; i++)
+                    if ((int)ex.Tag.Value == handlerTagIdxs[i]) return i;
+                return -1;
+            }
+            var ctx = exec;
             for (int i = 0; i < handlerTagIdxs.Length; i++)
             {
                 var ti = (TagIdx)(uint)handlerTagIdxs[i];
@@ -339,9 +477,12 @@ namespace Wacs.Core.Runtime.Concurrency
         /// reified cont as the trailing slot.
         /// </summary>
         public static Value[] ReifyHandlerArgs(
-            ExecContext? exec, Value contRef, SuspensionException ex)
+            object thinCtx, Value contRef, SuspensionException ex)
         {
-            var ctx = RequireExec(exec);
+            var exec = GetExec(thinCtx);
+            if (exec == null)
+                throw new NotSupportedException(StandaloneInvokeUnsupported);
+            var ctx = exec;
             var cont = contRef.GcRef as ContInstance
                        ?? throw new TrapException(
                            "reify: ref does not point to a continuation.");
@@ -376,10 +517,13 @@ namespace Wacs.Core.Runtime.Concurrency
         /// already in scope.
         /// </summary>
         public static Value[] Switch(
-            ExecContext? exec, int typeIdx, int tagIdxValue,
+            object thinCtx, int typeIdx, int tagIdxValue,
             Value[] args, Value contRef)
         {
-            var ctx = RequireExec(exec);
+            var exec = GetExec(thinCtx);
+            if (exec == null)
+                throw new NotSupportedException(StandaloneInvokeUnsupported);
+            var ctx = exec;
             if (contRef.IsNullRef)
                 throw new TrapException("switch: null continuation reference.");
             var target = contRef.GcRef as ContInstance

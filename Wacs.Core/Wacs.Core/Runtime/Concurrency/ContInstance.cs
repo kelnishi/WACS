@@ -64,10 +64,18 @@ namespace Wacs.Core.Runtime.Concurrency
         /// the typing context.</summary>
         public readonly TypeIdx ContTypeIndex;
 
-        /// <summary>The function the continuation will (or did)
-        /// invoke. For <see cref="ContState.Fresh"/> instances the
-        /// function has not yet been entered.</summary>
+        /// <summary>The interpreter-side function address. In
+        /// mixed mode this is the FuncAddr in the runtime's
+        /// Store; in standalone mode this is unused (zero) and
+        /// <see cref="StandaloneDelegate"/> carries the function
+        /// reference instead.</summary>
         public readonly FuncAddr Function;
+
+        /// <summary>Standalone-mode function reference: the CLR
+        /// delegate from the transpiled module's
+        /// <c>ThinContext.FuncTable</c>. Null in mixed mode where
+        /// invocation routes through <see cref="Function"/>.</summary>
+        public readonly System.Delegate? StandaloneDelegate;
 
         /// <summary>Prefix arguments pre-supplied by
         /// <c>cont.bind</c>. Empty for a fresh <c>cont.new</c>
@@ -84,6 +92,17 @@ namespace Wacs.Core.Runtime.Concurrency
             Index = new ContIdx(idx);
             ContTypeIndex = contTypeIndex;
             Function = function;
+            StandaloneDelegate = null;
+            BoundArgs = new List<Value>();
+            State = ContState.Fresh;
+        }
+
+        public ContInstance(long idx, TypeIdx contTypeIndex, System.Delegate standaloneDelegate)
+        {
+            Index = new ContIdx(idx);
+            ContTypeIndex = contTypeIndex;
+            Function = default;
+            StandaloneDelegate = standaloneDelegate;
             BoundArgs = new List<Value>();
             State = ContState.Fresh;
         }
