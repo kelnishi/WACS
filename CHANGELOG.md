@@ -1,5 +1,53 @@
 # Changelog
 
+## AOT enforcement test
+
+`Wacs.Core/Wacs.Core.Test/AotAcceptanceTests.cs` (new) enforces
+the hard requirement that `Wacs.Core` is AOT-safe. The test
+publishes `Wacs.Bench/Wacs.Bench.Aot` with
+`-p:TrimmerSingleWarn=false` (expands the `IL2104` umbrella
+into per-site warnings), parses the analyzer output, filters
+for warnings whose source path contains `Wacs.Core/`, and
+asserts the set matches an in-source `KnownBaseline` allow-list.
+
+### Policy
+
+- The base C# AOT analyzer fires only during `PublishAot=true`
+  publishes — not during `dotnet build`. Without this test
+  step, a new `Type.GetMethod` / `GetField` / `DynamicInvoke`
+  / etc. could slip into `Wacs.Core` unnoticed and only break
+  a downstream consumer's AOT image.
+- The `KnownBaseline` allow-list is **not** for adding new
+  AOT-unsafe code — it tracks pre-existing violations slated
+  for fix. Adding to it requires explicit reviewer sign-off.
+  Removing entries (when the underlying code is fixed) is the
+  only direction the list should move.
+- Current baseline (2026-05-18): one entry —
+  `Wacs.Core/Runtime/WasmRuntimeExecution.cs(459)` `IL2075`,
+  a `Type.GetConstructor` reflection call in the host
+  exception-rethrow path. Pre-dates the stack-switching work.
+
+### Gating + CI
+
+- Gated via the `WACS_AOT_TEST=1` env var. Publish takes
+  ~60-90s on a cold cache; gating keeps dev cycles fast.
+  Without the env var, the test logs "Skipping" and exits in
+  ~3ms.
+- `.github/workflows/ci.yml` "Run Core Tests" step sets the
+  env var — CI enforces the check on every PR/merge.
+
+### Negative-test verified
+
+Temporarily removing the baseline entry produces:
+```
+AOT-unsafe pattern introduced in Wacs.Core:
+  IL2075 at Wacs.Core/Wacs.Core/Runtime/WasmRuntimeExecution.cs(459)
+```
+followed by guidance on the AOT-safe rewrite options
+(interface dispatch, source generators).
+
+516 Wacs.Core tests pass (515 + 1 new gated test).
+
 ## WACS.Transpiler.Lib 0.15.0 — Stack Switching standalone-mode dispatch (Slice B.2)
 
 Transpiler now generates one `StandaloneContInvoker` subclass

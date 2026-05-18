@@ -41,6 +41,14 @@ jobs:
         run: dotnet test --configuration Release --no-build --verbosity normal Spec.Test/Spec.Test.csproj
 
       - name: Run Core Tests
+        # WACS_AOT_TEST=1 opts into AotAcceptanceTests, which
+        # publishes Wacs.Bench.Aot with PublishAot=true and
+        # asserts no new IL warnings originate from Wacs.Core.
+        # See Wacs.Core.Test/AotAcceptanceTests.cs for the
+        # baseline + policy. The test takes ~60-90s — kept
+        # behind the env var so dev cycles stay fast.
+        env:
+          WACS_AOT_TEST: "1"
         run: dotnet test --configuration Release --no-build --verbosity normal Wacs.Core/Wacs.Core.Test/Wacs.Core.Test.csproj
 
       - name: Run Compilation Tests
