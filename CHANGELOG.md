@@ -1,5 +1,42 @@
 # Changelog
 
+## WACS.ComponentModel 0.8.1 / WACS.ComponentModel.Harness.Lib 0.27.1 — async handle marshal + layout (Phase 2 Slice C)
+
+Adds the three async-ABI handle marshal helpers + extends the
+canonical-ABI layout table to cover the new types.
+
+### Marshal helpers
+
+Three new public static classes in
+`Wacs.ComponentModel/CanonicalABI/`:
+
+- `StreamMarshal` — `HandleSize = 4`, `HandleAlign = 4`,
+  `ReadHandle` / `WriteHandle` over little-endian i32.
+- `FutureMarshal` — same shape.
+- `ErrorContextMarshal` — same shape.
+
+All three are thin wrappers around `BinaryPrimitives.Read/Write
+Int32LittleEndian` with offset bounds checking. Phase 2 scope is
+"handle marshaling only" — the data plane (stream buffer, future
+cell, error-context debug-message) lands in Phase 3 with the
+dispatcher. These helpers exist now so call sites can document
+"a stream handle crosses here" rather than burying the marshaling
+in a generic i32 read.
+
+### CanonicalAbi.Layout coverage
+
+`Wacs.ComponentModel.Harness.Lib/CanonicalAbi.cs` Layout switch
+now recognizes `CtStreamType` / `CtFutureType` /
+`CtErrorContextType`, returning `(4, 4)` — same as
+`own<R>` / `borrow<R>` / `CtResourceType`. Previously these would
+fall through to the default `NotSupportedException`.
+
+### Tests
+
+6 new tests in `AsyncHandleMarshalTests` covering round-trip,
+size/align constants, out-of-bounds rejection, and non-zero
+offsets. 402/402 ComponentModel tests pass (was 396).
+
 ## WACS.ComponentModel.Parser 0.2.1 — canon async-builtin dispatch (Phase 2 Slice B)
 
 Lands binary decoding for all 25 canon async-ABI builtins
