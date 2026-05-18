@@ -1,5 +1,42 @@
 # Changelog
 
+## WACS 0.15.24 — field-names and tag-names subsections
+
+Adds parser and writer support for two more `name` custom-section
+subsections that were previously unrecognized (and would have
+thrown `FormatException` on any binary carrying them):
+
+- **Field names** (id 10, from the GC proposal) — indirect map
+  keyed by typeidx, then fieldidx. Exposed as
+  `Module.NameSection.FieldNames` (`IndirectNameMap`).
+- **Tag names** (id 11, from the exception-handling proposal) —
+  flat name map keyed by tagidx. Exposed as
+  `Module.NameSection.TagNames` (`NameMap`).
+
+Names are preserved on the `NameSection` object only; this
+change does not stamp `TagType.Id` or `FieldType.Id` (those
+types don't carry id strings today). Round-trip tests added
+against hand-built binaries.
+
+## WACS 0.15.23 — extended-name-section label-names wire shape
+
+Fixes the binary parser and writer for the label-names subsection
+(id 3) of the `name` custom section. Per the extended-name-section
+proposal, label names use an **indirect** name map
+(funcidx → labelidx → name), not the flat name map WACS was
+emitting and parsing. Any binary actually carrying label names
+would round-trip incorrectly before this fix.
+
+### What changed
+
+- `Module.NameSubsection.LabelNameSubsection.Names` is now an
+  `IndirectNameMap` (was `NameMap`). External consumers that read
+  the property directly need to switch from `.NameAssocMap` to
+  the indirect form (`labels[funcIdx].NameAssocMap[labelIdx]`).
+- `BinaryModuleWriter` emits the subsection as an indirect map.
+- New round-trip test covers the wire shape against a hand-built
+  binary.
+
 ## WACS.ComponentModel.Harness.Runtime 0.7.0 / WACS.ComponentModel.Harness.Lib 0.27.0 — separate host handle space + Borrowed&lt;T&gt;
 
 Layers an independent host-side handle space over the existing

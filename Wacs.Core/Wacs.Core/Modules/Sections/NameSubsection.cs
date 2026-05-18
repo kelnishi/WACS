@@ -31,7 +31,11 @@ namespace Wacs.Core
         MemoryName = 6,
         GlobalName = 7,
         ElementSegName = 8,
-        DataSegName = 9
+        DataSegName = 9,
+        // From the GC proposal: indirect map (typeidx → fieldidx → name).
+        FieldName = 10,
+        // From the exception-handling proposal: flat map (tagidx → name).
+        TagName = 11
     }
 
     public partial class Module
@@ -62,6 +66,8 @@ namespace Wacs.Core
             public NameSubsection.MemoryNameSubsection? MemoryNames { get; internal set; }
             public NameSubsection.LabelNameSubsection? LabelNames { get; internal set; }
             public NameSubsection.TypeNameSubsection? TypeNames { get; internal set; }
+            public NameSubsection.FieldNameSubsection? FieldNames { get; internal set; }
+            public NameSubsection.TagNameSubsection? TagNames { get; internal set; }
 
             public static NameSection Parse(BinaryReader reader)
             {
@@ -104,7 +110,13 @@ namespace Wacs.Core
                         case NameSubsectionId.DataSegName:
                             nameSection.DataSegNames = NameSubsection.DataSegNameSubsection.Parse(reader);
                             break;
-                        
+                        case NameSubsectionId.FieldName:
+                            nameSection.FieldNames = NameSubsection.FieldNameSubsection.Parse(reader);
+                            break;
+                        case NameSubsectionId.TagName:
+                            nameSection.TagNames = NameSubsection.TagNameSubsection.Parse(reader);
+                            break;
+
                         default:
                             throw new FormatException($"Name Subsection had invalid id: {subsectionId}");
                     }
@@ -140,8 +152,11 @@ namespace Wacs.Core
 
             public class LabelNameSubsection : NameSubsection
             {
-                public NameMap Names { get; internal set; } = null!;
-                public static LabelNameSubsection Parse(BinaryReader reader) => new() { Names = NameMap.Parse(reader) };
+                // Per the extended-name-section proposal: labels are
+                // grouped by funcidx, so the wire shape is an indirect
+                // name map (funcidx → labelidx → name), not a flat map.
+                public IndirectNameMap Names { get; internal set; } = null!;
+                public static LabelNameSubsection Parse(BinaryReader reader) => new() { Names = IndirectNameMap.Parse(reader) };
             }
 
             public class TypeNameSubsection : NameSubsection
@@ -178,6 +193,20 @@ namespace Wacs.Core
             {
                 public NameMap Names { get; internal set; } = null!;
                 public static DataSegNameSubsection Parse(BinaryReader reader) => new() { Names = NameMap.Parse(reader) };
+            }
+
+            public class FieldNameSubsection : NameSubsection
+            {
+                // GC spec §Field Names: indirect map (typeidx → fieldidx → name).
+                public IndirectNameMap Names { get; internal set; } = null!;
+                public static FieldNameSubsection Parse(BinaryReader reader) => new() { Names = IndirectNameMap.Parse(reader) };
+            }
+
+            public class TagNameSubsection : NameSubsection
+            {
+                // Exception-handling §Tag Names: flat name map.
+                public NameMap Names { get; internal set; } = null!;
+                public static TagNameSubsection Parse(BinaryReader reader) => new() { Names = NameMap.Parse(reader) };
             }
         }
 

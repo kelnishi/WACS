@@ -51,7 +51,7 @@ namespace Wacs.Core.Bin
 
             if (names.LabelNames != null)
                 WriteSubsection(w, NameSubsectionIdValue(NameSubKind.LabelName), inner =>
-                    WriteNameMap(inner, names.LabelNames.Names));
+                    WriteIndirectNameMap(inner, names.LabelNames.Names));
 
             if (names.TypeNames != null)
                 WriteSubsection(w, NameSubsectionIdValue(NameSubKind.TypeName), inner =>
@@ -76,6 +76,14 @@ namespace Wacs.Core.Bin
             if (names.DataSegNames != null)
                 WriteSubsection(w, NameSubsectionIdValue(NameSubKind.DataSegName), inner =>
                     WriteNameMap(inner, names.DataSegNames.Names));
+
+            if (names.FieldNames != null)
+                WriteSubsection(w, NameSubsectionIdValue(NameSubKind.FieldName), inner =>
+                    WriteIndirectNameMap(inner, names.FieldNames.Names));
+
+            if (names.TagNames != null)
+                WriteSubsection(w, NameSubsectionIdValue(NameSubKind.TagName), inner =>
+                    WriteNameMap(inner, names.TagNames.Names));
         }
 
         private enum NameSubKind : byte
@@ -89,7 +97,9 @@ namespace Wacs.Core.Bin
             MemoryName = 6,
             GlobalName = 7,
             ElementSegName = 8,
-            DataSegName = 9
+            DataSegName = 9,
+            FieldName = 10,
+            TagName = 11
         }
 
         private static byte NameSubsectionIdValue(NameSubKind kind) => (byte)kind;
