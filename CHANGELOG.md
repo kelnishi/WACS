@@ -1,5 +1,75 @@
 # Changelog
 
+## WACS.ComponentModel 0.8.5 — AsyncDispatcher contract (Phase 3 Slice C)
+
+Establishes the public API the interpreter calls directly and the
+transpiler emits CIL against — per `feedback_symmetric_engines`:
+two engines, one dispatcher.
+
+### `AsyncDispatcher`
+
+One instance per `ComponentInstance`. Owns six per-kind handle
+spaces (Tasks, Subtasks, WaitableSets, Streams, Futures,
+ErrorContexts) and exposes methods named after the canon-async
+builtins.
+
+**Implemented in Slice C** (no-suspend operations):
+
+- Stream: `StreamNew`, `StreamTryWrite`, `StreamTryRead`,
+  `StreamDropReadable`, `StreamDropWritable`.
+- Future: `FutureNew`, `FutureWrite`, `FutureReadAsync` (returns
+  `Task<object?>`), `FutureDropReadable`, `FutureDropWritable`.
+- ErrorContext: `ErrorContextNew(string)`,
+  `ErrorContextDebugMessage`, `ErrorContextDrop`.
+- WaitableSet: `WaitableSetNew`, `WaitableSetDrop`,
+  `WaitableJoin`.
+- Task lifecycle: `RegisterTask(ContInstance)` returning the
+  bound `ComponentTask`.
+- Subtask: `SubtaskDrop`.
+
+**Stubbed for Slice D** — methods throw
+`NotImplementedException` with a clear "Slice D" message,
+pinning the contract:
+
+- `TaskReturn` / `TaskCancel` (current-task tracking).
+- `SubtaskCancel` (cancel propagation).
+- `WaitableSetWait` / `WaitableSetPoll` (suspend integration).
+- `Backpressure{Set,Inc,Dec}` (ambient state machine).
+- `Context{Get,Set}` (per-task slots).
+- `ThreadYield` (suspend integration).
+- `Stream{CancelRead,CancelWrite}` / `Future{CancelRead,CancelWrite}`
+  (cooperative cancel handshake).
+
+Tests pin the `NotImplementedException` markers so adding
+behavior later still verifies the contract intent.
+
+### `AsyncHandleTable<T>` — factory-overload + thread-safety docs
+
+- New `Allocate(Func<int, T> factory)` overload: invoke the
+  factory with the freshly-minted handle to build the value
+  it gets bound to. Avoids the allocate-then-rewrite dance
+  for values that carry their own handle field
+  (`ComponentTask`, `ComponentWaitableSet`).
+- Tightened thread-safety doc comment: explicitly covers core
+  CM async (single-threaded by spec), the 🧵 non-shared
+  thread.* canon ops (cooperative-fiber single OS thread), and
+  the 🧵② shared-explicit-threads boundary (rejected at the
+  parser; would require concurrent storage to ship).
+
+### `StreamBuffer<T>` — thread-safety doc
+
+Clarifies that `SingleReader = SingleWriter = true` is a
+"one consumer/producer at a time" constraint, not a thread
+constraint — host-thread completion callbacks resolve through
+the underlying `Channel<T>` correctly.
+
+### Tests
+
+17 new in `AsyncDispatcherTests` — stream / future / error-
+context / waitable-set / task registration round-trip + the
+three pinned NotImplementedException markers. 456/456 CM
+tests pass (was 439).
+
 ## WACS.ComponentModel 0.8.4 — stream + future data plane (Phase 3 Slice B)
 
 Adds the backing storage for `stream<T>` and `future<T>` handles.

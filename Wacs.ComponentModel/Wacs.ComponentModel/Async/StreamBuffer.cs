@@ -33,10 +33,15 @@ namespace Wacs.ComponentModel.Async
     ///     async semantics.</item>
     /// </list>
     ///
-    /// <para>Single-threaded by convention — wasm execution is
-    /// single-threaded per component instance. The
-    /// <c>BoundedChannelOptions</c> are set accordingly
-    /// (<c>SingleReader = SingleWriter = true</c>).</para>
+    /// <para><b>Threading model:</b> <c>SingleReader = SingleWriter
+    /// = true</c> means "only one reader and one writer at a time"
+    /// — not "must be the same OS thread." The wasm-side producer
+    /// and consumer are single-threaded per component instance (see
+    /// <see cref="AsyncHandleTable{T}"/> notes on the spec's
+    /// stackful-async threading model), and host-side completion
+    /// callbacks can resolve from any thread without violating the
+    /// option. The underlying <see cref="Channel{T}"/> handles the
+    /// host-thread concurrency correctly.</para>
     /// </summary>
     public sealed class StreamBuffer<T>
     {

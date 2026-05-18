@@ -5,6 +5,7 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+using System;
 using System.Collections.Generic;
 
 namespace Wacs.ComponentModel.Async
@@ -24,9 +25,26 @@ namespace Wacs.ComponentModel.Async
     /// dropped handles so long-running components don't drift their
     /// counter unbounded.</para>
     ///
-    /// <para>Not thread-safe — wasm execution is single-threaded
-    /// per component instance, and the canon async ABI yields
-    /// control via stack switching rather than CLR thread pool.</para>
+    /// <para><b>Thread-safety:</b> not thread-safe by design. The
+    /// table assumes one wasm execution context calls into it at a
+    /// time — true for:</para>
+    /// <list type="bullet">
+    ///   <item>Core CM async (the stackful proposal Phase 3 targets):
+    ///     guest yields via Stack Switching <c>suspend</c>/<c>resume</c>,
+    ///     not CLR thread pool.</item>
+    ///   <item>The non-shared thread.* canon ops (bytes 0x26–0x2b,
+    ///     🧵 in the spec): cooperatively-scheduled fibers on a
+    ///     single OS thread per instance.</item>
+    /// </list>
+    /// <para>Host callbacks (e.g. completing a host-side
+    /// <see cref="System.Threading.Tasks.TaskCompletionSource{T}"/>
+    /// from a thread-pool thread) resolve through the dispatcher,
+    /// which marshals back to the wasm execution context — they
+    /// never call into this table directly.</para>
+    /// <para>Would require concurrent storage if the
+    /// explicit-threads proposal (🧵② shared variants, bytes
+    /// 0x40–0x42) ever lands — that case is rejected at the
+    /// parser today.</para>
     /// </summary>
     public sealed class AsyncHandleTable<T> where T : class
     {
@@ -39,6 +57,22 @@ namespace Wacs.ComponentModel.Async
         {
             int handle = _freelist.Count > 0 ? _freelist.Pop() : _nextHandle++;
             _entries[handle] = value;
+            return handle;
+        }
+
+        /// <summary>
+        /// Allocate a slot whose value depends on its own handle.
+        /// The <paramref name="factory"/> is invoked with the
+        /// freshly-minted handle and returns the value to bind to
+        /// it. Used when the stored value (e.g.
+        /// <see cref="ComponentTask"/>, <see cref="ComponentWaitableSet"/>)
+        /// carries its handle as a field — avoids the
+        /// allocate-then-rewrite dance.
+        /// </summary>
+        public int Allocate(Func<int, T> factory)
+        {
+            int handle = _freelist.Count > 0 ? _freelist.Pop() : _nextHandle++;
+            _entries[handle] = factory(handle);
             return handle;
         }
 
