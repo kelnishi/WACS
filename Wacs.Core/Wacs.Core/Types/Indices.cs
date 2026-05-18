@@ -216,5 +216,24 @@ namespace Wacs.Core.Types
         public bool Equals(Index other) => Value == other.Value;
         public static explicit operator ArrayIdx(long value) => new(value);
     }
-    
+
+    /// <summary>
+    /// Index of a <c>ContInstance</c> in the runtime — backs
+    /// <c>ValType.ContRef</c> / <c>ContRefNN</c> values created by the
+    /// Stack Switching <c>cont.new</c> opcode.
+    /// </summary>
+    public readonly struct ContIdx : RefIdx, IEquatable<ContIdx>
+    {
+        public readonly long Value;
+        public ContIdx(long value) => Value = value;
+        public bool Equals(Index other) => Value == other.Value;
+        public bool Equals(ContIdx other) => Value == other.Value;
+        public static explicit operator ContIdx(long value) => new(value);
+        public override bool Equals(object? obj) => obj is ContIdx other && Equals(other);
+        public override int GetHashCode() => Value.GetHashCode();
+        public static bool operator ==(ContIdx l, ContIdx r) => l.Value == r.Value;
+        public static bool operator !=(ContIdx l, ContIdx r) => l.Value != r.Value;
+    }
+
+
 }

@@ -28,6 +28,7 @@ namespace Wacs.Core.Runtime
         private readonly List<DataInstance> Datas = new();
         private readonly List<ElementInstance> Elems = new();
         private readonly List<ExnInstance> Exns = new();
+        private readonly List<Concurrency.ContInstance> Continuations = new();
 
         private readonly List<IFunctionInstance> Funcs = new();
         private readonly List<GlobalInstance> Globals = new();
@@ -244,6 +245,16 @@ namespace Wacs.Core.Runtime
             Exns.Add(exnInst);
             return exnAddr;
         }
+
+        public Concurrency.ContInstance AllocateContinuation(TypeIdx contTypeIdx, FuncAddr func)
+        {
+            var inst = new Concurrency.ContInstance(Continuations.Count, contTypeIdx, func);
+            Continuations.Add(inst);
+            return inst;
+        }
+
+        public Concurrency.ContInstance? GetContinuation(long idx) =>
+            idx >= 0 && idx < Continuations.Count ? Continuations[(int)idx] : null;
 
         public ElemAddr AddElement(ElementInstance elem)
         {

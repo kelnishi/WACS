@@ -169,14 +169,13 @@ namespace Wacs.Core.Test
         }
 
         /// <summary>
-        /// Execute throws NotImplementedException — a guest that
-        /// reaches cont.* must fail loudly rather than silently
-        /// no-op, since these opcodes carry no fallback semantics.
+        /// Execute throws NotImplementedException for the opcodes
+        /// whose runtime mechanics require the BlockTarget handler-
+        /// frame integration. A guest that reaches them must fail
+        /// loudly rather than silently no-op, since these opcodes
+        /// carry no fallback semantics.
         /// </summary>
         [Theory]
-        [InlineData(typeof(InstContNew))]
-        [InlineData(typeof(InstContBind))]
-        [InlineData(typeof(InstSuspend))]
         [InlineData(typeof(InstResume))]
         [InlineData(typeof(InstResumeThrow))]
         [InlineData(typeof(InstSwitch))]

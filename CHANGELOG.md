@@ -1,5 +1,52 @@
 # Changelog
 
+## WACS 0.17.0 — Continuation runtime: data structures + cont.new / cont.bind / suspend
+
+First runtime slice of the Stack Switching proposal. Introduces
+the `Wacs.Core.Runtime.Concurrency` namespace, allocates
+continuations on the Store, and wires execution for three of the
+six opcodes. The remaining three (`resume`, `resume_throw`,
+`switch`) still throw `NotImplementedException` until the
+BlockTarget handler-frame integration lands.
+
+### New runtime types
+
+- `Wacs.Core.Runtime.Concurrency.ContInstance` — `IGcRef`-shaped
+  record of a continuation (state machine: Fresh / Running /
+  Suspended / Completed; carries the inner FuncAddr + bound
+  prefix args + the continuation type index).
+- `Wacs.Core.Runtime.Concurrency.SuspensionException` —
+  `WasmRuntimeException` subclass that `suspend` throws to unwind
+  the interpreter stack to the matching `resume` handler frame.
+- `ContIdx` (`RefIdx`) — Store-side identifier; `Value`'s
+  `(refType, IGcRef)` constructor now recognizes it alongside the
+  existing struct / array / exn cases.
+- `Store.AllocateContinuation(typeIdx, funcAddr)` allocator and
+  `Store.GetContinuation(idx)` lookup.
+
+### Opcode runtime
+
+- `cont.new $ct` — pops a function reference, allocates a fresh
+  `ContInstance` tied to that function, pushes a non-nullable
+  `ContRef` value.
+- `cont.bind $ct1 $ct2` — pops a fresh continuation and `bindCount`
+  prefix args (computed from `ft1.params - ft2.params`),
+  allocates a new continuation with prefix args prepended, and
+  marks the source as `Completed` so it can't be reused.
+- `suspend $tag` — pops the tag's parameter values and throws a
+  `SuspensionException(tag, payload)`. Without a `resume` handler
+  frame to catch it the exception currently surfaces as an
+  unhandled `WasmRuntimeException`; the catch path lands with
+  the BlockTarget integration in the next slice.
+
+### Tests
+
+- 17 round-trip + factory tests in `StackSwitchingInstructionTests`
+  still pass; the `Execute_throws_NotImplemented` theory shrinks
+  from six cases to three (resume / resume_throw / switch) now
+  that the other three opcodes execute.
+- 508 Wacs.Core + 380 Wacs.ComponentModel tests green overall.
+
 ## WACS 0.16.2 — Scrub PM annotations from Stack Switching code
 
 Comment-only cleanup pass over the files added in 0.16.0 / 0.16.1:

@@ -13,9 +13,13 @@
 // limitations under the License.
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Wacs.Core.OpCodes;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Concurrency;
+using Wacs.Core.Runtime.Exceptions;
+using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
 using Wacs.Core.Utilities;
@@ -78,8 +82,19 @@ namespace Wacs.Core.Instructions
             context.OpStack.PushType(ValType.ContRefNN);
         }
 
-        public override void Execute(ExecContext context) =>
-            throw new NotImplementedException("cont.new is not implemented.");
+        public override void Execute(ExecContext context)
+        {
+            context.Assert(context.OpStack.Count > 0,
+                "cont.new: empty operand stack.");
+            var refVal = context.OpStack.PopRefType();
+            if (refVal.IsNullRef)
+                throw new TrapException("cont.new: null function reference.");
+            var funcAddr = refVal.GetFuncAddr(context.Frame.Module.Types);
+            context.Assert(context.Store.Contains(funcAddr),
+                $"cont.new: function address {funcAddr} is not in the store.");
+            var contInst = context.Store.AllocateContinuation(X, funcAddr);
+            context.OpStack.PushValue(new Value(ValType.ContRefNN, contInst));
+        }
 
         public override InstructionBase Parse(BinaryReader reader)
         {
@@ -140,8 +155,49 @@ namespace Wacs.Core.Instructions
             context.OpStack.PushType(ValType.ContRefNN);
         }
 
-        public override void Execute(ExecContext context) =>
-            throw new NotImplementedException("cont.bind is not implemented.");
+        public override void Execute(ExecContext context)
+        {
+            // The proposal models cont.bind as "shrink the param
+            // arity by partial application" — outer source signature
+            // has more params, target has fewer. The continuation
+            // (source) is on top of the stack; immediately below it
+            // are the bind-prefix args. Pop them all, prepend the
+            // prefix to the source's existing BoundArgs, and produce
+            // a new ContInstance retyped to the target.
+            context.Assert(context.OpStack.Count > 0,
+                "cont.bind: empty operand stack.");
+            var contVal = context.OpStack.PopRefType();
+            if (contVal.IsNullRef)
+                throw new TrapException("cont.bind: null continuation reference.");
+            var source = contVal.GcRef as ContInstance;
+            context.Assert(source,
+                "cont.bind: ref does not point to a continuation.");
+            context.Assert(source!.State == ContState.Fresh,
+                $"cont.bind: continuation is not fresh (state {source.State}).");
+
+            var srcFt = context.Frame.Module.Types[X1].Expansion as FunctionType;
+            var tgtFt = context.Frame.Module.Types[X2].Expansion as FunctionType;
+            context.Assert(srcFt,
+                $"cont.bind: source type {X1} is not a function type.");
+            context.Assert(tgtFt,
+                $"cont.bind: target type {X2} is not a function type.");
+            int bindCount = srcFt!.ParameterTypes.Arity - tgtFt!.ParameterTypes.Arity;
+
+            // Pop bind args in reverse so the leading-position
+            // semantics is preserved when re-pushed at resume time.
+            var prefix = new Value[bindCount];
+            for (int i = bindCount - 1; i >= 0; i--)
+                prefix[i] = context.OpStack.PopAny();
+
+            var bound = context.Store.AllocateContinuation(X2, source.Function);
+            bound.BoundArgs.AddRange(source.BoundArgs);
+            bound.BoundArgs.AddRange(prefix);
+            // The source continuation is consumed by cont.bind —
+            // re-using it would let two callers race on the same
+            // underlying function. Mark it spent.
+            source.State = ContState.Completed;
+            context.OpStack.PushValue(new Value(ValType.ContRefNN, bound));
+        }
 
         public override InstructionBase Parse(BinaryReader reader)
         {
@@ -181,8 +237,20 @@ namespace Wacs.Core.Instructions
             context.OpStack.PushResult(ft.ResultType);
         }
 
-        public override void Execute(ExecContext context) =>
-            throw new NotImplementedException("suspend is not implemented.");
+        public override void Execute(ExecContext context)
+        {
+            context.Assert(context.Frame.Module.TagAddrs.Contains(X),
+                $"suspend: tag {X} not addressable in this frame's module.");
+            var ta = context.Frame.Module.TagAddrs[X];
+            context.Assert(context.Store.Contains(ta),
+                $"suspend: tag address {ta} is not in the store.");
+            var ti = context.Store[ta];
+            var ft = (ti.Type.Expansion as FunctionType)!;
+
+            var payload = new Stack<Value>();
+            context.OpStack.PopResults(ft.ParameterTypes, ref payload);
+            throw new SuspensionException(ta, payload);
+        }
 
         public override InstructionBase Parse(BinaryReader reader)
         {
