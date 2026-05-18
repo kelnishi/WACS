@@ -1,5 +1,58 @@
 # Changelog
 
+## WACS.ComponentModel 0.8.0 / WACS.ComponentModel.Parser 0.2.0 — async-ABI handle types (Phase 2 Slice A)
+
+First slice of WASIp3 Phase 2: lands `stream<T>` / `future<T>` /
+`error-context` in the type system and the binary type-section
+parser. Handle marshaling and canon-builtin parser come in
+later slices; this commit only adds shapes + tag dispatch.
+
+### `CtValType` hierarchy
+
+Three new sealed subclasses in
+`Wacs.ComponentModel/Types/CtValType.cs`:
+
+- `CtStreamType { CtValType? Element }` — `stream<T>` or
+  `stream` (empty element form). 4-byte handle in the same
+  handle space as `own` / `borrow`.
+- `CtFutureType { CtValType? Element }` — `future<T>` or
+  `future`. Same wire shape as `CtStreamType`.
+- `CtErrorContextType` — singleton; no inner type parameter
+  (the debug message is exchanged via the
+  `error-context.debug-message` canon builtin, not part of
+  the static type).
+
+### Parser-side deftype entries
+
+Three new `DefTypeEntry` subclasses in
+`Wacs.ComponentModel.Parser/Runtime/Parser/TypeSectionReader.cs`:
+`ComponentStreamType`, `ComponentFutureType`, and the
+`ComponentErrorContextType.Instance` singleton. Three new tag
+constants:
+`StreamTypeTag = 0x66`, `FutureTypeTag = 0x65`,
+`ErrorContextTypeTag = 0x64`. `DecodeEntry` recognizes all
+three (mirrors the existing aggregate cases).
+
+The `stream<T>` / `future<T>` payload uses the canonical
+`<T>?` (optional) presence-byte encoding — 0x00 = absent,
+0x01 t = present (reusing `DecodeOptionalValType`).
+
+### Spec verification
+
+The full canon byte-tag table (0x00–0x2b core + 0x40–0x42
+threading) is now in the doc comment on
+`CanonSectionReader`, captured against
+WebAssembly/component-model main HEAD's
+`design/mvp/Binary.md`. Subsequent slices in this phase
+implement the parser entries that consume those bytes.
+
+### Verification
+
+`dotnet build` clean on both libs.
+`Wacs.ComponentModel.Test` + `Bindgen.Test` suites unchanged
+(no test additions yet — those land with the canon-parser
+slice + round-trip test).
+
 ## WACS 0.16.13 — Phase 1 close-out: standalone ResumeThrow + retention-free ContinuationStore
 
 Closes two Phase 1 stack-switching gaps and adds the longevity

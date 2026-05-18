@@ -221,6 +221,43 @@ namespace Wacs.ComponentModel.Runtime.Parser
     }
 
     /// <summary>
+    /// <c>stream&lt;T?&gt;</c> type (tag 0x66). The inner type is
+    /// optional — encoded as 0x00 = empty stream, 0x01 t = stream
+    /// of t. Wire surface is a 4-byte handle in the same handle
+    /// space as own / borrow. Data plane lives in the host's
+    /// stream-dispatcher (Phase 3).
+    /// </summary>
+    public sealed class ComponentStreamType : DefTypeEntry
+    {
+        public ComponentValType? Element { get; }
+        public ComponentStreamType(ComponentValType? element) { Element = element; }
+    }
+
+    /// <summary>
+    /// <c>future&lt;T?&gt;</c> type (tag 0x65). Same encoding as
+    /// <see cref="ComponentStreamType"/> — optional inner type,
+    /// 4-byte handle surface.
+    /// </summary>
+    public sealed class ComponentFutureType : DefTypeEntry
+    {
+        public ComponentValType? Element { get; }
+        public ComponentFutureType(ComponentValType? element) { Element = element; }
+    }
+
+    /// <summary>
+    /// <c>error-context</c> type (tag 0x64). No inner type
+    /// parameter; the carried debug message is exchanged via the
+    /// <c>error-context.debug-message</c> canon builtin, not part
+    /// of the handle's static type.
+    /// </summary>
+    public sealed class ComponentErrorContextType : DefTypeEntry
+    {
+        public static readonly ComponentErrorContextType Instance =
+            new ComponentErrorContextType();
+        private ComponentErrorContextType() { }
+    }
+
+    /// <summary>
     /// <c>variant { case_name [(T)] [refines other], … }</c>
     /// type (tag 0x71) — a tagged sum where each case carries an
     /// optional payload type. Wire layout: a discriminant byte
@@ -322,6 +359,9 @@ namespace Wacs.ComponentModel.Runtime.Parser
         public const byte BorrowTypeTag = 0x68;
         public const byte OwnTypeTag = 0x69;
         public const byte ResourceTypeTag = 0x3F;
+        public const byte ErrorContextTypeTag = 0x64;
+        public const byte FutureTypeTag = 0x65;
+        public const byte StreamTypeTag = 0x66;
 
         public static List<DefTypeEntry> Decode(byte[] payload)
         {
@@ -372,6 +412,12 @@ namespace Wacs.ComponentModel.Runtime.Parser
                             $"Unexpected resource dtor presence byte 0x{hasDtor:X2}.");
                     return new ComponentResourceType(dtor);
                 }
+                case StreamTypeTag:
+                    return new ComponentStreamType(DecodeOptionalValType(r));
+                case FutureTypeTag:
+                    return new ComponentFutureType(DecodeOptionalValType(r));
+                case ErrorContextTypeTag:
+                    return ComponentErrorContextType.Instance;
                 default:
                     // Unknown structural tag — capture the rest
                     // of the payload so the type slot occupies

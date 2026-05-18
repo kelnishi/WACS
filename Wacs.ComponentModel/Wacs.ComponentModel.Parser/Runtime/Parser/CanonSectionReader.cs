@@ -124,6 +124,56 @@ namespace Wacs.ComponentModel.Runtime.Parser
     /// component function space, every lower adds to the core
     /// function space, every resource op adds a handle-table
     /// intrinsic.
+    ///
+    /// <para>Canon opcode byte assignments (verified against
+    /// WebAssembly/component-model main HEAD,
+    /// design/mvp/Binary.md):</para>
+    /// <code>
+    /// 0x00 0x00 lift                    f opts t
+    /// 0x01 0x00 lower                   f opts
+    /// 0x02      resource.new            t
+    /// 0x03      resource.drop           t
+    /// 0x04      resource.rep            t
+    /// 0x05      task.cancel             —
+    /// 0x06      subtask.cancel          async?
+    /// 0x08      backpressure.set        —
+    /// 0x09      task.return             resultlist opts
+    /// 0x0a      context.get             v i
+    /// 0x0b      context.set             v i
+    /// 0x0c      thread.yield            cancel?
+    /// 0x0d      subtask.drop            —
+    /// 0x0e      stream.new              t
+    /// 0x0f      stream.read             t opts
+    /// 0x10      stream.write            t opts
+    /// 0x11      stream.cancel-read      t async?
+    /// 0x12      stream.cancel-write     t async?
+    /// 0x13      stream.drop-readable    t
+    /// 0x14      stream.drop-writable    t
+    /// 0x15      future.new              t
+    /// 0x16      future.read             t opts
+    /// 0x17      future.write            t opts
+    /// 0x18      future.cancel-read      t async?
+    /// 0x19      future.cancel-write     t async?
+    /// 0x1a      future.drop-readable    t
+    /// 0x1b      future.drop-writable    t
+    /// 0x1c      error-context.new       opts
+    /// 0x1d      error-context.debug-msg opts
+    /// 0x1e      error-context.drop      —
+    /// 0x1f      waitable-set.new        —
+    /// 0x20      waitable-set.wait       cancel? memidx
+    /// 0x21      waitable-set.poll       cancel? memidx
+    /// 0x22      waitable-set.drop       —
+    /// 0x23      waitable.join           —
+    /// 0x24      backpressure.inc        —
+    /// 0x25      backpressure.dec        —
+    /// 0x26-0x2b thread.*                (omitted — Phase 1
+    ///                                    Stack Switching domain)
+    /// 0x40-0x42 thread.spawn-*          (deferred — explicit
+    ///                                    threads proposal)
+    /// </code>
+    /// <para>The async? / cancel? / sh? sub-byte productions
+    /// all share the same shape: 0x00 = absent, 0x01 = present
+    /// (with payload if any).</para>
     /// </summary>
     public static class CanonSectionReader
     {
