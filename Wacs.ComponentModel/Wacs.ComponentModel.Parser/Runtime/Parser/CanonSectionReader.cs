@@ -82,6 +82,180 @@ namespace Wacs.ComponentModel.Runtime.Parser
         }
     }
 
+    // ---- Async ABI canon builtins -----------------------------------------
+    //
+    // Phase 2 of WASIp3 work: parse the async-ABI canon builtin
+    // family. Data plane / dispatcher are Phase 3 — these entries
+    // are pure shape (typeidx / opts / async? / cancel?) capture.
+
+    /// <summary><c>canon task.return rs opts</c> (0x09). Returns from an
+    /// async task with the lift-marshaled result list. <see cref="Result"/>
+    /// is <c>null</c> for an empty resultlist (<c>(result)</c>).</summary>
+    public sealed class CanonTaskReturn : CanonEntry
+    {
+        public ComponentValType? Result { get; }
+        public IReadOnlyList<CanonOption> Options { get; }
+        public CanonTaskReturn(ComponentValType? result, IReadOnlyList<CanonOption> options)
+        {
+            Result = result;
+            Options = options;
+        }
+    }
+
+    /// <summary><c>canon task.cancel</c> (0x05). Marker — no payload.</summary>
+    public sealed class CanonTaskCancel : CanonEntry { }
+
+    /// <summary><c>canon subtask.cancel async?</c> (0x06).</summary>
+    public sealed class CanonSubtaskCancel : CanonEntry
+    {
+        public bool Async { get; }
+        public CanonSubtaskCancel(bool async) { Async = async; }
+    }
+
+    /// <summary><c>canon subtask.drop</c> (0x0d). Marker.</summary>
+    public sealed class CanonSubtaskDrop : CanonEntry { }
+
+    /// <summary><c>canon backpressure.{set,inc,dec}</c> (0x08 / 0x24 / 0x25).</summary>
+    public sealed class CanonBackpressureOp : CanonEntry
+    {
+        public enum Kind { Set, Inc, Dec }
+        public Kind Op { get; }
+        public CanonBackpressureOp(Kind op) { Op = op; }
+    }
+
+    /// <summary>
+    /// <c>canon context.{get,set} v i</c> (0x0a / 0x0b). Reads/writes a
+    /// per-task context slot of value type <see cref="ValType"/> at index
+    /// <see cref="Index"/>.
+    /// </summary>
+    public sealed class CanonContextOp : CanonEntry
+    {
+        public enum Kind { Get, Set }
+        public Kind Op { get; }
+        public ComponentValType ValType { get; }
+        public uint Index { get; }
+        public CanonContextOp(Kind op, ComponentValType valType, uint index)
+        {
+            Op = op;
+            ValType = valType;
+            Index = index;
+        }
+    }
+
+    /// <summary>
+    /// <c>canon thread.yield cancel?</c> (0x0c). Yields the current task;
+    /// when <see cref="Cancellable"/>, surfaces task-cancellation across
+    /// the yield point.
+    /// </summary>
+    public sealed class CanonThreadYield : CanonEntry
+    {
+        public bool Cancellable { get; }
+        public CanonThreadYield(bool cancellable) { Cancellable = cancellable; }
+    }
+
+    /// <summary>
+    /// <c>canon stream.*</c> family (0x0e–0x14). All ops carry a stream
+    /// type idx; read/write additionally carry <see cref="Options"/>;
+    /// cancel-read/cancel-write additionally carry <see cref="Async"/>.
+    /// </summary>
+    public sealed class CanonStreamOp : CanonEntry
+    {
+        public enum Kind
+        {
+            New,            // 0x0e t
+            Read,           // 0x0f t opts
+            Write,          // 0x10 t opts
+            CancelRead,     // 0x11 t async?
+            CancelWrite,    // 0x12 t async?
+            DropReadable,   // 0x13 t
+            DropWritable,   // 0x14 t
+        }
+        public Kind Op { get; }
+        public uint StreamTypeIdx { get; }
+        public IReadOnlyList<CanonOption>? Options { get; }
+        public bool? Async { get; }
+        public CanonStreamOp(
+            Kind op, uint typeIdx,
+            IReadOnlyList<CanonOption>? options = null,
+            bool? async = null)
+        {
+            Op = op;
+            StreamTypeIdx = typeIdx;
+            Options = options;
+            Async = async;
+        }
+    }
+
+    /// <summary>
+    /// <c>canon future.*</c> family (0x15–0x1b). Same shape as
+    /// <see cref="CanonStreamOp"/>.
+    /// </summary>
+    public sealed class CanonFutureOp : CanonEntry
+    {
+        public enum Kind
+        {
+            New,            // 0x15 t
+            Read,           // 0x16 t opts
+            Write,          // 0x17 t opts
+            CancelRead,     // 0x18 t async?
+            CancelWrite,    // 0x19 t async?
+            DropReadable,   // 0x1a t
+            DropWritable,   // 0x1b t
+        }
+        public Kind Op { get; }
+        public uint FutureTypeIdx { get; }
+        public IReadOnlyList<CanonOption>? Options { get; }
+        public bool? Async { get; }
+        public CanonFutureOp(
+            Kind op, uint typeIdx,
+            IReadOnlyList<CanonOption>? options = null,
+            bool? async = null)
+        {
+            Op = op;
+            FutureTypeIdx = typeIdx;
+            Options = options;
+            Async = async;
+        }
+    }
+
+    /// <summary>
+    /// <c>canon error-context.{new,debug-message,drop}</c> (0x1c–0x1e).
+    /// </summary>
+    public sealed class CanonErrorContextOp : CanonEntry
+    {
+        public enum Kind { New, DebugMessage, Drop }
+        public Kind Op { get; }
+        public IReadOnlyList<CanonOption>? Options { get; }
+        public CanonErrorContextOp(Kind op, IReadOnlyList<CanonOption>? options = null)
+        {
+            Op = op;
+            Options = options;
+        }
+    }
+
+    /// <summary>
+    /// <c>canon waitable-set.{new,wait,poll,drop}</c> (0x1f–0x22). Wait /
+    /// poll carry <see cref="Cancellable"/> and a core memory index for
+    /// the dispatch-result write target.
+    /// </summary>
+    public sealed class CanonWaitableSetOp : CanonEntry
+    {
+        public enum Kind { New, Wait, Poll, Drop }
+        public Kind Op { get; }
+        public bool? Cancellable { get; }
+        public uint? MemoryIdx { get; }
+        public CanonWaitableSetOp(
+            Kind op, bool? cancellable = null, uint? memoryIdx = null)
+        {
+            Op = op;
+            Cancellable = cancellable;
+            MemoryIdx = memoryIdx;
+        }
+    }
+
+    /// <summary><c>canon waitable.join</c> (0x23). Marker.</summary>
+    public sealed class CanonWaitableJoin : CanonEntry { }
+
     /// <summary>
     /// A canonical-ABI option — controls how a lift / lower
     /// performs the conversion. Several are just tag bytes with
@@ -222,12 +396,151 @@ namespace Wacs.ComponentModel.Runtime.Parser
                 case 0x04:
                     return new CanonResourceOp(
                         CanonResourceOp.Kind.Rep, r.ReadVarU32());
+
+                // ---- Async ABI canon builtins (0x05–0x25) -------------
+                case 0x05: return new CanonTaskCancel();
+                case 0x06: return new CanonSubtaskCancel(DecodePresence(r));
+                case 0x08:
+                    return new CanonBackpressureOp(CanonBackpressureOp.Kind.Set);
+                case 0x09:
+                {
+                    var rs = DecodeResultList(r);
+                    var opts = DecodeOptions(r);
+                    return new CanonTaskReturn(rs, opts);
+                }
+                case 0x0a:
+                {
+                    var v = DecodeValType(r);
+                    var i = r.ReadVarU32();
+                    return new CanonContextOp(CanonContextOp.Kind.Get, v, i);
+                }
+                case 0x0b:
+                {
+                    var v = DecodeValType(r);
+                    var i = r.ReadVarU32();
+                    return new CanonContextOp(CanonContextOp.Kind.Set, v, i);
+                }
+                case 0x0c: return new CanonThreadYield(DecodePresence(r));
+                case 0x0d: return new CanonSubtaskDrop();
+
+                case 0x0e: return new CanonStreamOp(CanonStreamOp.Kind.New, r.ReadVarU32());
+                case 0x0f:
+                {
+                    var t = r.ReadVarU32(); var o = DecodeOptions(r);
+                    return new CanonStreamOp(CanonStreamOp.Kind.Read, t, options: o);
+                }
+                case 0x10:
+                {
+                    var t = r.ReadVarU32(); var o = DecodeOptions(r);
+                    return new CanonStreamOp(CanonStreamOp.Kind.Write, t, options: o);
+                }
+                case 0x11:
+                {
+                    var t = r.ReadVarU32(); var a = DecodePresence(r);
+                    return new CanonStreamOp(CanonStreamOp.Kind.CancelRead, t, async: a);
+                }
+                case 0x12:
+                {
+                    var t = r.ReadVarU32(); var a = DecodePresence(r);
+                    return new CanonStreamOp(CanonStreamOp.Kind.CancelWrite, t, async: a);
+                }
+                case 0x13: return new CanonStreamOp(CanonStreamOp.Kind.DropReadable, r.ReadVarU32());
+                case 0x14: return new CanonStreamOp(CanonStreamOp.Kind.DropWritable, r.ReadVarU32());
+
+                case 0x15: return new CanonFutureOp(CanonFutureOp.Kind.New, r.ReadVarU32());
+                case 0x16:
+                {
+                    var t = r.ReadVarU32(); var o = DecodeOptions(r);
+                    return new CanonFutureOp(CanonFutureOp.Kind.Read, t, options: o);
+                }
+                case 0x17:
+                {
+                    var t = r.ReadVarU32(); var o = DecodeOptions(r);
+                    return new CanonFutureOp(CanonFutureOp.Kind.Write, t, options: o);
+                }
+                case 0x18:
+                {
+                    var t = r.ReadVarU32(); var a = DecodePresence(r);
+                    return new CanonFutureOp(CanonFutureOp.Kind.CancelRead, t, async: a);
+                }
+                case 0x19:
+                {
+                    var t = r.ReadVarU32(); var a = DecodePresence(r);
+                    return new CanonFutureOp(CanonFutureOp.Kind.CancelWrite, t, async: a);
+                }
+                case 0x1a: return new CanonFutureOp(CanonFutureOp.Kind.DropReadable, r.ReadVarU32());
+                case 0x1b: return new CanonFutureOp(CanonFutureOp.Kind.DropWritable, r.ReadVarU32());
+
+                case 0x1c:
+                    return new CanonErrorContextOp(
+                        CanonErrorContextOp.Kind.New, DecodeOptions(r));
+                case 0x1d:
+                    return new CanonErrorContextOp(
+                        CanonErrorContextOp.Kind.DebugMessage, DecodeOptions(r));
+                case 0x1e: return new CanonErrorContextOp(CanonErrorContextOp.Kind.Drop);
+
+                case 0x1f: return new CanonWaitableSetOp(CanonWaitableSetOp.Kind.New);
+                case 0x20:
+                {
+                    var c = DecodePresence(r); var m = r.ReadVarU32();
+                    return new CanonWaitableSetOp(
+                        CanonWaitableSetOp.Kind.Wait, cancellable: c, memoryIdx: m);
+                }
+                case 0x21:
+                {
+                    var c = DecodePresence(r); var m = r.ReadVarU32();
+                    return new CanonWaitableSetOp(
+                        CanonWaitableSetOp.Kind.Poll, cancellable: c, memoryIdx: m);
+                }
+                case 0x22: return new CanonWaitableSetOp(CanonWaitableSetOp.Kind.Drop);
+                case 0x23: return new CanonWaitableJoin();
+                case 0x24: return new CanonBackpressureOp(CanonBackpressureOp.Kind.Inc);
+                case 0x25: return new CanonBackpressureOp(CanonBackpressureOp.Kind.Dec);
+
                 default:
                     throw new FormatException(
                         $"Unsupported canon opcode 0x{opcode:X2}. "
-                        + "Async / thread intrinsics (0x05+) are a "
-                        + "Phase 1b follow-up.");
+                        + "Threading intrinsics (0x26–0x2b / 0x40–0x42) "
+                        + "are deferred to the explicit-threads phase.");
             }
+        }
+
+        // Shared sub-byte presence helper for async? / cancel? / sh?.
+        // 0x00 = absent, 0x01 = present (no payload).
+        private static bool DecodePresence(ComponentBinaryReader r)
+        {
+            var b = r.ReadByte();
+            if (b == 0x00) return false;
+            if (b == 0x01) return true;
+            throw new FormatException(
+                $"Expected async?/cancel? presence byte (0x00 or 0x01), got 0x{b:X2}.");
+        }
+
+        // resultlist ::= 0x00 t:valtype       => (result t)
+        //              | 0x01 0x00            => empty
+        private static ComponentValType? DecodeResultList(ComponentBinaryReader r)
+        {
+            var prefix = r.ReadByte();
+            if (prefix == 0x00) return DecodeValType(r);
+            if (prefix == 0x01)
+            {
+                var term = r.ReadByte();
+                if (term != 0x00)
+                    throw new FormatException(
+                        $"Expected resultlist empty-terminator 0x00, got 0x{term:X2}.");
+                return null;
+            }
+            throw new FormatException(
+                $"Expected resultlist prefix byte (0x00 or 0x01), got 0x{prefix:X2}.");
+        }
+
+        // valtype is signed-LEB i33: negative = primitive, non-neg = typeidx.
+        private static ComponentValType DecodeValType(ComponentBinaryReader r)
+        {
+            var v = r.ReadVarI33();
+            return v < 0
+                ? ComponentValType.OfPrim((ComponentPrim)v)
+                : ComponentValType.OfRef((uint)v);
         }
 
         private static IReadOnlyList<CanonOption> DecodeOptions(

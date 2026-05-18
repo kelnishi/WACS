@@ -1,5 +1,51 @@
 # Changelog
 
+## WACS.ComponentModel.Parser 0.2.1 — canon async-builtin dispatch (Phase 2 Slice B)
+
+Lands binary decoding for all 25 canon async-ABI builtins
+(opcodes 0x05–0x25 except the Stack-Switching-domain 0x07).
+Pre-Slice B the parser threw "Unsupported canon opcode 0x05+"
+for every async / stream / future / error-context / waitable
+op; it now parses each into a typed `CanonEntry` subclass.
+
+### New `CanonEntry` subclasses
+
+One class per op family, mirroring the existing `CanonResourceOp`
+shape (kind enum + carried fields):
+
+- `CanonTaskReturn { ComponentValType? Result; Options }` (0x09)
+- `CanonTaskCancel` (0x05, marker)
+- `CanonSubtaskCancel { bool Async }` (0x06)
+- `CanonSubtaskDrop` (0x0d, marker)
+- `CanonBackpressureOp { Kind = Set | Inc | Dec }` (0x08 / 0x24 / 0x25)
+- `CanonContextOp { Kind = Get | Set; ValType; Index }` (0x0a / 0x0b)
+- `CanonThreadYield { bool Cancellable }` (0x0c)
+- `CanonStreamOp { Kind; TypeIdx; Options?; Async? }` (0x0e–0x14)
+- `CanonFutureOp { Kind; TypeIdx; Options?; Async? }` (0x15–0x1b)
+- `CanonErrorContextOp { Kind = New | DebugMessage | Drop; Options? }` (0x1c–0x1e)
+- `CanonWaitableSetOp { Kind; Cancellable?; MemoryIdx? }` (0x1f–0x22)
+- `CanonWaitableJoin` (0x23, marker)
+
+Threading-proposal opcodes 0x26–0x2b and 0x40–0x42 stay rejected
+with a clear "deferred to the explicit-threads phase" message.
+
+### Sub-byte helpers
+
+Shared private helpers in the parser for the recurring sub-byte
+encodings:
+
+- `DecodePresence` for `async?` / `cancel?` (0x00 = absent, 0x01 =
+  present) — used by 7 opcodes.
+- `DecodeResultList` for `task.return`'s `rs` operand (0x00 t /
+  0x01 0x00 empty).
+- `DecodeValType` for `context.get/set`'s `v` operand.
+
+### Tests
+
+16 new tests in `CanonAsyncBuiltinTests` covering every op
+family plus a sequential-dispatch test. 396/396 ComponentModel
+tests pass overall.
+
 ## WACS.ComponentModel 0.8.0 / WACS.ComponentModel.Parser 0.2.0 — async-ABI handle types (Phase 2 Slice A)
 
 First slice of WASIp3 Phase 2: lands `stream<T>` / `future<T>` /
