@@ -436,5 +436,60 @@ namespace Wacs.ComponentModel.Test
             Assert.NotNull(resRef.Target);
             Assert.Same(input, resRef.Target);
         }
+
+        // ---- Component-Model async ABI conversion (Phase 2) ----------------
+
+        [Fact]
+        public void Stream_of_u8_converts_to_CtStreamType()
+        {
+            var pkgs = Convert(@"
+                package a:b;
+                interface i {
+                    type s = stream<u8>;
+                }");
+            var named = Assert.Single(pkgs[0].Interfaces[0].Types);
+            var stream = Assert.IsType<CtStreamType>(named.Type);
+            Assert.Same(CtPrimType.U8, stream.Element);
+        }
+
+        [Fact]
+        public void Future_of_string_converts_to_CtFutureType()
+        {
+            var pkgs = Convert(@"
+                package a:b;
+                interface i {
+                    type f = future<string>;
+                }");
+            var fut = Assert.IsType<CtFutureType>(
+                pkgs[0].Interfaces[0].Types[0].Type);
+            Assert.Same(CtPrimType.String, fut.Element);
+        }
+
+        [Fact]
+        public void Bare_stream_and_future_carry_null_element()
+        {
+            var pkgs = Convert(@"
+                package a:b;
+                interface i {
+                    type s = stream;
+                    type f = future;
+                }");
+            var types = pkgs[0].Interfaces[0].Types;
+            Assert.Null(Assert.IsType<CtStreamType>(types[0].Type).Element);
+            Assert.Null(Assert.IsType<CtFutureType>(types[1].Type).Element);
+        }
+
+        [Fact]
+        public void Error_context_converts_to_singleton()
+        {
+            var pkgs = Convert(@"
+                package a:b;
+                interface i {
+                    type e = error-context;
+                }");
+            var ec = Assert.IsType<CtErrorContextType>(
+                pkgs[0].Interfaces[0].Types[0].Type);
+            Assert.Same(CtErrorContextType.Instance, ec);
+        }
     }
 }

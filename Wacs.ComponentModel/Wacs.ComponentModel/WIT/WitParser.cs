@@ -808,6 +808,28 @@ namespace Wacs.ComponentModel.WIT
                             return new WitOwnType { ResourceName = name, Span = SpanOf(t) };
                         return new WitBorrowType { ResourceName = name, Span = SpanOf(t) };
                     }
+                    case "stream":
+                    case "future":
+                    {
+                        // stream<T> / future<T> / stream / future
+                        // Both share an identical optional-inner shape.
+                        Consume();
+                        WitType? inner = null;
+                        if (At(WitTokenKind.LAngle))
+                        {
+                            Consume();
+                            inner = ParseType();
+                            Expect(WitTokenKind.RAngle, "'>'");
+                        }
+                        if (lex == "stream")
+                            return new WitStreamType { Element = inner, Span = SpanOf(t) };
+                        return new WitFutureType { Element = inner, Span = SpanOf(t) };
+                    }
+                    case "error-context":
+                    {
+                        Consume();
+                        return new WitErrorContextType { Span = SpanOf(t) };
+                    }
                 }
             }
 

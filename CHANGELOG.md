@@ -1,5 +1,52 @@
 # Changelog
 
+## WACS.ComponentModel 0.8.2 — WIT AST + parser + WitToTypes (Phase 2 Slice D)
+
+Lands the WIT-source-text layer for `stream<T>` / `future<T>` /
+`error-context`. The lexer now recognizes the three keywords;
+the parser accepts both typed (`stream<u8>`) and bare
+(`stream`) forms; `WitToTypes.ConvertType` lowers them to
+`CtStreamType` / `CtFutureType` / `CtErrorContextType.Instance`.
+
+### `WitModel`
+
+Three new `WitType` subclasses in `WIT/WitModel.cs`:
+
+- `WitStreamType { WitType? Element }`
+- `WitFutureType { WitType? Element }`
+- `WitErrorContextType` (marker)
+
+Element is null for the bare `stream` / `future` forms.
+
+### Lexer + parser
+
+`WitLexer.Keywords` adds `"stream"`, `"future"`,
+`"error-context"`. The kebab-case lexer already treats internal
+hyphens as identifier-continuation characters, so
+`error-context` lexes as a single Keyword token.
+
+`WitParser.ParseType` gains three new `case` arms:
+
+- `case "stream":` / `case "future":` — share the optional-
+  `<T>` parsing branch (consume `<…>` if present, otherwise
+  return with `Element = null`).
+- `case "error-context":` — bare keyword, no payload.
+
+### `WitToTypes.ConvertType`
+
+Three new switch arms lower each WIT type to the matching
+`CtValType`:
+`WitStreamType → CtStreamType(ConvertType(Element))` (or null),
+`WitFutureType → CtFutureType(...)`,
+`WitErrorContextType → CtErrorContextType.Instance`.
+
+### Tests
+
+5 new `WitParserTests` covering typed/bare forms + nested
+element (`stream<list<u8>>`) + error-context keyword. 4 new
+`WitToTypesTests` covering the lowering for each form. 411/411
+ComponentModel tests + 13/13 Bindgen tests pass.
+
 ## WACS.ComponentModel 0.8.1 / WACS.ComponentModel.Harness.Lib 0.27.1 — async handle marshal + layout (Phase 2 Slice C)
 
 Adds the three async-ABI handle marshal helpers + extends the

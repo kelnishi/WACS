@@ -97,6 +97,8 @@ namespace Wacs.ComponentModel.WIT
             "func", "static", "constructor", "type", "resource", "record",
             "variant", "enum", "flags", "option", "result", "tuple", "list",
             "own", "borrow", "include", "with",
+            // Component Model async ABI types
+            "stream", "future", "error-context",
             // Primitive types double as keywords in type position
             "bool", "s8", "u8", "s16", "u16", "s32", "u32", "s64", "u64",
             "f32", "f64", "float32", "float64", "char", "string",

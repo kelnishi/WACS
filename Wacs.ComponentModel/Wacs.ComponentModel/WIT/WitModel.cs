@@ -358,6 +358,34 @@ namespace Wacs.ComponentModel.WIT
     }
 
     /// <summary>
+    /// <c>stream&lt;T&gt;</c> or <c>stream</c> — Component Model async ABI
+    /// handle for a half-channel of <see cref="Element"/> values. The
+    /// element type is null when the source omits the type parameter
+    /// (status-only stream).
+    /// </summary>
+    public sealed class WitStreamType : WitType
+    {
+        public WitType? Element { get; set; }
+    }
+
+    /// <summary>
+    /// <c>future&lt;T&gt;</c> or <c>future</c> — single-write/single-read
+    /// async cell. Same null-element shape as <see cref="WitStreamType"/>.
+    /// </summary>
+    public sealed class WitFutureType : WitType
+    {
+        public WitType? Element { get; set; }
+    }
+
+    /// <summary>
+    /// <c>error-context</c> — Component Model async ABI handle to an
+    /// opaque error description. No inner type parameter; the carried
+    /// payload is exchanged via the <c>error-context.debug-message</c>
+    /// canon builtin.
+    /// </summary>
+    public sealed class WitErrorContextType : WitType { }
+
+    /// <summary>
     /// A bare identifier used where a type is expected — refers to some type
     /// declared earlier in the same interface / world, or imported via
     /// <c>use</c>. Resolution is deferred to a later pass (out of scope for
