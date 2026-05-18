@@ -1,5 +1,52 @@
 # Changelog
 
+## WACS.ComponentModel 0.8.3 — async ABI primitives (Phase 3 Slice A)
+
+First Phase 3 slice: the data carriers the CM async dispatcher
+will build on. Shapes only — no execution wiring, no canon
+binding. The dispatcher contract (Slice C) consumes these.
+
+### New `Wacs.ComponentModel/Async/` namespace
+
+- `AsyncHandleTable<T>` — per-component, per-kind handle space.
+  4-byte positive integers, freelist-recycling, handle `0`
+  reserved as the canon null sentinel.
+- `ComponentTask` — wraps a Phase 1 `ContInstance` Continuation
+  + a host-side `TaskCompletionSource<object?>`. The
+  `task = continuation` constraint from the WASIp3 plan
+  realized as a single carrier holding both. Completion uses
+  `RunContinuationsAsynchronously` so a `SetResult` inside
+  dispatch can't reenter wasm via the continuation chain.
+- `ComponentSubtask` — child/parent task references for the
+  spawn/cancel propagation paths.
+- `ComponentWaitableSet` — `HashSet<int>` of joined waitable
+  handles. Idempotent join, identity-based set semantics.
+- `ComponentTaskState` — Starting / Started / Returned /
+  Cancelled / Failed enum.
+
+### Tests
+
+11 new tests in `AsyncPrimitiveTests`:
+
+- Table handle allocation starts at 1 (0 reserved), get/drop
+  symmetry, freelist recycling, count tracking.
+- Task starts in `Starting` state with pending Completion;
+  TCS has `RunContinuationsAsynchronously`; continuation ref
+  is retained.
+- Subtask carries child + parent references.
+- WaitableSet join/remove idempotent; member tracking.
+
+429/429 ComponentModel tests pass (was 418).
+
+### Scope
+
+Phase 3 is 3-4 weeks per plan. Subsequent slices:
+- B: StreamBuffer + FutureCell with backpressure
+- C: AsyncDispatcher contract (the API the transpiler calls)
+- D: Wire canon-async entries through dispatcher
+- E: Transpiler symmetric emit
+- F: Producer/consumer acceptance fixture
+
 ## Phase 2 close-out — binary deftype coverage + acceptance summary
 
 Test-only commit closing Phase 2 (Component Model async ABI
