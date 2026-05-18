@@ -1,5 +1,59 @@
 # Changelog
 
+## WACS 0.20.0 / WACS.Transpiler.Lib 0.12.0 — Stack Switching CIL emit (3 of 6 opcodes)
+
+Promotes the transpiler from "fallback only" to "real CIL emit"
+for three of the six stack switching opcodes:
+
+- **Emitted via runtime helpers**: `cont.new`, `cont.bind`,
+  `suspend`. These are straight-line operations with no non-
+  local control transfer back into the caller. Emitted IL
+  packs CIL-stack operands into `Value[]`, calls the helper,
+  unpacks the result.
+- **Still interpreter fallback**: `resume`, `resume_throw`,
+  `switch`. They invoke a continuation's function and route
+  `SuspensionException` back to handler labels in the caller's
+  CIL body — the same try/catch + Leave-to-dispatch-label
+  pattern `ExceptionEmitter.EmitTryTable` uses for `try_table`.
+  Substantial separate work tracked as a Phase 1 exit gate.
+
+### New surface
+
+- `Wacs.Core.Runtime.Concurrency.StackSwitchingHelpers` —
+  static entry points that the transpiler's emitted IL calls.
+  `ContNew(ExecContext?, int typeIdx, Value funcRef) → Value`,
+  `ContBind(ExecContext?, int targetTypeIdx, Value cont, Value[] prefix) → Value`,
+  `Suspend(ExecContext?, int tagIdx, Value[] payload) → throws SuspensionException`.
+- `Wacs.Transpiler.AOT.Emitters.StackSwitchingEmitter` —
+  `CanEmit` now returns `true` for the three emittable
+  opcodes, dispatches to per-op CIL emitters that wrap CIL
+  stack operands as `Value` and call the helper.
+
+### Caveats
+
+Helpers require a live `ExecContext` (mixed mode). In
+standalone mode (`Module` instantiated via
+`Activator.CreateInstance` with no host runtime), the helpers
+throw `NotSupportedException("Stack switching opcodes (cont.*)
+require a WasmRuntime host context …")` with a clear
+explanation — replacing the prior opaque "Function N not
+transpiled" message. A self-contained continuation runtime for
+standalone mode is a separate design effort.
+
+### Tests
+
+- New `Cont_new_and_suspend_emit_without_fallback` —
+  transpiles a function containing only `cont.new` and asserts
+  `result.FallbackCount == 0`, then invokes the function and
+  asserts the expected result.
+- Existing 4 `StackSwitchingEquivalenceTests` still pass; the
+  producer/consumer test's producer function (cont.new +
+  suspend) now transpiles, while the host function (resume)
+  still falls back — `fallbacks > 0` remains true overall but
+  represents fewer functions than before.
+
+832 transpiler + 511 Wacs.Core + 380 ComponentModel tests green.
+
 ## WACS.Transpiler.Lib 0.11.2 — Stack Switching mixed-mode parity tests + standalone caveat
 
 Pins down the transpiler's behavioral guarantee for the six

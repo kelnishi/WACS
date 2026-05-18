@@ -120,6 +120,42 @@ namespace Wacs.Transpiler.Test
             Assert.Equal(77, aot.Data.Int32);
         }
 
+        /// <summary>
+        /// A function whose only stack-switching ops are
+        /// <c>cont.new</c>, <c>cont.bind</c>, and <c>suspend</c>
+        /// must transpile with no fallback — those three opcodes
+        /// have real CIL emission via
+        /// <see cref="StackSwitchingHelpers"/>.
+        /// </summary>
+        [Fact]
+        public void Cont_new_and_suspend_emit_without_fallback()
+        {
+            // $producer: cont.new (from func ref) — but we never
+            // resume it. Just push the contref and drop it. This
+            // function uses only emittable ops, so it must
+            // transpile cleanly.
+            var src = @"
+                (module
+                  (type $ft (func (result i32)))
+                  (type $ct (cont $ft))
+                  (func $body (result i32) i32.const 1)
+                  (elem declare func $body)
+                  (func (export ""make_cont"") (result i32)
+                    (drop (cont.new $ct (ref.func $body)))
+                    i32.const 42))";
+
+            var aotRt = new WasmRuntime();
+            var aotInst = aotRt.InstantiateModule(TextModuleParser.ParseWat(src));
+            aotRt.RegisterModule("M", aotInst);
+            var transpiler = new ModuleTranspiler();
+            var result = transpiler.Transpile(aotInst, aotRt);
+            Assert.Equal(0, result.FallbackCount);
+
+            var addr = aotRt.GetExportedFunction(("M", "make_cont"));
+            var got = aotRt.CreateStackInvoker(addr)(new Value[0]);
+            Assert.Equal(42, got[0].Data.Int32);
+        }
+
         [Fact]
         public void Switch_into_cont_matches_across_engines()
         {

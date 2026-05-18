@@ -428,6 +428,22 @@ namespace Wacs.Transpiler.AOT
 
             var op = inst.Op.x00;
 
+            // Stack Switching opcodes that the transpiler emits
+            // (cont.new / cont.bind / suspend). Resume / resume_throw
+            // / switch fall through to the HasEmitter false path
+            // and route the enclosing function to interpreter
+            // fallback.
+            if (StackSwitchingEmitter.CanEmit(op))
+            {
+                TrackStackSwitchingStackEffect(inst, before: true);
+                StackSwitchingEmitter.Emit(il, inst, _moduleInst);
+                TrackStackSwitchingStackEffect(inst, before: false);
+                // suspend never returns normally — mark unreachable.
+                if (op == WasmOpCode.Suspend)
+                    _cilValidator.SetUnreachable();
+                return;
+            }
+
             // Exception handling (doc 1 §13, doc 2 §14).
             if (ExceptionEmitter.CanEmit(op))
             {
@@ -1723,6 +1739,82 @@ namespace Wacs.Transpiler.AOT
         }
 
         /// <summary>Track 0xFC prefix (extension) instruction stack effects.</summary>
+        private void TrackStackSwitchingStackEffect(InstructionBase inst, bool before)
+        {
+            switch (inst)
+            {
+                case InstContNew _:
+                    // [funcref:Value] -> [contref:Value]
+                    if (before) _cilValidator.Pop(typeof(Value), "cont.new funcref");
+                    else _cilValidator.Push(typeof(Value));
+                    break;
+                case InstContBind cb:
+                {
+                    // [prefix*, cont:Value] -> [cont:Value]
+                    var ft1 = _moduleInst.Types[(TypeIdx)cb.TypeIndex1].Expansion is ContType ct1
+                        ? _moduleInst.Types[ct1.FuncTypeRef.Index()].Expansion as FunctionType
+                        : null;
+                    var ft2 = _moduleInst.Types[(TypeIdx)cb.TypeIndex2].Expansion is ContType ct2
+                        ? _moduleInst.Types[ct2.FuncTypeRef.Index()].Expansion as FunctionType
+                        : null;
+                    int prefix = (ft1!.ParameterTypes.Arity - ft2!.ParameterTypes.Arity);
+                    if (before)
+                    {
+                        _cilValidator.Pop(typeof(Value), "cont.bind cont");
+                        _cilValidator.Pop(prefix, "cont.bind prefix");
+                    }
+                    else
+                    {
+                        _cilValidator.Push(typeof(Value));
+                    }
+                    break;
+                }
+                case InstSuspend su:
+                {
+                    // [tagparams*] -> [tagresults*]; suspend never
+                    // returns normally on the success path, but
+                    // the validator needs the height accounting.
+                    int importedTagCount = 0;
+                    foreach (var imp in _moduleInst.Repr.Imports)
+                        if (imp.Desc is Wacs.Core.Module.ImportDesc.TagDesc) importedTagCount++;
+                    FunctionType tagFt;
+                    if (su.TagIndex < importedTagCount)
+                    {
+                        int seen = 0;
+                        FunctionType? found = null;
+                        foreach (var imp in _moduleInst.Repr.Imports)
+                        {
+                            if (imp.Desc is Wacs.Core.Module.ImportDesc.TagDesc td)
+                            {
+                                if (seen == su.TagIndex)
+                                {
+                                    found = _moduleInst.Types[td.TagDef.TypeIndex].Expansion as FunctionType;
+                                    break;
+                                }
+                                seen++;
+                            }
+                        }
+                        tagFt = found!;
+                    }
+                    else
+                    {
+                        var tag = _moduleInst.Repr.Tags[su.TagIndex - importedTagCount];
+                        tagFt = (_moduleInst.Types[tag.TypeIndex].Expansion as FunctionType)!;
+                    }
+                    if (before)
+                    {
+                        _cilValidator.Pop(tagFt.ParameterTypes.Arity, "suspend args");
+                    }
+                    else
+                    {
+                        for (int i = 0; i < tagFt.ResultType.Arity; i++)
+                            _cilValidator.Push(typeof(int));
+                    }
+                    break;
+                }
+            }
+        }
+
         private void TrackExtStackEffect(InstructionBase inst, bool before)
         {
             var extOp = inst.Op.xFC;
@@ -1980,12 +2072,10 @@ namespace Wacs.Transpiler.AOT
             if (CallEmitter.CanEmit(op))
                 return true;
 
-            // Stack Switching opcodes (cont.new / cont.bind /
-            // suspend / resume / resume_throw / switch) are
-            // recognized by the transpiler but intentionally
-            // routed to the interpreter — the predicate returns
-            // false today so the enclosing function falls back.
-            // See StackSwitchingEmitter for the extension point.
+            // Stack Switching opcodes — three emit (cont.new /
+            // cont.bind / suspend), three remain interpreter
+            // fallback (resume / resume_throw / switch). See
+            // StackSwitchingEmitter for the split.
             if (StackSwitchingEmitter.IsStackSwitchingOpcode(op))
                 return StackSwitchingEmitter.CanEmit(op);
 
