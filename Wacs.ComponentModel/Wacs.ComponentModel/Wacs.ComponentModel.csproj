@@ -12,8 +12,8 @@
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.ComponentModel</AssemblyName>
-        <AssemblyVersion>0.8.3</AssemblyVersion>
-        <Version>0.8.3</Version>
+        <AssemblyVersion>0.8.4</AssemblyVersion>
+        <Version>0.8.4</Version>
         <RepositoryType>git</RepositoryType>
         <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
         <IsAotCompatible>true</IsAotCompatible>
@@ -37,6 +37,13 @@
     <ItemGroup>
       <ProjectReference Include="..\..\Wacs.Core\Wacs.Core\Wacs.Core.csproj" />
       <ProjectReference Include="..\Wacs.ComponentModel.Parser\Wacs.ComponentModel.Parser.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <!-- System.Threading.Channels is in-box for net8.0+; netstandard2.1
+           needs the package. Used by the Phase 3 StreamBuffer for the
+           bounded producer/consumer half-channel that backs stream<T>. -->
+      <PackageReference Include="System.Threading.Channels" Version="8.0.0" />
     </ItemGroup>
 
     <ItemGroup>

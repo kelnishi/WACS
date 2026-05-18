@@ -1,5 +1,58 @@
 # Changelog
 
+## WACS.ComponentModel 0.8.4 — stream + future data plane (Phase 3 Slice B)
+
+Adds the backing storage for `stream<T>` and `future<T>` handles.
+Backpressure semantics come from `System.Threading.Channels`
+(bounded, single-reader, single-writer); the future cell uses
+`TaskCompletionSource<T>` with `RunContinuationsAsynchronously`.
+
+### `StreamBuffer<T>`
+
+Wraps a bounded `Channel<T>`. Public API:
+
+- `TryWrite(T) → bool` / `WriteAsync(T, ct) → ValueTask` —
+  immediate vs. wait variants. Backpressure: `WriteAsync`
+  suspends when the buffer is at `Capacity`.
+- `TryRead(out T) → bool` / `ReadAsync(ct) → ValueTask<T>` —
+  symmetric reader.
+- `Complete() → bool` — close the writer side; pending items
+  still drain.
+- `AsAsyncEnumerable(ct) → IAsyncEnumerable<T>` — natural
+  `await foreach` consumption surface.
+- `Reader → ChannelReader<T>` — for embedders that already
+  accept a `ChannelReader<T>`.
+
+### `FutureCell<T>`
+
+Wraps a `TaskCompletionSource<T>`. Public API:
+
+- `Task → Task<T>` — host await target.
+- `TrySetResult(T) / TrySetException(Exception) /
+  TrySetCanceled() → bool` — single-resolution; second call
+  returns false (matches spec's single-write trap behavior).
+- `IsCompleted` — observe resolution.
+
+### Dependency
+
+Added `System.Threading.Channels` 8.0.0 PackageReference to
+`Wacs.ComponentModel` for the bounded channel primitive.
+In-box on net8.0, NuGet-provided on netstandard2.1.
+
+### Tests
+
+10 new tests in `StreamBufferTests`:
+
+- Capacity validation, round-trip within capacity.
+- `TryWrite` returns false when full; `WriteAsync` suspends
+  and resumes when a reader drains.
+- `AsAsyncEnumerable` consumes in-order; `Complete` drains
+  cleanly.
+- Future result / exception / cancellation resolution;
+  single-write rejection.
+
+439/439 ComponentModel tests pass (was 429).
+
 ## WACS.ComponentModel 0.8.3 — async ABI primitives (Phase 3 Slice A)
 
 First Phase 3 slice: the data carriers the CM async dispatcher
