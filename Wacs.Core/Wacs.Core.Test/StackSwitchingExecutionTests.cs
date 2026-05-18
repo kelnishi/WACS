@@ -121,6 +121,54 @@ namespace Wacs.Core.Test
         }
 
         /// <summary>
+        /// Symmetric stack-switch happy path: caller allocates a
+        /// continuation, switches into it. The target receives the
+        /// switch-carried args plus a placeholder reified-self,
+        /// suspends with a yield tag, and the on-yield handler back
+        /// in the caller's frame captures the yielded value.
+        /// Demonstrates that switch's inherited handler chain
+        /// works correctly — suspend inside the switched-to cont
+        /// walks past the switch frame to the resume that
+        /// originally installed handlers.
+        /// </summary>
+        [Fact]
+        public void Switch_into_cont_inherits_outer_resume_handlers()
+        {
+            // The target cont takes a single (ref $main_ct)
+            // self-reference and suspends with $yield(33). The
+            // outer resume's on-yield handler captures 33.
+            // Demonstrates switch's inherited handler chain:
+            // suspend inside the switched-to cont walks past the
+            // switch frame to the resume frame above.
+            var src = @"
+                (module
+                  (type $main_ft (func))
+                  (type $main_ct (cont $main_ft))
+                  (type $tgt_ft (func (param (ref 1))))
+                  (type $tgt_ct (cont $tgt_ft))
+                  (tag $yield (param i32))
+                  (tag $sw_tag (param (ref 1)))
+
+                  (func $tgt (param $self (ref 1))
+                    (suspend $yield (i32.const 33)))
+                  (elem declare func $tgt $entry)
+
+                  (func $entry
+                    (switch $tgt_ct $sw_tag
+                      (cont.new $tgt_ct (ref.func $tgt))))
+
+                  (func (export ""go"") (result i32)
+                    (block $on_yield (result i32 (ref $main_ct))
+                      (resume $main_ct (on $yield $on_yield)
+                        (cont.new $main_ct (ref.func $entry)))
+                      i32.const 0
+                      return)
+                    drop))";
+            var (runtime, _) = Build(src);
+            Assert.Equal(33, InvokeI32(runtime, "go"));
+        }
+
+        /// <summary>
         /// Re-resuming a continuation that has already produced a
         /// value through suspend must trap: the one-shot semantics
         /// mark the reified continuation Completed at the

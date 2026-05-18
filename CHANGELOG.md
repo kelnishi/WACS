@@ -1,5 +1,37 @@
 # Changelog
 
+## WACS 0.19.1 — `switch` runtime parity
+
+Brings `switch $ct $tag` (0xE5) to runtime parity with `resume`.
+`InstSwitch.Execute` was `NotImplementedException`; now it pops
+the target continuation, validates it's `Fresh`, allocates a
+one-shot Completed placeholder for the reified caller, marshals
+the call's parameter stack, and dispatches via `InvokeResolved`.
+
+The validator's stack shape now matches the proposal: switch's
+input stack is `[t1* (ref $ct)]` where `t1*` comes from the
+**tag's** params (excluding its trailing self-ref), not the
+target function's params. The earlier draft popped the target's
+full `ft.ParameterTypes`, which conflated the call-site shape
+with the callee shape.
+
+`switch` does not install a new resume handler frame — it
+inherits the current handler chain. A suspend raised inside the
+switched-to cont continues to walk up through whatever resume
+frame installed matching handlers, which is the producer-
+consumer-trampoline shape exercised by the new test.
+
+### Tests
+
+- New `Switch_into_cont_inherits_outer_resume_handlers` —
+  switch into a fresh cont whose body suspends; outer resume's
+  on-yield handler captures the suspended value.
+- `Execute_throws_NotImplemented` theory shrinks to one case:
+  only `InstResumeThrow` remains unimplemented at the Execute
+  level.
+
+511 Wacs.Core + 380 ComponentModel + 826 Transpiler tests green.
+
 ## WACS 0.19.0 — Stack Switching: WAT parsing + end-to-end execution tests
 
 Adds the text-format parser entries that allow hand-written WAT

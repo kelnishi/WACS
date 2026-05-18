@@ -177,7 +177,6 @@ namespace Wacs.Core.Test
         /// </summary>
         [Theory]
         [InlineData(typeof(InstResumeThrow))]
-        [InlineData(typeof(InstSwitch))]
         public void Execute_throws_NotImplemented(System.Type instType)
         {
             var inst = (InstructionBase)System.Activator.CreateInstance(instType)!;

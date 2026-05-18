@@ -521,17 +521,86 @@ namespace Wacs.Core.Instructions
             context.Assert(tagFt!.ResultType.Arity == 0,
                 "switch: switch tag {0} must have empty result type (its results " +
                 "are the producer's return slots).", Tag);
+            // The tag's signature is [t1* (ref $ct')] — the last
+            // param is the reified self-ref that switch
+            // synthesizes, not something the caller leaves on the
+            // stack. The on-stack t1* is therefore everything
+            // except the tag's trailing param.
+            context.Assert(tagFt.ParameterTypes.Arity >= 1,
+                "switch: switch tag {0} must declare a trailing (ref ct) " +
+                "self-reference param.", Tag);
 
             context.OpStack.PopType(ValType.ContRef);
-            // The tag's parameters describe the values that flow
-            // between switching peers; structural matching of those
-            // against ft's params is delegated to the dispatcher.
-            context.OpStack.DiscardValues(ft!.ParameterTypes);
-            context.OpStack.PushResult(ft.ResultType);
+            for (int i = 0; i < tagFt.ParameterTypes.Arity - 1; i++)
+            {
+                // Discard one t1* slot. Structural typecheck of
+                // each slot against tagFt.ParameterTypes[i] is
+                // delegated to the dispatcher.
+                context.OpStack.PopAny();
+            }
+            context.OpStack.PushResult(ft!.ResultType);
         }
 
-        public override void Execute(ExecContext context) =>
-            throw new NotImplementedException("switch is not implemented.");
+        public override void Execute(ExecContext context)
+        {
+            // Pop the target continuation. The t1* values that
+            // accompany the switch sit on the opstack below where
+            // the cont was and stay there; InvokeResolved will pop
+            // them as the inner function's parameters.
+            context.Assert(context.OpStack.Count > 0,
+                "switch: empty operand stack.");
+            var contVal = context.OpStack.PopRefType();
+            if (contVal.IsNullRef)
+                throw new TrapException("switch: null continuation reference.");
+            var target = contVal.GcRef as ContInstance;
+            context.Assert(target,
+                "switch: ref does not point to a continuation.");
+            if (target!.State != ContState.Fresh)
+                throw new TrapException(
+                    $"switch: continuation is not resumable (state {target.State}).");
+
+            // Reify the current computation as a one-shot,
+            // already-Completed placeholder. A full implementation
+            // would snapshot the live frames so the target could
+            // switch back; one-shot semantics force the target to
+            // run forward to completion or suspend out through a
+            // higher resume frame instead.
+            var placeholder = context.Store.AllocateContinuation(
+                target.ContTypeIndex, target.Function);
+            placeholder.State = ContState.Completed;
+
+            // Inject the target's bound prefix args (from any
+            // earlier cont.bind), then push the placeholder reified
+            // continuation. The function's parameter signature is
+            // [t1* (ref null $ct')] so the placeholder is the
+            // trailing param; the t1* values are already correctly
+            // positioned on the opstack.
+            foreach (var arg in target.BoundArgs)
+                context.OpStack.PushValue(arg);
+            context.OpStack.PushValue(new Value(ValType.ContRefNN, placeholder));
+
+            context.Assert(context.Store.Contains(target.Function),
+                $"switch: function address {target.Function} is not in the store.");
+            var funcInst = context.Store[target.Function];
+
+            // switch does NOT install a new resume handler frame —
+            // it inherits the current handler chain. A suspend
+            // raised inside the target's function continues to walk
+            // up through whatever resume frame installed handlers
+            // for the matching tag, which may be the same frame
+            // that contained this switch (the common producer-
+            // consumer-trampoline pattern).
+            target.State = ContState.Running;
+            try
+            {
+                context.InvokeResolved(funcInst);
+            }
+            catch
+            {
+                target.State = ContState.Completed;
+                throw;
+            }
+        }
 
         public override InstructionBase Parse(BinaryReader reader)
         {
