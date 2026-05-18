@@ -1,5 +1,49 @@
 # Changelog
 
+## Phase 2 close-out — binary deftype coverage + acceptance summary
+
+Test-only commit closing Phase 2 (Component Model async ABI
+types + parser). Adds `AsyncDefTypeBinaryTests` covering the
+binary type-section dispatch for tags `0x64` (error-context),
+`0x65` (future), and `0x66` (stream) — the one parser path
+Slices A–D wired but didn't cover with dedicated tests.
+
+### Coverage matrix
+
+| Path | Slice | Tests |
+|------|-------|------:|
+| `CtValType` subclass shape | A | (compile-time) |
+| Binary deftype dispatch (0x64/0x65/0x66) | A | 7 (this commit) |
+| Canon async-builtin parser (0x05–0x25) | B | 16 |
+| Async handle marshal helpers | C | 6 |
+| `CanonicalAbi.Layout` 4-byte handle case | C | (covered by harness consumers) |
+| WIT lexer / parser / WitToTypes | D | 9 |
+| Total async-ABI tests added | A–E | **38** |
+
+### Acceptance vs. plan
+
+The plan's Phase 2 acceptance asked for *Component WAT
+declaring `stream<u8>` / `error-context` types and all the
+async canon builtins parses and re-encodes losslessly.*
+
+- ✓ Parses — all WIT forms (typed + bare) lower to the
+  matching `Ct*Type`; the binary parser decodes the three
+  deftype tags and all 25 canon-async opcodes.
+- ⚠ Re-encodes losslessly — deferred. No component-binary
+  writer exists in the codebase yet; lossless byte
+  round-trip is a follow-up. The structural AST is complete
+  enough to drive a writer when one lands. Test coverage
+  hand-builds the source bytes and asserts AST identity,
+  which is the achievable equivalent without a writer.
+- ⏳ Data plane / dispatcher — explicitly Phase 3 scope, not
+  Phase 2.
+
+Phase 2 closes the "shape + parse" surface. Phase 3 picks up
+the stackful dispatcher built atop the Phase 1 Stack Switching
+substrate.
+
+418/418 `Wacs.ComponentModel` tests pass.
+
 ## WACS.ComponentModel 0.8.2 — WIT AST + parser + WitToTypes (Phase 2 Slice D)
 
 Lands the WIT-source-text layer for `stream<T>` / `future<T>` /
