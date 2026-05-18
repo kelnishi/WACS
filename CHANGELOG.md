@@ -1,5 +1,25 @@
 # Changelog
 
+## WACS 0.16.0 — Stack Switching: type-system scaffolding
+
+WASIp3 Phase 1.1 — first slice of the WebAssembly Stack
+Switching proposal (https://github.com/WebAssembly/stack-switching).
+Type-system and opcode reservations only; no behavior wired
+yet. Byte assignments need re-verification against current
+spec submodule HEAD before final ship.
+
+- `HeapType.Cont` (0x68, -0x18) and `HeapType.NoCont` (0x75,
+  -0x0b) added.
+- `ValType.ContRef` / `NoCont` / `ContRefNN` / `NoContNN` added
+  with full `IsSubType` / `TopHeapType` / `GetHeapType` /
+  `Validate` coverage.
+- New `ContType` (composite-type subclass wrapping a function-
+  type index) parses via `CompType.ContCt = 0x5D`.
+- Opcodes 0xE0–0xE5 reserved: `cont.new`, `cont.bind`,
+  `suspend`, `resume`, `resume_throw`, `switch`. Instruction
+  parsing / validation / execution land in subsequent Phase 1
+  slices.
+
 ## WACS 0.15.24 — field-names and tag-names subsections
 
 Adds parser and writer support for two more `name` custom-section

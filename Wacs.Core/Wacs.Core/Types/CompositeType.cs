@@ -30,6 +30,7 @@ namespace Wacs.Core.Types
                 FunctionType ft => ValType.FuncRef,
                 ArrayType at => ValType.Array,
                 StructType st => ValType.Struct,
+                ContType ct => ValType.ContRef,
                 _ => throw new InvalidDataException($"Unknown CompType:{this}"),
             };
 
@@ -39,6 +40,7 @@ namespace Wacs.Core.Types
                 (byte)CompType.ArrayAt => ArrayType.Parse(reader),
                 (byte)CompType.StructSt => StructType.Parse(reader),
                 (byte)CompType.FuncFt => FunctionType.Parse(reader),
+                (byte)CompType.ContCt => ContType.Parse(reader),
                 var form => throw new FormatException(
                     $"Invalid comptype format {form} at offset {reader.BaseStream.Position - 1}.")
             };
@@ -55,6 +57,7 @@ namespace Wacs.Core.Types
                 FunctionType ft1 when super is FunctionType ft2 => ft1.Matches(ft2, types),
                 StructType st1 when super is StructType st2 => st1.Matches(st2, types),
                 ArrayType at1 when super is ArrayType at2 => at1.Matches(at2, types),
+                ContType ct1 when super is ContType ct2 => ct1.Matches(ct2, types),
                 _ => false
             };
 

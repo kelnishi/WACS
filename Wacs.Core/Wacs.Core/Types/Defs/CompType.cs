@@ -19,5 +19,9 @@ namespace Wacs.Core.Types.Defs
         ArrayAt  = 0x5E, // -0xde
         StructSt = 0x5F, // -0xdf
         FuncFt   = 0x60, // -0xe0
+
+        // Stack Switching proposal — verify against current spec
+        // submodule HEAD before merge.
+        ContCt   = 0x5D, // -0xdd
     }
 }
