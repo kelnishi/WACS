@@ -13,7 +13,6 @@
 // limitations under the License.
 
 using System;
-using System.Collections.Generic;
 using Wacs.Core.Types;
 
 namespace Wacs.Core.Runtime.Concurrency
@@ -25,26 +24,24 @@ namespace Wacs.Core.Runtime.Concurrency
     /// transpiled modules can either go through this store or
     /// through the WasmRuntime's Store; helpers branch based on
     /// what's available.
+    ///
+    /// <para>The allocator mints a unique idx per call but does
+    /// NOT retain a strong reference to the instance — wasm refs
+    /// reach the cont through the <c>Value.GcRef</c> they carry,
+    /// so once those refs become unreachable the cont can be
+    /// reclaimed by the CLR GC. Lookup-by-idx is unsupported in
+    /// standalone (no consumer needs it); keep the store
+    /// retention-free so 1M+ resume cycles don't grow the heap
+    /// unboundedly.</para>
     /// </summary>
     public sealed class ContinuationStore
     {
-        private readonly List<ContInstance> _instances = new();
+        private int _nextIdx;
 
-        public ContInstance Allocate(TypeIdx contTypeIdx, FuncAddr func)
-        {
-            var inst = new ContInstance(_instances.Count, contTypeIdx, func);
-            _instances.Add(inst);
-            return inst;
-        }
+        public ContInstance Allocate(TypeIdx contTypeIdx, FuncAddr func) =>
+            new ContInstance(_nextIdx++, contTypeIdx, func);
 
-        public ContInstance Allocate(TypeIdx contTypeIdx, Delegate standaloneDelegate)
-        {
-            var inst = new ContInstance(_instances.Count, contTypeIdx, standaloneDelegate);
-            _instances.Add(inst);
-            return inst;
-        }
-
-        public ContInstance? Get(long idx) =>
-            idx >= 0 && idx < _instances.Count ? _instances[(int)idx] : null;
+        public ContInstance Allocate(TypeIdx contTypeIdx, Delegate standaloneDelegate) =>
+            new ContInstance(_nextIdx++, contTypeIdx, standaloneDelegate);
     }
 }

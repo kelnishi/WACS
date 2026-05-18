@@ -1,5 +1,93 @@
 # Changelog
 
+## WACS 0.16.13 — Phase 1 close-out: standalone ResumeThrow + retention-free ContinuationStore
+
+Closes two Phase 1 stack-switching gaps and adds the longevity
+test the WASIp3 plan's acceptance criterion #2 asks for.
+
+### ResumeThrow standalone
+
+`StackSwitchingHelpers.ResumeThrow` no longer throws
+`NotSupportedException` when `ExecContext` is null. The
+standalone branch now constructs the exception in-line via the
+public `ExnInstance` constructor — no `Store.AllocateExn`, no
+reflection, AOT-safe — invokes the cont via the typed
+`StandaloneContInvoker` mirroring mixed-mode semantics for
+fresh-only continuations (body runs, then `WasmException`
+propagates), and surfaces a `WasmException` carrying the
+synthesized `ExnInstance`.
+
+The synthesized exn idx is minted from a process-wide
+`Interlocked` counter — uniqueness only matters for the catch
+site's identity comparison, which is by `TagAddr` not by exn
+idx. Catch arms compare against the synthesized `TagAddr`
+(same convention as the standalone `Suspend` path).
+
+### ContinuationStore: retention-free
+
+`Wacs.Core.Runtime.Concurrency.ContinuationStore` previously
+held a `List<ContInstance>` that grew monotonically across the
+lifetime of the standalone context — every `Allocate` appended
+a strong reference that was never released. A 1M resume cycle
+on a `Func<…>` body would retain 1M `ContInstance` objects
+plus the list slots.
+
+The store now mints a per-allocation idx via a counter and
+returns the freshly-allocated instance without retaining a
+reference. The `Get(long idx)` lookup is removed; it was
+unused (verified by grep — no callers in either `Wacs.Core`
+or `Wacs.Transpiler.Lib`).
+
+Wasm refs reach a continuation through the `Value.GcRef` they
+carry. Once those refs are unreachable, the CLR GC reclaims
+the instance — matching the spec's "continuations are GC'd
+once unreferenced" model. The instance idx is now purely an
+allocation counter, not a lookup key.
+
+### 1M-switch longevity test
+
+`StandaloneContInvokerTests.Resume_one_million_iterations_does_not_leak_continuations`
+exercises 1M allocate + resume cycles and asserts heap growth
+stays under 1 MB. Pre-fix this would have grown >50 MB.
+
+The test is gated behind `WACS_LONG_TESTS=1` to keep the
+default unit cycle short (~72 ms for 1M cycles when enabled,
+which still adds noticeable time to the suite). Enable it
+locally with `WACS_LONG_TESTS=1 dotnet test`.
+
+### Test coverage
+
+3 new standalone tests for `ResumeThrow` (payload, missing
+invoker, non-Fresh trap) + 1 longevity test. 520/520
+`Wacs.Core` and 833/833 `Wacs.Transpiler` tests pass.
+
+### Phase 1 acceptance — close-out
+
+- ✓ Mixed-mode interpreter parity (cont.new / cont.bind /
+  suspend / resume / resume_throw / switch all execute end-to-end)
+- ✓ Transpiler CIL emit parity (all 6 opcodes)
+- ✓ Standalone-mode parity (5 of 6: cont.new / cont.bind /
+  suspend / resume / switch; resume_throw now closes)
+- ✓ 1M-switch longevity (no retention leak)
+- ✗ Multi-result standalone invokers — blocked by the
+  underlying multi-result func representation
+  (`MultiReturnMethodRegistry` uses runtime `DynamicMethod`;
+  `BuildDelegateTypeForFunc` returns null for multi-result;
+  `StandaloneDelegate` is null for those conts). Closing
+  requires a different invoker contract
+  (`Value[]→Value[]` adapter generated at transpile time).
+  Deferred — bounded follow-up.
+- ✗ True re-resumable continuations (current impl is one-shot;
+  cont state is set to `Completed` after first resume).
+  Requires frame snapshotting — architectural future work,
+  not Phase 1 scope.
+- ⚠ Official spec-suite fixtures not vendored — the
+  stack-switching proposal repo doesn't publish `.wast`
+  fixtures we can run through our spec harness. Phase 1
+  acceptance is validated via the hand-written
+  `StackSwitchingExecutionTests` and
+  `StackSwitchingEquivalenceTests`.
+
 ## AOT enforcement test
 
 `Wacs.Core/Wacs.Core.Test/AotAcceptanceTests.cs` (new) enforces

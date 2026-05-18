@@ -14,6 +14,8 @@
 
 using System;
 using System.Collections.Generic;
+using System.Threading;
+using Wacs.Core.Compilation;
 using Wacs.Core.Instructions;
 using Wacs.Core.Runtime.Exceptions;
 using Wacs.Core.Runtime.Types;
@@ -75,6 +77,13 @@ namespace Wacs.Core.Runtime.Concurrency
         private static Delegate? ExtractDelegateRefTarget(IGcRef? gcRef) =>
             (gcRef as IDelegateRef)?.Target;
 
+        // Synthetic ExnIdx counter for standalone-mode resume_throw.
+        // The mixed-mode path goes through Store.AllocateExn which
+        // produces a Store-scoped idx; standalone has no Store, so
+        // mint a process-wide unique id directly. Catch sites compare
+        // by Tag identity (synthesized TagAddr), not by ExnIdx.
+        private static int s_standaloneExnIdSeed;
+
         // Standalone resume: validate the cont, dispatch via the
         // transpiler-generated typed invoker, mark Completed on
         // any exit. SuspensionException propagates naturally to
@@ -105,6 +114,56 @@ namespace Wacs.Core.Runtime.Concurrency
                 cont.State = ContState.Completed;
                 throw;
             }
+        }
+
+        // Standalone resume_throw: construct an ExnInstance directly
+        // (Store-less; the public ExnInstance ctor is AOT-safe), run
+        // the cont via the typed invoker mirroring mixed-mode semantics
+        // for fresh-only continuations (body runs, then exn throws),
+        // then raise WasmException. SuspensionException raised during
+        // invocation propagates naturally to the caller's emitted
+        // try/catch arm — resume_throw degenerates into resume on a
+        // suspending body.
+        private static Value[] ResumeThrowStandalone(
+            IContinuationContext hctx, int tagIdxValue,
+            Value[] excArgs, Value contRef, Value[] args,
+            StandaloneContInvoker? invoker)
+        {
+            if (invoker == null)
+                throw new NotSupportedException(StandaloneInvokeUnsupported);
+            if (contRef.IsNullRef)
+                throw new TrapException("resume_throw: null continuation reference.");
+            var cont = contRef.GcRef as ContInstance
+                       ?? throw new TrapException(
+                           "resume_throw: ref does not point to a continuation.");
+            if (cont.State != ContState.Fresh)
+                throw new TrapException(
+                    $"resume_throw: continuation is not resumable (state {cont.State}).");
+
+            // Build the exn ahead of body invocation so any allocation
+            // failure surfaces before state transitions. TagAddr is
+            // synthesized from the raw tag idx — same convention as
+            // Suspend so catch arms can compare by tag identity.
+            var fields = new Stack<Value>();
+            for (int i = 0; i < excArgs.Length; i++)
+                fields.Push(excArgs[i]);
+            var tagAddr = new TagAddr(tagIdxValue);
+            var nextId = (uint)Interlocked.Increment(ref s_standaloneExnIdSeed);
+            var exn = new ExnInstance(nextId, tagAddr, fields);
+
+            cont.State = ContState.Running;
+            try
+            {
+                invoker.Invoke(hctx, cont, args);
+            }
+            catch
+            {
+                cont.State = ContState.Completed;
+                throw;
+            }
+            cont.State = ContState.Completed;
+
+            throw new WasmException(exn);
         }
 
         // Standalone switch: same shape as ResumeStandalone but
@@ -392,10 +451,9 @@ namespace Wacs.Core.Runtime.Concurrency
         {
             var exec = hctx.ExecContext;
             if (exec == null)
-                // resume_throw injects an exception at function
-                // entry; without a typed invoker we can't enter
-                // the cont's body at all. Surface clearly.
-                throw new NotSupportedException(StandaloneInvokeUnsupported);
+                return ResumeThrowStandalone(
+                    hctx, tagIdxValue, excArgs, contRef, Array.Empty<Value>(),
+                    standaloneInvoker);
             var ctx = exec;
             var handlers = TagsToHandlers(handlerTagIdxs);
             if (contRef.IsNullRef)
