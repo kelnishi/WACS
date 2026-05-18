@@ -27,10 +27,19 @@ namespace Wacs.Transpiler.AOT.Emitters
     /// them is routed to the interpreter via the
     /// <c>FunctionCodegen.CanEmitAllInstructions</c> guard. The
     /// interpreter's <c>SuspensionDispatcher</c> handles the
-    /// runtime semantics; transpiled callers can invoke
-    /// interpreter-backed cont.* functions through the standard
-    /// IFunctionInstance dispatch path with no behavioral
-    /// difference visible to the guest.</para>
+    /// runtime semantics.</para>
+    ///
+    /// <para><strong>Mixed-mode only.</strong> The fallback path
+    /// requires a live <c>ThinContext.ExecContext</c> — present
+    /// when the transpiled module is invoked through a
+    /// <c>WasmRuntime</c>'s stack invoker (mixed-mode). In
+    /// standalone mode (the transpiled <c>Module</c> class
+    /// instantiated via <c>Activator.CreateInstance</c> without a
+    /// runtime context), <c>CallEmitter.InvokeFallback</c> throws
+    /// <c>NotSupportedException("Function N not transpiled and no
+    /// interpreter available")</c>. Until CIL emission lands for
+    /// the six opcodes, cont.*-bearing modules must be hosted by
+    /// a WasmRuntime to be callable.</para>
     ///
     /// <para>A real emit pass would CIL-call out to runtime
     /// helpers (the existing <c>SuspensionDispatcher.TryHandle</c>,

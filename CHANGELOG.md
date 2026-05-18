@@ -1,5 +1,33 @@
 # Changelog
 
+## WACS.Transpiler.Lib 0.11.2 — Stack Switching mixed-mode parity tests + standalone caveat
+
+Pins down the transpiler's behavioral guarantee for the six
+stack switching opcodes:
+
+- **Mixed-mode parity** (invoked through a `WasmRuntime` stack
+  invoker): functions containing cont.* opcodes fall back to
+  interpreter execution and produce identical results to a
+  pure-interpreter run. Four new equivalence tests in
+  `Wacs.Transpiler.Test.StackSwitchingEquivalenceTests` cover
+  cont.new+resume, full producer/consumer suspend/resume,
+  resume_throw with try_table catch, and switch with
+  inherited handler chain.
+- **Standalone-mode caveat** (transpiled `Module` class
+  instantiated via `Activator.CreateInstance` without a host
+  runtime): `CallEmitter.InvokeFallback` throws
+  `NotSupportedException("Function N not transpiled and no
+  interpreter available")` on the first call to any
+  cont.*-bearing function. Until CIL emission for the six
+  opcodes lands, cont.*-bearing modules must be hosted by a
+  `WasmRuntime` to be callable.
+
+`StackSwitchingEmitter`'s XML doc now spells this out
+explicitly so future readers understand which fallback path
+is wired and which is not.
+
+830 transpiler + 511 Wacs.Core + 380 ComponentModel tests green.
+
 ## WACS 0.19.2 — `resume_throw` runtime parity
 
 Brings `resume_throw $ct $tag handler*` (0xE4) to runtime
