@@ -1,0 +1,14 @@
+package wacs:list-record-param-spike;
+
+world inventory {
+    record item {
+        sku: string,
+        qty: u32,
+    }
+
+    /// list<record> as direct param — each element written to wasm
+    /// memory at its canonical layout offset, with strings inside
+    /// recursively lowered via cabi_realloc.
+    export inventory-value: func(items: list<item>, unit-price: u32) -> u32;
+    export inventory-summary: func(items: list<item>) -> string;
+}

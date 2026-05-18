@@ -1,0 +1,23 @@
+package wacs:enum-flags-spike;
+
+world security {
+    enum severity {
+        info,
+        warning,
+        critical,
+    }
+
+    flags permissions {
+        read,
+        write,
+        execute,
+        delete,
+    }
+
+    record status {
+        sev: severity,
+        perms: permissions,
+    }
+
+    export get-status: func() -> status;
+}

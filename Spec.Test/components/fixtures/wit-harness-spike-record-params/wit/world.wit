@@ -1,0 +1,17 @@
+package wacs:record-params-spike;
+
+world packager {
+    record dimensions {
+        width: u32,
+        height: u32,
+    }
+    record parcel {
+        name: string,
+        tags: list<string>,
+        size: dimensions,
+    }
+
+    /// Record-of-{string, list<string>, nested record} as a direct
+    /// param — exercises the generalized record lower path.
+    export describe: func(p: parcel) -> string;
+}

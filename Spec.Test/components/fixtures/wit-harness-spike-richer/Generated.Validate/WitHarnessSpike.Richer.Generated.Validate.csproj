@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net9.0</TargetFramework>
+        <ImplicitUsings>disable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <LangVersion>latest</LangVersion>
+        <RootNamespace>WitHarnessSpike.Richer.Generated.Validate</RootNamespace>
+        <AssemblyName>WitHarnessSpike.Richer.Generated.Validate</AssemblyName>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="..\wasm\richer.component.wasm">
+            <Link>richer.component.wasm</Link>
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </None>
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\..\..\..\Wacs.Core\Wacs.Core\Wacs.Core.csproj" />
+        <ProjectReference Include="..\..\..\..\..\Wacs.ComponentModel\Wacs.ComponentModel.Harness.Runtime\Wacs.ComponentModel.Harness.Runtime.csproj" />
+        <ProjectReference Include="..\..\..\..\..\Wacs.ComponentModel\Wacs.ComponentModel.Harness.Lib\Wacs.ComponentModel.Harness.Lib.csproj" />
+    </ItemGroup>
+
+</Project>

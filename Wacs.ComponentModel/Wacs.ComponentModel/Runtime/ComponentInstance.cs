@@ -85,6 +85,15 @@ namespace Wacs.ComponentModel.Runtime
         private readonly ModuleInstance _coreInstance;
         private MemoryInstance? _memory;
         private Wacs.Core.Runtime.Delegates.GenericFuncs? _cabiRealloc;
+        /// <summary>Per-resource canonical-ABI handle tables (one
+        /// per exported resource type). Populated during Instantiate
+        /// by <see cref="Wacs.Core.Runtime.CanonResourceBinder"/>
+        /// walking the core module's
+        /// <c>[export]&lt;iface&gt;.[resource-X]&lt;name&gt;</c>
+        /// imports. Keyed by resource name (per-instance, which is the
+        /// v1 scope — multi-instance composition is a v2 follow-up).</summary>
+        internal Dictionary<string, Wacs.Core.Runtime.ResourceHandleTable> _resourceTables
+            = new();
 
         private ComponentInstance(
             ComponentModule component,
@@ -174,10 +183,26 @@ namespace Wacs.ComponentModel.Runtime
                 var runtime = new WasmRuntime();
                 using var coreMs = new MemoryStream(coreBinaries[0]);
                 var coreModule = BinaryModuleParser.ParseWasm(coreMs);
+
+                // Canonical-ABI resource handle tables — bind
+                // new/drop/rep adapters BEFORE configureImports +
+                // InstantiateModule so the inner module's import
+                // resolution finds them. Late-resolve dtor
+                // trampolines from the freshly-built core instance.
+                // See CanonResourceBinder for the algorithm.
+                var (tables, dtorBindings) =
+                    Wacs.Core.Runtime.CanonResourceBinder
+                        .BindImports(runtime, coreModule);
+
                 configureImports?.Invoke(runtime);
                 var coreInstance = runtime.InstantiateModule(coreModule,
                     new RuntimeOptions { MemoryStorage = AmbientRuntime.MemoryStorage });
-                return new ComponentInstance(component, runtime, coreInstance);
+
+                Wacs.Core.Runtime.CanonResourceBinder
+                    .ResolveDtorTrampolines(runtime, coreInstance, dtorBindings);
+
+                return new ComponentInstance(component, runtime, coreInstance)
+                    { _resourceTables = tables };
             }
 
             // Composer mode: no core modules of our own — every

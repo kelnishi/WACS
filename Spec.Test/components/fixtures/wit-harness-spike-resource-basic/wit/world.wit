@@ -1,0 +1,16 @@
+package wacs:resource-basic-spike;
+
+interface store {
+    /// Opaque resource — Slice D scaffolding. Drop is implicit; the
+    /// host calls it via IDisposable.Dispose on the resource class.
+    resource bucket;
+
+    /// Free function returns a bucket handle. The harness wraps the
+    /// returned int in a Bucket class instance with the drop delegate
+    /// captured.
+    open: func(name: string) -> bucket;
+}
+
+world app {
+    export store;
+}

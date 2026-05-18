@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <LangVersion>9</LangVersion>
+        <Nullable>enable</Nullable>
+        <Title>WACS Component Model Harness Emitter</Title>
+        <PackageId>WACS.ComponentModel.Harness.Lib</PackageId>
+        <Authors>Kelvin Nishikawa</Authors>
+        <Description>Build-time IL emitter for typed WIT harnesses. Takes a WIT contract (either as a directory of `.wit` files or a pre-parsed CtPackage set) and emits a .NET assembly containing the typed harness class with `LoadFrom(byte[])` + per-export typed methods. Two ergonomic surfaces over one emit core: `EmitToFile` / `EmitToStream` for persisted .dll output (the `wacs harness gen` flow) and `EmitInMemory` for immediate consumption (the `wacs run --wit-dir` flow). Targets net9.0 to use PersistedAssemblyBuilder for the AOT-clean save+load round-trip.</Description>
+        <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
+        <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <AssemblyName>Wacs.ComponentModel.Harness.Lib</AssemblyName>
+        <AssemblyVersion>0.27.0</AssemblyVersion>
+        <Version>0.27.0</Version>
+        <RepositoryType>git</RepositoryType>
+        <TargetFramework>net9.0</TargetFramework>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    </PropertyGroup>
+
+    <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+      <DebugSymbols>true</DebugSymbols>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\..\Wacs.Core\Wacs.Core\Wacs.Core.csproj" />
+      <ProjectReference Include="..\Wacs.ComponentModel\Wacs.ComponentModel.csproj" />
+      <ProjectReference Include="..\Wacs.ComponentModel.Parser\Wacs.ComponentModel.Parser.csproj" />
+      <ProjectReference Include="..\Wacs.ComponentModel.Harness.Runtime\Wacs.ComponentModel.Harness.Runtime.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <InternalsVisibleTo Include="Wacs.ComponentModel.Harness.Lib.Test" />
+    </ItemGroup>
+
+</Project>

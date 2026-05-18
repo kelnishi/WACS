@@ -104,6 +104,23 @@ namespace Wacs.Console.Verbs
             "Print each step (transpile, scaffold, publish, copy).")]
         public bool Verbose { get; set; }
 
+        [Option("harness", HelpText =
+            "Path to a harness .dll (produced by `wacs harness`). "
+            + "When set, the transpiler validates the component's WIT "
+            + "against the harness's embedded _WitContract before "
+            + "emitting IL — a mismatch fails the transpile with a "
+            + "typed diff. Symmetric to the in-memory --wit-dir flow.")]
+        public string? Harness { get; set; }
+
+        [Option("wit-dir", HelpText =
+            "Path to a directory of .wit files. The transpiler "
+            + "concatenates them as the WIT contract and validates the "
+            + "component against it (same diff machinery as --harness, "
+            + "no .dll needed). Use during iteration; switch to "
+            + "--harness once the contract stabilizes and you ship a "
+            + "harness .dll alongside.")]
+        public string? WitDir { get; set; }
+
         [Value(1, MetaName = "args", HelpText =
             "Trailing positional args forwarded to the wasm guest (e.g. as "
             + "argv when --wasi is set).")]

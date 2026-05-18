@@ -1,0 +1,14 @@
+package wacs:resource-methods-spike;
+
+interface counter {
+    resource counter {
+        constructor(initial: u32);
+        increment: func() -> u32;
+        get-value: func() -> u32;
+        merge: static func(a: u32, b: u32) -> u32;
+    }
+}
+
+world demo {
+    export counter;
+}

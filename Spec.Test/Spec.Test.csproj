@@ -51,6 +51,15 @@
       <Compile Remove="components/fixtures/**/expected/**/*.cs" />
       <None Remove="components/fixtures/**/reference/**/*.cs" />
       <None Remove="components/fixtures/**/expected/**/*.cs" />
+      <!-- wit-harness fixtures ship their own csproj subprojects
+           (Aot.Spike, Generated.Validate). Exclude their .cs from
+           Spec.Test's globs so they don't pollute the test assembly. -->
+      <Compile Remove="components/fixtures/wit-harness-spike-*/**/*.cs" />
+      <None Remove="components/fixtures/wit-harness-spike-*/**/*.cs" />
+      <!-- canon-resource-roundtrip ships a Generated.Validate
+           csproj subproject too — same pattern, exclude it. -->
+      <Compile Remove="components/fixtures/canon-resource-roundtrip/**/*.cs" />
+      <None Remove="components/fixtures/canon-resource-roundtrip/**/*.cs" />
     </ItemGroup>
 
     <ItemGroup>

@@ -208,7 +208,18 @@ namespace Wacs.Transpiler.Cli
                 foreach (var b in hostBindings)
                     b.BindToRuntime(runtime);
 
+                // If the wasm has canon-resource imports
+                // ([export]<iface>.[resource-new/drop/rep]<name>)
+                // — typical of component-extracted core modules —
+                // bind the runtime adapters before instantiation.
+                // No-op for plain wasm with no such imports.
+                var (_, dtorBindings) =
+                    Wacs.Core.Runtime.CanonResourceBinder.BindImports(runtime, module);
+
                 moduleInst = runtime.InstantiateModule(module);
+
+                Wacs.Core.Runtime.CanonResourceBinder.ResolveDtorTrampolines(
+                    runtime, moduleInst, dtorBindings);
             }
             catch (Exception ex)
             {
@@ -357,7 +368,13 @@ namespace Wacs.Transpiler.Cli
                     using var fs = new FileStream(inputPath, FileMode.Open,
                         FileAccess.Read);
                     m = BinaryModuleParser.ParseWasm(fs);
+                    // Canon-resource adapters for component-extracted
+                    // core modules. No-op for plain wasm.
+                    var (_, dtorBindings) =
+                        Wacs.Core.Runtime.CanonResourceBinder.BindImports(runtime, m);
                     inst = runtime.InstantiateModule(m);
+                    Wacs.Core.Runtime.CanonResourceBinder.ResolveDtorTrampolines(
+                        runtime, inst, dtorBindings);
                     runtime.RegisterModule(name, inst);
                 }
                 catch (Exception ex)

@@ -56,38 +56,57 @@ namespace Wacs.Core.Runtime
             return Delegates.AnonymousFunctionFromType(funcInst.Type, invoker);
         }
 
+        // AnonymousFunctionFromType wraps the wasm return in a `Value`
+        // discriminated union (per the (n, 1) cases that synthesize
+        // `new Value(...)`); DynamicInvoke boxes it. We drop the wrapper
+        // by switching on the union's discriminator (`Value.Type`) and
+        // returning the matching typed field — same shape `Value.Scalar`
+        // already implements, reused here so a future union shape change
+        // stays in one place. The TResult == Value case short-circuits
+        // for callers that bind to `Func<…, Value>` and lift via Value's
+        // implicit operators at the call site (the BindingTests shape).
+        private static TResult UnboxReturn<TResult>(object? boxed)
+        {
+            if (boxed is Value v)
+            {
+                if (typeof(TResult) == typeof(Value)) return (TResult)(object)v;
+                return (TResult)v.Scalar;
+            }
+            return (TResult)boxed!;
+        }
+
         /// <summary>
         /// Bind a wasm Func to C# via dynamic invocation (AOT compatible)
         /// </summary>
-        public Func<TResult> CreateInvokerFunc<TResult>(FuncAddr funcAddr, InvokerOptions? options = default) => 
-            () => (TResult)CreateInvokerInternal(funcAddr, typeof(Func<TResult>), true, options).DynamicInvoke()!;
+        public Func<TResult> CreateInvokerFunc<TResult>(FuncAddr funcAddr, InvokerOptions? options = default) =>
+            () => UnboxReturn<TResult>(CreateInvokerInternal(funcAddr, typeof(Func<TResult>), true, options).DynamicInvoke());
 
-        public Func<T1,TResult> CreateInvokerFunc<T1,TResult>(FuncAddr funcAddr, InvokerOptions? options = default) => 
-            (arg1) => (TResult)CreateInvokerInternal(funcAddr, typeof(Func<T1,TResult>), true, options).DynamicInvoke(arg1)!;
+        public Func<T1,TResult> CreateInvokerFunc<T1,TResult>(FuncAddr funcAddr, InvokerOptions? options = default) =>
+            (arg1) => UnboxReturn<TResult>(CreateInvokerInternal(funcAddr, typeof(Func<T1,TResult>), true, options).DynamicInvoke(arg1));
 
-        public Func<T1,T2,TResult> CreateInvokerFunc<T1,T2,TResult>(FuncAddr funcAddr, InvokerOptions? options = default) => 
-            (arg1, arg2) => (TResult)CreateInvokerInternal(funcAddr, typeof(Func<T1,T2,TResult>), true, options).DynamicInvoke(arg1, arg2)!;
+        public Func<T1,T2,TResult> CreateInvokerFunc<T1,T2,TResult>(FuncAddr funcAddr, InvokerOptions? options = default) =>
+            (arg1, arg2) => UnboxReturn<TResult>(CreateInvokerInternal(funcAddr, typeof(Func<T1,T2,TResult>), true, options).DynamicInvoke(arg1, arg2));
 
-        public Func<T1,T2,T3,TResult> CreateInvokerFunc<T1,T2,T3,TResult>(FuncAddr funcAddr, InvokerOptions? options = default) => 
-            (arg1, arg2, arg3) => (TResult)CreateInvokerInternal(funcAddr, typeof(Func<T1,T2,T3,TResult>), true, options).DynamicInvoke(arg1, arg2, arg3)!;
+        public Func<T1,T2,T3,TResult> CreateInvokerFunc<T1,T2,T3,TResult>(FuncAddr funcAddr, InvokerOptions? options = default) =>
+            (arg1, arg2, arg3) => UnboxReturn<TResult>(CreateInvokerInternal(funcAddr, typeof(Func<T1,T2,T3,TResult>), true, options).DynamicInvoke(arg1, arg2, arg3));
 
-        public Func<T1,T2,T3,T4,TResult> CreateInvokerFunc<T1,T2,T3,T4,TResult>(FuncAddr funcAddr, InvokerOptions? options = default) => 
-            (arg1, arg2, arg3, arg4) => (TResult)CreateInvokerInternal(funcAddr, typeof(Func<T1,T2,T3,T4,TResult>), true, options).DynamicInvoke(arg1, arg2, arg3, arg4)!;
+        public Func<T1,T2,T3,T4,TResult> CreateInvokerFunc<T1,T2,T3,T4,TResult>(FuncAddr funcAddr, InvokerOptions? options = default) =>
+            (arg1, arg2, arg3, arg4) => UnboxReturn<TResult>(CreateInvokerInternal(funcAddr, typeof(Func<T1,T2,T3,T4,TResult>), true, options).DynamicInvoke(arg1, arg2, arg3, arg4));
 
         public Func<T1,T2,T3,T4,T5,TResult> CreateInvokerFunc<T1,T2,T3,T4,T5,TResult>(FuncAddr funcAddr, InvokerOptions? options = default) =>
-            (arg1, arg2, arg3, arg4, arg5) => (TResult)CreateInvokerInternal(funcAddr, typeof(Func<T1,T2,T3,T4,T5,TResult>), true, options).DynamicInvoke(arg1, arg2, arg3, arg4, arg5)!;
+            (arg1, arg2, arg3, arg4, arg5) => UnboxReturn<TResult>(CreateInvokerInternal(funcAddr, typeof(Func<T1,T2,T3,T4,T5,TResult>), true, options).DynamicInvoke(arg1, arg2, arg3, arg4, arg5));
 
         public Func<T1,T2,T3,T4,T5,T6,TResult> CreateInvokerFunc<T1,T2,T3,T4,T5,T6,TResult>(FuncAddr funcAddr, InvokerOptions? options = default) =>
-            (arg1, arg2, arg3, arg4, arg5, arg6) => (TResult)CreateInvokerInternal(funcAddr, typeof(Func<T1,T2,T3,T4,T5,T6,TResult>), true, options).DynamicInvoke(arg1, arg2, arg3, arg4, arg5, arg6)!;
+            (arg1, arg2, arg3, arg4, arg5, arg6) => UnboxReturn<TResult>(CreateInvokerInternal(funcAddr, typeof(Func<T1,T2,T3,T4,T5,T6,TResult>), true, options).DynamicInvoke(arg1, arg2, arg3, arg4, arg5, arg6));
 
         public Func<T1,T2,T3,T4,T5,T6,T7,TResult> CreateInvokerFunc<T1,T2,T3,T4,T5,T6,T7,TResult>(FuncAddr funcAddr, InvokerOptions? options = default) =>
-            (arg1, arg2, arg3, arg4, arg5, arg6, arg7) => (TResult)CreateInvokerInternal(funcAddr, typeof(Func<T1,T2,T3,T4,T5,T6,T7,TResult>), true, options).DynamicInvoke(arg1, arg2, arg3, arg4, arg5, arg6, arg7)!;
+            (arg1, arg2, arg3, arg4, arg5, arg6, arg7) => UnboxReturn<TResult>(CreateInvokerInternal(funcAddr, typeof(Func<T1,T2,T3,T4,T5,T6,T7,TResult>), true, options).DynamicInvoke(arg1, arg2, arg3, arg4, arg5, arg6, arg7));
 
         public Func<T1,T2,T3,T4,T5,T6,T7,T8,TResult> CreateInvokerFunc<T1,T2,T3,T4,T5,T6,T7,T8,TResult>(FuncAddr funcAddr, InvokerOptions? options = default) =>
-            (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) => (TResult)CreateInvokerInternal(funcAddr, typeof(Func<T1,T2,T3,T4,T5,T6,T7,T8,TResult>), true, options).DynamicInvoke(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8)!;
+            (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) => UnboxReturn<TResult>(CreateInvokerInternal(funcAddr, typeof(Func<T1,T2,T3,T4,T5,T6,T7,T8,TResult>), true, options).DynamicInvoke(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8));
 
         public Func<T1,T2,T3,T4,T5,T6,T7,T8,T9,TResult> CreateInvokerFunc<T1,T2,T3,T4,T5,T6,T7,T8,T9,TResult>(FuncAddr funcAddr, InvokerOptions? options = default) =>
-            (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9) => (TResult)CreateInvokerInternal(funcAddr, typeof(Func<T1,T2,T3,T4,T5,T6,T7,T8,T9,TResult>), true, options).DynamicInvoke(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9)!;
+            (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9) => UnboxReturn<TResult>(CreateInvokerInternal(funcAddr, typeof(Func<T1,T2,T3,T4,T5,T6,T7,T8,T9,TResult>), true, options).DynamicInvoke(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9));
 
 
         public Action CreateInvokerAction(FuncAddr funcAddr, InvokerOptions? options = default) =>

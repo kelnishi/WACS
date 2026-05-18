@@ -1,0 +1,20 @@
+package wacs:aggregate-inner-params-spike;
+
+world batcher {
+    record line {
+        text: string,
+        weight: u32,
+    }
+
+    /// option<list<u32>> as direct PARAM. Flat shape:
+    /// [disc, ptr, count].
+    export sum-or-default: func(maybe-values: option<list<u32>>, fallback: u32) -> u32;
+
+    /// option<record> as direct PARAM. Flat shape:
+    /// [disc, ptr, len, weight].
+    export format-line: func(maybe-line: option<line>) -> string;
+
+    /// tuple<u32, list<u32>> as direct PARAM. Flat shape:
+    /// [u32, ptr, count].
+    export weighted-sum: func(p: tuple<u32, list<u32>>) -> u32;
+}

@@ -1,0 +1,10 @@
+package wacs:list-of-records-spike;
+
+world geo {
+    record point {
+        x: s32,
+        y: s32,
+    }
+
+    export get-points: func() -> list<point>;
+}

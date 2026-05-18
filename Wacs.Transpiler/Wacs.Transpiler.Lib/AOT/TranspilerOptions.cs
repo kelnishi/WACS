@@ -129,6 +129,48 @@ namespace Wacs.Transpiler.AOT
         public TranspilerCapabilities GcTypeChecking { get; set; } = TranspilerCapabilities.None;
 
         /// <summary>
+        /// Optional harness WIT contract — when set, the transpiler
+        /// parses this text + the loaded component's WIT custom
+        /// section and validates the world / export set structurally
+        /// before any IL is emitted. Mismatch throws
+        /// <see cref="System.InvalidOperationException"/> with a
+        /// typed diff describing what differs.
+        ///
+        /// <para>The expected source: the
+        /// <c>_WitContract</c> static field emitted on every harness
+        /// `.dll` by <c>WACS.ComponentModel.Harness.Lib</c>.
+        /// Threading the same text both ways means the harness and
+        /// the transpiled assembly share one contract — a binary
+        /// shape drift gets caught at build time, not at the typed
+        /// call site.</para>
+        /// </summary>
+        public string? HarnessContractText { get; set; }
+
+        /// <summary>
+        /// Path to the harness <c>.dll</c> the transpiled assembly
+        /// should reference. When set (typically together with
+        /// <see cref="HarnessContractText"/>), the transpiler:
+        /// <list type="number">
+        /// <item><description>Loads the harness assembly via
+        /// <see cref="System.Runtime.Loader.AssemblyLoadContext.LoadFromAssemblyPath"/>
+        /// and pre-registers its named types (records / variants /
+        /// enums) with <c>ComponentExportsEmit</c>'s emitted-types
+        /// cache — so signatures use the harness's
+        /// <c>Vec2</c> / <c>Outcome</c> rather than emitting
+        /// transpiler-owned duplicates.</description></item>
+        /// <item><description>Emits a sealed
+        /// <c>{World}HarnessImpl</c> class on the transpiled
+        /// assembly that implements the harness's <c>I{World}</c>
+        /// interface by forwarding each method to
+        /// <c>ComponentExports</c>'s static methods. Embedders
+        /// instantiate this class and program against the harness
+        /// interface — engine-agnostic call sites per
+        /// <c>feedback_symmetric_engines</c>.</description></item>
+        /// </list>
+        /// </summary>
+        public string? HarnessAssemblyPath { get; set; }
+
+        /// <summary>
         /// Pre-built resolver derived from <see cref="HostPackages"/>.
         /// The component transpiler builds this once per
         /// <c>TranspileSingleModule</c> call (eagerly walking each

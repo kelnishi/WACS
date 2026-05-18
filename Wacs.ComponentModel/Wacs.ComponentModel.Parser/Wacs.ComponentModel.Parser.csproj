@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <LangVersion>9</LangVersion>
+        <Nullable>enable</Nullable>
+        <Title>WACS Component Model Parser</Title>
+        <PackageId>WACS.ComponentModel.Parser</PackageId>
+        <Authors>Kelvin Nishikawa</Authors>
+        <Description>AOT-safe binary parser for WebAssembly Component Model `.component.wasm` files — pure byte walker producing a typed ComponentModule, no reflection. Split from WACS.ComponentModel so harness / runtime consumers can load components under NativeAOT / Unity IL2CPP without pulling the reflective ComponentInstance / ComponentBridge surface.</Description>
+        <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
+        <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <AssemblyName>Wacs.ComponentModel.Parser</AssemblyName>
+        <AssemblyVersion>0.1.0</AssemblyVersion>
+        <Version>0.1.0</Version>
+        <RepositoryType>git</RepositoryType>
+        <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
+        <IsAotCompatible Condition="'$(TargetFramework)' == 'net8.0'">true</IsAotCompatible>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    </PropertyGroup>
+
+    <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+      <DebugSymbols>true</DebugSymbols>
+    </PropertyGroup>
+
+</Project>

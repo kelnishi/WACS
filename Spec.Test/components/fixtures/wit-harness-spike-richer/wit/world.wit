@@ -1,0 +1,16 @@
+package wacs:richer-spike;
+
+world richer {
+    record vec2 {
+        x: s32,
+        y: s32,
+    }
+
+    variant outcome {
+        success(vec2),
+        invalid,
+    }
+
+    export add: func(a: vec2, b: vec2) -> vec2;
+    export normalize-or-fail: func(v: vec2) -> outcome;
+}

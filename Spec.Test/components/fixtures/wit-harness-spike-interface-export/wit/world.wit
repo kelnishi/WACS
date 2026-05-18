@@ -1,0 +1,15 @@
+package wacs:interface-export-spike;
+
+interface ops {
+    add: func(a: u32, b: u32) -> u32;
+    swap: func(a: u32, b: u32) -> tuple<u32, u32>;
+}
+
+world calculator {
+    /// Function-only interface export. Wasm export names will be
+    /// "wacs:interface-export-spike/ops#add" and "...#swap".
+    export ops;
+
+    /// World-level free function alongside the interface export.
+    export bake: func() -> u32;
+}

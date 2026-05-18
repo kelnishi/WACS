@@ -1,5 +1,2458 @@
 # Changelog
 
+## WACS.ComponentModel.Harness.Runtime 0.7.0 / WACS.ComponentModel.Harness.Lib 0.27.0 — separate host handle space + Borrowed&lt;T&gt;
+
+Layers an independent host-side handle space over the existing
+WASM-side `ResourceHandleTable` (which stays rep-as-handle for
+wit-bindgen 0.41 Rust guest compatibility). Adds a type-distinct
+`Borrowed<T>` companion to the emitted Resource class so borrow
+mishandling is caught at compile time, not at runtime.
+
+### What changed
+
+- **`WACS.ComponentModel.Harness.Runtime` 0.7.0** — new public
+  `HostHandleTable` (auto-increment counter + freelist,
+  `NewOwn`/`Rep`/`DropOwn`) and `readonly struct Borrowed<T>`
+  (wraps the wasm rep, no `IDisposable`). Both AOT-clean.
+- **`WACS.ComponentModel.Harness.Lib` 0.27.0** — emitted Resource
+  class now has `(int hostHandle, int rep, Action<int> dtor,
+  Action<int> drop, HostHandleTable hostTable)` constructor;
+  `Handle` returns the host-side identity (decoupled from rep
+  reuse) and a new `Rep` property exposes the wasm-side value
+  for hand-rolled `Borrowed<R>` construction. `borrow<R>` in WIT
+  maps to `Borrowed<TR>` in C# at all call boundaries (params
+  and returns).
+
+### Architecture
+
+Two handle spaces, layered. The runtime keeps a wasm-side
+`ResourceHandleTable` per resource (rep-as-handle, bound by
+`CanonResourceBinder` as the `[resource-new]` / `[resource-drop]`
+adapter target). The harness adds a `HostHandleTable` per
+resource type on top — fresh handles allocated from an
+auto-increment counter, recycled through a freelist on
+`DropOwn`. User code sees only the host handle via
+`Resource.Handle`; lower IL uses `Resource.Rep` to talk to wasm.
+
+### Why two layers
+
+- wit-bindgen 0.41 Rust guests assume `handle == rep` for
+  exported resources (they don't import `[resource-rep]`, they
+  dereference `handle` directly). Keeping the wasm side
+  rep-as-handle preserves compatibility without forking the
+  toolchain.
+- Decoupling host-side identity gives `Resource.Handle` stable
+  semantics independent of how the guest reuses rep values
+  (which can be the same allocator address across drop/new
+  pairs). Two `new()` calls that happen to receive the same rep
+  still yield distinct host handles.
+- Type-level borrow safety: `Borrowed<T>` has no `Dispose`, so
+  user code that took a borrow can't accidentally release the
+  lender's resource. Soundness-tightening on the host side —
+  the wasm-side dtor invocation still goes through the canon
+  `[resource-drop]` adapter unchanged.
+
+### Deferred (scoped for follow-up)
+
+- **Call-scope borrow invalidation** — refusing to use a
+  `Borrowed<T>` after the lending call returned. Needs an
+  `ExecContext` hook the runtime doesn't expose yet.
+- **Cross-instance handle namespacing** — handing handles
+  between composed component instances. Static composition via
+  `wasm-tools compose` already works; dynamic composition would
+  build on this v2 foundation.
+
+### Tests
+
+- 11 new `HostHandleTableTests` (fresh handles, freelist reuse,
+  double-drop guard).
+- 4 new `BorrowHarnessEmitTests` (Borrowed signature on params
+  + returns, no Dispose, Handle+Rep both surface).
+- All 380 `Wacs.ComponentModel.Test` tests green.
+- All 3 resource fixtures green: `canon-resource-roundtrip`
+  (now reports host handles 1, 2 with freelist reuse instead
+  of rep heap addresses), `wit-harness-spike-resource-methods`
+  (own params via `get_Rep`), `wit-harness-spike-resource-basic`
+  (idempotent `Dispose` still no-op).
+
+### Misc
+
+- `Wacs.ComponentModel.Test.csproj` bumped to `net9.0` to
+  reference `Wacs.ComponentModel.Harness.Lib`.
+- `Spec.Test.csproj` excludes `canon-resource-roundtrip/**/*.cs`
+  from its default glob (fixture ships its own `Generated.Validate`
+  subproject — pre-existing oversight from 0.6.0).
+
+## WACS.ComponentModel.Harness.Lib 0.26.1 — diagnostics for unimplemented niches (Item 3 close-out)
+
+Tightens the error messages on two niches the harness emitter
+doesn't yet implement, and documents the status:
+
+- **Multi-return / named results** — verified that the WIT spec
+  has dropped this in favor of `func() -> tuple<...>` /
+  `func() -> record { ... }`; `wit-bindgen` 0.41 rejects the
+  old `(a: T, b: U)` syntax at WIT parse time. The
+  `BuildFunctionExport` throw is now annotated as a defensive
+  guard rather than a TODO.
+- **MAX_FLAT_PARAMS overflow** — beyond the BCL `Func<…>` /
+  `Action<…>` arity ceiling, the canonical-ABI prescribes an
+  indirect param area (single i32 ptr to a memory area
+  holding the lowered values at canonical offsets). The
+  harness emitter doesn't yet emit that mode; the diagnostic
+  in `MakeInvokerDelegateType` now calls this out explicitly.
+  Practical impact: real-world WIT exports rarely flatten past
+  16 slots; the BCL `Func<,,,,,,,,,,,,,,,,>` arity-17 ceiling
+  is well above what wit-bindgen produces in practice.
+
+Item 5c (alt string encodings — UTF-16, Latin1+UTF-16) is
+similarly deferred: `wit-bindgen` doesn't expose the
+`string-encoding` canon option, so we can't build a test
+fixture without going around the standard toolchain.
+`StringCoding.LiftUtf8` / `LowerUtf8` are isolated per the
+`feedback_js_string_externref` memory, so a future slice can
+add the encoding switch as a new `HarnessOptions` knob plus
+matching helper methods without touching the lift / lower IL
+sites.
+
+## WACS.ComponentModel.Harness.Lib 0.26.0 — variant/result mismatched-width join (Item 5a)
+
+`result<T, E>` and `variant` lower now handle mismatched flat
+slot widths between cases via the canonical-ABI join algorithm.
+
+```wit
+export upgrade: func(input: result<u32, u64>) -> u64;
+```
+
+`result<u32, u64>` flattens to `[i32 disc, i64]`. The Ok branch
+lowers its u32 payload and the wrapper IL widens it to i64
+(`Conv_U8`) before the invoker call; the Err branch already
+matches.
+
+### How it works
+
+- `ComputeVariantJoinedSlots` no longer throws on mismatched
+  per-position types — it calls the new `JoinSlotTypes(a, b)`
+  helper which implements the canonical-ABI rule: equal → equal,
+  `(i32, f32)` → i32, otherwise i64.
+- New `EmitWidenLastSlot(il, caseSlots, joinedSlots)` is called
+  after a case's payload lowering pushes its values. v1 widens
+  only the trailing slot (the most common single-payload
+  pattern); intermediate-slot mismatches throw at emit time.
+- New `EmitJoinConvert(from, to)` covers `int → long`
+  (`Conv_U8`), `float → double` (`Conv_R8`), `float → long`
+  (BitConverter.SingleToInt32Bits + `Conv_U8`), `double → long`
+  (BitConverter.DoubleToInt64Bits). Other combinations throw
+  until they're needed.
+- `AppendLoweredType`'s `CtResultType` branch now produces the
+  joined slot shape rather than picking one side, so the
+  invoker delegate type matches what the lower IL pushes.
+
+### What changed
+
+- **`WorldHarnessEmit.cs`**:
+  - `ComputeVariantJoinedSlots` uses `JoinSlotTypes` instead of
+    strict equality.
+  - New `JoinSlotTypes`, `EmitJoinConvert`, `EmitWidenLastSlot`
+    helpers.
+  - `EmitLowerResultArg` computes the joined shape and emits
+    widening after each branch's payload lowering.
+  - `EmitLowerVariantArg` per-case body widens after its
+    payload lowering.
+  - `IsFlatLowerable` for `CtResultType` no longer requires
+    `SlotsMatch`.
+  - `AppendLoweredType` for `CtResultType` computes the joined
+    shape across both sides.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-join-widening/`
+  — `upgrade(result<u32, u64>) -> u64`. Ok(7) widens to i64
+  and Rust adds 1 → 8. Err(5000) is already i64 and multiplies
+  by 2 → 10000.
+
+**31/31 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.33.0` →
+`WACS-ComponentModel-v0.34.0` (minor — capability shift on
+Harness.Lib).
+
+## WACS.ComponentModel.Harness.Lib 0.25.1 — multi-byte variant disc (Item 5b)
+
+`EmitVariantLift` no longer refuses variants with more than
+256 cases. Discriminator is now read at the canonical-ABI
+width (1 / 2 / 4 bytes) via the appropriate
+`MemoryHelpers.Read{U8,I16LE,I32LE}` helper, with `Conv_U2`
+on the 16-bit path for proper unsigned widening. Lower side
+already pushed `Ldc_I4 i` which is correct for any disc size
+since wasm widens to i32 at the boundary.
+
+No new fixture — variants with 257+ cases are pathological;
+the change just unblocks them if they appear.
+
+## WACS.ComponentModel.Harness.Lib 0.25.0 — lift list-element symmetry (Item 4)
+
+`list<T>` lift now covers every flat-lowerable element type, not
+just primitives + named records / variants. Closes the asymmetry
+where lower handled `list<option>` / `list<tuple>` but lift threw.
+
+```wit
+export sparse-values: func() -> list<option<u32>>;
+export pairs:         func() -> list<tuple<u32, string>>;
+export signals:       func() -> list<signal>;          // signal is an enum
+```
+
+### How it works
+
+`EmitLiftElementAt` gains cases for `CtEnumType`, `CtFlagsType`,
+`CtListType` (nested), `CtOptionType`, `CtResultType`,
+`CtTupleType`. For enum / flags the integer is read directly via
+a new `EmitReadIntegerAtElement` helper. For nested lists the
+element's `(ptr, count)` pair is read and the inner lift goes
+through `EmitLiftListFromBase`. For option / result / tuple the
+element address is stashed into a local and dispatched to a
+new general-purpose `EmitLiftFromBase` walker.
+
+`EmitLiftFromBase` mirrors `EmitLiftField` but takes the
+memory + base ptr via locals instead of the fixed arg-slot
+contract, so it can chain offsets from any starting address.
+
+### What changed
+
+- **`LiftEmit.cs`**:
+  - `EmitLiftElementAt` adds the five missing element-type
+    cases.
+  - New `EmitReadIntegerAtElement`,
+    `EmitElementPtrOffset` element-context helpers.
+  - New `EmitLiftFromBase` parallel walker (memory + basePtr
+    + offset addressing) with private helpers
+    `EmitLiftPrimitiveFromBase`, `EmitReadIntegerAtBase`,
+    `EmitLiftOptionFromBase`, `EmitLiftResultFromBase`,
+    `EmitLiftTupleFromBase`.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-list-aggregate-lift/`
+  — sparse-values (list&lt;option&lt;u32&gt;&gt;), pairs
+  (list&lt;tuple&lt;u32, string&gt;&gt;), signals
+  (list&lt;enum&gt;).
+
+**30/30 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.32.0` →
+`WACS-ComponentModel-v0.33.0` (minor — capability shift on
+Harness.Lib).
+
+## WACS.ComponentModel.Harness.Lib 0.24.0 — resource methods (Slice E)
+
+Resource methods — constructors, instance methods, static
+methods — now emit as harness methods.
+
+```wit
+interface counter {
+    resource counter {
+        constructor(initial: u32);
+        increment: func() -> u32;
+        get-value: func() -> u32;
+        merge: static func(a: u32, b: u32) -> u32;
+    }
+}
+```
+
+```csharp
+public sealed class DemoHarness
+{
+    public Counter WacsResourceMethodsSpikeCounter_NewCounter(uint initial);
+    public uint    WacsResourceMethodsSpikeCounter_Counter_Increment(Counter self);
+    public uint    WacsResourceMethodsSpikeCounter_Counter_GetValue(Counter self);
+    public uint    WacsResourceMethodsSpikeCounter_Counter_Merge(uint a, uint b);
+}
+```
+
+### How it works
+
+- **Constructor**: patched function-spec sets `Result = the
+  resource type`, so the existing resource-return lift path
+  (lift int handle → newobj `Bucket(handle, _drop)`) fires.
+  PascalName uses `New<Resource>` form (e.g.
+  `WacsResourceMethodsSpikeCounter_NewCounter`).
+- **Instance method**: a synthetic `self: <ResourceType>` param
+  is prepended to the function spec. The lower path extracts
+  `self.Handle` (via the public getter — `_handle` field is
+  private to the resource class so cross-class IL can't
+  `Ldfld` it) and pushes it as the first lowered i32. Wasm-side
+  name: `<iface>#[method]<resource>.<method>`.
+- **Static method**: emits like a regular function on the
+  harness; no `self` injection. Wasm-side name:
+  `<iface>#[static]<resource>.<method>`.
+
+### Layout note
+
+For v1, resource methods land flat on the harness (taking the
+resource as first arg for instance methods). The agreed nested
+layout (`bucket.Read(len)` instead of `harness.Bucket_Read(b,
+len)`) requires a back-ref pattern from the resource class to
+the harness, which would force a multi-phase emission
+restructure. Deferred to a future refactor; the wasm-side
+plumbing is identical so the surface change is purely user-
+facing.
+
+### What changed
+
+- **`WorldHarnessEmit.cs`**:
+  - `BuildInterfaceExports` walks `iface.Types`' resources and
+    for each `CtResourceMethod` builds a `FunctionExport` with
+    the appropriate wasm name (`[constructor]<name>` /
+    `[method]<name>.<m>` / `[static]<name>.<m>`) and PascalName.
+  - Constructor patches `Result = res` so the resource-return
+    lift fires after the invoker call.
+  - Instance methods get `self: <res>` prepended via new
+    `PrependSelfParam` helper.
+  - Lower path for resource args switched from private
+    `_handle` Ldfld to public `Handle` Callvirt — `_handle`
+    isn't visible to cross-class wrapper IL.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-resource-methods/`
+  — `counter` resource with constructor, two instance methods
+  (increment, get-value), and a static method (merge).
+  Validator builds a counter, increments three times,
+  reads value, calls merge, disposes.
+
+**29/29 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.31.0` →
+`WACS-ComponentModel-v0.32.0` (minor — capability shift on
+Harness.Lib closing the v1 interface-export arc).
+
+## WACS.ComponentModel.Harness.Lib 0.23.0 — resource scaffolding (Slice D)
+
+Resources can now flow through the harness emit-side. Each
+WIT `resource <name>` declaration emits a sealed CLR class
+in the interface's namespace:
+
+```wit
+interface store {
+    resource bucket;
+    open: func(name: string) -> bucket;
+}
+```
+
+```csharp
+namespace WitHarnessSpike.ResourceBasic.Generated.WacsResourceBasicSpikeStore
+{
+    public sealed class Bucket : IDisposable
+    {
+        public int Handle { get; }
+        public void Dispose();
+    }
+}
+
+// In the harness:
+public Bucket WacsResourceBasicSpikeStore_Open(string name) => …;
+```
+
+### How it works
+
+- **Resource class** emits with `_handle` (int) + `_drop`
+  (Action&lt;int&gt;) fields, internal `(handle, drop)` ctor,
+  public `Handle` getter, and `Dispose()` that calls drop
+  once and zeros the handle (subsequent Dispose calls no-op).
+- **Per-resource drop field** on the harness: `_drop_<slug>`
+  holds the wasm-side drop invoker. LoadFrom resolves
+  `<iface>#[dtor]<name>` (the guest's destructor) and binds
+  it. Wrapper IL that lifts a resource return pushes this
+  field before `newobj`-ing the resource class.
+- **Resource lift / lower**:
+  - Lift: invoker returns an int (handle), wrapper IL
+    constructs `new Bucket(handle, _drop_bucket)`.
+  - Lower: extract `_handle` from the resource instance and
+    push as int (Slice E will exercise this with method params).
+- **`MapPrimitiveToClrType`** / `IsFlatLowerable` /
+  `AppendLoweredType` treat `CtResourceType` / `CtOwnType` /
+  `CtBorrowType` as i32 handles at the wasm boundary.
+- New `TryGetResource(t)` helper drills through `own<R>` /
+  `borrow<R>` / bare resource refs to the underlying
+  `CtResourceType` so lift/lower can dispatch.
+
+### Runtime caveat
+
+WACS's component runtime doesn't yet implement the
+canonical-ABI exported-resource handle table — `canon
+resource.new` / `resource.rep` are parsed (for index-space
+accounting) but not constructed as runtime adapters. The
+harness wires its drop call to the core `<iface>#[dtor]<name>`
+export directly, skipping the table lookup.
+
+For the Slice D fixture to instantiate, the validator's
+`bindImports` callback stubs the two component-level
+`[export]<iface>.[resource-new|drop]<name>` host imports
+using a rep-as-handle 1:1 mapping (handle == rep, so the
+dtor receives a real rep pointer when invoked). When WACS
+implements proper resource handle tables, these stubs go
+away and the harness can call `[resource-drop]<name>` (the
+canonical adapter that handles the table lookup) instead.
+
+### What changed
+
+- **`WitTypeEmit.cs`** —
+  - `TypeRegistry` gains `Resources`, `ResourceCtors`,
+    `ResourceHandleFields`, `HarnessDropFields` dictionaries.
+  - `EmitWorldTypes` registers `CtResourceType` shells in
+    Pass 1 alongside records/variants/enums/flags.
+  - New `PopulateResource(tb, res, registry)` emits the
+    sealed class: `_handle` + `_drop` fields, internal
+    (handle, drop) ctor, public `Dispose()` with idempotent
+    drop-and-zero, public `Handle` getter.
+  - `MapClrType` resolves `CtResourceType` / `CtOwnType` /
+    `CtBorrowType` to the resource's `TypeBuilder`.
+- **`CanonicalAbi.cs`** — `Layout` treats resource handle
+  types as `(4, 4)` (a single i32).
+- **`WorldHarnessEmit.cs`** —
+  - `BuildInterfaceExports` drops the resource refusal.
+  - New `ResourceDrop` struct tracks per-resource drop
+    metadata.
+  - Per-export field allocation now also walks
+    interface-export resources and creates `_drop_*` fields.
+  - `EmitConstructor` + `EmitLoadFrom` thread the drop
+    invokers through.
+  - `MapPrimitiveToClrType` / `IsFlatLowerable` /
+    `AppendLoweredType` accept resource-like types.
+  - `EmitFlattenedArg` extracts `_handle` for resource
+    params (lower path).
+  - `EmitFlatLowered` direct-return branch lifts a resource
+    int into a CLR class instance with the drop field.
+  - New `TryGetResource(t)` helper.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-resource-basic/`
+  — `store` interface declares an opaque `bucket` resource
+  + `open` free function. Validator opens, asserts non-zero
+  handle, disposes (handle zeros, no exception), and runs
+  through a `using` block.
+
+**28/28 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.30.0` →
+`WACS-ComponentModel-v0.31.0` (minor — capability shift on
+Harness.Lib).
+
+## WACS.ComponentModel.Harness.Lib 0.22.0 — interface-level types (Slice C)
+
+Records / variants / enums / flags declared inside an exported
+interface emit into the interface's own C# sub-namespace,
+keeping interface-local names from colliding with world-level
+names (or other interfaces' same-named types).
+
+```wit
+interface geometry {
+    record point { x: u32, y: u32 }
+    enum quadrant { ne, nw, sw, se }
+    variant region {
+        empty,
+        point-only(point),
+        labeled(string),
+    }
+    classify: func(p: point) -> quadrant;
+    describe: func(r: region) -> string;
+}
+
+world cartographer { export geometry; }
+```
+
+Emits:
+
+```
+WitHarnessSpike.InterfaceTypes.Generated
+├── CartographerHarness
+│     ├── WacsInterfaceTypesSpikeGeometry_Classify(Point) -> Quadrant
+│     └── WacsInterfaceTypesSpikeGeometry_Describe(Region) -> string
+└── WacsInterfaceTypesSpikeGeometry
+      ├── Point
+      ├── Quadrant
+      └── Region (with nested Empty / PointOnly / Labeled case classes)
+```
+
+### Structural refactor
+
+`TypeRegistry` flipped from string-keyed to **structural-type-
+reference-keyed** for all dictionaries (`Records`, `Variants`,
+`Enums`, `Flags`, `RecordCtors`, `RecordGetters`, `VariantCases`,
+`VariantCaseCtors`). Two interfaces both declaring `error` no
+longer collide because the CtRecordType / CtVariantType
+references are unique per WIT declaration.
+
+Same refactor for `liftMethods` dictionary in `LiftEmit` — now
+`Dictionary<CtValType, MethodBuilder>` keyed by the structural
+type. Lift method names use the TypeBuilder's `FullName` (with
+`.` → `_`) to keep them unique even when type short names match
+across interfaces.
+
+`EmitWorldTypes` now walks an `EnumerateAllTypes(world, opts)`
+sequence that yields `(CtNamedType, csharpNamespace)` pairs —
+world types get `opts.Namespace`, interface-export types get
+`opts.Namespace + "." + HarnessNaming.InterfaceSegment(iface)`.
+
+### What changed
+
+- **`WitTypeEmit.cs`**:
+  - `TypeRegistry` keys flipped to structural-type references.
+  - `EmitWorldTypes` walks `EnumerateAllTypes` so interface
+    types are emitted into their own sub-namespace.
+  - New `EnumerateAllTypes(world, opts)` helper.
+  - Dead `PrimitiveAliases` write site removed.
+- **`LiftEmit.cs`** — lift methods keyed by structural type
+  reference; unique method-name synthesis via
+  `UniqueLiftMethodName(tb)`.
+- **`WorldHarnessEmit.cs`**:
+  - All `registry.X[name]` sites changed to `registry.X[type]`.
+  - `BuildInterfaceExports` drops the interface-types refusal
+    (now handled by Slice C); resource refusal remains until
+    Slice D.
+  - `MapPrimitiveToClrType` widened to accept `CtEnumType` /
+    `CtFlagsType` (lowered to `int`).
+  - `EmitFlatLowered` direct-return branch handles enum / flags
+    (invoker's int is stack-compatible with the wrapper's
+    enum-typed Ret slot).
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-interface-types/`
+  — `geometry` interface with `point` (record), `quadrant`
+  (enum direct return), `region` (variant with payload + unit
+  cases). Validator asserts all three types live in the
+  expected sub-namespace and round-trip through both exports.
+
+**27/27 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.29.0` →
+`WACS-ComponentModel-v0.30.0` (minor — capability shift on
+Harness.Lib).
+
+## WACS.ComponentModel.Harness.Lib 0.21.0 — function-only interface exports (Slices A + B)
+
+Interface exports now flow through to the harness. Function-only
+interfaces (no resources, no own type declarations) surface as
+flat methods on the harness class, prefixed with the interface's
+PascalCase segment. Resource + interface-level-type support lands
+in Slices C–E.
+
+```wit
+package wacs:interface-export-spike;
+
+interface ops {
+    add: func(a: u32, b: u32) -> u32;
+    swap: func(a: u32, b: u32) -> tuple<u32, u32>;
+}
+
+world calculator {
+    export ops;                       // function-only interface
+    export bake: func() -> u32;       // free function
+}
+```
+
+Emits a harness with three flat methods:
+
+```csharp
+public sealed class CalculatorHarness : ICalculator
+{
+    public uint Bake() => …;
+    public uint WacsInterfaceExportSpikeOps_Add(uint a, uint b) => …;
+    public ValueTuple<uint, uint> WacsInterfaceExportSpikeOps_Swap(uint a, uint b) => …;
+}
+```
+
+Per-interface namespace segments (`WasiCliRun`, etc.) collapse the
+multi-part package + interface name into one Pascal token — this
+contrasts with the transpiler-side `NameMangler.InterfaceNamespace`
+which uses full dotted namespaces. Resource-bearing interfaces
+will get nested `Exports` classes in a later slice; that's where
+the per-interface segment also becomes the C# namespace for
+interface-declared types.
+
+### How it works
+
+- **`HarnessNaming.InterfaceSegment(iface)`** — produces
+  `WacsInterfaceExportSpikeOps` from `wacs:interface-export-spike/ops`.
+- **`HarnessNaming.InterfaceFunctionPascal(iface, fnKebab)`** —
+  joins segment + `_` + Pascal(fn) for the C# method name.
+- **`HarnessNaming.InterfaceFunctionSlug(iface, fnKebab)`** —
+  C#-safe field slug (replaces `-`/`/`/`:`/`@`/`#` with `_`),
+  used for `_invoke_*` / `_post_*` field names.
+- **`FunctionExport.WasmName`** (new field) — the exact wasm-side
+  export string (`<iface-base>#<fn-kebab>` for interface
+  functions, plain witName for free functions). The
+  `RequireFunctionExport` and `cabi_post_*` lookup sites use
+  this instead of `Name`, which now carries only the C#-safe
+  slug.
+
+### What changed
+
+- **`Wacs.ComponentModel.Harness.Lib/HarnessNaming.cs`** — new
+  helper module.
+- **`WorldHarnessEmit.cs`**:
+  - `FunctionExport` gains `WasmName` (separates wasm-side
+    name from C#-safe slug).
+  - `BuildFunctionExport` accepts optional `wasmName`,
+    `pascalName`, `slug` for interface callers.
+  - New `BuildInterfaceExports` walks an interface's functions
+    and builds one `FunctionExport` per. Refuses interfaces
+    that declare their own types (Slice C) or resources
+    (Slice D).
+  - Exports loop dispatches on `CtExternFunc` /
+    `CtExternInterfaceRef` / `CtExternInlineInterface`.
+  - `EmitWorldInterface` mirrors the dispatch so the `IWorld`
+    C# interface includes interface-export functions.
+  - Wasm-side export lookups (`RequireFunctionExport`,
+    `cabi_post_*`) read `fe.WasmName`.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-interface-export/`
+  — `calculator` world with an `ops` interface (`add`, `swap`)
+  plus free function `bake`.
+
+**26/26 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.28.0` →
+`WACS-ComponentModel-v0.29.0` (minor — capability shift on
+Harness.Lib).
+
+## WACS.ComponentModel.Harness.Lib 0.20.0 — option/tuple of aggregate-inner direct PARAMS
+
+option / tuple direct params with aggregate inner types
+(list, record, nested tuple) now round-trip through the lower
+path:
+
+```wit
+record line { text: string, weight: u32 }
+
+export sum-or-default: func(maybe-values: option<list<u32>>, fallback: u32) -> u32;
+export format-line:    func(maybe-line: option<line>)                      -> string;
+export weighted-sum:   func(p: tuple<u32, list<u32>>)                      -> u32;
+```
+
+### How it works
+
+- **`EmitLowerInnerFromLocal`** (used by option / result / variant
+  payload lower) gains aggregate dispatch: `CtListType` →
+  `EmitLowerListFromLocal`, `CtRecordType` → walk the
+  record's getters via `EmitFlattenSubRecordField`,
+  `CtTupleType` → `EmitFlattenLocal`. The registry param is
+  now threaded through (was nullable before — now passed by
+  every caller).
+- **Top-level `EmitFlattenedArg` tuple branch** simplified: stash
+  the arg into a typed `ValueTuple<…>` local and dispatch
+  through `EmitFlattenLocal`, which now handles every element
+  type — primitives, strings, enums, flags, lists, nested
+  records, nested tuples. Removes the duplicated element-by-
+  element lower IL from the tuple arg branch.
+- **`EmitFlattenLocal` tuple branch** extended to handle list /
+  record / nested-tuple elements: extract the element via the
+  WitTupleAccess accessor into a typed local and recurse via
+  `EmitFlattenLocal`.
+
+### What changed
+
+- **`WorldHarnessEmit.cs`**:
+  - `EmitLowerInnerFromLocal` dispatches list / record / tuple
+    inner types when the registry is supplied. All callers
+    (option / result / variant payload lower) thread it through.
+  - Top-level tuple-arg lower in `EmitFlattenedArg` replaced
+    with stash-to-local + `EmitFlattenLocal` dispatch.
+  - `EmitFlattenLocal` tuple branch handles non-primitive
+    element types by recursing.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-aggregate-inner-params/`
+  — `sum-or-default(option<list<u32>>, u32)`,
+  `format-line(option<line>)`, `weighted-sum(tuple<u32,
+  list<u32>>)`. Five distinct cases including Some / None and
+  list-in-tuple.
+
+**25/25 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.27.0` →
+`WACS-ComponentModel-v0.28.0` (minor — capability shift on
+Harness.Lib).
+
+## WACS.ComponentModel.Harness.Lib 0.19.0 — `list<tuple>` + `list<option>` as direct PARAMS
+
+Two more list-element shapes round-trip through the lower path:
+
+```wit
+export tuple-list-sum:    func(pairs: list<tuple<u32, u32>>)     -> u32;
+export tuple-list-format: func(items: list<tuple<u32, string>>)  -> string;
+export option-list-sum:   func(values: list<option<u32>>)        -> u32;
+```
+
+### How it works
+
+`EmitLowerListElement` gains two new branches:
+
+- **`CtTupleType` (list element):** writes each tuple element to
+  the per-element slot at its in-tuple offset (computed via
+  `CanonicalAbi.TupleElementOffsets`). Per-element-type
+  dispatch picks the matching `MemoryHelpers.Write*` helper;
+  string elements lower through `LowerUtf8` first and the
+  `(ptr, len)` pair is written into the slot's offset and
+  offset+4.
+- **`CtOptionType` (list element):** writes 1-byte disc at slot
+  offset 0, then for Some writes the inner value at
+  `align_up(1, T_align)` via the new `EmitWriteSimpleAt`
+  helper. None just writes disc=0 — the payload area stays as
+  the realloc'd zero-bytes.
+
+The new `EmitLdelemForType` helper picks the right `Ldelem_*`
+opcode based on element CLR type (covers struct elements like
+`Nullable<T>` and `ValueTuple<...>` via the generic `Ldelem,
+elemType` form).
+
+### What changed
+
+- **`WorldHarnessEmit.cs`**:
+  - `EmitLowerListElement` adds `CtTupleType` and `CtOptionType`
+    cases.
+  - New helpers: `EmitLowerTupleElement`,
+    `EmitWriteTupleElementPrim`, `EmitLowerOptionElement`,
+    `EmitWriteSimpleAt`, `EmitLdelemForType`.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-list-aggregate-params/`
+  — three exports covering `list<tuple<u32, u32>>` (pure
+  numeric tuple), `list<tuple<u32, string>>` (mixed-element
+  tuple with realloc per element), and `list<option<u32>>`
+  (mixed None / Some).
+
+**24/24 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.26.0` →
+`WACS-ComponentModel-v0.27.0` (minor — capability shift on
+Harness.Lib).
+
+## WACS.ComponentModel.Harness.Lib 0.18.0 — `variant` + `result<T,E>` as direct PARAMS
+
+Variants and results can now flow as direct params per the
+canonical-ABI flat shape `(i32 disc, …joined-payload)`. This
+closes out the most architecturally complex remaining gap on
+the lower path.
+
+```wit
+variant signal { silence, ping, message(string) }
+
+export describe-signal: func(s: signal) -> string;
+export prefer-ok:       func(input: result<u32, u32>)       -> u32;
+export render:          func(input: result<string, string>) -> string;
+export note:            func(input: result)                 -> u32;
+```
+
+### How it works
+
+- **Result lower** (`EmitLowerResultArg`):
+  reads `WitResult<TOk, TErr>.IsOk` via `Call` on the getter,
+  branches; the Ok branch pushes `disc=0` then runs the inner
+  lower for the present side (or zeros for elided); same shape
+  for Err on `disc=1`. v1 requires matching flat shape between
+  Ok and Err sides (or one elided) — full join-algorithm
+  widening is deferred.
+- **Variant lower** (`EmitLowerVariantArg`):
+  per-case `isinst` dispatch on the variant base reference;
+  each matched case pushes its ordinal disc, then loads
+  `Value` from the case subclass (if payload-bearing), stashes
+  it to a local, and runs the per-type lower. Trailing joined
+  slots the case doesn't fill get zero-padded via
+  `EmitDefaultForSlot`.
+- **`ComputeVariantJoinedSlots`** — strict join algorithm: at
+  each slot position, every case that has a slot at that
+  position must contribute the same CLR slot type. Throws
+  `NotSupportedException` on mismatched cases (the IsFlatLowerable
+  check catches this early so it surfaces at harness-emit
+  time, not at JIT).
+
+### What changed
+
+- **`WorldHarnessEmit.cs`**:
+  - `IsFlatLowerable` accepts `CtResultType` (matching flat
+    shapes / one elided) and `CtVariantType` (via the join
+    check).
+  - `AppendLoweredType` flattens result + variant per the
+    above rules.
+  - New helpers: `EmitLowerResultArg`, `EmitLowerVariantArg`,
+    `ComputeVariantJoinedSlots`, `SlotsMatch`.
+- **Fixtures**:
+  - `Spec.Test/components/fixtures/wit-harness-spike-result-params/`
+    — `prefer-ok(result<u32, u32>)`, `render(result<string,
+    string>)`, `note(result)` covering matching u32 widths,
+    matching string widths, and both-elided.
+  - `Spec.Test/components/fixtures/wit-harness-spike-variant-params/`
+    — `describe-signal(signal)` where signal has two unit
+    cases and one string-payload case; exercises the zero-pad
+    path for unit cases.
+
+**23/23 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.25.0` →
+`WACS-ComponentModel-v0.26.0` (minor — capability shift on
+Harness.Lib closing the variant/result lower gap).
+
+## WACS.ComponentModel.Harness.Lib 0.17.0 — `list<record>` as direct PARAM
+
+Per-element canonical layout writes — `list<record>` can now flow
+as a direct param, with each element's record laid out in linear
+memory per the canonical-ABI offsets and strings inside the record
+recursively lowered via `cabi_realloc`.
+
+```wit
+record item { sku: string, qty: u32 }
+export inventory-value: func(items: list<item>, unit-price: u32) -> u32;
+export inventory-summary: func(items: list<item>) -> string;
+```
+
+### How it works
+
+`EmitLowerListElement` gained a `CtRecordType` branch that pulls
+the per-index element via `Ldelem_Ref`, stashes to a typed local,
+then walks each record field. For each primitive field, it writes
+via the matching `MemoryHelpers.Write*` helper at the field's
+canonical offset within the per-element slot. String fields lower
+through `LowerUtf8` first and the produced `(ptr, len)` pair is
+written into the slot's offset and offset+4.
+
+### What changed
+
+- **`WorldHarnessEmit.cs`**:
+  - `EmitLowerListElement` adds a `CtRecordType` case calling
+    new `EmitLowerRecordElement` + per-field
+    `EmitLowerRecordFieldToMemory`. Signature widened to thread
+    `TypeRegistry` through (needed for the record's CLR-type
+    lookup and getters).
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-list-record-param/`
+  — `item { sku: string, qty: u32 }`; `inventory-value` returns
+  sum of qty * unit-price, `inventory-summary` formats each
+  element. Tests non-empty + empty list paths.
+
+**21/21 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.24.0` →
+`WACS-ComponentModel-v0.25.0` (minor — capability shift on
+Harness.Lib).
+
+## WACS.ComponentModel.Harness.Lib 0.16.0 — `option<T>` as direct PARAM
+
+`option<T>` is now a valid direct param shape. The canonical-ABI
+flat lowering for `option<T>` is `(i32 disc, T_flat…)`:
+
+```wit
+export double-or: func(value: option<u32>, fallback: u32) -> u32;
+export greet:     func(name: option<string>) -> string;
+```
+
+### How it works
+
+- `IsFlatLowerable` accepts options whose inner type is itself
+  flat-lowerable.
+- `AppendLoweredType` flattens an option to `[int (disc), ...T_flat]`.
+- `EmitLowerOptionArg` branches on the arg's presence
+  (`Nullable<T>.HasValue` for value types, `!= null` for
+  reference types). The Some path pushes `disc=1` then runs
+  the inner lower (re-using LowerUtf8 for strings, direct
+  `Ldloc` for primitives/enums/flags). The None path pushes
+  `disc=0` followed by zero-defaults for each inner flat slot
+  (via the new `EmitDefaultForSlot` helper covering int / long
+  / float / double).
+- New `EmitLdarga` helper for loading struct arg addresses
+  (needed for `Nullable<T>.HasValue` and `.Value`).
+
+### What changed
+
+- **`WorldHarnessEmit.cs`**:
+  - `IsFlatLowerable` + `AppendLoweredType` extend to
+    `CtOptionType`.
+  - New `EmitLowerOptionArg`, `EmitLowerInnerFromLocal`,
+    `EmitDefaultForSlot`, `EmitLdarga` helpers.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-option-params/`
+  — `double-or(option<u32>, u32) -> u32` (value-type inner)
+  and `greet(option<string>) -> string` (reference-type inner
+  with string lower in the Some path).
+
+**20/20 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.23.0` →
+`WACS-ComponentModel-v0.24.0` (minor — capability shift on
+Harness.Lib).
+
+## WACS.ComponentModel.Harness.Lib 0.15.0 — records-of-aggregates as PARAMS + full Func/Action arity range
+
+The flat-lowered record param path now handles fields of any
+supported flat-lowerable type — strings, lists, enums, flags,
+tuples, and nested records. Previously each field had to be a
+primitive.
+
+```wit
+record dimensions { width: u32, height: u32 }
+record parcel {
+    name: string,
+    tags: list<string>,
+    size: dimensions,
+}
+export describe: func(p: parcel) -> string;
+```
+
+### How it works
+
+- `EmitFlattenedArg`'s record branch now dispatches each field
+  through new `EmitFlattenRecordField`, which: for primitives /
+  enums / flags just calls the getter and pushes the result;
+  for strings calls the getter then runs `LowerUtf8`; for lists
+  / nested records / tuples stashes the getter's result into a
+  typed local and re-dispatches via `EmitFlattenLocal`. The
+  local-based dispatch mirrors the arg-slot-based one but reads
+  from a fresh local — needed so we can repeatedly access the
+  same nested record's fields via the same instance, rather
+  than calling the outer getter multiple times.
+- `EmitLowerListFromLocal` mirrors `EmitLowerListArg` but takes
+  a local for the array source rather than an arg index. Used
+  when a list comes out of a record field or tuple element.
+- `MakeInvokerDelegateType` widened to cover every `Func<…>` /
+  `Action<…>` arity the BCL exposes (Action arity 0..16, Func
+  arity 1..17 type args). Records-with-strings + lists quickly
+  blow past the old 4-param ceiling — a parcel with name +
+  tags + size lowers to 6 i32s of params + 1 i32 of retArea.
+
+### What changed
+
+- **`WorldHarnessEmit.cs`**:
+  - `EmitFlattenedArg` record branch routes each field through
+    new `EmitFlattenRecordField`.
+  - New helpers: `EmitFlattenRecordField`, `EmitFlattenLocal`,
+    `EmitFlattenSubRecordField`, `EmitLowerListFromLocal`.
+  - `MakeInvokerDelegateType` replaced its 4-param ceiling with
+    `OpenActions` / `OpenFuncs` lookup tables covering the full
+    BCL Action / Func arity range.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-record-params/`
+  — `describe(parcel)` where parcel = (string, list&lt;string&gt;,
+  nested-record). Lowers to 6 i32 slots; returns a string
+  formatted from all fields.
+
+**19/19 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.22.0` →
+`WACS-ComponentModel-v0.23.0` (minor — capability shift on
+Harness.Lib).
+
+## WACS.ComponentModel.Harness.Lib 0.14.0 / WACS.ComponentModel.Harness.Runtime 0.6.0 — enum + flags + tuple direct PARAMS
+
+Direct params can now be `enum`, `flags`, or `tuple<...>` — they
+flatten to one or more i32 slots on the invoker stack.
+
+```wit
+world classifier {
+    enum priority { low, normal, high }
+    flags channels { email, sms, push, webhook }
+
+    export rank: func(p: priority, ch: channels) -> u32;
+    export render-point: func(p: tuple<u32, u32, string>) -> string;
+}
+```
+
+- **Enum / flags** flatten to one i32 — `Ldarg` pushes the
+  CLR enum value (whose stack repr is the underlying int).
+- **Tuple** flattens to the concatenation of its elements'
+  flat lowerings. For primitive / enum / flag / string
+  elements, the wrapper IL reads each item via a closed
+  generic helper on `WitTupleAccess` (e.g.
+  `WitTupleAccess.Item3<uint, uint, string>`) — calling a
+  generic static method side-steps a PersistedAssemblyBuilder
+  bug where `Ldfld` against a closed runtime ValueTuple field
+  serializes the open generic's token, producing
+  `MissingFieldException` at JIT time.
+
+### What changed
+
+- **`Wacs.ComponentModel.Harness.Runtime`** — new
+  `WitTupleAccess` static class with `Item1..Item7` generic
+  accessors for `ValueTuple<...>` arities 1..7.
+- **`WorldHarnessEmit.cs`**:
+  - `IsFlatLowerable` accepts enum / flags / tuple-of-flat.
+  - `AppendLoweredType` flattens enum / flags to one i32, tuple
+    to recursed-per-element.
+  - `EmitFlattenedArg` dispatches enum / flags to `Ldarg`,
+    tuples to per-item `WitTupleAccess.ItemN` accessor calls
+    (with inline `LowerUtf8` per string element).
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-aggregate-params/`
+  — `rank(priority, channels)` exercises enum + flags as
+  separate params, `render-point(tuple<u32, u32, string>)`
+  exercises tuple-of-mixed (two primitives + a string) as a
+  single param.
+
+**18/18 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.21.0` →
+`WACS-ComponentModel-v0.22.0` (minor — capability shift on
+Harness.Lib + new Harness.Runtime public API).
+
+## WACS.ComponentModel.Harness.Lib 0.13.0 — direct `option<T>` / `result<T,E>` / `tuple<...>` returns
+
+Anonymous aggregate types are now valid as the direct return of
+an export — no record wrapper required.
+
+```wit
+world directs {
+    export find-positive:    func(value: s32)    -> option<u32>;
+    export ensure-non-empty: func(value: string) -> option<string>;
+    export parse-int:        func(text: string)  -> result<u32, string>;
+    export coord-named:      func(x: u32, y: u32, label: string) -> tuple<u32, u32, string>;
+}
+```
+
+### How it works
+
+The named-record / named-variant return path lifts via the
+per-type `Lift{Name}` static method registered during
+`LiftEmit.EmitLifts`. Anonymous aggregates have no name to
+register under, so we emit a synthetic per-export
+`Lift__ret_<exportName>` static method that calls
+`LiftEmit.EmitLiftField` at offset 0 over the retArea pointer.
+The wrapper then takes the same `EmitLiftReturnViaRetArea`
+path the named-type returns use — including the
+`NeedsPostReturn` cabi_post cleanup when the type transitively
+carries strings or lists.
+
+### What changed
+
+- **`WorldHarnessEmit.cs`**:
+  - `BuildFunctionExport` widens its indirect-aggregate-return
+    case to also accept `CtOptionType` / `CtResultType` /
+    `CtTupleType` — they get `LoweredReturn = int` and the
+    transitive `NeedsPostReturn` check.
+  - New per-export emission step: for each export whose return
+    derefs to option / result / tuple, define
+    `Lift__ret_<name>(MemoryInstance, int)` private static
+    method that calls `LiftEmit.EmitLiftField(ret, 0, …)` and
+    returns.
+  - `EmitFlatLowered` dispatches option/result/tuple returns to
+    `EmitLiftReturnViaRetArea` using the new
+    `fe.ReturnLiftMethod`.
+  - `FunctionExport` carries the optional `ReturnLiftMethod`
+    reference.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-direct-returns/`
+  — four exports covering direct `option<u32>` (numeric),
+  `option<string>` (reference + string-bearing cabi_post),
+  `result<u32, string>` (Ok + Err with realloc'd error string),
+  and `tuple<u32, u32, string>` (mixed value+ref tuple).
+
+**17/17 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.20.0` →
+`WACS-ComponentModel-v0.21.0` (minor — capability shift on
+Harness.Lib).
+
+## WACS.ComponentModel.Harness.Lib 0.12.0 — strings + lists in PARAMS (lower path)
+
+Harness emitter now lowers `string` and `list<T>` arguments on the
+way IN to a wasm export. The existing `EmitStringInStringOut`
+special path handled exactly one shape (`func(s: string) -> string`);
+this slice generalises the lower side so the same lift/lower
+plumbing covers strings + lists in arbitrary param positions.
+
+```wit
+world repeater {
+    export shout: func(name: string, count: u32) -> string;
+    export length-of: func(text: string) -> u32;
+    export sum: func(values: list<u32>) -> u32;
+    export total-chars: func(words: list<string>) -> u32;
+}
+```
+
+### How it works
+
+- **String params** → call `StringCoding.LowerUtf8(memory, str,
+  cabi_realloc, out ptr, out len)`, push `(ptr, len)` onto the
+  invoker's argument stack. Memory allocated by `cabi_realloc`
+  is conceptually owned by the call site — wasm-side allocator
+  reclaims it on its own schedule, matching the existing
+  string-in-string-out path.
+- **List params** (`list<T>`) → call `cabi_realloc(0, 0, elemAlign,
+  count * elemSize)` to get a base pointer, walk each element
+  writing it into linear memory via the matching `MemoryHelpers.Write*`
+  helper (`WriteU8`/`WriteI16LE`/`WriteI32LE`/`WriteI64LE`/
+  `WriteF32LE`/`WriteF64LE`), push `(basePtr, count)`. For
+  `list<string>`, each element recurses through `LowerUtf8` and
+  the produced `(innerPtr, innerLen)` pair is written into the
+  per-element slot.
+
+### What changed
+
+- **`WorldHarnessEmit.cs`**:
+  - `IsFlatLowerable` now accepts strings and lists (recursively
+    on the element type).
+  - `AppendLoweredType` flattens `list<T>` to two i32s (ptr,
+    count); strings already flattened that way.
+  - `EmitFlatLowered` threads `reallocField` through to
+    `EmitFlattenedArg`.
+  - `EmitFlattenedArg` dispatches string params to new
+    `EmitLowerStringArg` and list params to new
+    `EmitLowerListArg`.
+  - `EmitLowerListArg` emits the allocate-loop-push pattern,
+    delegating to `EmitLowerListElement` for each WIT element
+    width (primitives + string).
+  - New `MemoryHelpers_Write*` MethodInfo statics (`WriteU8`,
+    `WriteI16LE`, `WriteI32LE`, `WriteI64LE`, `WriteF32LE`,
+    `WriteF64LE`).
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-lower-params/`
+  — `shout`, `length-of`, `sum`, `total-chars`. Covers
+  multi-string params, string + primitive return, `list<u32>`,
+  zero-length list lower, and `list<string>` (the most complex
+  per-element path).
+
+**16/16 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.19.0` →
+`WACS-ComponentModel-v0.20.0` (minor — capability shift on
+Harness.Lib).
+
+## WACS.ComponentModel.Harness.Lib 0.11.0 / WACS.ComponentModel.Harness.Runtime 0.5.0 — `result<T,E>` + `tuple<...>`
+
+Harness emitter handles WIT `result<T, E>` and `tuple<T1, T2, …>`,
+both with their lift IL plus CLR-type surface.
+
+### `tuple<…>`
+
+```wit
+record entry {
+    coord: tuple<u32, u32>,
+    labeled: tuple<string, u32>,
+}
+```
+
+- **CLR mapping**: closed `System.ValueTuple<T1, T2, …>` for
+  arities 1..7. The BCL ValueTuple struct gives us positional
+  `.Item1`/`.Item2`/… access matching WIT tuple semantics with
+  no per-type emission needed.
+- **Layout**: identical packing rule to records (positional
+  fields with per-element alignment padding); shared via the
+  new `TupleElementOffsets` helper alongside the existing
+  `RecordFieldOffsets`.
+- **Lift**: walk per-element offsets, push each element on the
+  stack via `EmitLiftField`, then `newobj
+  ValueTuple<…>..ctor(T1, T2, …)`.
+
+### `result<T, E>`
+
+```wit
+record outcome {
+    from-positive: result<u32, string>,
+    from-negative: result<u32, string>,
+    empty-check:   result,
+}
+```
+
+- **CLR mapping**: new `WitResult<TOk, TErr>` struct in
+  `Wacs.ComponentModel.Harness.Runtime`. Elided sides
+  (`result`, `result<T>`, `result<_, E>`) substitute
+  `System.ValueTuple` (the empty struct) for the missing side
+  — no separate sentinel type needed.
+- **Layout**: 2-case-variant shape (1-byte disc + `max(ok_size,
+  err_size)` at the aligned payload offset). Elided sides
+  contribute size 0 / align 1.
+- **Lift**: read disc, branch on `0` (Ok) / `1` (Err); for each
+  present side lift the payload at the aligned offset and call
+  `WitResult<…>.Ok(T)` / `Err(E)` static factory; for elided
+  sides push `default(ValueTuple)`.
+
+### What changed
+
+- **`Wacs.ComponentModel.Harness.Runtime`** — new
+  `WitResult<TOk, TErr>` public struct (`IsOk`, `OkValue`,
+  `ErrValue`, static `Ok`/`Err` factories,
+  `ToString → Ok(...)/Err(...)`).
+- **`CanonicalAbi.cs`** — `Layout` handles `CtTupleType` (via
+  new `LayoutTuple` helper, mirroring `LayoutRecord`) and
+  `CtResultType` (2-case variant shape). Adds
+  `TupleElementOffsets` public helper.
+- **`WitTypeEmit.cs`** — `MapClrType` returns the closed
+  `ValueTuple<…>` for tuples and the closed `WitResult<TOk,
+  TErr>` for results.
+- **`LiftEmit.cs`** — `EmitLiftField` dispatches `CtTupleType`
+  to new `EmitLiftTuple` (per-element lift +
+  `newobj ValueTuple<…>..ctor`) and `CtResultType` to new
+  `EmitLiftResult` (disc branch + factory calls + elided-side
+  `default(ValueTuple)` via new `EmitDefaultValueTuple`).
+- **`WorldHarnessEmit.cs`** — `ContainsStringOrList` recurses
+  into tuple elements + result Ok/Err sides, so cabi_post
+  correctly walks tuples / results carrying strings or lists.
+- **Fixtures**:
+  - `Spec.Test/components/fixtures/wit-harness-spike-tuple/` —
+    `tuple<u32, u32>` + `tuple<string, u32>` inside a record;
+    asserts both numeric tuple and string-bearing tuple lift
+    plus the CLR types match `ValueTuple<,>`.
+  - `Spec.Test/components/fixtures/wit-harness-spike-result/` —
+    Ok payload (`result<u32, string>` → `Ok(42)`), Err payload
+    (`Err("not a positive integer")`), and the empty-elided
+    form (`result` → `WitResult<ValueTuple, ValueTuple>`).
+
+**15/15 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.18.0` →
+`WACS-ComponentModel-v0.19.0` (minor — capability shift on
+Harness.Lib + new Harness.Runtime public API).
+
+## WACS.ComponentModel.Harness.Lib 0.10.0 — `option<T>`
+
+Harness emitter handles WIT `option<T>` for both value-type and
+reference-type inner shapes:
+
+```wit
+world picker {
+    record snapshot {
+        maybe-num: option<u32>,
+        maybe-name: option<string>,
+    }
+    export pick: func(want-num: u32, want-name: u32) -> snapshot;
+}
+```
+
+CLR mapping:
+- **`option<u32>`** → `System.Nullable<uint>` (value-type inner).
+  None reads as `null`, Some as the wrapped value via `HasValue`.
+- **`option<string>`** → `string` with `null` sentinel
+  (reference-type inner — no wrapper needed).
+
+Canonical-ABI layout: 1-byte discriminator at offset 0, then the
+payload aligned per the inner type's alignment. Lift walks the
+discriminator, branches on `0` (none → `null` / `default`) vs
+`1` (some → lifts the inner T, optionally `Nullable.ctor` wraps
+for value types). `cabi_post` cleanup walks into a present
+option's inner T when it contains strings or lists.
+
+### What changed
+
+- **`CanonicalAbi.cs`** — `Layout` handles `CtOptionType` with
+  the disc-then-payload pattern.
+- **`WitTypeEmit.cs`** — `MapClrType` returns
+  `Nullable<innerClr>` for value-type inner, plain `innerClr`
+  for reference-type inner.
+- **`LiftEmit.cs`** — `EmitLiftField` adds `CtOptionType` case
+  delegating to new `EmitLiftOption` helper (reads disc, two
+  branches, lifts inner, conditionally wraps in `Nullable<T>`
+  via `.ctor(T)`).
+- **`WorldHarnessEmit.cs`** — `ContainsStringOrList` recurses
+  into `CtOptionType.Inner`, so cabi_post correctly walks
+  options containing strings/lists.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-option/` —
+  Rust returns conditional `Some`/`None` based on input flags.
+  Test asserts `pick(1,1) → (42, "hi")`, `pick(0,0) → (null,
+  null)`, and mixed `pick(1,0) → (42, null)`.
+
+**13/13 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.17.0` →
+`WACS-ComponentModel-v0.18.0` (minor — capability shift on
+Harness.Lib).
+
+## WACS.ComponentModel.Harness.Lib 0.9.0 — `enum` + `flags`
+
+Harness emitter handles WIT `enum` and `flags` declarations:
+
+```wit
+world security {
+    enum severity { info, warning, critical }
+    flags permissions { read, write, execute, delete }
+    record status { sev: severity, perms: permissions }
+    export get-status: func() -> status;
+}
+```
+
+Both shapes emit as native CLR enums:
+- **`Severity`**: byte underlying, no `[Flags]` — three literals
+  at sequential ordinals (`Info=0`, `Warning=1`, `Critical=2`).
+- **`Permissions`**: byte underlying, `[Flags]` attribute — bit
+  literals (`Read=1`, `Write=2`, `Execute=4`, `Delete=8`).
+  Combined values render naturally via `ToString()`:
+  `Read|Write` → `"Read, Write"`.
+
+Backing-width selection per canonical-ABI:
+- Enum: 1 byte if `≤ 256` cases, 2 bytes if `≤ 65536`, else 4.
+  Same width rule as variant discriminator.
+- Flags: 1 byte if `≤ 8` flags, 2 bytes if `≤ 16`, 4 if `≤ 32`.
+
+### What changed
+
+- **`CanonicalAbi.cs`** — adds `CtEnumType` + `CtFlagsType` layout
+  cases; new `FlagsByteWidth` helper.
+- **`WitTypeEmit.cs`** — `EmitWorldTypes` Pass-1 now emits enum +
+  flags eagerly as complete `Type` instances (no two-pass needed
+  — enum values are constants, no forward refs). New
+  `EmitEnumType` and `EmitFlagsType` helpers using
+  `ModuleBuilder.DefineEnum` + `DefineLiteral`. Flags get
+  `FlagsAttribute` applied. `MapClrType` looks up enum / flags
+  types from the registry.
+- **`LiftEmit.cs`** — `EmitLiftField` adds `CtEnumType` +
+  `CtFlagsType` cases delegating to new `EmitReadIntegerWidth`
+  helper (reads 1 / 2 / 4 bytes by backing width; the resulting
+  integer is stelem / stfld-compatible with the enum-typed slot
+  directly, no explicit boxing/conversion needed).
+- **`TypeRegistry`** — gains `Enums` and `Flags` dictionaries.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-enum-flags/`
+  — Rust returns `severity=warning` + `perms=Read|Write`. Test
+  asserts both numeric values + ToString rendering.
+
+**12/12 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.16.0` → `WACS-ComponentModel-v0.17.0`
+(minor — capability shift on Harness.Lib).
+
+## WACS.ComponentModel.Harness.Lib 0.8.0 / WACS.ComponentModel.Harness.Runtime 0.4.0 — full primitive width matrix + list&lt;string&gt; / list&lt;record&gt;
+
+Harness lift IL now covers every WIT primitive (bool, s8, u8, s16,
+u16, s32, u32, s64, u64, f32, f64, char, string). Previously only
+s32/u32/string went through correctly in records; other widths
+threw at emit. Plus two more list-element shapes (string, record)
+got fixture coverage via the existing infrastructure.
+
+**Three new fixtures** validate the broader coverage:
+
+| Fixture | Shape | Notes |
+|---|---|---|
+| `list-string` | `list<string>` return | string elements via existing EmitLiftElementAt |
+| `list-record-of` | `list<record>` return | record elements via existing Lift{Name} delegation |
+| `primitives` | record of all 10 primitives | exercises new width support — bool / s8 / u8 / s16 / u16 / s64 / u64 / f32 / f64 / char |
+
+The primitives fixture's Rust returns:
+```rust
+Sample {
+    flag: true, small_s: -7, small_u: 200,
+    med_s: -1000, med_u: 50000,
+    big_s: -9_000_000_000, big_u: 18_000_000_000_000_000_000,
+    single: 3.14, double: 2.718281828, letter: 'Z',
+}
+```
+All 10 fields round-trip exactly through the emitted Lift method.
+
+### What changed
+
+- **`WACS.ComponentModel.Harness.Runtime` 0.3.0 → 0.4.0** (minor —
+  new public API surface): `MemoryHelpers` gains `ReadI16LE` /
+  `WriteI16LE`, `ReadI64LE` / `WriteI64LE`, `ReadF32LE` /
+  `WriteF32LE`, `ReadF64LE` / `WriteF64LE`. The F32/F64 helpers
+  use `BitConverter.{SingleToInt32Bits, DoubleToInt64Bits}` to
+  reuse the integer LE path.
+- **`WACS.ComponentModel.Harness.Lib` 0.7.0 → 0.8.0** (minor —
+  full primitive-width lift): `LiftEmit.EmitLiftPrimitive` +
+  `EmitLiftElementAt` extended for bool / s8 / u8 / s16 / u16 /
+  s64 / u64 / f32 / f64 / char. Signed narrow widths get
+  `Conv_I1` after `ReadU8`; unsigned ushort/char get `Conv_U2`
+  after `ReadI16LE`. F32/F64 go through dedicated helpers.
+
+**11/11 fixtures pass.**
+
+Family tag: `WACS-ComponentModel-v0.15.0` → `WACS-ComponentModel-v0.16.0`
+(minor — capability shift on both Harness.Runtime + Harness.Lib).
+
+## WACS.ComponentModel.Harness.Lib 0.7.0 — small wins batch (bool params, direct string return, string-in-variant)
+
+Three smaller follow-ups bundled in one slice. The harness
+emitter's "real-world WIT" coverage is meaningfully wider:
+
+### 1. bool params + missing small-integer primitives
+
+`MapPrimitiveToClrType` (the LOWERED-shape mapper used by
+`AppendLoweredType`) was missing many primitive kinds — only
+S32/U32/S64/U64/F32/F64. Now covers:
+- `bool` → `int` (lowers as i32 0/1; CLR bool on the stack is
+  already i4-sized so no explicit conv emit needed at the
+  param-pushing site)
+- `s8` / `u8` / `s16` / `u16` / `char` → `int` (all lower to i32)
+- The wider numeric types (s64/u64/f32/f64) unchanged.
+
+User-facing type (`MapClrType` in `WitTypeEmit`) already returned
+the natural CLR primitive for each — `typeof(bool)`, `typeof(byte)`,
+etc. The fix lets the lowered-type bookkeeping not throw.
+
+### 2. Direct string return (`func() -> string`)
+
+Previously fell into `EmitFlatLowered`'s `CtPrimType` branch
+which returned the int retArea pointer as if it were the result.
+Now special-cases `CtPrim.String`:
+
+```csharp
+if (retPrim.Kind == CtPrim.String) {
+    EmitLiftStringReturn(il, fe, memoryField);
+    return;
+}
+```
+
+New `EmitLiftStringReturn` mirrors the string-out tail of the
+existing `EmitStringInStringOut` special path: stash retArea,
+read (ptr, len), `StringCoding.LiftUtf8`, call cabi_post, return.
+
+### 3. Strings in variant payloads
+
+No code changes — fixture-only coverage. The existing
+infrastructure (variant lift + `EmitLiftField` string case)
+already composed correctly.
+
+### What changed
+
+- **`WACS.ComponentModel.Harness.Lib` 0.6.0 → 0.7.0** (minor —
+  new primitive-type coverage + direct string return):
+  `MapPrimitiveToClrType` extended; `EmitFlatLowered` adds the
+  string-return branch; new `EmitLiftStringReturn` helper.
+- **Fixtures**:
+  - `wit-harness-spike-string-variant/` — string in variant
+    payload (`variant message { hello(string), silence }`).
+  - `wit-harness-spike-bool-string-return/` — bool param + direct
+    string return (`greet(use-comma: bool) -> string`).
+
+**All 8 fixtures pass**: hello, richer, string-record, list-record,
+list-return, list-variant, string-variant, bool-string-return.
+
+Family tag: `WACS-ComponentModel-v0.14.0` → `WACS-ComponentModel-v0.15.0`
+(minor — capability shift on Harness.Lib).
+
+## Fixture coverage: list&lt;T&gt; in variant payload
+
+New regression fixture
+(`Spec.Test/components/fixtures/wit-harness-spike-list-variant/`)
+validates that lists nested inside variant payloads work
+end-to-end via the existing infrastructure (variant lift +
+field-level list lift). No Harness.Lib code changes required:
+the prior slices (records + variants + lists in record fields)
+composed correctly to cover this shape.
+
+```wit
+world streams {
+    variant payload {
+        numbers(list<u32>),
+        empty,
+    }
+    export get-payload: func(want-numbers: u32) -> payload;
+}
+```
+
+Rust impl returns `Numbers(vec![7,14,21,28])` or `Empty` based on
+the flag. The emitted harness round-trips both cases — variant
+discriminator dispatch + `EmitLiftField` recursing into
+`EmitLiftList` for the payload + `cabi_post_get-payload` to free
+the element-array body.
+
+## WACS.ComponentModel.Harness.Lib 0.6.0 — direct `list<T>` return value
+
+Harness emitter handles `list<T>` as a direct export return (not
+nested in a record). Closes a real-world WIT shape:
+`export get-numbers: func() -> list<u32>`,
+`export get-titles: func() -> list<string>`, etc.
+
+**End-to-end verified on a new fixture**
+(`Spec.Test/components/fixtures/wit-harness-spike-list-return/`):
+
+```wit
+world numbers {
+    export get-numbers: func() -> list<u32>;
+}
+```
+
+Rust returns `vec![100, 200, 300, 400]`. Emitted
+`NumbersHarness.GetNumbers()` returns `uint[] { 100, 200, 300, 400 }`
+and calls `cabi_post_get-numbers` to free the element-array body.
+
+### Refactor: `EmitLiftListFromBase` parameterized over memory local
+
+The field-level list lift (called from a static `Lift{Name}`
+method where `arg.0 = MemoryInstance`) and the wrapper-instance
+list lift (called from the typed wrapper method where
+`arg.0 = this`) need the SAME element-walking IL but DIFFERENT
+sources for the `MemoryInstance` reference. `EmitLiftListFromBase`
++ `EmitLiftElementAt` now take a `memoryLocal` parameter; each
+call site sets it up from its own source:
+- Static Lift methods: `memoryLocal = arg.0`
+- Instance wrappers: `memoryLocal = this._memory`
+
+Caught a subtle bug in the v0.5.0 emission where I'd assumed
+`Ldarg_0 = memory` universally; the instance wrapper for direct
+list return tried to call `MemoryHelpers.ReadI32LE(harness, ptr)`
+and read random memory addresses. The new param explicitly
+threads memory through every path.
+
+### What changed
+
+- **`WACS.ComponentModel.Harness.Lib` 0.5.0 → 0.6.0** (minor —
+  direct list return + memory-local refactor):
+  - `WorldHarnessEmit.BuildFunctionExport` recognizes `CtListType`
+    return as indirect (retArea ptr, `NeedsPostReturn = true`).
+  - `WorldHarnessEmit.EmitFlatLowered` adds `CtListType` return
+    branch → calls new `EmitLiftListReturn` helper.
+  - `EmitLiftListReturn` stashes retArea, loads memory from the
+    instance field, calls `LiftEmit.EmitLiftListFromBase` then
+    `cabi_post_<name>`.
+  - `LiftEmit.EmitLiftListFromBase` made public, takes a
+    `memoryLocal` parameter.
+  - `LiftEmit.EmitLiftElementAt` takes a `memoryLocal` parameter
+    (previously assumed `arg.0`).
+  - `LiftEmit.EmitLiftList` (field-level entry point) sets up a
+    `memoryLocal` from `arg.0` to satisfy the new contract.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-list-return/`
+  — Rust + WIT + built `.component.wasm` + Generated.Validate
+  asserting `get-numbers() == [100, 200, 300, 400]`.
+- **Regression-checked**: hello, richer, string-record, list-record
+  all 4 existing fixtures still pass.
+
+Family tag: `WACS-ComponentModel-v0.13.0` → `WACS-ComponentModel-v0.14.0`
+(minor — capability shift on Harness.Lib).
+
+## WACS.ComponentModel.Harness.Lib 0.5.0 — `list<T>` lift in record fields
+
+Harness emitter extends to handle `list<T>` fields inside records
+on the LIFT path. Unblocks WIT shapes like
+`record bag { values: list<u32>, count: u32 }`,
+`record event-log { entries: list<string> }`,
+`record query-result { rows: list<row> }`.
+
+**End-to-end verified on a new fixture**
+(`Spec.Test/components/fixtures/wit-harness-spike-list-record/`):
+
+```wit
+world numbers {
+    record bag {
+        values: list<u32>,
+        count: u32,
+    }
+    export get-bag: func() -> bag;
+}
+```
+
+Rust impl returns `Bag { values: vec![10, 20, 30, 40, 50], count: 5 }`.
+Emitted `NumbersHarness.GetBag()` returns
+`Bag(Values=[10,20,30,40,50], Count=5)` and calls `cabi_post_get-bag`
+to free the retArea + element-array body.
+
+### What changed
+
+- **`CanonicalAbi`** — adds `CtListType` layout (8 bytes, 4-align,
+  matching the (ptr, count) pair shape).
+- **`WitTypeEmit.MapClrType`** — maps `list<T>` to `T[]` (chose
+  arrays over `IReadOnlyList<T>` so the lift loop can use
+  `newarr` + `stelem` without an extra wrapper).
+- **`LiftEmit.EmitLiftField`** — adds `CtListType` case
+  delegating to new `EmitLiftList`.
+- **`LiftEmit.EmitLiftList`** — reads ptr + count from the field
+  offset, allocates a `T[]` of length count, loops `0..count`
+  lifting each element from `(listPtr + i * elemSize)`.
+- **`LiftEmit.EmitLiftElementAt`** — element-level lift
+  parameterized over a runtime (listPtr, indexLocal) pair rather
+  than the static (arg.1, offset) pair the field-level lift uses.
+  Covers primitive / string / record / variant element types.
+- **`LiftEmit.EmitStelem`** — picks the right `Stelem_*` opcode
+  for primitive widths + falls back to `Stelem` for reference /
+  struct elements.
+
+### What still throws (next slices of #65)
+
+- Lists as direct return / param values (not nested inside a
+  record). Same lift logic applies — needs `CtListType` handling
+  in `BuildFunctionExport`'s return-type branch + an outer
+  list-lift helper.
+- Lists in variant payloads. Same `EmitLiftField` extension,
+  just needs the variant payload case to call into it.
+- Strings + lists in record/variant PARAMS (lower path). The
+  indirect-ptr emission is a bigger structural change — defer.
+- Nested lists (`list<list<T>>`). The recursive shape probably
+  works but isn't exercised by current fixtures.
+
+Family tag: `WACS-ComponentModel-v0.12.0` → `WACS-ComponentModel-v0.13.0`
+(minor — capability shift on Harness.Lib).
+
+### What changed
+
+- **`WACS.ComponentModel.Harness.Lib` 0.4.0 → 0.5.0** (minor —
+  list lift in record fields): `CanonicalAbi.cs` adds list layout;
+  `WitTypeEmit.cs` adds list CLR mapping;
+  `LiftEmit.cs` adds `EmitLiftList` + `EmitLiftElementAt` +
+  `EmitStelem` helpers.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-list-record/`
+  — Rust + WIT + built `.component.wasm` + Generated.Validate
+  asserting `get-bag() == Bag([10,20,30,40,50], 5)`.
+
+## WACS.ComponentModel.Harness.Lib 0.4.0 — strings in record fields (lift)
+
+Harness emitter extends to handle string fields inside records on
+the LIFT path (records flowing wasm → host). The most common
+real-world WIT shape this unblocks: things like
+`record task { id: u32, title: string }`,
+`record greeting { message: string, count: u32 }`.
+
+**End-to-end verified on a new fixture**
+(`Spec.Test/components/fixtures/wit-harness-spike-string-record/`):
+
+```wit
+world greeter {
+    record greeting {
+        message: string,
+        count: u32,
+    }
+    export greet: func() -> greeting;
+}
+```
+
+Rust impl returns `Greeting { message: "Hello, World!", count: 42 }`.
+The emitted `GreeterHarness.Greet()` returns the typed
+`Greeting(Message="Hello, World!", Count=42)` and calls
+`cabi_post_greet` to free the retArea + the string body.
+
+### What changed
+
+- **`LiftEmit.EmitLiftPrimitive`** — adds the `CtPrim.String`
+  case: reads ptr + len (two i32s at the field's offset / offset+4)
+  + calls `StringCoding.LiftUtf8(memory, ptr, len)`. The string
+  body's lifetime stays managed by the owning record/variant's
+  `cabi_post_<name>` call at the export-method level.
+- **`WorldHarnessEmit.EmitFlatLowered`** — gate loosened: removes
+  the `!fe.NeedsPostReturn` exclusion so records / variants
+  containing strings can take the flat-lowered path. New
+  `EmitLiftReturnViaRetArea` helper centralizes the
+  "stash retArea → lift → optional cabi_post → return lifted"
+  shape that both `CtRecordType` and `CtVariantType` returns now
+  share.
+
+### Existing fixtures (regression-checked, both green)
+
+- `wit-harness-spike-hello` — `greet(string) -> string` still
+  works via the dedicated string-in-string-out path.
+- `wit-harness-spike-richer` — records + variants without strings
+  still work (NeedsPostReturn=false → cabi_post call elided).
+
+### What still throws
+
+- Strings in RECORD / VARIANT PARAMS (lower path) — the indirect
+  param lowering for pointer-content records needs a different
+  emission shape (allocate via cabi_realloc, write fields,
+  including realloc-allocating any nested string bodies, pass
+  the resulting ptr). Tracked for follow-up.
+- `list<T>` anywhere — layout primitive (8-byte ptr+len) is
+  already in CanonicalAbi, but lift IL needs to walk the element
+  array + per-element lift. Next slice of task #65.
+- `option<T>`, `result<T, E>`, `tuple<...>` as record/variant
+  payloads.
+
+Family tag: `WACS-ComponentModel-v0.11.1` → `WACS-ComponentModel-v0.12.0`
+(minor — capability shift on Harness.Lib).
+
+### What changed
+
+- **`WACS.ComponentModel.Harness.Lib` 0.3.0 → 0.4.0** (minor —
+  records-with-string lift): `LiftEmit.EmitLiftPrimitive` adds
+  `CtPrim.String` case; `WorldHarnessEmit.EmitFlatLowered` loses
+  the `!NeedsPostReturn` gate + factors the indirect-return tail
+  into `EmitLiftReturnViaRetArea`.
+- **Fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-string-record/`
+  — Rust + WIT + 40 KB `.component.wasm` + Generated.Validate
+  console asserting `greet() == Greeting('Hello, World!', 42)`.
+
+## WACS.Transpiler.Lib 0.11.0 / WACS.ComponentModel 0.7.1 — harness implementation emit infrastructure
+
+Plumbing for the symmetric-engines payoff: when the transpiler is
+given a harness assembly via the new
+`TranspilerOptions.HarnessAssemblyPath`, it loads the harness,
+discovers its `I{World}` interface + named-type classes
+(`Vec2`, `Outcome`, etc.), and is now wired to emit a
+`{World}HarnessImpl` wrapper class that implements `I{World}` by
+forwarding to `ComponentExports`'s static methods.
+
+The CLI's existing `--harness <dll>` flag on `wacs build` /
+`wacs aot` already populates the new option transparently — no
+new flags.
+
+**Architectural shape**:
+- **`HarnessAssemblyBinder`** loads the harness `.dll` via
+  `AssemblyLoadContext.Default.LoadFromAssemblyPath`, parses the
+  embedded `_WitContract` to recover the harness's authored world
+  name (the transpiler must use the HARNESS's world name to find
+  the `I{World}` interface, not the loaded component's possibly-
+  synthesized name).
+- **`ComponentExportsEmit.EmitComponentExportsClass`** gains a
+  `preRegisteredTypes` parameter that seeds the emitted-types
+  cache. When set, signatures use the harness's `Vec2` / `Outcome`
+  rather than emitting transpiler-owned duplicates — no
+  translation layer needed at the interface boundary.
+- **`HarnessImplEmit`** emits the `{World}HarnessImpl` class:
+  sealed, public, parameterless ctor, instance methods (Virtual+
+  Final+NewSlot) forwarding to the matching `ComponentExports`
+  static method. Methods without a match emit a
+  `NotImplementedException`-throwing body so the interface
+  contract stays structurally complete.
+
+**Known gap (the reason this is "infrastructure" rather than a
+working end-to-end):**
+
+`ComponentExportsEmit.IsEmittable` rejects today's spike fixtures:
+
+- **richer** (`add(vec2, vec2) -> vec2`): record params aren't
+  in the v0 emittable set (only primitives, list-of-prim, and
+  resource-handle params pass).
+- **hello** (`greet(string) -> string`): the string-param shape
+  isn't in v0 either (the predicate accepts string RETURNS but
+  rejects string PARAMS).
+
+Both gating predicates are pre-existing transpiler limitations
+that predate the harness work. With them in place,
+`ComponentExports` doesn't emit a method matching `IHello.Greet`
+or `IRicher.Add`, so `HarnessImpl` has nothing to forward to.
+The plumbing is verified to load the harness correctly and gate
+on `componentExportsType != null` cleanly — no errors, no spam.
+
+**Next slice**: extend `ComponentExportsEmit.IsEmittable` (+ the
+per-export emit body) to handle record + string params. That's a
+focused 200-400 LOC extension of an existing module that
+automatically unlocks `HarnessImpl` for these fixtures. Tracked
+separately from task 64 since it's a transpiler-internals slice
+rather than a harness-side one.
+
+### What changed
+
+- **`WACS.Transpiler.Lib` 0.10.4 → 0.11.0** (minor — new public
+  API): `TranspilerOptions.HarnessAssemblyPath`,
+  `ComponentExportsEmit.EmitComponentExportsClass` gains an
+  optional `preRegisteredTypes` parameter, internal
+  `HarnessAssemblyBinder` + `HarnessImplEmit`. `BuildHandler`
+  threads `--harness` through.
+- **`WACS.ComponentModel` 0.7.0 → 0.7.1** (point — metadata):
+  adds `InternalsVisibleTo Wacs.Transpiler.Lib` so the
+  Transpiler.Lib helpers can reuse `NameMangler` (kebab →
+  PascalCase) — same naming must agree with what
+  `Harness.Lib` emitted into the harness assembly.
+
+Family tags: `WACS-Transpiler-v0.10.2` → `WACS-Transpiler-v0.11.0`
+(minor — capability shift); `WACS-ComponentModel-v0.11.0` →
+`WACS-ComponentModel-v0.11.1` (point).
+
+## WACS.ComponentModel 0.7.0 / WACS.Transpiler.Lib 0.10.4 — primary-section decode for canon-lifted components (richer fixture)
+
+v1 follow-up to the primary-section decode work. Extends
+`BinaryWitDecoder.DecodeFromComponentBinary` to track the
+component function index space across additional sections so
+exports routed through canon.lift + sort=Core aliases (the
+typical `wasm-tools component new` shape, including the
+richer-spike fixture) resolve their type idx and surface in the
+diff.
+
+**End-to-end verified on cargo-built richer fixture (NO
+`wasm-tools component embed` step):**
+```
+$ wacs build --wasip2 --harness richer.harness.dll \
+    -o out.dll richer.component.wasm
+wrote out.dll (21 functions, 220ms)
+$ wacs build --wasip2 --harness hello.harness.dll \
+    -o sf.dll richer.component.wasm
+error: ...
+  export 'greet': declared in harness, missing from component.
+  export 'add': present in component, not declared in harness.
+  export 'normalize-or-fail': present in component, not declared in harness.
+```
+
+### New decoder sections
+
+- **Canon section** — `DecodeCanonSection` reads canon.lift entries
+  (recording the source type idx in the func index space) +
+  canon.lower (consumes wire format, no component-func-space
+  contribution — produces core funcs) + resource.new / drop / rep
+  intrinsics (consume wire format, no contribution). canonopts
+  parsing covers the common opt tags (string-encoding,
+  memory/realloc/post-return refs, async, callback,
+  always-task-return).
+- **Alias section** — `DecodeAliasSection` consumes wire format
+  with correct sort-first / target-second ordering; sort=Func
+  aliases (interface-export, core-instance-export, outer)
+  contribute uint.MaxValue slots so the func index space stays
+  aligned, but type isn't recoverable for them without chasing
+  the alias chain. Sort=Core / Type / Instance / Component
+  aliases skip without contribution.
+- **Export-as-rebinding** — primary-component exports of
+  sort=Func re-bind the source func at a new component-func
+  index (per wasm-tools' `$"#funcN name"` annotations). The
+  decoder translates the source idx through the current
+  funcTable to capture the type, then appends a new slot —
+  matching the binary's index space exactly.
+
+### World-level type-ref binding in WitContractCompare
+
+`WitResolver` only binds CtTypeRefs declared inside interfaces.
+The primary-section decoder places named types in `world.Types`,
+which WitResolver ignores. Added `BindWorldLevelTypeRefs` to
+`WitContractCompare`: walks each world's named types + binds
+matching CtTypeRefs in the world's export / import signatures
+(recursively through records, variants, lists, options, results,
+tuples). Without this, comparisons against primary-decoded
+packages would always diff structural-record-vs-CtTypeRef even
+when the underlying types matched.
+
+### Still gap: hello-style components with many sort=Func aliases
+
+The hello fixture (Rust + cargo-built wasm32-wasip2 binding to
+~13 WASI interfaces) still falls through to the "no custom
+section" error — the canon.lift for "greet" lands at a func idx
+the export references, but the cascading sort=Func aliases from
+the WASI instance imports either alter the index space ordering
+in ways the decoder doesn't track or trigger a canonopts shape
+v0 doesn't recognize. Investigation deferred; `wasm-tools
+component embed` remains the workaround for those.
+
+### What changed
+
+- **`WACS.ComponentModel` 0.6.0 → 0.7.0** (minor — canon /
+  alias / export-rebinding logic added to
+  `BinaryWitDecoder.DecodeFromComponentBinary`): new private
+  helpers `DecodeCanonSection` (with `SkipCanonOpts`),
+  `DecodeAliasSection`, `ContributeImportsToFuncTable`,
+  `DecodePrimaryExportSection`.
+- **`WACS.Transpiler.Lib` 0.10.3 → 0.10.4** (point — validator
+  resolves world-level type refs): `WitContractCompare.Diff`
+  calls `BindWorldLevelTypeRefs` on both expected + actual
+  packages before structural comparison.
+
+Family tags: `WACS-ComponentModel-v0.10.0` → `WACS-ComponentModel-v0.11.0`
+(minor — capability shift); `WACS-Transpiler-v0.10.1` →
+`WACS-Transpiler-v0.10.2` (point).
+
+## WACS.ComponentModel 0.6.0 / WACS.Transpiler.Lib 0.10.3 — primary-section WIT decode (partial)
+
+New entry point `BinaryWitDecoder.DecodeFromComponentBinary(byte[])`
+derives a `CtPackage` from the primary type / import / export
+sections of a component binary — fallback for components without
+a `component-type:*` custom section (the cargo-built
+`wasm32-wasip2` case the previous slice surfaced as a documented
+limitation).
+
+`ComponentTranspiler.Parse` now calls this fallback when the
+custom-section decode is absent or yields an empty world. The
+validator's world-name check additionally treats `"root"`
+(the synthesized default the primary decoder uses when no
+qualified name is available in the binary) as a wildcard,
+delegating the actual validity signal to the export comparison.
+
+**Verified end-to-end on cargo-built hello fixture (no `wasm-tools
+component embed` step):**
+```
+$ wacs build --wasip2 --harness hello.harness.dll \
+    -o out.dll hello.component.wasm
+wrote out.dll (138 functions, 296ms)
+$ wacs build --wasip2 --harness richer.harness.dll \
+    -o sf.dll hello.component.wasm
+error: ...
+  export 'add': declared in harness, missing from component.
+  export 'normalize-or-fail': declared in harness, missing from component.
+  export 'greet': present in component, not declared in harness.
+```
+
+### What still doesn't decode (and why)
+
+Components routing exports through canonical-function aliases
+(the typical `wasm-tools component new` output and richer-spike's
+shape) trip `BuildWorld`'s assumption that export indices point
+directly at type-indexed function types. In primary-section form
+those indices reference the function index space — populated by
+canon.lift / canon.lower / alias-from-core-instance — which the
+v0 decoder doesn't track. Such components surface as an empty
+world; the fallback in `Parse` then yields the existing typed
+"no custom section" error from validation.
+
+Lifting this needs ~300-500 LOC: track the function index space
+across Canon, Alias, and Import sections; map each canon.lift's
+function index to its type index; resolve export-of-sort-Func
+through that map. Tracked as v1 work.
+
+Other shapes that don't decode in v0:
+- Multiple Type/Import section interleaving where the index
+  space ordering matters (decoder does preserve file order; this
+  works) but Alias sections also contribute to the index space
+  (decoder doesn't track those yet).
+- Nested-component types in the primary type section.
+- Inline interface re-exports.
+
+### What changed
+
+- **`WACS.ComponentModel` 0.5.2 → 0.6.0** (minor — new public API):
+  `BinaryWitDecoder.DecodeFromComponentBinary(byte[])`, plus
+  internal helpers `DecodeTypeSectionAsInnerDecls`,
+  `DecodePrimaryImportExportSection`, `BuildPackageFromPrimary`.
+  Reuses the existing `ReadImportOrExport` for import/export
+  parsing — single source for the wire format.
+- **`WACS.Transpiler.Lib` 0.10.2 → 0.10.3** (point — fallback
+  wiring + validator world-name leniency): `ComponentTranspiler.Parse`
+  buffers the stream so the fallback can re-decode, and falls
+  through to `DecodeFromComponentBinary` when the custom-section
+  decode is absent or empty. `WitContractCompare.Diff` skips the
+  world-name comparison when the actual world is named `"root"`
+  (the synthesized default).
+
+Family tags: `WACS-ComponentModel-v0.9.0` → `WACS-ComponentModel-v0.10.0`
+(minor — capability shift); `WACS-Transpiler-v0.10.0` →
+`WACS-Transpiler-v0.10.1` (point).
+
+## WACS.Transpiler.Lib 0.10.2 — imports validation in WitContractCompare
+
+Extends the contract diff to cover imports. v0 rule (per
+`docs/wit-harness-plan.md` §"Validation contract"):
+
+- Every WIT-declared inline-function import (`import name: func(...)`)
+  must be present in the component with a matching signature.
+  Missing or mismatched imports surface as typed messages.
+- The reverse direction — component imports not declared in the
+  harness — is intentionally NOT a hard mismatch. wit-bindgen
+  auto-bundles WASI imports the harness can't realistically pre-
+  declare; embedders supply those via `LoadFrom`'s `bindImports`
+  callback.
+- Interface-reference imports (`import wasi:io/poll@0.2.0`) on the
+  harness side surface as a "not validated in v0" diagnostic so
+  the user knows the check isn't covering them silently. Lifting
+  this needs WIT-side interface resolution + per-method signature
+  walking; tracked as the next-mile follow-up.
+
+`CompareFunctionSignatures` generalizes its diagnostic prefix
+from hardcoded "export" to a `kind` parameter ("export" or
+"import") so messages read correctly for both directions.
+
+Spike fixtures unaffected — both `hello.wit` and `richer.wit`
+declare zero imports, so the new code path has nothing to flag
+on existing diff invocations. Transpiler.Test 57/57 still green.
+
+### Two follow-ups investigated + documented this round (deferred)
+
+- **`BinaryWitDecoder` primary-section decode**: the existing
+  `BuildPackage` is hardcoded for wit-component's
+  nested-wrapper encoding (a wrapper `ComponentType` whose
+  inner `ComponentType` describes the world). Cargo-built
+  `wasm32-wasip2` components don't ship that wrapper — their
+  world is in the primary type/export sections directly.
+  Passing the full binary to the existing decoder returns
+  null (no wrapper to find). A proper fix is ~200-400 LOC of
+  new decoder logic walking the primary component sections.
+  Today's workaround: `wasm-tools component embed` adds the
+  custom section, then validation works.
+- **Transpiler emits `implements I{World}`**: the
+  symmetric-engines payoff at the CLR-interface level needs
+  either cross-assembly type sharing (transpiler references
+  the harness's emitted `Vec2` / `Outcome` types instead of
+  emitting its own) or a translation layer at the interface
+  boundary. Either path is ~500-1000 LOC and tightly coupled
+  to `ComponentExportsEmit`'s 3281-LOC class-emission
+  pipeline. Embedders today still get typed call sites via
+  the interpreter harness + compile-time WIT-shape validation
+  via `--harness` on transpile; CLR-interface-level identity
+  across engines is the natural v2 close.
+
+### What changed
+
+- **`WACS.Transpiler.Lib` 0.10.1 → 0.10.2** (point — additional
+  validation cases): `WitContractCompare.Diff` adds imports
+  comparison; `CompareFunctionSignatures` gains a `kind`
+  parameter for export/import diagnostic prefixing.
+
+## WACS.Cli 1.10.0 / WACS.Transpiler.Lib 0.10.1 — `--harness` / `--wit-dir` on aot + build
+
+Both transpile-side CLI verbs (`wacs aot`, `wacs build`) gain
+two new flags that resolve the harness contract WIT text and
+forward it through `TranspilerOptions.HarnessContractText`:
+
+- **`--harness <path.dll>`** — loads a built harness assembly
+  (produced by `wacs harness`), reads its embedded
+  `_WitContract` static field via reflection, threads the text
+  into the transpile pipeline.
+- **`--wit-dir <dir>`** — concatenates every `.wit` under the
+  directory (matching the embedding shape `HarnessEmitter` uses).
+  In-process equivalent of `--harness`: no `.dll` build step
+  required, useful during iteration.
+
+The two flags are mutually exclusive.
+
+**End-to-end verified**:
+```
+$ wacs harness hello-spike/wit -o hello.harness.dll
+$ wasm-tools component embed wit/ hello.component.wasm \
+    --world hello -o hello-with-witsection.wasm
+$ wacs build --wasip2 --harness hello.harness.dll \
+    -o out.dll hello-with-witsection.wasm
+wrote out.dll (138 functions, 263ms)
+$ wacs build --wasip2 --harness richer.harness.dll \
+    -o should-fail.dll hello-with-witsection.wasm
+error: component transpilation failed: Component does not match harness WIT contract:
+  world name: harness expects 'richer', component declares 'hello'.
+  export 'add': declared in harness, missing from component.
+  export 'normalize-or-fail': declared in harness, missing from component.
+  export 'greet': present in component, not declared in harness.
+```
+
+**Caveat surfaced during E2E test, fixed in this slice (Transpiler.Lib
+0.10.1 point bump)**: the v0 validator requires the component
+binary to carry a `component-type:*` custom section (the
+wit-component convention). Rust components built straight to
+`wasm32-wasip2` via cargo don't emit one. Previously the
+validator silently skipped when the section was missing, giving
+a false-positive pass; now it throws with an actionable message
+pointing at `wasm-tools component embed`. Deriving the world
+from the component's primary type / export sections (instead of
+a custom section) is a follow-up — needs `BinaryWitDecoder` to
+grow a new entry point.
+
+**Deferred from the outer ring**: the transpiler doesn't yet
+emit `implements I{World}` on the transpiled output. That's the
+"symmetric engines at the CLR-interface level" piece — requires
+weaving the harness's `I{World}` reference into
+`ComponentExportsEmit`'s class-definition pipeline (~600 LOC of
+coordinated transpiler-internals work). Embedders today get
+typed call sites on the interpreter side via the harness +
+contract validation on the transpiler side; CLR-interface-level
+sharing across engines is the natural v2 close.
+
+### What changed
+
+- **`WACS.Cli` 1.9.0 → 1.10.0** (minor — two new flags on aot +
+  build verbs): `AotOptions.Harness` + `AotOptions.WitDir` (and
+  the same on `BuildOptions`). `BuildHandler.BuildTranspilerOptions`
+  gains `ResolveHarnessContractText(BuildOptions)` — loads
+  harness `.dll` via `AssemblyLoadContext.LoadFromAssemblyPath` +
+  reflects `_WitContract`, or walks the directory concatenating
+  every `*.wit`.
+- **`WACS.Transpiler.Lib` 0.10.0 → 0.10.1** (point — validation
+  correctness): swap silent-skip for typed throw when
+  `HarnessContractText` is set but the component binary carries
+  no `component-type:*` custom section.
+
+## WACS.Transpiler.Lib 0.10.0 — compile-time harness contract validation
+
+`TranspilerOptions` gains a `HarnessContractText` property — when
+set, the transpiler diffs the supplied WIT text against the loaded
+component's WIT custom section before any IL is emitted, and
+throws `InvalidOperationException` with a typed report listing
+every mismatch.
+
+The expected source for that text is the `_WitContract` static
+field every `WACS.ComponentModel.Harness.Lib`-emitted harness
+carries (per the previous slice). Threading it both ways binds
+the harness and transpiled output to one canonical contract — a
+binary shape drift gets caught at build time, not at the typed
+call site.
+
+New module: `Wacs.Transpiler.AOT.Component.WitContractCompare`.
+v0 scope:
+- World name match (kebab-case).
+- Export set match (added / dropped exports flagged).
+- Per-export signature: param arity, per-param type, return type,
+  via deep structural equality on the resolved `CtValType` tree
+  (records, variants, options, results, tuples, lists, primitives).
+  Records / variants compare on field / case names + types.
+- Imports not compared (the harness asserts what embedders invoke,
+  not what the component imports — that's a follow-up).
+- Diagnostic messages render short WIT-ish forms per mismatch.
+
+The transpiler emits-an-`implements I{World}` step on the
+transpiled assembly + CLI wiring follow in the next two
+checkpoints.
+
+Family tag: `WACS-Transpiler-v0.9.0` → `WACS-Transpiler-v0.10.0`
+(minor — new public API on TranspilerOptions, new public type).
+
+### What changed
+
+- **`WACS.Transpiler.Lib` 0.9.1 → 0.10.0** (minor — new public
+  API): adds `TranspilerOptions.HarnessContractText`,
+  `WitContractCompare.Diff(string, CtPackage)`,
+  `WitContractCompare.TypesEqual` recursion. Wired in
+  `ComponentTranspiler.TranspileSingleModule` between `Parse` and
+  the composer / single-module branch.
+- **Spec.Test**: csproj excludes
+  `components/fixtures/wit-harness-spike-*/**/*.cs` from the
+  default compile + None globs so the wit-harness fixtures'
+  subprojects (Aot.Spike, Generated.Validate) don't pollute
+  Spec.Test's assembly.
+
+## WACS.ComponentModel.Harness.Lib 0.3.0 — `_WitContract` + symmetric `I{World}` interface
+
+Harness emitter now produces two pieces of contract scaffolding
+on every harness assembly:
+
+1. **`I{World}` interface** — emitted alongside the harness class,
+   carries one abstract method per WIT export with the same name
+   + signature as the typed wrapper. The harness class implements
+   it implicitly (Virtual+Final+NewSlot on the wrapper methods).
+   The symmetric counterpart for the transpiler-emitted class is
+   the next slice: both engines implement the same `I{World}`,
+   so embedder call sites are engine-agnostic per the
+   `feedback_symmetric_engines` invariant.
+
+2. **`public static readonly string _WitContract`** — embeds the
+   raw WIT source the emit consumed (concatenated from every
+   `.wit` under the input directory, recursively). The transpiler's
+   future `AddHarnessContract` reads this string at compile time
+   to diff against the loaded component's WIT custom section;
+   a runtime `LoadFrom`-time validator could do the same via
+   reflection.
+
+Surface change on `HarnessEmitter.EmitToStream(packages, ...)`:
+new optional `contractText` parameter. Default empty when callers
+have no source text to embed. The directory-input overload
+threads the WIT source through automatically.
+
+Validation extended on
+`Spec.Test/components/fixtures/wit-harness-spike-richer/Generated.Validate/`:
+five tests now green — add, two normalize-or-fail cases, IRicher
+interface cast + invocation, and `_WitContract` presence /
+length / contents (297 chars, contains `"world richer"`). The
+hello fixture's validator also still passes — the existing typed
+methods on its harness satisfy the synthesized `IHello` interface
+without changes.
+
+Family tag: `WACS-ComponentModel-v0.8.0` → `WACS-ComponentModel-v0.9.0`
+(minor — capability shift on Harness.Lib).
+
+### What changed
+
+- **`WACS.ComponentModel.Harness.Lib` 0.2.0 → 0.3.0** (minor —
+  new emitted shape, new optional API parameter): adds
+  `EmitWorldInterface` + `EmitWitContractField` in
+  `WorldHarnessEmit.cs`; `HarnessEmitter.EmitToStream(packages, ...)`
+  gains an optional `contractText` parameter. Typed-wrapper
+  methods now carry `Virtual | Final | NewSlot` so they implement
+  the `I{World}` interface implicitly.
+- **Spike validators**: richer's `Generated.Validate` adds two
+  new assertions (interface cast + invocation, `_WitContract`
+  presence + content).
+
+## WACS.Cli 1.9.0 — `wacs harness` verb
+
+New CLI verb:
+
+```
+wacs harness <wit-dir> -o <out.dll>
+       [--namespace <ns>]
+       [--assembly-name <name>]
+```
+
+Thin wrapper over `HarnessEmitter.EmitToFile` — takes a directory
+of `.wit` files (recurses into `deps/` per the existing
+`WitLoader.LoadDirectoryTree` convention) and emits a typed
+harness `.dll` consumers can reference directly. Defaults:
+namespace `Wacs.ComponentModel.Harness.Generated`, assembly name
+derived from the world's PascalCase + `"Harness"`.
+
+The in-memory side of the same emit core (the
+`HarnessEmitter.EmitInMemory` shape) lights up future
+`wacs run --wit-dir` / `wacs transpile --wit-dir` flows — deferred
+to a separate slice, since they need design beyond the verb shape
+(what does "run" mean for a pure-export component? validate then
+invoke a named export? both?). The persisted verb is the
+high-value piece for the v0 distribution flow regardless.
+
+Drive-tested against both spike fixtures:
+- `wacs harness hello-spike/wit -o /tmp/hello.harness.dll` →
+  3.5 KB `.dll` carrying `HelloHarness` with `LoadFrom` + `Greet`.
+- `wacs harness richer-spike/wit -o /tmp/richer.harness.dll` →
+  4 KB `.dll` carrying `RicherHarness` + `Vec2` + `Outcome` +
+  `Outcome.Success` / `Outcome.Invalid` + `LoadFrom` + `Add` +
+  `NormalizeOrFail`.
+
+The persisted .dll uses the same `PersistedAssemblyBuilder` pass
+as the in-memory path the `Generated.Validate` consoles exercise;
+both surfaces share one emit core, so functional equivalence
+follows from the in-memory tests.
+
+### What changed
+
+- **`WACS.Cli` 1.8.1 → 1.9.0** (minor — new verb): adds
+  `Verbs/HarnessOptions.cs` + `Verbs/HarnessHandler.cs`, wires
+  into `Program.cs`'s ParseArguments+MapResult. Project reference
+  added to `Wacs.ComponentModel.Harness.Lib`.
+
+## WACS.ComponentModel.Harness.Lib 0.2.0 / WACS.ComponentModel.Harness.Runtime 0.3.0 — records + variants
+
+Harness emitter expands to handle WIT records + variants
+end-to-end, validated against a new richer fixture:
+`Spec.Test/components/fixtures/wit-harness-spike-richer/` —
+multi-export world with `record vec2 { x: s32, y: s32 }`,
+`variant outcome { success(vec2), invalid }`, and two exports:
+
+```wit
+export add: func(a: vec2, b: vec2) -> vec2;
+export normalize-or-fail: func(v: vec2) -> outcome;
+```
+
+The generated `RicherHarness` runs the same three assertions the
+hand-shaped reference would: `add(Vec2(1,2), Vec2(3,4)) →
+Vec2(4,6)`, `normalize-or-fail(Vec2(0,0)) → Outcome.Invalid`,
+`normalize-or-fail(Vec2(7,-3)) → Outcome.Success(Vec2(1,-1))`.
+
+### What the emitter learned
+
+- **`CanonicalAbi.cs`** — layout rules: record + variant size /
+  alignment, record field offsets, variant disc width
+  (1 / 2 / 4 bytes by case count), variant payload offset
+  (padded to max-case-align). Single-source for emitters so layout
+  math stays consistent across lift / lower paths.
+- **`WitTypeEmit.cs`** — record types as sealed CLR classes with
+  positional ctor + readonly properties; variants as abstract
+  base + nested sealed subclasses per case (`Outcome.Success`,
+  `Outcome.Invalid`). `TypeRegistry` stashes ctor / getter
+  references so cross-type IL works without TypeBuilder-after-bake
+  reflection.
+- **`LiftEmit.cs`** — per-named-type private static `Lift{Name}`
+  helpers on the harness. Variant lift dispatches via discriminator
+  Beq chain, lifts payload, newobjs the matching subclass; throws
+  `InvalidDataException` on unknown discriminator.
+- **`WorldHarnessEmit.cs`** — generic flat-lowered wrapper path:
+  for each user-facing param, unwrap fields into the lowered
+  primitive call args (record's `a` becomes `a.X, a.Y`); for
+  record / variant returns, treat the invoker return as an
+  indirect ret-area i32 and call the registered `Lift{Name}` to
+  produce the typed value. Strings still take the dedicated
+  string-in / string-out path.
+
+Aggregate-return cabi_post detection: returns containing strings
+or lists transitively get a `cabi_post_*` invoker; pure-primitive
+records / variants don't (Rust + wit-bindgen don't emit
+`cabi_post_*` for those — `wasm-tools print` on richer.component.wasm
+confirms no `cabi_post_add` or `cabi_post_normalize-or-fail`).
+
+### What still throws
+
+The v0.2 emitter intentionally fails loud on:
+- Strings, lists, options, results, nested records inside
+  records, multi-results.
+- Inline-interface exports (`export wasi:foo/iface`).
+- Variants with > 256 cases (1-byte discriminator assumed).
+- Resource handles, flags, enums.
+
+These light up the next fixture pass; each closes incrementally.
+
+`Harness.Runtime` minor-bumps to 0.3.0 — adds
+`MemoryHelpers.ReadU8` / `WriteU8` (variant discriminator
+reads). Family tag: `WACS-ComponentModel-v0.7.0` →
+`WACS-ComponentModel-v0.8.0` (minor — capability shift on
+Harness.Lib + Harness.Runtime).
+
+### What changed
+
+- **`WACS.ComponentModel.Harness.Lib` 0.1.0 → 0.2.0** (minor —
+  records + variants): `CanonicalAbi.cs`, `WitTypeEmit.cs`,
+  `LiftEmit.cs` (new); `WorldHarnessEmit.cs` substantially expanded
+  (~+200 LOC) — generic flat-lowered path + lifted-return dispatch.
+- **`WACS.ComponentModel.Harness.Runtime` 0.2.0 → 0.3.0** (minor —
+  public API addition): `MemoryHelpers.ReadU8` / `WriteU8`.
+- **New fixture**:
+  `Spec.Test/components/fixtures/wit-harness-spike-richer/` —
+  Rust + WIT + built `.component.wasm` (13.7 KB, no WASI imports)
+  + `Generated.Validate` console.
+
+## WACS.ComponentModel.Harness.Lib 0.1.0 / WACS.ComponentModel.Harness.Runtime 0.2.0 / WACS.ComponentModel 0.5.2 — IL-emitting harness generator
+
+`WACS.ComponentModel.Harness.Lib` is the third sibling in the
+ComponentModel family this round — the IL emitter that takes a
+WIT contract and produces a `.dll` containing a typed harness
+class. Built on `PersistedAssemblyBuilder` (.NET 9), targets
+net9.0, matches the architectural shape `Wacs.Transpiler.Lib`
+already uses for the wasm → IL direction.
+
+Single emission core behind three ergonomic surfaces — the
+`wacs harness gen` distribution flow (file/stream output) and the
+`wacs run --wit-dir` / `wacs transpile --wit-dir` in-process
+flows (memory output) all funnel through the same builder pass:
+
+- `HarnessEmitter.EmitToFile(witDir, outPath)` — saves a `.dll`.
+- `HarnessEmitter.EmitToStream(witDir, stream)` — lowest-level.
+- `HarnessEmitter.EmitInMemory(witDir) → Assembly` — `Save` to
+  a `MemoryStream`, then `AssemblyLoadContext.LoadFromStream` for
+  immediate use, mirroring `Wacs.Transpiler.Lib`'s `Bake` shape.
+
+v0 emits the spike's `func(string) -> string` shape end-to-end:
+the IL builds a sealed `HelloHarness` class with five private
+readonly fields (runtime + memory + cabi_realloc invoker + per-
+export invoker + per-export `cabi_post_*` invoker), a private
+ctor, a public static `LoadFrom(byte[], Action<WasmRuntime>?)`
+factory that funnels through `HarnessLoader`, and a public typed
+`Greet(string) -> string` method that calls
+`StringCoding.LowerUtf8` / `MemoryHelpers.ReadI32LE` /
+`StringCoding.LiftUtf8` from `Harness.Runtime`. Records, variants,
+multi-result returns, list types, and inline-interface exports
+throw `NotSupportedException` at emit time — loud failure beats
+silent mis-emission, and these gaps close as the richer fixture
+exercises them.
+
+**Validation**: a new console
+`Spec.Test/components/fixtures/wit-harness-spike-hello/Generated.Validate/`
+emits `HelloHarness` in-memory from the spike's `wit/world.wit`,
+loads the spike's `hello.component.wasm` via reflection-driven
+`LoadFrom`, calls `Greet("World")`, and asserts the result equals
+`"Hello, World!"` — same output the hand-written spike emits.
+The generated harness is functionally equivalent to the
+hand-written one in `Aot.Spike/HelloHarness.cs` (post the
+HarnessLoader refactor in this same commit).
+
+`Harness.Runtime` minor-bumps to 0.2.0 for the new
+`HarnessLoader` + `LoadedComponent` public API surface — the
+load + export-resolution boilerplate every emitted `LoadFrom`
+calls into. `Wacs.ComponentModel` point-bumps to 0.5.2 for the
+new `InternalsVisibleTo Wacs.ComponentModel.Harness.Lib`
+attribute (Harness.Lib needs `NameMangler` for kebab → PascalCase
+identifier conversion, kept as a single source of truth).
+
+Family tag: `WACS-ComponentModel-v0.6.0` → `WACS-ComponentModel-v0.7.0`
+(minor — new sibling package).
+
+### What changed
+
+- **`WACS.ComponentModel.Harness.Lib` 0.1.0** (new package):
+  `HarnessEmitter.cs` + `HarnessOptions.cs` + `WorldHarnessEmit.cs`
+  (~570 LOC total). Targets net9.0 for `PersistedAssemblyBuilder`.
+  Internal-visible to `Wacs.ComponentModel.Harness.Lib.Test`.
+- **`WACS.ComponentModel.Harness.Runtime` 0.1.0 → 0.2.0** (minor —
+  public API addition): adds `HarnessLoader` (parse + instantiate
+  + register), `HarnessLoader.RequireMemoryExport`,
+  `HarnessLoader.RequireFunctionExport`, and the
+  `LoadedComponent(WasmRuntime, ModuleInstance)` return shape.
+  Used by both the refactored hand-written spike and the IL
+  emitted by `Harness.Lib`.
+- **`WACS.ComponentModel` 0.5.1 → 0.5.2** (point — metadata): adds
+  `InternalsVisibleTo Wacs.ComponentModel.Harness.Lib` so the
+  emitter can reuse `NameMangler` for kebab → PascalCase /
+  CamelCase conversions.
+- **Spike**: `Aot.Spike/HelloHarness.cs` collapsed from ~250 →
+  ~85 LOC by routing through `Wacs.ComponentModel.Harness.HarnessLoader`.
+  Cleared the un-needed `using` lines; AOT-publish + native run
+  still emit `"Hello, World!"`.
+- **Spike validation**:
+  `Spec.Test/components/fixtures/wit-harness-spike-hello/Generated.Validate/`
+  (new console fixture, net9.0) — emits HelloHarness via
+  `HarnessEmitter.EmitInMemory`, drives via reflection, asserts
+  result against hand-written spike's output.
+
+## WACS.ComponentModel.Harness.Runtime 0.1.0 — canonical-ABI primitives
+
+New sibling package in the ComponentModel family. Carries the
+AOT-safe canonical-ABI runtime primitives that emitted harness IL
+calls at component-load time. v0 surface (kept minimal —
+intentionally what the wit-harness-spike-hello fixture exercises;
+grows as the richer fixture surfaces what's missing):
+
+- **`MemoryHelpers`** — little-endian `ReadI32LE` / `WriteI32LE`
+  over `MemoryInstance.Data`. The canonical ABI mandates LE on
+  every numeric width; one call site per access in emitted IL.
+- **`StringCoding`** — `LiftUtf8(memory, ptr, byteLen) -> string`
+  for strings flowing wasm → host, and `LowerUtf8(memory, value,
+  cabiRealloc, out ptr, out byteLen)` for strings flowing host →
+  wasm. UTF-16 + Latin1 canonical-ABI encodings deferred to v0.2
+  when the richer fixture surfaces them.
+
+Validation: the spike's hand-written `HelloHarness` refactored to
+call into `MemoryHelpers.ReadI32LE` / `StringCoding.LiftUtf8` /
+`StringCoding.LowerUtf8` instead of inline helpers. Both
+`dotnet run` and the NativeAOT-published native binary still emit
+`"Hello, World!"`.
+
+`WitContract` / `WitContractDiff` / `WitContractMismatchException`
+are deliberately deferred to the next slice — they'll land
+together with the Harness.Lib emitter that populates them, so the
+shape is validated against an actual consumer before shipping.
+
+Multi-target net8.0 + netstandard2.1; `IsAotCompatible` gated to
+net8.0.
+
+Family tag: `WACS-ComponentModel-v0.5.0` → `WACS-ComponentModel-v0.6.0`
+(minor — second new sibling package this round).
+
+### What changed
+
+- **`WACS.ComponentModel.Harness.Runtime` 0.1.0** (new package):
+  `MemoryHelpers.cs` (~30 LOC), `StringCoding.cs` (~70 LOC),
+  csproj depending on `Wacs.Core` + `Wacs.ComponentModel.Parser`.
+- **Spike** (`Aot.Spike/HelloHarness.cs`): refactored to call into
+  `Wacs.ComponentModel.Harness.MemoryHelpers` /
+  `Wacs.ComponentModel.Harness.StringCoding`; inline `ReadI32LE`
+  + `Encoding.UTF8.*` removed. Csproj gains the new ProjectReference.
+
+## WACS.ComponentModel.Parser 0.1.0 / WACS.ComponentModel 0.5.1 — AOT-safe parser split
+
+`WACS.ComponentModel.Parser` is a new sibling package in the
+ComponentModel family. It carries the AOT-safe binary parser
+(`Wacs.ComponentModel.Runtime.Parser.*` — ten section readers,
+`ComponentBinaryParser`, `ComponentBinaryReader`) plus the typed
+output model (`Wacs.ComponentModel.Runtime.ComponentModule`) — pure
+byte walkers, no reflection, multi-target net8.0 + netstandard2.1
+with `IsAotCompatible` gated to net8.0.
+
+Existing `WACS.ComponentModel` (point bumped to 0.5.1) becomes a
+downstream consumer via project reference — the type names,
+namespaces, and `using` statements are unchanged for callers who
+take both packages transitively. Callers who want *only* the
+parser (the wit-harness consumers, per
+`docs/wit-harness-plan.md` and the closeout
+`docs/wit-harness-unity-spike.md` finding D) can now reference
+`WACS.ComponentModel.Parser` standalone and avoid pulling the
+reflective `ComponentInstance` / `ComponentBridge` /
+`HostInterfaceRuntime` surface (which carries
+`[RequiresDynamicCode]` + `[RequiresUnreferencedCode]` and isn't
+viable on Unity IL2CPP).
+
+The `WACS.ComponentModel.Parser` package is the first chunk of
+`docs/wit-harness-plan.md` productionization — Harness.Runtime
+and Harness.Lib will reference it directly.
+
+### What changed
+
+- **`WACS.ComponentModel.Parser` 0.1.0** (new package): split from
+  `Wacs.ComponentModel`. Contains
+  `Wacs.ComponentModel/Runtime/Parser/*.cs` (10 files, ~1900 LOC)
+  + `Wacs.ComponentModel/Runtime/ComponentModule.cs` (~530 LOC).
+- **`WACS.ComponentModel` 0.5.0 → 0.5.1** (point — transparent
+  refactor): adds a project reference to
+  `Wacs.ComponentModel.Parser`; the moved types remain
+  transitively visible to consumers. `Wacs.ComponentModel/WIT/BinaryWitDecoder.cs`
+  + `Wacs.ComponentModel/Runtime/ComponentInstance.cs` still use
+  the parser types unchanged.
+- **Spike**: `Spec.Test/components/fixtures/wit-harness-spike-hello/Aot.Spike/`
+  switches from referencing `WACS.ComponentModel` to
+  `WACS.ComponentModel.Parser` — drops the
+  `[RequiresDynamicCode]` surface from its AOT call graph and
+  resolves the prior `NETSDK1210` warning the
+  unconditional `IsAotCompatible` in `Wacs.ComponentModel` produced.
+
+Family tag: `WACS-ComponentModel-v0.4.0` → `WACS-ComponentModel-v0.5.0`
+(minor — new sibling package counts as a capability shift for the
+family).
+
+## WACS 0.15.22 — `CreateInvokerFunc<…,TResult>` unboxes via `Value`
+
+`WasmRuntime.CreateInvokerFunc<…,TResult>` (every arity, 0–9 args)
+wrapped the wasm return in `Value` (per `Delegates.AnonymousFunctionFromType`),
+boxed it via `DynamicInvoke`, and then attempted `(TResult)boxed`. For
+primitive `TResult` (e.g. `int`), that's an unbox-to-primitive against
+a boxed `Value` struct — `InvalidCastException` at every call.
+
+Added a `UnboxReturn<TResult>` helper that drops the `Value` wrapper
+by reading `Value.Scalar` — the existing discriminator-driven switch
+that already returns the typed field for `I32` / `I64` / `F32` /
+`F64` / `V128` / refs. The standard `(TResult)object` unbox then
+matches whatever primitive `Scalar` returned. When `TResult == Value`
+(the shape existing `BindingTests` use — bind to `Func<…, Value>`
+and lift via Value's implicit operators at the call site, e.g.
+`(int)invoker(1)`), the helper returns the boxed `Value` straight
+through. When the boxed object is *not* a `Value` (host-function
+returns flow through as primitives), the helper falls through to a
+direct `(TResult)boxed` unbox. Every `CreateInvokerFunc` arity
+(0–9 args) now routes through it.
+
+Surfaced by the wit-harness AOT spike (Package 3 of
+`docs/wit-harness-plan.md`): the spike's canonical-ABI call into the
+component's `cabi_realloc` / `greet` / `cabi_post_greet` exports
+needed typed `Func<int, int, int, int, int>` etc. delegates, which
+hit the bug on the first invocation. Hand-written harness now runs
+end-to-end on both `dotnet run` and a NativeAOT-published native
+binary, returning the expected `"Hello, World!"`.
+
+`CreateInvokerAction` is unaffected — the void-return path doesn't
+unbox.
+
+### What changed
+
+- **`WACS` 0.15.21 → 0.15.22** (point — bug fix):
+  - `WasmRuntimeExecution.cs` adds `UnboxReturn<TResult>` and routes
+    every `CreateInvokerFunc` overload through it.
+
 ## Warning hygiene pass — WACS 0.15.21 / WACS.Cli 1.8.1 / WACS.ComponentModel 0.5.0 / WACS.ComponentModel.Bindgen.Lib 0.1.2 / WACS.HostBindings.SourceGen 0.1.1 / WACS.WASI.NN.OpenVino 0.2.2 / WACS.WASI.Preview1 0.13.1 / WACS.Transpiler.Lib 0.9.1
 
 Solution-wide warning count: **390 → 0** (100% reduction).
