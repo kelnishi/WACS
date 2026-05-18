@@ -167,20 +167,5 @@ namespace Wacs.Core.Test
             Assert.Equal(2, inst.TagIndex);
             Assert.Equal(bytes, Render(inst));
         }
-
-        /// <summary>
-        /// Execute throws NotImplementedException for the opcodes
-        /// whose runtime mechanics require the BlockTarget handler-
-        /// frame integration. A guest that reaches them must fail
-        /// loudly rather than silently no-op, since these opcodes
-        /// carry no fallback semantics.
-        /// </summary>
-        [Theory]
-        [InlineData(typeof(InstResumeThrow))]
-        public void Execute_throws_NotImplemented(System.Type instType)
-        {
-            var inst = (InstructionBase)System.Activator.CreateInstance(instType)!;
-            Assert.Throws<System.NotImplementedException>(() => inst.Execute(null!));
-        }
     }
 }

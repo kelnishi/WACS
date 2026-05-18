@@ -169,6 +169,36 @@ namespace Wacs.Core.Test
         }
 
         /// <summary>
+        /// resume_throw injects an exception at the continuation's
+        /// entry. The throw unwinds the cont's empty control
+        /// stack, pops the cont's frame, then continues through
+        /// the caller's enclosing try_table which catches the
+        /// exception and branches to the on-tag block exit with
+        /// the exception's payload on stack.
+        /// </summary>
+        [Fact]
+        public void ResumeThrow_injects_exception_caught_by_outer_try_table()
+        {
+            var src = @"
+                (module
+                  (type $ft (func))
+                  (type $ct (cont $ft))
+                  (tag $e (param i32))
+                  (func $noop)
+                  (elem declare func $noop)
+                  (func (export ""go"") (result i32)
+                    (block $on_e (result i32)
+                      (try_table (catch $e $on_e)
+                        (resume_throw $ct $e
+                          (i32.const 77)
+                          (cont.new $ct (ref.func $noop))))
+                      i32.const 0
+                      return)))";
+            var (runtime, _) = Build(src);
+            Assert.Equal(77, InvokeI32(runtime, "go"));
+        }
+
+        /// <summary>
         /// Re-resuming a continuation that has already produced a
         /// value through suspend must trap: the one-shot semantics
         /// mark the reified continuation Completed at the

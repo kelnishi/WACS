@@ -1,5 +1,47 @@
 # Changelog
 
+## WACS 0.19.2 — `resume_throw` runtime parity
+
+Brings `resume_throw $ct $tag handler*` (0xE4) to runtime
+parity with `resume` and `switch`. `InstResumeThrow.Execute`
+was `NotImplementedException`; now it:
+
+1. Pops the target continuation, validates `Fresh`.
+2. Pops the exception tag's params from the operand stack.
+3. Allocates an `ExnInstance` via `Store.AllocateExn`.
+4. Installs the resume handlers (precomputed at Link time, same
+   shape as `InstResume`).
+5. Pushes the cont's bound prefix args (from any prior
+   `cont.bind`) and invokes the cont's function — sets up the
+   inner frame with the function's locals initialized.
+6. Pushes the exception ref onto the inner frame's opstack and
+   runs `InstThrowRef.ExecuteInstruction`, which unwinds the
+   cont's empty control stack, pops the cont's frame (auto-
+   pruning the resume handler), and continues unwinding
+   through the caller's enclosing `try_table` chain until
+   caught or surfaced as `UnhandledWasmException`.
+
+For one-shot semantics, this models the spec's
+function-entry-throw behavior: an outer `try_table` catching
+the tag receives the exception's payload as designed; an
+inner `try_table` inside the cont's function body would not
+fire since the throw injects before the function's first
+instruction. Re-entering a suspended cont via `resume_throw`
+isn't reachable today (suspended conts are marked Completed
+at suspension dispatch); the throw-at-entry path covers what
+WASIp3 cancellation semantics need.
+
+### Tests
+
+- New `ResumeThrow_injects_exception_caught_by_outer_try_table`:
+  resume_throw injects an exception that the caller's
+  try_table catches, the catch handler captures the payload
+  (77).
+- The `Execute_throws_NotImplemented` theory is gone — all six
+  stack-switching opcodes have runtime implementations.
+
+511 Wacs.Core + 380 ComponentModel + 826 Transpiler tests green.
+
 ## WACS 0.19.1 — `switch` runtime parity
 
 Brings `switch $ct $tag` (0xE5) to runtime parity with `resume`.

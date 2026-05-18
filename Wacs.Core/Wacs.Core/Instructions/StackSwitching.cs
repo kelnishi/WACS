@@ -470,8 +470,96 @@ namespace Wacs.Core.Instructions
             context.OpStack.PushResult(ft!.ResultType);
         }
 
-        public override void Execute(ExecContext context) =>
-            throw new NotImplementedException("resume_throw is not implemented.");
+        /// <summary>
+        /// Per-handler precomputed branch target — resolved at
+        /// Link time so the SuspensionException catch arm can
+        /// fast-branch without re-walking the link-label stack.
+        /// </summary>
+        public BlockTarget?[] HandlerTargets = Array.Empty<BlockTarget?>();
+
+        public override InstructionBase Link(ExecContext context, int pointer)
+        {
+            _ = base.Link(context, pointer);
+            HandlerTargets = new BlockTarget?[Handlers.Length];
+            for (int i = 0; i < Handlers.Length; i++)
+            {
+                HandlerTargets[i] = InstBranch.PrecomputeStack(context, Handlers[i].Label);
+            }
+            return this;
+        }
+
+        public override void Execute(ExecContext context)
+        {
+            // resume_throw's stack input is [t* (ref null $ct)],
+            // where t* is the exception tag's params. Pop them in
+            // order: cont first (top), then t*.
+            context.Assert(context.OpStack.Count > 0,
+                "resume_throw: empty operand stack.");
+            var contVal = context.OpStack.PopRefType();
+            if (contVal.IsNullRef)
+                throw new TrapException("resume_throw: null continuation reference.");
+            var cont = contVal.GcRef as ContInstance;
+            context.Assert(cont,
+                "resume_throw: ref does not point to a continuation.");
+            if (cont!.State != ContState.Fresh)
+                throw new TrapException(
+                    $"resume_throw: continuation is not resumable (state {cont.State}).");
+
+            // Resolve the exception tag and pop its params as the
+            // exception's field values.
+            context.Assert(context.Frame.Module.TagAddrs.Contains(Tag),
+                $"resume_throw: tag {Tag} not addressable in this frame's module.");
+            var tagAddr = context.Frame.Module.TagAddrs[Tag];
+            context.Assert(context.Store.Contains(tagAddr),
+                $"resume_throw: tag address {tagAddr} is not in the store.");
+            var tagInst = context.Store[tagAddr];
+            var tagFt = (tagInst.Type.Expansion as FunctionType)!;
+            var fields = new Stack<Value>();
+            context.OpStack.PopResults(tagFt.ParameterTypes, ref fields);
+
+            // Allocate the ExnInstance the throw will carry.
+            var exnAddr = context.Store.AllocateExn(tagAddr, fields);
+            var exn = context.Store[exnAddr];
+
+            // Install handlers (same shape as resume) — auto-
+            // pruned when the cont's frame unwinds out from under
+            // the injected throw. Bound args from any prior
+            // cont.bind go onto the opstack as the function's
+            // leading params.
+            foreach (var arg in cont.BoundArgs)
+                context.OpStack.PushValue(arg);
+
+            context.Assert(context.Store.Contains(cont.Function),
+                $"resume_throw: function address {cont.Function} is not in the store.");
+            var funcInst = context.Store[cont.Function];
+
+            context.ActiveResumeHandlers.Push(
+                new ResumeHandlerFrame(Handlers, HandlerTargets, context.StackHeight + 1, cont));
+            cont.State = ContState.Running;
+            try
+            {
+                context.InvokeResolved(funcInst);
+            }
+            catch
+            {
+                if (context.ActiveResumeHandlers.Count > 0)
+                    context.ActiveResumeHandlers.Pop();
+                cont.State = ContState.Completed;
+                throw;
+            }
+
+            // The cont's frame is now on the call stack with the
+            // function's locals initialized but no instructions
+            // executed. Push the exception reference and run the
+            // throw_ref unwind — this walks the cont's (empty)
+            // control stack, FunctionReturn-pops the cont's frame
+            // (which auto-prunes the resume handler), then
+            // continues unwinding through the caller's enclosing
+            // try_tables until something catches or the exception
+            // surfaces as UnhandledWasmException.
+            context.OpStack.PushValue(new Value(ValType.Exn, exn));
+            InstThrowRef.ExecuteInstruction(context, this);
+        }
 
         public override InstructionBase Parse(BinaryReader reader)
         {
