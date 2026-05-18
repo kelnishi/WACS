@@ -132,31 +132,42 @@ namespace Wacs.ComponentModel.Harness.Lib
 
             var handleField = tb.DefineField("_handle", typeof(int),
                 FieldAttributes.Private);
+            // _dtor: the guest's <iface>#[dtor]<name> wasm export —
+            // runs the user-side Drop impl with the rep.
+            var dtorField = tb.DefineField("_dtor", typeof(Action<int>),
+                FieldAttributes.Private | FieldAttributes.InitOnly);
+            // _drop: the canonical-ABI [resource-drop]<name> adapter
+            // (host-bound via CanonResourceBinder) that removes the
+            // slot from the runtime's handle table.
             var dropField = tb.DefineField("_drop", typeof(Action<int>),
                 FieldAttributes.Private | FieldAttributes.InitOnly);
             registry.ResourceHandleFields[res] = handleField;
 
-            // Internal ctor (int handle, Action<int> drop)
+            // Internal ctor (int handle, Action<int> dtor, Action<int> drop).
+            // Dispose runs dtor THEN drop — keeping the two wasm-side
+            // calls top-level (not nested) sidesteps a WACS runtime
+            // re-entrancy bug where the canon-adapter invoking the
+            // dtor inline confuses the interpreter's frame stack.
             var ctor = tb.DefineConstructor(
                 MethodAttributes.Assembly | MethodAttributes.HideBySig
                     | MethodAttributes.SpecialName | MethodAttributes.RTSpecialName,
                 CallingConventions.HasThis,
-                new[] { typeof(int), typeof(Action<int>) });
+                new[] { typeof(int), typeof(Action<int>), typeof(Action<int>) });
             var cil = ctor.GetILGenerator();
             cil.Emit(OpCodes.Ldarg_0);
             cil.Emit(OpCodes.Call, typeof(object).GetConstructor(Type.EmptyTypes)!);
-            cil.Emit(OpCodes.Ldarg_0);
-            cil.Emit(OpCodes.Ldarg_1);
-            cil.Emit(OpCodes.Stfld, handleField);
-            cil.Emit(OpCodes.Ldarg_0);
-            cil.Emit(OpCodes.Ldarg_2);
-            cil.Emit(OpCodes.Stfld, dropField);
+            cil.Emit(OpCodes.Ldarg_0); cil.Emit(OpCodes.Ldarg_1); cil.Emit(OpCodes.Stfld, handleField);
+            cil.Emit(OpCodes.Ldarg_0); cil.Emit(OpCodes.Ldarg_2); cil.Emit(OpCodes.Stfld, dtorField);
+            cil.Emit(OpCodes.Ldarg_0); cil.Emit(OpCodes.Ldarg_3); cil.Emit(OpCodes.Stfld, dropField);
             cil.Emit(OpCodes.Ret);
             registry.ResourceCtors[res] = ctor;
 
             // public void Dispose() {
-            //     if (_handle != 0) _drop(_handle);
-            //     _handle = 0;
+            //     if (_handle != 0) {
+            //         _dtor(_handle);    // run guest cleanup (rep == handle in v1)
+            //         _drop(_handle);    // free the handle-table slot
+            //         _handle = 0;
+            //     }
             // }
             var dispose = tb.DefineMethod("Dispose",
                 MethodAttributes.Public | MethodAttributes.Virtual | MethodAttributes.HideBySig
@@ -164,21 +175,21 @@ namespace Wacs.ComponentModel.Harness.Lib
                 typeof(void), Type.EmptyTypes);
             var dil = dispose.GetILGenerator();
             var skipDrop = dil.DefineLabel();
-            // if (_handle != 0)
+            var invokeAction = typeof(Action<int>).GetMethod("Invoke")!;
             dil.Emit(OpCodes.Ldarg_0);
             dil.Emit(OpCodes.Ldfld, handleField);
             dil.Emit(OpCodes.Brfalse, skipDrop);
-            // _drop(_handle);
-            dil.Emit(OpCodes.Ldarg_0);
-            dil.Emit(OpCodes.Ldfld, dropField);
-            dil.Emit(OpCodes.Ldarg_0);
-            dil.Emit(OpCodes.Ldfld, handleField);
-            dil.Emit(OpCodes.Callvirt, typeof(Action<int>).GetMethod("Invoke")!);
+            // _dtor(_handle)
+            dil.Emit(OpCodes.Ldarg_0); dil.Emit(OpCodes.Ldfld, dtorField);
+            dil.Emit(OpCodes.Ldarg_0); dil.Emit(OpCodes.Ldfld, handleField);
+            dil.Emit(OpCodes.Callvirt, invokeAction);
+            // _drop(_handle)
+            dil.Emit(OpCodes.Ldarg_0); dil.Emit(OpCodes.Ldfld, dropField);
+            dil.Emit(OpCodes.Ldarg_0); dil.Emit(OpCodes.Ldfld, handleField);
+            dil.Emit(OpCodes.Callvirt, invokeAction);
+            // _handle = 0
+            dil.Emit(OpCodes.Ldarg_0); dil.Emit(OpCodes.Ldc_I4_0); dil.Emit(OpCodes.Stfld, handleField);
             dil.MarkLabel(skipDrop);
-            // _handle = 0;
-            dil.Emit(OpCodes.Ldarg_0);
-            dil.Emit(OpCodes.Ldc_I4_0);
-            dil.Emit(OpCodes.Stfld, handleField);
             dil.Emit(OpCodes.Ret);
             tb.DefineMethodOverride(dispose, typeof(IDisposable).GetMethod(nameof(IDisposable.Dispose))!);
 
@@ -588,9 +599,15 @@ namespace Wacs.ComponentModel.Harness.Lib
         public Dictionary<CtResourceType, ConstructorBuilder> ResourceCtors { get; } = new();
         // Per-resource _handle field (so lift/lower can read/write it).
         public Dictionary<CtResourceType, FieldBuilder> ResourceHandleFields { get; } = new();
-        // Per-resource Action<int> drop field on the harness class.
-        // Wrapper IL that lifts a resource return pushes this field
+        // Per-resource Action<int> drop field on the harness class
+        // (the canonical [resource-drop] adapter — table cleanup).
+        // Wrapper IL that lifts a resource return pushes this
         // before newobj-ing the resource class.
         public Dictionary<CtResourceType, FieldBuilder> HarnessDropFields { get; } = new();
+        // Per-resource Action<int> dtor field on the harness class
+        // (the guest's <iface>#[dtor]<name> destructor). Resource
+        // Dispose calls dtor + drop in sequence; both must be passed
+        // at lift time.
+        public Dictionary<CtResourceType, FieldBuilder> HarnessDtorFields { get; } = new();
     }
 }

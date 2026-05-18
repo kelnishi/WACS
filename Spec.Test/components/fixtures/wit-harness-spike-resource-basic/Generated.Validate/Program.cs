@@ -133,26 +133,9 @@ namespace WitHarnessSpike.ResourceBasic.Generated.Validate
 
         private static void BindWasiStubs(WasmRuntime runtime)
         {
-            // The wasm component imports [export]<iface>.[resource-new]
-            // and .[resource-drop] from the host — these are the
-            // canonical-ABI handle-table intrinsics. WACS's component
-            // runtime doesn't yet construct these adapters itself
-            // (it counts them for index-space accounting but doesn't
-            // bind), so we provide rep-as-handle stubs here: every
-            // new() returns a fresh int, drop is a no-op. Without a
-            // real handle table the wasm-side dtor doesn't fire from
-            // drop, but the harness-side wiring (Dispose -> wasm drop
-            // call -> Action<int>.Invoke) still gets exercised.
-            // Rep-as-handle 1:1 — the rep IS the handle, so the
-            // dtor (which expects a rep / Rust struct pointer) gets
-            // a real pointer when invoked with the handle on drop.
-            runtime.BindHostFunction<Func<ExecContext, int, int>>(
-                ("[export]wacs:resource-basic-spike/store", "[resource-new]bucket"),
-                (_, rep) => rep);
-            runtime.BindHostFunction<Action<ExecContext, int>>(
-                ("[export]wacs:resource-basic-spike/store", "[resource-drop]bucket"),
-                (_, _) => { /* no-op stub; runtime handle table TBD */ });
-
+            // Canon-resource intrinsics are bound by WACS's runtime
+            // (Wacs.Core.Runtime.CanonResourceBinder) — no host
+            // stubs needed since the handle-table support landed.
             Action<ExecContext, int> drop = (_, _) =>
                 throw new NotSupportedException("App harness does not implement WASI runtime.");
             runtime.BindHostFunction<Action<ExecContext, int>>(("wasi:io/error@0.2.0", "[resource-drop]error"), drop);

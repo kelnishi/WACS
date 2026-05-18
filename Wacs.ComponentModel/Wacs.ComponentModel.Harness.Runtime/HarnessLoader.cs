@@ -65,14 +65,29 @@ namespace Wacs.ComponentModel.Harness
                     "Component contains no core wasm modules.");
 
             var runtime = new WasmRuntime();
-            bindImports?.Invoke(runtime);
 
             Wacs.Core.Module coreModule;
             using (var coreMs = new MemoryStream(coreModuleBytes))
                 coreModule = BinaryModuleParser.ParseWasm(coreMs);
 
+            // Canonical-ABI resource handle tables — bind new/drop/rep
+            // adapters BEFORE bindImports + InstantiateModule so the
+            // inner module's import resolution finds them. Without
+            // this, components that declare exported resources fail
+            // at instantiation: "[export]<iface>.[resource-new]<name>
+            // not provided by the environment". Late-resolve dtor
+            // trampolines from the freshly-built core instance.
+            var (_, dtorBindings) =
+                Wacs.Core.Runtime.CanonResourceBinder
+                    .BindImports(runtime, coreModule);
+
+            bindImports?.Invoke(runtime);
+
             var moduleInst = runtime.InstantiateModule(coreModule);
             runtime.RegisterModule(registerName, moduleInst);
+
+            Wacs.Core.Runtime.CanonResourceBinder
+                .ResolveDtorTrampolines(runtime, moduleInst, dtorBindings);
 
             return new LoadedComponent(runtime, moduleInst);
         }

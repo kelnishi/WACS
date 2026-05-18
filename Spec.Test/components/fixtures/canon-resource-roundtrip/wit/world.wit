@@ -1,0 +1,12 @@
+package wacs:canon-resource-test;
+
+interface counter {
+    resource counter {
+        constructor(initial: u32);
+        bump: func() -> u32;
+    }
+}
+
+world app {
+    export counter;
+}

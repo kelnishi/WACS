@@ -6,7 +6,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
-using Wacs.ComponentModel.Runtime;
+using Wacs.Core.Runtime;
 using Xunit;
 
 namespace Wacs.ComponentModel.Test
@@ -16,24 +16,44 @@ namespace Wacs.ComponentModel.Test
     /// component-instance handle table backing the canonical-ABI
     /// <c>canon resource.new / resource.drop / resource.rep</c>
     /// intrinsics.
+    ///
+    /// <para>v1 is <strong>rep-as-handle</strong> 1:1 mapping —
+    /// the handle returned by New(rep) IS rep. This matches what
+    /// wit-bindgen-compiled Rust guests expect (they stash rep
+    /// statically and dereference handle as rep without calling
+    /// [resource-rep]).</para>
     /// </summary>
     public class ResourceHandleTableTests
     {
         [Fact]
-        public void New_assigns_increasing_handles_starting_at_1()
+        public void New_returns_rep_as_handle()
         {
             var t = new ResourceHandleTable();
-            Assert.Equal(1, t.New(100));
-            Assert.Equal(2, t.New(200));
-            Assert.Equal(3, t.New(300));
+            Assert.Equal(0x10001, t.New(0x10001));
+            Assert.Equal(0x10042, t.New(0x10042));
         }
 
         [Fact]
-        public void Rep_returns_stored_value()
+        public void New_rejects_zero_rep()
         {
             var t = new ResourceHandleTable();
-            var h = t.New(42);
-            Assert.Equal(42, t.Rep(h));
+            Assert.Throws<InvalidOperationException>(() => t.New(0));
+        }
+
+        [Fact]
+        public void New_rejects_duplicate_rep()
+        {
+            var t = new ResourceHandleTable();
+            t.New(42);
+            Assert.Throws<InvalidOperationException>(() => t.New(42));
+        }
+
+        [Fact]
+        public void Rep_returns_handle_when_live()
+        {
+            var t = new ResourceHandleTable();
+            var h = t.New(0xABCD);
+            Assert.Equal(0xABCD, t.Rep(h));
         }
 
         [Fact]
@@ -44,7 +64,7 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
-        public void Drop_returns_rep_and_removes_slot()
+        public void Drop_returns_handle_and_removes_slot()
         {
             var t = new ResourceHandleTable();
             var h = t.New(42);
@@ -77,35 +97,22 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
-        public void New_reuses_freelist_after_drop()
-        {
-            var t = new ResourceHandleTable();
-            var h1 = t.New(100);
-            var h2 = t.New(200);
-            t.Drop(h1);
-            var h3 = t.New(300);
-            // h3 should reuse h1's slot rather than allocate fresh.
-            Assert.Equal(h1, h3);
-            Assert.Equal(300, t.Rep(h3));
-            Assert.Equal(200, t.Rep(h2));
-        }
-
-        [Fact]
         public void Many_news_and_drops_stay_consistent()
         {
             var t = new ResourceHandleTable();
-            var handles = new int[100];
-            for (int i = 0; i < 100; i++) handles[i] = t.New(i * 10);
+            var reps = new int[100];
+            for (int i = 0; i < 100; i++) reps[i] = i + 1;   // avoid 0
+            foreach (var r in reps) t.New(r);
             Assert.Equal(100, t.LiveCount);
-            for (int i = 0; i < 100; i++) Assert.Equal(i * 10, t.Rep(handles[i]));
-            for (int i = 0; i < 100; i += 2) t.Drop(handles[i]);
+            foreach (var r in reps) Assert.Equal(r, t.Rep(r));
+            for (int i = 0; i < 100; i += 2) t.Drop(reps[i]);
             Assert.Equal(50, t.LiveCount);
-            for (int i = 1; i < 100; i += 2) Assert.Equal(i * 10, t.Rep(handles[i]));
-            for (int i = 0; i < 100; i += 2) Assert.False(t.Contains(handles[i]));
+            for (int i = 1; i < 100; i += 2) Assert.Equal(reps[i], t.Rep(reps[i]));
+            for (int i = 0; i < 100; i += 2) Assert.False(t.Contains(reps[i]));
         }
 
         [Fact]
-        public void Contains_returns_true_for_live_handle_false_for_dropped()
+        public void Contains_true_for_live_handle_false_for_dropped()
         {
             var t = new ResourceHandleTable();
             var h = t.New(7);

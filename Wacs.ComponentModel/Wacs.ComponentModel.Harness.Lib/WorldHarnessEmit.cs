@@ -40,6 +40,17 @@ namespace Wacs.ComponentModel.Harness.Lib
             typeof(HarnessLoader).GetMethod(nameof(HarnessLoader.RequireMemoryExport), BindingFlags.Public | BindingFlags.Static)!;
         private static readonly MethodInfo HarnessLoader_RequireFunctionExport =
             typeof(HarnessLoader).GetMethod(nameof(HarnessLoader.RequireFunctionExport), BindingFlags.Public | BindingFlags.Static)!;
+        // WasmRuntime.GetExportedFunction((string module, string entity))
+        // — used to look up host-bound canon adapters (the canonical
+        // [resource-drop] entry point is bound on the runtime by
+        // CanonResourceBinder, not exported by the core module, so
+        // RequireFunctionExport wouldn't find it).
+        private static readonly MethodInfo WasmRuntime_GetExportedFunction =
+            typeof(WasmRuntime).GetMethod(nameof(WasmRuntime.GetExportedFunction),
+                BindingFlags.Public | BindingFlags.Instance,
+                null,
+                new[] { typeof(ValueTuple<string, string>) },
+                null)!;
         private static readonly MethodInfo LoadedComponent_Runtime =
             typeof(LoadedComponent).GetProperty(nameof(LoadedComponent.Runtime))!.GetGetMethod()!;
         private static readonly MethodInfo LoadedComponent_Module =
@@ -176,24 +187,27 @@ namespace Wacs.ComponentModel.Harness.Lib
                 {
                     if (CanonicalAbi.Deref(t.Type) is not CtResourceType res) continue;
                     var slug = HarnessNaming.InterfaceFunctionSlug(iface, t.Name);
-                    var field = typeBuilder.DefineField(
+                    // Two fields per resource: the guest's dtor
+                    // (runs cleanup) and the canon `[resource-drop]`
+                    // adapter (removes the handle-table slot).
+                    // Resource class's Dispose runs both in order
+                    // as separate top-level calls — keeps them out
+                    // of a nested wasm-from-host-from-wasm context
+                    // that WACS's runtime doesn't yet handle.
+                    var dtorField = typeBuilder.DefineField(
+                        "_dtor_" + slug, typeof(Action<int>),
+                        FieldAttributes.Private | FieldAttributes.InitOnly);
+                    var dropField = typeBuilder.DefineField(
                         "_drop_" + slug, typeof(Action<int>),
                         FieldAttributes.Private | FieldAttributes.InitOnly);
-                    // The canonical-ABI `[resource-drop]<name>`
-                    // adapter is a SYNTHETIC component-level binding
-                    // that WACS's component runtime doesn't yet
-                    // surface as a host-callable export. The real
-                    // core export is `<iface>#[dtor]<name>` — the
-                    // guest-emitted destructor that runs cleanup
-                    // when a resource is freed. Calling it directly
-                    // skips the handle-table lookup (fine in the
-                    // rep-as-handle model) and runs the user-side
-                    // Drop impl. Revisit when WACS implements a
-                    // proper component-instance handle table.
-                    var wasmName = EntryPoints.InterfaceBase(iface)
-                        + "#[dtor]" + t.Name;
-                    resourceDrops.Add(new ResourceDrop(res, wasmName, field));
-                    registry.HarnessDropFields[res] = field;
+                    var dropWasmName = "[resource-drop]" + t.Name;
+                    var dropWasmModule = "[export]" + EntryPoints.InterfaceBase(iface);
+                    var dtorWasmName = EntryPoints.InterfaceBase(iface) + "#[dtor]" + t.Name;
+                    resourceDrops.Add(new ResourceDrop(res,
+                        dtorWasmName, dropWasmModule, dropWasmName,
+                        dtorField, dropField));
+                    registry.HarnessDropFields[res] = dropField;
+                    registry.HarnessDtorFields[res] = dtorField;
                 }
             }
 
@@ -321,13 +335,28 @@ namespace Wacs.ComponentModel.Harness.Lib
         private sealed class ResourceDrop
         {
             public CtResourceType Resource { get; }
-            public string WasmName { get; }
-            public FieldBuilder Field { get; }
-            public ResourceDrop(CtResourceType resource, string wasmName, FieldBuilder field)
+            // Guest-emitted destructor — core export at
+            // "<iface>#[dtor]<name>", takes the rep (== handle
+            // in rep-as-handle), runs user-side Drop impl.
+            public string DtorWasmName { get; }
+            public FieldBuilder DtorField { get; }
+            // Canonical-ABI [resource-drop] adapter — host
+            // binding at (DropWasmModule, DropWasmName).
+            // Removes the handle from the runtime's table.
+            public string DropWasmModule { get; }
+            public string DropWasmName { get; }
+            public FieldBuilder DropField { get; }
+            public ResourceDrop(CtResourceType resource,
+                                string dtorWasmName,
+                                string dropWasmModule, string dropWasmName,
+                                FieldBuilder dtorField, FieldBuilder dropField)
             {
                 Resource = resource;
-                WasmName = wasmName;
-                Field = field;
+                DtorWasmName = dtorWasmName;
+                DropWasmModule = dropWasmModule;
+                DropWasmName = dropWasmName;
+                DtorField = dtorField;
+                DropField = dropField;
             }
         }
 
@@ -794,8 +823,13 @@ namespace Wacs.ComponentModel.Harness.Lib
                 paramTypes.Add(fe.InvokerType);
                 if (fe.NeedsPostReturn) paramTypes.Add(typeof(Action<int>));
             }
+            // Two Action<int> per resource: dtor then drop (in
+            // ResourceDrop.DtorField then DropField order).
             foreach (var _ in resourceDrops)
-                paramTypes.Add(typeof(Action<int>));
+            {
+                paramTypes.Add(typeof(Action<int>));    // dtor
+                paramTypes.Add(typeof(Action<int>));    // drop
+            }
 
             var ctor = typeBuilder.DefineConstructor(
                 MethodAttributes.Private | MethodAttributes.HideBySig
@@ -818,7 +852,10 @@ namespace Wacs.ComponentModel.Harness.Lib
                     EmitStoreFromArg(il, fe.PostInvokerField!, argIdx++);
             }
             foreach (var rd in resourceDrops)
-                EmitStoreFromArg(il, rd.Field, argIdx++);
+            {
+                EmitStoreFromArg(il, rd.DtorField, argIdx++);
+                EmitStoreFromArg(il, rd.DropField, argIdx++);
+            }
 
             il.Emit(OpCodes.Ret);
             return ctor;
@@ -924,21 +961,43 @@ namespace Wacs.ComponentModel.Harness.Lib
                 perExportLocals.Add((invokerLocal, postLocal));
             }
 
-            // Per-resource drop invoker.
-            var dropLocals = new List<LocalBuilder>();
+            // Per-resource (dtor, drop) invoker pair. dtor is a
+            // regular core export (RequireFunctionExport); drop is
+            // a host-bound canon adapter (GetExportedFunction
+            // checks bindings before module exports).
+            var resourceLocals = new List<(LocalBuilder Dtor, LocalBuilder Drop)>();
+            var tupleCtor = typeof(ValueTuple<string, string>).GetConstructor(
+                new[] { typeof(string), typeof(string) })!;
             foreach (var rd in resourceDrops)
             {
-                var dropAddrLocal = il.DeclareLocal(typeof(FuncAddr));
+                // Dtor: <iface>#[dtor]<name> as a core export.
+                var dtorAddrLocal = il.DeclareLocal(typeof(FuncAddr));
                 il.Emit(OpCodes.Ldloc, moduleLocal);
-                il.Emit(OpCodes.Ldstr, rd.WasmName);
+                il.Emit(OpCodes.Ldstr, rd.DtorWasmName);
                 il.Emit(OpCodes.Call, HarnessLoader_RequireFunctionExport);
+                il.Emit(OpCodes.Stloc, dtorAddrLocal);
+
+                var dtorLocal = il.DeclareLocal(typeof(Action<int>));
+                EmitCreateInvokerFunc(il, runtimeLocal, dtorAddrLocal,
+                    new[] { typeof(int) }, null);
+                il.Emit(OpCodes.Stloc, dtorLocal);
+
+                // Drop: [resource-drop]<name> as a host binding
+                // at module="[export]<iface>".
+                var dropAddrLocal = il.DeclareLocal(typeof(FuncAddr));
+                il.Emit(OpCodes.Ldloc, runtimeLocal);
+                il.Emit(OpCodes.Ldstr, rd.DropWasmModule);
+                il.Emit(OpCodes.Ldstr, rd.DropWasmName);
+                il.Emit(OpCodes.Newobj, tupleCtor);
+                il.Emit(OpCodes.Callvirt, WasmRuntime_GetExportedFunction);
                 il.Emit(OpCodes.Stloc, dropAddrLocal);
 
                 var dropLocal = il.DeclareLocal(typeof(Action<int>));
                 EmitCreateInvokerFunc(il, runtimeLocal, dropAddrLocal,
                     new[] { typeof(int) }, null);
                 il.Emit(OpCodes.Stloc, dropLocal);
-                dropLocals.Add(dropLocal);
+
+                resourceLocals.Add((dtorLocal, dropLocal));
             }
 
             // Construct harness instance. The ctor's metadata token is
@@ -952,8 +1011,11 @@ namespace Wacs.ComponentModel.Harness.Lib
                 il.Emit(OpCodes.Ldloc, invoker);
                 if (post != null) il.Emit(OpCodes.Ldloc, post);
             }
-            foreach (var drop in dropLocals)
+            foreach (var (dtor, drop) in resourceLocals)
+            {
+                il.Emit(OpCodes.Ldloc, dtor);
                 il.Emit(OpCodes.Ldloc, drop);
+            }
             il.Emit(OpCodes.Newobj, ctor);
             il.Emit(OpCodes.Ret);
         }
@@ -1308,13 +1370,15 @@ namespace Wacs.ComponentModel.Harness.Lib
                 var resRet = TryGetResource(retDeref);
                 if (resRet != null)
                 {
-                    // Stack has the int handle from the invoker. Push
-                    // the drop delegate field, then newobj the resource
-                    // class (which takes (int handle, Action<int> drop)).
+                    // Stack has the int handle from the invoker.
+                    // Push (dtor, drop) delegate fields, then
+                    // newobj the resource class
+                    // (which takes (int handle, Action<int> dtor, Action<int> drop)).
                     var resCtor = registry.ResourceCtors[resRet];
+                    var dtorFld = registry.HarnessDtorFields[resRet];
                     var dropFld = registry.HarnessDropFields[resRet];
-                    il.Emit(OpCodes.Ldarg_0);
-                    il.Emit(OpCodes.Ldfld, dropFld);
+                    il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, dtorFld);
+                    il.Emit(OpCodes.Ldarg_0); il.Emit(OpCodes.Ldfld, dropFld);
                     il.Emit(OpCodes.Newobj, resCtor);
                     il.Emit(OpCodes.Ret);
                     return;

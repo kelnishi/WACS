@@ -152,17 +152,9 @@ namespace WitHarnessSpike.ResourceMethods.Generated.Validate
 
         private static void BindWasiStubs(WasmRuntime runtime)
         {
-            // Rep-as-handle 1:1 stubs (see resource-basic fixture).
-            runtime.BindHostFunction<Func<ExecContext, int, int>>(
-                ("[export]wacs:resource-methods-spike/counter", "[resource-new]counter"),
-                (_, rep) => rep);
-            runtime.BindHostFunction<Action<ExecContext, int>>(
-                ("[export]wacs:resource-methods-spike/counter", "[resource-drop]counter"),
-                (_, _) => { });
-            runtime.BindHostFunction<Func<ExecContext, int, int>>(
-                ("[export]wacs:resource-methods-spike/counter", "[resource-rep]counter"),
-                (_, h) => h);
-
+            // Canon-resource intrinsics are bound by WACS's runtime
+            // (Wacs.Core.Runtime.CanonResourceBinder) — no host
+            // stubs needed since the handle-table support landed.
             Action<ExecContext, int> drop = (_, _) =>
                 throw new NotSupportedException("Demo harness does not implement WASI runtime.");
             runtime.BindHostFunction<Action<ExecContext, int>>(("wasi:io/error@0.2.0", "[resource-drop]error"), drop);
