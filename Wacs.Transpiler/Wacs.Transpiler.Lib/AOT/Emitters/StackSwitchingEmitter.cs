@@ -136,7 +136,8 @@ namespace Wacs.Transpiler.AOT.Emitters
         public static void Emit(
             ILGenerator il, InstructionBase inst, ModuleInstance moduleInst,
             System.Collections.Generic.Stack<EmitBlock> blockStack,
-            Action<int> incTryDepth, Action<int> decTryDepth)
+            Action<int> incTryDepth, Action<int> decTryDepth,
+            System.Collections.Generic.Dictionary<int, FieldInfo> contInvokerFields)
         {
             switch (inst)
             {
@@ -150,13 +151,13 @@ namespace Wacs.Transpiler.AOT.Emitters
                     EmitSuspend(il, su, moduleInst);
                     return;
                 case InstResume re:
-                    EmitResume(il, re, moduleInst, blockStack, incTryDepth, decTryDepth);
+                    EmitResume(il, re, moduleInst, blockStack, incTryDepth, decTryDepth, contInvokerFields);
                     return;
                 case InstResumeThrow rt:
-                    EmitResumeThrow(il, rt, moduleInst, blockStack, incTryDepth, decTryDepth);
+                    EmitResumeThrow(il, rt, moduleInst, blockStack, incTryDepth, decTryDepth, contInvokerFields);
                     return;
                 case InstSwitch sw:
-                    EmitSwitch(il, sw, moduleInst);
+                    EmitSwitch(il, sw, moduleInst, contInvokerFields);
                     return;
             }
             throw new TranspilerException(
@@ -294,7 +295,8 @@ namespace Wacs.Transpiler.AOT.Emitters
         // the runtime OpStack — helper returns them as Value[].
         // Switch does not install a new handler frame.
         private static void EmitSwitch(
-            ILGenerator il, InstSwitch inst, ModuleInstance moduleInst)
+            ILGenerator il, InstSwitch inst, ModuleInstance moduleInst,
+            System.Collections.Generic.Dictionary<int, FieldInfo> contInvokerFields)
         {
             var tagParamTypes = ResolveTagParamTypes(moduleInst, (TagIdx)(uint)inst.TagIndex);
             int t1Arity = tagParamTypes.Length - 1; // last is self-ref, not on stack
@@ -333,6 +335,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             il.Emit(OpCodes.Ldc_I4, inst.TagIndex);
             il.Emit(OpCodes.Ldloc, argsLocal);
             il.Emit(OpCodes.Ldloc, contLocal);
+            EmitLoadStandaloneInvoker(il, inst.TypeIndex, contInvokerFields);
             il.Emit(OpCodes.Call, SwitchMethod);
 
             // Results: Value[] on CIL stack. Unpack to typed
@@ -353,7 +356,8 @@ namespace Wacs.Transpiler.AOT.Emitters
         private static void EmitResume(
             ILGenerator il, InstResume inst, ModuleInstance moduleInst,
             System.Collections.Generic.Stack<EmitBlock> blockStack,
-            Action<int> incTryDepth, Action<int> decTryDepth)
+            Action<int> incTryDepth, Action<int> decTryDepth,
+            System.Collections.Generic.Dictionary<int, FieldInfo> contInvokerFields)
         {
             var contFt = ResolveFuncType(moduleInst, inst.TypeIndex);
             int t1Arity = contFt.ParameterTypes.Arity;
@@ -370,6 +374,7 @@ namespace Wacs.Transpiler.AOT.Emitters
                     il.Emit(OpCodes.Ldloc, saveArgsLocal);
                     il.Emit(OpCodes.Ldloc, saveContLocal);
                     il.Emit(OpCodes.Ldloc, saveHandlersLocal);
+                    EmitLoadStandaloneInvoker(il, inst.TypeIndex, contInvokerFields);
                     il.Emit(OpCodes.Call, ResumeMethod);
                 });
         }
@@ -383,7 +388,8 @@ namespace Wacs.Transpiler.AOT.Emitters
         private static void EmitResumeThrow(
             ILGenerator il, InstResumeThrow inst, ModuleInstance moduleInst,
             System.Collections.Generic.Stack<EmitBlock> blockStack,
-            Action<int> incTryDepth, Action<int> decTryDepth)
+            Action<int> incTryDepth, Action<int> decTryDepth,
+            System.Collections.Generic.Dictionary<int, FieldInfo> contInvokerFields)
         {
             var contFt = ResolveFuncType(moduleInst, inst.TypeIndex);
             var excTagParams = ResolveTagParamTypes(moduleInst, (TagIdx)(uint)inst.TagIndex);
@@ -401,8 +407,23 @@ namespace Wacs.Transpiler.AOT.Emitters
                     il.Emit(OpCodes.Ldloc, saveArgsLocal);
                     il.Emit(OpCodes.Ldloc, saveContLocal);
                     il.Emit(OpCodes.Ldloc, saveHandlersLocal);
+                    EmitLoadStandaloneInvoker(il, inst.TypeIndex, contInvokerFields);
                     il.Emit(OpCodes.Call, ResumeThrowMethod);
                 });
+        }
+
+        // Load the static StandaloneContInvoker.Instance field
+        // generated for this continuation typeidx, or ldnull if
+        // none was generated (helper will route the standalone
+        // call to its clear NotSupportedException).
+        private static void EmitLoadStandaloneInvoker(
+            ILGenerator il, int contTypeIdx,
+            System.Collections.Generic.Dictionary<int, FieldInfo> contInvokerFields)
+        {
+            if (contInvokerFields.TryGetValue(contTypeIdx, out var field))
+                il.Emit(OpCodes.Ldsfld, field);
+            else
+                il.Emit(OpCodes.Ldnull);
         }
 
         // Shared scaffolding for resume / resume_throw: save args

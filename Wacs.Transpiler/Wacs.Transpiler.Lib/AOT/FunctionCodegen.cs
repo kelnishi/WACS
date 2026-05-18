@@ -108,6 +108,15 @@ namespace Wacs.Transpiler.AOT
         private Type InternalType(ValType t) => ModuleTranspiler.MapValTypeInternal(t, _moduleInst);
         private bool IsGcRef(ValType t) => ModuleTranspiler.IsGcRefType(t, _moduleInst);
 
+        // Per-cont-typeidx registry of generated
+        // StandaloneContInvoker Instance fields. Populated by
+        // ContInvokerEmitter before function emit starts. Null
+        // entries mean no invoker was generated (the typeidx had
+        // an unsupported signature shape — e.g., multi-result —
+        // and standalone-mode resume/switch will fall back to
+        // NotSupportedException via the helper).
+        internal readonly System.Collections.Generic.Dictionary<int, FieldInfo> _contInvokerFields;
+
         public FunctionCodegen(
             MethodBuilder method,
             FunctionInstance funcInst,
@@ -117,7 +126,8 @@ namespace Wacs.Transpiler.AOT
             GcTypeEmitter gcTypes,
             FunctionType[] allFunctionTypes,
             TranspilerOptions options,
-            DiagnosticCollector diagnostics)
+            DiagnosticCollector diagnostics,
+            System.Collections.Generic.Dictionary<int, FieldInfo>? contInvokerFields = null)
         {
             _method = method;
             _funcInst = funcInst;
@@ -133,6 +143,8 @@ namespace Wacs.Transpiler.AOT
             _allFunctionTypes = allFunctionTypes;
             _options = options;
             _diagnostics = diagnostics;
+            _contInvokerFields = contInvokerFields
+                ?? new System.Collections.Generic.Dictionary<int, FieldInfo>();
         }
 
         /// <summary>
@@ -438,7 +450,8 @@ namespace Wacs.Transpiler.AOT
                 StackSwitchingEmitter.Emit(il, inst, _moduleInst,
                     _blockStack,
                     inc => _tryDepth += inc,
-                    dec => _tryDepth -= dec);
+                    dec => _tryDepth -= dec,
+                    _contInvokerFields);
                 TrackStackSwitchingStackEffect(inst, before: false);
                 // suspend never returns normally — mark unreachable.
                 if (op == WasmOpCode.Suspend)

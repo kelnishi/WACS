@@ -198,6 +198,37 @@ namespace Wacs.Transpiler.Test
             Assert.Equal(42, got[0].Data.Int32);
         }
 
+        /// <summary>
+        /// Standalone-mode end-to-end: transpile a module that
+        /// uses cont.new + resume, instantiate via Activator
+        /// (no host runtime), invoke. The transpiler-generated
+        /// StandaloneContInvoker for the cont's signature wires
+        /// the standalone dispatch path; no ExecContext involved.
+        /// </summary>
+        [Fact]
+        public void Standalone_resume_via_generated_invoker()
+        {
+            var src = @"
+                (module
+                  (type $ft (func (result i32)))
+                  (type $ct (cont $ft))
+                  (func $produce (result i32) i32.const 88)
+                  (elem declare func $produce)
+                  (func (export ""go"") (result i32)
+                    (resume $ct (cont.new $ct (ref.func $produce)))))";
+
+            var rt = new WasmRuntime();
+            var inst = rt.InstantiateModule(TextModuleParser.ParseWat(src));
+            var transpiler = new ModuleTranspiler();
+            var result = transpiler.Transpile(inst, rt);
+            Assert.Equal(0, result.FallbackCount);
+
+            var wrapper = new TranspiledModuleWrapper(result);
+            wrapper.Instantiate();
+            var got = wrapper.InvokeExport("go", new Value[0]);
+            Assert.Equal(88, got[0].Data.Int32);
+        }
+
         [Fact]
         public void Switch_into_cont_matches_across_engines()
         {

@@ -1,5 +1,75 @@
 # Changelog
 
+## WACS.Transpiler.Lib 0.15.0 — Stack Switching standalone-mode dispatch (Slice B.2)
+
+Transpiler now generates one `StandaloneContInvoker` subclass
+per unique continuation typeidx in a module. Each generated
+invoker is sealed, has a public-static `Instance` singleton
+field, and overrides `Invoke` with strongly-typed IL: cast
+`cont.StandaloneDelegate` to the typed `Func` / `Action`,
+unbox `Value[]` args per the signature's params, call the
+delegate (ThinContext is closed into the target by
+`PopulateFuncTable`, so the delegate type omits it), wrap the
+typed result back into `Value[]`.
+
+### New emit pass
+
+`ContInvokerEmitter` (new file). Plugged into
+`ModuleTranspiler.Transpile` as Pass 0c — between GC type
+emit and function method-stub creation. Scans every wasm
+function body for `InstContNew` / `InstContBind` /
+`InstResume` / `InstResumeThrow` / `InstSwitch`, collects
+distinct continuation typeidxs, generates one invoker class
+per typeidx, bakes them via `TypeBuilder.CreateType()` so
+the emit downstream can `ldsfld` their `Instance` fields.
+
+Multi-result continuations (arity > 1) are skipped in this
+slice — the registry entry is absent and the helper falls
+back to its documented `NotSupportedException` for that
+signature.
+
+### Function emit wiring
+
+`FunctionCodegen` gains an optional
+`Dictionary<int, FieldInfo>` parameter (the invoker registry
+from `ContInvokerEmitter.InvokerFields`).
+`StackSwitchingEmitter.Emit` accepts it and threads through
+to `EmitResume` / `EmitResumeThrow` / `EmitSwitch`. Each
+call site `ldsfld`'s the invoker for its cont typeidx (or
+`ldnull` if absent) and passes it as the trailing
+`StandaloneContInvoker?` argument to the helper.
+
+### End-to-end test
+
+`Standalone_resume_via_generated_invoker` —
+`TranspiledModuleWrapper.Instantiate()` +
+`InvokeExport()` on a module that uses `cont.new` + `resume`,
+no `WasmRuntime` involved. The wrapper's
+`Activator.CreateInstance` path leaves
+`ThinContext.ExecContext` null; the helper routes through
+`ResumeStandalone`, which calls the generated
+`Invoker_Cont1.Invoke`, which casts the
+`StandaloneDelegate` to `Func<int>` (`ThinContext` closed
+in by `PopulateFuncTable`), invokes, wraps the result.
+Asserts the expected value.
+
+### Verification
+
+- 834 transpiler + 515 Wacs.Core + 380 ComponentModel tests
+  green.
+- `dotnet publish Wacs.Bench.Aot` clean — no new IL2026 /
+  IL3050 / IL2070 / IL2075 warnings; the only umbrella
+  IL2104 on Wacs.Core is pre-existing
+  (FluentValidation surface, unrelated).
+
+### Remaining
+
+`ResumeThrow` standalone still surfaces
+`NotSupportedException` — it requires an AOT-safe
+`WasmException` construction path without
+`Store.AllocateExn`. Multi-result continuations also remain
+gated. Both are bounded follow-ups.
+
 ## WACS 0.24.0 — Standalone Cont Invoker contract (Slice B.2 v0)
 
 Establishes the AOT-safe dispatch contract for standalone-mode
