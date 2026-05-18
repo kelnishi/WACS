@@ -26,10 +26,11 @@ namespace Wacs.Transpiler.AOT
     /// Used to store bound delegates in table elements for cross-module
     /// call_indirect dispatch.
     /// </summary>
-    public class DelegateRef : IGcRef
+    public class DelegateRef : IGcRef, Wacs.Core.Runtime.Concurrency.IDelegateRef
     {
-        public readonly Delegate Target;
-        public DelegateRef(Delegate target) => Target = target;
+        private readonly Delegate _target;
+        public Delegate Target => _target;
+        public DelegateRef(Delegate target) => _target = target;
         public RefIdx StoreIndex => default(PtrIdx);
     }
 
@@ -58,7 +59,7 @@ namespace Wacs.Transpiler.AOT
     /// When running standalone (without WasmRuntime), consumers construct this directly.
     /// When running inside the WACS framework, LoadTranspiledModule populates it from the Store.
     /// </summary>
-    public class ThinContext
+    public class ThinContext : Wacs.Core.Runtime.Concurrency.IContinuationContext
     {
         // === Transpiler Capabilities ===
         // Flags from TranspilerOptions, baked into the Module constructor.
@@ -98,6 +99,21 @@ namespace Wacs.Transpiler.AOT
         // Store.AllocateContinuation.
         public readonly Wacs.Core.Runtime.Concurrency.ContinuationStore Continuations
             = new Wacs.Core.Runtime.Concurrency.ContinuationStore();
+
+        // === IContinuationContext forwarders ===
+        // Explicit-interface implementations bridge the existing
+        // public fields onto the property contract Wacs.Core's
+        // StackSwitchingHelpers consumes. AOT-safe (interface
+        // dispatch); no reflection.
+        ExecContext? Wacs.Core.Runtime.Concurrency.IContinuationContext.ExecContext
+            => ExecContext;
+        Wacs.Core.Runtime.Concurrency.ContinuationStore
+            Wacs.Core.Runtime.Concurrency.IContinuationContext.Continuations
+            => Continuations;
+        TagInstance[] Wacs.Core.Runtime.Concurrency.IContinuationContext.Tags
+            => Tags;
+        Delegate[] Wacs.Core.Runtime.Concurrency.IContinuationContext.FuncTable
+            => FuncTable;
 
         // === Function dispatch ===
         // ImportDelegates: typed delegates for imported functions.

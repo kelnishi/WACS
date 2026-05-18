@@ -1,5 +1,45 @@
 # Changelog
 
+## WACS 0.23.0 / WACS.Transpiler.Lib 0.14.1 — Stack Switching helpers go AOT-safe
+
+Replaces the runtime reflection the 0.22.0 helpers used to
+access ThinContext fields with interface dispatch. AOT
+publish of `Wacs.Core` is back at zero analyzer warnings on
+the stack-switching code path.
+
+### New interfaces in `Wacs.Core.Runtime.Concurrency`
+
+- `IContinuationContext`: the contract the transpiler's
+  `ThinContext` satisfies. Exposes `ExecContext?`,
+  `Continuations`, `Tags`, `FuncTable` as properties.
+- `IDelegateRef : IGcRef`: exposes `Target` (the delegate);
+  `Wacs.Transpiler.AOT.DelegateRef` implements it.
+
+### Changes
+
+- `StackSwitchingHelpers.{ContNew, ContBind, Suspend, Resume,
+  ResumeThrow, Switch, FindHandlerMatch, ReifyHandlerArgs}`
+  now take `IContinuationContext hctx` instead of
+  `object thinCtx`. Internal access is direct property
+  reads — no `GetField` / `GetValue` calls at runtime.
+- `ExtractDelegateRefTarget` is now a one-line `gcRef as
+  IDelegateRef`?.Target downcast.
+- `ThinContext` declares `: IContinuationContext` with
+  explicit-interface forwarders that delegate to its existing
+  public fields. `DelegateRef` declares `: IDelegateRef`.
+
+### Verification
+
+- `dotnet publish Wacs.Bench.Aot` (the project that exercises
+  `PublishAot=true` against Wacs.Core net8.0) produces zero
+  IL2026 / IL3050 / IL2070 / IL2075 warnings on
+  stack-switching helpers. The only remaining IL2104
+  umbrella warning on `Wacs.Core` is pre-existing
+  (FluentValidation / TagInstance lookups outside this
+  surface).
+- 833 transpiler + 511 Wacs.Core + 380 ComponentModel tests
+  green.
+
 ## WACS 0.22.0 / WACS.Transpiler.Lib 0.14.0 — Stack Switching standalone-mode parity (3 of 6 ops)
 
 Closes the standalone-mode gap for `cont.new`, `cont.bind`, and
