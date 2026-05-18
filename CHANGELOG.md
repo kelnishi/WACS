@@ -1,5 +1,28 @@
 # Changelog
 
+## WACS.Transpiler.Lib 0.11.1 — Stack Switching extension point + intentional interpreter fallback
+
+Documents the transpiler's handling of the six Stack Switching
+opcodes (`cont.new`, `cont.bind`, `suspend`, `resume`,
+`resume_throw`, `switch`) as an intentional interpreter
+fallback rather than a generic "unsupported opcode" rejection.
+
+- New `Wacs.Transpiler.AOT.Emitters.StackSwitchingEmitter` —
+  `CanEmit` returns `false`, `IsStackSwitchingOpcode`
+  identifies the family. Reserves the extension point so the
+  real CIL emit lands in one place.
+- `FunctionCodegen.HasEmitter` consults the new emitter; the
+  rejection reason in `LastRejectionReason` now distinguishes
+  cont.* (known but not yet emitting) from genuinely unknown
+  opcodes for diagnostics.
+- Behavior unchanged at the user level: a function containing
+  any cont.* opcode falls back to the interpreter, which since
+  WACS 0.17.0 / 0.18.0 implements
+  `cont.new` / `cont.bind` / `suspend` / `resume` end-to-end
+  with one-shot semantics.
+
+826 transpiler tests still green.
+
 ## WACS 0.18.0 — suspend/resume one-shot dispatch
 
 Lands the runtime catch path for `suspend $tag` and the

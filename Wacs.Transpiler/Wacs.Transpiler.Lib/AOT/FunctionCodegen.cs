@@ -1980,6 +1980,15 @@ namespace Wacs.Transpiler.AOT
             if (CallEmitter.CanEmit(op))
                 return true;
 
+            // Stack Switching opcodes (cont.new / cont.bind /
+            // suspend / resume / resume_throw / switch) are
+            // recognized by the transpiler but intentionally
+            // routed to the interpreter — the predicate returns
+            // false today so the enclosing function falls back.
+            // See StackSwitchingEmitter for the extension point.
+            if (StackSwitchingEmitter.IsStackSwitchingOpcode(op))
+                return StackSwitchingEmitter.CanEmit(op);
+
             return false;
         }
 
