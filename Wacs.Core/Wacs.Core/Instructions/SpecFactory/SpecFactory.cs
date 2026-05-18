@@ -261,7 +261,16 @@ namespace Wacs.Core.Instructions
             OpCode.I64Extend8S       => InstI64SignExtend.I64Extend8S,
             OpCode.I64Extend16S      => InstI64SignExtend.I64Extend16S,
             OpCode.I64Extend32S      => InstI64SignExtend.I64Extend32S,
-            
+
+            //Stack Switching (Phase 1.2 — Parse + Validate only;
+            // Execute throws NotImplementedException until 1.3.)
+            OpCode.ContNew           => new InstContNew(),
+            OpCode.ContBind          => new InstContBind(),
+            OpCode.Suspend           => new InstSuspend(),
+            OpCode.Resume            => new InstResume(),
+            OpCode.ResumeThrow       => new InstResumeThrow(),
+            OpCode.Switch            => new InstSwitch(),
+
             _ => throw new NotSupportedException($"Opcode {opcode} is not supported.")
         } ?? throw new InvalidOperationException($"Could not create instruction for opcode {opcode}");
     }

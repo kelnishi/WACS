@@ -1,5 +1,27 @@
 # Changelog
 
+## WACS 0.16.1 — Stack Switching: parser + validator
+
+WASIp3 Phase 1.2 — wires binary parse / render / validation for
+the six Stack Switching opcodes reserved in 0.16.0. Execute
+throws `NotImplementedException` until Phase 1.3 lands the
+Continuation runtime.
+
+- New `Wacs.Core/Instructions/StackSwitching.cs` with
+  `InstContNew` / `InstContBind` / `InstSuspend` / `InstResume`
+  / `InstResumeThrow` / `InstSwitch`.
+- `SpecFactory` dispatches `OpCode.ContNew`–`OpCode.Switch` to
+  the new classes.
+- `ByteCode` constants for the six opcodes.
+- Validators check the static typing rules per the proposal
+  (cont-type resolution, tag arity, handler labels/tags exist).
+- New `StackSwitchHandler` struct models the `0x00 $tag $label`
+  and `0x01 $tag $label` on-tag handler immediates inside
+  `resume` / `resume_throw`.
+- 20 new round-trip + dispatch tests in
+  `Wacs.Core.Test/StackSwitchingInstructionTests.cs`.
+- 511 Wacs.Core + 380 Wacs.ComponentModel tests green.
+
 ## WACS 0.16.0 — Stack Switching: type-system scaffolding
 
 WASIp3 Phase 1.1 — first slice of the WebAssembly Stack

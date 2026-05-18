@@ -120,5 +120,13 @@ namespace Wacs.Core.OpCodes
         public static readonly ByteCode TableFill = ExtCode.TableFill;
         public static readonly ByteCode ReturnCall = OpCode.ReturnCall;
         public static readonly ByteCode ReturnCallIndirect = OpCode.ReturnCallIndirect;
+
+        // Stack Switching proposal
+        public static readonly ByteCode ContNew = OpCode.ContNew;
+        public static readonly ByteCode ContBind = OpCode.ContBind;
+        public static readonly ByteCode Suspend = OpCode.Suspend;
+        public static readonly ByteCode Resume = OpCode.Resume;
+        public static readonly ByteCode ResumeThrow = OpCode.ResumeThrow;
+        public static readonly ByteCode Switch = OpCode.Switch;
     }
 }
