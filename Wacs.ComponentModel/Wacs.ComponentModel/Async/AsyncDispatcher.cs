@@ -7,9 +7,11 @@
 
 using System;
 using System.Collections.Generic;
+using System.Text;
 using System.Threading.Tasks;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Concurrency;
+using Wacs.Core.Runtime.Types;
 
 namespace Wacs.ComponentModel.Async
 {
@@ -62,6 +64,19 @@ namespace Wacs.ComponentModel.Async
 
         public AsyncHandleTable<object> Streams { get; } =
             new AsyncHandleTable<object>();
+
+        // Wrapper around a stream buffer that tracks the drop state
+        // of each half. Spec: stream<T> has separate readable and
+        // writable halves; drop-writable closes the writer but the
+        // reader can still drain pending items; drop-readable
+        // signals the writer no further reads will arrive. The
+        // handle slot is released only after BOTH halves are dropped.
+        internal sealed class StreamSlot
+        {
+            public StreamBuffer<byte> Buffer = null!;
+            public bool WriterDropped;
+            public bool ReaderDropped;
+        }
 
         public AsyncHandleTable<object> Futures { get; } =
             new AsyncHandleTable<object>();
@@ -222,8 +237,20 @@ namespace Wacs.ComponentModel.Async
         /// generalizes to other element widths.</summary>
         public int StreamNew(int typeIdx, int capacity = 64)
         {
-            var buf = new StreamBuffer<byte>(capacity);
-            return Streams.Allocate(buf);
+            var slot = new StreamSlot { Buffer = new StreamBuffer<byte>(capacity) };
+            return Streams.Allocate(slot);
+        }
+
+        // Resolve the StreamSlot for a handle, throwing with the
+        // canon-op name on failure.
+        private StreamSlot GetStreamSlot(int handle, string canonOp)
+        {
+            var raw = Streams.Get(handle)
+                ?? throw new InvalidOperationException(
+                    $"{canonOp}: handle {handle} is not allocated.");
+            return raw as StreamSlot
+                ?? throw new InvalidOperationException(
+                    $"{canonOp}: handle {handle} is not a byte stream.");
         }
 
         /// <summary>Non-blocking write of a byte to the stream.
@@ -231,13 +258,8 @@ namespace Wacs.ComponentModel.Async
         /// Slice D adds the suspend-on-full variant.</summary>
         public bool StreamTryWrite(int streamHandle, byte value)
         {
-            var raw = Streams.Get(streamHandle)
-                ?? throw new InvalidOperationException(
-                    $"stream.write: handle {streamHandle} is not allocated.");
-            var buf = raw as StreamBuffer<byte>
-                ?? throw new InvalidOperationException(
-                    $"stream.write: handle {streamHandle} is not a byte stream.");
-            return buf.TryWrite(value);
+            var slot = GetStreamSlot(streamHandle, "stream.write");
+            return slot.Buffer.TryWrite(value);
         }
 
         /// <summary>Non-blocking read of a byte. Returns false when
@@ -246,8 +268,58 @@ namespace Wacs.ComponentModel.Async
         {
             value = 0;
             var raw = Streams.Get(streamHandle);
-            if (raw is not StreamBuffer<byte> buf) return false;
-            return buf.TryRead(out value);
+            if (raw is not StreamSlot slot) return false;
+            return slot.Buffer.TryRead(out value);
+        }
+
+        /// <summary><c>canon stream.write t opts</c> with memory
+        /// access — read <paramref name="length"/> bytes from
+        /// <paramref name="memory"/> starting at
+        /// <paramref name="ptr"/> and write them to the stream.
+        /// Returns the number of bytes actually written (less than
+        /// <paramref name="length"/> when the buffer fills up).
+        /// </summary>
+        public int StreamWriteFromMemory(
+            int streamHandle, MemoryInstance memory, uint ptr, int length)
+        {
+            if (length < 0)
+                throw new ArgumentOutOfRangeException(nameof(length));
+            if (length == 0) return 0;
+            var slot = GetStreamSlot(streamHandle, "stream.write");
+            var src = memory.AsSpan((int)ptr, length);
+            int written = 0;
+            for (int i = 0; i < length; i++)
+            {
+                if (!slot.Buffer.TryWrite(src[i])) break;
+                written++;
+            }
+            return written;
+        }
+
+        /// <summary><c>canon stream.read t opts</c> with memory
+        /// access — read up to <paramref name="capacity"/> bytes
+        /// from the stream and write them to
+        /// <paramref name="memory"/> starting at
+        /// <paramref name="ptr"/>. Returns the number of bytes
+        /// actually transferred (less than <paramref name="capacity"/>
+        /// when the stream had less data, or zero when empty).
+        /// </summary>
+        public int StreamReadToMemory(
+            int streamHandle, MemoryInstance memory, uint ptr, int capacity)
+        {
+            if (capacity < 0)
+                throw new ArgumentOutOfRangeException(nameof(capacity));
+            if (capacity == 0) return 0;
+            var slot = GetStreamSlot(streamHandle, "stream.read");
+            var dst = memory.AsSpan((int)ptr, capacity);
+            int read = 0;
+            for (int i = 0; i < capacity; i++)
+            {
+                if (!slot.Buffer.TryRead(out var b)) break;
+                dst[i] = b;
+                read++;
+            }
+            return read;
         }
 
         /// <summary><c>canon stream.cancel-read t async?</c> —
@@ -271,28 +343,33 @@ namespace Wacs.ComponentModel.Async
             StreamDropWritable(streamHandle);
 
         /// <summary><c>canon stream.drop-readable t</c> — drop the
-        /// reader half of the stream handle. Producer can still
-        /// write, but pending and future reads observe completion.</summary>
+        /// reader half of the stream handle. The slot stays in the
+        /// table until <see cref="StreamDropWritable"/> also fires;
+        /// pending writes effectively go nowhere once the reader
+        /// is dropped (the spec allows the runtime to short-circuit
+        /// further writes, but this implementation just keeps
+        /// buffering until the writer-side also closes).</summary>
         public bool StreamDropReadable(int streamHandle)
         {
-            var raw = Streams.Get(streamHandle);
-            if (raw is not StreamBuffer<byte> buf) return false;
-            // Closing the writer side surfaces a clean EOS on the
-            // reader; the table entry stays until drop-writable
-            // also fires (release both halves).
-            buf.Complete();
+            if (Streams.Get(streamHandle) is not StreamSlot slot)
+                return false;
+            slot.ReaderDropped = true;
+            if (slot.WriterDropped) Streams.Drop(streamHandle);
             return true;
         }
 
         /// <summary><c>canon stream.drop-writable t</c> — drop the
-        /// writer half. Closes the channel so the reader observes
-        /// end-of-stream once the buffer drains. Releases the table
-        /// slot.</summary>
+        /// writer half. Completes the channel so the reader observes
+        /// end-of-stream once the buffer drains; the table slot is
+        /// retained until the reader-side also drops.</summary>
         public bool StreamDropWritable(int streamHandle)
         {
-            if (Streams.Get(streamHandle) is StreamBuffer<byte> buf)
-                buf.Complete();
-            return Streams.Drop(streamHandle) != null;
+            if (Streams.Get(streamHandle) is not StreamSlot slot)
+                return false;
+            slot.Buffer.Complete();
+            slot.WriterDropped = true;
+            if (slot.ReaderDropped) Streams.Drop(streamHandle);
+            return true;
         }
 
         // ---- Future ------------------------------------------------------
@@ -363,6 +440,47 @@ namespace Wacs.ComponentModel.Async
         public int ErrorContextNew(string debugMessage) =>
             ErrorContexts.Allocate(debugMessage);
 
+        /// <summary>Memory-aware variant of
+        /// <see cref="ErrorContextNew(string)"/>: reads the debug
+        /// message as a UTF-8 string from
+        /// <paramref name="memory"/> at <paramref name="ptr"/>,
+        /// <paramref name="len"/>, then allocates a handle.</summary>
+        public int ErrorContextNewFromMemory(
+            MemoryInstance memory, uint ptr, uint len)
+        {
+            var bytes = memory.AsSpan((int)ptr, (int)len);
+            var str = Encoding.UTF8.GetString(bytes);
+            return ErrorContextNew(str);
+        }
+
+        /// <summary>Memory-aware variant of
+        /// <see cref="ErrorContextDebugMessage(int)"/>: writes the
+        /// allocated string into <paramref name="memory"/> at
+        /// <paramref name="dstPtr"/> as UTF-8. The caller is
+        /// responsible for ensuring <paramref name="dstPtr"/>
+        /// addresses a sufficiently-sized buffer; spec-compliant
+        /// callers use <c>cabi_realloc</c> to allocate first via
+        /// the returned byte count.
+        ///
+        /// <para>Returns the number of UTF-8 bytes written. Returns
+        /// the message's required byte count even when
+        /// <paramref name="dstPtr"/> is 0 — that's the spec-defined
+        /// way to query the size before allocating.</para>
+        /// </summary>
+        public int ErrorContextDebugMessageToMemory(
+            int errorContextHandle, MemoryInstance memory, uint dstPtr)
+        {
+            var msg = ErrorContexts.Get(errorContextHandle)
+                ?? throw new InvalidOperationException(
+                    $"error-context.debug-message: handle {errorContextHandle} not allocated.");
+            int byteCount = Encoding.UTF8.GetByteCount(msg);
+            if (dstPtr != 0)
+            {
+                memory.WriteUtf8String(dstPtr, msg, nullTerminate: false);
+            }
+            return byteCount;
+        }
+
         /// <summary><c>canon error-context.debug-message opts</c> —
         /// retrieve the message string for an allocated handle.</summary>
         public string ErrorContextDebugMessage(int errorContextHandle)
@@ -431,8 +549,8 @@ namespace Wacs.ComponentModel.Async
                 return st.Child.Completion.Task.IsCompleted;
             if (Futures.Get(waitableHandle) is FutureCell<object?> f)
                 return f.IsCompleted;
-            if (Streams.Get(waitableHandle) is StreamBuffer<byte> sb)
-                return sb.IsCompleted || sb.Reader.Count > 0;
+            if (Streams.Get(waitableHandle) is StreamSlot ss)
+                return ss.Buffer.IsCompleted || ss.Buffer.Reader.Count > 0;
             return false;
         }
 

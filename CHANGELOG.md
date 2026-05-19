@@ -1,5 +1,119 @@
 # Changelog
 
+## WACS.ComponentModel 0.8.8 — lift adapter + memory ops + producer/consumer (Phase 3 Slice F)
+
+Closes Phase 3's tractable surface: the task-lifecycle wrapper,
+memory-touching dispatcher ops, and a CLR-level producer/consumer
+test that exercises the full stack. Real `.component.wasm` end-
+to-end against wit-component output stays a follow-up.
+
+### `AsyncLiftAdapter`
+
+New helper for the `canon lift f opts` async-option wrapper:
+
+```csharp
+Task<object?> InvokeAsync(AsyncDispatcher, ContInstance, Action body);
+Task<object?> InvokeAsync<T>(AsyncDispatcher, ContInstance, Func<T> body);
+```
+
+Each call:
+
+1. Allocates a `ComponentTask` bound to the supplied
+   `ContInstance` via `dispatcher.RegisterTask`.
+2. Pushes the task as ambient (`PushCurrentTask`).
+3. Invokes the body once on the calling stack.
+4. Settles the task on body exit:
+   - Body called `task.return` ↦ surfaced result.
+   - Body called `task.cancel` ↦ canceled completion.
+   - Body returned without canon op ↦ implicit
+     `TaskReturn(null)` (or the value, for the typed overload).
+   - Body threw ↦ faulted completion. **Exception surfaces
+     via the returned Task, not via a synchronous throw** —
+     embedders observe wasm failures through the same
+     `await` they use for normal results.
+5. Pops the task on the `finally` path (always cleans up).
+
+Synchronous-body case only at this slice; suspending bodies
+that park via Stack Switching land with the WaitableSetWait
+suspend bridge in a future slice.
+
+### Memory-touching dispatcher ops
+
+Bridges the dispatcher to wasm `MemoryInstance`:
+
+- **`StreamWriteFromMemory(handle, memory, ptr, length)`** —
+  reads bytes from memory and pushes into the stream buffer.
+  Returns the count actually written (less than `length` when
+  the buffer fills — back-pressure surface).
+- **`StreamReadToMemory(handle, memory, ptr, capacity)`** —
+  drains the buffer into memory. Returns the actual count.
+- **`ErrorContextNewFromMemory(memory, ptr, len)`** — reads a
+  UTF-8 string from memory and allocates an error-context
+  handle.
+- **`ErrorContextDebugMessageToMemory(handle, memory, dstPtr)`** —
+  writes the message back into memory as UTF-8 when
+  `dstPtr != 0`; always returns the required byte count
+  (spec probe convention).
+
+### Stream slot semantics (two-half drop model)
+
+Discovered while building the producer/consumer test that the
+original `StreamDropWritable` released the handle immediately,
+breaking the canon-spec "reader can drain after writer drops"
+contract. Introduced an internal `StreamSlot` wrapper tracking
+`WriterDropped` / `ReaderDropped` independently — the table
+entry is now released only when **both** halves are dropped.
+Matches the spec semantics + makes the producer/consumer
+pattern work.
+
+### Producer/consumer integration test
+
+`AsyncLiftAdapterTests.Producer_consumer_through_lift_adapter_round_trips_bytes`
+models the WASIp3 plan's Phase 3 acceptance fixture at the
+CLR-test level: producer task creates a stream, writes
+`[1,2,3,4]` from memory, drops the writable half; consumer
+task reads the same handle back into memory, drops readable;
+test asserts the bytes round-trip and both tasks settled
+cleanly.
+
+**What's NOT yet covered:** a full `.component.wasm` fixture
+compiled by wit-component that exercises the same flow. That
+awaits wit-component's canon-async emit settling (Preview 3
+RC is still in motion) — at which point a single fixture
+update plus the binder's `NameResolver` adjustment lights the
+end-to-end test up.
+
+### Tests
+
+12 new in `AsyncLiftAdapterTests`:
+
+- `InvokeAsync` overload coverage (void, typed, with/without
+  explicit task.return).
+- `task.cancel` from inside the body cancels the host await.
+- Body exception surfaces as a faulted Task; null args throw
+  synchronously.
+- Memory ops: write/read symmetric, capacity respected,
+  utf-8 error-context round-trip, probe-vs-write distinction.
+- Producer/consumer end-to-end (CLR level).
+
+492/492 ComponentModel tests pass (was 480).
+
+### What's still pending in Phase 3
+
+- **WaitableSetWait suspend bridge** — needs interpreter-loop
+  integration with `StackSwitchingHelpers.Suspend`. Currently
+  stubbed with a "Slice F follow-up" NotImplementedException.
+  Doable but requires careful work around the existing
+  interpreter loop.
+- **task.return / context.get/set with typed Value
+  marshaling** — requires the canon-ABI lift layer (component
+  Value ↔ wasm-frame Value). Cleanest after wit-component
+  fixtures are available to verify against.
+- **Full `.component.wasm` e2e** — see above.
+
+These are the realistic Phase 3 closeout items; the rest of
+the phase is achieved.
+
 ## WACS.ComponentModel 0.8.7 — canon-async binder + ComponentInstance integration (Phase 3 Slice E)
 
 Bridges the canon-async entries to host-function bindings on

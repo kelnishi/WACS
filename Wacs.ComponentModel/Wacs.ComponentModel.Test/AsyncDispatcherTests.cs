@@ -65,14 +65,26 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
-        public void Stream_drop_writable_completes_buffer_and_frees_handle()
+        public void Stream_drop_writable_completes_writer_but_keeps_reader_addressable()
         {
+            // Spec semantics: drop-writable closes the writer side
+            // so the reader observes EOS once the buffer drains, but
+            // the handle remains valid for the reader until
+            // drop-readable also fires. Both halves dropped ↦ the
+            // slot is released.
             var d = new AsyncDispatcher();
             var h = d.StreamNew(0);
             d.StreamTryWrite(h, 1);
+
             Assert.True(d.StreamDropWritable(h));
-            // Handle gone — second drop returns false.
+            // Reader can still drain the buffered byte.
+            Assert.True(d.StreamTryRead(h, out var b));
+            Assert.Equal(1, b);
+            // Reader half also drops ↦ slot released.
+            Assert.True(d.StreamDropReadable(h));
+            // Subsequent drops on either half return false (slot gone).
             Assert.False(d.StreamDropWritable(h));
+            Assert.False(d.StreamDropReadable(h));
         }
 
         // ---- Future handle table ---------------------------------------
