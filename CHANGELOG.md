@@ -1,5 +1,92 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.8 — host-resource binding infrastructure + `wasi:http/types.fields` wire-up (Phase 5 Slice F)
+
+Establishes the canonical host-resource binding pattern.
+Slices C/D/E defined the surface area; this slice ships the
+wiring infrastructure (HostResourceTable<T>) and demonstrates
+the pattern by wiring four representative
+`wasi:http/types.fields` methods through to the WasmRuntime.
+
+### `HostResourceTable<T>`
+
+New `Wacs.WASI.Preview3.Resources.HostResourceTable<T>` — typed
+handle table for host-side resource objects. Each Preview 3
+host resource (fields, request, response, request-options,
+descriptor, tcp-socket, udp-socket) gets its own table; the
+guest sees i32 handles, the host indirects through the table
+for method dispatch.
+
+Distinct from `Wacs.ComponentModel.Async.AsyncHandleTable<T>`:
+that one backs canon-async waitable kinds in a single
+per-dispatcher shared namespace; this one backs host-defined
+resources with per-type independent handle spaces, matching
+the WIT spec's "per-(component, resource-type)" lifetime
+model.
+
+API: `Allocate(T)`, `Get(int)`, `Drop(int)`, `Count`. 0
+reserved as the null sentinel; freelist recycling keeps the
+counter stable.
+
+### `WasiPreview3Host.FieldsHandles`
+
+Public `HostResourceTable<IFields>` on the host. Embedders /
+binding code use this directly when they need to allocate or
+look up fields handles outside the wire path.
+
+### `wasi:http/types.fields` wire-up
+
+Four representative methods registered through
+`BindToRuntime`:
+
+```
+(wasi:http/types@0.3.0-rc-2026-03-15, [constructor]fields)
+(wasi:http/types@0.3.0-rc-2026-03-15, [resource-drop]fields)
+(wasi:http/types@0.3.0-rc-2026-03-15, [method]fields.has)
+(wasi:http/types@0.3.0-rc-2026-03-15, [method]fields.append)
+```
+
+Selection rationale: `[constructor]` exercises resource
+allocation; `[resource-drop]` exercises release;
+`[method]fields.has` exercises self-handle lookup + memory
+string read; `[method]fields.append` exercises self-handle
+lookup + memory string read + memory byte-list read. Together
+they validate the pattern end-to-end. The other 7 method
+shapes (set, delete, get-and-delete, get, copy-all, clone,
+from-list) follow the same pattern mechanically — they ship
+in a follow-up slice.
+
+`InvokeFieldsHas` / `InvokeFieldsAppend` / `InvokeFieldsDrop`
+public helpers expose the delegate bodies for direct test
+access without going through a full wasm invoke. Memory
+reads use the standard `dispatcher.Memory.AsSpan` path.
+
+### `HttpTypesModuleName` constant
+
+`wasi:http/types@0.3.0-rc-2026-03-15` — the wire-level module
+name `wit-component` emits for HTTP type imports. Same wire-
+convention caveat as Slice J's `wasi:cli/stdout` binding;
+override hook will land when real `.component.wasm` fixtures
+let us validate.
+
+### Test coverage
+
+12 new tests in `HostResourceBindingTests.cs`:
+- `HostResourceTable<T>` allocate / get / drop / count /
+  freelist recycling.
+- All four registered host functions appear in the runtime.
+- Constructor returns fresh distinct handles per call.
+- `InvokeFieldsHas` reads name from memory + case-insensitive
+  lookup + missing-handle returns false.
+- `InvokeFieldsAppend` reads name + value from memory and
+  forwards to the impl.
+- `InvokeFieldsDrop` releases handle + idempotent on absent.
+- Invalid self handle → `HeaderException(Other)`.
+- Empty name during append → `HeaderException(InvalidSyntax)`
+  bubbles from the impl through the binding.
+
+128/128 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.7 — `wasi:http` port (Phase 5 Slice E)
 
 Fifth and final Phase 5 host-interface port. Vendors the

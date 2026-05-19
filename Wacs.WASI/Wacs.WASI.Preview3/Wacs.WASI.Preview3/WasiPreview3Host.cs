@@ -16,6 +16,7 @@ using Wacs.WASI.Preview3.Clocks;
 using Wacs.WASI.Preview3.Filesystem;
 using Wacs.WASI.Preview3.Http;
 using Wacs.WASI.Preview3.Random;
+using Wacs.WASI.Preview3.Resources;
 using Wacs.WASI.Preview3.Sockets;
 
 namespace Wacs.WASI.Preview3
@@ -64,6 +65,21 @@ namespace Wacs.WASI.Preview3
         private IIpNameLookup? _nameLookup;
         private IClient? _httpClient;
         private IHandler? _httpHandler;
+
+        /// <summary>
+        /// Host-side handle table for <c>wasi:http/types.fields</c>
+        /// resources. The guest sees i32 handles; we look up the
+        /// CLR <see cref="IFields"/> instance through this table
+        /// at every method dispatch.
+        ///
+        /// <para>One table per host instance — fresh component
+        /// instances get fresh tables. The same handle integer
+        /// across two host instances refers to two unrelated
+        /// fields objects, which matches the per-component
+        /// resource-lifetime model.</para>
+        /// </summary>
+        public HostResourceTable<IFields> FieldsHandles { get; } =
+            new HostResourceTable<IFields>();
 
         public WasiPreview3Host() : this(new WasiPreview3HostBuilder()) { }
 
@@ -326,6 +342,113 @@ namespace Wacs.WASI.Preview3
                 (InsecureSeedModuleName, "get-insecure-seed"),
                 (Action<ExecContext, int>)((_, retptr) =>
                     InvokeGetInsecureSeed(InsecureSeed, retptr)));
+
+            // wasi:http/types.fields — host-resource lifecycle +
+            // representative method dispatch. Constructor allocates
+            // a fresh empty Fields and returns its handle; methods
+            // take the self handle as first arg and look up the
+            // CLR instance through FieldsHandles. Destructor drops.
+            //
+            // Names use the wit-component convention
+            // ([constructor]NAME / [method]NAME.OP /
+            // [resource-drop]NAME); the exact spelling awaits
+            // real wit-component fixture validation, same caveat
+            // as Slice J's stdout binding.
+            runtime.BindHostFunction(
+                (HttpTypesModuleName, "[constructor]fields"),
+                (Func<ExecContext, int>)(_ =>
+                    FieldsHandles.Allocate(new Fields())));
+
+            runtime.BindHostFunction(
+                (HttpTypesModuleName, "[resource-drop]fields"),
+                (Action<ExecContext, int>)((_, handle) =>
+                    InvokeFieldsDrop(handle)));
+
+            runtime.BindHostFunction(
+                (HttpTypesModuleName, "[method]fields.has"),
+                (Func<ExecContext, int, int, int, int>)((_, self, namePtr, nameLen) =>
+                    InvokeFieldsHas(self, namePtr, nameLen) ? 1 : 0));
+
+            runtime.BindHostFunction(
+                (HttpTypesModuleName, "[method]fields.append"),
+                (Action<ExecContext, int, int, int, int, int>)(
+                    (_, self, namePtr, nameLen, valuePtr, valueLen) =>
+                        InvokeFieldsAppend(self, namePtr, nameLen,
+                            valuePtr, valueLen)));
+        }
+
+        // ---- wasi:http/types.fields binding bodies --------------------
+
+        /// <summary>Invoke the
+        /// <c>[resource-drop]fields</c> body — release the
+        /// handle from <see cref="FieldsHandles"/>. Idempotent:
+        /// dropping an absent handle is a no-op (matches the
+        /// canon spec's "drop on missing handle is silent").</summary>
+        public void InvokeFieldsDrop(int handle)
+        {
+            FieldsHandles.Drop(handle);
+        }
+
+        /// <summary>Invoke <c>[method]fields.has(name)</c> —
+        /// looks up the fields instance by self-handle, reads
+        /// the name string from guest memory at
+        /// <paramref name="namePtr"/>, returns whether the
+        /// field exists. Throws when the self handle is
+        /// invalid.</summary>
+        public bool InvokeFieldsHas(int self, int namePtr, int nameLen)
+        {
+            var fields = RequireFields(self);
+            var name = ReadGuestUtf8(namePtr, nameLen);
+            return fields.Has(name);
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]fields.append(name, value)</c> — reads
+        /// both the name (UTF-8 string) and value (byte list)
+        /// from guest memory and forwards to
+        /// <see cref="IFields.Append"/>. Throws on invalid
+        /// handle or on the err path
+        /// (<see cref="HeaderException"/> from the impl).</summary>
+        public void InvokeFieldsAppend(
+            int self, int namePtr, int nameLen,
+            int valuePtr, int valueLen)
+        {
+            var fields = RequireFields(self);
+            var name = ReadGuestUtf8(namePtr, nameLen);
+            var memory = RequireMemoryForHttp();
+            var value = new byte[valueLen];
+            if (valueLen > 0)
+                memory.AsSpan(valuePtr, valueLen).CopyTo(value);
+            fields.Append(name, value);
+        }
+
+        private IFields RequireFields(int handle)
+        {
+            var fields = FieldsHandles.Get(handle);
+            if (fields == null)
+                throw new HeaderException(
+                    HeaderError.Other,
+                    $"wasi:http/types.fields: handle {handle} " +
+                    "is not allocated.");
+            return fields;
+        }
+
+        private string ReadGuestUtf8(int ptr, int len)
+        {
+            var memory = RequireMemoryForHttp();
+            if (len == 0) return string.Empty;
+            return System.Text.Encoding.UTF8.GetString(
+                memory.AsSpan(ptr, len));
+        }
+
+        private Wacs.Core.Runtime.Types.MemoryInstance RequireMemoryForHttp()
+        {
+            var dispatcher = RequireDispatcher();
+            return dispatcher.Memory
+                ?? throw new InvalidOperationException(
+                    "wasi:http binding: dispatcher.Memory must be " +
+                    "set before any string- or list-marshaling " +
+                    "method is invoked.");
         }
 
         /// <summary>
@@ -580,6 +703,13 @@ namespace Wacs.WASI.Preview3
         /// 128-bit DoS-protection seed source.</summary>
         public const string InsecureSeedModuleName =
             "wasi:random/insecure-seed@0.3.0-rc-2026-03-15";
+
+        /// <summary>Wire-level WASI module name for the
+        /// <c>wasi:http/types</c> interface (covers fields,
+        /// request, response, request-options resources +
+        /// shared types).</summary>
+        public const string HttpTypesModuleName =
+            "wasi:http/types@0.3.0-rc-2026-03-15";
     }
 
     /// <summary>Fluent builder for <see cref="WasiPreview3Host"/>.</summary>
