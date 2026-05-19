@@ -755,6 +755,61 @@ namespace Wacs.WASI.Preview3
                 (Action<ExecContext, int, int>)((_, self, retptr) =>
                     InvokeTcpSocketListen(self, retptr, realloc)));
 
+            // ---- bind / connect: ip-socket-address variant-arg ----
+            //
+            // ip-socket-address variant flat-lowers to 12 i32
+            // slots: 1 disc + 11 joined payload. The joined
+            // payload is sized to the larger case (ipv6 = 11
+            // slots: port + flow-info + 8×u16 address + scope-id).
+            // ipv4 (port + 4×u8) lives in the first 5 slots; the
+            // remaining 6 are unused per disc=ipv4.
+            //
+            // Total wire signature: (self, 12 variant slots,
+            // retptr) = 14 i32 params.
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName, "[method]tcp-socket.bind"),
+                (Action<ExecContext, int, int, int, int, int, int, int,
+                    int, int, int, int, int, int, int>)(
+                    (_, self, disc, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11,
+                     retptr) =>
+                        InvokeTcpSocketBind(self,
+                            ReadIpSocketAddressFromSlots(
+                                disc, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11),
+                            retptr, realloc)));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName, "[method]tcp-socket.connect"),
+                (Action<ExecContext, int, int, int, int, int, int, int,
+                    int, int, int, int, int, int, int>)(
+                    (_, self, disc, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11,
+                     retptr) =>
+                        InvokeTcpSocketConnect(self,
+                            ReadIpSocketAddressFromSlots(
+                                disc, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11),
+                            retptr, realloc)));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName, "[method]udp-socket.bind"),
+                (Action<ExecContext, int, int, int, int, int, int, int,
+                    int, int, int, int, int, int, int>)(
+                    (_, self, disc, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11,
+                     retptr) =>
+                        InvokeUdpSocketBind(self,
+                            ReadIpSocketAddressFromSlots(
+                                disc, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11),
+                            retptr, realloc)));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName, "[method]udp-socket.connect"),
+                (Action<ExecContext, int, int, int, int, int, int, int,
+                    int, int, int, int, int, int, int>)(
+                    (_, self, disc, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11,
+                     retptr) =>
+                        InvokeUdpSocketConnect(self,
+                            ReadIpSocketAddressFromSlots(
+                                disc, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11),
+                            retptr, realloc)));
+
             // ---- wasi:sockets/types.udp-socket simple methods ----
             runtime.BindHostFunction(
                 (SocketsTypesModuleName, "[static]udp-socket.create"),
@@ -1159,6 +1214,119 @@ namespace Wacs.WASI.Preview3
                 .WriteInt32LittleEndian(dest.Slice(0), streamHandle);
             System.Buffers.Binary.BinaryPrimitives
                 .WriteInt32LittleEndian(dest.Slice(4), futureHandle);
+        }
+
+        /// <summary>
+        /// Decode an <see cref="IpSocketAddress"/> from the 12
+        /// canon-ABI flat slots (1 disc + 11 joined payload):
+        ///
+        /// <list type="bullet">
+        ///   <item>disc=0 (ipv4): s1=port, s2..s5=address octets;
+        ///     s6..s11 are unused per the variant disc.</item>
+        ///   <item>disc=1 (ipv6): s1=port, s2=flow-info,
+        ///     s3..s10=address u16 groups, s11=scope-id.</item>
+        /// </list>
+        /// </summary>
+        public static IpSocketAddress ReadIpSocketAddressFromSlots(
+            int disc,
+            int s1, int s2, int s3, int s4, int s5, int s6,
+            int s7, int s8, int s9, int s10, int s11)
+        {
+            if (disc == 0)
+            {
+                return IpSocketAddress.Ipv4(new Ipv4SocketAddress(
+                    port: (ushort)s1,
+                    address: new Ipv4Address(
+                        (byte)s2, (byte)s3, (byte)s4, (byte)s5)));
+            }
+            if (disc == 1)
+            {
+                return IpSocketAddress.Ipv6(new Ipv6SocketAddress(
+                    port: (ushort)s1,
+                    flowInfo: unchecked((uint)s2),
+                    address: new Ipv6Address(
+                        (ushort)s3, (ushort)s4, (ushort)s5, (ushort)s6,
+                        (ushort)s7, (ushort)s8, (ushort)s9, (ushort)s10),
+                    scopeId: unchecked((uint)s11)));
+            }
+            throw new SocketsException(
+                Sockets.ErrorCode.InvalidArgument,
+                $"ip-socket-address: invalid discriminant {disc} " +
+                "(expected 0 for ipv4 or 1 for ipv6).");
+        }
+
+        // ---- bind / connect wire bodies (Slice T) -------------------
+
+        /// <summary>Invoke
+        /// <c>[method]tcp-socket.bind(local-address)</c>.</summary>
+        public void InvokeTcpSocketBind(
+            int self, IpSocketAddress localAddress,
+            int retptr, ICabiRealloc realloc)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateResultSocketsErrorCodeRetptr(retptr, memory);
+            SocketsException? caught = null;
+            try { RequireTcpSocket(self).Bind(localAddress); }
+            catch (SocketsException ex) { caught = ex; }
+            WriteSocketsErrorCodeResult(
+                memory.AsSpan(retptr, ResultSocketsErrorCodeSize),
+                caught, realloc, memory);
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]tcp-socket.connect(remote-address)</c>.
+        /// Sync-blocking on the async impl (same pattern as
+        /// client.send / handler.handle from Slice H).</summary>
+        public void InvokeTcpSocketConnect(
+            int self, IpSocketAddress remoteAddress,
+            int retptr, ICabiRealloc realloc)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateResultSocketsErrorCodeRetptr(retptr, memory);
+            SocketsException? caught = null;
+            try
+            {
+                RequireTcpSocket(self).ConnectAsync(remoteAddress)
+                    .GetAwaiter().GetResult();
+            }
+            catch (SocketsException ex) { caught = ex; }
+            WriteSocketsErrorCodeResult(
+                memory.AsSpan(retptr, ResultSocketsErrorCodeSize),
+                caught, realloc, memory);
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]udp-socket.bind(local-address)</c>.</summary>
+        public void InvokeUdpSocketBind(
+            int self, IpSocketAddress localAddress,
+            int retptr, ICabiRealloc realloc)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateResultSocketsErrorCodeRetptr(retptr, memory);
+            SocketsException? caught = null;
+            try { RequireUdpSocket(self).Bind(localAddress); }
+            catch (SocketsException ex) { caught = ex; }
+            WriteSocketsErrorCodeResult(
+                memory.AsSpan(retptr, ResultSocketsErrorCodeSize),
+                caught, realloc, memory);
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]udp-socket.connect(remote-address)</c>.
+        /// UDP connect is synchronous (no handshake — sets the
+        /// default peer for subsequent send/receive).</summary>
+        public void InvokeUdpSocketConnect(
+            int self, IpSocketAddress remoteAddress,
+            int retptr, ICabiRealloc realloc)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateResultSocketsErrorCodeRetptr(retptr, memory);
+            SocketsException? caught = null;
+            try { RequireUdpSocket(self).Connect(remoteAddress); }
+            catch (SocketsException ex) { caught = ex; }
+            WriteSocketsErrorCodeResult(
+                memory.AsSpan(retptr, ResultSocketsErrorCodeSize),
+                caught, realloc, memory);
         }
 
         private ITcpSocket RequireTcpSocket(int handle)

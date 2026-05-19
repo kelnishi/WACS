@@ -1,5 +1,63 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.22 — bind/connect variant-arg flat-lowering (Phase 5 Slice T)
+
+Closes the last big gap on the sockets side: the
+`ip-socket-address` variant flat-lowering for `bind` and
+`connect` on both TCP and UDP. Sockets are now usable from a
+guest end-to-end — guest passes a flat-lowered variant arg,
+host decodes it, transitions state.
+
+### `ip-socket-address` variant flat-lowering
+
+The variant flattens to 12 i32 slots per canon-ABI:
+- 1 disc slot
+- 11 joined-payload slots (sized to the larger case = ipv6:
+  port + flow-info + 8×u16 address + scope-id)
+
+For ipv4 (disc=0), only the first 5 payload slots are live
+(port + 4 address octets); the remaining 6 are dead per the
+disc. For ipv6 (disc=1), all 11 are live.
+
+### `WasiPreview3Host.ReadIpSocketAddressFromSlots`
+
+Static decoder taking the 12 flat slots and returning a
+typed `IpSocketAddress`. Throws `SocketsException(InvalidArgument)`
+for out-of-range discriminants. Public so test code can
+exercise the decode independently of the wire bindings.
+
+### Four host functions wired
+
+```
+[method]tcp-socket.bind     -> result<_, error-code>
+[method]tcp-socket.connect  -> result<_, error-code>  (sync-blocking)
+[method]udp-socket.bind     -> result<_, error-code>
+[method]udp-socket.connect  -> result<_, error-code>  (sync)
+```
+
+All four have 14-i32 wire signatures: `(self, 12 variant
+slots, retptr)`. The body decodes the variant via
+`ReadIpSocketAddressFromSlots`, calls the typed impl, and
+writes the standard 20-byte `result<_, sockets.error-code>`
+at retptr. TCP connect sync-blocks on the
+`Task`-returning `ConnectAsync` impl — same pattern as
+client.send / handler.handle from Slice H.
+
+### Test coverage
+
+11 new tests in `BindConnectVariantArgTests.cs`:
+- Decode ipv4 from disc=0 + 5 payload slots; ipv6 from
+  disc=1 + 11 payload slots; invalid disc throws.
+- `BindToRuntime` registers all four host functions.
+- TCP bind to loopback succeeds; bind on already-bound
+  socket writes InvalidState.
+- TCP connect to a live loopback listener succeeds; connect
+  to a closed port writes ConnectionRefused (or close-family).
+- UDP bind to loopback succeeds; UDP connect after bind
+  succeeds; UDP connect on unbound writes InvalidState.
+
+242/242 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.21 — `descriptor.read-directory` typed-stream return (Phase 5 Slice S)
 
 Closes the second typed-stream return. `descriptor.read-directory`
