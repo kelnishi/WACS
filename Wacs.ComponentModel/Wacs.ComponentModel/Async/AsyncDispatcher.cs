@@ -113,6 +113,67 @@ namespace Wacs.ComponentModel.Async
         public IReadOnlyList<Wacs.ComponentModel.Runtime.Parser.DefTypeEntry>? Types
         { get; set; }
 
+        // ---- Typed-lifter mapping --------------------------------------
+        //
+        // Bindgen-emitted code calls RegisterTypeMapping at
+        // instantiation time to declare "type-table index N is
+        // WIT identifier X". The canon-async binder, when
+        // building a `task.return` delegate for an aggregate at
+        // type-table index N, queries this map for a typed lifter
+        // before falling back to the per-arity helpers in
+        // CanonAsyncBinder.
+        //
+        // The map is sparse — only indices the bindgen knows
+        // about are populated. Per-call lookup is allocation-free
+        // (Dictionary lookup, no boxing of typeIdx).
+
+        private readonly Dictionary<uint, string> _typeIdxToWitIdent =
+            new Dictionary<uint, string>();
+
+        /// <summary>
+        /// Declare that type-table index <paramref name="typeIdx"/>
+        /// corresponds to the WIT-level identifier
+        /// <paramref name="witIdent"/>. Idempotent — re-registering
+        /// the same (idx, ident) pair is a no-op. Re-registering a
+        /// different ident for the same index throws to surface a
+        /// bindgen bug rather than silently overwriting.
+        /// </summary>
+        public void RegisterTypeMapping(uint typeIdx, string witIdent)
+        {
+            if (witIdent == null) throw new ArgumentNullException(nameof(witIdent));
+            if (_typeIdxToWitIdent.TryGetValue(typeIdx, out var existing))
+            {
+                if (!string.Equals(existing, witIdent, StringComparison.Ordinal))
+                    throw new InvalidOperationException(
+                        $"Type-table index {typeIdx} already mapped to " +
+                        $"WIT identifier '{existing}'; refusing to overwrite " +
+                        $"with '{witIdent}'.");
+                return;
+            }
+            _typeIdxToWitIdent[typeIdx] = witIdent;
+        }
+
+        /// <summary>
+        /// Try to resolve a typed lifter for the value at type-table
+        /// index <paramref name="typeIdx"/>. Returns true and a
+        /// non-null <paramref name="lifter"/> iff the index has
+        /// been registered via
+        /// <see cref="RegisterTypeMapping(uint, string)"/> AND a
+        /// matching <c>[ComponentLifter]</c>-decorated method exists
+        /// in <see cref="ComponentLifterRegistry"/>. Otherwise the
+        /// canon-async binder falls back to its per-arity helpers.
+        /// </summary>
+        public bool TryGetTypedLifterForTypeIdx(
+            uint typeIdx, out Delegate? lifter)
+        {
+            if (!_typeIdxToWitIdent.TryGetValue(typeIdx, out var ident))
+            {
+                lifter = null;
+                return false;
+            }
+            return ComponentLifterRegistry.TryGet(ident, out lifter);
+        }
+
         // ---- Current-task stack ----------------------------------------
         //
         // The "ambient task" is the task whose body is currently

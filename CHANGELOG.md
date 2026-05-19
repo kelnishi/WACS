@@ -1,5 +1,88 @@
 # Changelog
 
+## WACS.ComponentModel 0.8.21 / WACS.ComponentModel.Async.SourceGen 0.2.0 — typed `[ComponentLifter]` registry (Phase 3 Slice K3)
+
+Adds the source-generator-driven typed-lifter pathway that
+removes the arity/width/heterogeneity restrictions in Slices
+K1/K2 — bindgen-emitted (or hand-written) typed methods can
+now claim a specific WIT identifier and the canon-async binder
+will route through them.
+
+### `[ComponentLifter("wit-id")]` attribute
+
+New `Wacs.ComponentModel.Async.ComponentLifterAttribute`
+decorates a static method whose signature mirrors the
+canon-ABI flat-lowered shape of a WIT value. The body
+constructs the typed CLR representation and forwards it to
+`AsyncDispatcher.TaskReturn`.
+
+```csharp
+[ComponentLifter("my:pkg/iface#point")]
+internal static void LiftPoint(ExecContext _, int x, int y) =>
+    dispatcher.TaskReturn(null!,
+        new Point(unchecked((uint)x), unchecked((uint)y)));
+```
+
+The signature determines the delegate shape; the registry
+constructs the matching `Action<...>` / `Func<...>` at
+registration time. No runtime reflection.
+
+### `ComponentLifterRegistry` — process-wide typed-lifter table
+
+Populated at startup by per-assembly
+`[ModuleInitializer]`-decorated methods the new
+`ComponentLifterRegistryGenerator` emits — one initializer per
+assembly that ships any `[ComponentLifter]` method. The
+initializer calls `ComponentLifterRegistry.Register(witIdent,
+delegate)` literally for each match; the table is a plain
+`Dictionary<string, Delegate>` populated once on assembly load.
+
+For targets that don't ship
+`System.Runtime.CompilerServices.ModuleInitializerAttribute`
+(netstandard2.0 / netstandard2.1), the generator emits an
+internal polyfill alongside the initializer.
+
+### `AsyncDispatcher.RegisterTypeMapping(uint, string)`
+
+Bindgen-emitted (or embedder) code calls this at instantiation
+time to declare "type-table index N is WIT identifier X". The
+canon-async binder consults
+`AsyncDispatcher.TryGetTypedLifterForTypeIdx(uint, out Delegate?)`
+when building the `task.return` delegate; if a typed lifter is
+registered for that index's WIT identifier, the binder returns
+it directly — bypasses the per-arity helpers from Slices K1/K2.
+
+Re-registering the same (idx, ident) pair is idempotent; a
+different ident for an already-mapped index throws to surface
+bindgen / mis-merge bugs.
+
+### Binder integration
+
+`CanonAsyncBinder.TryBuildDelegateForEntry` (and the internal
+`TryBuildTaskReturn`) now check the typed-lifter table first
+for any typeidx-referenced aggregate. The per-arity fallback
+chain is unchanged — Slice K1 (enum / flags) and Slice K2
+(record / variant) still cover the cases where no typed lifter
+is registered.
+
+### `Wacs.ComponentModel.Async.SourceGen.CanonOpRegistryGenerator`
+
+Tightened the trigger — emits only when `AsyncDispatcher` is
+*declared* in the current compilation, not just referenced.
+Prevents CS0759 (no defining declaration) when a consumer
+assembly references the generator.
+
+### Test coverage
+
+13 new tests in
+`Wacs.ComponentModel.Test/ComponentLifterRegistryTests.cs`:
+registry shape, lookup APIs, dispatcher type-idx mapping
+(register / idempotent / conflicting-ident throws), binder
+integration with a synthetic typed record + a
+heterogeneous-payload variant the K2 fallback declines.
+
+611/611 tests green.
+
 ## WACS.ComponentModel 0.8.20 — record + variant task.return lift (Phase 3 Slice K2)
 
 Extends the canon-async binder to recognize two more aggregate

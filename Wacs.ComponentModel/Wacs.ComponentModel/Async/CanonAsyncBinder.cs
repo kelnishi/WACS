@@ -421,6 +421,20 @@ namespace Wacs.ComponentModel.Async
             // cover list/option/result with primitive payloads.
             if (!tr.Result.Value.IsPrimitive)
             {
+                // Slice K3: if the bindgen registered this typeidx
+                // against a WIT ident with a matching
+                // [ComponentLifter]-decorated method, use the
+                // typed lifter directly — bypasses the per-arity
+                // fallback and supports arbitrary heterogeneous
+                // record/variant shapes the per-arity helpers
+                // decline.
+                if (d.TryGetTypedLifterForTypeIdx(
+                        tr.Result.Value.TypeIdx, out var typed)
+                    && typed != null)
+                {
+                    del = typed;
+                    return true;
+                }
                 var defType = ResolveType(d, tr.Result.Value.TypeIdx);
                 return defType switch
                 {

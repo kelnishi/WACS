@@ -65,6 +65,14 @@ namespace Wacs.ComponentModel.Async.SourceGen
         {
             var dispatcher = compilation.GetTypeByMetadataName(DispatcherFqn);
             if (dispatcher == null) return ImmutableArray<string>.Empty;
+            // Only emit when AsyncDispatcher is DECLARED in the
+            // current compilation — not just referenced. The partial
+            // method's defining declaration lives in
+            // Wacs.ComponentModel; emitting the impl from any other
+            // assembly produces CS0759 ("no defining declaration").
+            if (!SymbolEqualityComparer.Default.Equals(
+                    dispatcher.ContainingAssembly, compilation.Assembly))
+                return ImmutableArray<string>.Empty;
             var attrType = compilation.GetTypeByMetadataName(AttributeFqn);
             if (attrType == null) return ImmutableArray<string>.Empty;
 
