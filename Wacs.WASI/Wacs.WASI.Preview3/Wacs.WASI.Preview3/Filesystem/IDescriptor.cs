@@ -9,6 +9,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Wacs.ComponentModel.Async;
+using Wacs.WASI.Preview3.CanonicalAbi;
 
 namespace Wacs.WASI.Preview3.Filesystem
 {
@@ -97,15 +98,18 @@ namespace Wacs.WASI.Preview3.Filesystem
         /// <summary><c>read-directory: func() -&gt;
         /// tuple&lt;stream&lt;directory-entry&gt;,
         /// future&lt;result&lt;_, error-code&gt;&gt;&gt;</c>.
-        /// Note: the stream element type is
-        /// <c>directory-entry</c>, not byte — a typed-stream lift
-        /// that the canon-async dispatcher will need to surface
-        /// once the typed-stream lift pathway is built. For
-        /// Slice C the implementation may produce a stream of
-        /// canon-ABI-lowered <c>directory-entry</c> records;
-        /// the binding lands later.</summary>
+        ///
+        /// <para>Each directory-entry serializes to 24 bytes in
+        /// the stream's byte buffer (descriptor-type variant
+        /// at +0..16, name-ptr at +16, name-len at +20). The
+        /// per-entry name UTF-8 bytes live in guest memory at
+        /// addresses returned by <paramref name="realloc"/>'s
+        /// cabi_realloc indirection. Guests reading the stream
+        /// in 24-byte chunks recover the entry inline + read
+        /// the name string from name-ptr.</para>
+        /// </summary>
         (int streamHandle, int futureHandle, Task ReadCompletion)
-            ReadDirectory(AsyncDispatcher dispatcher);
+            ReadDirectory(AsyncDispatcher dispatcher, ICabiRealloc realloc);
 
         /// <summary><c>sync: async func() -&gt;
         /// result&lt;_, error-code&gt;</c>.</summary>

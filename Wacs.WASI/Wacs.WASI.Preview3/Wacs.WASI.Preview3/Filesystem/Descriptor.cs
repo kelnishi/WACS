@@ -13,6 +13,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Wacs.ComponentModel.Async;
+using Wacs.WASI.Preview3.CanonicalAbi;
 using Wacs.WASI.Preview3.Cli;
 using Wacs.WASI.Preview3.Clocks;
 
@@ -378,23 +379,125 @@ namespace Wacs.WASI.Preview3.Filesystem
         }
 
         public (int streamHandle, int futureHandle, Task ReadCompletion)
-            ReadDirectory(AsyncDispatcher dispatcher)
+            ReadDirectory(AsyncDispatcher dispatcher, ICabiRealloc realloc)
         {
-            // Typed-stream lift for `stream<directory-entry>`
-            // requires the canon-async typed-stream pathway.
-            // For Slice C, surface as a byte stream whose
-            // contents are the canon-ABI-lowered directory-entry
-            // records. The wire-level binding lands when typed
-            // streams arrive.
+            if (dispatcher == null)
+                throw new ArgumentNullException(nameof(dispatcher));
+            if (realloc == null)
+                throw new ArgumentNullException(nameof(realloc));
+
+            // Enumerate UP-FRONT to size the byte stream
+            // correctly. The default StreamNew capacity (64) is
+            // too small for even a couple of 24-byte entries —
+            // eager fill needs the channel sized for the full
+            // payload to avoid TryWrite-on-full dropping the
+            // tail. Embedders with very large directories should
+            // override `ReadDirectory` for a true lazy-streaming
+            // backing.
             //
-            // TODO(slice-D): wire to typed-stream lift once
-            // the dispatcher supports stream<T> where T is
-            // an aggregate type (currently only stream<u8>).
-            throw new FilesystemException(
-                ErrorCode.Unsupported,
-                "read-directory: typed-stream lift for " +
-                "stream<directory-entry> awaits canon-async " +
-                "typed-stream pathway.");
+            // Enumerate before allocating the stream + future so
+            // a NotDirectory error doesn't leak handles.
+            string[] entries;
+            try
+            {
+                if (!_isDirectory)
+                    throw new FilesystemException(
+                        ErrorCode.NotDirectory,
+                        $"'{_absolutePath}' is not a directory.");
+                entries = Directory.GetFileSystemEntries(_absolutePath);
+            }
+            catch (FilesystemException) { throw; }
+            catch (Exception ex) { throw ToFilesystem(ex); }
+
+            // 24 bytes per entry; +24 headroom for any final
+            // pad/flush. Minimum 64 to avoid pathological tiny
+            // capacities.
+            int capacity = System.Math.Max(64, entries.Length * 24 + 24);
+            var streamHandle = dispatcher.StreamNew(
+                typeIdx: 0, capacity: capacity);
+            var futureHandle = dispatcher.FutureNew(typeIdx: 0);
+
+            try
+            {
+                foreach (var entry in entries)
+                {
+                    WriteDirectoryEntry(
+                        dispatcher, streamHandle, realloc, entry);
+                }
+                dispatcher.StreamDropWritable(streamHandle);
+                dispatcher.FutureWrite(futureHandle, /* ok */ null);
+            }
+            catch (Exception ex)
+            {
+                dispatcher.StreamDropWritable(streamHandle);
+                dispatcher.FutureWrite(futureHandle, ToFilesystem(ex));
+            }
+            return (streamHandle, futureHandle, Task.CompletedTask);
+        }
+
+        // Serialize one directory-entry to the byte stream.
+        // Layout: 24 bytes per entry:
+        //   +0..16:  descriptor-type variant
+        //     +0:    disc (u8) + 3-byte pad
+        //     +4..16: Other-payload slot (12 bytes: option<string>);
+        //            zero for non-Other variants
+        //   +16..20: name-ptr (i32 — cabi_realloc-allocated)
+        //   +20..24: name-len (i32)
+        private static void WriteDirectoryEntry(
+            AsyncDispatcher dispatcher, int streamHandle,
+            ICabiRealloc realloc, string entryPath)
+        {
+            // Determine type.
+            DescriptorType type;
+            if (Directory.Exists(entryPath))
+                type = DescriptorType.Directory;
+            else if (File.Exists(entryPath))
+            {
+                var attr = File.GetAttributes(entryPath);
+                type = (attr & FileAttributes.ReparsePoint) != 0
+                    ? DescriptorType.SymbolicLink
+                    : DescriptorType.RegularFile;
+            }
+            else
+            {
+                type = DescriptorType.Other(null);
+            }
+
+            // Allocate + write the name UTF-8 in guest memory.
+            var name = Path.GetFileName(entryPath);
+            var nameBytes = Encoding.UTF8.GetBytes(name);
+            int namePtr = nameBytes.Length == 0
+                ? 0
+                : realloc.Allocate(align: 1, size: nameBytes.Length);
+            if (nameBytes.Length > 0
+                && dispatcher.Memory != null)
+            {
+                new ReadOnlySpan<byte>(nameBytes)
+                    .CopyTo(dispatcher.Memory
+                        .AsSpan(namePtr, nameBytes.Length));
+            }
+
+            // Serialize the 24-byte entry into the byte stream
+            // one byte at a time (the byte-channel doesn't have
+            // a bulk-write primitive). Performance isn't a
+            // concern at the directory-entry granularity.
+            var entryBytes = new byte[24];
+            entryBytes[0] = (byte)type.Kind;
+            // Bytes 1..16 stay zero (variant pad + Other payload
+            // slot none-discriminant). type.OtherPayload is
+            // ignored when emitting via the stream — the per-
+            // entry retptr layout for the variant payload would
+            // need a separate realloc allocation; not worth the
+            // complexity for the rare Other case here.
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(
+                    entryBytes.AsSpan(16, 4), namePtr);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(
+                    entryBytes.AsSpan(20, 4), nameBytes.Length);
+
+            for (int i = 0; i < entryBytes.Length; i++)
+                dispatcher.StreamTryWrite(streamHandle, entryBytes[i]);
         }
 
         public Task SyncAsync(CancellationToken cancellationToken = default)

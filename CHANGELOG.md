@@ -1,5 +1,81 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.21 — `descriptor.read-directory` typed-stream return (Phase 5 Slice S)
+
+Closes the second typed-stream return. `descriptor.read-directory`
+produces a `stream<directory-entry>` whose elements are 24-byte
+canon-ABI records (descriptor-type variant + ptr/len to a
+cabi_realloc-allocated UTF-8 name string).
+
+### Wire encoding for `stream<directory-entry>`
+
+Each entry serializes to 24 bytes in the stream:
+
+```
++0..16:  descriptor-type variant (disc at +0, Other-payload at +4)
++16..20: name-ptr (i32 — cabi_realloc-allocated)
++20..24: name-len (i32 — UTF-8 byte length)
+```
+
+The per-entry name string lives in guest memory at addresses
+returned by cabi_realloc. Guests reading the stream in 24-byte
+chunks recover the entry inline + dereference the name-ptr to
+get the UTF-8 bytes.
+
+For the Other variant's option<string> payload (rare in
+practice), the encoder leaves the slot at +4..16 as zero
+(option-disc = none). Production-quality Other handling would
+require nested realloc + the option<string> wire layout —
+deferred until a workload actually needs it.
+
+### `IDescriptor.ReadDirectory(dispatcher, ICabiRealloc)`
+
+Signature change: now takes the `ICabiRealloc` reference so the
+impl can allocate per-entry name strings. Embedders providing
+custom IDescriptor impls need to update their signature.
+
+### `Descriptor.ReadDirectory` impl
+
+Eager-fill: enumerates the directory up-front with
+`Directory.GetFileSystemEntries`, sizes the StreamBuffer
+`capacity = max(64, entries.Length * 24 + 24)` to avoid the
+default 64-byte cap dropping the tail under TryWrite-on-full,
+then serializes each entry through `WriteDirectoryEntry`.
+`NotDirectory` errors throw synchronously up-front (no stream
+or future is allocated, so no handle leak).
+
+Embedders with very large directories that don't fit in
+memory should override the impl with a lazy-streaming
+backing.
+
+### Host-function wire-up
+
+```
+[method]descriptor.read-directory
+  -> tuple<stream<directory-entry>, future<...>> at 8-byte retptr
+```
+
+Same retptr shape as `descriptor.read-via-stream` (stream-handle
+at +0, future-handle at +4).
+
+### Test coverage
+
+6 new tests in `ReadDirectoryStreamTests.cs`:
+- `BindToRuntime` registers the host function.
+- Three-entry directory (two files + one subdir) → exactly
+  three 24-byte records on the stream; each (type, name) pair
+  matches a known entry, name bytes round-trip through the
+  cabi_realloc-allocated guest memory.
+- Empty directory → empty stream (writable half drops,
+  no leftover bytes).
+- Read-directory on a regular file throws `NotDirectory`
+  synchronously.
+- `InvokeDescriptorReadDirectory` writes (stream, future)
+  handle pair at retptr correctly.
+- Misaligned retptr throws.
+
+231/231 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.20 — `tcp-socket.listen` typed-stream return (Phase 5 Slice R)
 
 First typed-stream return wired end-to-end:

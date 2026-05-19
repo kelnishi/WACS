@@ -640,6 +640,13 @@ namespace Wacs.WASI.Preview3
                         InvokeDescriptorAppendViaStream(
                             self, streamHandle)));
 
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[method]descriptor.read-directory"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeDescriptorReadDirectory(
+                        self, retptr, realloc)));
+
             // wasi:sockets — resource drops + ip-name-lookup.
             // Full ITcpSocket/IUdpSocket method wire-ups + a
             // System.Net.Sockets-backed default impl ship in
@@ -1471,6 +1478,41 @@ namespace Wacs.WASI.Preview3
             var (futureHandle, _) = desc.AppendViaStream(
                 dispatcher, streamHandle);
             return futureHandle;
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]descriptor.read-directory()</c>. Returns
+        /// <c>tuple&lt;stream&lt;directory-entry&gt;,
+        /// future&lt;result&lt;_, error-code&gt;&gt;&gt;</c>
+        /// via an 8-byte 4-aligned retptr (stream-handle at +0,
+        /// future-handle at +4). The stream's bytes carry
+        /// 24-byte directory-entry records; per-entry name
+        /// strings are cabi_realloc-allocated at the addresses
+        /// embedded in each record's name-ptr slot.</summary>
+        public void InvokeDescriptorReadDirectory(
+            int self, int retptr, ICabiRealloc realloc)
+        {
+            if (realloc == null) throw new ArgumentNullException(nameof(realloc));
+            var dispatcher = RequireDispatcher();
+            var memory = dispatcher.Memory
+                ?? throw new InvalidOperationException(
+                    "descriptor.read-directory: dispatcher.Memory " +
+                    "must be set before this import is invoked.");
+            if (retptr < 0 || (retptr & 0x3) != 0
+                || retptr + 8 > memory.Data.Length)
+                throw new InvalidOperationException(
+                    "descriptor.read-directory: retptr " +
+                    $"0x{retptr:X8} misaligned or out of range " +
+                    $"(memory size = {memory.Data.Length}).");
+
+            var desc = RequireDescriptor(self);
+            var (streamHandle, futureHandle, _) =
+                desc.ReadDirectory(dispatcher, realloc);
+            var dest = memory.AsSpan(retptr, 8);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(dest.Slice(0), streamHandle);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(dest.Slice(4), futureHandle);
         }
 
         private IDescriptor RequireDescriptor(int handle)
