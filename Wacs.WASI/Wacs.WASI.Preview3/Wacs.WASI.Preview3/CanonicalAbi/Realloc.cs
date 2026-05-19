@@ -30,7 +30,20 @@ namespace Wacs.WASI.Preview3.CanonicalAbi
     /// <c>Wacs.ComponentModel.CanonicalABI</c> once a third
     /// package needs it.</para>
     /// </summary>
-    public sealed class Realloc
+    /// <summary>
+    /// Abstraction over <c>cabi_realloc</c> for guest-memory
+    /// allocation. The default implementation
+    /// (<see cref="Realloc"/>) routes through the runtime's
+    /// exported <c>cabi_realloc</c>; tests stub this interface
+    /// to return pre-canned addresses without needing a
+    /// runtime export.
+    /// </summary>
+    public interface ICabiRealloc
+    {
+        int Allocate(int align, int size);
+    }
+
+    public sealed class Realloc : ICabiRealloc
     {
         private readonly WasmRuntime _runtime;
         private Wacs.Core.Runtime.Delegates.GenericFuncs? _cabiRealloc;

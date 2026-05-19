@@ -96,6 +96,11 @@ namespace Wacs.WASI.Preview3
         public HostResourceTable<IRequest> RequestHandles { get; } =
             new HostResourceTable<IRequest>();
 
+        /// <summary>Host-side handle table for
+        /// <c>wasi:filesystem/types.descriptor</c> resources.</summary>
+        public HostResourceTable<IDescriptor> DescriptorHandles { get; } =
+            new HostResourceTable<IDescriptor>();
+
         public WasiPreview3Host() : this(new WasiPreview3HostBuilder()) { }
 
         public WasiPreview3Host(WasiPreview3HostBuilder builder)
@@ -467,6 +472,145 @@ namespace Wacs.WASI.Preview3
                 (HttpHandlerModuleName, "handle"),
                 (Func<ExecContext, int, int>)((_, requestHandle) =>
                     InvokeHandlerHandle(requestHandle)));
+
+            // wasi:filesystem/types.descriptor — drop + the
+            // simplest sync method as a representative wire-up.
+            // The remaining ~23 methods (stat / open-at /
+            // read-via-stream / etc.) follow the same pattern
+            // and ship in follow-up slices alongside the
+            // canon-async-func wire-shape settling.
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName, "[resource-drop]descriptor"),
+                (Action<ExecContext, int>)((_, handle) =>
+                    DescriptorHandles.Drop(handle)));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName, "[method]descriptor.get-flags"),
+                (Func<ExecContext, int, int>)((_, self) =>
+                    (int)RequireDescriptor(self).GetFlags()));
+
+            // wasi:filesystem/preopens.get-directories — the
+            // landmark binding that lets guests discover the
+            // host-configured preopen set. Returns
+            // list<tuple<descriptor, string>>:
+            //
+            //   retptr+0: list-ptr (i32)
+            //   retptr+4: list-count (i32)
+            //
+            // List body at list-ptr: count tuples × 12 bytes:
+            //
+            //   +0: descriptor-handle (i32)
+            //   +4: path-string-ptr   (i32)
+            //   +8: path-string-len   (i32)
+            //
+            // Each tuple's path string lives in its own
+            // cabi_realloc-allocated guest memory region. We
+            // reuse the `realloc` allocator already constructed
+            // above for the wasi:random list-returning paths —
+            // a single instance per BindToRuntime call caches the
+            // cabi_realloc resolution.
+            runtime.BindHostFunction(
+                (FilesystemPreopensModuleName, "get-directories"),
+                (Action<ExecContext, int>)((_, retptr) =>
+                    InvokePreopensGetDirectories(retptr, realloc)));
+        }
+
+        // ---- wasi:filesystem binding bodies (Slice I) ---------------
+
+        /// <summary>Invoke
+        /// <c>wasi:filesystem/preopens.get-directories</c>'s
+        /// body. Allocates a descriptor handle per configured
+        /// preopen, writes each path string via cabi_realloc,
+        /// then allocates the outer tuple-list and writes its
+        /// (ptr, count) at the retptr.</summary>
+        public void InvokePreopensGetDirectories(int retptr, ICabiRealloc realloc)
+        {
+            if (realloc == null) throw new ArgumentNullException(nameof(realloc));
+            var dispatcher = RequireDispatcher();
+            var memory = dispatcher.Memory
+                ?? throw new InvalidOperationException(
+                    "wasi:filesystem/preopens.get-directories: " +
+                    "dispatcher.Memory must be set before this " +
+                    "import is invoked.");
+            if (retptr < 0 || (retptr & 0x3) != 0
+                || retptr + 8 > memory.Data.Length)
+                throw new InvalidOperationException(
+                    "wasi:filesystem/preopens.get-directories: retptr " +
+                    $"0x{retptr:X8} misaligned or out of range " +
+                    $"(memory size = {memory.Data.Length}). " +
+                    "Caller must allocate an 8-byte 4-aligned " +
+                    "return area.");
+
+            var preopens = Preopens.GetDirectories();
+            int count = preopens.Count;
+            if (count == 0)
+            {
+                // Empty list: (ptr=0, count=0) at retptr.
+                var emptyDest = memory.AsSpan(retptr, 8);
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(emptyDest.Slice(0), 0);
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(emptyDest.Slice(4), 0);
+                return;
+            }
+
+            // For each preopen, allocate a descriptor handle +
+            // a guest-side path-string region. We accumulate the
+            // (handle, str-ptr, str-len) triples in a host-side
+            // staging array; the final array goes through one
+            // cabi_realloc allocation.
+            var triples = new (int Handle, int StrPtr, int StrLen)[count];
+            for (int i = 0; i < count; i++)
+            {
+                var pre = preopens[i];
+                int handle = DescriptorHandles.Allocate(pre.Descriptor);
+                var pathBytes = System.Text.Encoding.UTF8.GetBytes(pre.Path);
+                int strPtr = pathBytes.Length == 0
+                    ? 0
+                    : realloc.Allocate(align: 1, size: pathBytes.Length);
+                if (pathBytes.Length > 0)
+                    new ReadOnlySpan<byte>(pathBytes)
+                        .CopyTo(memory.AsSpan(strPtr, pathBytes.Length));
+                triples[i] = (handle, strPtr, pathBytes.Length);
+            }
+
+            // Tuple<descriptor, string> wire size: 12 bytes
+            // (i32 handle + i32 ptr + i32 len). Tuple-list
+            // allocation must be 4-aligned.
+            int tupleArrayBytes = count * 12;
+            int arrayPtr = realloc.Allocate(align: 4, size: tupleArrayBytes);
+            var arraySpan = memory.AsSpan(arrayPtr, tupleArrayBytes);
+            for (int i = 0; i < count; i++)
+            {
+                int off = i * 12;
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(
+                        arraySpan.Slice(off + 0), triples[i].Handle);
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(
+                        arraySpan.Slice(off + 4), triples[i].StrPtr);
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(
+                        arraySpan.Slice(off + 8), triples[i].StrLen);
+            }
+
+            // Write the outer (list-ptr, list-count) at retptr.
+            var outerDest = memory.AsSpan(retptr, 8);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(outerDest.Slice(0), arrayPtr);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(outerDest.Slice(4), count);
+        }
+
+        private IDescriptor RequireDescriptor(int handle)
+        {
+            var desc = DescriptorHandles.Get(handle);
+            if (desc == null)
+                throw new FilesystemException(
+                    Filesystem.ErrorCode.BadDescriptor,
+                    $"wasi:filesystem/types.descriptor: handle " +
+                    $"{handle} is not allocated.");
+            return desc;
         }
 
         // ---- wasi:http/client + handler binding bodies ---------------
@@ -700,7 +844,7 @@ namespace Wacs.WASI.Preview3
         /// at <paramref name="retptr"/>. Public for test access.
         /// </summary>
         public void InvokeGetRandomBytes(
-            IRandom source, Realloc realloc, ulong maxLen, int retptr)
+            IRandom source, ICabiRealloc realloc, ulong maxLen, int retptr)
         {
             if (source == null) throw new ArgumentNullException(nameof(source));
             if (realloc == null) throw new ArgumentNullException(nameof(realloc));
@@ -712,7 +856,7 @@ namespace Wacs.WASI.Preview3
         /// <see cref="InvokeGetRandomBytes"/> for the insecure
         /// variant.</summary>
         public void InvokeGetInsecureRandomBytes(
-            IInsecure source, Realloc realloc, ulong maxLen, int retptr)
+            IInsecure source, ICabiRealloc realloc, ulong maxLen, int retptr)
         {
             if (source == null) throw new ArgumentNullException(nameof(source));
             if (realloc == null) throw new ArgumentNullException(nameof(realloc));
@@ -756,7 +900,7 @@ namespace Wacs.WASI.Preview3
         // implementations to return fewer bytes than requested
         // (short read) — the wire convention encodes whatever
         // the host actually produced.
-        private void WriteByteList(Realloc realloc, int retptr, byte[] data)
+        private void WriteByteList(ICabiRealloc realloc, int retptr, byte[] data)
         {
             var dispatcher = RequireDispatcher();
             var memory = dispatcher.Memory
@@ -961,6 +1105,18 @@ namespace Wacs.WASI.Preview3
         /// provides this when serving).</summary>
         public const string HttpHandlerModuleName =
             "wasi:http/handler@0.3.0-rc-2026-03-15";
+
+        /// <summary>Wire-level WASI module name for the
+        /// <c>wasi:filesystem/types</c> interface (descriptor
+        /// resource + shared types).</summary>
+        public const string FilesystemTypesModuleName =
+            "wasi:filesystem/types@0.3.0-rc-2026-03-15";
+
+        /// <summary>Wire-level WASI module name for the
+        /// <c>wasi:filesystem/preopens</c> interface
+        /// (get-directories).</summary>
+        public const string FilesystemPreopensModuleName =
+            "wasi:filesystem/preopens@0.3.0-rc-2026-03-15";
     }
 
     /// <summary>Fluent builder for <see cref="WasiPreview3Host"/>.</summary>

@@ -1,5 +1,81 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.11 — `wasi:filesystem` descriptor + preopens wire-up (Phase 5 Slice I)
+
+Adds the descriptor host-resource table, wires the simplest
+descriptor methods, and ships the landmark
+`preopens.get-directories` binding — the gating piece that
+lets guests discover the host-configured preopen set.
+
+### `DescriptorHandles` host-resource table
+
+New `HostResourceTable<IDescriptor>` on the host. Filesystem
+wire-bound functions resolve descriptor handles through this
+table.
+
+### `wasi:filesystem/types.descriptor` (sample methods)
+
+- `[resource-drop]descriptor` — releases the handle.
+- `[method]descriptor.get-flags` — returns the descriptor's
+  `descriptor-flags` (u32 bitfield). Representative example
+  of the self-handle-to-sync-getter shape; the remaining ~23
+  descriptor methods (stat / open-at / read-via-stream /
+  read-directory / etc.) follow the same pattern and ship in
+  follow-up slices alongside the canon-async-func wire-shape
+  settling.
+
+### `wasi:filesystem/preopens.get-directories` (landmark)
+
+Returns `list<tuple<descriptor, string>>` via the cabi_realloc
+multi-list wire convention. Implementation:
+
+1. Allocates a fresh `descriptor` handle per configured
+   preopen.
+2. For each preopen, allocates guest memory via cabi_realloc
+   and writes the UTF-8 path bytes.
+3. Allocates a 12-byte-per-tuple array via cabi_realloc and
+   writes each `(descriptor-handle, path-ptr, path-len)`
+   triple.
+4. Writes the outer `(list-ptr, list-count)` at retptr
+   (8 bytes, 4-aligned).
+
+Empty preopen sets short-circuit to `(0, 0)` at retptr.
+Misaligned / out-of-range retptr + missing dispatcher
+memory throw with diagnostic messages.
+
+### `ICabiRealloc` interface
+
+Extracted from `Realloc` to let tests stub the cabi_realloc
+indirection without needing a runtime export. The host's
+list-returning bindings now accept `ICabiRealloc` instead of
+the concrete `Realloc` class; the test suite uses a
+deterministic `StubRealloc` that returns pre-canned
+addresses.
+
+### New wire-level module-name constants
+
+`FilesystemTypesModuleName` and `FilesystemPreopensModuleName`
+on `WasiPreview3Host`.
+
+### Test coverage
+
+7 new tests in `FilesystemBindingTests.cs`:
+- `BindToRuntime` registers descriptor + preopens host
+  functions.
+- Descriptor get-flags returns the constructed bitfield via
+  handle indirection.
+- Descriptor drop releases the handle.
+- `InvokePreopensGetDirectories` empty preopen set writes
+  `(0, 0)` at retptr.
+- Full happy-path: one preopen → fresh descriptor handle
+  allocated, UTF-8 path written at first cabi_realloc
+  address, 12-byte tuple written at second cabi_realloc
+  address, outer (list-ptr, list-count) at retptr.
+- Misaligned retptr throws.
+- Missing dispatcher memory throws.
+
+152/152 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.10 — `wasi:http/client.send` + `handler.handle` wire-up (Phase 5 Slice H)
 
 Wires the outbound + inbound HTTP entry points through to
