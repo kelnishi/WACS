@@ -13,6 +13,7 @@ using Wacs.Core.Runtime;
 using Wacs.WASI.Preview3.CanonicalAbi;
 using Wacs.WASI.Preview3.Cli;
 using Wacs.WASI.Preview3.Clocks;
+using Wacs.WASI.Preview3.Filesystem;
 using Wacs.WASI.Preview3.Random;
 
 namespace Wacs.WASI.Preview3
@@ -57,6 +58,7 @@ namespace Wacs.WASI.Preview3
         private IRandom? _random;
         private IInsecure? _insecure;
         private IInsecureSeed? _insecureSeed;
+        private IPreopens? _preopens;
 
         public WasiPreview3Host() : this(new WasiPreview3HostBuilder()) { }
 
@@ -89,6 +91,16 @@ namespace Wacs.WASI.Preview3
 
         public IInsecureSeed InsecureSeed =>
             _insecureSeed ??= _config.InsecureSeed ?? new InsecureSeedSource();
+
+        /// <summary>
+        /// Filesystem preopen set. Defaults to an empty list —
+        /// guests with no configured preopens see no
+        /// filesystem. Embedders typically populate this via
+        /// <see cref="DirectoryPreopens.FromHostPaths"/>.
+        /// </summary>
+        public IPreopens Preopens =>
+            _preopens ??= _config.Preopens
+                ?? DirectoryPreopens.FromHostPaths();
 
         /// <summary>
         /// The component-instance dispatcher the host bindings
@@ -541,6 +553,7 @@ namespace Wacs.WASI.Preview3
         public IRandom? Random { get; set; }
         public IInsecure? InsecureRandom { get; set; }
         public IInsecureSeed? InsecureSeed { get; set; }
+        public IPreopens? Preopens { get; set; }
     }
 
     /// <summary>Ergonomic one-liner mirroring

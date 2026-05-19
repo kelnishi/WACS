@@ -1,5 +1,118 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.5 — `wasi:filesystem` surface area (Phase 5 Slice C)
+
+Third Phase 5 host-interface port. Vendors the
+`wasi-filesystem-0.3.0-rc-2026-03-15` WIT and defines the host
+surface — all type definitions, the
+<see cref="IDescriptor"/> resource interface, the
+<see cref="IPreopens"/> interface, and System.IO-backed default
+impls. The wire-level canon-async binding (resource handle
+lifecycle + `BindToRuntime` registrations) ships in the next
+slice once the descriptor-resource pathway is settled — keeping
+the slice focused on the surface design so the wiring choices
+can be made with full visibility.
+
+### Vendored WIT
+
+`wit/deps/wasi-filesystem-0.3.0-rc-2026-03-15/package.wit`
+copied from `Spec.Test/wasi`. Embedded via the existing
+`EmbeddedResource` pattern.
+
+### `FilesystemTypes.cs`
+
+All WIT types modeled as ergonomic C# types:
+
+- `FileSize`, `LinkCount` — typed wrappers around `ulong` so
+  callers can't accidentally mix file sizes with arbitrary u64s.
+- `DescriptorType` — value-type with tag enum +
+  `Other(option<string>)` payload modeling.
+- `DescriptorFlags`, `PathFlags`, `OpenFlags` — `[Flags]` enums
+  with bit positions matching the WIT declaration order (the
+  canon-ABI flags lowering writes the bitfield in that order).
+- `DescriptorStat`, `DirectoryEntry`, `MetadataHashValue` —
+  records with `init`-only properties (netstandard2.1 ships
+  the `IsExternalInit` polyfill alongside).
+- `NewTimestamp` — value-type tag + `Instant` payload for the
+  `timestamp(instant)` case.
+- `ErrorCode` — flat enum covering all 37 cases.
+- `FilesystemException` — host-side throwable carrying
+  `ErrorCode` + optional `OtherPayload` for the binding to
+  lower into `result<_, error-code>` err values.
+- `Advice` — flat enum.
+
+### `IDescriptor` interface (25 methods)
+
+Models the WIT `resource descriptor` shape. Async methods
+surface as `Task`-returning. Stream-returning methods
+(`read-via-stream`, `write-via-stream`, `append-via-stream`,
+`read-directory`) return the
+`(streamHandle, futureHandle, completion)` tuple established
+by `IStdin.ReadViaStream`. Methods returning
+`result<X, error-code>` throw `FilesystemException` on err;
+the binding layer (Slice D) catches and lowers.
+
+### `Descriptor` (default impl)
+
+System.IO-backed implementation with **sandboxing** rooted at
+a configurable path. Path-relative operations refuse to
+resolve outside the sandbox boundary via `..` or absolute
+paths — attempts throw `FilesystemException(NotPermitted)`.
+
+Async methods run their synchronous .NET I/O on the thread
+pool via `Task.Run` so the canon-async dispatcher's calling
+thread is free to do other work.
+
+Exception → ErrorCode mapping covers the common cases:
+`FileNotFoundException` → `NoEntry`, `UnauthorizedAccessException`
+→ `Access`, `PathTooLongException` → `NameTooLong`, etc.
+Uncategorized exceptions become `ErrorCode.Io`.
+
+Some methods are intentionally `Unsupported` in the default
+backend pending platform-specific work:
+- `link-at` (hard links — platform-limited)
+- `read-directory` (typed stream `stream<directory-entry>`
+  awaits the canon-async typed-stream pathway)
+- `readlink-at` (symbolic-link target read — netstandard2.1
+  doesn't expose `FileSystemInfo.LinkTarget`)
+- `symlink-at` (symbolic-link creation — same)
+
+### `IPreopens` + `DescriptorPreopen` + `DirectoryPreopens`
+
+`IPreopens.GetDirectories()` returns the static set of
+preopened directory descriptors the guest sees.
+`DirectoryPreopens.FromHostPaths` ergonomic constructor accepts
+`(hostPath, guestPath)` pairs and produces `Descriptor`
+instances with read+write+mutate-directory flags rooted at
+the host paths.
+
+### `WasiPreview3Host` integration
+
+`Preopens` property on the host (default-constructed lazily to
+an empty list — guests with no configured preopens see no
+filesystem). Builder property `Preopens` for embedder override.
+
+### Test coverage
+
+27 new tests in `FilesystemTests.cs`:
+- Type-level: factory methods, bit-position pinning for flags,
+  exception payload routing.
+- `Descriptor.GetType_` / `GetFlags`.
+- `Descriptor.StatAsync` / `StatAtAsync` returning correct
+  type+size+timestamps; `NoEntry` on missing paths.
+- `Descriptor.OpenAtAsync` with `Create` / `Exclusive` flags.
+- `Descriptor.ReadViaStream` / `WriteViaStream` round-trip
+  through the dispatcher.
+- `Descriptor.CreateDirectoryAtAsync` / `UnlinkFileAtAsync`.
+- `Descriptor.UnlinkFileAtAsync` on directory → `IsDirectory`.
+- Sandbox escape via `../../etc/passwd` → `NotPermitted`.
+- `Descriptor.IsSameObjectAsync` true/false cases.
+- `Descriptor.MetadataHashAsync` stability.
+- `DirectoryPreopens.FromHostPaths` construction; empty list.
+- Host default-construct empty preopens; builder override.
+
+81/81 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.4 — `wasi:random` port (Phase 5 Slice B)
 
 Second Phase 5 host-interface port. Adds host bindings for all
