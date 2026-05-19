@@ -436,6 +436,10 @@ namespace Wacs.ComponentModel.Async
                         TryBuildTaskReturnEnum(en, d, out del),
                     ComponentFlagsType fl =>
                         TryBuildTaskReturnFlags(fl, d, out del),
+                    ComponentRecordType rec =>
+                        TryBuildTaskReturnRecord(rec, d, out del),
+                    ComponentVariantType variant =>
+                        TryBuildTaskReturnVariant(variant, d, out del),
                     _ => false,
                 };
             }
@@ -869,6 +873,249 @@ namespace Wacs.ComponentModel.Async
                 d.TaskReturn(null!, disc);
             });
             return true;
+        }
+
+        // task.return record { f1: T, …, fN: T } where every
+        // field is the same primitive type and arity is 2-4. The
+        // canon-ABI flat-lowering places each field consecutively
+        // in the core call params (FlatLowering.FlatCountDef
+        // returns the field-count sum). The lift materializes a
+        // CLR IReadOnlyDictionary<string, object?> keyed by field
+        // name — boxes the primitive but task.return is the cold
+        // path (one call per task completion). Heterogeneous-field
+        // records and >4-arity records are deferred to the Session
+        // 3 source-gen typed-record lifters.
+        private static bool TryBuildTaskReturnRecord(
+            ComponentRecordType rec, AsyncDispatcher d, out Delegate? del)
+        {
+            del = null;
+            int arity = rec.Fields.Count;
+            if (arity < 2 || arity > 4) return false;
+            if (!rec.Fields[0].Type.IsPrimitive) return false;
+            var prim = rec.Fields[0].Type.Prim;
+            for (int i = 1; i < arity; i++)
+            {
+                if (!rec.Fields[i].Type.IsPrimitive) return false;
+                if (rec.Fields[i].Type.Prim != prim) return false;
+            }
+            // Snapshot field names so the closure doesn't retain
+            // the parser ComponentRecordType.
+            var names = new string[arity];
+            for (int i = 0; i < arity; i++) names[i] = rec.Fields[i].Name;
+            switch (prim)
+            {
+                case ComponentPrim.S32:
+                case ComponentPrim.U32:
+                    return BuildIntRecord(arity, names, d, out del);
+                case ComponentPrim.S64:
+                case ComponentPrim.U64:
+                    return BuildLongRecord(arity, names, d, out del);
+                case ComponentPrim.F32:
+                    return BuildFloatRecord(arity, names, d, out del);
+                case ComponentPrim.F64:
+                    return BuildDoubleRecord(arity, names, d, out del);
+                default:
+                    return false;
+            }
+        }
+
+        private static Dictionary<string, object?> ToDict(
+            string[] names, params object[] values)
+        {
+            var dict = new Dictionary<string, object?>(names.Length);
+            for (int i = 0; i < names.Length; i++)
+                dict[names[i]] = values[i];
+            return dict;
+        }
+
+        private static bool BuildIntRecord(
+            int arity, string[] names, AsyncDispatcher d, out Delegate? del)
+        {
+            switch (arity)
+            {
+                case 2:
+                    del = (Action<ExecContext, int, int>)((_, a, b) =>
+                        d.TaskReturn(null!, ToDict(names, a, b)));
+                    return true;
+                case 3:
+                    del = (Action<ExecContext, int, int, int>)((_, a, b, c) =>
+                        d.TaskReturn(null!, ToDict(names, a, b, c)));
+                    return true;
+                case 4:
+                    del = (Action<ExecContext, int, int, int, int>)((_, a, b, c, e) =>
+                        d.TaskReturn(null!, ToDict(names, a, b, c, e)));
+                    return true;
+            }
+            del = null;
+            return false;
+        }
+
+        private static bool BuildLongRecord(
+            int arity, string[] names, AsyncDispatcher d, out Delegate? del)
+        {
+            switch (arity)
+            {
+                case 2:
+                    del = (Action<ExecContext, long, long>)((_, a, b) =>
+                        d.TaskReturn(null!, ToDict(names, a, b)));
+                    return true;
+                case 3:
+                    del = (Action<ExecContext, long, long, long>)((_, a, b, c) =>
+                        d.TaskReturn(null!, ToDict(names, a, b, c)));
+                    return true;
+                case 4:
+                    del = (Action<ExecContext, long, long, long, long>)((_, a, b, c, e) =>
+                        d.TaskReturn(null!, ToDict(names, a, b, c, e)));
+                    return true;
+            }
+            del = null;
+            return false;
+        }
+
+        private static bool BuildFloatRecord(
+            int arity, string[] names, AsyncDispatcher d, out Delegate? del)
+        {
+            switch (arity)
+            {
+                case 2:
+                    del = (Action<ExecContext, float, float>)((_, a, b) =>
+                        d.TaskReturn(null!, ToDict(names, a, b)));
+                    return true;
+                case 3:
+                    del = (Action<ExecContext, float, float, float>)((_, a, b, c) =>
+                        d.TaskReturn(null!, ToDict(names, a, b, c)));
+                    return true;
+                case 4:
+                    del = (Action<ExecContext, float, float, float, float>)((_, a, b, c, e) =>
+                        d.TaskReturn(null!, ToDict(names, a, b, c, e)));
+                    return true;
+            }
+            del = null;
+            return false;
+        }
+
+        private static bool BuildDoubleRecord(
+            int arity, string[] names, AsyncDispatcher d, out Delegate? del)
+        {
+            switch (arity)
+            {
+                case 2:
+                    del = (Action<ExecContext, double, double>)((_, a, b) =>
+                        d.TaskReturn(null!, ToDict(names, a, b)));
+                    return true;
+                case 3:
+                    del = (Action<ExecContext, double, double, double>)((_, a, b, c) =>
+                        d.TaskReturn(null!, ToDict(names, a, b, c)));
+                    return true;
+                case 4:
+                    del = (Action<ExecContext, double, double, double, double>)((_, a, b, c, e) =>
+                        d.TaskReturn(null!, ToDict(names, a, b, c, e)));
+                    return true;
+            }
+            del = null;
+            return false;
+        }
+
+        // task.return variant: two recognized shapes.
+        //   1. All-unit-cases (no case carries a payload) → core
+        //      sig is a single i32 discriminant. Same delegate
+        //      shape as enum; lift surfaces the disc as int and
+        //      bounds-checks against case count.
+        //   2. All cases carry the SAME primitive payload type
+        //      (no missing-payload cases mixed in) → core sig is
+        //      (i32 disc, T payload). Lift surfaces a
+        //      (int disc, T payload) ValueTuple; the host inspects
+        //      the discriminant to interpret the payload semantics.
+        //
+        // Heterogeneous-payload variants need the canon-ABI's
+        // largest-payload slot reservation per spec; that's the
+        // Session 3 source-gen typed-variant path. We decline
+        // here rather than half-implement it.
+        private static bool TryBuildTaskReturnVariant(
+            ComponentVariantType variant, AsyncDispatcher d, out Delegate? del)
+        {
+            del = null;
+            int caseCount = variant.Cases.Count;
+            if (caseCount == 0) return false;
+
+            bool allUnit = true;
+            for (int i = 0; i < caseCount; i++)
+            {
+                if (variant.Cases[i].Payload != null) { allUnit = false; break; }
+            }
+            if (allUnit)
+            {
+                del = (Action<ExecContext, int>)((_, disc) =>
+                {
+                    if ((uint)disc >= (uint)caseCount)
+                        throw new InvalidOperationException(
+                            $"task.return variant: discriminant {disc} " +
+                            $"out of range for variant with {caseCount} cases");
+                    d.TaskReturn(null!, disc);
+                });
+                return true;
+            }
+
+            // Uniform-primitive-payload variant: every case carries
+            // the same primitive payload type. (No case may be
+            // unit; mixing unit + payload would violate the
+            // uniform-slot lowering.)
+            ComponentPrim? uniform = null;
+            for (int i = 0; i < caseCount; i++)
+            {
+                var p = variant.Cases[i].Payload;
+                if (p == null) return false;
+                if (!p.Value.IsPrimitive) return false;
+                if (uniform == null) uniform = p.Value.Prim;
+                else if (uniform.Value != p.Value.Prim) return false;
+            }
+            switch (uniform!.Value)
+            {
+                case ComponentPrim.S32:
+                case ComponentPrim.U32:
+                    del = (Action<ExecContext, int, int>)((_, disc, payload) =>
+                    {
+                        if ((uint)disc >= (uint)caseCount)
+                            throw new InvalidOperationException(
+                                $"task.return variant: discriminant {disc} " +
+                                $"out of range for variant with {caseCount} cases");
+                        d.TaskReturn(null!, (disc, payload));
+                    });
+                    return true;
+                case ComponentPrim.S64:
+                case ComponentPrim.U64:
+                    del = (Action<ExecContext, int, long>)((_, disc, payload) =>
+                    {
+                        if ((uint)disc >= (uint)caseCount)
+                            throw new InvalidOperationException(
+                                $"task.return variant: discriminant {disc} " +
+                                $"out of range for variant with {caseCount} cases");
+                        d.TaskReturn(null!, (disc, payload));
+                    });
+                    return true;
+                case ComponentPrim.F32:
+                    del = (Action<ExecContext, int, float>)((_, disc, payload) =>
+                    {
+                        if ((uint)disc >= (uint)caseCount)
+                            throw new InvalidOperationException(
+                                $"task.return variant: discriminant {disc} " +
+                                $"out of range for variant with {caseCount} cases");
+                        d.TaskReturn(null!, (disc, payload));
+                    });
+                    return true;
+                case ComponentPrim.F64:
+                    del = (Action<ExecContext, int, double>)((_, disc, payload) =>
+                    {
+                        if ((uint)disc >= (uint)caseCount)
+                            throw new InvalidOperationException(
+                                $"task.return variant: discriminant {disc} " +
+                                $"out of range for variant with {caseCount} cases");
+                        d.TaskReturn(null!, (disc, payload));
+                    });
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         // task.return flags ≤32: flat-lowered to a single i32

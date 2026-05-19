@@ -1,5 +1,48 @@
 # Changelog
 
+## WACS.ComponentModel 0.8.20 — record + variant task.return lift (Phase 3 Slice K2)
+
+Extends the canon-async binder to recognize two more aggregate
+shapes, leaning on the same per-arity hand-coded pattern that
+the tuple lifter already established.
+
+### `task.return record { … }` (same-primitive, arity 2-4)
+
+Records whose fields are all the same primitive type and whose
+arity is 2-4 lift to an
+`IReadOnlyDictionary<string, object?>` keyed by field name. The
+canon-ABI flat-lowering places each field consecutively in the
+core call params, so the delegate signature is the same per-arity
+shape as tuple — the field names live in a snapshot captured at
+bind time. Boxing the primitive into `object?` is acceptable for
+`task.return`, the cold one-call-per-completion path.
+
+Heterogeneous-field records and arity > 4 decline; the source
+generator path (Session 3) will lift those into typed records.
+
+### `task.return variant { … }` — two recognized shapes
+
+1. **All-unit-cases** — no case carries a payload. Lifts as
+   `int` discriminant with case-count bounds checking. Same
+   delegate shape as enum.
+2. **Uniform single-primitive payload** — every case carries
+   the same primitive payload type. Lifts as a
+   `(int disc, T payload)` ValueTuple; the host inspects the
+   discriminant to interpret the payload semantics.
+
+Mixed-unit / mixed-payload-type variants decline pending the
+Session 3 source-gen typed-variant path.
+
+### Test coverage
+
+Seven new lift cases in
+`Wacs.ComponentModel.Test/AsyncLiftAdapterTests.cs`:
+record arity-2 u32, record arity-4 f64, record mixed-width
+declines, variant all-unit, variant uniform-u32, variant
+mixed declines, variant out-of-range disc throws.
+
+598/598 tests green.
+
 ## WACS.ComponentModel 0.8.19 — FlatLowering analyzer + enum / flags task.return lift (Phase 3 Slice K1)
 
 Adds the canon-ABI flat-lowering analyzer the typed-lifter work

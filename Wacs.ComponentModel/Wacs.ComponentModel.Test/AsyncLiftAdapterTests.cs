@@ -858,5 +858,247 @@ namespace Wacs.ComponentModel.Test
                 .TryBuildDelegateForEntry(entry, d);
             Assert.Null(del);
         }
+
+        // ---- Slice K2: record + variant task.return lift -------------
+
+        [Fact]
+        public async Task TaskReturn_record_arity2_same_primitive_surfaces_dict()
+        {
+            var d = new AsyncDispatcher();
+            var rec = new Wacs.ComponentModel.Runtime.Parser.ComponentRecordType(
+                new[]
+                {
+                    new Wacs.ComponentModel.Runtime.Parser.ComponentRecordType.Field(
+                        "x",
+                        Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfPrim(
+                            Wacs.ComponentModel.Runtime.Parser.ComponentPrim.U32)),
+                    new Wacs.ComponentModel.Runtime.Parser.ComponentRecordType.Field(
+                        "y",
+                        Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfPrim(
+                            Wacs.ComponentModel.Runtime.Parser.ComponentPrim.U32)),
+                });
+            d.Types = new Wacs.ComponentModel.Runtime.Parser.DefTypeEntry[] { rec };
+
+            var task = d.RegisterTask(MakeCont());
+            d.PushCurrentTask(task);
+            try
+            {
+                var entry = new Wacs.ComponentModel.Runtime.Parser.CanonTaskReturn(
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfRef(0),
+                    System.Array.Empty<Wacs.ComponentModel.Runtime.Parser.CanonOption>());
+                var del = (Action<ExecContext, int, int>)
+                    Wacs.ComponentModel.Async.CanonAsyncBinder
+                        .TryBuildDelegateForEntry(entry, d)!;
+                del(null!, 42, 99);
+            }
+            finally { d.PopCurrentTask(); }
+
+            var result = await task.Completion.Task;
+            var dict = (System.Collections.Generic.IReadOnlyDictionary<string, object?>)result!;
+            Assert.Equal(42, dict["x"]);
+            Assert.Equal(99, dict["y"]);
+        }
+
+        [Fact]
+        public async Task TaskReturn_record_arity4_f64_round_trip()
+        {
+            var d = new AsyncDispatcher();
+            var rec = new Wacs.ComponentModel.Runtime.Parser.ComponentRecordType(
+                new[]
+                {
+                    new Wacs.ComponentModel.Runtime.Parser.ComponentRecordType.Field(
+                        "a", Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfPrim(
+                            Wacs.ComponentModel.Runtime.Parser.ComponentPrim.F64)),
+                    new Wacs.ComponentModel.Runtime.Parser.ComponentRecordType.Field(
+                        "b", Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfPrim(
+                            Wacs.ComponentModel.Runtime.Parser.ComponentPrim.F64)),
+                    new Wacs.ComponentModel.Runtime.Parser.ComponentRecordType.Field(
+                        "c", Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfPrim(
+                            Wacs.ComponentModel.Runtime.Parser.ComponentPrim.F64)),
+                    new Wacs.ComponentModel.Runtime.Parser.ComponentRecordType.Field(
+                        "d", Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfPrim(
+                            Wacs.ComponentModel.Runtime.Parser.ComponentPrim.F64)),
+                });
+            d.Types = new Wacs.ComponentModel.Runtime.Parser.DefTypeEntry[] { rec };
+
+            var task = d.RegisterTask(MakeCont());
+            d.PushCurrentTask(task);
+            try
+            {
+                var entry = new Wacs.ComponentModel.Runtime.Parser.CanonTaskReturn(
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfRef(0),
+                    System.Array.Empty<Wacs.ComponentModel.Runtime.Parser.CanonOption>());
+                var del = (Action<ExecContext, double, double, double, double>)
+                    Wacs.ComponentModel.Async.CanonAsyncBinder
+                        .TryBuildDelegateForEntry(entry, d)!;
+                del(null!, 1.5, 2.5, 3.5, 4.5);
+            }
+            finally { d.PopCurrentTask(); }
+
+            var dict = (System.Collections.Generic.IReadOnlyDictionary<string, object?>)
+                (await task.Completion.Task)!;
+            Assert.Equal(1.5, dict["a"]);
+            Assert.Equal(2.5, dict["b"]);
+            Assert.Equal(3.5, dict["c"]);
+            Assert.Equal(4.5, dict["d"]);
+        }
+
+        [Fact]
+        public void TaskReturn_record_mixed_width_returns_null_delegate()
+        {
+            // Mixed-width fields need a per-shape signature
+            // cross-product — Slice K2 declines; Session 3
+            // source-gen typed-record lifters cover this.
+            var d = new AsyncDispatcher();
+            var rec = new Wacs.ComponentModel.Runtime.Parser.ComponentRecordType(
+                new[]
+                {
+                    new Wacs.ComponentModel.Runtime.Parser.ComponentRecordType.Field(
+                        "a", Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfPrim(
+                            Wacs.ComponentModel.Runtime.Parser.ComponentPrim.U32)),
+                    new Wacs.ComponentModel.Runtime.Parser.ComponentRecordType.Field(
+                        "b", Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfPrim(
+                            Wacs.ComponentModel.Runtime.Parser.ComponentPrim.U64)),
+                });
+            d.Types = new Wacs.ComponentModel.Runtime.Parser.DefTypeEntry[] { rec };
+
+            var entry = new Wacs.ComponentModel.Runtime.Parser.CanonTaskReturn(
+                Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfRef(0),
+                System.Array.Empty<Wacs.ComponentModel.Runtime.Parser.CanonOption>());
+            var del = Wacs.ComponentModel.Async.CanonAsyncBinder
+                .TryBuildDelegateForEntry(entry, d);
+            Assert.Null(del);
+        }
+
+        [Fact]
+        public async Task TaskReturn_variant_all_unit_cases_lifts_discriminant()
+        {
+            var d = new AsyncDispatcher();
+            var variant = new Wacs.ComponentModel.Runtime.Parser.ComponentVariantType(
+                new[]
+                {
+                    new Wacs.ComponentModel.Runtime.Parser.ComponentVariantType.Case(
+                        "red", null, null),
+                    new Wacs.ComponentModel.Runtime.Parser.ComponentVariantType.Case(
+                        "green", null, null),
+                    new Wacs.ComponentModel.Runtime.Parser.ComponentVariantType.Case(
+                        "blue", null, null),
+                });
+            d.Types = new Wacs.ComponentModel.Runtime.Parser.DefTypeEntry[] { variant };
+
+            var task = d.RegisterTask(MakeCont());
+            d.PushCurrentTask(task);
+            try
+            {
+                var entry = new Wacs.ComponentModel.Runtime.Parser.CanonTaskReturn(
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfRef(0),
+                    System.Array.Empty<Wacs.ComponentModel.Runtime.Parser.CanonOption>());
+                var del = (Action<ExecContext, int>)
+                    Wacs.ComponentModel.Async.CanonAsyncBinder
+                        .TryBuildDelegateForEntry(entry, d)!;
+                del(null!, 2);
+            }
+            finally { d.PopCurrentTask(); }
+
+            Assert.Equal(2, await task.Completion.Task);
+        }
+
+        [Fact]
+        public async Task TaskReturn_variant_uniform_u32_payload_lifts_tuple()
+        {
+            var d = new AsyncDispatcher();
+            var variant = new Wacs.ComponentModel.Runtime.Parser.ComponentVariantType(
+                new[]
+                {
+                    new Wacs.ComponentModel.Runtime.Parser.ComponentVariantType.Case(
+                        "tag-a",
+                        Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfPrim(
+                            Wacs.ComponentModel.Runtime.Parser.ComponentPrim.U32),
+                        null),
+                    new Wacs.ComponentModel.Runtime.Parser.ComponentVariantType.Case(
+                        "tag-b",
+                        Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfPrim(
+                            Wacs.ComponentModel.Runtime.Parser.ComponentPrim.U32),
+                        null),
+                });
+            d.Types = new Wacs.ComponentModel.Runtime.Parser.DefTypeEntry[] { variant };
+
+            var task = d.RegisterTask(MakeCont());
+            d.PushCurrentTask(task);
+            try
+            {
+                var entry = new Wacs.ComponentModel.Runtime.Parser.CanonTaskReturn(
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfRef(0),
+                    System.Array.Empty<Wacs.ComponentModel.Runtime.Parser.CanonOption>());
+                var del = (Action<ExecContext, int, int>)
+                    Wacs.ComponentModel.Async.CanonAsyncBinder
+                        .TryBuildDelegateForEntry(entry, d)!;
+                // case 1 ("tag-b"), payload = 777
+                del(null!, 1, 777);
+            }
+            finally { d.PopCurrentTask(); }
+
+            var tup = ((int, int))(await task.Completion.Task)!;
+            Assert.Equal((1, 777), tup);
+        }
+
+        [Fact]
+        public void TaskReturn_variant_mixed_payloads_returns_null_delegate()
+        {
+            // Mixed unit + payload, or mixed primitive payload
+            // types — heterogeneous-payload variant. Session 3
+            // source-gen typed-variant lifters cover this.
+            var d = new AsyncDispatcher();
+            var variant = new Wacs.ComponentModel.Runtime.Parser.ComponentVariantType(
+                new[]
+                {
+                    new Wacs.ComponentModel.Runtime.Parser.ComponentVariantType.Case(
+                        "none", null, null),
+                    new Wacs.ComponentModel.Runtime.Parser.ComponentVariantType.Case(
+                        "some",
+                        Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfPrim(
+                            Wacs.ComponentModel.Runtime.Parser.ComponentPrim.U32),
+                        null),
+                });
+            d.Types = new Wacs.ComponentModel.Runtime.Parser.DefTypeEntry[] { variant };
+
+            var entry = new Wacs.ComponentModel.Runtime.Parser.CanonTaskReturn(
+                Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfRef(0),
+                System.Array.Empty<Wacs.ComponentModel.Runtime.Parser.CanonOption>());
+            var del = Wacs.ComponentModel.Async.CanonAsyncBinder
+                .TryBuildDelegateForEntry(entry, d);
+            Assert.Null(del);
+        }
+
+        [Fact]
+        public void TaskReturn_variant_rejects_out_of_range_discriminant()
+        {
+            var d = new AsyncDispatcher();
+            var variant = new Wacs.ComponentModel.Runtime.Parser.ComponentVariantType(
+                new[]
+                {
+                    new Wacs.ComponentModel.Runtime.Parser.ComponentVariantType.Case(
+                        "a", null, null),
+                    new Wacs.ComponentModel.Runtime.Parser.ComponentVariantType.Case(
+                        "b", null, null),
+                });
+            d.Types = new Wacs.ComponentModel.Runtime.Parser.DefTypeEntry[] { variant };
+
+            var task = d.RegisterTask(MakeCont());
+            d.PushCurrentTask(task);
+            try
+            {
+                var entry = new Wacs.ComponentModel.Runtime.Parser.CanonTaskReturn(
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfRef(0),
+                    System.Array.Empty<Wacs.ComponentModel.Runtime.Parser.CanonOption>());
+                var del = (Action<ExecContext, int>)
+                    Wacs.ComponentModel.Async.CanonAsyncBinder
+                        .TryBuildDelegateForEntry(entry, d)!;
+                var thrown = Assert.Throws<InvalidOperationException>(
+                    () => del(null!, 99));
+                Assert.Contains("out of range", thrown.Message);
+            }
+            finally { d.PopCurrentTask(); }
+        }
     }
 }
