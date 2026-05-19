@@ -639,6 +639,232 @@ namespace Wacs.WASI.Preview3
                 (IpNameLookupModuleName, "resolve-addresses"),
                 (Action<ExecContext, int, int, int>)((_, namePtr, nameLen, retptr) =>
                     InvokeResolveAddresses(namePtr, nameLen, retptr, realloc)));
+
+            // ---- wasi:sockets/types.tcp-socket simple methods ----
+            //
+            // Static factory + simple primitive getters/setters.
+            // Bind / Connect / Listen / Send / Receive land in a
+            // follow-up slice alongside the variant-arg flat-
+            // lowering and stream-shape work.
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName, "[static]tcp-socket.create"),
+                (Action<ExecContext, int, int>)((_, family, retptr) =>
+                    InvokeTcpSocketCreate(
+                        (IpAddressFamily)family, retptr, realloc)));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]tcp-socket.get-address-family"),
+                (Func<ExecContext, int, int>)((_, self) =>
+                    (int)RequireTcpSocket(self).GetAddressFamily()));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]tcp-socket.get-is-listening"),
+                (Func<ExecContext, int, int>)((_, self) =>
+                    RequireTcpSocket(self).GetIsListening() ? 1 : 0));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]tcp-socket.get-receive-buffer-size"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeTcpSocketGetBufferSize(
+                        self, retptr, realloc, sendBuffer: false)));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]tcp-socket.set-receive-buffer-size"),
+                (Action<ExecContext, int, long, int>)(
+                    (_, self, value, retptr) =>
+                        InvokeTcpSocketSetBufferSize(
+                            self, unchecked((ulong)value),
+                            retptr, realloc, sendBuffer: false)));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]tcp-socket.get-send-buffer-size"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeTcpSocketGetBufferSize(
+                        self, retptr, realloc, sendBuffer: true)));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]tcp-socket.set-send-buffer-size"),
+                (Action<ExecContext, int, long, int>)(
+                    (_, self, value, retptr) =>
+                        InvokeTcpSocketSetBufferSize(
+                            self, unchecked((ulong)value),
+                            retptr, realloc, sendBuffer: true)));
+        }
+
+        // ---- wasi:sockets tcp-socket binding bodies (Slice O) -------
+
+        /// <summary>Invoke <c>[static]tcp-socket.create(family)</c>.
+        /// Allocates a fresh <see cref="TcpSocket"/> on success
+        /// and writes its handle at retptr+4; on err encodes the
+        /// sockets error-code at retptr.</summary>
+        public void InvokeTcpSocketCreate(
+            IpAddressFamily family, int retptr, ICabiRealloc realloc)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateResultSocketsErrorCodeRetptr(retptr, memory);
+            SocketsException? caught = null;
+            int handle = 0;
+            try
+            {
+                var socket = new TcpSocket(family);
+                handle = TcpSocketHandles.Allocate(socket);
+            }
+            catch (SocketsException ex) { caught = ex; }
+
+            var dest = memory.AsSpan(retptr, ResultSocketsErrorCodeSize);
+            if (caught == null)
+            {
+                dest.Clear();
+                dest[0] = 0; // ok
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(dest.Slice(4), handle);
+            }
+            else
+            {
+                WriteSocketsErrorCodeResult(dest, caught, realloc, memory);
+            }
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]tcp-socket.get-{send,receive}-buffer-size()</c>.
+        /// Writes <c>result&lt;u64, error-code&gt;</c> at retptr —
+        /// 16 bytes 8-aligned (disc i32 + i64 value), or err
+        /// payload on failure.</summary>
+        public void InvokeTcpSocketGetBufferSize(
+            int self, int retptr, ICabiRealloc realloc, bool sendBuffer)
+        {
+            var memory = RequireMemoryForHttp();
+            // result<u64, error-code>: align = max(8, 4) = 8,
+            // payload-offset = round_up(1, 8) = 8.
+            // size = round_up(8 + max(8, 16), 8) = round_up(24, 8) = 24.
+            if (retptr < 0 || (retptr & 0x7) != 0
+                || retptr + 24 > memory.Data.Length)
+                throw new InvalidOperationException(
+                    "tcp-socket.get-{buffer}-size: retptr " +
+                    $"0x{retptr:X8} misaligned or out of range " +
+                    $"(memory size = {memory.Data.Length}). " +
+                    "Caller must allocate a 24-byte 8-aligned " +
+                    "return area.");
+
+            SocketsException? caught = null;
+            ulong value = 0;
+            try
+            {
+                var socket = RequireTcpSocket(self);
+                value = sendBuffer
+                    ? socket.GetSendBufferSize()
+                    : socket.GetReceiveBufferSize();
+            }
+            catch (SocketsException ex) { caught = ex; }
+
+            var dest = memory.AsSpan(retptr, 24);
+            dest.Clear();
+            if (caught == null)
+            {
+                dest[0] = 0; // result-disc = ok
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteUInt64LittleEndian(dest.Slice(8), value);
+            }
+            else
+            {
+                dest[0] = 1; // err
+                // error-code variant at +8 (16 bytes).
+                WriteSocketsErrorCodeBytes(
+                    dest.Slice(8, 16), caught, realloc, memory);
+            }
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]tcp-socket.set-{send,receive}-buffer-size(value)</c>.
+        /// </summary>
+        public void InvokeTcpSocketSetBufferSize(
+            int self, ulong value, int retptr,
+            ICabiRealloc realloc, bool sendBuffer)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateResultSocketsErrorCodeRetptr(retptr, memory);
+            SocketsException? caught = null;
+            try
+            {
+                var socket = RequireTcpSocket(self);
+                if (sendBuffer) socket.SetSendBufferSize(value);
+                else socket.SetReceiveBufferSize(value);
+            }
+            catch (SocketsException ex) { caught = ex; }
+            WriteSocketsErrorCodeResult(
+                memory.AsSpan(retptr, ResultSocketsErrorCodeSize),
+                caught, realloc, memory);
+        }
+
+        private ITcpSocket RequireTcpSocket(int handle)
+        {
+            var s = TcpSocketHandles.Get(handle);
+            if (s == null)
+                throw new SocketsException(
+                    Sockets.ErrorCode.InvalidState,
+                    $"wasi:sockets/types.tcp-socket: handle " +
+                    $"{handle} is not allocated.");
+            return s;
+        }
+
+        // ---- canon-ABI result<_, sockets.error-code> encoder --------
+
+        private const int ResultSocketsErrorCodeSize = 20;
+
+        private static void ValidateResultSocketsErrorCodeRetptr(
+            int retptr, Wacs.Core.Runtime.Types.MemoryInstance memory)
+        {
+            if (retptr < 0 || (retptr & 0x3) != 0
+                || retptr + ResultSocketsErrorCodeSize > memory.Data.Length)
+                throw new InvalidOperationException(
+                    "wasi:sockets/types: result<_, error-code> " +
+                    $"retptr 0x{retptr:X8} misaligned or out of range " +
+                    $"(memory size = {memory.Data.Length}). " +
+                    "Caller must allocate a 20-byte 4-aligned " +
+                    "return area.");
+        }
+
+        private static void WriteSocketsErrorCodeResult(
+            Span<byte> dest, SocketsException? ex,
+            ICabiRealloc realloc,
+            Wacs.Core.Runtime.Types.MemoryInstance memory)
+        {
+            dest.Clear();
+            if (ex == null) { dest[0] = 0; return; }
+            dest[0] = 1;
+            WriteSocketsErrorCodeBytes(
+                dest.Slice(4, 16), ex, realloc, memory);
+        }
+
+        private static void WriteSocketsErrorCodeBytes(
+            Span<byte> dest, SocketsException ex,
+            ICabiRealloc realloc,
+            Wacs.Core.Runtime.Types.MemoryInstance memory)
+        {
+            dest.Clear();
+            dest[0] = (byte)ex.Code;
+            if (ex.Code == Sockets.ErrorCode.Other
+                && ex.OtherPayload != null)
+            {
+                dest[4] = 1; // option-disc = some
+                var bytes = System.Text.Encoding.UTF8
+                    .GetBytes(ex.OtherPayload);
+                int strPtr = bytes.Length > 0
+                    ? realloc.Allocate(1, bytes.Length) : 0;
+                if (bytes.Length > 0)
+                    new ReadOnlySpan<byte>(bytes)
+                        .CopyTo(memory.AsSpan(strPtr, bytes.Length));
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(dest.Slice(8), strPtr);
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(dest.Slice(12), bytes.Length);
+            }
         }
 
         // ---- wasi:sockets binding bodies (Slice J) -------------------

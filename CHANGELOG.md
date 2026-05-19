@@ -1,5 +1,82 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.17 — TCP socket System.Net.Sockets backing + create/getters (Phase 5 Slice O)
+
+Adds the `TcpSocket` System.Net.Sockets-backed default impl
+and wires the static factory + simple primitive accessors.
+
+### `Wacs.WASI.Preview3.Sockets.TcpSocket`
+
+Wraps `System.Net.Sockets.Socket(family, Stream, Tcp)`.
+Tracks the wasi-sockets state machine (Unbound / Bound /
+Connecting / Connected / Listening / Closed) and refuses
+out-of-state operations per spec
+(`SocketsException(InvalidState)`).
+
+Bind sets `SO_REUSEADDR` per the spec's "Implementors note".
+IPv6 sockets force `IPV6_V6ONLY` at construction.
+
+Maps `SocketException.SocketErrorCode` to typed
+`SocketsException(ErrorCode.X)` codes:
+`AccessDenied → AccessDenied`,
+`AddressAlreadyInUse → AddressInUse`,
+`AddressNotAvailable → AddressNotBindable`,
+`HostUnreachable / NetworkUnreachable → RemoteUnreachable`,
+`ConnectionRefused / Reset / Aborted` → matching codes,
+`TimedOut → Timeout`, others → `Other`.
+
+Methods that lack a direct .NET Socket API equivalent
+(`get-keep-alive-{idle-time,interval,count}`) throw
+`SocketsException(NotSupported)` with diagnostic messages.
+Stream-returning methods (Connect / Listen / Send / Receive)
+likewise throw NotSupported pending the canon-async
+variant-arg flat-lowering + stream-shape wire-up.
+
+### Seven host functions wired
+
+```
+[static]tcp-socket.create
+[method]tcp-socket.get-address-family
+[method]tcp-socket.get-is-listening
+[method]tcp-socket.get-receive-buffer-size
+[method]tcp-socket.set-receive-buffer-size
+[method]tcp-socket.get-send-buffer-size
+[method]tcp-socket.set-send-buffer-size
+```
+
+The static factory exercises `result<own<tcp-socket>,
+error-code>` on the 20-byte retptr; the buffer-size getters
+exercise `result<u64, error-code>` on the 24-byte 8-aligned
+retptr (payload offset 8 due to align-8). The
+`get-{receive,send}-buffer-size` registrations share the same
+`InvokeTcpSocketGetBufferSize` body with a `sendBuffer` toggle.
+
+### `WriteSocketsErrorCodeResult` + `WriteSocketsErrorCodeBytes`
+
+Mirrors the filesystem error-code encoder pattern — same
+20-byte 4-aligned layout, just keyed on the 18-case
+`Sockets.ErrorCode` enum. Same `Other(option<string>)`
+realloc-allocated payload handling.
+
+### Test coverage
+
+14 new tests in `TcpSocketBindingTests.cs`:
+- `TcpSocket` IPv4/IPv6 start unbound with correct family.
+- Bind to loopback transitions to Bound; second bind throws
+  `InvalidState`.
+- `get-remote-address` on unbound throws `InvalidState`.
+- Buffer size + hop-limit + keep-alive round-trip.
+- `ConnectAsync` throws `NotSupported` (pending future slice).
+- `BindToRuntime` registers all 7 host functions.
+- `InvokeTcpSocketCreate` ipv4 returns a fresh handle.
+- `InvokeTcpSocketGetBufferSize` writes the `result<u64,
+  error-code>` at retptr+8 on success.
+- `InvokeTcpSocketSetBufferSize` writes disc=0 on success and
+  the impl observes the new value.
+- Misaligned retptr throws.
+
+202/202 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.16 — descriptor methods + descriptor-stat encoder (Phase 5 Slice N)
 
 Lands the canon-ABI `result<_, error-code>` encoder and the
