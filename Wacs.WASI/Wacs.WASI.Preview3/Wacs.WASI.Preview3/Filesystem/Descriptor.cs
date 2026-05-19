@@ -203,9 +203,11 @@ namespace Wacs.WASI.Preview3.Filesystem
             var ofs = offset;
             var completion = Task.Run(async () =>
             {
+                FileStream? fs = null;
+                Exception? err = null;
                 try
                 {
-                    using var fs = new FileStream(
+                    fs = new FileStream(
                         path, FileMode.OpenOrCreate, FileAccess.Write,
                         FileShare.None);
                     fs.Position = (long)ofs.Value;
@@ -224,12 +226,17 @@ namespace Wacs.WASI.Preview3.Filesystem
                                 .ConfigureAwait(false);
                     }
                     await fs.FlushAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex) { err = ex; }
+                // Close the FileStream BEFORE writing to the
+                // future — embedders that observe future
+                // completion then immediately read the file
+                // race with dispose otherwise.
+                fs?.Dispose();
+                if (err == null)
                     dispatcher.FutureWrite(futureHandle, null);
-                }
-                catch (Exception ex)
-                {
-                    dispatcher.FutureWrite(futureHandle, ToFilesystem(ex));
-                }
+                else
+                    dispatcher.FutureWrite(futureHandle, ToFilesystem(err));
             });
             return (futureHandle, completion);
         }
@@ -253,9 +260,11 @@ namespace Wacs.WASI.Preview3.Filesystem
             var path = _absolutePath;
             var completion = Task.Run(async () =>
             {
+                FileStream? fs = null;
+                Exception? err = null;
                 try
                 {
-                    using var fs = new FileStream(
+                    fs = new FileStream(
                         path, FileMode.Append, FileAccess.Write,
                         FileShare.None);
                     var staging = new byte[4096];
@@ -273,12 +282,13 @@ namespace Wacs.WASI.Preview3.Filesystem
                                 .ConfigureAwait(false);
                     }
                     await fs.FlushAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex) { err = ex; }
+                fs?.Dispose();
+                if (err == null)
                     dispatcher.FutureWrite(futureHandle, null);
-                }
-                catch (Exception ex)
-                {
-                    dispatcher.FutureWrite(futureHandle, ToFilesystem(ex));
-                }
+                else
+                    dispatcher.FutureWrite(futureHandle, ToFilesystem(err));
             });
             return (futureHandle, completion);
         }

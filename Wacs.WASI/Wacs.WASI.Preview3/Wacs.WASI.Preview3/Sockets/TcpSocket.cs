@@ -109,14 +109,52 @@ namespace Wacs.WASI.Preview3.Sockets
             }
         }
 
-        public Task ConnectAsync(
+        public async Task ConnectAsync(
             IpSocketAddress remoteAddress,
             CancellationToken cancellationToken = default)
         {
-            throw new SocketsException(
-                ErrorCode.NotSupported,
-                "tcp-socket.connect: pending canon-async variant " +
-                "argument flat-lowering wire-up.");
+            if (_state == State.Unbound)
+            {
+                // Implicit bind to ephemeral port per spec when
+                // the caller didn't bind first.
+                try
+                {
+                    var implicitLocal = _family == IpAddressFamily.Ipv4
+                        ? new System.Net.IPEndPoint(
+                            System.Net.IPAddress.Any, 0)
+                        : new System.Net.IPEndPoint(
+                            System.Net.IPAddress.IPv6Any, 0);
+                    _socket.Bind(implicitLocal);
+                    _state = State.Bound;
+                }
+                catch (SocketException sx)
+                {
+                    _state = State.Closed;
+                    throw TcpEndpointHelper.MapSocketException(sx);
+                }
+            }
+            if (_state != State.Bound)
+                throw new SocketsException(
+                    ErrorCode.InvalidState,
+                    $"tcp-socket.connect: socket is in state {_state}, " +
+                    "expected Bound (or Unbound for implicit bind).");
+            _state = State.Connecting;
+            try
+            {
+                var ep = TcpEndpointHelper.ToIpEndPoint(remoteAddress);
+                await _socket.ConnectAsync(ep).ConfigureAwait(false);
+                _state = State.Connected;
+            }
+            catch (SocketException sx)
+            {
+                _state = State.Closed;
+                throw TcpEndpointHelper.MapSocketException(sx);
+            }
+            catch (OperationCanceledException)
+            {
+                _state = State.Closed;
+                throw;
+            }
         }
 
         public int Listen(AsyncDispatcher dispatcher)
@@ -130,19 +168,116 @@ namespace Wacs.WASI.Preview3.Sockets
         public (int futureHandle, Task SendCompletion) Send(
             AsyncDispatcher dispatcher, int streamHandle)
         {
-            throw new SocketsException(
-                ErrorCode.NotSupported,
-                "tcp-socket.send: pending stream<u8> + future " +
-                "return shape.");
+            if (dispatcher == null)
+                throw new ArgumentNullException(nameof(dispatcher));
+            if (_state != State.Connected)
+                throw new SocketsException(
+                    ErrorCode.InvalidState,
+                    "tcp-socket.send: socket is not in the " +
+                    $"connected state (state = {_state}).");
+            var futureHandle = dispatcher.FutureNew(typeIdx: 0);
+            var buffer = dispatcher.GetByteStreamBuffer(streamHandle);
+            if (buffer == null)
+            {
+                dispatcher.FutureWrite(futureHandle,
+                    new SocketsException(
+                        ErrorCode.InvalidArgument,
+                        $"stream handle {streamHandle} not allocated"));
+                return (futureHandle, Task.CompletedTask);
+            }
+
+            var socket = _socket;
+            var completion = Task.Run(async () =>
+            {
+                try
+                {
+                    var staging = new byte[4096];
+                    while (await buffer.Reader.WaitToReadAsync()
+                        .ConfigureAwait(false))
+                    {
+                        int n = 0;
+                        while (n < staging.Length
+                            && buffer.Reader.TryRead(out var b))
+                        {
+                            staging[n++] = b;
+                        }
+                        if (n == 0) continue;
+                        int offset = 0;
+                        while (offset < n)
+                        {
+                            int sent = await socket.SendAsync(
+                                new ArraySegment<byte>(
+                                    staging, offset, n - offset),
+                                SocketFlags.None).ConfigureAwait(false);
+                            if (sent == 0) break;
+                            offset += sent;
+                        }
+                    }
+                    // Stream's writable side dropped → shutdown
+                    // the socket's send half (FIN packet) per spec.
+                    try { socket.Shutdown(SocketShutdown.Send); }
+                    catch { /* idempotent */ }
+                    dispatcher.FutureWrite(futureHandle, /* ok */ null);
+                }
+                catch (SocketException sx)
+                {
+                    dispatcher.FutureWrite(futureHandle,
+                        TcpEndpointHelper.MapSocketException(sx));
+                }
+                catch (Exception ex)
+                {
+                    dispatcher.FutureWrite(futureHandle,
+                        new SocketsException(ErrorCode.Other, ex.Message));
+                }
+            });
+            return (futureHandle, completion);
         }
 
         public (int streamHandle, int futureHandle, Task ReceiveCompletion)
             Receive(AsyncDispatcher dispatcher)
         {
-            throw new SocketsException(
-                ErrorCode.NotSupported,
-                "tcp-socket.receive: pending stream<u8> + future " +
-                "return shape.");
+            if (dispatcher == null)
+                throw new ArgumentNullException(nameof(dispatcher));
+            if (_state != State.Connected)
+                throw new SocketsException(
+                    ErrorCode.InvalidState,
+                    "tcp-socket.receive: socket is not in the " +
+                    $"connected state (state = {_state}).");
+            var streamHandle = dispatcher.StreamNew(typeIdx: 0);
+            var futureHandle = dispatcher.FutureNew(typeIdx: 0);
+
+            var socket = _socket;
+            var completion = Task.Run(async () =>
+            {
+                try
+                {
+                    var staging = new byte[4096];
+                    while (true)
+                    {
+                        int n = await socket.ReceiveAsync(
+                            new ArraySegment<byte>(staging),
+                            SocketFlags.None).ConfigureAwait(false);
+                        if (n == 0) break; // peer FIN
+                        for (int i = 0; i < n; i++)
+                            dispatcher.StreamTryWrite(streamHandle, staging[i]);
+                    }
+                    dispatcher.StreamDropWritable(streamHandle);
+                    dispatcher.FutureWrite(futureHandle, /* ok */ null);
+                }
+                catch (SocketException sx)
+                {
+                    dispatcher.StreamDropWritable(streamHandle);
+                    dispatcher.FutureWrite(futureHandle,
+                        TcpEndpointHelper.MapSocketException(sx));
+                }
+                catch (Exception ex)
+                {
+                    dispatcher.StreamDropWritable(streamHandle);
+                    dispatcher.FutureWrite(futureHandle,
+                        new SocketsException(ErrorCode.Other, ex.Message));
+                }
+            });
+            return (streamHandle, futureHandle, completion);
         }
 
         public IpSocketAddress GetLocalAddress()

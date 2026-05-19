@@ -1,5 +1,95 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.19 — stream-shape bindings: descriptor I/O + TCP send/receive (Phase 5 Slice Q)
+
+Wires the stream-shape host bindings that turn the
+`stream<u8>` ABI from a surface area into actual I/O.
+End-to-end byte flow through the canon-async stream + future
+handle pairs for both filesystem and socket I/O.
+
+### Descriptor stream-shape wire-up
+
+```
+[method]descriptor.read-via-stream(offset)
+   -> tuple<stream<u8>, future<result<_, error-code>>>
+[method]descriptor.write-via-stream(stream, offset)
+   -> future<result<_, error-code>>
+[method]descriptor.append-via-stream(stream)
+   -> future<result<_, error-code>>
+```
+
+The `read-via-stream` retptr layout (8 bytes 4-aligned)
+matches the existing `wasi:cli/stdin.read-via-stream` shape.
+`write-via-stream` + `append-via-stream` return single i32
+future-handles directly (no retptr, single-i32 fits within
+`MAX_FLAT_RESULTS`).
+
+Side fix in `Descriptor.WriteViaStream` /
+`AppendViaStream`: the FileStream is now disposed BEFORE
+the future-completion write, eliminating a race where the
+embedder observing the future could call `File.Read` on a
+still-open stream. Caught by parallel xunit execution of
+the new Slice Q tests.
+
+### TCP socket send / receive implementations
+
+`TcpSocket.Send(dispatcher, streamHandle)`:
+- Allocates a future-handle.
+- Spawns a background task that drains the stream buffer
+  into `Socket.SendAsync` until the buffer's writable half
+  closes, then `Shutdown(Send)` per spec (FIN packet) and
+  completes the future.
+
+`TcpSocket.Receive(dispatcher)`:
+- Allocates a fresh stream-handle + future-handle.
+- Spawns a background task that pumps `Socket.ReceiveAsync`
+  bytes into the stream buffer until peer FIN or socket
+  error, then drops the writable half and completes the
+  future.
+
+Both map `SocketException` through
+`TcpEndpointHelper.MapSocketException` to typed
+`SocketsException` codes for the future-err payload.
+
+### `TcpSocket.ConnectAsync` now functional
+
+Previously threw `NotSupported`. The wire-up still needs the
+12-slot `ip-socket-address` variant flat-lowering (future
+slice), but the impl now uses `Socket.ConnectAsync` with
+implicit-bind-on-unbound per the spec. End-to-end exercised
+by the loopback TCP send/receive round-trip test.
+
+### TCP socket send/receive wire-up
+
+```
+[method]tcp-socket.send    -> (stream-handle) -> future-handle
+[method]tcp-socket.receive -> () -> retptr<stream, future>
+```
+
+`InvokeTcpSocketReceive` writes the 8-byte tuple to retptr
+identically to the descriptor + stdin patterns.
+
+### Test coverage
+
+9 new tests in `StreamShapeBindingTests.cs`:
+- `BindToRuntime` registers all 5 new host functions.
+- `InvokeDescriptorReadViaStream` yields file bytes through
+  the stream handle; misaligned retptr throws.
+- `InvokeDescriptorWriteViaStream` persists stream bytes to
+  file with no race on read-after-future-completion.
+- `InvokeDescriptorAppendViaStream` extends an existing file.
+- `TcpSocket.Send` / `Receive` reject `InvalidState` on
+  unconnected sockets.
+- **End-to-end loopback round-trip**: spin up a real .NET
+  `Socket` listener, drive the WACS `TcpSocket` through
+  Connect → Send → Receive, observe the bytes flow both
+  ways with proper FIN handling on both sides.
+- `InvokeTcpSocketReceive` writes the (stream, future)
+  handle pair to retptr correctly when driven through the
+  host-function binding.
+
+218/218 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.18 — UDP socket backing + simple wire-up (Phase 5 Slice P)
 
 Closes the same gap for UDP that Slice O closed for TCP.

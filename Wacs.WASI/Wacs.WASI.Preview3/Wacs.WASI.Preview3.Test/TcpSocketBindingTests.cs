@@ -136,19 +136,10 @@ namespace Wacs.WASI.Preview3.Test
             Assert.False(sock.GetKeepAliveEnabled());
         }
 
-        [Fact]
-        public void TcpSocket_connect_returns_not_supported()
-        {
-            using var sock = new TcpSocket(IpAddressFamily.Ipv4);
-            var ex = Assert.ThrowsAsync<SocketsException>(() =>
-                sock.ConnectAsync(IpSocketAddress.Ipv4(
-                    new Ipv4SocketAddress(80, Ipv4Address.Loopback))));
-            // The async path completes synchronously with the
-            // SocketsException; .Result here would deadlock, but
-            // ThrowsAsync handles the awaiter.
-            Assert.Equal(Sockets.ErrorCode.NotSupported,
-                ex.GetAwaiter().GetResult().Code);
-        }
+        // ConnectAsync is now implemented (Slice Q). The host-
+        // function wire-up that lowers the ip-socket-address
+        // variant argument is still pending; the impl itself
+        // is exercised end-to-end through SendReceive tests.
 
         // ---- Wire-up integration ------------------------------------
 

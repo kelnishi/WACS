@@ -609,6 +609,37 @@ namespace Wacs.WASI.Preview3
                 (Action<ExecContext, int, int>)((_, self, retptr) =>
                     InvokeDescriptorStat(self, retptr, realloc)));
 
+            // ---- Stream-shape descriptor methods --------------------
+            // read-via-stream(offset) -> tuple<stream, future>:
+            //   8-byte 4-aligned retptr layout (stream-handle, future-handle)
+            // write-via-stream(data, offset) -> future:
+            //   single i32 return (future-handle)
+            // append-via-stream(data) -> future:
+            //   single i32 return
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[method]descriptor.read-via-stream"),
+                (Action<ExecContext, int, long, int>)(
+                    (_, self, offset, retptr) =>
+                        InvokeDescriptorReadViaStream(
+                            self, unchecked((ulong)offset), retptr)));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[method]descriptor.write-via-stream"),
+                (Func<ExecContext, int, int, long, int>)(
+                    (_, self, streamHandle, offset) =>
+                        InvokeDescriptorWriteViaStream(
+                            self, streamHandle, unchecked((ulong)offset))));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[method]descriptor.append-via-stream"),
+                (Func<ExecContext, int, int, int>)(
+                    (_, self, streamHandle) =>
+                        InvokeDescriptorAppendViaStream(
+                            self, streamHandle)));
+
             // wasi:sockets — resource drops + ip-name-lookup.
             // Full ITcpSocket/IUdpSocket method wire-ups + a
             // System.Net.Sockets-backed default impl ship in
@@ -695,6 +726,22 @@ namespace Wacs.WASI.Preview3
                         InvokeTcpSocketSetBufferSize(
                             self, unchecked((ulong)value),
                             retptr, realloc, sendBuffer: true)));
+
+            // ---- Stream-shape tcp-socket methods --------------------
+            // send(data: stream<u8>) -> future<...>:
+            //   single i32 future-handle return
+            // receive() -> tuple<stream<u8>, future<...>>:
+            //   8-byte 4-aligned retptr (stream-handle, future-handle)
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName, "[method]tcp-socket.send"),
+                (Func<ExecContext, int, int, int>)(
+                    (_, self, streamHandle) =>
+                        InvokeTcpSocketSend(self, streamHandle)));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName, "[method]tcp-socket.receive"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeTcpSocketReceive(self, retptr)));
 
             // ---- wasi:sockets/types.udp-socket simple methods ----
             runtime.BindHostFunction(
@@ -1008,6 +1055,49 @@ namespace Wacs.WASI.Preview3
                 caught, realloc, memory);
         }
 
+        /// <summary>Invoke
+        /// <c>[method]tcp-socket.send(data: stream&lt;u8&gt;)</c>.
+        /// Returns the i32 future-handle directly.</summary>
+        public int InvokeTcpSocketSend(int self, int streamHandle)
+        {
+            var dispatcher = RequireDispatcher();
+            var socket = RequireTcpSocket(self);
+            var (futureHandle, _) = socket.Send(dispatcher, streamHandle);
+            return futureHandle;
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]tcp-socket.receive()</c>. Returns
+        /// <c>tuple&lt;stream&lt;u8&gt;,
+        /// future&lt;result&lt;_, error-code&gt;&gt;&gt;</c>
+        /// via an 8-byte 4-aligned retptr (stream-handle at +0,
+        /// future-handle at +4).</summary>
+        public void InvokeTcpSocketReceive(int self, int retptr)
+        {
+            var dispatcher = RequireDispatcher();
+            var memory = dispatcher.Memory
+                ?? throw new InvalidOperationException(
+                    "tcp-socket.receive: dispatcher.Memory " +
+                    "must be set before this import is invoked.");
+            if (retptr < 0 || (retptr & 0x3) != 0
+                || retptr + 8 > memory.Data.Length)
+                throw new InvalidOperationException(
+                    "tcp-socket.receive: retptr " +
+                    $"0x{retptr:X8} misaligned or out of range " +
+                    $"(memory size = {memory.Data.Length}). " +
+                    "Caller must allocate an 8-byte 4-aligned " +
+                    "return area.");
+
+            var socket = RequireTcpSocket(self);
+            var (streamHandle, futureHandle, _) =
+                socket.Receive(dispatcher);
+            var dest = memory.AsSpan(retptr, 8);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(dest.Slice(0), streamHandle);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(dest.Slice(4), futureHandle);
+        }
+
         private ITcpSocket RequireTcpSocket(int handle)
         {
             var s = TcpSocketHandles.Get(handle);
@@ -1265,6 +1355,66 @@ namespace Wacs.WASI.Preview3
                 .WriteInt32LittleEndian(outerDest.Slice(0), arrayPtr);
             System.Buffers.Binary.BinaryPrimitives
                 .WriteInt32LittleEndian(outerDest.Slice(4), count);
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]descriptor.read-via-stream(offset)</c>.
+        /// Returns <c>tuple&lt;stream&lt;u8&gt;,
+        /// future&lt;result&lt;_, error-code&gt;&gt;&gt;</c> via
+        /// a 8-byte 4-aligned retptr (stream-handle at +0,
+        /// future-handle at +4).</summary>
+        public void InvokeDescriptorReadViaStream(
+            int self, ulong offset, int retptr)
+        {
+            var dispatcher = RequireDispatcher();
+            var memory = dispatcher.Memory
+                ?? throw new InvalidOperationException(
+                    "descriptor.read-via-stream: dispatcher.Memory " +
+                    "must be set before this import is invoked.");
+            if (retptr < 0 || (retptr & 0x3) != 0
+                || retptr + 8 > memory.Data.Length)
+                throw new InvalidOperationException(
+                    "descriptor.read-via-stream: retptr " +
+                    $"0x{retptr:X8} misaligned or out of range " +
+                    $"(memory size = {memory.Data.Length}). " +
+                    "Caller must allocate an 8-byte 4-aligned " +
+                    "return area.");
+
+            var desc = RequireDescriptor(self);
+            var (streamHandle, futureHandle, _) =
+                desc.ReadViaStream(dispatcher, new FileSize(offset));
+
+            var dest = memory.AsSpan(retptr, 8);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(dest.Slice(0), streamHandle);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(dest.Slice(4), futureHandle);
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]descriptor.write-via-stream(data, offset)</c>.
+        /// Returns the i32 future-handle directly (no retptr —
+        /// single i32 return fits within MAX_FLAT_RESULTS).</summary>
+        public int InvokeDescriptorWriteViaStream(
+            int self, int streamHandle, ulong offset)
+        {
+            var dispatcher = RequireDispatcher();
+            var desc = RequireDescriptor(self);
+            var (futureHandle, _) = desc.WriteViaStream(
+                dispatcher, streamHandle, new FileSize(offset));
+            return futureHandle;
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]descriptor.append-via-stream(data)</c>.</summary>
+        public int InvokeDescriptorAppendViaStream(
+            int self, int streamHandle)
+        {
+            var dispatcher = RequireDispatcher();
+            var desc = RequireDescriptor(self);
+            var (futureHandle, _) = desc.AppendViaStream(
+                dispatcher, streamHandle);
+            return futureHandle;
         }
 
         private IDescriptor RequireDescriptor(int handle)
