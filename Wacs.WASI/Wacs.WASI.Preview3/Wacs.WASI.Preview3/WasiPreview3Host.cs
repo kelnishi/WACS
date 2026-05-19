@@ -15,6 +15,7 @@ using Wacs.WASI.Preview3.Cli;
 using Wacs.WASI.Preview3.Clocks;
 using Wacs.WASI.Preview3.Filesystem;
 using Wacs.WASI.Preview3.Random;
+using Wacs.WASI.Preview3.Sockets;
 
 namespace Wacs.WASI.Preview3
 {
@@ -59,6 +60,7 @@ namespace Wacs.WASI.Preview3
         private IInsecure? _insecure;
         private IInsecureSeed? _insecureSeed;
         private IPreopens? _preopens;
+        private IIpNameLookup? _nameLookup;
 
         public WasiPreview3Host() : this(new WasiPreview3HostBuilder()) { }
 
@@ -101,6 +103,19 @@ namespace Wacs.WASI.Preview3
         public IPreopens Preopens =>
             _preopens ??= _config.Preopens
                 ?? DirectoryPreopens.FromHostPaths();
+
+        /// <summary>
+        /// Hostname → IP address resolver. Defaults to
+        /// <see cref="NoNameLookup"/> — guests requesting
+        /// resolution see <see cref="ErrorCode.PermanentResolverFailure"/>
+        /// until the embedder explicitly opts in (typically by
+        /// configuring <see cref="DnsBackedNameLookup"/> or a
+        /// custom impl). This default fail-closed posture
+        /// prevents accidental leakage of the host's DNS
+        /// resolver to untrusted components.
+        /// </summary>
+        public IIpNameLookup IpNameLookup =>
+            _nameLookup ??= _config.IpNameLookup ?? new NoNameLookup();
 
         /// <summary>
         /// The component-instance dispatcher the host bindings
@@ -554,6 +569,7 @@ namespace Wacs.WASI.Preview3
         public IInsecure? InsecureRandom { get; set; }
         public IInsecureSeed? InsecureSeed { get; set; }
         public IPreopens? Preopens { get; set; }
+        public IIpNameLookup? IpNameLookup { get; set; }
     }
 
     /// <summary>Ergonomic one-liner mirroring

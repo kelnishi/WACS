@@ -1,5 +1,91 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.6 — `wasi:sockets` types + DNS lookup (Phase 5 Slice D)
+
+Fourth Phase 5 host-interface port. Vendors the
+`wasi-sockets-0.3.0-rc-2026-03-15` WIT and lands the type
+system + `IIpNameLookup` resolver. `tcp-socket` /
+`udp-socket` resource backings ship as Slice E — the
+state-machine + send/receive stream wiring is large enough to
+warrant its own slice once the descriptor-resource pathway
+from Slice D (filesystem) settles.
+
+### Vendored WIT
+
+`wit/deps/wasi-sockets-0.3.0-rc-2026-03-15/package.wit` copied
+from `Spec.Test/wasi`. Embedded via the existing
+`EmbeddedResource` pattern.
+
+### `SocketsTypes.cs`
+
+All WIT types modeled as ergonomic value-type C# structs:
+
+- `IpAddressFamily` — flat enum (Ipv4 / Ipv6).
+- `Ipv4Address` / `Ipv6Address` — readonly structs with the
+  raw octets / 16-bit groups. Static `Any` / `Loopback`
+  properties.
+- `IpAddress` — discriminated union with a tag + payload pair
+  for both families.
+- `Ipv4SocketAddress` / `Ipv6SocketAddress` — records with
+  port + address (+ FlowInfo / ScopeId for v6).
+- `IpSocketAddress` — same discriminated-union shape.
+- `ErrorCode` — flat enum covering the 14 cases from
+  `types.error-code` plus the 3 additional cases from
+  `ip-name-lookup.error-code` (the WIT defines them as
+  separate variants but the latter is a strict superset).
+- `SocketsException` — host-side throwable carrying
+  `ErrorCode` + optional `OtherPayload` for the binding to
+  lower into `result<_, error-code>` err values.
+
+### `ITcpSocket` + `IUdpSocket` interface contracts
+
+Full method signatures for both resource types — ~25 methods
+each covering the state-machine ops (bind / connect / listen /
+send / receive), per-socket config (keep-alive, hop-limit,
+buffer sizes), and socket-pair / option getters. No default
+impls in this slice; that work lands in Slice E.
+
+### `IIpNameLookup` + `DnsBackedNameLookup` + `NoNameLookup`
+
+`IIpNameLookup.ResolveAddressesAsync(name)` returns the list
+of IPs for a hostname. Two impls ship:
+
+- `DnsBackedNameLookup` — `System.Net.Dns.GetHostAddressesAsync`-
+  backed. Maps `SocketError.HostNotFound` →
+  `ErrorCode.NameUnresolvable`,
+  `SocketError.TryAgain` → `TemporaryResolverFailure`,
+  other socket errors → `PermanentResolverFailure`. Honors a
+  `CancellationToken` (with a `#if NET6_0_OR_GREATER`
+  branch to use the native overload; older targets check the
+  token manually).
+- `NoNameLookup` — refuses all resolution with
+  `PermanentResolverFailure`. The **default** on the host,
+  so guests don't accidentally leak the host's DNS resolver
+  until the embedder explicitly opts in.
+
+### `WasiPreview3Host` integration
+
+`IpNameLookup` property on the host (defaults to
+`NoNameLookup`; embedders can swap via builder).
+
+### Test coverage
+
+14 new tests in `SocketsTests.cs`:
+- `Ipv4Address` / `Ipv6Address` to-string + equality.
+- `IpAddress` / `IpSocketAddress` factory methods set the
+  correct family + payload.
+- `Ipv6SocketAddress` preserves FlowInfo + ScopeId.
+- `SocketsException` routes payload correctly.
+- `DnsBackedNameLookup` resolves loopback (with a CI-graceful
+  skip if the host's resolver misbehaves), throws
+  `NameUnresolvable` for invalid TLD, throws
+  `InvalidArgument` for null.
+- `NoNameLookup` refuses with `PermanentResolverFailure`.
+- Host default-construct uses `NoNameLookup`; builder
+  override threads through.
+
+95/95 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.5 — `wasi:filesystem` surface area (Phase 5 Slice C)
 
 Third Phase 5 host-interface port. Vendors the
