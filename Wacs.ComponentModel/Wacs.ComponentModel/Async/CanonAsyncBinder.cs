@@ -7,6 +7,7 @@
 
 using System;
 using System.Collections.Generic;
+using Wacs.ComponentModel.CanonicalABI;
 using Wacs.ComponentModel.Runtime.Parser;
 using Wacs.Core.Runtime;
 
@@ -68,12 +69,18 @@ namespace Wacs.ComponentModel.Async
                 case CanonWaitableSetOp ws:       return ("[canon]", $"[waitable-set-{WaitableSetSuffix(ws.Op)}]");
                 case CanonWaitableJoin _:         return ("[canon]", "[waitable-join]");
                 case CanonThreadYield _:          return ("[canon]", "[thread-yield]");
-                // task.return: bind iff the resultlist is a
-                // primitive valtype (or empty). Aggregate/string
-                // results need the canon-ABI lift adapter and
-                // remain deferred.
+                // task.return: bind iff the resultlist is empty,
+                // a primitive valtype, a string (Slice I.1), a
+                // list-of-primitive (Slice I.2), or an
+                // option/result-of-primitive (Slice I.3). For
+                // typeidx-referenced aggregates the name resolver
+                // alone can't validate — TryBuildDelegate makes
+                // the final call via `Types` lookup.
                 case CanonTaskReturn tr:
-                    if (tr.Result == null || IsBindablePrimitive(tr.Result.Value))
+                    if (tr.Result == null
+                        || IsBindablePrimitive(tr.Result.Value)
+                        || IsBindableString(tr.Result.Value)
+                        || tr.Result.Value.IsPrimitive == false)
                         return ("[canon]", "[task-return]");
                     return (null, null);
                 // context.{get,set}: bind iff valtype is a
@@ -104,6 +111,17 @@ namespace Wacs.ComponentModel.Async
                     return false;
             }
         }
+
+        /// <summary>True iff <paramref name="v"/> is the
+        /// component-model <c>string</c> primitive — handled
+        /// separately from <see cref="IsBindablePrimitive"/>
+        /// because the lift path needs memory access (the
+        /// dispatcher's <c>Memory</c> + <c>StringEncoding</c>
+        /// properties) and a different delegate signature
+        /// (<c>(i32 ptr, i32 len)</c> instead of the primitive's
+        /// single core value).</summary>
+        private static bool IsBindableString(ComponentValType v) =>
+            v.IsPrimitive && v.Prim == ComponentPrim.String;
 
         private static string BackpressureSuffix(CanonBackpressureOp.Kind k) => k switch
         {
@@ -384,7 +402,11 @@ namespace Wacs.ComponentModel.Async
 
         // task.return shape: () for empty resultlist; (T) for a
         // single-primitive result. T is unwrapped and forwarded
-        // to dispatcher.TaskReturn(object?).
+        // to dispatcher.TaskReturn(object?). For string, the
+        // delegate takes (i32 ptr, i32 len) per the canon-ABI
+        // flat-lowering rules; the lift adapter reads the bytes
+        // from the dispatcher's Memory using the resolved
+        // StringEncoding.
         private static bool TryBuildTaskReturn(
             CanonTaskReturn tr, AsyncDispatcher d, out Delegate? del)
         {
@@ -394,7 +416,23 @@ namespace Wacs.ComponentModel.Async
                 del = (Action<ExecContext>)((_) => d.TaskReturn(null!, null));
                 return true;
             }
-            if (!tr.Result.Value.IsPrimitive) return false;
+            // Typeidx-ref aggregate: resolve via dispatcher.Types
+            // and dispatch to the per-shape sub-builder. Slice I.2/I.3
+            // cover list/option/result with primitive payloads.
+            if (!tr.Result.Value.IsPrimitive)
+            {
+                var defType = ResolveType(d, tr.Result.Value.TypeIdx);
+                return defType switch
+                {
+                    ComponentListType list =>
+                        TryBuildTaskReturnList(list, d, out del),
+                    ComponentOptionType opt =>
+                        TryBuildTaskReturnOption(opt, d, out del),
+                    ComponentResultType res =>
+                        TryBuildTaskReturnResult(res, d, out del),
+                    _ => false,
+                };
+            }
             switch (tr.Result.Value.Prim)
             {
                 case ComponentPrim.S32:
@@ -414,6 +452,194 @@ namespace Wacs.ComponentModel.Async
                 case ComponentPrim.F64:
                     del = (Action<ExecContext, double>)((_, x) =>
                         d.TaskReturn(null!, x));
+                    return true;
+                case ComponentPrim.String:
+                    del = (Action<ExecContext, int, int>)((_, ptr, len) =>
+                    {
+                        var memory = d.Memory
+                            ?? throw new InvalidOperationException(
+                                "task.return string: dispatcher.Memory not set. " +
+                                "ComponentInstance must assign Memory after " +
+                                "core-module instantiation before this call site is reachable.");
+                        var lifted = d.StringEncoding switch
+                        {
+                            CanonOption.Kind.StringUtf16 =>
+                                StringMarshal.LiftUtf16(memory, ptr, len),
+                            CanonOption.Kind.StringLatin1OrUtf16 =>
+                                StringMarshal.LiftLatin1OrUtf16(memory, ptr, len),
+                            _ => StringMarshal.LiftUtf8(memory, ptr, len),
+                        };
+                        d.TaskReturn(null!, lifted);
+                    });
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        // Look up a typeidx in the dispatcher's type table.
+        // Returns null when types aren't wired or the index is
+        // out of range — caller bails out of the delegate build.
+        private static DefTypeEntry? ResolveType(
+            AsyncDispatcher d, uint typeIdx)
+        {
+            var types = d.Types;
+            if (types == null || typeIdx >= types.Count) return null;
+            return types[(int)typeIdx];
+        }
+
+        // Memory accessor with the same "must be set" diagnostic
+        // as the string lift — reused by list/option/result paths.
+        private static Wacs.Core.Runtime.Types.MemoryInstance RequireMemory(
+            AsyncDispatcher d, string canonOpName)
+        {
+            return d.Memory
+                ?? throw new InvalidOperationException(
+                    $"{canonOpName}: dispatcher.Memory not set. " +
+                    "ComponentInstance must assign Memory after " +
+                    "core-module instantiation.");
+        }
+
+        // task.return list<T> for primitive T: delegate takes
+        // (i32 ptr, i32 count) per canon-ABI flat-lowering rules.
+        // The lift adapter reads count elements of T from memory
+        // at ptr via ListMarshal.LiftPrim<T>, then forwards the
+        // resulting CLR T[] to TaskReturn.
+        private static bool TryBuildTaskReturnList(
+            ComponentListType list, AsyncDispatcher d, out Delegate? del)
+        {
+            del = null;
+            if (!list.Element.IsPrimitive) return false;
+            switch (list.Element.Prim)
+            {
+                case ComponentPrim.U8:
+                case ComponentPrim.S8:
+                    del = (Action<ExecContext, int, int>)((_, ptr, count) =>
+                        d.TaskReturn(null!,
+                            ListMarshal.LiftPrim<byte>(
+                                RequireMemory(d, "task.return list<u8>"), ptr, count)));
+                    return true;
+                case ComponentPrim.U16:
+                case ComponentPrim.S16:
+                    del = (Action<ExecContext, int, int>)((_, ptr, count) =>
+                        d.TaskReturn(null!,
+                            ListMarshal.LiftPrim<ushort>(
+                                RequireMemory(d, "task.return list<u16>"), ptr, count)));
+                    return true;
+                case ComponentPrim.U32:
+                case ComponentPrim.S32:
+                    del = (Action<ExecContext, int, int>)((_, ptr, count) =>
+                        d.TaskReturn(null!,
+                            ListMarshal.LiftPrim<uint>(
+                                RequireMemory(d, "task.return list<u32>"), ptr, count)));
+                    return true;
+                case ComponentPrim.U64:
+                case ComponentPrim.S64:
+                    del = (Action<ExecContext, int, int>)((_, ptr, count) =>
+                        d.TaskReturn(null!,
+                            ListMarshal.LiftPrim<ulong>(
+                                RequireMemory(d, "task.return list<u64>"), ptr, count)));
+                    return true;
+                case ComponentPrim.F32:
+                    del = (Action<ExecContext, int, int>)((_, ptr, count) =>
+                        d.TaskReturn(null!,
+                            ListMarshal.LiftPrim<float>(
+                                RequireMemory(d, "task.return list<f32>"), ptr, count)));
+                    return true;
+                case ComponentPrim.F64:
+                    del = (Action<ExecContext, int, int>)((_, ptr, count) =>
+                        d.TaskReturn(null!,
+                            ListMarshal.LiftPrim<double>(
+                                RequireMemory(d, "task.return list<f64>"), ptr, count)));
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        // task.return option<T> for primitive T: flat-lowered to
+        // (i32 disc, T payload). Discriminant 0 = none, 1 = some.
+        private static bool TryBuildTaskReturnOption(
+            ComponentOptionType opt, AsyncDispatcher d, out Delegate? del)
+        {
+            del = null;
+            if (!opt.Inner.IsPrimitive) return false;
+            switch (opt.Inner.Prim)
+            {
+                case ComponentPrim.S32:
+                case ComponentPrim.U32:
+                    del = (Action<ExecContext, int, int>)((_, disc, payload) =>
+                        d.TaskReturn(null!,
+                            disc == 0 ? (int?)null : payload));
+                    return true;
+                case ComponentPrim.S64:
+                case ComponentPrim.U64:
+                    del = (Action<ExecContext, int, long>)((_, disc, payload) =>
+                        d.TaskReturn(null!,
+                            disc == 0 ? (long?)null : payload));
+                    return true;
+                case ComponentPrim.F32:
+                    del = (Action<ExecContext, int, float>)((_, disc, payload) =>
+                        d.TaskReturn(null!,
+                            disc == 0 ? (float?)null : payload));
+                    return true;
+                case ComponentPrim.F64:
+                    del = (Action<ExecContext, int, double>)((_, disc, payload) =>
+                        d.TaskReturn(null!,
+                            disc == 0 ? (double?)null : payload));
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        // task.return result<T,E> for primitive T/E: flat-lowered
+        // to (i32 disc, T okPayload, E errPayload). Discriminant
+        // 0 = ok, 1 = err. Both payload slots are passed; the
+        // adapter picks the live one based on disc. For typed
+        // host consumption, the CLR-side result is materialized
+        // as a 3-element ValueTuple (bool isOk, T ok, E err) —
+        // simple, AOT-safe, no custom Result&lt;T,E&gt; type needed.
+        //
+        // The spec's result has either side optional (result,
+        // result<T>, result<_,E>, result<T,E>). For now we only
+        // bind result<T,E> with both sides primitive; the
+        // single-sided variants would have a different wire
+        // shape (no slot for the missing side).
+        private static bool TryBuildTaskReturnResult(
+            ComponentResultType res, AsyncDispatcher d, out Delegate? del)
+        {
+            del = null;
+            // Phase I.3 covers the both-sides-present primitive
+            // case. Other shapes (one side empty, aggregate
+            // payloads) need further per-shape lowering.
+            if (res.Ok == null || res.Err == null) return false;
+            if (!res.Ok.Value.IsPrimitive || !res.Err.Value.IsPrimitive)
+                return false;
+            // Specialize on (Ok, Err) prim pair. The cross-product
+            // is too large to enumerate cleanly; cover the common
+            // case: both Ok and Err same width (most components
+            // use result<u32, u32> or similar).
+            if (res.Ok.Value.Prim != res.Err.Value.Prim) return false;
+            switch (res.Ok.Value.Prim)
+            {
+                case ComponentPrim.S32:
+                case ComponentPrim.U32:
+                    del = (Action<ExecContext, int, int, int>)((_, disc, ok, err) =>
+                        d.TaskReturn(null!, (disc == 0, ok, err)));
+                    return true;
+                case ComponentPrim.S64:
+                case ComponentPrim.U64:
+                    del = (Action<ExecContext, int, long, long>)((_, disc, ok, err) =>
+                        d.TaskReturn(null!, (disc == 0, ok, err)));
+                    return true;
+                case ComponentPrim.F32:
+                    del = (Action<ExecContext, int, float, float>)((_, disc, ok, err) =>
+                        d.TaskReturn(null!, (disc == 0, ok, err)));
+                    return true;
+                case ComponentPrim.F64:
+                    del = (Action<ExecContext, int, double, double>)((_, disc, ok, err) =>
+                        d.TaskReturn(null!, (disc == 0, ok, err)));
                     return true;
                 default:
                     return false;

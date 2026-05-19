@@ -84,6 +84,35 @@ namespace Wacs.ComponentModel.Async
         public AsyncHandleTable<string> ErrorContexts { get; } =
             new AsyncHandleTable<string>();
 
+        /// <summary>The component's exported memory, set by the
+        /// host after core-module instantiation. Memory-touching
+        /// canon ops (stream.read/write, error-context.new) +
+        /// the canon-async lift adapter (string/list/option/result
+        /// results for task.return) read from here. Null when the
+        /// host hasn't yet wired the memory, in which case
+        /// memory-touching ops throw.</summary>
+        public Wacs.Core.Runtime.Types.MemoryInstance? Memory { get; set; }
+
+        /// <summary>The string-encoding option resolved from the
+        /// canon-lift's opts during component instantiation
+        /// (<c>(string-encoding utf8|utf16|latin1+utf16)</c>).
+        /// The lift adapter consults this to pick the right
+        /// <see cref="StringMarshal"/> variant for string-typed
+        /// canon-async results. Default UTF-8.</summary>
+        public Wacs.ComponentModel.Runtime.Parser.CanonOption.Kind StringEncoding { get; set; }
+            = Wacs.ComponentModel.Runtime.Parser.CanonOption.Kind.StringUtf8;
+
+        /// <summary>The component's type table, set by the host
+        /// at dispatcher allocation time. The lift adapter
+        /// resolves typeidx references in canon entries (e.g.
+        /// <c>task.return list&lt;u8&gt;</c>) by indexing into
+        /// this list to discover the
+        /// <see cref="Wacs.ComponentModel.Runtime.Parser.DefTypeEntry"/>
+        /// shape. Null when the host hasn't wired it — aggregate
+        /// lift paths return null delegates in that case.</summary>
+        public IReadOnlyList<Wacs.ComponentModel.Runtime.Parser.DefTypeEntry>? Types
+        { get; set; }
+
         // ---- Current-task stack ----------------------------------------
         //
         // The "ambient task" is the task whose body is currently

@@ -1,5 +1,121 @@
 # Changelog
 
+## WACS.ComponentModel 0.8.16 — canon-ABI lift for string / list / option / result task.return (Phase 3 Slices I.1 + I.2 + I.3)
+
+Extends the canon-async binder's `task.return` support from
+primitive-only to also cover **string**, **list of primitive
+T**, **option of primitive T**, and **result of primitive
+T/E** resultlists. The lift adapter reads from the
+dispatcher's memory using AOT-safe `StringMarshal` /
+`ListMarshal` helpers — no runtime reflection. Aggregate
+records, variants, and nested-aggregate shapes remain
+deferred (Slice I.4 next session).
+
+### `AsyncDispatcher` — three new lift-context properties
+
+```csharp
+public MemoryInstance? Memory { get; set; }
+public CanonOption.Kind StringEncoding { get; set; } = StringUtf8;
+public IReadOnlyList<DefTypeEntry>? Types { get; set; }
+```
+
+`Memory` is read at delegate-call time (set by
+`ComponentInstance` post-instantiation). `StringEncoding` is
+baked in from the canon-lift's `(string-encoding utf*)`
+options at instantiation. `Types` is the component's
+type-section index space — used to resolve typeidx-ref
+canon-entry results to concrete `ComponentListType` /
+`ComponentOptionType` / `ComponentResultType`.
+
+### Slice I.1: string
+
+`task.return string` builds a delegate
+`(ExecContext, int ptr, int len) → ()` that lifts via
+`StringMarshal.LiftUtf8/Utf16/Latin1OrUtf16` per the
+dispatcher's encoding, then forwards the CLR `string` to
+`TaskReturn(object?)`. Throws a clear "Memory not set"
+diagnostic if invoked before `ComponentInstance` wires
+`dispatcher.Memory`.
+
+### Slice I.2: list of primitive T
+
+`task.return list<T>` for T ∈ {u8/s8, u16/s16, u32/s32,
+u64/s64, f32, f64}. Delegate signature
+`(ExecContext, int ptr, int count) → ()`. Body:
+`ListMarshal.LiftPrim<T>(memory, ptr, count)` →
+`TaskReturn(arr)`. AOT-safe — closed-generic `LiftPrim<T>`
+specializations, no runtime `MakeGenericType`.
+
+### Slice I.3: option<T> and result<T,E> for primitive T/E
+
+`task.return option<T>` flat-lowers to
+`(disc, payload) → ()`. disc=0 ↦ `null`, disc=1 ↦ payload as
+nullable T (`int?`, `long?`, `float?`, `double?`).
+
+`task.return result<T,E>` (both sides primitive, same width)
+flat-lowers to `(disc, ok, err) → ()`. Materializes as a
+`(bool isOk, T ok, E err)` ValueTuple — no custom
+`Result<T,E>` type, AOT-safe.
+
+The single-sided result variants (`result<T>` / `result<_,E>`)
+and mismatched-width `result<T,E>` shapes remain deferred —
+they're rare in WASIp3 payloads and have a different wire
+shape (missing payload slot).
+
+### `ComponentInstance` wiring
+
+Both single-core (`Instantiate`) and multi-core
+(`InstantiateMultiCore`) paths now:
+
+1. Set `dispatcher.Types = component.Types` at dispatcher
+   construction (before binding, since
+   `TryBuildTaskReturnList/Option/Result` need it).
+2. Set `dispatcher.Memory` + `dispatcher.StringEncoding`
+   after core-module instantiation (the lift adapter needs
+   these at delegate-call time, well after binding).
+
+Helper: `FindCanonLiftStringEncoding(component)` scans canon
+entries for the first `CanonLift` and resolves its
+encoding option. Falls back to UTF-8.
+
+### Tests
+
+7 new in `AsyncLiftAdapterTests`:
+
+- `TaskReturn_string_lift_via_dispatcher_memory_round_trips`
+  (UTF-8 round trip end-to-end).
+- `TaskReturn_string_lift_throws_when_dispatcher_memory_not_set`
+  (clear diagnostic).
+- `TaskReturn_list_u8_lift_via_dispatcher_memory_round_trips`
+  (byte[] round trip).
+- `TaskReturn_list_u32_lift_via_dispatcher_memory_round_trips`
+  (uint[] round trip, LE-encoded in memory).
+- `TaskReturn_option_i32_some_lifts_value` (disc=1 ↦ int?).
+- `TaskReturn_option_i32_none_lifts_to_null`.
+- `TaskReturn_result_u32_u32_ok_lifts_isOk_true`.
+- `TaskReturn_result_u32_u32_err_lifts_isOk_false`.
+
+1 updated in `CanonAsyncBinderTests`:
+- The "skips typeidx aggregate" test now reflects that the
+  name resolver is permissive; the actual viability check
+  happens in `TryBuildDelegate` via `dispatcher.Types`.
+
+548/548 ComponentModel + 833/833 Transpiler tests pass
+(was 539).
+
+### Slice I.4 (next session) — records / variants / nested aggregates
+
+The remaining surface: `record<f1: T1, f2: T2, ...>`,
+`variant`, `tuple`, and aggregate-payload option/result.
+These need:
+- Recursive lift over fields/cases.
+- Flat-lowering analysis (record's flat-count is the sum of
+  field flat-counts; can grow beyond ~16 i32s and require
+  return-area indirection).
+- Likely a source-generator pattern (like `CanonOpRegistry`
+  did for the name set) so the per-shape lift IL is build-
+  time generated, AOT-safe.
+
 ## WACS.ComponentModel 0.8.15 — multi-core shim integration (Phase 3 Slice H)
 
 Wires `ShimModuleRecognizer` into `ComponentInstance.InstantiateMultiCore`

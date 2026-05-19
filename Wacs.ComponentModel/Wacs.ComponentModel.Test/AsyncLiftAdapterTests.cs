@@ -282,5 +282,284 @@ namespace Wacs.ComponentModel.Test
             // Both tasks reached terminal state cleanly.
             Assert.Null(d.CurrentTask);
         }
+
+        // ---- Slice I.1: string task.return lift -----------------------
+
+        [Fact]
+        public async Task TaskReturn_string_lift_via_dispatcher_memory_round_trips()
+        {
+            // The binder-emitted delegate for `task.return string`
+            // reads bytes from dispatcher.Memory at (ptr, len) per
+            // the StringEncoding, then forwards to TaskReturn as
+            // a CLR string. Exercise the path end-to-end via the
+            // dispatcher's public surface.
+            var d = new AsyncDispatcher();
+            var mem = MakeMemory();
+            d.Memory = mem;
+            d.StringEncoding =
+                Wacs.ComponentModel.Runtime.Parser.CanonOption.Kind.StringUtf8;
+
+            // Plant a UTF-8 string in memory at offset 32.
+            const string expected = "hello, canon-async";
+            var bytes = System.Text.Encoding.UTF8.GetBytes(expected);
+            bytes.CopyTo(mem.Data, 32);
+
+            // Register a task and push it as current — the
+            // delegate needs an ambient task to settle.
+            var task = d.RegisterTask(MakeCont());
+            d.PushCurrentTask(task);
+            try
+            {
+                // Build the same delegate the binder would emit
+                // for `task.return string` via the public
+                // TryBuildDelegateForEntry surface.
+                var entry = new Wacs.ComponentModel.Runtime.Parser.CanonTaskReturn(
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType
+                        .OfPrim(Wacs.ComponentModel.Runtime.Parser.ComponentPrim.String),
+                    System.Array.Empty<Wacs.ComponentModel.Runtime.Parser.CanonOption>());
+                var del = Wacs.ComponentModel.Async.CanonAsyncBinder
+                    .TryBuildDelegateForEntry(entry, d);
+                Assert.NotNull(del);
+                var typed = (Action<ExecContext, int, int>)del!;
+                typed(null!, 32, bytes.Length);
+            }
+            finally
+            {
+                d.PopCurrentTask();
+            }
+
+            // task.return surfaces the lifted string as the host await.
+            var result = await task.Completion.Task;
+            Assert.Equal(expected, result);
+        }
+
+        // ---- Slice I.2: list<T> task.return lift ---------------------
+
+        [Fact]
+        public async Task TaskReturn_list_u8_lift_via_dispatcher_memory_round_trips()
+        {
+            var d = new AsyncDispatcher();
+            var mem = MakeMemory();
+            d.Memory = mem;
+            // Type table: index 0 = list<u8>.
+            var listOfU8 = new Wacs.ComponentModel.Runtime.Parser.ComponentListType(
+                Wacs.ComponentModel.Runtime.Parser.ComponentValType
+                    .OfPrim(Wacs.ComponentModel.Runtime.Parser.ComponentPrim.U8));
+            d.Types = new Wacs.ComponentModel.Runtime.Parser.DefTypeEntry[]
+                { listOfU8 };
+
+            // Plant 5 bytes at offset 16.
+            byte[] expected = { 10, 20, 30, 40, 50 };
+            expected.CopyTo(mem.Data, 16);
+
+            var task = d.RegisterTask(MakeCont());
+            d.PushCurrentTask(task);
+            try
+            {
+                var entry = new Wacs.ComponentModel.Runtime.Parser.CanonTaskReturn(
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfRef(0),
+                    System.Array.Empty<Wacs.ComponentModel.Runtime.Parser.CanonOption>());
+                var del = (Action<ExecContext, int, int>)
+                    Wacs.ComponentModel.Async.CanonAsyncBinder
+                        .TryBuildDelegateForEntry(entry, d)!;
+                del(null!, 16, expected.Length);
+            }
+            finally { d.PopCurrentTask(); }
+
+            var result = await task.Completion.Task;
+            Assert.Equal(expected, (byte[])result!);
+        }
+
+        [Fact]
+        public async Task TaskReturn_list_u32_lift_via_dispatcher_memory_round_trips()
+        {
+            var d = new AsyncDispatcher();
+            var mem = MakeMemory();
+            d.Memory = mem;
+            var listOfU32 = new Wacs.ComponentModel.Runtime.Parser.ComponentListType(
+                Wacs.ComponentModel.Runtime.Parser.ComponentValType
+                    .OfPrim(Wacs.ComponentModel.Runtime.Parser.ComponentPrim.U32));
+            d.Types = new Wacs.ComponentModel.Runtime.Parser.DefTypeEntry[]
+                { listOfU32 };
+
+            // Plant 3 u32s at offset 8 (LE).
+            uint[] expected = { 0x11223344, 0x55667788, 0x99AABBCC };
+            for (int i = 0; i < expected.Length; i++)
+                System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(
+                    mem.Data.AsSpan(8 + i * 4, 4), expected[i]);
+
+            var task = d.RegisterTask(MakeCont());
+            d.PushCurrentTask(task);
+            try
+            {
+                var entry = new Wacs.ComponentModel.Runtime.Parser.CanonTaskReturn(
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfRef(0),
+                    System.Array.Empty<Wacs.ComponentModel.Runtime.Parser.CanonOption>());
+                var del = (Action<ExecContext, int, int>)
+                    Wacs.ComponentModel.Async.CanonAsyncBinder
+                        .TryBuildDelegateForEntry(entry, d)!;
+                del(null!, 8, expected.Length);
+            }
+            finally { d.PopCurrentTask(); }
+
+            var result = await task.Completion.Task;
+            Assert.Equal(expected, (uint[])result!);
+        }
+
+        // ---- Slice I.3: option<T> / result<T,E> task.return lift -----
+
+        [Fact]
+        public async Task TaskReturn_option_i32_some_lifts_value()
+        {
+            var d = new AsyncDispatcher();
+            var optU32 = new Wacs.ComponentModel.Runtime.Parser.ComponentOptionType(
+                Wacs.ComponentModel.Runtime.Parser.ComponentValType
+                    .OfPrim(Wacs.ComponentModel.Runtime.Parser.ComponentPrim.U32));
+            d.Types = new Wacs.ComponentModel.Runtime.Parser.DefTypeEntry[]
+                { optU32 };
+
+            var task = d.RegisterTask(MakeCont());
+            d.PushCurrentTask(task);
+            try
+            {
+                var entry = new Wacs.ComponentModel.Runtime.Parser.CanonTaskReturn(
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfRef(0),
+                    System.Array.Empty<Wacs.ComponentModel.Runtime.Parser.CanonOption>());
+                var del = (Action<ExecContext, int, int>)
+                    Wacs.ComponentModel.Async.CanonAsyncBinder
+                        .TryBuildDelegateForEntry(entry, d)!;
+                // disc=1 (some), payload=42
+                del(null!, 1, 42);
+            }
+            finally { d.PopCurrentTask(); }
+
+            var result = await task.Completion.Task;
+            Assert.Equal(42, ((int?)result)!.Value);
+        }
+
+        [Fact]
+        public async Task TaskReturn_option_i32_none_lifts_to_null()
+        {
+            var d = new AsyncDispatcher();
+            var optU32 = new Wacs.ComponentModel.Runtime.Parser.ComponentOptionType(
+                Wacs.ComponentModel.Runtime.Parser.ComponentValType
+                    .OfPrim(Wacs.ComponentModel.Runtime.Parser.ComponentPrim.U32));
+            d.Types = new Wacs.ComponentModel.Runtime.Parser.DefTypeEntry[]
+                { optU32 };
+
+            var task = d.RegisterTask(MakeCont());
+            d.PushCurrentTask(task);
+            try
+            {
+                var entry = new Wacs.ComponentModel.Runtime.Parser.CanonTaskReturn(
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfRef(0),
+                    System.Array.Empty<Wacs.ComponentModel.Runtime.Parser.CanonOption>());
+                var del = (Action<ExecContext, int, int>)
+                    Wacs.ComponentModel.Async.CanonAsyncBinder
+                        .TryBuildDelegateForEntry(entry, d)!;
+                // disc=0 (none), payload ignored
+                del(null!, 0, 999);
+            }
+            finally { d.PopCurrentTask(); }
+
+            var result = await task.Completion.Task;
+            Assert.Null(result);
+        }
+
+        [Fact]
+        public async Task TaskReturn_result_u32_u32_ok_lifts_isOk_true()
+        {
+            var d = new AsyncDispatcher();
+            var resU32U32 = new Wacs.ComponentModel.Runtime.Parser.ComponentResultType(
+                Wacs.ComponentModel.Runtime.Parser.ComponentValType
+                    .OfPrim(Wacs.ComponentModel.Runtime.Parser.ComponentPrim.U32),
+                Wacs.ComponentModel.Runtime.Parser.ComponentValType
+                    .OfPrim(Wacs.ComponentModel.Runtime.Parser.ComponentPrim.U32));
+            d.Types = new Wacs.ComponentModel.Runtime.Parser.DefTypeEntry[]
+                { resU32U32 };
+
+            var task = d.RegisterTask(MakeCont());
+            d.PushCurrentTask(task);
+            try
+            {
+                var entry = new Wacs.ComponentModel.Runtime.Parser.CanonTaskReturn(
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfRef(0),
+                    System.Array.Empty<Wacs.ComponentModel.Runtime.Parser.CanonOption>());
+                var del = (Action<ExecContext, int, int, int>)
+                    Wacs.ComponentModel.Async.CanonAsyncBinder
+                        .TryBuildDelegateForEntry(entry, d)!;
+                // disc=0 (ok), ok=7, err=99 (ignored on ok path)
+                del(null!, 0, 7, 99);
+            }
+            finally { d.PopCurrentTask(); }
+
+            var result = await task.Completion.Task;
+            var tuple = ((bool isOk, int ok, int err))result!;
+            Assert.True(tuple.isOk);
+            Assert.Equal(7, tuple.ok);
+        }
+
+        [Fact]
+        public async Task TaskReturn_result_u32_u32_err_lifts_isOk_false()
+        {
+            var d = new AsyncDispatcher();
+            var resU32U32 = new Wacs.ComponentModel.Runtime.Parser.ComponentResultType(
+                Wacs.ComponentModel.Runtime.Parser.ComponentValType
+                    .OfPrim(Wacs.ComponentModel.Runtime.Parser.ComponentPrim.U32),
+                Wacs.ComponentModel.Runtime.Parser.ComponentValType
+                    .OfPrim(Wacs.ComponentModel.Runtime.Parser.ComponentPrim.U32));
+            d.Types = new Wacs.ComponentModel.Runtime.Parser.DefTypeEntry[]
+                { resU32U32 };
+
+            var task = d.RegisterTask(MakeCont());
+            d.PushCurrentTask(task);
+            try
+            {
+                var entry = new Wacs.ComponentModel.Runtime.Parser.CanonTaskReturn(
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfRef(0),
+                    System.Array.Empty<Wacs.ComponentModel.Runtime.Parser.CanonOption>());
+                var del = (Action<ExecContext, int, int, int>)
+                    Wacs.ComponentModel.Async.CanonAsyncBinder
+                        .TryBuildDelegateForEntry(entry, d)!;
+                // disc=1 (err), ok=0, err=42
+                del(null!, 1, 0, 42);
+            }
+            finally { d.PopCurrentTask(); }
+
+            var result = await task.Completion.Task;
+            var tuple = ((bool isOk, int ok, int err))result!;
+            Assert.False(tuple.isOk);
+            Assert.Equal(42, tuple.err);
+        }
+
+        [Fact]
+        public void TaskReturn_string_lift_throws_when_dispatcher_memory_not_set()
+        {
+            // Dispatcher.Memory is null — common during the
+            // bind-time/instantiate-time window. The delegate
+            // throws when invoked, with a clear message.
+            var d = new AsyncDispatcher();
+            // No Memory assignment.
+            var task = d.RegisterTask(MakeCont());
+            d.PushCurrentTask(task);
+            try
+            {
+                var entry = new Wacs.ComponentModel.Runtime.Parser.CanonTaskReturn(
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType
+                        .OfPrim(Wacs.ComponentModel.Runtime.Parser.ComponentPrim.String),
+                    System.Array.Empty<Wacs.ComponentModel.Runtime.Parser.CanonOption>());
+                var del = (Action<ExecContext, int, int>)
+                    Wacs.ComponentModel.Async.CanonAsyncBinder
+                        .TryBuildDelegateForEntry(entry, d)!;
+
+                var thrown = Assert.Throws<InvalidOperationException>(
+                    () => del(null!, 0, 0));
+                Assert.Contains("Memory", thrown.Message);
+            }
+            finally
+            {
+                d.PopCurrentTask();
+            }
+        }
     }
 }

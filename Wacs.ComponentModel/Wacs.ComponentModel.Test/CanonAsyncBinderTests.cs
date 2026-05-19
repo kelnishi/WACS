@@ -68,17 +68,20 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
-        public void DefaultNameResolver_skips_aggregate_resultlist_and_valtype()
+        public void DefaultNameResolver_resolves_typeidx_aggregate_resultlist_optimistically()
         {
-            // String / aggregate resultlists still need the lift
-            // adapter — name resolver returns null so the binder
-            // skips them.
+            // Slice I.2/I.3 made the name resolver permissive
+            // for typeidx-referenced aggregates — the actual
+            // viability check happens later in TryBuildDelegate
+            // via dispatcher.Types lookup, where unsupported
+            // shapes (records, variants, nested aggregates)
+            // surface as a null delegate.
             var (m, n) = CanonAsyncBinder.DefaultNameResolver(
                 new CanonTaskReturn(
-                    ComponentValType.OfPrim(ComponentPrim.String),
+                    ComponentValType.OfRef(5),
                     System.Array.Empty<CanonOption>()));
-            Assert.Null(m);
-            Assert.Null(n);
+            Assert.Equal("[canon]", m);
+            Assert.Equal("[task-return]", n);
         }
 
         // ---- BindImports registers delegates the runtime can resolve ---
@@ -105,18 +108,19 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
-        public void BindImports_skips_aggregate_resultlist_and_valtype_entries()
+        public void BindImports_skips_typeidx_aggregate_resultlist_and_valtype_entries()
         {
-            // Aggregate / string resultlists + non-primitive
-            // context valtypes still skip — they need the full
-            // canon-ABI lift adapter to marshal the typed value
-            // across the boundary. Primitive forms bind.
+            // Typeidx-referenced aggregate resultlists + non-
+            // primitive context valtypes still skip — they need
+            // the canon-ABI lift adapter to marshal the typed
+            // value across the boundary. Primitive forms bind;
+            // string lifts via Slice I.1.
             var runtime = new WasmRuntime();
             var dispatcher = new AsyncDispatcher();
             var entries = new List<CanonEntry>
             {
                 new CanonTaskReturn(
-                    ComponentValType.OfPrim(ComponentPrim.String),
+                    ComponentValType.OfRef(5),
                     System.Array.Empty<CanonOption>()),
                 new CanonContextOp(CanonContextOp.Kind.Get,
                     ComponentValType.OfRef(0), 0),
@@ -268,20 +272,35 @@ namespace Wacs.ComponentModel.Test
         [Fact]
         public void BindImports_skips_aggregate_task_return_and_context()
         {
+            // Slice I.1 promoted string task.return to a bindable
+            // shape — only the typeidx-ref context op still skips.
             var runtime = new WasmRuntime();
             var dispatcher = new AsyncDispatcher();
             var entries = new List<CanonEntry>
             {
-                // string resultlist — needs lift adapter, skipped.
-                new CanonTaskReturn(
-                    ComponentValType.OfPrim(ComponentPrim.String),
-                    System.Array.Empty<CanonOption>()),
-                // typeidx-referenced valtype (aggregate) — skipped.
                 new CanonContextOp(CanonContextOp.Kind.Get,
                     ComponentValType.OfRef(5), 0),
             };
             var bound = CanonAsyncBinder.BindImports(runtime, entries, dispatcher);
             Assert.Empty(bound);
+        }
+
+        // ---- Slice I.1: string task.return -----------------------------
+
+        [Fact]
+        public void BindImports_binds_string_task_return_after_I1()
+        {
+            var runtime = new WasmRuntime();
+            var dispatcher = new AsyncDispatcher();
+            var entries = new List<CanonEntry>
+            {
+                new CanonTaskReturn(
+                    ComponentValType.OfPrim(ComponentPrim.String),
+                    System.Array.Empty<CanonOption>()),
+            };
+            var bound = CanonAsyncBinder.BindImports(runtime, entries, dispatcher);
+            Assert.Single(bound);
+            Assert.Equal("[task-return]", bound[0].Name);
         }
     }
 }

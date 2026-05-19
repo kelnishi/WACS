@@ -213,7 +213,10 @@ namespace Wacs.ComponentModel.Runtime
                 Wacs.ComponentModel.Async.AsyncDispatcher? asyncDispatcher = null;
                 if (HasAnyCanonAsync(component.Canons))
                 {
-                    asyncDispatcher = new Wacs.ComponentModel.Async.AsyncDispatcher();
+                    asyncDispatcher = new Wacs.ComponentModel.Async.AsyncDispatcher
+                    {
+                        Types = component.Types,
+                    };
                     Wacs.ComponentModel.Async.CanonAsyncBinder.BindImports(
                         runtime, component.Canons, asyncDispatcher);
                 }
@@ -224,6 +227,19 @@ namespace Wacs.ComponentModel.Runtime
 
                 Wacs.Core.Runtime.CanonResourceBinder
                     .ResolveDtorTrampolines(runtime, coreInstance, dtorBindings);
+
+                // Late-bind the dispatcher's memory + string
+                // encoding from the now-instantiated core
+                // instance + canon-lift options. The lift adapter
+                // (for string task.return, etc.) consults these
+                // at delegate-call time.
+                if (asyncDispatcher != null)
+                {
+                    runtime.TryGetExportedMemory("memory", out var asyncMem);
+                    asyncDispatcher.Memory = asyncMem;
+                    asyncDispatcher.StringEncoding =
+                        FindCanonLiftStringEncoding(component);
+                }
 
                 return new ComponentInstance(component, runtime, coreInstance)
                     { _resourceTables = tables, AsyncDispatcher = asyncDispatcher };
@@ -461,7 +477,10 @@ namespace Wacs.ComponentModel.Runtime
                         continue;
 
                     asyncDispatcher ??=
-                        new Wacs.ComponentModel.Async.AsyncDispatcher();
+                        new Wacs.ComponentModel.Async.AsyncDispatcher
+                        {
+                            Types = component.Types,
+                        };
                     Wacs.ComponentModel.Async.ShimModuleRecognizer
                         .BindShimImports(
                             runtime, candidate, component.Canons,
@@ -481,6 +500,17 @@ namespace Wacs.ComponentModel.Runtime
                     {
                         MemoryStorage = AmbientRuntime.MemoryStorage,
                     });
+
+                // Late-bind dispatcher memory + encoding (same as
+                // the single-core path).
+                if (asyncDispatcher != null)
+                {
+                    runtime.TryGetExportedMemory("memory", out var asyncMem);
+                    asyncDispatcher.Memory = asyncMem;
+                    asyncDispatcher.StringEncoding =
+                        FindCanonLiftStringEncoding(component);
+                }
+
                 return new ComponentInstance(component, runtime, coreInstance)
                 {
                     AsyncDispatcher = asyncDispatcher,
@@ -670,6 +700,35 @@ namespace Wacs.ComponentModel.Runtime
 
         /// <summary>Pick the export's string encoding from its
         /// canon-lift options. Mirror of the transpiler's
+        /// Component-wide string-encoding probe: scan canon entries
+        /// for the first <see cref="CanonLift"/> and return its
+        /// resolved string-encoding option. Used to bake the
+        /// encoding into the
+        /// <see cref="Wacs.ComponentModel.Async.AsyncDispatcher"/>'s
+        /// state at instantiation time, so the canon-async lift
+        /// adapter can pick the right
+        /// <see cref="Wacs.ComponentModel.CanonicalABI.StringMarshal"/>
+        /// variant without re-walking the canon section per call.
+        ///
+        /// <para>A component with multiple lifts that disagree on
+        /// string-encoding is rare in practice (wit-component
+        /// emits one encoding per component); when it happens,
+        /// the first lift wins. Per-call refinement would require
+        /// threading the option through the binder per-canon-entry,
+        /// a follow-up if real fixtures surface the divergence.</para>
+        /// </summary>
+        internal static CanonOption.Kind FindCanonLiftStringEncoding(
+            ComponentModule component)
+        {
+            foreach (var c in component.Canons)
+            {
+                if (c is CanonLift cl)
+                    return ResolveStringEncoding(cl.Options);
+            }
+            return CanonOption.Kind.StringUtf8;
+        }
+
+        /// <summary>
         /// ResolveStringEncoding — defaults to UTF-8 when no
         /// option present.</summary>
         private static CanonOption.Kind ResolveStringEncoding(
