@@ -1,5 +1,74 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.12 — sockets resource tables + `ip-name-lookup` wire-up (Phase 5 Slice J)
+
+Adds socket resource tables and wires the
+`wasi:sockets/ip-name-lookup.resolve-addresses` host import —
+the most immediately useful socket binding, since the DNS
+backing from Slice D works without a TCP/UDP socket impl. The
+TCP/UDP socket method wire-ups + System.Net.Sockets-backed
+default impls ship in a follow-up slice.
+
+### `TcpSocketHandles` / `UdpSocketHandles` host-resource tables
+
+New `HostResourceTable` properties on the host. Wire-bound
+socket resource methods resolve through these tables.
+
+### `wasi:sockets/types.[resource-drop]{tcp-socket,udp-socket}`
+
+Registered drop functions that release handles from the
+respective tables.
+
+### `wasi:sockets/ip-name-lookup.resolve-addresses`
+
+```
+(wasi:sockets/ip-name-lookup@0.3.0-rc-2026-03-15,
+ resolve-addresses)
+```
+
+Lowered signature:
+`(name-ptr: i32, name-len: i32, retptr: i32) -> ()`.
+
+Implementation:
+1. Reads the hostname UTF-8 bytes from guest memory.
+2. Sync-blocks on the configured `IIpNameLookup`'s
+   `ResolveAddressesAsync`.
+3. Allocates the canon-ABI-lowered variant list through
+   cabi_realloc (`align=2`,
+   `size=count * 18`).
+4. For each `ip-address` writes the 18-byte variant entry:
+   disc at +0 (0=ipv4, 1=ipv6), 1-byte align-pad,
+   16-byte payload section. IPv4 writes 4 octets at +2..6;
+   IPv6 writes 8 big-endian u16 groups at +2..18.
+5. Writes the outer `(list-ptr, list-count)` at retptr.
+
+Default-host configuration uses `NoNameLookup` (refuses with
+`PermanentResolverFailure`); embedders that want DNS opt in
+via the `IpNameLookup` builder property — `DnsBackedNameLookup`
+is the standard backing.
+
+### New wire-level module-name constants
+
+`SocketsTypesModuleName` and `IpNameLookupModuleName` on
+`WasiPreview3Host`.
+
+### Test coverage
+
+8 new tests in `SocketsBindingTests.cs`:
+- `BindToRuntime` registers socket drops + name lookup.
+- `TcpSocketHandles` / `UdpSocketHandles` round-trip.
+- `InvokeResolveAddresses` empty list writes `(0, 0)` at
+  retptr.
+- IPv4 list writes correct 18-byte entries with disc=0 +
+  octets at the payload offset.
+- IPv6 list writes disc=1 + big-endian u16 groups.
+- Misaligned retptr throws.
+- `SocketsException` from the impl (e.g.
+  `PermanentResolverFailure` from `NoNameLookup`) propagates
+  to the binding.
+
+160/160 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.11 — `wasi:filesystem` descriptor + preopens wire-up (Phase 5 Slice I)
 
 Adds the descriptor host-resource table, wires the simplest

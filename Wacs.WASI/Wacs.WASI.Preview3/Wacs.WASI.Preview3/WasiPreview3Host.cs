@@ -101,6 +101,16 @@ namespace Wacs.WASI.Preview3
         public HostResourceTable<IDescriptor> DescriptorHandles { get; } =
             new HostResourceTable<IDescriptor>();
 
+        /// <summary>Host-side handle table for
+        /// <c>wasi:sockets/types.tcp-socket</c> resources.</summary>
+        public HostResourceTable<ITcpSocket> TcpSocketHandles { get; } =
+            new HostResourceTable<ITcpSocket>();
+
+        /// <summary>Host-side handle table for
+        /// <c>wasi:sockets/types.udp-socket</c> resources.</summary>
+        public HostResourceTable<IUdpSocket> UdpSocketHandles { get; } =
+            new HostResourceTable<IUdpSocket>();
+
         public WasiPreview3Host() : this(new WasiPreview3HostBuilder()) { }
 
         public WasiPreview3Host(WasiPreview3HostBuilder builder)
@@ -513,6 +523,144 @@ namespace Wacs.WASI.Preview3
                 (FilesystemPreopensModuleName, "get-directories"),
                 (Action<ExecContext, int>)((_, retptr) =>
                     InvokePreopensGetDirectories(retptr, realloc)));
+
+            // wasi:sockets — resource drops + ip-name-lookup.
+            // Full ITcpSocket/IUdpSocket method wire-ups + a
+            // System.Net.Sockets-backed default impl ship in
+            // a follow-up slice; the resource drops + the DNS
+            // lookup are the immediately useful pieces.
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName, "[resource-drop]tcp-socket"),
+                (Action<ExecContext, int>)((_, handle) =>
+                    TcpSocketHandles.Drop(handle)));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName, "[resource-drop]udp-socket"),
+                (Action<ExecContext, int>)((_, handle) =>
+                    UdpSocketHandles.Drop(handle)));
+
+            // wasi:sockets/ip-name-lookup.resolve-addresses
+            //   async func(name: string) -> result<list<ip-address>, error-code>
+            //
+            // The (name) arg lowers to (i32 ptr, i32 len). The
+            // result list flat-lowers to 2 i32s > MAX_FLAT_RESULTS
+            // → retptr layout (8 bytes 4-aligned: list-ptr +
+            // list-count). Each ip-address variant entry is 18
+            // bytes 2-aligned: disc byte (case 0=ipv4, 1=ipv6) +
+            // 1-byte align-pad + 16 bytes payload (max(4, 16)).
+            // Async-blocking on the Task<IReadOnlyList<IpAddress>>
+            // until the canon-async-func wire shape settles.
+            runtime.BindHostFunction(
+                (IpNameLookupModuleName, "resolve-addresses"),
+                (Action<ExecContext, int, int, int>)((_, namePtr, nameLen, retptr) =>
+                    InvokeResolveAddresses(namePtr, nameLen, retptr, realloc)));
+        }
+
+        // ---- wasi:sockets binding bodies (Slice J) -------------------
+
+        /// <summary>Invoke
+        /// <c>wasi:sockets/ip-name-lookup.resolve-addresses</c>'s
+        /// body. Reads the hostname from guest memory, blocks
+        /// on the Task<IReadOnlyList<IpAddress>>, allocates the
+        /// canon-ABI-lowered variant list through cabi_realloc,
+        /// writes the outer (list-ptr, list-count) at retptr.</summary>
+        public void InvokeResolveAddresses(
+            int namePtr, int nameLen, int retptr, ICabiRealloc realloc)
+        {
+            if (realloc == null) throw new ArgumentNullException(nameof(realloc));
+            var dispatcher = RequireDispatcher();
+            var memory = dispatcher.Memory
+                ?? throw new InvalidOperationException(
+                    "wasi:sockets/ip-name-lookup.resolve-addresses: " +
+                    "dispatcher.Memory must be set before this " +
+                    "import is invoked.");
+            if (retptr < 0 || (retptr & 0x3) != 0
+                || retptr + 8 > memory.Data.Length)
+                throw new InvalidOperationException(
+                    "wasi:sockets/ip-name-lookup.resolve-addresses: " +
+                    $"retptr 0x{retptr:X8} misaligned or out of range " +
+                    $"(memory size = {memory.Data.Length}). " +
+                    "Caller must allocate an 8-byte 4-aligned " +
+                    "return area.");
+
+            // Read the hostname string.
+            string name;
+            if (nameLen == 0)
+                name = string.Empty;
+            else
+                name = System.Text.Encoding.UTF8.GetString(
+                    memory.AsSpan(namePtr, nameLen));
+
+            // Resolve (sync-blocking).
+            var addresses = IpNameLookup
+                .ResolveAddressesAsync(name)
+                .GetAwaiter().GetResult();
+
+            // Empty list: (0, 0) at retptr.
+            int count = addresses.Count;
+            if (count == 0)
+            {
+                var emptyDest = memory.AsSpan(retptr, 8);
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(emptyDest.Slice(0), 0);
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(emptyDest.Slice(4), 0);
+                return;
+            }
+
+            // ip-address wire entry: 18 bytes, 2-aligned.
+            //   +0: disc (u8: 0=ipv4, 1=ipv6)
+            //   +1: align pad
+            //   +2..18: payload (max(ipv4 = 4, ipv6 = 16) = 16 bytes)
+            const int entrySize = 18;
+            int listPtr = realloc.Allocate(
+                align: 2, size: count * entrySize);
+            var listSpan = memory.AsSpan(listPtr, count * entrySize);
+            for (int i = 0; i < count; i++)
+            {
+                int off = i * entrySize;
+                var addr = addresses[i];
+                // Zero the entire entry first to keep the pad
+                // bytes deterministic.
+                for (int j = 0; j < entrySize; j++)
+                    listSpan[off + j] = 0;
+
+                if (addr.Family == IpAddressFamily.Ipv4)
+                {
+                    listSpan[off + 0] = 0; // disc
+                    // payload at +2: 4 bytes.
+                    listSpan[off + 2] = addr.V4.A;
+                    listSpan[off + 3] = addr.V4.B;
+                    listSpan[off + 4] = addr.V4.C;
+                    listSpan[off + 5] = addr.V4.D;
+                }
+                else
+                {
+                    listSpan[off + 0] = 1; // disc = ipv6
+                    // payload at +2: 8 u16s, 16 bytes, network
+                    // byte order (BE) to match the WIT tuple
+                    // semantics.
+                    ushort[] groups = new ushort[]
+                    {
+                        addr.V6.G0, addr.V6.G1, addr.V6.G2, addr.V6.G3,
+                        addr.V6.G4, addr.V6.G5, addr.V6.G6, addr.V6.G7,
+                    };
+                    for (int slot = 0; slot < 8; slot++)
+                    {
+                        listSpan[off + 2 + slot * 2 + 0] =
+                            (byte)((groups[slot] >> 8) & 0xFF);
+                        listSpan[off + 2 + slot * 2 + 1] =
+                            (byte)(groups[slot] & 0xFF);
+                    }
+                }
+            }
+
+            // Outer (list-ptr, list-count) at retptr.
+            var outerDest = memory.AsSpan(retptr, 8);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(outerDest.Slice(0), listPtr);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(outerDest.Slice(4), count);
         }
 
         // ---- wasi:filesystem binding bodies (Slice I) ---------------
@@ -1117,6 +1265,17 @@ namespace Wacs.WASI.Preview3
         /// (get-directories).</summary>
         public const string FilesystemPreopensModuleName =
             "wasi:filesystem/preopens@0.3.0-rc-2026-03-15";
+
+        /// <summary>Wire-level WASI module name for the
+        /// <c>wasi:sockets/types</c> interface (tcp-socket +
+        /// udp-socket resources + shared types).</summary>
+        public const string SocketsTypesModuleName =
+            "wasi:sockets/types@0.3.0-rc-2026-03-15";
+
+        /// <summary>Wire-level WASI module name for the
+        /// <c>wasi:sockets/ip-name-lookup</c> interface.</summary>
+        public const string IpNameLookupModuleName =
+            "wasi:sockets/ip-name-lookup@0.3.0-rc-2026-03-15";
     }
 
     /// <summary>Fluent builder for <see cref="WasiPreview3Host"/>.</summary>
