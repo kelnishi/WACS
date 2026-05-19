@@ -7,6 +7,7 @@
 
 using System;
 using System.IO;
+using Wacs.ComponentModel.Async;
 using Wacs.Core.Runtime;
 using Wacs.WASI.Preview3.Cli;
 
@@ -66,27 +67,117 @@ namespace Wacs.WASI.Preview3
                 ?? new StreamBackedSink(Console.OpenStandardError());
 
         /// <summary>
-        /// Registers the host-side delegates the wit-component
-        /// shim module will route canon-async calls to.
+        /// The component-instance dispatcher the host bindings
+        /// route stream/future handles through. Late-bound — set
+        /// by the embedder after <c>ComponentInstance.Instantiate</c>
+        /// has allocated the dispatcher (it's available on
+        /// <c>ComponentInstance.AsyncDispatcher</c>). The host
+        /// function delegates registered by <see cref="BindToRuntime"/>
+        /// resolve this lazily so a null setting at bind time
+        /// doesn't break registration.
+        /// </summary>
+        public AsyncDispatcher? Dispatcher { get; set; }
+
+        /// <summary>
+        /// Registers the WASI Preview 3 host-import surface on
+        /// <paramref name="runtime"/>:
         ///
-        /// <para>v0: no-op — the binding mechanism (delegate
-        /// registration under <c>("", "&lt;funcIdx&gt;")</c> imports
-        /// produced by wit-component's shim emit) lands in
-        /// Slice J once a real fixture is available. The
-        /// <see cref="WasiPreview3Host"/> public surface is
-        /// stable; the wire connection is the deferred piece.</para>
+        /// <list type="bullet">
+        ///   <item><c>wasi:cli/stdout@0.3.0-rc-2026-03-15
+        ///     .write-via-stream(data: stream&lt;u8&gt;) -&gt;
+        ///     future&lt;result&lt;_, error-code&gt;&gt;</c> —
+        ///     drains the supplied stream handle into
+        ///     <see cref="Stdout"/>, returns a future handle the
+        ///     guest awaits.</item>
+        ///   <item><c>wasi:cli/stderr.write-via-stream</c> —
+        ///     same shape, routes to <see cref="Stderr"/>.</item>
+        /// </list>
+        ///
+        /// <para>The delegate bodies resolve
+        /// <see cref="Dispatcher"/> at call time, so the
+        /// embedder can set it AFTER instantiating the
+        /// component (where the dispatcher is created). At call
+        /// time the dispatcher must be set or the delegate
+        /// throws a clear "Dispatcher not set" diagnostic.</para>
+        ///
+        /// <para><b>Wire convention:</b> uses
+        /// <c>(wasi:cli/stdout@0.3.0-rc-2026-03-15,
+        /// write-via-stream)</c> as the import name — wit-
+        /// component's lowering of the component's import of
+        /// this interface method. The exact spelling awaits
+        /// fixture-level verification (same caveat as the
+        /// canon-async binder's placeholder convention); if
+        /// it differs in real output, the binding-name resolver
+        /// hook is the override point. The Slice J commitment
+        /// is the binding shape + delegate body, not the wire-
+        /// name lockdown.</para>
+        ///
+        /// <para><c>read-via-stream</c> (stdin) returns a
+        /// two-value tuple (stream + future); the multi-return
+        /// host-function path needs an extra binder shape and
+        /// remains deferred to a follow-up.</para>
         /// </summary>
         public void BindToRuntime(WasmRuntime runtime)
         {
             if (runtime == null) throw new ArgumentNullException(nameof(runtime));
-            // Slice J: register host delegates under the
-            // canon-async-shim-resolved import names. The
-            // ShimModuleRecognizer + CanonAsyncBinder pipeline
-            // does the actual routing; this layer just plugs
-            // the IStdio impls into the delegate bodies.
-            //
-            // No-op today — see class doc comment.
+
+            runtime.BindHostFunction(
+                (StdoutModuleName, "write-via-stream"),
+                (Func<ExecContext, int, int>)((_, streamHandle) =>
+                    InvokeWriteViaStream(Stdout, streamHandle)));
+
+            runtime.BindHostFunction(
+                (StderrModuleName, "write-via-stream"),
+                (Func<ExecContext, int, int>)((_, streamHandle) =>
+                    InvokeWriteViaStream(Stderr, streamHandle)));
         }
+
+        /// <summary>
+        /// Invoke <c>wasi:cli/stdout.write-via-stream</c>'s
+        /// host-side delegate logic directly — same body the
+        /// canon-async-shim-routed import calls. Public so tests
+        /// can exercise the binding without going through a full
+        /// wasm invoke; embedders typically reach this through
+        /// the runtime-bound host function instead.
+        /// </summary>
+        public int InvokeWriteViaStream(IStdout sink, int streamHandle)
+        {
+            if (sink == null) throw new ArgumentNullException(nameof(sink));
+            var dispatcher = RequireDispatcher();
+            var (futureHandle, _) = sink.WriteViaStream(dispatcher, streamHandle);
+            return futureHandle;
+        }
+
+        /// <summary>Same as <see cref="InvokeWriteViaStream(IStdout, int)"/>
+        /// but for stderr.</summary>
+        public int InvokeWriteViaStream(IStderr sink, int streamHandle)
+        {
+            if (sink == null) throw new ArgumentNullException(nameof(sink));
+            var dispatcher = RequireDispatcher();
+            var (futureHandle, _) = sink.WriteViaStream(dispatcher, streamHandle);
+            return futureHandle;
+        }
+
+        private AsyncDispatcher RequireDispatcher()
+        {
+            return Dispatcher
+                ?? throw new InvalidOperationException(
+                    "WasiPreview3Host.Dispatcher must be set before " +
+                    "the host's stdio imports are invoked. Set it from " +
+                    "ComponentInstance.AsyncDispatcher after instantiation.");
+        }
+
+        /// <summary>Wire-level WASI module name for stdout.</summary>
+        public const string StdoutModuleName =
+            "wasi:cli/stdout@0.3.0-rc-2026-03-15";
+
+        /// <summary>Wire-level WASI module name for stderr.</summary>
+        public const string StderrModuleName =
+            "wasi:cli/stderr@0.3.0-rc-2026-03-15";
+
+        /// <summary>Wire-level WASI module name for stdin.</summary>
+        public const string StdinModuleName =
+            "wasi:cli/stdin@0.3.0-rc-2026-03-15";
     }
 
     /// <summary>Fluent builder for <see cref="WasiPreview3Host"/>.</summary>

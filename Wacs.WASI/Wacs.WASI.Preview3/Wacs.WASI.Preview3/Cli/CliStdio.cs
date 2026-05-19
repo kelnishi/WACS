@@ -133,34 +133,39 @@ namespace Wacs.WASI.Preview3.Cli
             if (dispatcher == null) throw new ArgumentNullException(nameof(dispatcher));
             var futureHandle = dispatcher.FutureNew(typeIdx: 0);
 
+            // Capture the buffer reference at bind time so the
+            // drain loop doesn't have to re-resolve through the
+            // dispatcher's handle table per iteration. The
+            // buffer ALSO outlives the StreamSlot's release —
+            // ChannelReader.WaitToReadAsync surfaces channel
+            // completion as the read-loop exit signal, so we
+            // drain through end-of-stream cleanly.
+            var buffer = dispatcher.GetByteStreamBuffer(streamHandle);
+            if (buffer == null)
+            {
+                dispatcher.FutureWrite(futureHandle,
+                    new InvalidOperationException(
+                        $"stream handle {streamHandle} not allocated"));
+                return (futureHandle, Task.CompletedTask);
+            }
+
             var completion = Task.Run(async () =>
             {
                 try
                 {
                     var staging = new byte[4096];
-                    while (true)
+                    while (await buffer.Reader
+                        .WaitToReadAsync().ConfigureAwait(false))
                     {
                         int n = 0;
                         while (n < staging.Length
-                               && dispatcher.StreamTryRead(streamHandle, out var b))
+                               && buffer.Reader.TryRead(out var b))
                         {
                             staging[n++] = b;
                         }
-                        if (n == 0)
-                        {
-                            // No data; wait briefly. A proper
-                            // implementation would await a
-                            // ChannelReader-level signal, but
-                            // the dispatcher's StreamBuffer
-                            // currently surfaces only TryRead.
-                            // Pending Slice-J refinement.
-                            await Task.Delay(1).ConfigureAwait(false);
-                            // Probe for stream completion: if
-                            // both halves dropped, break.
-                            if (dispatcher.Streams.Get(streamHandle) == null) break;
-                            continue;
-                        }
-                        await _sink.WriteAsync(staging, 0, n).ConfigureAwait(false);
+                        if (n == 0) continue;
+                        await _sink.WriteAsync(staging, 0, n)
+                            .ConfigureAwait(false);
                     }
                     await _sink.FlushAsync().ConfigureAwait(false);
                     dispatcher.FutureWrite(futureHandle, /* ok */ null);

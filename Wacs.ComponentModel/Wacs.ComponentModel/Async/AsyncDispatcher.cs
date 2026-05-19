@@ -306,6 +306,20 @@ namespace Wacs.ComponentModel.Async
             return slot.Buffer.TryRead(out value);
         }
 
+        /// <summary>
+        /// Expose the underlying <see cref="StreamBuffer{T}"/>
+        /// for a byte stream handle, or null when the handle is
+        /// absent / wrong-typed. Host bridges (e.g. the
+        /// <c>StreamBackedSink</c> in WACS.WASI.Preview3) use this
+        /// to subscribe to the buffer's
+        /// <see cref="System.Threading.Channels.ChannelReader{T}.WaitToReadAsync"/>
+        /// signal instead of polling.
+        /// </summary>
+        public StreamBuffer<byte>? GetByteStreamBuffer(int streamHandle)
+        {
+            return (Streams.Get(streamHandle) as StreamSlot)?.Buffer;
+        }
+
         /// <summary><c>canon stream.write t opts</c> with memory
         /// access — read <paramref name="length"/> bytes from
         /// <paramref name="memory"/> starting at

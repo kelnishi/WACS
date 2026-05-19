@@ -1,5 +1,87 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.1 / WACS.ComponentModel 0.8.18 — wire-level stdout/stderr binding (Phase 4 Slice J)
+
+`WasiPreview3Host.BindToRuntime` now registers concrete host
+functions for `wasi:cli/stdout.write-via-stream` and
+`wasi:cli/stderr.write-via-stream` instead of being a no-op.
+The delegates drain the supplied stream handle into the
+configured sink and return a future handle the guest awaits.
+
+### New on `WasiPreview3Host`
+
+- `AsyncDispatcher? Dispatcher { get; set; }` — late-bound by
+  the embedder after `ComponentInstance.Instantiate` allocates
+  the dispatcher (available on
+  `ComponentInstance.AsyncDispatcher`). Delegates resolve
+  lazily at call time; null-at-bind-time is fine.
+- `InvokeWriteViaStream(IStdout sink, int streamHandle)` and
+  `InvokeWriteViaStream(IStderr sink, int streamHandle)` —
+  public helpers exposing the same delegate-body logic
+  `BindToRuntime` registers. Lets embedders + tests exercise
+  the binding without going through a full wasm invoke.
+- `StdoutModuleName` / `StderrModuleName` / `StdinModuleName`
+  constants — the WASI v3 module names the host binds under
+  (`wasi:cli/{stream}@0.3.0-rc-2026-03-15`).
+
+### Registered host imports
+
+```
+(wasi:cli/stdout@0.3.0-rc-2026-03-15, write-via-stream)
+(wasi:cli/stderr@0.3.0-rc-2026-03-15, write-via-stream)
+```
+
+Each binding takes `(stream-handle: i32) -> i32 (future-handle)`.
+The delegate body:
+
+1. Resolves `Dispatcher` (throws "set after instantiation"
+   if null).
+2. Calls `Stdout.WriteViaStream(dispatcher, streamHandle)` /
+   `Stderr.WriteViaStream(...)` — the `IStdout`/`IStderr`
+   impl allocates a future, kicks off background drain into
+   the underlying `Stream` sink.
+3. Returns the future handle.
+
+`wasi:cli/stdin.read-via-stream` (returns
+`tuple<stream<u8>, future<...>>`) needs the multi-return
+host-function binder shape and is the natural follow-up.
+
+### `AsyncDispatcher.GetByteStreamBuffer`
+
+New public method exposing the underlying `StreamBuffer<byte>`
+for a stream handle. Host bridges (e.g. `StreamBackedSink`)
+subscribe to `ChannelReader.WaitToReadAsync` instead of
+polling via `TryRead + Task.Delay`. Replaces the previous
+fragile poll-loop in `StreamBackedSink` — deterministic under
+parallel xunit execution.
+
+### Wire-convention caveat
+
+The `wasi:cli/{stdout,stderr}@0.3.0-rc-2026-03-15`
+module-name spelling is the wit-component-style import
+convention. Real fixture verification awaits wit-component
+RC stabilization. If the spelling differs in actual output,
+the override point is `WasiPreview3HostBuilder` — additional
+naming-resolver hook can land at that time without
+restructuring the binder.
+
+### Tests
+
+5 new in `WasiPreview3HostTests`:
+
+- `BindToRuntime_registers_stdout_and_stderr_host_functions`
+  — round-trip via `runtime.TryGetExportedFunction`.
+- `Dispatcher_property_round_trips`.
+- `InvokeWriteViaStream_throws_when_Dispatcher_unset`.
+- `InvokeWriteViaStream_returns_future_handle_drains_to_sink`
+  — end-to-end stream → sink drain (deterministic, no
+  Task.Delay polling).
+- `InvokeWriteViaStream_stderr_overload_routes_to_stderr_sink`.
+- `InvokeWriteViaStream_rejects_null_sink`.
+
+16/16 Preview3 tests + 552/552 ComponentModel + 833/833
+Transpiler tests pass.
+
 ## WACS.WASI.Preview3 0.1.0 / .DependencyInjection 0.1.0 / .Test 0.1.0 — vertical-slice skeleton (Phase 4 v0)
 
 First Phase 4 commit: stand up the
