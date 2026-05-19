@@ -91,6 +91,11 @@ namespace Wacs.WASI.Preview3
         public HostResourceTable<IResponse> ResponseHandles { get; } =
             new HostResourceTable<IResponse>();
 
+        /// <summary>Host-side handle table for
+        /// <c>wasi:http/types.request</c> resources.</summary>
+        public HostResourceTable<IRequest> RequestHandles { get; } =
+            new HostResourceTable<IRequest>();
+
         public WasiPreview3Host() : this(new WasiPreview3HostBuilder()) { }
 
         public WasiPreview3Host(WasiPreview3HostBuilder builder)
@@ -440,6 +445,79 @@ namespace Wacs.WASI.Preview3
                 (Action<ExecContext, int, int>)((_, self, code) =>
                     RequireResponse(self).SetStatusCode(
                         unchecked((ushort)code))));
+
+            // wasi:http/client.send and wasi:http/handler.handle.
+            // Both are async func in the WIT and lower as a
+            // canon-async call. Phase 5 binds them sync-blocking
+            // (.GetAwaiter().GetResult() on the Task<IResponse>);
+            // when the canon-async-func wire shape stabilizes
+            // (see Phase 3 Slice L), the binding moves to the
+            // cooperative-yield path via the lift adapter.
+            //
+            // Wire convention: takes a request handle, returns
+            // a response handle. The err path throws
+            // HttpException; the canon-async binding lowers to
+            // result<response, error-code>::err.
+            runtime.BindHostFunction(
+                (HttpClientModuleName, "send"),
+                (Func<ExecContext, int, int>)((_, requestHandle) =>
+                    InvokeClientSend(requestHandle)));
+
+            runtime.BindHostFunction(
+                (HttpHandlerModuleName, "handle"),
+                (Func<ExecContext, int, int>)((_, requestHandle) =>
+                    InvokeHandlerHandle(requestHandle)));
+        }
+
+        // ---- wasi:http/client + handler binding bodies ---------------
+
+        /// <summary>Invoke <c>wasi:http/client.send</c>'s body.
+        /// Resolves the request handle, calls
+        /// <see cref="IClient.SendAsync(IRequest, System.Threading.CancellationToken)"/>
+        /// sync-blocking, allocates a response handle bound to
+        /// the lifted response. The async-func cooperative-yield
+        /// shape will replace the sync block once the canon-async-
+        /// func wire convention stabilizes.</summary>
+        public int InvokeClientSend(int requestHandle)
+        {
+            var request = RequireRequest(requestHandle);
+            var response = HttpClient.SendAsync(request)
+                .GetAwaiter().GetResult();
+            return ResponseHandles.Allocate(response);
+        }
+
+        /// <summary>Invoke <c>wasi:http/handler.handle</c>'s body.
+        /// Routes the request to the configured
+        /// <see cref="IHandler"/>; throws
+        /// <see cref="HttpException"/> with
+        /// <see cref="HttpErrorCode.ConfigurationError"/> when
+        /// no handler is configured — guests importing
+        /// <c>wasi:http/handler</c> need an embedder-provided
+        /// inbound handler.</summary>
+        public int InvokeHandlerHandle(int requestHandle)
+        {
+            var handler = HttpHandler;
+            if (handler == null)
+                throw new HttpException(
+                    HttpErrorCode.ConfigurationError,
+                    "wasi:http/handler.handle: no IHandler " +
+                    "configured. Set " +
+                    "WasiPreview3HostBuilder.HttpHandler.");
+            var request = RequireRequest(requestHandle);
+            var response = handler.HandleAsync(request)
+                .GetAwaiter().GetResult();
+            return ResponseHandles.Allocate(response);
+        }
+
+        private IRequest RequireRequest(int handle)
+        {
+            var req = RequestHandles.Get(handle);
+            if (req == null)
+                throw new HttpException(
+                    HttpErrorCode.InternalError,
+                    $"wasi:http/types.request: handle {handle} " +
+                    "is not allocated.");
+            return req;
         }
 
         // Helper that registers the get/set pair for an
@@ -872,6 +950,17 @@ namespace Wacs.WASI.Preview3
         /// shared types).</summary>
         public const string HttpTypesModuleName =
             "wasi:http/types@0.3.0-rc-2026-03-15";
+
+        /// <summary>Wire-level WASI module name for
+        /// <c>wasi:http/client</c> (outbound HTTP).</summary>
+        public const string HttpClientModuleName =
+            "wasi:http/client@0.3.0-rc-2026-03-15";
+
+        /// <summary>Wire-level WASI module name for
+        /// <c>wasi:http/handler</c> (inbound HTTP — guest
+        /// provides this when serving).</summary>
+        public const string HttpHandlerModuleName =
+            "wasi:http/handler@0.3.0-rc-2026-03-15";
     }
 
     /// <summary>Fluent builder for <see cref="WasiPreview3Host"/>.</summary>

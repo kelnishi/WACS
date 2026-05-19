@@ -1,5 +1,67 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.10 — `wasi:http/client.send` + `handler.handle` wire-up (Phase 5 Slice H)
+
+Wires the outbound + inbound HTTP entry points through to
+the WasmRuntime. Both bind sync-blocking
+(`.GetAwaiter().GetResult()` on the `Task<IResponse>`) until
+the canon-async-func wire convention settles.
+
+### `RequestHandles` host-resource table
+
+New `HostResourceTable<IRequest>` on the host. Wire-bound
+host functions resolve request handles through this table.
+
+### `wasi:http/client.send`
+
+```
+(wasi:http/client@0.3.0-rc-2026-03-15, send)
+```
+
+Lowered as `(request-handle: i32) -> response-handle: i32`.
+Body resolves the request, calls
+`IClient.SendAsync(request)`, awaits, allocates a fresh
+response handle bound to the lifted response. Err paths
+(impl throws `HttpException`) propagate; the canon-async
+binding lowers to `result<response, error-code>::err`.
+
+### `wasi:http/handler.handle`
+
+```
+(wasi:http/handler@0.3.0-rc-2026-03-15, handle)
+```
+
+Same shape as `client.send` but routes to the configured
+`IHandler`. Throws `HttpException(ConfigurationError)` when
+no handler is configured — guests importing
+`wasi:http/handler` for inbound serving need an embedder-
+provided handler. Error message points to the builder
+property.
+
+### New wire-level module-name constants
+
+`HttpClientModuleName` and `HttpHandlerModuleName` on
+`WasiPreview3Host`.
+
+### Test coverage
+
+7 new tests in `HttpClientHandlerBindingTests.cs`:
+- `BindToRuntime` registers both host functions.
+- `InvokeClientSend` routes to the configured `IClient`,
+  returns a fresh response handle with the lifted status.
+- `InvokeClientSend` propagates `HttpException` from the
+  client.
+- `InvokeClientSend` invalid request handle throws
+  `HttpException(InternalError)`.
+- `InvokeHandlerHandle` routes to the configured
+  `IHandler`.
+- `InvokeHandlerHandle` throws
+  `HttpException(ConfigurationError)` when unset.
+- `InvokeHandlerHandle` propagates `HttpException` from the
+  handler.
+
+145/145 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.9 — `request-options` full wire-up + `response` status methods (Phase 5 Slice G)
 
 Builds on Slice F's host-resource binding pattern. Wires all
