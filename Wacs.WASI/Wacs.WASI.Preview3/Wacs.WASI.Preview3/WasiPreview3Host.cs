@@ -810,6 +810,36 @@ namespace Wacs.WASI.Preview3
                                 disc, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11),
                             retptr, realloc)));
 
+            // ---- get-local-address / get-remote-address ----------
+            //
+            // result<ip-socket-address, error-code>: 36-byte
+            // 4-aligned retptr. Per-side variants share the
+            // wire encoder; the per-getter only differs in
+            // which impl method it calls.
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]tcp-socket.get-local-address"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeTcpSocketGetLocalAddress(self, retptr, realloc)));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]tcp-socket.get-remote-address"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeTcpSocketGetRemoteAddress(self, retptr, realloc)));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]udp-socket.get-local-address"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeUdpSocketGetLocalAddress(self, retptr, realloc)));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]udp-socket.get-remote-address"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeUdpSocketGetRemoteAddress(self, retptr, realloc)));
+
             // ---- wasi:sockets/types.udp-socket simple methods ----
             runtime.BindHostFunction(
                 (SocketsTypesModuleName, "[static]udp-socket.create"),
@@ -1327,6 +1357,147 @@ namespace Wacs.WASI.Preview3
             WriteSocketsErrorCodeResult(
                 memory.AsSpan(retptr, ResultSocketsErrorCodeSize),
                 caught, realloc, memory);
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]tcp-socket.get-local-address()</c>.</summary>
+        public void InvokeTcpSocketGetLocalAddress(
+            int self, int retptr, ICabiRealloc realloc)
+            => InvokeSocketGetAddress(self, retptr, realloc,
+                handle => RequireTcpSocket(handle).GetLocalAddress());
+
+        /// <summary>Invoke
+        /// <c>[method]tcp-socket.get-remote-address()</c>.</summary>
+        public void InvokeTcpSocketGetRemoteAddress(
+            int self, int retptr, ICabiRealloc realloc)
+            => InvokeSocketGetAddress(self, retptr, realloc,
+                handle => RequireTcpSocket(handle).GetRemoteAddress());
+
+        /// <summary>Invoke
+        /// <c>[method]udp-socket.get-local-address()</c>.</summary>
+        public void InvokeUdpSocketGetLocalAddress(
+            int self, int retptr, ICabiRealloc realloc)
+            => InvokeSocketGetAddress(self, retptr, realloc,
+                handle => RequireUdpSocket(handle).GetLocalAddress());
+
+        /// <summary>Invoke
+        /// <c>[method]udp-socket.get-remote-address()</c>.</summary>
+        public void InvokeUdpSocketGetRemoteAddress(
+            int self, int retptr, ICabiRealloc realloc)
+            => InvokeSocketGetAddress(self, retptr, realloc,
+                handle => RequireUdpSocket(handle).GetRemoteAddress());
+
+        // Shared dispatch for the four get-{local,remote}-address
+        // host functions. The only per-method variation is the
+        // impl call; the wire encoding is identical.
+        private void InvokeSocketGetAddress(
+            int self, int retptr, ICabiRealloc realloc,
+            Func<int, IpSocketAddress> getter)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateResultIpSocketAddressRetptr(retptr, memory);
+            SocketsException? caught = null;
+            IpSocketAddress addr = default;
+            try { addr = getter(self); }
+            catch (SocketsException ex) { caught = ex; }
+            WriteResultIpSocketAddress(
+                memory.AsSpan(retptr, ResultIpSocketAddressSize),
+                caught, addr, realloc, memory);
+        }
+
+        // ---- canon-ABI result<ip-socket-address, error-code> ---
+        //
+        // 36-byte 4-aligned retptr layout:
+        //
+        //   +0:   result-disc (u8) + 3-byte pad
+        //   +4..36: payload section (32 bytes — sized to the
+        //           ip-socket-address variant case, which
+        //           dominates error-code's 16-byte variant)
+        //
+        // On ok the inner ip-socket-address variant lays out:
+        //   +4:   ip-sock-addr disc (u8) + 3-byte pad
+        //   +8..36: payload (28 bytes — ipv6 case; ipv4 uses
+        //           only the first 6 bytes per its variant
+        //           disc, with the trailing 22 bytes unused).
+        //
+        // ipv4-socket-address inner layout (6 bytes, align 2):
+        //   +8..10: port (u16)
+        //   +10..14: 4 address octets (u8 each)
+        //
+        // ipv6-socket-address inner layout (28 bytes, align 4):
+        //   +8..10:  port (u16)
+        //   +10..12: pad (to align-4 for flow-info)
+        //   +12..16: flow-info (u32)
+        //   +16..32: address (8×u16, big-endian groups)
+        //   +32..36: scope-id (u32)
+
+        private const int ResultIpSocketAddressSize = 36;
+
+        private static void ValidateResultIpSocketAddressRetptr(
+            int retptr, Wacs.Core.Runtime.Types.MemoryInstance memory)
+        {
+            if (retptr < 0 || (retptr & 0x3) != 0
+                || retptr + ResultIpSocketAddressSize > memory.Data.Length)
+                throw new InvalidOperationException(
+                    "wasi:sockets/types: result<ip-socket-address, " +
+                    $"error-code> retptr 0x{retptr:X8} misaligned or " +
+                    $"out of range (memory size = {memory.Data.Length}). " +
+                    "Caller must allocate a 36-byte 4-aligned " +
+                    "return area.");
+        }
+
+        private static void WriteResultIpSocketAddress(
+            Span<byte> dest, SocketsException? ex, IpSocketAddress addr,
+            ICabiRealloc realloc,
+            Wacs.Core.Runtime.Types.MemoryInstance memory)
+        {
+            dest.Clear();
+            if (ex != null)
+            {
+                dest[0] = 1; // result-disc = err
+                WriteSocketsErrorCodeBytes(
+                    dest.Slice(4, 16), ex, realloc, memory);
+                return;
+            }
+            dest[0] = 0; // result-disc = ok
+            // ip-sock-addr variant disc at +4.
+            dest[4] = (byte)(addr.Family == IpAddressFamily.Ipv4 ? 0 : 1);
+            if (addr.Family == IpAddressFamily.Ipv4)
+            {
+                // +8..10: port (u16 LE), +10..14: 4 octets.
+                dest[8] = (byte)(addr.V4.Port & 0xFF);
+                dest[9] = (byte)((addr.V4.Port >> 8) & 0xFF);
+                dest[10] = addr.V4.Address.A;
+                dest[11] = addr.V4.Address.B;
+                dest[12] = addr.V4.Address.C;
+                dest[13] = addr.V4.Address.D;
+            }
+            else
+            {
+                // +8..10: port, +12..16: flow-info,
+                // +16..32: 8×u16 BE address, +32..36: scope-id.
+                dest[8] = (byte)(addr.V6.Port & 0xFF);
+                dest[9] = (byte)((addr.V6.Port >> 8) & 0xFF);
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteUInt32LittleEndian(
+                        dest.Slice(12, 4), addr.V6.FlowInfo);
+                var v6 = addr.V6.Address;
+                ushort[] groups = new ushort[]
+                {
+                    v6.G0, v6.G1, v6.G2, v6.G3,
+                    v6.G4, v6.G5, v6.G6, v6.G7,
+                };
+                for (int slot = 0; slot < 8; slot++)
+                {
+                    dest[16 + slot * 2 + 0] =
+                        (byte)((groups[slot] >> 8) & 0xFF);
+                    dest[16 + slot * 2 + 1] =
+                        (byte)(groups[slot] & 0xFF);
+                }
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteUInt32LittleEndian(
+                        dest.Slice(32, 4), addr.V6.ScopeId);
+            }
         }
 
         private ITcpSocket RequireTcpSocket(int handle)

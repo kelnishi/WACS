@@ -1,5 +1,73 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.23 — get-local/remote-address variant-return wire-up (Phase 5 Slice U)
+
+Mirror of Slice T's variant-arg work in the return direction:
+`result<ip-socket-address, error-code>` written through a
+36-byte 4-aligned retptr. With Slice T (variant-in for
+bind/connect) and Slice U (variant-out for get-address),
+sockets are fully usable from a guest end-to-end.
+
+### `WriteResultIpSocketAddress`
+
+Encoder mirroring the `ReadIpSocketAddressFromSlots` decoder.
+36-byte layout:
+
+```
++0:    result-disc (u8) + 3-byte pad
++4:    ip-sock-addr disc (u8) + 3-byte pad  (on ok)
++8..36: payload (28 bytes for ipv6; ipv4 uses 6, leaves 22 unused)
+
+  ipv4 (6 bytes at +8..14):
+    +8..10:  port (u16)
+    +10..14: 4 address octets
+
+  ipv6 (28 bytes at +8..36):
+    +8..10:  port
+    +12..16: flow-info (u32, padded to align-4)
+    +16..32: 8×u16 BE address groups
+    +32..36: scope-id (u32)
+```
+
+Err path reuses `WriteSocketsErrorCodeBytes` from Slice O at
+the +4..20 slot.
+
+### Four host functions wired
+
+```
+[method]tcp-socket.get-local-address
+[method]tcp-socket.get-remote-address
+[method]udp-socket.get-local-address
+[method]udp-socket.get-remote-address
+```
+
+All share `InvokeSocketGetAddress` — the per-method variation
+is the impl-getter lambda. Same dispatch pattern as the
+buffer-size getters from Slice O.
+
+### Test coverage
+
+9 new tests in `AddressReturnTests.cs`:
+- `BindToRuntime` registers all four host functions.
+- TCP `get-local-address` after bind returns the bound ipv4
+  address; round-trip through the test's decoder confirms
+  port + octets.
+- TCP `get-local-address` on unbound writes InvalidState.
+- TCP `get-remote-address` on bound-but-not-connected writes
+  InvalidState.
+- TCP `get-local-address` on ipv6 writes the BE u16 groups
+  with ::1 layout.
+- UDP `get-local-address` after bind round-trips.
+- UDP `get-remote-address` on unconnected writes InvalidState.
+- **Encode-decode symmetry**: encode through
+  `WriteResultIpSocketAddress`, decode through
+  `ReadIpSocketAddressFromSlots` — same address comes back.
+  Proves Slice T's decoder and Slice U's encoder are inverse
+  operations on the wire.
+- Misaligned retptr throws.
+
+251/251 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.22 — bind/connect variant-arg flat-lowering (Phase 5 Slice T)
 
 Closes the last big gap on the sockets side: the
