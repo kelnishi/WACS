@@ -492,6 +492,40 @@ namespace Wacs.WASI.Preview3
                     return RequestOptionsHandles.Allocate(opt.Clone());
                 }));
 
+            // ---- request method + scheme (Slice CC) ----------------
+            //
+            // method variant: 9 simple cases + other(string).
+            // scheme variant: HTTP, HTTPS, other(string).
+            // Both flat-lower to 3 slots (disc + str-ptr + str-len)
+            // and retptr-encode to 12 bytes 4-aligned. Wrapping
+            // scheme in option<...> adds 1 outer slot / 4 outer
+            // bytes for the option-disc.
+
+            runtime.BindHostFunction(
+                (HttpTypesModuleName, "[method]request.get-method"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeRequestGetMethod(self, retptr, realloc)));
+
+            runtime.BindHostFunction(
+                (HttpTypesModuleName, "[method]request.set-method"),
+                (Func<ExecContext, int, int, int, int, int>)(
+                    (_, self, disc, strPtr, strLen) =>
+                        InvokeRequestSetMethod(
+                            self, disc, strPtr, strLen)));
+
+            runtime.BindHostFunction(
+                (HttpTypesModuleName, "[method]request.get-scheme"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeRequestGetScheme(self, retptr, realloc)));
+
+            runtime.BindHostFunction(
+                (HttpTypesModuleName, "[method]request.set-scheme"),
+                (Func<ExecContext, int, int, int, int, int, int>)(
+                    (_, self, optDisc, schemeDisc, strPtr, strLen) =>
+                        InvokeRequestSetScheme(
+                            self, optDisc, schemeDisc,
+                            strPtr, strLen)));
+
             // ---- request option<string> getters/setters (Slice BB) ----
             //
             // path-with-query, authority: option<string> shape.
@@ -3192,6 +3226,176 @@ namespace Wacs.WASI.Preview3
                     $"wasi:http/types.request: handle {handle} " +
                     "is not allocated.");
             return req;
+        }
+
+        // ---- request method + scheme (Slice CC) ---------------------
+
+        // Tag mapping per the WIT variant order:
+        //   method: get=0, head=1, post=2, put=3, delete=4,
+        //           connect=5, options=6, trace=7, patch=8,
+        //           other(string)=9
+        //   scheme: HTTP=0, HTTPS=1, other(string)=2
+
+        internal void InvokeRequestGetMethod(
+            int self, int retptr, ICabiRealloc realloc)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateMethodOrSchemeRetptr(retptr, memory,
+                "wasi:http/types.request.get-method", 12);
+
+            var method = RequireRequest(self).GetMethod();
+            var dest = memory.AsSpan(retptr, 12);
+            dest.Clear();
+            WriteMethodVariantBytes(dest, method, realloc, memory);
+        }
+
+        internal int InvokeRequestSetMethod(
+            int self, int disc, int strPtr, int strLen)
+        {
+            HttpMethod m = ReadMethodFromSlots(disc, strPtr, strLen);
+            RequireRequest(self).SetMethod(m);
+            return 0; // result = ok
+        }
+
+        public HttpMethod ReadMethodFromSlots(
+            int disc, int strPtr, int strLen)
+        {
+            switch (disc)
+            {
+                case 0: return HttpMethod.Get;
+                case 1: return HttpMethod.Head;
+                case 2: return HttpMethod.Post;
+                case 3: return HttpMethod.Put;
+                case 4: return HttpMethod.Delete;
+                case 5: return HttpMethod.Connect;
+                case 6: return HttpMethod.Options_;
+                case 7: return HttpMethod.Trace;
+                case 8: return HttpMethod.Patch;
+                case 9: return HttpMethod.Other(
+                    ReadGuestUtf8(strPtr, strLen));
+                default:
+                    throw new HttpException(
+                        HttpErrorCode.HttpRequestMethodInvalid,
+                        $"method: invalid discriminant {disc} " +
+                        "(expected 0..9).");
+            }
+        }
+
+        internal void InvokeRequestGetScheme(
+            int self, int retptr, ICabiRealloc realloc)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateMethodOrSchemeRetptr(retptr, memory,
+                "wasi:http/types.request.get-scheme", 16);
+
+            var scheme = RequireRequest(self).GetScheme();
+            var dest = memory.AsSpan(retptr, 16);
+            dest.Clear();
+            if (scheme == null)
+            {
+                // option-disc = none; payload stays zero.
+                return;
+            }
+            dest[0] = 1; // option-disc = some
+            // Inner scheme variant at +4..16 (12 bytes).
+            WriteSchemeVariantBytes(
+                dest.Slice(4, 12), scheme.Value, realloc, memory);
+        }
+
+        internal int InvokeRequestSetScheme(
+            int self, int optDisc,
+            int schemeDisc, int strPtr, int strLen)
+        {
+            HttpScheme? scheme;
+            if (optDisc == 0)
+            {
+                scheme = null;
+            }
+            else
+            {
+                scheme = ReadSchemeFromSlots(
+                    schemeDisc, strPtr, strLen);
+            }
+            RequireRequest(self).SetScheme(scheme);
+            return 0;
+        }
+
+        /// <summary>Write a flat method variant into a 12-byte
+        /// span: disc at +0, string-ptr / string-len at +4..12
+        /// (used only when disc=9 / Other).</summary>
+        private static void WriteMethodVariantBytes(
+            Span<byte> dest, HttpMethod method,
+            ICabiRealloc realloc,
+            Wacs.Core.Runtime.Types.MemoryInstance memory)
+        {
+            int disc = (int)method.Kind;
+            dest[0] = (byte)disc;
+            if (method.Kind == HttpMethod.Tag.Other)
+            {
+                byte[] bytes = System.Text.Encoding.UTF8
+                    .GetBytes(method.OtherName ?? string.Empty);
+                int strPtr = bytes.Length > 0
+                    ? realloc.Allocate(1, bytes.Length) : 0;
+                if (bytes.Length > 0)
+                    new ReadOnlySpan<byte>(bytes)
+                        .CopyTo(memory.AsSpan(strPtr, bytes.Length));
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(dest.Slice(4), strPtr);
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(dest.Slice(8), bytes.Length);
+            }
+        }
+
+        private static void WriteSchemeVariantBytes(
+            Span<byte> dest, HttpScheme scheme,
+            ICabiRealloc realloc,
+            Wacs.Core.Runtime.Types.MemoryInstance memory)
+        {
+            dest[0] = (byte)scheme.Kind;
+            if (scheme.Kind == HttpScheme.Tag.Other)
+            {
+                byte[] bytes = System.Text.Encoding.UTF8
+                    .GetBytes(scheme.OtherName ?? string.Empty);
+                int strPtr = bytes.Length > 0
+                    ? realloc.Allocate(1, bytes.Length) : 0;
+                if (bytes.Length > 0)
+                    new ReadOnlySpan<byte>(bytes)
+                        .CopyTo(memory.AsSpan(strPtr, bytes.Length));
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(dest.Slice(4), strPtr);
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(dest.Slice(8), bytes.Length);
+            }
+        }
+
+        public HttpScheme ReadSchemeFromSlots(
+            int disc, int strPtr, int strLen)
+        {
+            switch (disc)
+            {
+                case 0: return HttpScheme.Http;
+                case 1: return HttpScheme.Https;
+                case 2: return HttpScheme.Other(
+                    ReadGuestUtf8(strPtr, strLen));
+                default:
+                    throw new HttpException(
+                        HttpErrorCode.InternalError,
+                        $"scheme: invalid discriminant {disc} " +
+                        "(expected 0/1/2 for HTTP/HTTPS/other).");
+            }
+        }
+
+        private static void ValidateMethodOrSchemeRetptr(
+            int retptr,
+            Wacs.Core.Runtime.Types.MemoryInstance memory,
+            string label, int size)
+        {
+            if (retptr < 0 || (retptr & 0x3) != 0
+                || retptr + size > memory.Data.Length)
+                throw new InvalidOperationException(
+                    $"{label}: retptr 0x{retptr:X8} misaligned " +
+                    $"or out of range (needs {size} bytes " +
+                    "4-aligned).");
         }
 
         // ---- request option<string> shared dispatch (Slice BB) ------

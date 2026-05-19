@@ -1,5 +1,79 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.31 — request method + scheme getters/setters (Phase 5 Slice CC)
+
+Wires `request.get-method`/`set-method` (bare `method` variant)
+and `request.get-scheme`/`set-scheme` (`option<scheme>`). Both
+variants flat-lower to 3 slots (disc + str-ptr + str-len) since
+their `other(string)` arm is the widest. The scheme pair wraps
+that variant in `option<...>` for the outer optionality.
+
+### Variant flat-lowering + retptr layouts
+
+```
+method variant: { get=0, head=1, post=2, put=3, delete=4,
+                  connect=5, options=6, trace=7, patch=8,
+                  other(string)=9 }
+  flat:   3 slots (disc i32, str-ptr i32, str-len i32)
+  retptr: 12 bytes 4-aligned
+    +0:   disc (u8) + 3 pad
+    +4..12: payload (8 bytes — string ptr/len when disc=9,
+            otherwise unused/zero)
+
+scheme variant: { HTTP=0, HTTPS=1, other(string)=2 }
+  same flat-lowering + retptr shape as method
+
+option<scheme>:
+  flat:   4 slots (opt-disc + scheme-disc + str-ptr + str-len)
+  retptr: 16 bytes 4-aligned
+    +0:   option-disc (u8) + 3 pad
+    +4..16: scheme variant (12 bytes — disc + ptr/len)
+```
+
+### Wire signatures
+
+```
+get-method:   Action<ExecContext, self, retptr>
+set-method:   Func<ExecContext, self, disc, strPtr, strLen, int>
+get-scheme:   Action<ExecContext, self, retptr>
+set-scheme:   Func<ExecContext, self, optDisc, schemeDisc,
+                                       strPtr, strLen, int>
+```
+
+Setters return result-disc as a flat i32 (always 0; impl
+setters can't fail).
+
+### Public decoders
+
+```csharp
+public HttpMethod ReadMethodFromSlots(int disc, int strPtr, int strLen)
+public HttpScheme ReadSchemeFromSlots(int disc, int strPtr, int strLen)
+```
+
+Test fixtures and downstream binders can validate flat-lowering
+independently of the host body. Invalid discs throw
+`HttpException` with `HttpRequestMethodInvalid` (method) or
+`InternalError` (scheme).
+
+### Test coverage
+
+10 tests in `RequestMethodSchemeWireTests.cs`:
+- `BindToRuntime` registers all four host functions.
+- `get-method` default writes disc=0 (Get) + zero pair.
+- `set-method(Post)` + `get-method` round-trips.
+- `set-method(Other("BREW"))` + `get-method` round-trips the
+  string payload at +4..12 through `cabi_realloc`.
+- `ReadMethodFromSlots(99, ...)` throws
+  `HttpRequestMethodInvalid`.
+- `get-scheme` default writes option-disc=0 (none).
+- `set-scheme(some(Https))` + `get-scheme` round-trips.
+- `set-scheme(some(Other("ws")))` + `get-scheme` round-trips
+  the protocol string at +8..16.
+- `set-scheme(none)` clears a previously-set value.
+- `ReadSchemeFromSlots(99, ...)` throws `InternalError`.
+
+314/314 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.30 — request option<string> getters/setters (Phase 5 Slice BB)
 
 Wires `request.get-path-with-query` / `set-path-with-query` and
