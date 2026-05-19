@@ -1,5 +1,106 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.7 — `wasi:http` port (Phase 5 Slice E)
+
+Fifth and final Phase 5 host-interface port. Vendors the
+`wasi-http-0.3.0-rc-2026-03-15` WIT and lands the full
+http surface: types, in-memory resource impls, and an
+`HttpClient`-backed `IClient` for outbound HTTP calls.
+
+### Vendored WIT
+
+`wit/deps/wasi-http-0.3.0-rc-2026-03-15/package.wit` copied
+from `Spec.Test/wasi`. Embedded via the `EmbeddedResource`
+pattern.
+
+### `HttpTypes.cs`
+
+- `HttpMethod` value-type with tag enum + `Other(string)`
+  payload for non-standard methods (PROPFIND etc.).
+- `HttpScheme` value-type with tag enum + `Other(string)`.
+- `HttpErrorCode` flat enum covering the 40+ variant cases;
+  typed payloads (DNS rcode, TLS alert id, field sizes,
+  body sizes) ride on `HttpException` properties rather than
+  embedded in the discriminator.
+- `HeaderError` / `RequestOptionsError` flat enums.
+- `HttpException` / `HeaderException` /
+  `RequestOptionsException` — host-side throwables the
+  canon-async binding lowers into the wire `result<_,
+  error-code>` err shape.
+
+### `IFields` + `Fields`
+
+`IFields` interface for the WIT `resource fields` shape:
+case-insensitive multi-value name lookup, mutability via
+`Freeze()`. Default `Fields` impl backed by a case-insensitive
+dictionary. Includes basic name-character validation
+(RFC 9110 §5.6.2 token chars) and the
+`FromList` static factory + `Clone()` deep-copy.
+
+### `IRequestOptions` + `RequestOptions`
+
+Per-request connect / first-byte / between-bytes timeouts in
+nanoseconds. Same freeze pattern as fields.
+
+### `IRequest` / `IResponse` + `Request` / `Response`
+
+In-memory request/response objects with method, scheme,
+authority, path-with-query, headers, optional body
+(`System.IO.Stream`), and optional trailers.
+
+### `IClient` + `HttpBackedClient`
+
+`IClient.SendAsync(IRequest)` — outbound HTTP. Default
+`HttpBackedClient` is `System.Net.Http.HttpClient`-backed:
+
+- Builds `HttpRequestMessage` from the `IRequest`, splitting
+  headers between request-headers and content-headers per
+  HttpClient's conventions.
+- User-driven `OperationCanceledException` (token from the
+  caller fired) propagates as-is; `HttpClient.Timeout` fires
+  surface as `HttpErrorCode.ConnectionTimeout`.
+- `HttpRequestException` maps to
+  `HttpErrorCode.ConnectionRefused`.
+- Uncategorized failures surface as `InternalError` with the
+  exception message in `OtherPayload`.
+- Lifts the response body through a `MemoryStream` so the
+  `IResponse` outlives the underlying
+  `HttpResponseMessage`'s disposal.
+
+Implements `IDisposable` — the parameterless ctor allocates
+its own `HttpClient` and disposes it; injecting an existing
+`HttpClient` leaves disposal to the caller.
+
+### `IHandler` (inbound)
+
+Interface only — no default impl. Embedders providing
+inbound HTTP must configure this; the canon-async binding will
+return `HttpErrorCode.ConfigurationError` when unset (wired
+in a follow-up slice).
+
+### `WasiPreview3Host` integration
+
+`HttpClient` property (default: fresh `HttpBackedClient`).
+`HttpHandler` property (default: null). Builder properties
+for both.
+
+### Test coverage
+
+21 new tests in `HttpTests.cs`:
+- `HttpMethod` / `HttpScheme` factories + to-string.
+- `Fields` case-insensitive lookup, append-preserves-order,
+  get-and-delete, freeze rejects mutations,
+  invalid-name throws, `FromList` constructs, `Clone` decouples.
+- `RequestOptions` timeout round-trip, freeze, clone.
+- `Request` / `Response` default state + setter round-trip.
+- `HttpBackedClient` user-cancellation propagates as OCE,
+  unreachable host maps to ConnectionRefused, round-trips
+  status+body+content-type through a stub handler.
+- Host default-construct provides client, null handler;
+  builder overrides both.
+
+116/116 Preview3 tests green. Phase 5 complete.
+
 ## WACS.WASI.Preview3 0.1.6 — `wasi:sockets` types + DNS lookup (Phase 5 Slice D)
 
 Fourth Phase 5 host-interface port. Vendors the

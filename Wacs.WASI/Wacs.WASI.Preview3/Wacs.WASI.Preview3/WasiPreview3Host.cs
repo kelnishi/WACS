@@ -14,6 +14,7 @@ using Wacs.WASI.Preview3.CanonicalAbi;
 using Wacs.WASI.Preview3.Cli;
 using Wacs.WASI.Preview3.Clocks;
 using Wacs.WASI.Preview3.Filesystem;
+using Wacs.WASI.Preview3.Http;
 using Wacs.WASI.Preview3.Random;
 using Wacs.WASI.Preview3.Sockets;
 
@@ -61,6 +62,8 @@ namespace Wacs.WASI.Preview3
         private IInsecureSeed? _insecureSeed;
         private IPreopens? _preopens;
         private IIpNameLookup? _nameLookup;
+        private IClient? _httpClient;
+        private IHandler? _httpHandler;
 
         public WasiPreview3Host() : this(new WasiPreview3HostBuilder()) { }
 
@@ -116,6 +119,28 @@ namespace Wacs.WASI.Preview3
         /// </summary>
         public IIpNameLookup IpNameLookup =>
             _nameLookup ??= _config.IpNameLookup ?? new NoNameLookup();
+
+        /// <summary>
+        /// Outbound HTTP client. Default is an
+        /// <see cref="HttpBackedClient"/> with a fresh
+        /// <see cref="System.Net.Http.HttpClient"/>; embedders
+        /// that want pinned cert validation, custom proxies, or
+        /// shared client pooling configure their own via the
+        /// builder.
+        /// </summary>
+        public IClient HttpClient =>
+            _httpClient ??= _config.HttpClient ?? new HttpBackedClient();
+
+        /// <summary>
+        /// Inbound HTTP handler. No default — guests that
+        /// import <c>wasi:http/handler</c> for inbound serving
+        /// must have an embedder-configured handler. The
+        /// canon-async binding throws
+        /// <see cref="HttpErrorCode.ConfigurationError"/> at
+        /// invocation time when this is null.
+        /// </summary>
+        public IHandler? HttpHandler =>
+            _httpHandler ??= _config.HttpHandler;
 
         /// <summary>
         /// The component-instance dispatcher the host bindings
@@ -570,6 +595,8 @@ namespace Wacs.WASI.Preview3
         public IInsecureSeed? InsecureSeed { get; set; }
         public IPreopens? Preopens { get; set; }
         public IIpNameLookup? IpNameLookup { get; set; }
+        public IClient? HttpClient { get; set; }
+        public IHandler? HttpHandler { get; set; }
     }
 
     /// <summary>Ergonomic one-liner mirroring
