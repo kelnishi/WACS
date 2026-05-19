@@ -1064,6 +1064,125 @@ namespace Wacs.WASI.Preview3
                         InvokeUdpSocketSetBufferSize(
                             self, unchecked((ulong)value),
                             retptr, realloc, sendBuffer: true)));
+
+            // ---- TCP simple getter/setter cluster (Slice X) -------
+            //
+            // The remaining flat tcp-socket methods:
+            // set-listen-backlog-size, keep-alive family
+            // (enabled/idle-time/interval/count), hop-limit.
+            // (get-is-listening was wired in Slice O.) All getters
+            // return result<X, error-code> via the matching retptr
+            // shape; setters return result<_, error-code> via the
+            // standard 20-byte sockets-error-code retptr.
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]tcp-socket.set-listen-backlog-size"),
+                (Action<ExecContext, int, long, int>)(
+                    (_, self, value, retptr) =>
+                        InvokeTcpSocketSetterErrorCode(
+                            self, retptr, realloc,
+                            s => s.SetListenBacklogSize(
+                                unchecked((ulong)value)))));
+
+            // ---- keep-alive family --------------------------------
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]tcp-socket.get-keep-alive-enabled"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeTcpSocketGetterResultBool(
+                        self, retptr, realloc,
+                        s => s.GetKeepAliveEnabled())));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]tcp-socket.set-keep-alive-enabled"),
+                (Action<ExecContext, int, int, int>)(
+                    (_, self, value, retptr) =>
+                        InvokeTcpSocketSetterErrorCode(
+                            self, retptr, realloc,
+                            s => s.SetKeepAliveEnabled(value != 0))));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]tcp-socket.get-keep-alive-idle-time"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeTcpSocketGetterResultU64(
+                        self, retptr, realloc,
+                        s => s.GetKeepAliveIdleTime())));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]tcp-socket.set-keep-alive-idle-time"),
+                (Action<ExecContext, int, long, int>)(
+                    (_, self, value, retptr) =>
+                        InvokeTcpSocketSetterErrorCode(
+                            self, retptr, realloc,
+                            s => s.SetKeepAliveIdleTime(
+                                unchecked((ulong)value)))));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]tcp-socket.get-keep-alive-interval"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeTcpSocketGetterResultU64(
+                        self, retptr, realloc,
+                        s => s.GetKeepAliveInterval())));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]tcp-socket.set-keep-alive-interval"),
+                (Action<ExecContext, int, long, int>)(
+                    (_, self, value, retptr) =>
+                        InvokeTcpSocketSetterErrorCode(
+                            self, retptr, realloc,
+                            s => s.SetKeepAliveInterval(
+                                unchecked((ulong)value)))));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]tcp-socket.get-keep-alive-count"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeTcpSocketGetterResultU32(
+                        self, retptr, realloc,
+                        s => s.GetKeepAliveCount())));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]tcp-socket.set-keep-alive-count"),
+                (Action<ExecContext, int, int, int>)(
+                    (_, self, value, retptr) =>
+                        InvokeTcpSocketSetterErrorCode(
+                            self, retptr, realloc,
+                            s => s.SetKeepAliveCount(
+                                unchecked((uint)value)))));
+
+            // ---- hop-limit -----------------------------------------
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]tcp-socket.get-hop-limit"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeTcpSocketGetterResultU8(
+                        self, retptr, realloc,
+                        s => s.GetHopLimit())));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]tcp-socket.set-hop-limit"),
+                (Action<ExecContext, int, int, int>)(
+                    (_, self, value, retptr) =>
+                        InvokeTcpSocketSetterErrorCode(
+                            self, retptr, realloc,
+                            s => s.SetHopLimit(unchecked((byte)value)))));
+
+            // ---- UDP disconnect ------------------------------------
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]udp-socket.disconnect"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeUdpSocketSetterErrorCode(
+                        self, retptr, realloc,
+                        s => s.Disconnect())));
         }
 
         // ---- wasi:sockets udp-socket binding bodies (Slice P) -------
@@ -1571,6 +1690,187 @@ namespace Wacs.WASI.Preview3
                 caught, addr, realloc, memory);
         }
 
+        // ---- Slice X dispatch helpers ------------------------------
+        //
+        // Shared bodies for the TCP simple-getter cluster. Each
+        // method-shape gets its own retptr-sized helper:
+        //
+        //   result<bool, error-code>: 12 bytes 4-aligned
+        //     (disc + 3 pad, then 8 bytes payload section.
+        //      ok: 1-byte bool at +4; err: 8-byte error-code
+        //      variant at +4)
+        //   result<u8,   error-code>: same 12-byte 4-aligned shape
+        //   result<u32,  error-code>: same 12-byte 4-aligned shape
+        //                             (u32 payload sits at +4)
+        //   result<u64,  error-code>: 24-byte 8-aligned (already
+        //                             implemented for buffer-size
+        //                             getters; reused here for
+        //                             keep-alive idle-time /
+        //                             interval which are also u64
+        //                             nanoseconds)
+
+        private const int ResultSmallErrorCodeSize = 12;
+
+        private static void ValidateResultSmallErrorCodeRetptr(
+            int retptr,
+            Wacs.Core.Runtime.Types.MemoryInstance memory)
+        {
+            if (retptr < 0 || (retptr & 0x3) != 0
+                || retptr + ResultSmallErrorCodeSize > memory.Data.Length)
+                throw new InvalidOperationException(
+                    "wasi:sockets/types: result<bool|u8|u32, " +
+                    $"error-code> retptr 0x{retptr:X8} misaligned " +
+                    $"or out of range (memory size = " +
+                    $"{memory.Data.Length}). Caller must allocate " +
+                    "a 12-byte 4-aligned return area.");
+        }
+
+        internal void InvokeTcpSocketGetterResultBool(
+            int self, int retptr, ICabiRealloc realloc,
+            Func<ITcpSocket, bool> getter)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateResultSmallErrorCodeRetptr(retptr, memory);
+            SocketsException? caught = null;
+            bool value = false;
+            try { value = getter(RequireTcpSocket(self)); }
+            catch (SocketsException ex) { caught = ex; }
+            var dest = memory.AsSpan(retptr, ResultSmallErrorCodeSize);
+            dest.Clear();
+            if (caught == null)
+            {
+                dest[0] = 0; // ok disc
+                dest[4] = (byte)(value ? 1 : 0);
+            }
+            else
+            {
+                dest[0] = 1; // err disc
+                WriteSocketsErrorCodeBytes(
+                    dest.Slice(4, 8), caught, realloc, memory);
+            }
+        }
+
+        internal void InvokeTcpSocketGetterResultU8(
+            int self, int retptr, ICabiRealloc realloc,
+            Func<ITcpSocket, byte> getter)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateResultSmallErrorCodeRetptr(retptr, memory);
+            SocketsException? caught = null;
+            byte value = 0;
+            try { value = getter(RequireTcpSocket(self)); }
+            catch (SocketsException ex) { caught = ex; }
+            var dest = memory.AsSpan(retptr, ResultSmallErrorCodeSize);
+            dest.Clear();
+            if (caught == null)
+            {
+                dest[0] = 0;
+                dest[4] = value;
+            }
+            else
+            {
+                dest[0] = 1;
+                WriteSocketsErrorCodeBytes(
+                    dest.Slice(4, 8), caught, realloc, memory);
+            }
+        }
+
+        internal void InvokeTcpSocketGetterResultU32(
+            int self, int retptr, ICabiRealloc realloc,
+            Func<ITcpSocket, uint> getter)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateResultSmallErrorCodeRetptr(retptr, memory);
+            SocketsException? caught = null;
+            uint value = 0;
+            try { value = getter(RequireTcpSocket(self)); }
+            catch (SocketsException ex) { caught = ex; }
+            var dest = memory.AsSpan(retptr, ResultSmallErrorCodeSize);
+            dest.Clear();
+            if (caught == null)
+            {
+                dest[0] = 0;
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteUInt32LittleEndian(dest.Slice(4), value);
+            }
+            else
+            {
+                dest[0] = 1;
+                WriteSocketsErrorCodeBytes(
+                    dest.Slice(4, 8), caught, realloc, memory);
+            }
+        }
+
+        // Shared u64-shape getter for keep-alive idle-time /
+        // interval. Mirrors InvokeTcpSocketGetBufferSize's
+        // 24-byte 8-aligned retptr layout exactly — only the
+        // impl-call lambda varies per method.
+        internal void InvokeTcpSocketGetterResultU64(
+            int self, int retptr, ICabiRealloc realloc,
+            Func<ITcpSocket, ulong> getter)
+        {
+            var memory = RequireMemoryForHttp();
+            if (retptr < 0 || (retptr & 0x7) != 0
+                || retptr + 24 > memory.Data.Length)
+                throw new InvalidOperationException(
+                    "wasi:sockets/types: result<u64, " +
+                    $"error-code> retptr 0x{retptr:X8} " +
+                    $"misaligned or out of range (memory " +
+                    $"size = {memory.Data.Length}). Caller " +
+                    "must allocate a 24-byte 8-aligned " +
+                    "return area.");
+            SocketsException? caught = null;
+            ulong value = 0;
+            try { value = getter(RequireTcpSocket(self)); }
+            catch (SocketsException ex) { caught = ex; }
+            var dest = memory.AsSpan(retptr, 24);
+            dest.Clear();
+            if (caught == null)
+            {
+                dest[0] = 0;
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteUInt64LittleEndian(dest.Slice(8), value);
+            }
+            else
+            {
+                dest[0] = 1;
+                WriteSocketsErrorCodeBytes(
+                    dest.Slice(8, 16), caught, realloc, memory);
+            }
+        }
+
+        // Shared setter dispatch for the methods that return only
+        // result<_, error-code>. The lambda runs the actual impl
+        // call; the wire layer captures SocketsException and writes
+        // the 20-byte sockets-error-code retptr.
+        internal void InvokeTcpSocketSetterErrorCode(
+            int self, int retptr, ICabiRealloc realloc,
+            Action<ITcpSocket> body)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateResultSocketsErrorCodeRetptr(retptr, memory);
+            SocketsException? caught = null;
+            try { body(RequireTcpSocket(self)); }
+            catch (SocketsException ex) { caught = ex; }
+            WriteSocketsErrorCodeResult(
+                memory.AsSpan(retptr, ResultSocketsErrorCodeSize),
+                caught, realloc, memory);
+        }
+
+        internal void InvokeUdpSocketSetterErrorCode(
+            int self, int retptr, ICabiRealloc realloc,
+            Action<IUdpSocket> body)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateResultSocketsErrorCodeRetptr(retptr, memory);
+            SocketsException? caught = null;
+            try { body(RequireUdpSocket(self)); }
+            catch (SocketsException ex) { caught = ex; }
+            WriteSocketsErrorCodeResult(
+                memory.AsSpan(retptr, ResultSocketsErrorCodeSize),
+                caught, realloc, memory);
+        }
+
         // ---- canon-ABI result<ip-socket-address, error-code> ---
         //
         // 36-byte 4-aligned retptr layout:
@@ -1666,7 +1966,7 @@ namespace Wacs.WASI.Preview3
             }
         }
 
-        private ITcpSocket RequireTcpSocket(int handle)
+        internal ITcpSocket RequireTcpSocket(int handle)
         {
             var s = TcpSocketHandles.Get(handle);
             if (s == null)

@@ -1,5 +1,87 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.26 — TCP simple-options cluster + UDP disconnect (Phase 5 Slice X)
+
+Wires the remaining flat tcp-socket getters/setters
+(set-listen-backlog-size, the keep-alive family of 4 pairs,
+hop-limit pair) plus udp-socket.disconnect. With Slice X, every
+tcp-socket and udp-socket method is bound except UDP's
+paramptr-by-pointer send (17 flat params).
+
+### Three new retptr shapes
+
+```
+result<bool, error-code>: 12 bytes 4-aligned
+result<u8,   error-code>: 12 bytes 4-aligned
+result<u32,  error-code>: 12 bytes 4-aligned
+
+  +0:   result-disc (u8) + 3-byte pad
+  +4..12: payload section (8 bytes — sized to the error-code's
+          string-payload arm; ok payload sits at +4 within it)
+```
+
+The 24-byte 8-aligned `result<u64, error-code>` shape (used by
+the buffer-size getters from Slice O) gets reused here for the
+keep-alive idle-time / interval methods.
+
+### Five new dispatch helpers
+
+```csharp
+internal void InvokeTcpSocketGetterResultBool(self, retptr, realloc, Func<ITcpSocket, bool>)
+internal void InvokeTcpSocketGetterResultU8  (self, retptr, realloc, Func<ITcpSocket, byte>)
+internal void InvokeTcpSocketGetterResultU32 (self, retptr, realloc, Func<ITcpSocket, uint>)
+internal void InvokeTcpSocketGetterResultU64 (self, retptr, realloc, Func<ITcpSocket, ulong>)
+internal void InvokeTcpSocketSetterErrorCode (self, retptr, realloc, Action<ITcpSocket>)
+internal void InvokeUdpSocketSetterErrorCode (self, retptr, realloc, Action<IUdpSocket>)
+```
+
+Same shape-as-template-shared-dispatch pattern as the buffer-size
+getter from Slice O and the metadata-hash dispatch from Slice V.
+Per-method body is a one-line lambda routing through the right
+impl method.
+
+### Eleven new host functions wired
+
+```
+[method]tcp-socket.set-listen-backlog-size      — u64 setter
+[method]tcp-socket.{get,set}-keep-alive-enabled — bool getter / setter
+[method]tcp-socket.{get,set}-keep-alive-idle-time — u64 (duration ns)
+[method]tcp-socket.{get,set}-keep-alive-interval  — u64 (duration ns)
+[method]tcp-socket.{get,set}-keep-alive-count     — u32
+[method]tcp-socket.{get,set}-hop-limit            — u8
+[method]udp-socket.disconnect                     — () -> result<_, error-code>
+```
+
+(`tcp-socket.get-is-listening` was already wired in Slice O.)
+Several keep-alive methods route through impls that throw
+`Sockets.ErrorCode.NotSupported` on the default
+System.Net.Sockets backing — TCP_KEEPIDLE / TCP_KEEPINTVL /
+TCP_KEEPCNT aren't exposed cross-platform. The wire layer
+captures the SocketsException and routes the NotSupported
+through the same retptr encoder as the success path.
+
+### Test coverage
+
+12 tests in `TcpSocketSimpleOptionsTests.cs`:
+- `BindToRuntime` registers all 13 new+existing host functions.
+- `get-is-listening` returns false when unbound.
+- `get-keep-alive-enabled` writes the ok-disc + bool at +4.
+- `get-keep-alive-idle-time` writes err-disc + NotSupported at
+  +8 on the 24-byte u64 retptr.
+- `get-hop-limit` round-trips a setter-applied value (42)
+  through the u8 retptr at +4.
+- `get-keep-alive-count` u32 err-path writes NotSupported.
+- `set-listen-backlog-size` writes ok-disc.
+- `set-keep-alive-enabled` round-trip (set true → get returns 1).
+- `set-keep-alive-idle-time` writes NotSupported (20-byte
+  sockets-error-code retptr).
+- `set-keep-alive-count` writes NotSupported.
+- UDP `disconnect` on an unconnected socket writes
+  `InvalidState`.
+- 12-byte retptr misalignment throws.
+
+281/281 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.25 — variant-bearing filesystem descriptor methods (Phase 5 Slice W)
 
 Closes the variant-arg gap on `wasi:filesystem/types.descriptor`:
