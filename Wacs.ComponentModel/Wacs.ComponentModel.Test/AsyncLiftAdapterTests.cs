@@ -532,6 +532,139 @@ namespace Wacs.ComponentModel.Test
             Assert.Equal(42, tuple.err);
         }
 
+        // ---- Slice I.4: tuple<T, T, ...> task.return lift -----------
+
+        [Fact]
+        public async Task TaskReturn_tuple_u32_u32_lifts_as_value_tuple()
+        {
+            var d = new AsyncDispatcher();
+            var tupU32U32 = new Wacs.ComponentModel.Runtime.Parser.ComponentTupleType(
+                new[]
+                {
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType
+                        .OfPrim(Wacs.ComponentModel.Runtime.Parser.ComponentPrim.U32),
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType
+                        .OfPrim(Wacs.ComponentModel.Runtime.Parser.ComponentPrim.U32),
+                });
+            d.Types = new Wacs.ComponentModel.Runtime.Parser.DefTypeEntry[]
+                { tupU32U32 };
+
+            var task = d.RegisterTask(MakeCont());
+            d.PushCurrentTask(task);
+            try
+            {
+                var entry = new Wacs.ComponentModel.Runtime.Parser.CanonTaskReturn(
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfRef(0),
+                    System.Array.Empty<Wacs.ComponentModel.Runtime.Parser.CanonOption>());
+                var del = (Action<ExecContext, int, int>)
+                    Wacs.ComponentModel.Async.CanonAsyncBinder
+                        .TryBuildDelegateForEntry(entry, d)!;
+                del(null!, 11, 22);
+            }
+            finally { d.PopCurrentTask(); }
+
+            var result = await task.Completion.Task;
+            var tuple = ((int, int))result!;
+            Assert.Equal((11, 22), tuple);
+        }
+
+        [Fact]
+        public async Task TaskReturn_tuple_u64_u64_u64_arity3()
+        {
+            var d = new AsyncDispatcher();
+            var tup = new Wacs.ComponentModel.Runtime.Parser.ComponentTupleType(
+                new[]
+                {
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType
+                        .OfPrim(Wacs.ComponentModel.Runtime.Parser.ComponentPrim.U64),
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType
+                        .OfPrim(Wacs.ComponentModel.Runtime.Parser.ComponentPrim.U64),
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType
+                        .OfPrim(Wacs.ComponentModel.Runtime.Parser.ComponentPrim.U64),
+                });
+            d.Types = new Wacs.ComponentModel.Runtime.Parser.DefTypeEntry[] { tup };
+
+            var task = d.RegisterTask(MakeCont());
+            d.PushCurrentTask(task);
+            try
+            {
+                var entry = new Wacs.ComponentModel.Runtime.Parser.CanonTaskReturn(
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfRef(0),
+                    System.Array.Empty<Wacs.ComponentModel.Runtime.Parser.CanonOption>());
+                var del = (Action<ExecContext, long, long, long>)
+                    Wacs.ComponentModel.Async.CanonAsyncBinder
+                        .TryBuildDelegateForEntry(entry, d)!;
+                del(null!, 100L, 200L, 300L);
+            }
+            finally { d.PopCurrentTask(); }
+
+            var result = await task.Completion.Task;
+            var tuple = ((long, long, long))result!;
+            Assert.Equal((100L, 200L, 300L), tuple);
+        }
+
+        [Fact]
+        public async Task TaskReturn_tuple_f64_arity4()
+        {
+            var d = new AsyncDispatcher();
+            var tup = new Wacs.ComponentModel.Runtime.Parser.ComponentTupleType(
+                new[]
+                {
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType
+                        .OfPrim(Wacs.ComponentModel.Runtime.Parser.ComponentPrim.F64),
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType
+                        .OfPrim(Wacs.ComponentModel.Runtime.Parser.ComponentPrim.F64),
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType
+                        .OfPrim(Wacs.ComponentModel.Runtime.Parser.ComponentPrim.F64),
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType
+                        .OfPrim(Wacs.ComponentModel.Runtime.Parser.ComponentPrim.F64),
+                });
+            d.Types = new Wacs.ComponentModel.Runtime.Parser.DefTypeEntry[] { tup };
+
+            var task = d.RegisterTask(MakeCont());
+            d.PushCurrentTask(task);
+            try
+            {
+                var entry = new Wacs.ComponentModel.Runtime.Parser.CanonTaskReturn(
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfRef(0),
+                    System.Array.Empty<Wacs.ComponentModel.Runtime.Parser.CanonOption>());
+                var del = (Action<ExecContext, double, double, double, double>)
+                    Wacs.ComponentModel.Async.CanonAsyncBinder
+                        .TryBuildDelegateForEntry(entry, d)!;
+                del(null!, 1.5, 2.5, 3.5, 4.5);
+            }
+            finally { d.PopCurrentTask(); }
+
+            var result = await task.Completion.Task;
+            var tuple = ((double, double, double, double))result!;
+            Assert.Equal((1.5, 2.5, 3.5, 4.5), tuple);
+        }
+
+        [Fact]
+        public void TaskReturn_tuple_mixed_width_returns_null_delegate()
+        {
+            // tuple<u32, u64> mixes primitive widths — Slice I.4
+            // doesn't support this shape. TryBuildDelegateForEntry
+            // returns null; the binder skips registration.
+            var d = new AsyncDispatcher();
+            var tup = new Wacs.ComponentModel.Runtime.Parser.ComponentTupleType(
+                new[]
+                {
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType
+                        .OfPrim(Wacs.ComponentModel.Runtime.Parser.ComponentPrim.U32),
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType
+                        .OfPrim(Wacs.ComponentModel.Runtime.Parser.ComponentPrim.U64),
+                });
+            d.Types = new Wacs.ComponentModel.Runtime.Parser.DefTypeEntry[] { tup };
+
+            var entry = new Wacs.ComponentModel.Runtime.Parser.CanonTaskReturn(
+                Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfRef(0),
+                System.Array.Empty<Wacs.ComponentModel.Runtime.Parser.CanonOption>());
+            var del = Wacs.ComponentModel.Async.CanonAsyncBinder
+                .TryBuildDelegateForEntry(entry, d);
+            Assert.Null(del);
+        }
+
         [Fact]
         public void TaskReturn_string_lift_throws_when_dispatcher_memory_not_set()
         {

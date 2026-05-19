@@ -430,6 +430,8 @@ namespace Wacs.ComponentModel.Async
                         TryBuildTaskReturnOption(opt, d, out del),
                     ComponentResultType res =>
                         TryBuildTaskReturnResult(res, d, out del),
+                    ComponentTupleType tup =>
+                        TryBuildTaskReturnTuple(tup, d, out del),
                     _ => false,
                 };
             }
@@ -591,6 +593,133 @@ namespace Wacs.ComponentModel.Async
                 default:
                     return false;
             }
+        }
+
+        // task.return tuple<T, T, ...> for arity 2-4 with all
+        // elements of the same primitive type T. Flat-lowered to
+        // (T, T, ...) — one core value per element. Materialized
+        // as a closed-generic ValueTuple<T, T, ...> — AOT-safe.
+        //
+        // Slice I.4 scope: same-primitive same-width tuples. Mixed-
+        // width and aggregate-element tuples need either per-shape
+        // enumeration or the extensibility hook deferred to a
+        // later slice (alongside record/variant lift).
+        private static bool TryBuildTaskReturnTuple(
+            ComponentTupleType tup, AsyncDispatcher d, out Delegate? del)
+        {
+            del = null;
+            int arity = tup.Elements.Count;
+            if (arity < 2 || arity > 4) return false;
+            if (!tup.Elements[0].IsPrimitive) return false;
+            var prim = tup.Elements[0].Prim;
+            for (int i = 1; i < arity; i++)
+            {
+                if (!tup.Elements[i].IsPrimitive) return false;
+                if (tup.Elements[i].Prim != prim) return false;
+            }
+            switch (prim)
+            {
+                case ComponentPrim.S32:
+                case ComponentPrim.U32:
+                    return BuildIntTuple(arity, d, out del);
+                case ComponentPrim.S64:
+                case ComponentPrim.U64:
+                    return BuildLongTuple(arity, d, out del);
+                case ComponentPrim.F32:
+                    return BuildFloatTuple(arity, d, out del);
+                case ComponentPrim.F64:
+                    return BuildDoubleTuple(arity, d, out del);
+                default:
+                    return false;
+            }
+        }
+
+        private static bool BuildIntTuple(
+            int arity, AsyncDispatcher d, out Delegate? del)
+        {
+            switch (arity)
+            {
+                case 2:
+                    del = (Action<ExecContext, int, int>)((_, a, b) =>
+                        d.TaskReturn(null!, (a, b)));
+                    return true;
+                case 3:
+                    del = (Action<ExecContext, int, int, int>)((_, a, b, c) =>
+                        d.TaskReturn(null!, (a, b, c)));
+                    return true;
+                case 4:
+                    del = (Action<ExecContext, int, int, int, int>)((_, a, b, c, e) =>
+                        d.TaskReturn(null!, (a, b, c, e)));
+                    return true;
+            }
+            del = null;
+            return false;
+        }
+
+        private static bool BuildLongTuple(
+            int arity, AsyncDispatcher d, out Delegate? del)
+        {
+            switch (arity)
+            {
+                case 2:
+                    del = (Action<ExecContext, long, long>)((_, a, b) =>
+                        d.TaskReturn(null!, (a, b)));
+                    return true;
+                case 3:
+                    del = (Action<ExecContext, long, long, long>)((_, a, b, c) =>
+                        d.TaskReturn(null!, (a, b, c)));
+                    return true;
+                case 4:
+                    del = (Action<ExecContext, long, long, long, long>)((_, a, b, c, e) =>
+                        d.TaskReturn(null!, (a, b, c, e)));
+                    return true;
+            }
+            del = null;
+            return false;
+        }
+
+        private static bool BuildFloatTuple(
+            int arity, AsyncDispatcher d, out Delegate? del)
+        {
+            switch (arity)
+            {
+                case 2:
+                    del = (Action<ExecContext, float, float>)((_, a, b) =>
+                        d.TaskReturn(null!, (a, b)));
+                    return true;
+                case 3:
+                    del = (Action<ExecContext, float, float, float>)((_, a, b, c) =>
+                        d.TaskReturn(null!, (a, b, c)));
+                    return true;
+                case 4:
+                    del = (Action<ExecContext, float, float, float, float>)((_, a, b, c, e) =>
+                        d.TaskReturn(null!, (a, b, c, e)));
+                    return true;
+            }
+            del = null;
+            return false;
+        }
+
+        private static bool BuildDoubleTuple(
+            int arity, AsyncDispatcher d, out Delegate? del)
+        {
+            switch (arity)
+            {
+                case 2:
+                    del = (Action<ExecContext, double, double>)((_, a, b) =>
+                        d.TaskReturn(null!, (a, b)));
+                    return true;
+                case 3:
+                    del = (Action<ExecContext, double, double, double>)((_, a, b, c) =>
+                        d.TaskReturn(null!, (a, b, c)));
+                    return true;
+                case 4:
+                    del = (Action<ExecContext, double, double, double, double>)((_, a, b, c, e) =>
+                        d.TaskReturn(null!, (a, b, c, e)));
+                    return true;
+            }
+            del = null;
+            return false;
         }
 
         // task.return result<T,E> for primitive T/E: flat-lowered

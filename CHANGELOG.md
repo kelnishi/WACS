@@ -1,5 +1,87 @@
 # Changelog
 
+## WACS.ComponentModel 0.8.17 — tuple of same-primitive task.return lift (Phase 3 Slice I.4)
+
+Extends `task.return` aggregate lift support to
+`tuple<T, T, ...>` for arities 2–4 with all elements of the
+same primitive type. Materializes as a closed-generic
+`ValueTuple<T, T, ...>` — AOT-safe, no reflection.
+
+### Coverage
+
+Element type `T` ∈ {`u32`/`s32`, `u64`/`s64`, `f32`, `f64`}
+× arity ∈ {2, 3, 4}. Mixed-width tuples (e.g.
+`tuple<u32, u64>`) and aggregate-element tuples (e.g.
+`tuple<string, list<u8>>`) return null delegates — the binder
+skips registration, and the test pins the behavior so the
+contract is auditable.
+
+### Implementation
+
+`TryBuildTaskReturnTuple` validates the same-primitive
+constraint, then dispatches to one of four `Build{Int,Long,
+Float,Double}Tuple` helpers that select the right
+`Action<ExecContext, T, T, ...>` delegate shape and
+materialize the result via C# value-tuple syntax
+(`(a, b)` / `(a, b, c)` / `(a, b, c, e)`). The compiler
+emits closed-generic `ValueTuple<T, T, ...>` constructions —
+no `MakeGenericType` at runtime.
+
+### Tests
+
+4 new in `AsyncLiftAdapterTests`:
+
+- `TaskReturn_tuple_u32_u32_lifts_as_value_tuple` (arity 2).
+- `TaskReturn_tuple_u64_u64_u64_arity3`.
+- `TaskReturn_tuple_f64_arity4`.
+- `TaskReturn_tuple_mixed_width_returns_null_delegate`
+  (negative — pins the unsupported case).
+
+552/552 ComponentModel + 833/833 Transpiler tests pass
+(was 548).
+
+### What's still deferred for full aggregate lift
+
+The genuinely complex aggregate shapes:
+
+- **`record { f1: T1, f2: T2, ... }`** — needs a CLR-type
+  registry or generated lifters per record. The interpreter
+  could lift reflectively (already does in
+  `ComponentInstance.LiftRecord`); the AOT path needs the
+  transpiler's harness-emitter to register concrete lifters.
+- **`variant { c1(T1), c2(T2), ... }`** — joined-payload
+  wire shape; the active case is determined by the
+  discriminant, but the payload slot is sized to the widest
+  case.
+- **Aggregate-payload `option<T>` / `result<T,E>`** — recursive
+  lift of T (currently primitive-only in I.3).
+- **Mixed-width tuples** — combinatorial signatures; cleanest
+  as an extensibility hook rather than enumerated cases.
+
+Each of these warrants its own design pass — likely an
+extensibility hook on `AsyncDispatcher`
+(`Dictionary<int typeIdx, Func<...> lifter>`) with default
+reflective lifters for the interpreter path and source-gen
+lifters for the AOT path. Outside Phase 3's tractable
+surface.
+
+### Phase 3 status
+
+The canon-async surface now covers:
+
+- All canon-async builtins parsed (Phase 2).
+- Dispatcher + canon binder + shim recognizer + memory ops
+  (Phase 3 A–H).
+- Source-generator-backed name registry (G1+G2).
+- Aggregate lift for the **flat-lowered single-segment cases**:
+  string, list of primitive, option of primitive, result of
+  primitive, tuple of same-primitive (I.1–I.4).
+
+Phase 3's tractable surface is functionally complete.
+Records/variants/mixed-width aggregates are the natural
+Phase 4 / harness-emitter work that pairs with
+`Wacs.ComponentModel.Harness.Lib`.
+
 ## WACS.ComponentModel 0.8.16 — canon-ABI lift for string / list / option / result task.return (Phase 3 Slices I.1 + I.2 + I.3)
 
 Extends the canon-async binder's `task.return` support from
