@@ -3397,39 +3397,55 @@ namespace Wacs.WASI.Preview3
                 caught, response, realloc, memory);
         }
 
-        // ---- result<response, error-code> encoder (Slice GG) --------
+        // ---- result<response, error-code> encoder (Slice GG/HH) -----
         //
-        // 32-byte 4-aligned retptr:
-        //   +0:   result-disc (u8) + 3 pad
-        //   +4..32: payload section (28 bytes)
+        // 40-byte 8-aligned retptr (HH-corrected layout):
+        //
+        //   +0:   result-disc (u8) + 7 pad
+        //   +8..40: payload section (32 bytes — sized to the
+        //           error-code variant which dominates the
+        //           4-byte response handle)
         //
         //   ok:
-        //     +4..8: response handle (i32)
-        //     +8..32: unused, zero
+        //     +8..12: response handle (i32)
+        //     +12..40: unused, zero
         //
-        //   err (http error-code variant, 28 bytes):
-        //     +4:    variant disc (u8) + 3 pad
-        //     +8..32: payload section (24 bytes — sized to the
+        //   err (http error-code variant, 32 bytes, align 8):
+        //     +8:    error-code disc (u8) + 7 pad
+        //     +16..40: payload section (24 bytes — sized to the
         //             dominant arm, option<field-size-payload>)
         //
-        // Slice GG implements the simple (no-payload) arms — most
-        // common case for HTTP errors. Typed-payload arms
-        // (DnsError, TlsAlertReceived, body-size, field-size,
-        // transfer-coding, content-coding, internal-error) write
-        // the disc only; payload encoding lands in a follow-up.
+        // The 8-alignment is forced by option<u64> in the body-size
+        // arms (HttpRequestBodySize, HttpResponseBodySize) — u64
+        // align = 8 → option<u64> align = 8 → error-code variant
+        // align = 8 → result variant align = 8.
+        //
+        // Slice GG shipped the simple (no-payload) arms with disc
+        // at the (incorrect) +4 offset; Slice HH corrects the
+        // 8-alignment and adds typed-payload encoders for the
+        // arms HttpException carries:
+        //   DnsError(option<string>)
+        //   TlsAlertReceived(option<u8>, option<string>)
+        //   HttpRequestBodySize / HttpResponseBodySize (option<u64>)
+        //   *HeaderSectionSize / *TrailerSectionSize (option<u32>)
+        //   *HeaderSize / *TrailerSize (option<field-size-payload>
+        //     or field-size-payload — encoded uniformly through
+        //     the HttpException.{FieldName, FieldSize} fields)
+        //   HttpResponseTransferCoding / *ContentCoding (option<string>)
+        //   InternalError (option<string>)
 
-        private const int ResultResponseErrorCodeSize = 32;
+        private const int ResultResponseErrorCodeSize = 40;
 
         private static void ValidateResultResponseErrorCodeRetptr(
             int retptr,
             Wacs.Core.Runtime.Types.MemoryInstance memory)
         {
-            if (retptr < 0 || (retptr & 0x3) != 0
+            if (retptr < 0 || (retptr & 0x7) != 0
                 || retptr + ResultResponseErrorCodeSize > memory.Data.Length)
                 throw new InvalidOperationException(
                     "wasi:http/client.send / handler.handle: " +
                     $"retptr 0x{retptr:X8} misaligned or out of " +
-                    "range (needs 32 bytes 4-aligned).");
+                    "range (needs 40 bytes 8-aligned).");
         }
 
         private void WriteResultResponseErrorCode(
@@ -3447,15 +3463,202 @@ namespace Wacs.WASI.Preview3
                 dest[0] = 0; // result-disc = ok
                 int handle = ResponseHandles.Allocate(response);
                 System.Buffers.Binary.BinaryPrimitives
-                    .WriteInt32LittleEndian(dest.Slice(4), handle);
+                    .WriteInt32LittleEndian(dest.Slice(8), handle);
                 return;
             }
             dest[0] = 1; // result-disc = err
-            // error-code variant disc at +4. Slice GG: simple
-            // arms only; payload section (+8..32) stays zero.
-            // Typed-payload arms write only the disc here and
-            // populate +8..32 in a follow-up slice.
-            dest[4] = (byte)ex.Code;
+            dest[8] = (byte)ex.Code; // error-code variant disc
+
+            // Typed-payload arms write into +16..40 (the 24-byte
+            // payload section of the error-code variant, sized
+            // to the dominant arm option<field-size-payload>).
+            WriteHttpErrorCodeTypedPayload(
+                dest.Slice(16, 24), ex, realloc, memory);
+        }
+
+        // ---- Slice HH: typed-payload encoder ------------------------
+
+        private static void WriteOptionString(
+            Span<byte> dest, string? value,
+            ICabiRealloc realloc,
+            Wacs.Core.Runtime.Types.MemoryInstance memory)
+        {
+            // option<string> wire: 12 bytes, align 4.
+            //   +0:    opt-disc (u8) + 3 pad
+            //   +4..8: ptr (i32; 0 when none)
+            //   +8..12: len (i32; 0 when none)
+            dest.Slice(0, 12).Clear();
+            if (value == null) return;
+            dest[0] = 1;
+            byte[] bytes = System.Text.Encoding.UTF8.GetBytes(value);
+            int strPtr = bytes.Length > 0
+                ? realloc.Allocate(1, bytes.Length) : 0;
+            if (bytes.Length > 0)
+                new ReadOnlySpan<byte>(bytes)
+                    .CopyTo(memory.AsSpan(strPtr, bytes.Length));
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(dest.Slice(4), strPtr);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(dest.Slice(8), bytes.Length);
+        }
+
+        private static void WriteOptionU8(
+            Span<byte> dest, byte? value)
+        {
+            // option<u8> wire: 2 bytes, align 1.
+            //   +0: opt-disc (u8)
+            //   +1: u8 value (when some)
+            dest.Slice(0, 2).Clear();
+            if (value == null) return;
+            dest[0] = 1;
+            dest[1] = value.Value;
+        }
+
+        private static void WriteOptionU16(
+            Span<byte> dest, ushort? value)
+        {
+            // option<u16> wire: 4 bytes, align 2.
+            //   +0:    opt-disc (u8) + 1 pad
+            //   +2..4: u16 value (when some, LE)
+            dest.Slice(0, 4).Clear();
+            if (value == null) return;
+            dest[0] = 1;
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteUInt16LittleEndian(dest.Slice(2, 2), value.Value);
+        }
+
+        private static void WriteOptionU32(
+            Span<byte> dest, uint? value)
+        {
+            // option<u32> wire: 8 bytes, align 4.
+            //   +0:    opt-disc (u8) + 3 pad
+            //   +4..8: u32 value (when some, LE)
+            dest.Slice(0, 8).Clear();
+            if (value == null) return;
+            dest[0] = 1;
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteUInt32LittleEndian(dest.Slice(4, 4), value.Value);
+        }
+
+        private static void WriteOptionU64(
+            Span<byte> dest, ulong? value)
+        {
+            // option<u64> wire: 16 bytes, align 8.
+            //   +0:    opt-disc (u8) + 7 pad
+            //   +8..16: u64 value (when some, LE)
+            dest.Slice(0, 16).Clear();
+            if (value == null) return;
+            dest[0] = 1;
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteUInt64LittleEndian(dest.Slice(8, 8), value.Value);
+        }
+
+        private static void WriteFieldSizePayload(
+            Span<byte> dest, string? fieldName, uint? fieldSize,
+            ICabiRealloc realloc,
+            Wacs.Core.Runtime.Types.MemoryInstance memory)
+        {
+            // field-size-payload record: 20 bytes, align 4.
+            //   +0..12:  option<string> field-name
+            //   +12..20: option<u32> field-size
+            dest.Slice(0, 20).Clear();
+            WriteOptionString(dest.Slice(0, 12), fieldName, realloc, memory);
+            WriteOptionU32(dest.Slice(12, 8), fieldSize);
+        }
+
+        private static void WriteOptionFieldSizePayload(
+            Span<byte> dest, string? fieldName, uint? fieldSize,
+            ICabiRealloc realloc,
+            Wacs.Core.Runtime.Types.MemoryInstance memory)
+        {
+            // option<field-size-payload> wire: 24 bytes, align 4.
+            //   +0:    opt-disc (u8) + 3 pad
+            //   +4..24: field-size-payload (20 bytes)
+            dest.Slice(0, 24).Clear();
+            if (fieldName == null && fieldSize == null)
+            {
+                // none — represent absence as a literal none. The
+                // HttpException with neither field set is rare
+                // but possible; treat as a missing payload.
+                return;
+            }
+            dest[0] = 1;
+            WriteFieldSizePayload(
+                dest.Slice(4, 20), fieldName, fieldSize, realloc, memory);
+        }
+
+        // Write the typed payload (if any) for an
+        // HttpException's error-code arm into a 24-byte span
+        // starting at the variant's payload offset (+16 within
+        // the result retptr, = +8 within the error-code variant).
+        // The span is already cleared; this method only writes
+        // the payload bytes for arms that carry one.
+        private static void WriteHttpErrorCodeTypedPayload(
+            Span<byte> dest, HttpException ex,
+            ICabiRealloc realloc,
+            Wacs.Core.Runtime.Types.MemoryInstance memory)
+        {
+            switch (ex.Code)
+            {
+                case HttpErrorCode.DnsError:
+                    // DNS-error-payload record at +0:
+                    //   +0..12:  option<string> rcode
+                    //   +12..16: option<u16> info-code (the impl
+                    //            doesn't store info-code today —
+                    //            always none)
+                    WriteOptionString(dest.Slice(0, 12),
+                        ex.DnsRcode, realloc, memory);
+                    WriteOptionU16(dest.Slice(12, 4), null);
+                    break;
+
+                case HttpErrorCode.TlsAlertReceived:
+                    // TLS-alert-received-payload record at +0:
+                    //   +0..2:  option<u8> alert-id
+                    //   +2..4:  pad to align-4 for next option<string>
+                    //   +4..16: option<string> alert-message
+                    WriteOptionU8(dest.Slice(0, 2), ex.TlsAlertId);
+                    WriteOptionString(dest.Slice(4, 12),
+                        ex.TlsAlertMessage, realloc, memory);
+                    break;
+
+                case HttpErrorCode.HttpRequestBodySize:
+                case HttpErrorCode.HttpResponseBodySize:
+                    WriteOptionU64(dest.Slice(0, 16), ex.BodySize);
+                    break;
+
+                case HttpErrorCode.HttpRequestHeaderSectionSize:
+                case HttpErrorCode.HttpRequestTrailerSectionSize:
+                case HttpErrorCode.HttpResponseHeaderSectionSize:
+                case HttpErrorCode.HttpResponseTrailerSectionSize:
+                    WriteOptionU32(dest.Slice(0, 8), ex.FieldSize);
+                    break;
+
+                case HttpErrorCode.HttpRequestHeaderSize:
+                    // option<field-size-payload>
+                    WriteOptionFieldSizePayload(
+                        dest.Slice(0, 24), ex.FieldName,
+                        ex.FieldSize, realloc, memory);
+                    break;
+
+                case HttpErrorCode.HttpRequestTrailerSize:
+                case HttpErrorCode.HttpResponseHeaderSize:
+                case HttpErrorCode.HttpResponseTrailerSize:
+                    // bare field-size-payload (not option-wrapped)
+                    WriteFieldSizePayload(
+                        dest.Slice(0, 20), ex.FieldName,
+                        ex.FieldSize, realloc, memory);
+                    break;
+
+                case HttpErrorCode.HttpResponseTransferCoding:
+                case HttpErrorCode.HttpResponseContentCoding:
+                case HttpErrorCode.InternalError:
+                    WriteOptionString(dest.Slice(0, 12),
+                        ex.OtherPayload, realloc, memory);
+                    break;
+
+                // All other arms: no typed payload, span stays
+                // zero from the caller's Clear().
+            }
         }
 
         private IRequest RequireRequest(int handle)

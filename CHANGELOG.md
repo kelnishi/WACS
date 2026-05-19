@@ -1,5 +1,72 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.36 — result<response, error-code> 40-byte 8-aligned + typed payloads (Phase 5 Slice HH)
+
+Slice GG's 32-byte 4-aligned retptr layout was wrong: the
+wasi:http/error-code variant has `option<u64>` payload arms
+(HttpRequestBodySize, HttpResponseBodySize) which require
+align=8 → variant align=8 → result variant align=8 →
+result-retptr size=40, align=8.
+
+### Corrected retptr layout
+
+```
++0:    result-disc (u8) + 7 pad
++8..40: payload section (32 bytes)
+
+  ok:
+    +8..12:  response handle (i32)
+    +12..40: unused, zero
+
+  err (http error-code variant, 32 bytes, align 8):
+    +8:    error-code disc (u8) + 7 pad
+    +16..40: payload section (24 bytes — sized to
+             option<field-size-payload>)
+```
+
+### Typed-payload encoders
+
+Wired the per-arm encoders for every error-code variant case
+that HttpException carries payload data for:
+
+| Arm | Wire payload |
+|---|---|
+| `DnsError` | `(option<string> rcode, option<u16> info-code)` record |
+| `TlsAlertReceived` | `(option<u8> alert-id, option<string> alert-message)` record |
+| `HttpRequestBodySize`, `HttpResponseBodySize` | `option<u64>` |
+| `*HeaderSectionSize`, `*TrailerSectionSize` (×4) | `option<u32>` |
+| `HttpRequestHeaderSize` | `option<field-size-payload>` |
+| `HttpRequestTrailerSize`, `HttpResponseHeaderSize`, `HttpResponseTrailerSize` | bare `field-size-payload` |
+| `HttpResponseTransferCoding`, `HttpResponseContentCoding`, `InternalError` | `option<string>` |
+
+`field-size-payload` is a 20-byte 4-aligned record of
+`(option<string> field-name, option<u32> field-size)`.
+
+Six small primitive option encoders (`WriteOptionString`,
+`WriteOptionU8/U16/U32/U64`, `WriteFieldSizePayload`,
+`WriteOptionFieldSizePayload`) compose to drive the typed-arm
+encoder via a switch on `ex.Code`. Each option encoder follows
+its own canon-ABI layout: option<u8>=2 bytes align 1,
+option<u16>=4 bytes align 2, option<u32>=8 bytes align 4,
+option<u64>=16 bytes align 8, option<string>=12 bytes align 4.
+
+### Test updates
+
+- Existing 6 ok/err tests in `HttpClientHandlerBindingTests.cs`
+  have all offsets updated for the new 8-aligned layout
+  (handle: +4 → +8, error-code disc: +4 → +8).
+- 11 new tests in `HttpErrorCodeTypedPayloadTests.cs` cover the
+  typed-payload arms — DnsError, TlsAlertReceived,
+  HttpRequestBodySize (some + none), HttpRequestHeaderSectionSize
+  (option<u32>), HttpRequestHeaderSize (option<field-size-payload>
+  unwrapping into name + size), HttpResponseHeaderSize (bare
+  field-size-payload at +16..36 without the option wrapper),
+  HttpResponseTransferCoding, InternalError-with-message, a
+  no-payload-arm check (ConnectionRefused leaves +16..40 zero),
+  and a misaligned-retptr test pinned to 8-alignment.
+
+341/341 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.35 — client.send / handler.handle result<response, error-code> wire fix (Phase 5 Slice GG)
 
 Same shape of bug as Slice Z (resolve-addresses): the existing

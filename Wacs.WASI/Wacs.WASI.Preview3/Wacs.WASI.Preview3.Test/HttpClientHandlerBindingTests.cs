@@ -87,7 +87,7 @@ namespace Wacs.WASI.Preview3.Test
             // disc=0 (ok) at +0; handle at +4.
             Assert.Equal(0, dispatcher.Memory.AsSpan(retptr, 1)[0]);
             int respHandle = BinaryPrimitives.ReadInt32LittleEndian(
-                dispatcher.Memory.AsSpan(retptr + 4, 4));
+                dispatcher.Memory.AsSpan(retptr + 8, 4));
             Assert.True(respHandle > 0);
             var resp = host.ResponseHandles.Get(respHandle);
             Assert.NotNull(resp);
@@ -120,7 +120,7 @@ namespace Wacs.WASI.Preview3.Test
             // disc=1 (err) at +0; error-code variant disc at +4.
             Assert.Equal(1, dispatcher.Memory.AsSpan(retptr, 1)[0]);
             Assert.Equal((byte)HttpErrorCode.ConnectionRefused,
-                dispatcher.Memory.AsSpan(retptr + 4, 1)[0]);
+                dispatcher.Memory.AsSpan(retptr + 8, 1)[0]);
         }
 
         [Fact]
@@ -141,7 +141,7 @@ namespace Wacs.WASI.Preview3.Test
             // wire layer routes it to disc=1 + error-code at +4.
             Assert.Equal(1, dispatcher.Memory.AsSpan(retptr, 1)[0]);
             Assert.Equal((byte)HttpErrorCode.InternalError,
-                dispatcher.Memory.AsSpan(retptr + 4, 1)[0]);
+                dispatcher.Memory.AsSpan(retptr + 8, 1)[0]);
         }
 
         [Fact]
@@ -166,7 +166,7 @@ namespace Wacs.WASI.Preview3.Test
 
             Assert.Equal(0, dispatcher.Memory.AsSpan(retptr, 1)[0]);
             int respHandle = BinaryPrimitives.ReadInt32LittleEndian(
-                dispatcher.Memory.AsSpan(retptr + 4, 4));
+                dispatcher.Memory.AsSpan(retptr + 8, 4));
             var resp = host.ResponseHandles.Get(respHandle);
             Assert.Equal(418, resp!.GetStatusCode());
         }
@@ -189,7 +189,7 @@ namespace Wacs.WASI.Preview3.Test
             // ConfigurationError lowered to err-variant.
             Assert.Equal(1, dispatcher.Memory.AsSpan(retptr, 1)[0]);
             Assert.Equal((byte)HttpErrorCode.ConfigurationError,
-                dispatcher.Memory.AsSpan(retptr + 4, 1)[0]);
+                dispatcher.Memory.AsSpan(retptr + 8, 1)[0]);
         }
 
         [Fact]
@@ -216,7 +216,7 @@ namespace Wacs.WASI.Preview3.Test
 
             Assert.Equal(1, dispatcher.Memory.AsSpan(retptr, 1)[0]);
             Assert.Equal((byte)HttpErrorCode.HttpResponseTimeout,
-                dispatcher.Memory.AsSpan(retptr + 4, 1)[0]);
+                dispatcher.Memory.AsSpan(retptr + 8, 1)[0]);
         }
 
         // ---- Test stubs ----------------------------------------------
