@@ -183,28 +183,52 @@ namespace Wacs.ComponentModel.Async
         // current task (task.return, task.cancel, context.get/set)
         // peek the top.
 
-        private readonly Stack<ComponentTask> _currentTasks =
-            new Stack<ComponentTask>();
+        // Flow-context-aware task frame: each push allocates a new
+        // immutable frame node and stores it as the AsyncLocal
+        // value, so sibling async bodies (each with its own
+        // ExecutionContext) see their OWN task stack. Without this,
+        // two cooperatively-yielding bodies on the same dispatcher
+        // clobber each other's CurrentTask state.
+        private sealed class TaskFrame
+        {
+            public readonly ComponentTask Task;
+            public readonly TaskFrame? Parent;
+            public TaskFrame(ComponentTask task, TaskFrame? parent)
+            {
+                Task = task;
+                Parent = parent;
+            }
+        }
 
-        /// <summary>The task whose body is currently executing, or
-        /// <c>null</c> when none.</summary>
-        public ComponentTask? CurrentTask =>
-            _currentTasks.Count > 0 ? _currentTasks.Peek() : null;
+        private readonly System.Threading.AsyncLocal<TaskFrame?> _currentTaskFrame =
+            new System.Threading.AsyncLocal<TaskFrame?>();
+
+        /// <summary>The task whose body is currently executing on
+        /// the calling ExecutionContext, or <c>null</c> when none.
+        /// Flow-aware: distinct async bodies on the same dispatcher
+        /// see distinct ambient tasks.</summary>
+        public ComponentTask? CurrentTask => _currentTaskFrame.Value?.Task;
 
         /// <summary>Lift-adapter entry point: push a freshly-created
-        /// task as the ambient task. Transitions
-        /// <see cref="ComponentTaskState.Starting"/> →
+        /// task as the ambient task in the current ExecutionContext.
+        /// Transitions <see cref="ComponentTaskState.Starting"/> →
         /// <see cref="ComponentTaskState.Started"/>.</summary>
         public void PushCurrentTask(ComponentTask task)
         {
             task.State = ComponentTaskState.Started;
-            _currentTasks.Push(task);
+            _currentTaskFrame.Value = new TaskFrame(task, _currentTaskFrame.Value);
         }
 
-        /// <summary>Lift-adapter exit point: pop the ambient task.
-        /// Returns the popped task or null if the stack was empty.</summary>
-        public ComponentTask? PopCurrentTask() =>
-            _currentTasks.Count > 0 ? _currentTasks.Pop() : null;
+        /// <summary>Lift-adapter exit point: pop the ambient task
+        /// from the current ExecutionContext's frame chain. Returns
+        /// the popped task or null if the chain was empty.</summary>
+        public ComponentTask? PopCurrentTask()
+        {
+            var frame = _currentTaskFrame.Value;
+            if (frame == null) return null;
+            _currentTaskFrame.Value = frame.Parent;
+            return frame.Task;
+        }
 
         // ---- Backpressure ----------------------------------------------
         //
@@ -630,19 +654,24 @@ namespace Wacs.ComponentModel.Async
         /// state. Returns the handle of the first deliverable
         /// member (any member already deliverable when called wins).
         ///
-        /// <para><b>Implementation:</b> blocking <c>Task.WaitAny</c>
-        /// over each member's completion task. This is the
-        /// pragmatic choice for Phase 3's single-task-per-component
-        /// model — the calling CLR thread parks on the
-        /// <see cref="WaitHandle"/> the runtime built around the
-        /// underlying tasks. The wasm-side stackful suspend (where
-        /// the wasm continuation yields control back to the host
-        /// dispatch loop) is a future refinement: it needs a
-        /// dispatcher-level scheduler that the current
-        /// <see cref="IContinuationContext"/> doesn't carry. For
-        /// the common case — one wasm task waits, one host task
-        /// completes it — both shapes are observationally
-        /// identical from the wasm side.</para>
+        /// <para><b>Two flavors share the same body:</b>
+        /// this synchronous entry point is the canon-async binder's
+        /// default, intended for wasm bodies that run synchronously
+        /// on the calling CLR thread.
+        /// <see cref="WaitableSetWaitAsync(IContinuationContext, int, int, bool, System.Threading.CancellationToken)"/>
+        /// is the cooperative-yield variant for async wasm bodies
+        /// (the lift adapter's
+        /// <see cref="AsyncLiftAdapter.InvokeAsync(AsyncDispatcher, ContInstance, System.Func{Task})"/>
+        /// overload) — same wait semantics, but the CLR thread
+        /// is free to run other work while parked.</para>
+        ///
+        /// <para>The wasm-side stackful suspend (where the wasm
+        /// continuation captures via <c>cont.new</c> /
+        /// <c>suspend</c> and yields control back to a wasm-defined
+        /// dispatch loop) is a future refinement that lights up
+        /// when wit-component-emitted async components actually
+        /// use the Stack Switching opcodes. The current async-body
+        /// path covers the CLR-side concurrency case adequately.</para>
         ///
         /// <para>Returns <c>0</c> (canon null) when the set is
         /// empty. Members without a wait-able completion source
@@ -662,21 +691,55 @@ namespace Wacs.ComponentModel.Async
             IContinuationContext ctx, int waitableSetHandle,
             int memoryIdx, bool cancellable)
         {
+            // Sync entry: block on the async body. GetAwaiter().GetResult()
+            // unwraps the Task<int> and rethrows any inner exception
+            // without the AggregateException wrapper that .Result
+            // would introduce.
+            return WaitableSetWaitAsync(
+                ctx, waitableSetHandle, memoryIdx,
+                cancellable, default).GetAwaiter().GetResult();
+        }
+
+        /// <summary>Cooperative-yield variant of
+        /// <see cref="WaitableSetWait(IContinuationContext, int, int, bool)"/>.
+        /// Returns a <see cref="Task{T}"/> that completes when any
+        /// member of the set reaches a deliverable state — the
+        /// CLR thread is yielded to the host scheduler while
+        /// parked, so other tasks on the same scheduler can run.
+        ///
+        /// <para>Use this from async wasm bodies launched via
+        /// <see cref="AsyncLiftAdapter.InvokeAsync(AsyncDispatcher, ContInstance, System.Func{Task})"/>.</para>
+        ///
+        /// <para>Honors
+        /// <paramref name="cancellationToken"/>: cancellation
+        /// surfaces as <see cref="OperationCanceledException"/>
+        /// from the awaiting body. The <paramref name="cancellable"/>
+        /// flag is the wasm-side hint that the runtime is free to
+        /// cancel-on-deliver if needed — implementation does not
+        /// currently distinguish, both flavors honor the token.</para>
+        /// </summary>
+        public async Task<int> WaitableSetWaitAsync(
+            IContinuationContext ctx, int waitableSetHandle,
+            int memoryIdx, bool cancellable,
+            System.Threading.CancellationToken cancellationToken = default)
+        {
             var ws = WaitableSets.Get(waitableSetHandle)
                 ?? throw new InvalidOperationException(
                     $"waitable-set.wait: handle {waitableSetHandle} not allocated.");
 
             while (true)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 // Sync scan — wins immediately when any member is
                 // already deliverable, so a polling caller never
-                // pays the WaitAny overhead.
+                // pays the WhenAny overhead.
                 foreach (var member in ws.Members)
                     if (IsWaitableDeliverable(member)) return member;
 
                 if (ws.Members.Count == 0) return 0;
 
-                // Build the WaitAny-able task set. Streams use the
+                // Build the WhenAny-able task set. Streams use the
                 // channel reader's WaitToReadAsync to wake on
                 // buffered-data or EOS. Tasks/subtasks/futures use
                 // their completion task directly.
@@ -696,8 +759,28 @@ namespace Wacs.ComponentModel.Async
                     return 0;
                 }
 
-                Task.WaitAny(waitables.ToArray());
-                // Loop back and re-scan: WaitAny only proves SOME
+                // WhenAny + cancellation: race the wait against a
+                // cancellation-triggered TCS so cancellationToken
+                // cancellation unblocks promptly without abandoning
+                // the underlying tasks.
+                if (cancellationToken.CanBeCanceled)
+                {
+                    var cancelTcs = new TaskCompletionSource<bool>(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
+                    using (cancellationToken.Register(
+                        s => ((TaskCompletionSource<bool>)s!).TrySetResult(true),
+                        cancelTcs))
+                    {
+                        waitables.Add(cancelTcs.Task);
+                        await Task.WhenAny(waitables).ConfigureAwait(false);
+                    }
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+                else
+                {
+                    await Task.WhenAny(waitables).ConfigureAwait(false);
+                }
+                // Loop back and re-scan: WhenAny only proves SOME
                 // task completed, not which one.
             }
         }
@@ -705,23 +788,34 @@ namespace Wacs.ComponentModel.Async
         // Build a Task that completes when the given waitable
         // handle becomes deliverable. Returns null for handles
         // we can't wait on (unknown / non-waitable shapes).
+        //
+        // <para><b>Handle-space caveat:</b> each AsyncHandleTable
+        // assigns its own monotonic <c>_nextHandle</c>, so the
+        // same integer can refer to entries across multiple
+        // tables (e.g. registered Task at handle 1 AND fresh
+        // future at handle 1). We build a Task that fires when
+        // ANY of the entries the handle resolves to becomes
+        // ready — sympathetic to the CM spec's single-namespace
+        // model — to avoid short-circuiting on the
+        // wrong table.</para>
         private Task? GetMemberWaitTask(int handle)
         {
+            List<Task>? tasks = null;
             if (Tasks.Get(handle) is ComponentTask t)
-                return t.Completion.Task;
+                (tasks ??= new List<Task>()).Add(t.Completion.Task);
             if (Subtasks.Get(handle) is ComponentSubtask st)
-                return st.Child.Completion.Task;
+                (tasks ??= new List<Task>()).Add(st.Child.Completion.Task);
             if (Futures.Get(handle) is FutureCell<object?> f)
-                return f.Task;
+                (tasks ??= new List<Task>()).Add(f.Task);
             if (Streams.Get(handle) is StreamSlot ss)
             {
-                // ChannelReader.WaitToReadAsync completes when
-                // an item arrives or the channel completes. Bridge
-                // to a Task so it composes with the rest.
                 var vt = ss.Buffer.Reader.WaitToReadAsync();
-                return vt.IsCompleted ? Task.CompletedTask : vt.AsTask();
+                (tasks ??= new List<Task>()).Add(
+                    vt.IsCompleted ? Task.CompletedTask : vt.AsTask());
             }
-            return null;
+            if (tasks == null) return null;
+            if (tasks.Count == 1) return tasks[0];
+            return Task.WhenAny(tasks);
         }
 
         /// <summary><c>canon waitable-set.poll cancel? memidx</c> —
@@ -748,19 +842,24 @@ namespace Wacs.ComponentModel.Async
         }
 
         // Determine whether a waitable handle has reached a state
-        // that wait/poll should surface. Handles are not partitioned
-        // by kind on the wire — same int can appear in any of the
-        // tables — so check each kind in turn.
+        // that wait/poll should surface. The handle can resolve
+        // to entries across multiple tables (the per-kind
+        // <see cref="AsyncHandleTable{T}"/> instances each allocate
+        // their own monotone <c>_nextHandle</c>); any one of the
+        // resolved entries reaching a deliverable state makes the
+        // handle deliverable — sympathetic to the CM spec's
+        // single-namespace model.
         private bool IsWaitableDeliverable(int waitableHandle)
         {
-            if (Tasks.Get(waitableHandle) is ComponentTask t)
-                return t.Completion.Task.IsCompleted;
-            if (Subtasks.Get(waitableHandle) is ComponentSubtask st)
-                return st.Child.Completion.Task.IsCompleted;
-            if (Futures.Get(waitableHandle) is FutureCell<object?> f)
-                return f.IsCompleted;
-            if (Streams.Get(waitableHandle) is StreamSlot ss)
-                return ss.Buffer.IsCompleted || ss.Buffer.Reader.Count > 0;
+            if (Tasks.Get(waitableHandle) is ComponentTask t
+                && t.Completion.Task.IsCompleted) return true;
+            if (Subtasks.Get(waitableHandle) is ComponentSubtask st
+                && st.Child.Completion.Task.IsCompleted) return true;
+            if (Futures.Get(waitableHandle) is FutureCell<object?> f
+                && f.IsCompleted) return true;
+            if (Streams.Get(waitableHandle) is StreamSlot ss
+                && (ss.Buffer.IsCompleted || ss.Buffer.Reader.Count > 0))
+                return true;
             return false;
         }
 

@@ -1,5 +1,72 @@
 # Changelog
 
+## WACS.ComponentModel 0.8.22 — WaitableSet wait suspend bridge (Phase 3 Slice L)
+
+Replaces the blocking `Task.WaitAny` in
+`AsyncDispatcher.WaitableSetWait` with a cooperative-yield
+async variant — async wasm bodies can park on a wait without
+hogging the CLR thread.
+
+### `AsyncDispatcher.WaitableSetWaitAsync`
+
+Returns `Task<int>` instead of blocking `int`. Uses
+`Task.WhenAny` over the member waitables (futures, streams,
+tasks, subtasks); the CLR thread is yielded to the scheduler
+while parked. Honors a `CancellationToken` — cancellation
+surfaces as `OperationCanceledException` from the awaiting
+body.
+
+The synchronous `WaitableSetWait` entry point is preserved as a
+thin sync-bridge (`.GetAwaiter().GetResult()`) — back-compat
+for synchronous canon-async bodies and the canon-async binder's
+default delegate shape.
+
+### `AsyncLiftAdapter.InvokeAsync(Func<Task>)` overload
+
+New overload accepts an async wasm body that awaits cooperatively.
+The body's exceptions surface via the returned task in the same
+shape as the synchronous overload. `OperationCanceledException`
+escapes as a soft cancel — the task transitions to
+`Cancelled` and the awaiter sees a canceled task.
+
+### Flow-aware `AsyncDispatcher.CurrentTask`
+
+The current-task stack is now `AsyncLocal<TaskFrame>`-backed
+(linked-list frame). Each push allocates a new frame node and
+stores it in the current ExecutionContext; sibling async bodies
+on the same dispatcher each see their OWN ambient task — no
+cross-context clobber. Replaces the previous `Stack<ComponentTask>`
+which was process-wide.
+
+### Handle-overlap fix in `IsWaitableDeliverable` / `GetMemberWaitTask`
+
+`AsyncHandleTable<T>` instances each allocate handles from their
+own monotone counter starting at 1, so the same integer can
+refer to entries across multiple kinds (e.g. registered task
+at handle 1 AND a future at handle 1). The previous
+"first-table-wins" short-circuit silently misrouted waits in
+that scenario — a running task at handle 1 was checked for
+completion when the caller meant the future at handle 1.
+
+Both functions now check every table and union the
+deliverable / wait-task signals — sympathetic to the CM spec's
+single-namespace model. Side-by-side fix until the broader
+per-component shared-handle-space refactor lands.
+
+### Test coverage
+
+12 new tests in
+`Wacs.ComponentModel.Test/WaitableSetSuspendBridgeTests.cs`:
+sync entry preserved, async entry returns ready handle,
+async completes when member becomes ready, async doesn't
+block calling thread, cancellation token honored, async
+lift-adapter overload runs body, body yields via
+WaitableSetWaitAsync, exception faults task, cancellation
+marks task cancelled, two interleaving async bodies on the
+same dispatcher.
+
+623/623 tests green.
+
 ## WACS.ComponentModel 0.8.21 / WACS.ComponentModel.Async.SourceGen 0.2.0 — typed `[ComponentLifter]` registry (Phase 3 Slice K3)
 
 Adds the source-generator-driven typed-lifter pathway that

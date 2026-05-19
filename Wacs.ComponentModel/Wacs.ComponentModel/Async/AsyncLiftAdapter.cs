@@ -140,5 +140,91 @@ namespace Wacs.ComponentModel.Async
                 }
             });
         }
+
+        /// <summary>
+        /// Wrap an async wasm body (a <see cref="Func{Task}"/>)
+        /// with task lifecycle management. Used by wasm bodies
+        /// that yield cooperatively via
+        /// <see cref="AsyncDispatcher.WaitableSetWaitAsync(IContinuationContext, int, int, bool, System.Threading.CancellationToken)"/>
+        /// instead of blocking — the calling CLR thread is free
+        /// to run other tasks while parked, so multiple component
+        /// tasks can interleave on a single thread.
+        ///
+        /// <para>The body's <see cref="Task"/> is awaited; when it
+        /// completes, the task is implicitly returned with
+        /// <c>null</c> unless the body called
+        /// <see cref="AsyncDispatcher.TaskReturn"/> explicitly.
+        /// Exceptions surface via the returned task in the same
+        /// shape as the synchronous overload.</para>
+        ///
+        /// <para><b>Ambient task scoping:</b> the
+        /// <see cref="AsyncDispatcher.CurrentTask"/> stack is
+        /// pushed on entry and popped on completion. The
+        /// dispatcher's current-task storage is
+        /// <see cref="System.Threading.AsyncLocal{T}"/>-backed,
+        /// so two cooperatively-yielding bodies on the same
+        /// dispatcher each see their OWN ambient task even when
+        /// interleaving on a shared thread pool.</para>
+        /// </summary>
+        public static async Task<object?> InvokeAsync(
+            AsyncDispatcher dispatcher,
+            ContInstance continuation,
+            Func<Task> body)
+        {
+            if (dispatcher == null)
+                throw new ArgumentNullException(nameof(dispatcher));
+            if (continuation == null)
+                throw new ArgumentNullException(nameof(continuation));
+            if (body == null)
+                throw new ArgumentNullException(nameof(body));
+
+            // Yield to the thread pool BEFORE touching the
+            // dispatcher's AsyncLocal state, so the
+            // PushCurrentTask mutation lives in a forked
+            // ExecutionContext rather than the caller's. Without
+            // the yield, the synchronous prefix would mutate the
+            // caller's AsyncLocal — and sibling InvokeAsync calls
+            // on the same caller would stack ambient tasks
+            // together, breaking the flow-aware design.
+            //
+            // ConfigureAwait(false) keeps the continuation on the
+            // pool, so we don't pin to a SynchronizationContext
+            // (e.g. xUnit's per-test context).
+            await Task.Yield();
+
+            var task = dispatcher.RegisterTask(continuation);
+            dispatcher.PushCurrentTask(task);
+            try
+            {
+                await body().ConfigureAwait(false);
+                if (task.State == ComponentTaskState.Started)
+                {
+                    task.State = ComponentTaskState.Returned;
+                    task.Completion.TrySetResult(null);
+                }
+            }
+            catch (OperationCanceledException oce)
+            {
+                if (task.State == ComponentTaskState.Started)
+                {
+                    task.State = ComponentTaskState.Cancelled;
+                    task.Completion.TrySetCanceled(oce.CancellationToken);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (task.State == ComponentTaskState.Started)
+                {
+                    task.State = ComponentTaskState.Failed;
+                    task.Completion.TrySetException(ex);
+                }
+            }
+            finally
+            {
+                dispatcher.PopCurrentTask();
+            }
+
+            return await task.Completion.Task.ConfigureAwait(false);
+        }
     }
 }
