@@ -8,6 +8,7 @@
 using System;
 using System.Threading.Tasks;
 using Wacs.ComponentModel.Async;
+using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Concurrency;
 using Wacs.Core.Types;
 using Xunit;
@@ -187,33 +188,229 @@ namespace Wacs.ComponentModel.Test
             Assert.False(d.SubtaskDrop(subHandle));
         }
 
-        // ---- Pinned Slice-D contract markers ----------------------------
+        // ---- Current-task stack + task lifecycle (Slice D) -------------
 
         [Fact]
-        public void TaskReturn_throws_NotImplemented_pinned_for_SliceD()
+        public void PushCurrentTask_transitions_Starting_to_Started()
         {
             var d = new AsyncDispatcher();
-            var ex = Assert.Throws<NotImplementedException>(
-                () => d.TaskReturn(null!, "value"));
-            Assert.Contains("Slice D", ex.Message);
+            var task = d.RegisterTask(MakeCont());
+            Assert.Equal(ComponentTaskState.Starting, task.State);
+            d.PushCurrentTask(task);
+            Assert.Equal(ComponentTaskState.Started, task.State);
+            Assert.Same(task, d.CurrentTask);
         }
 
         [Fact]
-        public void WaitableSetWait_throws_NotImplemented_pinned_for_SliceD()
+        public void PopCurrentTask_returns_task_and_leaves_stack_empty()
+        {
+            var d = new AsyncDispatcher();
+            var task = d.RegisterTask(MakeCont());
+            d.PushCurrentTask(task);
+            var popped = d.PopCurrentTask();
+            Assert.Same(task, popped);
+            Assert.Null(d.CurrentTask);
+            Assert.Null(d.PopCurrentTask()); // empty stack returns null
+        }
+
+        [Fact]
+        public async Task TaskReturn_sets_completion_with_value_and_transitions_state()
+        {
+            var d = new AsyncDispatcher();
+            var task = d.RegisterTask(MakeCont());
+            d.PushCurrentTask(task);
+            d.TaskReturn(null!, "lifted-result");
+            Assert.Equal(ComponentTaskState.Returned, task.State);
+            Assert.Equal("lifted-result", await task.Completion.Task);
+        }
+
+        [Fact]
+        public void TaskReturn_throws_when_no_ambient_task()
+        {
+            var d = new AsyncDispatcher();
+            Assert.Throws<InvalidOperationException>(
+                () => d.TaskReturn(null!, "x"));
+        }
+
+        [Fact]
+        public async Task TaskCancel_cancels_completion()
+        {
+            var d = new AsyncDispatcher();
+            var task = d.RegisterTask(MakeCont());
+            d.PushCurrentTask(task);
+            d.TaskCancel(null!);
+            Assert.Equal(ComponentTaskState.Cancelled, task.State);
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                async () => await task.Completion.Task);
+        }
+
+        [Fact]
+        public async Task TaskFail_faults_completion_with_exception()
+        {
+            var d = new AsyncDispatcher();
+            var task = d.RegisterTask(MakeCont());
+            d.PushCurrentTask(task);
+            d.TaskFail(new InvalidOperationException("body-threw"));
+            Assert.Equal(ComponentTaskState.Failed, task.State);
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+                async () => await task.Completion.Task);
+            Assert.Equal("body-threw", ex.Message);
+        }
+
+        // ---- Backpressure ----------------------------------------------
+
+        [Fact]
+        public void Backpressure_increments_decrements_and_set_clears()
+        {
+            var d = new AsyncDispatcher();
+            Assert.Equal(0, d.BackpressureLevel);
+            d.BackpressureInc();
+            d.BackpressureInc();
+            Assert.Equal(2, d.BackpressureLevel);
+            d.BackpressureDec();
+            Assert.Equal(1, d.BackpressureLevel);
+            d.BackpressureSet(); // clear to 0
+            Assert.Equal(0, d.BackpressureLevel);
+            d.BackpressureDec(); // floors at 0
+            Assert.Equal(0, d.BackpressureLevel);
+        }
+
+        // ---- Context (per-task slots) ----------------------------------
+
+        [Fact]
+        public void ContextSet_then_Get_round_trips()
+        {
+            var d = new AsyncDispatcher();
+            var task = d.RegisterTask(MakeCont());
+            d.PushCurrentTask(task);
+            d.ContextSet(slotIdx: 3, new Value(42));
+            var read = d.ContextGet(3);
+            Assert.Equal(42, read.Data.Int32);
+        }
+
+        [Fact]
+        public void ContextGet_returns_default_when_slot_unwritten()
+        {
+            var d = new AsyncDispatcher();
+            var task = d.RegisterTask(MakeCont());
+            d.PushCurrentTask(task);
+            // Reading an unwritten slot returns the default Value
+            // (Type byte 0) without throwing — slots are sparse.
+            // Compare the raw type byte rather than via op_Equality
+            // (which rejects Undefined ValType comparisons).
+            var v = d.ContextGet(99);
+            Assert.Equal((Wacs.Core.Types.Defs.ValType)0, v.Type);
+        }
+
+        [Fact]
+        public void ContextGet_throws_when_no_ambient_task()
+        {
+            var d = new AsyncDispatcher();
+            Assert.Throws<InvalidOperationException>(
+                () => d.ContextGet(0));
+        }
+
+        // ---- Subtask cancel propagation --------------------------------
+
+        [Fact]
+        public async Task SubtaskCancel_transitions_child_state_and_cancels_completion()
+        {
+            var d = new AsyncDispatcher();
+            var parent = d.RegisterTask(MakeCont());
+            var child = d.RegisterTask(MakeCont());
+            // child must be in a non-terminal state to be cancelable.
+            d.PushCurrentTask(child); // transitions to Started
+            d.PopCurrentTask();
+
+            var subHandle = d.Subtasks.Allocate(
+                h => new ComponentSubtask(h, child, parent));
+
+            d.SubtaskCancel(subHandle, asyncFlag: false);
+            Assert.Equal(ComponentTaskState.Cancelled, child.State);
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                async () => await child.Completion.Task);
+        }
+
+        // ---- WaitableSetPoll -------------------------------------------
+
+        [Fact]
+        public void WaitableSetPoll_returns_zero_when_no_member_ready()
+        {
+            var d = new AsyncDispatcher();
+            var ws = d.WaitableSetNew();
+            var f = d.FutureNew(0);
+            d.WaitableJoin(ws, f);
+            // Future hasn't been written — not deliverable.
+            Assert.Equal(0, d.WaitableSetPoll(null!, ws, 0, false));
+        }
+
+        [Fact]
+        public void WaitableSetPoll_returns_member_handle_when_future_resolved()
+        {
+            var d = new AsyncDispatcher();
+            var ws = d.WaitableSetNew();
+            var f = d.FutureNew(0);
+            d.WaitableJoin(ws, f);
+            d.FutureWrite(f, "ready");
+            Assert.Equal(f, d.WaitableSetPoll(null!, ws, 0, false));
+        }
+
+        [Fact]
+        public void WaitableSetPoll_picks_first_deliverable_when_multiple_join()
+        {
+            var d = new AsyncDispatcher();
+            var ws = d.WaitableSetNew();
+            var f1 = d.FutureNew(0);
+            var f2 = d.FutureNew(0);
+            d.WaitableJoin(ws, f1);
+            d.WaitableJoin(ws, f2);
+            d.FutureWrite(f2, "two-is-ready");
+            // f2 is deliverable, f1 isn't.
+            Assert.Equal(f2, d.WaitableSetPoll(null!, ws, 0, false));
+        }
+
+        // ---- Stream/Future cancel-* (now wired in Slice D) -------------
+
+        [Fact]
+        public void StreamCancelRead_drops_readable_side()
+        {
+            var d = new AsyncDispatcher();
+            var h = d.StreamNew(0);
+            Assert.True(d.StreamCancelRead(h, asyncFlag: false));
+        }
+
+        [Fact]
+        public async Task FutureCancelRead_cancels_pending_read()
+        {
+            var d = new AsyncDispatcher();
+            var h = d.FutureNew(0);
+            var read = d.FutureReadAsync(h);
+            Assert.True(d.FutureCancelRead(h, asyncFlag: false));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                async () => await read);
+        }
+
+        // ---- Thread.yield no-op for single-task model ------------------
+
+        [Fact]
+        public void ThreadYield_is_synchronous_noop()
+        {
+            var d = new AsyncDispatcher();
+            // Should return without throwing or suspending; the
+            // single-task model has nothing to yield to.
+            d.ThreadYield(null!, cancellable: false);
+            d.ThreadYield(null!, cancellable: true);
+        }
+
+        // ---- Pinned Slice-F marker for the suspend bridge --------------
+
+        [Fact]
+        public void WaitableSetWait_throws_NotImplemented_pinned_for_SliceF()
         {
             var d = new AsyncDispatcher();
             var ex = Assert.Throws<NotImplementedException>(
                 () => d.WaitableSetWait(null!, 1, 0, false));
-            Assert.Contains("Slice D", ex.Message);
-        }
-
-        [Fact]
-        public void Backpressure_set_throws_NotImplemented_pinned_for_SliceD()
-        {
-            var d = new AsyncDispatcher();
-            var ex = Assert.Throws<NotImplementedException>(
-                () => d.BackpressureSet());
-            Assert.Contains("Slice D", ex.Message);
+            Assert.Contains("Slice F", ex.Message);
         }
     }
 }

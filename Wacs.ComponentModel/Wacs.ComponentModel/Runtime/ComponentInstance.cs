@@ -306,15 +306,37 @@ namespace Wacs.ComponentModel.Runtime
                         var entries = CanonSectionReader.Decode(s.Payload);
                         foreach (var e in entries)
                         {
-                            // Both canon lower AND
-                            // canon resource.* (new / drop /
-                            // rep) add to the core-func index
-                            // space. Counting only CanonLower
-                            // would mis-align subsequent core-
-                            // alias indices when wit-component
-                            // emits resource handles.
-                            if (e is CanonLower) coreFuncIdx++;
-                            else if (e is CanonResourceOp) coreFuncIdx++;
+                            // Every canon-form except `canon lift`
+                            // produces a (core func) — see the
+                            // canon grammar in component-model
+                            // Binary.md. Counting only some
+                            // mis-aligns subsequent core-alias
+                            // indices when wit-component emits
+                            // mixed resource + async builtins.
+                            switch (e)
+                            {
+                                case CanonLift _:
+                                    // Lift produces a *component*-
+                                    // level func; doesn't bump the
+                                    // core-func counter.
+                                    break;
+                                case CanonLower _:
+                                case CanonResourceOp _:
+                                case CanonTaskReturn _:
+                                case CanonTaskCancel _:
+                                case CanonSubtaskCancel _:
+                                case CanonSubtaskDrop _:
+                                case CanonBackpressureOp _:
+                                case CanonContextOp _:
+                                case CanonThreadYield _:
+                                case CanonStreamOp _:
+                                case CanonFutureOp _:
+                                case CanonErrorContextOp _:
+                                case CanonWaitableSetOp _:
+                                case CanonWaitableJoin _:
+                                    coreFuncIdx++;
+                                    break;
+                            }
                         }
                         break;
                     }

@@ -1,5 +1,99 @@
 # Changelog
 
+## WACS.ComponentModel 0.8.6 — dispatcher state + canon-async index alignment (Phase 3 Slice D)
+
+Fills in the dispatcher state-machine surface that doesn't
+require Stack Switching `Suspend` integration, and closes an
+index-alignment bug in `ComponentInstance` exposed by Phase 2's
+expanded canon-entry hierarchy.
+
+### Dispatcher state (now implemented)
+
+- **Current-task stack** — `PushCurrentTask` / `PopCurrentTask` /
+  `CurrentTask`. Lift adapters (Slice E) push on body entry,
+  pop on body exit. `PushCurrentTask` transitions
+  `Starting → Started`.
+- **`TaskReturn` / `TaskCancel` / `TaskFail`** — consume the
+  ambient task. Set `Completion` (Result / Canceled / Faulted),
+  transition state, all under guard that the task is in
+  `Started` for return / cancel.
+- **Backpressure** — `BackpressureSet` (clears),
+  `BackpressureInc` / `BackpressureDec`; the embedder reads
+  `BackpressureLevel`.
+- **Per-task context slots** — `ContextGet(slotIdx)` /
+  `ContextSet(slotIdx, Value)` route through the current
+  task's sparse `Dictionary<int, Value>`. Unwritten slots
+  return `default(Value)`; no ambient task throws.
+- **`SubtaskCancel`** — transitions the child task to
+  `Cancelled` and cancels its completion. Idempotent on
+  already-terminal children.
+- **Stream/Future `Cancel{Read,Write}`** — wired as the
+  synchronous "release the half" equivalents
+  (`StreamDropReadable` / `FutureDropReadable` etc.). The
+  spec's sync-vs-async distinction is a Slice F refinement.
+- **`WaitableSetPoll`** — synchronous "first deliverable
+  member" scan. Returns the matching handle or `0` (canon
+  null). Deliverable = task completed, future resolved,
+  stream has data or is completed.
+- **`ThreadYield`** — synchronous no-op for the single-task
+  body model. Documented as the natural hook for a future
+  multi-task scheduler.
+
+### ComponentInstance — async canon entries bump the core-func index
+
+`ComponentInstance.Instantiate`'s canon-section walk used to
+increment `coreFuncIdx` only for `CanonLower` and
+`CanonResourceOp`. Per the spec grammar, every canon form
+except `canon lift` produces a `(core func)` — so the new
+async-ABI canon entries (`task.return`, `subtask.cancel`,
+`stream.*`, `future.*`, `error-context.*`, `waitable-set.*`,
+`waitable.join`, `backpressure.*`, `context.{get,set}`,
+`thread.yield`) all need to bump the counter. Without the
+fix, components mixing resource + async builtins would
+mis-align subsequent core-alias indices.
+
+The switch now enumerates each canon-entry kind explicitly,
+making the spec compliance auditable at a glance.
+
+### `ComponentTask.Context`
+
+Added `public Dictionary<int, Value> Context { get; }` for the
+per-task context slots Phase 2's `CanonContextOp` reads/writes.
+Sparse — slot keys are component-defined u32s without a static
+bound.
+
+### Tests
+
+15 new in `AsyncDispatcherTests`:
+
+- Current-task push/pop transitions; multiple registrations.
+- TaskReturn / TaskCancel / TaskFail outcomes + state guards.
+- Backpressure inc/dec/set + floor at zero.
+- Context round-trip; default-on-unwritten; no-task throw.
+- SubtaskCancel propagation to child completion.
+- WaitableSetPoll: empty set, single future ready, first
+  deliverable of many.
+- StreamCancelRead / FutureCancelRead now wired (sync paths).
+- ThreadYield is observably a no-op.
+- WaitableSetWait remains pinned with a "Slice F" marker.
+
+471/471 ComponentModel tests pass (was 456).
+
+### Slice scope
+
+**What's still in Slice E** (transpiler symmetric emit):
+
+- ComponentInstance's canon-async binding to actual host
+  functions the core module calls (creating delegates that
+  invoke dispatcher methods).
+- Transpiler CIL emission for the same surface.
+
+**What's still in Slice F** (suspend bridge + e2e):
+
+- `WaitableSetWait` blocking on suspend via
+  `StackSwitchingHelpers.Suspend`.
+- Producer/consumer end-to-end fixture under both engines.
+
 ## WACS.ComponentModel 0.8.5 — AsyncDispatcher contract (Phase 3 Slice C)
 
 Establishes the public API the interpreter calls directly and the

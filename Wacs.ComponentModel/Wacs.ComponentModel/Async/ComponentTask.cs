@@ -5,7 +5,9 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+using System.Collections.Generic;
 using System.Threading.Tasks;
+using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Concurrency;
 
 namespace Wacs.ComponentModel.Async
@@ -68,6 +70,16 @@ namespace Wacs.ComponentModel.Async
         /// gate which canon ops are legal (e.g. <c>task.return</c>
         /// requires <see cref="ComponentTaskState.Started"/>).</summary>
         public ComponentTaskState State { get; internal set; }
+
+        /// <summary>
+        /// Per-task <c>context.get</c> / <c>context.set</c> slots —
+        /// a sparse keyed store the wasm body uses to thread
+        /// task-scoped values across <c>suspend</c>/<c>resume</c>
+        /// boundaries. Slot keys are component-defined u32 indices;
+        /// the spec does not bound them, so the storage is sparse.
+        /// </summary>
+        public Dictionary<int, Value> Context { get; } =
+            new Dictionary<int, Value>();
 
         public ComponentTask(int handle, ContInstance continuation)
         {

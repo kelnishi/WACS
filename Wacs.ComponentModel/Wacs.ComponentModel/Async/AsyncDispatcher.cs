@@ -69,24 +69,100 @@ namespace Wacs.ComponentModel.Async
         public AsyncHandleTable<string> ErrorContexts { get; } =
             new AsyncHandleTable<string>();
 
-        // ---- Task lifecycle (Slice D — current-task tracking) ----------
+        // ---- Current-task stack ----------------------------------------
+        //
+        // The "ambient task" is the task whose body is currently
+        // executing on the wasm stack. The lift adapter (Slice E)
+        // pushes a fresh task on body entry and pops on
+        // return/cancel/exception. Canon ops that reference the
+        // current task (task.return, task.cancel, context.get/set)
+        // peek the top.
+
+        private readonly Stack<ComponentTask> _currentTasks =
+            new Stack<ComponentTask>();
+
+        /// <summary>The task whose body is currently executing, or
+        /// <c>null</c> when none.</summary>
+        public ComponentTask? CurrentTask =>
+            _currentTasks.Count > 0 ? _currentTasks.Peek() : null;
+
+        /// <summary>Lift-adapter entry point: push a freshly-created
+        /// task as the ambient task. Transitions
+        /// <see cref="ComponentTaskState.Starting"/> →
+        /// <see cref="ComponentTaskState.Started"/>.</summary>
+        public void PushCurrentTask(ComponentTask task)
+        {
+            task.State = ComponentTaskState.Started;
+            _currentTasks.Push(task);
+        }
+
+        /// <summary>Lift-adapter exit point: pop the ambient task.
+        /// Returns the popped task or null if the stack was empty.</summary>
+        public ComponentTask? PopCurrentTask() =>
+            _currentTasks.Count > 0 ? _currentTasks.Pop() : null;
+
+        // ---- Backpressure ----------------------------------------------
+        //
+        // A monotone counter the embedder consults to gate new task
+        // creation. Set clears, Inc/Dec adjust. The state is
+        // process-wide for the component instance — not per-task —
+        // which matches the spec's "backpressure is an ambient
+        // flag, not a per-call argument" stance.
+
+        private int _backpressureLevel;
+
+        /// <summary>Current backpressure level. Embedders consult
+        /// this before lifting new tasks; a positive level means
+        /// the component is asking callers to slow down.</summary>
+        public int BackpressureLevel => _backpressureLevel;
+
+        // ---- Task lifecycle --------------------------------------------
 
         /// <summary><c>canon task.return rs opts</c> — settle the
-        /// ambient task's completion with the lifted result. Needs
-        /// current-task tracking, lands in Slice D.</summary>
+        /// ambient task's completion with the lifted result.
+        /// Caller passes the already-lifted CLR object (the canon-
+        /// ABI lift converted the wasm-side value before reaching
+        /// here). Body continues to its natural return after this
+        /// call; the lift adapter pops the task on body exit.</summary>
         public void TaskReturn(IContinuationContext ctx, object? result)
         {
-            throw new NotImplementedException(
-                "task.return needs current-task tracking (Slice D).");
+            var task = CurrentTask
+                ?? throw new InvalidOperationException(
+                    "task.return called outside an active task body.");
+            if (task.State != ComponentTaskState.Started)
+                throw new InvalidOperationException(
+                    $"task.return: task is in state {task.State}, expected Started.");
+            task.State = ComponentTaskState.Returned;
+            task.Completion.TrySetResult(result);
         }
 
         /// <summary><c>canon task.cancel</c> — transition the ambient
-        /// task to <see cref="ComponentTaskState.Cancelled"/>.
-        /// Slice D wires this.</summary>
+        /// task to <see cref="ComponentTaskState.Cancelled"/>. The
+        /// body continues to its natural exit after this call —
+        /// like <see cref="TaskReturn"/> the lift adapter handles
+        /// the pop.</summary>
         public void TaskCancel(IContinuationContext ctx)
         {
-            throw new NotImplementedException(
-                "task.cancel needs current-task tracking (Slice D).");
+            var task = CurrentTask
+                ?? throw new InvalidOperationException(
+                    "task.cancel called outside an active task body.");
+            if (task.State != ComponentTaskState.Started)
+                throw new InvalidOperationException(
+                    $"task.cancel: task is in state {task.State}, expected Started.");
+            task.State = ComponentTaskState.Cancelled;
+            task.Completion.TrySetCanceled();
+        }
+
+        /// <summary>Mark the ambient task as failed and fault its
+        /// completion. Called by the lift adapter when an exception
+        /// escapes the body without being caught.</summary>
+        public void TaskFail(Exception exception)
+        {
+            var task = CurrentTask
+                ?? throw new InvalidOperationException(
+                    "TaskFail called outside an active task body.");
+            task.State = ComponentTaskState.Failed;
+            task.Completion.TrySetException(exception);
         }
 
         /// <summary>Register a freshly-allocated task with the
@@ -106,13 +182,26 @@ namespace Wacs.ComponentModel.Async
 
         // ---- Subtask -----------------------------------------------------
 
-        /// <summary><c>canon subtask.cancel async?</c>. Slice D wires
-        /// the cancel-propagation semantics; the table-side drop
-        /// is implemented today.</summary>
+        /// <summary><c>canon subtask.cancel async?</c> — request
+        /// cancellation of the child task. Transitions the child's
+        /// state and faults its completion; the <paramref name="asyncFlag"/>
+        /// is the spec's hint that the caller does/doesn't intend
+        /// to wait synchronously — Phase 3 implementation treats
+        /// both the same (the caller decides whether to await the
+        /// canceled completion).</summary>
         public void SubtaskCancel(int subtaskHandle, bool asyncFlag)
         {
-            throw new NotImplementedException(
-                "subtask.cancel cancel propagation lands in Slice D.");
+            var sub = Subtasks.Get(subtaskHandle)
+                ?? throw new InvalidOperationException(
+                    $"subtask.cancel: handle {subtaskHandle} not allocated.");
+            var child = sub.Child;
+            // Idempotent: only transition out of running states.
+            if (child.State == ComponentTaskState.Starting
+                || child.State == ComponentTaskState.Started)
+            {
+                child.State = ComponentTaskState.Cancelled;
+                child.Completion.TrySetCanceled();
+            }
         }
 
         /// <summary><c>canon subtask.drop</c> — release the subtask
@@ -161,22 +250,25 @@ namespace Wacs.ComponentModel.Async
             return buf.TryRead(out value);
         }
 
-        /// <summary><c>canon stream.cancel-read t async?</c>. Slice D
-        /// implements the cooperative-cancel handshake; for now,
-        /// surfaces as a no-op returning the buffer's drained
-        /// status.</summary>
+        /// <summary><c>canon stream.cancel-read t async?</c> —
+        /// signals the stream that no further reads will arrive.
+        /// The buffer keeps any unread items (writer may still call
+        /// <see cref="StreamTryWrite"/>); the reader half is marked
+        /// done. Returns true on a known handle.</summary>
         public bool StreamCancelRead(int streamHandle, bool asyncFlag)
         {
-            throw new NotImplementedException(
-                "stream.cancel-read cooperative cancel lands in Slice D.");
+            // For the byte stream slice, cancel-read is observationally
+            // equivalent to drop-readable: pending and future reads
+            // will see end-of-stream. Distinguishing the two arms
+            // (sync vs. async hint) is a Slice F refinement.
+            return StreamDropReadable(streamHandle);
         }
 
-        /// <summary><c>canon stream.cancel-write t async?</c>. Slice D.</summary>
-        public bool StreamCancelWrite(int streamHandle, bool asyncFlag)
-        {
-            throw new NotImplementedException(
-                "stream.cancel-write cooperative cancel lands in Slice D.");
-        }
+        /// <summary><c>canon stream.cancel-write t async?</c> —
+        /// signals the stream that no further writes will arrive.
+        /// Completes the channel so the reader observes EOS.</summary>
+        public bool StreamCancelWrite(int streamHandle, bool asyncFlag) =>
+            StreamDropWritable(streamHandle);
 
         /// <summary><c>canon stream.drop-readable t</c> — drop the
         /// reader half of the stream handle. Producer can still
@@ -236,19 +328,16 @@ namespace Wacs.ComponentModel.Async
             return cell.Task;
         }
 
-        /// <summary><c>canon future.cancel-read t async?</c>. Slice D.</summary>
-        public bool FutureCancelRead(int futureHandle, bool asyncFlag)
-        {
-            throw new NotImplementedException(
-                "future.cancel-read cooperative cancel lands in Slice D.");
-        }
+        /// <summary><c>canon future.cancel-read t async?</c> —
+        /// abandon the reader side. Pending read is cancelled.</summary>
+        public bool FutureCancelRead(int futureHandle, bool asyncFlag) =>
+            FutureDropReadable(futureHandle);
 
-        /// <summary><c>canon future.cancel-write t async?</c>. Slice D.</summary>
-        public bool FutureCancelWrite(int futureHandle, bool asyncFlag)
-        {
-            throw new NotImplementedException(
-                "future.cancel-write cooperative cancel lands in Slice D.");
-        }
+        /// <summary><c>canon future.cancel-write t async?</c> —
+        /// abandon the writer side without resolving. Reader
+        /// observes cancellation.</summary>
+        public bool FutureCancelWrite(int futureHandle, bool asyncFlag) =>
+            FutureDropReadable(futureHandle);
 
         /// <summary><c>canon future.drop-readable t</c>. Cancels any
         /// pending reader and drops the handle.</summary>
@@ -296,24 +385,55 @@ namespace Wacs.ComponentModel.Async
 
         /// <summary><c>canon waitable-set.wait cancel? memidx</c> —
         /// suspend until any member of the set reaches a deliverable
-        /// state. Needs <see cref="IContinuationContext"/> integration
-        /// for the suspend mechanic. Slice D.</summary>
+        /// state. Needs <see cref="IContinuationContext"/>-driven
+        /// suspend integration with the interpreter loop; lands in
+        /// Slice F together with the end-to-end producer/consumer
+        /// fixture.</summary>
         public void WaitableSetWait(
             IContinuationContext ctx, int waitableSetHandle,
             int memoryIdx, bool cancellable)
         {
             throw new NotImplementedException(
-                "waitable-set.wait suspend integration lands in Slice D.");
+                "waitable-set.wait suspend integration lands in Slice F.");
         }
 
         /// <summary><c>canon waitable-set.poll cancel? memidx</c> —
-        /// non-blocking check for any deliverable member. Slice D.</summary>
-        public void WaitableSetPoll(
+        /// non-blocking check. Returns the handle of the first
+        /// deliverable member, or 0 (the canon null sentinel) when
+        /// no member is ready. Deliverable = the underlying
+        /// <see cref="ComponentTask"/> is past Started,
+        /// <see cref="FutureCell{T}"/> is completed, or
+        /// <see cref="StreamBuffer{T}"/> has buffered items or has
+        /// completed.</summary>
+        public int WaitableSetPoll(
             IContinuationContext ctx, int waitableSetHandle,
             int memoryIdx, bool cancellable)
         {
-            throw new NotImplementedException(
-                "waitable-set.poll lands in Slice D.");
+            var ws = WaitableSets.Get(waitableSetHandle)
+                ?? throw new InvalidOperationException(
+                    $"waitable-set.poll: handle {waitableSetHandle} not allocated.");
+            foreach (var memberHandle in ws.Members)
+            {
+                if (IsWaitableDeliverable(memberHandle)) return memberHandle;
+            }
+            return 0; // canon null
+        }
+
+        // Determine whether a waitable handle has reached a state
+        // that wait/poll should surface. Handles are not partitioned
+        // by kind on the wire — same int can appear in any of the
+        // tables — so check each kind in turn.
+        private bool IsWaitableDeliverable(int waitableHandle)
+        {
+            if (Tasks.Get(waitableHandle) is ComponentTask t)
+                return t.Completion.Task.IsCompleted;
+            if (Subtasks.Get(waitableHandle) is ComponentSubtask st)
+                return st.Child.Completion.Task.IsCompleted;
+            if (Futures.Get(waitableHandle) is FutureCell<object?> f)
+                return f.IsCompleted;
+            if (Streams.Get(waitableHandle) is StreamBuffer<byte> sb)
+                return sb.IsCompleted || sb.Reader.Count > 0;
+            return false;
         }
 
         /// <summary><c>canon waitable-set.drop</c>.</summary>
@@ -331,34 +451,68 @@ namespace Wacs.ComponentModel.Async
             ws.Join(waitableHandle);
         }
 
-        // ---- Backpressure (Slice D — ambient state machine) -------------
+        // ---- Backpressure -----------------------------------------------
 
-        public void BackpressureSet() =>
-            throw new NotImplementedException(
-                "backpressure.set ambient state lands in Slice D.");
+        /// <summary><c>canon backpressure.set</c> — clear the
+        /// component's backpressure flag. Embedders are free to
+        /// resume creating new tasks.</summary>
+        public void BackpressureSet() { _backpressureLevel = 0; }
 
-        public void BackpressureInc() =>
-            throw new NotImplementedException(
-                "backpressure.inc ambient state lands in Slice D.");
+        /// <summary><c>canon backpressure.inc</c> — raise the
+        /// backpressure level by one. Multiple increments stack;
+        /// the embedder reads <see cref="BackpressureLevel"/>.</summary>
+        public void BackpressureInc() { _backpressureLevel++; }
 
-        public void BackpressureDec() =>
-            throw new NotImplementedException(
-                "backpressure.dec ambient state lands in Slice D.");
+        /// <summary><c>canon backpressure.dec</c> — drop the
+        /// level by one (floor 0).</summary>
+        public void BackpressureDec()
+        {
+            if (_backpressureLevel > 0) _backpressureLevel--;
+        }
 
-        // ---- Context (Slice D — per-task context slots) -----------------
+        // ---- Context ----------------------------------------------------
 
-        public Value ContextGet(int slotIdx) =>
-            throw new NotImplementedException(
-                "context.get needs per-task slots (Slice D).");
+        /// <summary><c>canon context.get v i</c> — read the ambient
+        /// task's context slot <paramref name="slotIdx"/>. Returns
+        /// a default-initialized <see cref="Value"/> when the slot
+        /// has never been written. Throws when no task is ambient.</summary>
+        public Value ContextGet(int slotIdx)
+        {
+            var task = CurrentTask
+                ?? throw new InvalidOperationException(
+                    "context.get called outside an active task body.");
+            return task.Context.TryGetValue(slotIdx, out var v) ? v : default;
+        }
 
-        public void ContextSet(int slotIdx, Value value) =>
-            throw new NotImplementedException(
-                "context.set needs per-task slots (Slice D).");
+        /// <summary><c>canon context.set v i</c> — write the ambient
+        /// task's context slot. Throws when no task is ambient.</summary>
+        public void ContextSet(int slotIdx, Value value)
+        {
+            var task = CurrentTask
+                ?? throw new InvalidOperationException(
+                    "context.set called outside an active task body.");
+            task.Context[slotIdx] = value;
+        }
 
-        // ---- Thread.yield (Slice D — suspend integration) ---------------
+        // ---- Thread.yield -----------------------------------------------
 
-        public void ThreadYield(IContinuationContext ctx, bool cancellable) =>
-            throw new NotImplementedException(
-                "thread.yield suspend integration lands in Slice D.");
+        /// <summary><c>canon thread.yield cancel?</c> — yield the
+        /// current task's slot to other runnable tasks. In a
+        /// single-task body (the only model Phase 3 implements),
+        /// there are no other tasks to schedule, so yield is a
+        /// synchronous no-op. <paramref name="cancellable"/>
+        /// controls whether task-cancellation is observable across
+        /// the yield boundary; today both arms are identical
+        /// because there is no scheduler that could interleave.
+        ///
+        /// <para>When Phase 3 grows a multi-task scheduler, this
+        /// method becomes the runtime's natural cooperative
+        /// yield point — at that time the suspend integration
+        /// with <see cref="IContinuationContext"/> lands.</para>
+        /// </summary>
+        public void ThreadYield(IContinuationContext ctx, bool cancellable)
+        {
+            // Intentional no-op. See doc comment.
+        }
     }
 }
