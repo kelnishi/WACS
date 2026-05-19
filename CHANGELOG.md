@@ -1,5 +1,84 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.4 — `wasi:random` port (Phase 5 Slice B)
+
+Second Phase 5 host-interface port. Adds host bindings for all
+three WASI Preview 3 random interfaces; introduces the
+`Wacs.WASI.Preview3.CanonicalAbi.Realloc` helper for any
+import that returns a list or aggregate through guest memory.
+
+### Vendored WIT
+
+`wit/deps/wasi-random-0.3.0-rc-2026-03-15/package.wit` copied
+from the Spec.Test/wasi submodule. Embedded via the existing
+EmbeddedResource pattern.
+
+### `IRandom` + default `Random`
+
+Backs `wasi:random/random@0.3.0-rc-2026-03-15`:
+
+- `get-random-u64: func() -> u64` —
+  `RandomNumberGenerator`-backed CSPRNG read.
+- `get-random-bytes: func(max-len: u64) -> list<u8>` — CSPRNG-
+  filled buffer; rejects requests above `int.MaxValue`. The
+  returned list goes back through cabi_realloc-allocated
+  guest memory; `InvokeGetRandomBytes` writes (ptr, len) at
+  the retptr.
+
+### `IInsecure` + default `InsecureRandom`
+
+Backs `wasi:random/insecure@0.3.0-rc-2026-03-15`:
+
+- `get-insecure-random-u64: func() -> u64` —
+  `System.Random`-backed (NOT cryptographically secure).
+- `get-insecure-random-bytes: func(max-len: u64) -> list<u8>` —
+  same buffer-allocation path as `get-random-bytes`.
+
+### `IInsecureSeed` + default `InsecureSeedSource`
+
+Backs `wasi:random/insecure-seed@0.3.0-rc-2026-03-15`:
+
+- `get-insecure-seed: func() -> tuple<u64, u64>` — CSPRNG-
+  backed (the WIT name notwithstanding; spec recommends
+  secure seed for hash-map DoS protection). Returns through
+  a 16-byte 8-aligned retptr (two u64s laid out at retptr).
+
+### `CanonicalAbi.Realloc` helper
+
+New `Wacs.WASI.Preview3.CanonicalAbi.Realloc` — lazy
+`cabi_realloc` resolver mirroring Preview2's helper. Resolves
+the guest's `cabi_realloc` export on first `Allocate` call;
+throws if the component doesn't export it. Sibling per-package
+copy until a third package needs it, at which point it moves
+to `Wacs.ComponentModel.CanonicalABI`.
+
+### `WasiPreview3Host` integration
+
+`Random`, `InsecureRandom`, `InsecureSeed` properties on the
+host (default-constructed lazily, overridable via builder).
+`BindToRuntime` registers all 5 random host functions. Three
+new wire-level module-name constants: `RandomModuleName`,
+`InsecureRandomModuleName`, `InsecureSeedModuleName`.
+
+`InvokeGetRandomBytes`, `InvokeGetInsecureRandomBytes`, and
+`InvokeGetInsecureSeed` are public for direct test access.
+
+### Test coverage
+
+15 new tests in `RandomTests.cs`:
+- Default impls: non-zero u64s, correct byte lengths,
+  zero-length handling, oversize rejection.
+- `InsecureSeed`: produces a non-zero u64 pair.
+- `BindToRuntime` registers all 5 host functions.
+- `InvokeGetInsecureSeed` writes the u64 pair, rejects
+  misaligned retptr, throws when dispatcher unset.
+- `InvokeGetRandomBytes` zero-length writes (0, 0) at retptr
+  without needing cabi_realloc; misaligned retptr throws.
+- Default-construct provides impls; builder override threads
+  through.
+
+54/54 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.3 — `wasi:clocks` port (Phase 5 Slice A)
 
 First Phase 5 host-interface port. Adds host bindings for the

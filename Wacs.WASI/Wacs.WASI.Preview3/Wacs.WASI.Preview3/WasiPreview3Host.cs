@@ -10,8 +10,10 @@ using System.IO;
 using Wacs.ComponentModel.Async;
 using Wacs.ComponentModel.CanonicalABI;
 using Wacs.Core.Runtime;
+using Wacs.WASI.Preview3.CanonicalAbi;
 using Wacs.WASI.Preview3.Cli;
 using Wacs.WASI.Preview3.Clocks;
+using Wacs.WASI.Preview3.Random;
 
 namespace Wacs.WASI.Preview3
 {
@@ -52,6 +54,9 @@ namespace Wacs.WASI.Preview3
         private IStderr? _stderr;
         private IMonotonicClock? _monotonic;
         private ISystemClock? _system;
+        private IRandom? _random;
+        private IInsecure? _insecure;
+        private IInsecureSeed? _insecureSeed;
 
         public WasiPreview3Host() : this(new WasiPreview3HostBuilder()) { }
 
@@ -75,6 +80,15 @@ namespace Wacs.WASI.Preview3
 
         public ISystemClock SystemClock =>
             _system ??= _config.SystemClock ?? new SystemClock();
+
+        public IRandom Random =>
+            _random ??= _config.Random ?? new Random.Random();
+
+        public IInsecure InsecureRandom =>
+            _insecure ??= _config.InsecureRandom ?? new InsecureRandom();
+
+        public IInsecureSeed InsecureSeed =>
+            _insecureSeed ??= _config.InsecureSeed ?? new InsecureSeedSource();
 
         /// <summary>
         /// The component-instance dispatcher the host bindings
@@ -209,6 +223,150 @@ namespace Wacs.WASI.Preview3
                 (SystemClockModuleName, "get-resolution"),
                 (Func<ExecContext, long>)(_ =>
                     unchecked((long)SystemClock.GetResolution())));
+
+            // wasi:random — three interfaces. Memory-writing
+            // bindings (get-*-bytes, get-insecure-seed) need
+            // cabi_realloc to reserve guest space; the resolver
+            // captures the runtime here and resolves the export
+            // lazily at first call (after instantiation).
+            var realloc = new Realloc(runtime);
+
+            // wasi:random/random@0.3.0-rc-2026-03-15
+            //   get-random-bytes: func(max-len: u64) -> list<u8>
+            //   get-random-u64: func() -> u64
+            //
+            // list<u8> flat-count = 2 (ptr + len) > MAX_FLAT_RESULTS
+            // → retptr layout: ptr (i32) + len (i32). The bytes
+            // themselves are allocated via cabi_realloc and the
+            // host writes them at the returned ptr.
+            runtime.BindHostFunction(
+                (RandomModuleName, "get-random-u64"),
+                (Func<ExecContext, long>)(_ =>
+                    unchecked((long)Random.GetRandomU64())));
+
+            runtime.BindHostFunction(
+                (RandomModuleName, "get-random-bytes"),
+                (Action<ExecContext, long, int>)((_, maxLen, retptr) =>
+                    InvokeGetRandomBytes(Random, realloc,
+                        unchecked((ulong)maxLen), retptr)));
+
+            // wasi:random/insecure@0.3.0-rc-2026-03-15
+            //   get-insecure-random-bytes: func(max-len: u64) -> list<u8>
+            //   get-insecure-random-u64: func() -> u64
+            runtime.BindHostFunction(
+                (InsecureRandomModuleName, "get-insecure-random-u64"),
+                (Func<ExecContext, long>)(_ =>
+                    unchecked((long)InsecureRandom.GetInsecureRandomU64())));
+
+            runtime.BindHostFunction(
+                (InsecureRandomModuleName, "get-insecure-random-bytes"),
+                (Action<ExecContext, long, int>)((_, maxLen, retptr) =>
+                    InvokeGetInsecureRandomBytes(InsecureRandom, realloc,
+                        unchecked((ulong)maxLen), retptr)));
+
+            // wasi:random/insecure-seed@0.3.0-rc-2026-03-15
+            //   get-insecure-seed: func() -> tuple<u64, u64>
+            //
+            // tuple<u64, u64> flat-count = 2 > MAX_FLAT_RESULTS
+            // → retptr layout: u64 (8 bytes) + u64 (8 bytes) =
+            // 16 bytes, 8-aligned.
+            runtime.BindHostFunction(
+                (InsecureSeedModuleName, "get-insecure-seed"),
+                (Action<ExecContext, int>)((_, retptr) =>
+                    InvokeGetInsecureSeed(InsecureSeed, retptr)));
+        }
+
+        /// <summary>
+        /// Invoke <c>wasi:random/random.get-random-bytes</c>'s
+        /// host-side delegate body. Allocates
+        /// <paramref name="maxLen"/> bytes of guest memory via
+        /// <paramref name="realloc"/>, fills it with the
+        /// <see cref="IRandom"/>'s output, and writes (ptr, len)
+        /// at <paramref name="retptr"/>. Public for test access.
+        /// </summary>
+        public void InvokeGetRandomBytes(
+            IRandom source, Realloc realloc, ulong maxLen, int retptr)
+        {
+            if (source == null) throw new ArgumentNullException(nameof(source));
+            if (realloc == null) throw new ArgumentNullException(nameof(realloc));
+            var bytes = source.GetRandomBytes(maxLen);
+            WriteByteList(realloc, retptr, bytes);
+        }
+
+        /// <summary>Same as
+        /// <see cref="InvokeGetRandomBytes"/> for the insecure
+        /// variant.</summary>
+        public void InvokeGetInsecureRandomBytes(
+            IInsecure source, Realloc realloc, ulong maxLen, int retptr)
+        {
+            if (source == null) throw new ArgumentNullException(nameof(source));
+            if (realloc == null) throw new ArgumentNullException(nameof(realloc));
+            var bytes = source.GetInsecureRandomBytes(maxLen);
+            WriteByteList(realloc, retptr, bytes);
+        }
+
+        /// <summary>
+        /// Invoke <c>wasi:random/insecure-seed.get-insecure-seed</c>'s
+        /// host-side delegate body. Writes the two u64s at
+        /// <paramref name="retptr"/> (16 bytes, 8-aligned).
+        /// </summary>
+        public void InvokeGetInsecureSeed(IInsecureSeed source, int retptr)
+        {
+            if (source == null) throw new ArgumentNullException(nameof(source));
+            var dispatcher = RequireDispatcher();
+            var memory = dispatcher.Memory
+                ?? throw new InvalidOperationException(
+                    "wasi:random/insecure-seed: dispatcher.Memory " +
+                    "must be set before this import is invoked.");
+
+            if (retptr < 0 || (retptr & 0x7) != 0
+                || retptr + 16 > memory.Data.Length)
+                throw new InvalidOperationException(
+                    "wasi:random/insecure-seed: retptr " +
+                    $"0x{retptr:X8} is misaligned or out of range " +
+                    $"(memory size = {memory.Data.Length}). The caller " +
+                    "must allocate a 16-byte 8-aligned return area.");
+
+            var (a, b) = source.GetInsecureSeed();
+            var dest = memory.AsSpan(retptr, 16);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteUInt64LittleEndian(dest.Slice(0), a);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteUInt64LittleEndian(dest.Slice(8), b);
+        }
+
+        // Shared write path for get-*-bytes: allocate guest
+        // memory via cabi_realloc, copy the bytes into it,
+        // write (ptr, len) into the retArea slot. Spec allows
+        // implementations to return fewer bytes than requested
+        // (short read) — the wire convention encodes whatever
+        // the host actually produced.
+        private void WriteByteList(Realloc realloc, int retptr, byte[] data)
+        {
+            var dispatcher = RequireDispatcher();
+            var memory = dispatcher.Memory
+                ?? throw new InvalidOperationException(
+                    "wasi:random/get-*-bytes: dispatcher.Memory must " +
+                    "be set before this import is invoked.");
+            if (retptr < 0 || (retptr & 0x3) != 0
+                || retptr + 8 > memory.Data.Length)
+                throw new InvalidOperationException(
+                    "wasi:random/get-*-bytes: retptr " +
+                    $"0x{retptr:X8} is misaligned or out of range " +
+                    $"(memory size = {memory.Data.Length}). The caller " +
+                    "must allocate an 8-byte 4-aligned return area.");
+
+            int ptr = data.Length == 0
+                ? 0
+                : realloc.Allocate(align: 1, size: data.Length);
+            if (data.Length > 0)
+                new ReadOnlySpan<byte>(data)
+                    .CopyTo(memory.AsSpan(ptr, data.Length));
+            var dest = memory.AsSpan(retptr, 8);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(dest.Slice(0), ptr);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(dest.Slice(4), data.Length);
         }
 
         /// <summary>
@@ -357,6 +515,19 @@ namespace Wacs.WASI.Preview3
         /// <summary>Wire-level WASI module name for the system clock.</summary>
         public const string SystemClockModuleName =
             "wasi:clocks/system-clock@0.3.0-rc-2026-03-15";
+
+        /// <summary>Wire-level WASI module name for cryptographic random.</summary>
+        public const string RandomModuleName =
+            "wasi:random/random@0.3.0-rc-2026-03-15";
+
+        /// <summary>Wire-level WASI module name for insecure random.</summary>
+        public const string InsecureRandomModuleName =
+            "wasi:random/insecure@0.3.0-rc-2026-03-15";
+
+        /// <summary>Wire-level WASI module name for the insecure-seed
+        /// 128-bit DoS-protection seed source.</summary>
+        public const string InsecureSeedModuleName =
+            "wasi:random/insecure-seed@0.3.0-rc-2026-03-15";
     }
 
     /// <summary>Fluent builder for <see cref="WasiPreview3Host"/>.</summary>
@@ -367,6 +538,9 @@ namespace Wacs.WASI.Preview3
         public IStderr? Stderr { get; set; }
         public IMonotonicClock? MonotonicClock { get; set; }
         public ISystemClock? SystemClock { get; set; }
+        public IRandom? Random { get; set; }
+        public IInsecure? InsecureRandom { get; set; }
+        public IInsecureSeed? InsecureSeed { get; set; }
     }
 
     /// <summary>Ergonomic one-liner mirroring
