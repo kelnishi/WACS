@@ -31,16 +31,18 @@ namespace Wacs.ComponentModel.Test
             return store.Allocate((TypeIdx)0, (Delegate)(Func<int>)(() => 0));
         }
 
-        // ---- AsyncHandleTable ---------------------------------------------
+        // ---- AsyncHandleTable (typed facade over shared store) ----------
 
         [Fact]
         public void Table_allocates_handles_starting_at_one()
         {
             // Handle 0 is reserved as the null sentinel by canon
-            // spec — the table must never return 0.
-            var t = new AsyncHandleTable<object>();
-            var h1 = t.Allocate(new object());
-            var h2 = t.Allocate(new object());
+            // spec — the dispatcher's shared store must never
+            // return 0. Exercised via the ErrorContexts facade
+            // (any kind would do; the counter is shared).
+            var d = new AsyncDispatcher();
+            var h1 = d.ErrorContexts.Allocate("a");
+            var h2 = d.ErrorContexts.Allocate("b");
             Assert.Equal(1, h1);
             Assert.Equal(2, h2);
         }
@@ -48,49 +50,105 @@ namespace Wacs.ComponentModel.Test
         [Fact]
         public void Table_get_returns_allocated_value_and_null_for_unknown()
         {
-            var t = new AsyncHandleTable<string>();
-            var h = t.Allocate("hello");
-            Assert.Equal("hello", t.Get(h));
-            Assert.Null(t.Get(999));
+            var d = new AsyncDispatcher();
+            var h = d.ErrorContexts.Allocate("hello");
+            Assert.Equal("hello", d.ErrorContexts.Get(h));
+            Assert.Null(d.ErrorContexts.Get(999));
         }
 
         [Fact]
         public void Table_drop_returns_value_and_removes_entry()
         {
-            var t = new AsyncHandleTable<string>();
-            var h = t.Allocate("world");
-            Assert.True(t.Contains(h));
-            Assert.Equal("world", t.Drop(h));
-            Assert.False(t.Contains(h));
-            Assert.Null(t.Drop(h)); // second drop = absent
+            var d = new AsyncDispatcher();
+            var h = d.ErrorContexts.Allocate("world");
+            Assert.True(d.ErrorContexts.Contains(h));
+            Assert.Equal("world", d.ErrorContexts.Drop(h));
+            Assert.False(d.ErrorContexts.Contains(h));
+            Assert.Null(d.ErrorContexts.Drop(h)); // second drop = absent
         }
 
         [Fact]
         public void Table_freelist_recycles_dropped_handles()
         {
-            // Recycling stabilizes long-running components — the
-            // handle counter doesn't drift unbounded under steady
-            // allocate/drop churn.
-            var t = new AsyncHandleTable<object>();
-            var h1 = t.Allocate(new object());
-            var h2 = t.Allocate(new object());
-            t.Drop(h1);
-            var h3 = t.Allocate(new object()); // pops h1 from freelist
+            // Recycling stabilizes long-running components. The
+            // freelist is SHARED across kinds — a dropped Task
+            // handle gets reused by the next allocation of any kind.
+            var d = new AsyncDispatcher();
+            var h1 = d.ErrorContexts.Allocate("x");
+            var h2 = d.ErrorContexts.Allocate("y");
+            d.ErrorContexts.Drop(h1);
+            var h3 = d.ErrorContexts.Allocate("z");
             Assert.Equal(h1, h3);
-            Assert.Equal(2, t.Count);
+            Assert.Equal(2, d.ErrorContexts.Count);
             Assert.NotEqual(h2, h3);
         }
 
         [Fact]
-        public void Table_count_reflects_live_entries()
+        public void Table_count_reflects_live_entries_for_kind()
         {
-            var t = new AsyncHandleTable<object>();
-            Assert.Equal(0, t.Count);
-            var a = t.Allocate(new object());
-            var b = t.Allocate(new object());
-            Assert.Equal(2, t.Count);
-            t.Drop(a);
-            Assert.Equal(1, t.Count);
+            var d = new AsyncDispatcher();
+            Assert.Equal(0, d.ErrorContexts.Count);
+            var a = d.ErrorContexts.Allocate("a");
+            var b = d.ErrorContexts.Allocate("b");
+            Assert.Equal(2, d.ErrorContexts.Count);
+            d.ErrorContexts.Drop(a);
+            Assert.Equal(1, d.ErrorContexts.Count);
+        }
+
+        [Fact]
+        public void Cross_kind_get_returns_null_for_same_handle()
+        {
+            // Spec-aligned single-namespace lookup: a handle
+            // allocated under one kind is never visible to a
+            // different kind's facade. With the per-kind tables
+            // the old code had at handle 1 from Tasks AND handle 1
+            // from Futures simultaneously — Slice L worked around
+            // that by union-checking; the shared-store refactor
+            // makes it impossible.
+            var d = new AsyncDispatcher();
+            var ecHandle = d.ErrorContexts.Allocate("error");
+            Assert.NotNull(d.ErrorContexts.Get(ecHandle));
+            // Same integer, different kind facade — must be null.
+            Assert.Null(d.Futures.Get(ecHandle));
+            Assert.Null(d.Streams.Get(ecHandle));
+            Assert.False(d.Futures.Contains(ecHandle));
+        }
+
+        [Fact]
+        public void Cross_kind_drop_does_not_release_wrong_kind()
+        {
+            // Dropping via the wrong facade returns null and
+            // leaves the handle live in its real facade. Prevents
+            // a hostile / mis-merged path from releasing a slot
+            // it doesn't own.
+            var d = new AsyncDispatcher();
+            var h = d.ErrorContexts.Allocate("hello");
+            Assert.Null(d.Futures.Drop(h));
+            Assert.True(d.ErrorContexts.Contains(h));
+            Assert.Equal("hello", d.ErrorContexts.Get(h));
+        }
+
+        [Fact]
+        public void GetHandleKind_returns_kind_for_live_handle_and_null_for_absent()
+        {
+            var d = new AsyncDispatcher();
+            var h = d.ErrorContexts.Allocate("hello");
+            Assert.Equal(WaitableKind.ErrorContext, d.GetHandleKind(h));
+            Assert.Null(d.GetHandleKind(999));
+        }
+
+        [Fact]
+        public void Shared_counter_does_not_overlap_across_kinds()
+        {
+            // The spec-aligned property: a fresh allocation in
+            // ANY kind takes the next integer from the SHARED
+            // counter, so two different kinds never share a handle.
+            var d = new AsyncDispatcher();
+            var ec = d.ErrorContexts.Allocate("a");
+            var ws = d.WaitableSets.Allocate(
+                h => new ComponentWaitableSet(h));
+            Assert.NotEqual(ec, ws);
+            Assert.Equal(ec + 1, ws);
         }
 
         // ---- ComponentTask -------------------------------------------------

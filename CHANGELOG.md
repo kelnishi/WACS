@@ -1,5 +1,76 @@
 # Changelog
 
+## WACS.ComponentModel 0.8.23 — shared per-component handle space (Phase 3 Slice M)
+
+Spec-aligned restructure of the canon-async handle storage.
+Previously each `AsyncHandleTable<T>` (Tasks, Subtasks,
+WaitableSets, Streams, Futures, ErrorContexts) ran its own
+monotone counter starting at 1, so the same integer could refer
+to entries across kinds (e.g. a registered Task and a fresh
+Future both at handle 1). Slice L worked around the resulting
+ambiguity with a union-across-tables check in
+`IsWaitableDeliverable` / `GetMemberWaitTask`; this slice
+removes the workaround by making the structure spec-correct.
+
+### Single per-component handle store
+
+`AsyncDispatcher` now owns a single
+`Dictionary<int, HandleEntry>` with one `_nextHandle` counter
+and one freelist. Each entry carries a `WaitableKind`
+discriminator alongside the payload reference. Drops recycle
+handles across all kinds — no per-kind drift.
+
+### `WaitableKind` enum (public)
+
+New `Wacs.ComponentModel.Async.WaitableKind` lists the six
+canon-async waitable shapes: `Task`, `Subtask`, `WaitableSet`,
+`Stream`, `Future`, `ErrorContext`. Adding a new shape is a
+two-step change: extend the enum + add a typed facade on
+`AsyncDispatcher`.
+
+### `AsyncHandleTable<T>` becomes a typed facade
+
+The class survives as a public typed view: it holds a
+back-reference to its owning dispatcher and the kind tag, and
+delegates `Allocate` / `Get` / `Drop` / `Contains` / `Count` to
+internal helpers on the dispatcher. The constructor is now
+`internal` — facades are created by `AsyncDispatcher`'s
+constructor and exposed via the six existing properties
+(`dispatcher.Tasks`, `dispatcher.Futures`, etc.). Public API
+shape for those properties is unchanged.
+
+`Get` / `Drop` enforce kind: a handle registered under one kind
+returns null when looked up via a different facade. The
+old "any table that has this integer wins" semantics is gone.
+
+### `AsyncDispatcher.GetHandleKind(int)`
+
+New public method for embedders writing generic waitable
+handlers (custom poll loops, debug introspection). Returns the
+`WaitableKind?` for a live handle, null if absent — lets the
+embedder dispatch on kind without trial-and-error `Get`
+probing through each facade.
+
+### Slice L union-hack removed
+
+`IsWaitableDeliverable` and `GetMemberWaitTask` are now clean
+single-kind switches. Each handle has exactly one meaning, so
+no cross-table union is required. The doc comments calling out
+the handle-overlap caveat are gone.
+
+### Test coverage
+
+`AsyncPrimitiveTests` rewrote the standalone-table tests as
+facade tests through a fresh dispatcher. Added four new tests
+explicitly exercising the spec-aligned properties:
+- Cross-kind `Get` returns null for the same handle
+- Cross-kind `Drop` does not release the wrong kind
+- `GetHandleKind` returns the correct kind / null
+- Shared counter does not overlap across kinds
+
+627 ComponentModel + 24 Preview3 + 13 Bindgen = 664/664 tests
+green.
+
 ## WACS.WASI.Preview3 0.1.2 — `wasi:cli/stdin.read-via-stream` multi-return binding (Phase 4 Slice K)
 
 Closes the Slice J deferral for the multi-result host import

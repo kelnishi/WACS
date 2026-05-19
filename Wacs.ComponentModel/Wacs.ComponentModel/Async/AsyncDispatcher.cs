@@ -47,23 +47,52 @@ namespace Wacs.ComponentModel.Async
     /// </summary>
     public sealed class AsyncDispatcher
     {
-        // Streams / futures / error-contexts erase to object at the
-        // table level — the dispatcher's typed methods take/return
-        // the concrete element shape (byte, etc.) and cast on the
-        // way in/out. The wire surface is handles either way;
-        // typing is enforced by the canon-ABI lift/lower layer
-        // surrounding the dispatcher call.
-        public AsyncHandleTable<ComponentTask> Tasks { get; } =
-            new AsyncHandleTable<ComponentTask>();
+        // Shared per-component handle store. Spec: the Component
+        // Model's task/subtask/waitable-set/stream/future/error-
+        // context handles all live in a single namespace, with
+        // kind tracked alongside each entry. The per-kind
+        // AsyncHandleTable<T> properties below are typed facades
+        // over THIS store — each tagged with its WaitableKind so
+        // Get/Drop reject cross-kind lookups cleanly.
+        //
+        // Single counter + single freelist → the same integer
+        // never resolves to two different waitables, and dropped
+        // handles get recycled across all kinds.
 
-        public AsyncHandleTable<ComponentSubtask> Subtasks { get; } =
-            new AsyncHandleTable<ComponentSubtask>();
+        private readonly struct HandleEntry
+        {
+            public readonly WaitableKind Kind;
+            public readonly object Payload;
+            public HandleEntry(WaitableKind kind, object payload)
+            {
+                Kind = kind;
+                Payload = payload;
+            }
+        }
 
-        public AsyncHandleTable<ComponentWaitableSet> WaitableSets { get; } =
-            new AsyncHandleTable<ComponentWaitableSet>();
+        private readonly Dictionary<int, HandleEntry> _handles =
+            new Dictionary<int, HandleEntry>();
+        private readonly Stack<int> _handleFreelist =
+            new Stack<int>();
+        private int _nextHandle = 1; // 0 is the canon null sentinel
 
-        public AsyncHandleTable<object> Streams { get; } =
-            new AsyncHandleTable<object>();
+        /// <summary>Typed facade for the <see cref="WaitableKind.Task"/>
+        /// slice of the shared handle store.</summary>
+        public AsyncHandleTable<ComponentTask> Tasks { get; }
+
+        /// <summary>Typed facade for the <see cref="WaitableKind.Subtask"/>
+        /// slice of the shared handle store.</summary>
+        public AsyncHandleTable<ComponentSubtask> Subtasks { get; }
+
+        /// <summary>Typed facade for the <see cref="WaitableKind.WaitableSet"/>
+        /// slice of the shared handle store.</summary>
+        public AsyncHandleTable<ComponentWaitableSet> WaitableSets { get; }
+
+        /// <summary>Typed facade for the <see cref="WaitableKind.Stream"/>
+        /// slice. Payload erases to <c>object</c>; the dispatcher's
+        /// stream canon ops cast to the concrete
+        /// <see cref="StreamSlot"/> on the way out.</summary>
+        public AsyncHandleTable<object> Streams { get; }
 
         // Wrapper around a stream buffer that tracks the drop state
         // of each half. Spec: stream<T> has separate readable and
@@ -78,11 +107,87 @@ namespace Wacs.ComponentModel.Async
             public bool ReaderDropped;
         }
 
-        public AsyncHandleTable<object> Futures { get; } =
-            new AsyncHandleTable<object>();
+        /// <summary>Typed facade for the <see cref="WaitableKind.Future"/>
+        /// slice. Payload erases to <c>object</c>; the dispatcher's
+        /// future canon ops cast to <see cref="FutureCell{T}"/>.</summary>
+        public AsyncHandleTable<object> Futures { get; }
 
-        public AsyncHandleTable<string> ErrorContexts { get; } =
-            new AsyncHandleTable<string>();
+        /// <summary>Typed facade for the <see cref="WaitableKind.ErrorContext"/>
+        /// slice. Payload is the debug message string.</summary>
+        public AsyncHandleTable<string> ErrorContexts { get; }
+
+        public AsyncDispatcher()
+        {
+            Tasks = new AsyncHandleTable<ComponentTask>(this, WaitableKind.Task);
+            Subtasks = new AsyncHandleTable<ComponentSubtask>(this, WaitableKind.Subtask);
+            WaitableSets = new AsyncHandleTable<ComponentWaitableSet>(
+                this, WaitableKind.WaitableSet);
+            Streams = new AsyncHandleTable<object>(this, WaitableKind.Stream);
+            Futures = new AsyncHandleTable<object>(this, WaitableKind.Future);
+            ErrorContexts = new AsyncHandleTable<string>(this, WaitableKind.ErrorContext);
+        }
+
+        // ---- Shared-store internal helpers used by AsyncHandleTable<T> ----
+
+        internal int AllocateHandleInternal(WaitableKind kind, object payload)
+        {
+            int handle = _handleFreelist.Count > 0
+                ? _handleFreelist.Pop() : _nextHandle++;
+            _handles[handle] = new HandleEntry(kind, payload);
+            return handle;
+        }
+
+        internal int AllocateHandleInternalWithFactory<T>(
+            WaitableKind kind, Func<int, T> factory) where T : class
+        {
+            int handle = _handleFreelist.Count > 0
+                ? _handleFreelist.Pop() : _nextHandle++;
+            _handles[handle] = new HandleEntry(kind, factory(handle));
+            return handle;
+        }
+
+        internal T? GetHandleInternal<T>(int handle, WaitableKind kind)
+            where T : class
+        {
+            if (!_handles.TryGetValue(handle, out var e) || e.Kind != kind)
+                return null;
+            return (T)e.Payload;
+        }
+
+        internal T? DropHandleInternal<T>(int handle, WaitableKind kind)
+            where T : class
+        {
+            if (!_handles.TryGetValue(handle, out var e) || e.Kind != kind)
+                return null;
+            _handles.Remove(handle);
+            _handleFreelist.Push(handle);
+            return (T)e.Payload;
+        }
+
+        /// <summary>Kind discriminator for an arbitrary handle, or
+        /// null if the handle isn't currently allocated. Embedders
+        /// implementing generic waitable handlers (custom poll
+        /// loops, debug introspection) can use this to dispatch
+        /// without trial-and-error <c>Get</c> probing.</summary>
+        public WaitableKind? GetHandleKind(int handle) =>
+            _handles.TryGetValue(handle, out var e)
+                ? (WaitableKind?)e.Kind : null;
+
+        // Internal-shape variant used by the facade's Contains
+        // probe. Returns a non-nullable sentinel value
+        // (WaitableKind.Task) when absent so the facade can
+        // compare without boxing — Contains is supposed to be cheap.
+        internal WaitableKind? HandleKindInternal(int handle) =>
+            _handles.TryGetValue(handle, out var e)
+                ? (WaitableKind?)e.Kind : null;
+
+        internal int CountByKindInternal(WaitableKind kind)
+        {
+            int n = 0;
+            foreach (var entry in _handles.Values)
+                if (entry.Kind == kind) n++;
+            return n;
+        }
 
         /// <summary>The component's exported memory, set by the
         /// host after core-module instantiation. Memory-touching
@@ -787,35 +892,35 @@ namespace Wacs.ComponentModel.Async
 
         // Build a Task that completes when the given waitable
         // handle becomes deliverable. Returns null for handles
-        // we can't wait on (unknown / non-waitable shapes).
-        //
-        // <para><b>Handle-space caveat:</b> each AsyncHandleTable
-        // assigns its own monotonic <c>_nextHandle</c>, so the
-        // same integer can refer to entries across multiple
-        // tables (e.g. registered Task at handle 1 AND fresh
-        // future at handle 1). We build a Task that fires when
-        // ANY of the entries the handle resolves to becomes
-        // ready — sympathetic to the CM spec's single-namespace
-        // model — to avoid short-circuiting on the
-        // wrong table.</para>
+        // that don't exist or aren't a wait-able kind. With the
+        // shared-store refactor each handle has exactly one kind,
+        // so this is a clean kind-dispatch — no cross-table
+        // union needed.
         private Task? GetMemberWaitTask(int handle)
         {
-            List<Task>? tasks = null;
-            if (Tasks.Get(handle) is ComponentTask t)
-                (tasks ??= new List<Task>()).Add(t.Completion.Task);
-            if (Subtasks.Get(handle) is ComponentSubtask st)
-                (tasks ??= new List<Task>()).Add(st.Child.Completion.Task);
-            if (Futures.Get(handle) is FutureCell<object?> f)
-                (tasks ??= new List<Task>()).Add(f.Task);
-            if (Streams.Get(handle) is StreamSlot ss)
+            var kind = HandleKindInternal(handle);
+            if (kind == null) return null;
+            switch (kind.Value)
             {
-                var vt = ss.Buffer.Reader.WaitToReadAsync();
-                (tasks ??= new List<Task>()).Add(
-                    vt.IsCompleted ? Task.CompletedTask : vt.AsTask());
+                case WaitableKind.Task:
+                    return Tasks.Get(handle)?.Completion.Task;
+                case WaitableKind.Subtask:
+                    return Subtasks.Get(handle)?.Child.Completion.Task;
+                case WaitableKind.Future:
+                    return (Futures.Get(handle) as FutureCell<object?>)?.Task;
+                case WaitableKind.Stream:
+                    if (Streams.Get(handle) is StreamSlot ss)
+                    {
+                        var vt = ss.Buffer.Reader.WaitToReadAsync();
+                        return vt.IsCompleted ? Task.CompletedTask : vt.AsTask();
+                    }
+                    return null;
+                // WaitableSet / ErrorContext: no completion source —
+                // they're not directly waitable, only joinable into
+                // a waitable-set or read by error-context.debug-message.
+                default:
+                    return null;
             }
-            if (tasks == null) return null;
-            if (tasks.Count == 1) return tasks[0];
-            return Task.WhenAny(tasks);
         }
 
         /// <summary><c>canon waitable-set.poll cancel? memidx</c> —
@@ -842,25 +947,32 @@ namespace Wacs.ComponentModel.Async
         }
 
         // Determine whether a waitable handle has reached a state
-        // that wait/poll should surface. The handle can resolve
-        // to entries across multiple tables (the per-kind
-        // <see cref="AsyncHandleTable{T}"/> instances each allocate
-        // their own monotone <c>_nextHandle</c>); any one of the
-        // resolved entries reaching a deliverable state makes the
-        // handle deliverable — sympathetic to the CM spec's
-        // single-namespace model.
+        // that wait/poll should surface. Clean kind-dispatch under
+        // the shared-store model — each handle has exactly one
+        // kind, no cross-table union required.
         private bool IsWaitableDeliverable(int waitableHandle)
         {
-            if (Tasks.Get(waitableHandle) is ComponentTask t
-                && t.Completion.Task.IsCompleted) return true;
-            if (Subtasks.Get(waitableHandle) is ComponentSubtask st
-                && st.Child.Completion.Task.IsCompleted) return true;
-            if (Futures.Get(waitableHandle) is FutureCell<object?> f
-                && f.IsCompleted) return true;
-            if (Streams.Get(waitableHandle) is StreamSlot ss
-                && (ss.Buffer.IsCompleted || ss.Buffer.Reader.Count > 0))
-                return true;
-            return false;
+            var kind = HandleKindInternal(waitableHandle);
+            if (kind == null) return false;
+            switch (kind.Value)
+            {
+                case WaitableKind.Task:
+                    return Tasks.Get(waitableHandle)
+                        ?.Completion.Task.IsCompleted ?? false;
+                case WaitableKind.Subtask:
+                    return Subtasks.Get(waitableHandle)
+                        ?.Child.Completion.Task.IsCompleted ?? false;
+                case WaitableKind.Future:
+                    return (Futures.Get(waitableHandle) as FutureCell<object?>)
+                        ?.IsCompleted ?? false;
+                case WaitableKind.Stream:
+                    if (Streams.Get(waitableHandle) is StreamSlot ss)
+                        return ss.Buffer.IsCompleted
+                            || ss.Buffer.Reader.Count > 0;
+                    return false;
+                default:
+                    return false;
+            }
         }
 
         /// <summary><c>canon waitable-set.drop</c>.</summary>
