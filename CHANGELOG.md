@@ -1,5 +1,81 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.16 — descriptor methods + descriptor-stat encoder (Phase 5 Slice N)
+
+Lands the canon-ABI `result<_, error-code>` encoder and the
+112-byte `descriptor-stat` record encoder, then wires seven
+representative descriptor methods through to the runtime.
+
+### `WriteErrorCodeResult` + `WriteErrorCodeBytes`
+
+20-byte 4-aligned `result<_, error-code>` retptr layout
+(same shape as `result<_, header-error>` but with the
+37-case `error-code` variant). `WriteErrorCodeBytes` is
+the inner 16-byte error-code variant writer, factored out
+so the stat retptr layout (which embeds error-code at +8
+to satisfy align-8) can reuse it.
+
+### `WriteDescriptorStat` + `WriteOptionInstant`
+
+104-byte `descriptor-stat` record encoder:
+- `+0..16`: type (descriptor-type variant, 16 bytes, may
+  realloc for the Other(string) case)
+- `+16..24`: link-count (u64)
+- `+24..32`: size (u64)
+- `+32..56`: data-access-timestamp (option<instant>)
+- `+56..80`: data-modification-timestamp (option<instant>)
+- `+80..104`: status-change-timestamp (option<instant>)
+
+`WriteOptionInstant` is the 24-byte option<instant> writer
+(8-aligned: disc+7pad / s64 seconds / u32 nanoseconds +
+4pad).
+
+### Seven descriptor methods wired
+
+```
+[method]descriptor.create-directory-at  (result<_, error-code>)
+[method]descriptor.unlink-file-at       (result<_, error-code>)
+[method]descriptor.remove-directory-at  (result<_, error-code>)
+[method]descriptor.is-same-object       (bool)
+[method]descriptor.get-type             (descriptor-type variant via retptr)
+[method]descriptor.open-at              (result<own<descriptor>, error-code>)
+[method]descriptor.stat                 (result<descriptor-stat, error-code>)
+```
+
+The three `result<_, error-code>` methods share an
+`InvokeDescriptorResultErrorCode` template that reads the
+path, calls the impl method via `.GetAwaiter().GetResult()`,
+catches `FilesystemException`, and writes the result.
+
+`open-at` allocates a fresh descriptor handle on success
+and writes it at retptr+4 (the result's payload slot for
+`own<descriptor>`). On err it routes through the same
+`WriteErrorCodeResult`.
+
+`stat` writes the 112-byte combined result (8-aligned to
+satisfy descriptor-stat's u64 fields). On err the error-code
+variant lives at +8 (not +4), reflecting the result's
+align-8 payload offset.
+
+### Test coverage
+
+15 new tests in `FilesystemMethodWireTests.cs`:
+- All 7 methods register in the runtime.
+- `create-directory-at` happy path + sandbox escape →
+  NotPermitted.
+- `unlink-file-at` happy path + IsDirectory err.
+- `remove-directory-at` happy path.
+- `is-same-object` for same/different paths + invalid handle.
+- `get-type` writes Directory vs RegularFile.
+- `open-at` Create allocates a fresh handle; Exclusive on
+  existing writes Exist err.
+- `stat` writes the 104-byte record correctly (type,
+  link-count, size, timestamp option-disc).
+- `stat` for a missing path writes the err variant.
+- `create-directory-at` and `stat` reject misaligned retptr.
+
+188/188 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.15 — `result<_, header-error>` encoding + fields gaps (Phase 5 Slice M)
 
 Closes the first batch of HTTP wire-up gaps. Adds the

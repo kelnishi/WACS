@@ -548,6 +548,67 @@ namespace Wacs.WASI.Preview3
                 (Action<ExecContext, int>)((_, retptr) =>
                     InvokePreopensGetDirectories(retptr, realloc)));
 
+            // ---- wasi:filesystem/types.descriptor methods --------
+            //
+            // The async result<_, error-code> methods all flow
+            // through WriteErrorCodeResult — the 20-byte
+            // 4-aligned retptr layout mirroring header-error's.
+            // The descriptor-stat-returning paths use
+            // WriteDescriptorStatResult (112-byte record).
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[method]descriptor.create-directory-at"),
+                (Action<ExecContext, int, int, int, int>)(
+                    (_, self, pathPtr, pathLen, retptr) =>
+                        InvokeDescriptorCreateDirectoryAt(
+                            self, pathPtr, pathLen, retptr, realloc)));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[method]descriptor.unlink-file-at"),
+                (Action<ExecContext, int, int, int, int>)(
+                    (_, self, pathPtr, pathLen, retptr) =>
+                        InvokeDescriptorUnlinkFileAt(
+                            self, pathPtr, pathLen, retptr, realloc)));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[method]descriptor.remove-directory-at"),
+                (Action<ExecContext, int, int, int, int>)(
+                    (_, self, pathPtr, pathLen, retptr) =>
+                        InvokeDescriptorRemoveDirectoryAt(
+                            self, pathPtr, pathLen, retptr, realloc)));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[method]descriptor.is-same-object"),
+                (Func<ExecContext, int, int, int>)((_, self, other) =>
+                    InvokeDescriptorIsSameObject(self, other) ? 1 : 0));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[method]descriptor.get-type"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeDescriptorGetType(self, retptr, realloc)));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[method]descriptor.open-at"),
+                (Action<ExecContext, int, int, int, int, int, int, int>)(
+                    (_, self, pathFlags, pathPtr, pathLen,
+                     openFlags, flags, retptr) =>
+                        InvokeDescriptorOpenAt(self,
+                            unchecked((uint)pathFlags), pathPtr, pathLen,
+                            unchecked((uint)openFlags),
+                            unchecked((uint)flags),
+                            retptr, realloc)));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[method]descriptor.stat"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeDescriptorStat(self, retptr, realloc)));
+
             // wasi:sockets — resource drops + ip-name-lookup.
             // Full ITcpSocket/IUdpSocket method wire-ups + a
             // System.Net.Sockets-backed default impl ship in
@@ -783,6 +844,340 @@ namespace Wacs.WASI.Preview3
                     $"wasi:filesystem/types.descriptor: handle " +
                     $"{handle} is not allocated.");
             return desc;
+        }
+
+        // ---- wasi:filesystem/types.descriptor method bodies ----------
+
+        /// <summary>Invoke
+        /// <c>[method]descriptor.create-directory-at(path)</c>.</summary>
+        public void InvokeDescriptorCreateDirectoryAt(
+            int self, int pathPtr, int pathLen, int retptr,
+            ICabiRealloc realloc)
+        {
+            InvokeDescriptorResultErrorCode(self, retptr, realloc,
+                (desc, path) =>
+                    desc.CreateDirectoryAtAsync(path)
+                        .GetAwaiter().GetResult(),
+                pathPtr, pathLen);
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]descriptor.unlink-file-at(path)</c>.</summary>
+        public void InvokeDescriptorUnlinkFileAt(
+            int self, int pathPtr, int pathLen, int retptr,
+            ICabiRealloc realloc)
+        {
+            InvokeDescriptorResultErrorCode(self, retptr, realloc,
+                (desc, path) =>
+                    desc.UnlinkFileAtAsync(path)
+                        .GetAwaiter().GetResult(),
+                pathPtr, pathLen);
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]descriptor.remove-directory-at(path)</c>.</summary>
+        public void InvokeDescriptorRemoveDirectoryAt(
+            int self, int pathPtr, int pathLen, int retptr,
+            ICabiRealloc realloc)
+        {
+            InvokeDescriptorResultErrorCode(self, retptr, realloc,
+                (desc, path) =>
+                    desc.RemoveDirectoryAtAsync(path)
+                        .GetAwaiter().GetResult(),
+                pathPtr, pathLen);
+        }
+
+        // Shared invocation pattern for descriptor methods that
+        // take a path arg and return result<_, error-code>.
+        private void InvokeDescriptorResultErrorCode(
+            int self, int retptr, ICabiRealloc realloc,
+            Action<IDescriptor, string> body,
+            int pathPtr, int pathLen)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateResultErrorCodeRetptr(retptr, memory);
+            FilesystemException? caught = null;
+            try
+            {
+                var desc = RequireDescriptor(self);
+                var path = ReadGuestUtf8(pathPtr, pathLen);
+                body(desc, path);
+            }
+            catch (FilesystemException ex) { caught = ex; }
+            WriteErrorCodeResult(
+                memory.AsSpan(retptr, ResultErrorCodeSize),
+                caught, realloc, memory);
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]descriptor.is-same-object(other)</c>. Both
+        /// args are descriptor handles; returns bool.</summary>
+        public bool InvokeDescriptorIsSameObject(int self, int other)
+        {
+            var selfDesc = RequireDescriptor(self);
+            var otherDesc = DescriptorHandles.Get(other);
+            if (otherDesc == null) return false;
+            return selfDesc.IsSameObjectAsync(otherDesc)
+                .GetAwaiter().GetResult();
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]descriptor.get-type() -&gt; descriptor-type</c>.
+        /// Writes the variant at retptr (16 bytes 4-aligned).
+        /// Unit cases: just write the tag at +0; the
+        /// <see cref="DescriptorType.Other"/> case may carry an
+        /// option&lt;string&gt; payload at +8.</summary>
+        public void InvokeDescriptorGetType(
+            int self, int retptr, ICabiRealloc realloc)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateDescriptorTypeRetptr(retptr, memory);
+            var desc = RequireDescriptor(self);
+            var dtype = desc.GetType_();
+            var dest = memory.AsSpan(retptr, 16);
+            dest.Clear();
+            dest[0] = (byte)dtype.Kind;
+            if (dtype.Kind == DescriptorType.Tag.Other
+                && dtype.OtherPayload != null)
+            {
+                dest[4] = 1; // option-disc = some
+                var bytes = System.Text.Encoding.UTF8
+                    .GetBytes(dtype.OtherPayload);
+                int strPtr = bytes.Length > 0
+                    ? realloc.Allocate(1, bytes.Length) : 0;
+                if (bytes.Length > 0)
+                    new ReadOnlySpan<byte>(bytes)
+                        .CopyTo(memory.AsSpan(strPtr, bytes.Length));
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(dest.Slice(8), strPtr);
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(dest.Slice(12), bytes.Length);
+            }
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]descriptor.open-at</c>. On success
+        /// allocates a fresh descriptor handle bound to the
+        /// returned IDescriptor; on err encodes the error-code
+        /// at the retptr.</summary>
+        public void InvokeDescriptorOpenAt(
+            int self, uint pathFlagsBits, int pathPtr, int pathLen,
+            uint openFlagsBits, uint flagsBits,
+            int retptr, ICabiRealloc realloc)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateResultErrorCodeRetptr(retptr, memory);
+            FilesystemException? caught = null;
+            int childHandle = 0;
+            try
+            {
+                var parent = RequireDescriptor(self);
+                var path = ReadGuestUtf8(pathPtr, pathLen);
+                var child = parent.OpenAtAsync(
+                    (PathFlags)pathFlagsBits, path,
+                    (OpenFlags)openFlagsBits,
+                    (DescriptorFlags)flagsBits)
+                    .GetAwaiter().GetResult();
+                childHandle = DescriptorHandles.Allocate(child);
+            }
+            catch (FilesystemException ex) { caught = ex; }
+
+            var dest = memory.AsSpan(retptr, ResultErrorCodeSize);
+            if (caught == null)
+            {
+                // ok: disc=0 + own<descriptor> at +4
+                dest.Clear();
+                dest[0] = 0;
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(dest.Slice(4), childHandle);
+            }
+            else
+            {
+                WriteErrorCodeResult(dest, caught, realloc, memory);
+            }
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]descriptor.stat() -&gt;
+        /// result&lt;descriptor-stat, error-code&gt;</c>. Writes
+        /// the 112-byte descriptor-stat at retptr on success or
+        /// the error-code variant otherwise.</summary>
+        public void InvokeDescriptorStat(
+            int self, int retptr, ICabiRealloc realloc)
+        {
+            var memory = RequireMemoryForHttp();
+            // result<descriptor-stat, error-code>: 112-byte struct
+            // (8-aligned) for the ok payload, 16 bytes for the err
+            // payload. The result itself is 1 + max(112, 16) = 113
+            // rounded up to align-8 = 120 bytes. Validate.
+            if (retptr < 0 || (retptr & 0x7) != 0
+                || retptr + 120 > memory.Data.Length)
+                throw new InvalidOperationException(
+                    "wasi:filesystem/types.descriptor.stat: retptr " +
+                    $"0x{retptr:X8} misaligned or out of range " +
+                    $"(memory size = {memory.Data.Length}). " +
+                    "Caller must allocate a 120-byte 8-aligned " +
+                    "return area.");
+
+            FilesystemException? caught = null;
+            DescriptorStat? stat = null;
+            try
+            {
+                stat = RequireDescriptor(self).StatAsync()
+                    .GetAwaiter().GetResult();
+            }
+            catch (FilesystemException ex) { caught = ex; }
+
+            var dest = memory.AsSpan(retptr, 120);
+            dest.Clear();
+            if (caught != null)
+            {
+                dest[0] = 1; // result-disc = err
+                // Reuse the 16-byte error-code variant layout
+                // shifted by the 8-byte payload-offset (the
+                // payload section sits at +8 due to align-8).
+                WriteErrorCodeBytes(
+                    dest.Slice(8, 16), caught, realloc, memory);
+                return;
+            }
+
+            // ok path: result-disc=0 + descriptor-stat at +8.
+            dest[0] = 0;
+            WriteDescriptorStat(dest.Slice(8, 104), stat!, realloc, memory);
+        }
+
+        // ---- canon-ABI result<_, error-code> encoder -----------------
+
+        private const int ResultErrorCodeSize = 20;
+
+        private static void ValidateResultErrorCodeRetptr(
+            int retptr, Wacs.Core.Runtime.Types.MemoryInstance memory)
+        {
+            if (retptr < 0 || (retptr & 0x3) != 0
+                || retptr + ResultErrorCodeSize > memory.Data.Length)
+                throw new InvalidOperationException(
+                    "wasi:filesystem/types: result<_, error-code> " +
+                    $"retptr 0x{retptr:X8} misaligned or out of range " +
+                    $"(memory size = {memory.Data.Length}). " +
+                    "Caller must allocate a 20-byte 4-aligned " +
+                    "return area.");
+        }
+
+        private static void ValidateDescriptorTypeRetptr(
+            int retptr, Wacs.Core.Runtime.Types.MemoryInstance memory)
+        {
+            if (retptr < 0 || (retptr & 0x3) != 0
+                || retptr + 16 > memory.Data.Length)
+                throw new InvalidOperationException(
+                    "wasi:filesystem/types: descriptor-type retptr " +
+                    $"0x{retptr:X8} misaligned or out of range " +
+                    $"(memory size = {memory.Data.Length}). " +
+                    "Caller must allocate a 16-byte 4-aligned " +
+                    "return area.");
+        }
+
+        // Write the result<_, error-code> at the supplied 20-byte
+        // dest. null exception → disc=0 (ok); on err writes
+        // disc=1 + the error-code variant.
+        private static void WriteErrorCodeResult(
+            Span<byte> dest, FilesystemException? ex,
+            ICabiRealloc realloc,
+            Wacs.Core.Runtime.Types.MemoryInstance memory)
+        {
+            dest.Clear();
+            if (ex == null) { dest[0] = 0; return; }
+            dest[0] = 1; // result-disc = err
+            // error-code variant lives at +4 (16 bytes).
+            WriteErrorCodeBytes(dest.Slice(4, 16), ex, realloc, memory);
+        }
+
+        // Write the 16-byte error-code variant into `dest`. Used
+        // by both result<_, error-code> and the stat retptr (which
+        // embeds the error-code variant at +8 due to align-8).
+        private static void WriteErrorCodeBytes(
+            Span<byte> dest, FilesystemException ex,
+            ICabiRealloc realloc,
+            Wacs.Core.Runtime.Types.MemoryInstance memory)
+        {
+            dest.Clear();
+            dest[0] = (byte)ex.Code; // error-code-disc (0..36)
+            if (ex.Code == Filesystem.ErrorCode.Other
+                && ex.OtherPayload != null)
+            {
+                // option<string> at +4 (12 bytes).
+                dest[4] = 1; // option-disc = some
+                var bytes = System.Text.Encoding.UTF8
+                    .GetBytes(ex.OtherPayload);
+                int strPtr = bytes.Length > 0
+                    ? realloc.Allocate(1, bytes.Length) : 0;
+                if (bytes.Length > 0)
+                    new ReadOnlySpan<byte>(bytes)
+                        .CopyTo(memory.AsSpan(strPtr, bytes.Length));
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(dest.Slice(8), strPtr);
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(dest.Slice(12), bytes.Length);
+            }
+        }
+
+        // Write the 104-byte descriptor-stat record into `dest`.
+        // Field offsets per canon-ABI record layout (computed in
+        // declaration order with field-align-rounding):
+        //   +0   type        (descriptor-type, 16 bytes align 4)
+        //   +16  link-count  (u64, align 8 — already aligned)
+        //   +24  size        (u64, align 8)
+        //   +32  data-access-timestamp        (option<instant>, 24 bytes align 8)
+        //   +56  data-modification-timestamp  (option<instant>, 24 bytes align 8)
+        //   +80  status-change-timestamp      (option<instant>, 24 bytes align 8)
+        private static void WriteDescriptorStat(
+            Span<byte> dest, DescriptorStat stat,
+            ICabiRealloc realloc,
+            Wacs.Core.Runtime.Types.MemoryInstance memory)
+        {
+            dest.Clear();
+            // type: descriptor-type variant at +0..16.
+            dest[0] = (byte)stat.Type.Kind;
+            if (stat.Type.Kind == DescriptorType.Tag.Other
+                && stat.Type.OtherPayload != null)
+            {
+                dest[4] = 1; // option-disc some
+                var bytes = System.Text.Encoding.UTF8
+                    .GetBytes(stat.Type.OtherPayload);
+                int strPtr = bytes.Length > 0
+                    ? realloc.Allocate(1, bytes.Length) : 0;
+                if (bytes.Length > 0)
+                    new ReadOnlySpan<byte>(bytes)
+                        .CopyTo(memory.AsSpan(strPtr, bytes.Length));
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(dest.Slice(8), strPtr);
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(dest.Slice(12), bytes.Length);
+            }
+            // link-count + size: plain u64s.
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteUInt64LittleEndian(dest.Slice(16), stat.LinkCount.Value);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteUInt64LittleEndian(dest.Slice(24), stat.Size.Value);
+            // 3× option<instant> (24 bytes each: i32 disc + 4 pad + s64 seconds + u32 nanoseconds + 4 pad).
+            WriteOptionInstant(dest.Slice(32, 24), stat.DataAccessTimestamp);
+            WriteOptionInstant(dest.Slice(56, 24), stat.DataModificationTimestamp);
+            WriteOptionInstant(dest.Slice(80, 24), stat.StatusChangeTimestamp);
+        }
+
+        // option<instant> wire layout (24 bytes 8-aligned):
+        //   +0   option-disc (u8) + 7-byte pad (align-8 from instant)
+        //   +8   instant.seconds (s64)
+        //   +16  instant.nanoseconds (u32) + 4-byte tail pad
+        private static void WriteOptionInstant(
+            Span<byte> dest, Clocks.Instant? value)
+        {
+            dest.Clear();
+            if (!value.HasValue) { dest[0] = 0; return; }
+            dest[0] = 1; // option-disc = some
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt64LittleEndian(dest.Slice(8), value.Value.Seconds);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteUInt32LittleEndian(dest.Slice(16), value.Value.Nanoseconds);
         }
 
         // ---- wasi:http/client + handler binding bodies ---------------
