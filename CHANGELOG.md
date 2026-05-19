@@ -1,5 +1,85 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.29 — HTTP fields collection methods (Phase 5 Slice AA)
+
+Wires the remaining `wasi:http/types.fields` methods: `get`,
+`copy-all`, `get-and-delete`, and `static fields.from-list`.
+The fields surface is now complete — every method on the
+resource is bound through to the host backend.
+
+### Wire shapes
+
+```
+[method]fields.get(name)
+  -> list<list<u8>>                   8-byte 4-aligned retptr
+
+[method]fields.copy-all()
+  -> list<tuple<list<u8>, list<u8>>>  8-byte 4-aligned retptr
+
+[method]fields.get-and-delete(name)
+  -> result<list<list<u8>>,
+           header-error>                20-byte 4-aligned retptr
+
+[static]fields.from-list(list<tuple<...>>)
+  -> result<fields, header-error>      20-byte 4-aligned retptr
+```
+
+The two result-variant returns (`get-and-delete` and
+`from-list`) reuse Slice M's 20-byte `result<_, header-error>`
+shape since the header-error variant (16 bytes, dominated by
+its `other(option<string>)` arm) is larger than both payload
+arms (8 bytes for `list<list<u8>>`, 4 bytes for the `fields`
+handle).
+
+### List-of-byte-lists encoder
+
+```csharp
+private void WriteListOfByteLists(
+    Span<byte> dest,
+    IReadOnlyList<byte[]> values,
+    ICabiRealloc realloc,
+    MemoryInstance memory)
+```
+
+Shared helper used by both `fields.get` (offset 0 of an 8-byte
+retptr) and `fields.get-and-delete` (offset 4 of a 20-byte
+retptr after the ok-disc). For each entry, allocates the byte
+payload via `realloc.Allocate(1, len)` and writes `(ptr, len)`
+into the outer list at 8-byte stride.
+
+### header-error encoder split
+
+Introduced `WriteHeaderErrorBytes(Span<byte> dest, ...)` as a
+companion to the existing `WriteHeaderErrorResult` from Slice
+M. The new helper writes only the 16-byte header-error variant
+starting at offset 0 of `dest`, so callers writing a non-
+`result<_, header-error>` retptr (e.g. `result<list<_>,
+header-error>` or `result<fields, header-error>`) can route
+the err arm through this at their `+4` payload offset.
+
+### Test coverage
+
+10 tests in `FieldsCollectionWireTests.cs`:
+- `BindToRuntime` registers all four host functions.
+- `fields.get` returns empty list for a missing header.
+- `fields.get` returns both values for a multi-valued header
+  with full byte-string round-trip through `cabi_realloc`.
+- `fields.copy-all` returns every (name, value) pair (order-
+  insensitive set assertion since Dictionary iteration order
+  isn't specified).
+- `fields.copy-all` empty returns null-ptr / 0-count.
+- `fields.get-and-delete` removes a header and returns its
+  values (asserts impl mutation + wire output).
+- `fields.get-and-delete` on a frozen Fields writes
+  `HeaderError.Immutable` at +4.
+- `fields.from-list` allocates a fresh handle whose Fields
+  contains the round-tripped entries.
+- `fields.from-list` with an illegal name (`bad:name`) writes
+  `HeaderError.InvalidSyntax`.
+- `fields.get` misaligned retptr throws.
+
+297/297 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.28 — resolve-addresses result-variant encoding fix (Phase 5 Slice Z)
 
 `ip-name-lookup.resolve-addresses` was writing `(list-ptr,
