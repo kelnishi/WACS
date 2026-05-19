@@ -58,9 +58,29 @@ namespace Wacs.ComponentModel.Async
         AllowMultiple = false)]
     public sealed class CanonAsyncAttribute : Attribute
     {
-        /// <summary>Wasmtime <c>symbol_name()</c> spelling.</summary>
-        public string Name { get; }
+        /// <summary>Explicit wasmtime <c>symbol_name()</c>
+        /// spelling. <c>null</c> when the attribute was declared
+        /// without an argument — in that case the canon-op name
+        /// is auto-derived from the method name via
+        /// <c>NameMangler.ToKebab</c> at generator time.</summary>
+        public string? Name { get; }
 
+        /// <summary>Mark the method as a canon-op handler whose
+        /// name is auto-derived from the method's PascalCase
+        /// identifier. <c>TaskReturn</c> → <c>"task-return"</c>,
+        /// <c>StreamNew</c> → <c>"stream-new"</c>, etc. Use this
+        /// form for the common case where the method name
+        /// follows the wasmtime spelling.</summary>
+        public CanonAsyncAttribute() { Name = null; }
+
+        /// <summary>Mark the method as a canon-op handler with
+        /// an explicit name override. Use this form when the
+        /// method name intentionally diverges from the canon-op
+        /// spelling — e.g. the <c>StreamWriteFromMemory</c>
+        /// helper backs the <c>"stream-write"</c> canon op (the
+        /// <c>FromMemory</c> suffix distinguishes it from the
+        /// host-side <c>StreamTryWrite</c> overload, but
+        /// downstream consumers see only the canon-op name).</summary>
         public CanonAsyncAttribute(string name)
         {
             Name = name ?? throw new ArgumentNullException(nameof(name));

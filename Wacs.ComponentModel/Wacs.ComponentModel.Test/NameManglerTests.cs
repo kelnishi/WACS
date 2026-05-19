@@ -42,6 +42,37 @@ namespace Wacs.ComponentModel.Test
             Assert.Equal(expected, NameMangler.ToUpperSnake(kebab));
 
         [Theory]
+        [InlineData("InputStream", "input-stream")]
+        [InlineData("TaskReturn", "task-return")]
+        [InlineData("WaitableSetWait", "waitable-set-wait")]
+        [InlineData("ErrorContextDebugMessage", "error-context-debug-message")]
+        [InlineData("Hello", "hello")]                    // single segment
+        [InlineData("A", "a")]                            // single uppercase char
+        [InlineData("", "")]                              // empty
+        // Acronyms degenerate to dash-per-letter — by design
+        // avoid acronyms in identifiers that round-trip through
+        // kebab. The Component Model canon-op names don't have any.
+        [InlineData("AOT", "a-o-t")]
+        public void ToKebab(string pascal, string expected) =>
+            Assert.Equal(expected, NameMangler.ToKebab(pascal));
+
+        [Theory]
+        [InlineData("InputStream")]
+        [InlineData("TaskReturn")]
+        [InlineData("WaitableSetWait")]
+        [InlineData("ErrorContextDebugMessage")]
+        [InlineData("StreamCancelRead")]
+        public void ToKebab_round_trips_through_ToPascalCase(string pascal)
+        {
+            // Round-trip property: for inputs composed of
+            // single-word PascalCase segments (the common case for
+            // WIT identifiers + wasmtime canon-op names),
+            // ToPascalCase(ToKebab(x)) == x.
+            Assert.Equal(pascal,
+                NameMangler.ToPascalCase(NameMangler.ToKebab(pascal)));
+        }
+
+        [Theory]
         [InlineData("0.2.8", "v0_2_8")]
         [InlineData("1.0.0", "v1_0_0")]
         [InlineData(null, "")]

@@ -1,5 +1,85 @@
 # Changelog
 
+## WACS.ComponentModel 0.8.12 / WACS.ComponentModel.Async.SourceGen 0.1.1 — parameterless [CanonAsync] + NameMangler.ToKebab
+
+Closes the missed-utility loop on the canon-async attribute
+flow: leverage the existing `NameMangler` for the kebab/Pascal
+conversion instead of hand-spelling each name twice.
+
+### `NameMangler.ToKebab` (Pascal → kebab)
+
+The kebab → Pascal direction already existed; the reverse was
+missing. Added:
+
+```csharp
+public static string ToKebab(string pascal);
+```
+
+Rule: lowercase the leading char; each subsequent uppercase
+letter becomes a `-` prefix + lowercase. Round-trips with
+`ToPascalCase` for inputs composed of single-word PascalCase
+segments — pinned by `ToKebab_round_trips_through_ToPascalCase`
+theory test (5 inputs including the canon-op shapes).
+
+Acronyms degenerate to dash-per-letter (`AOT` → `a-o-t`) — by
+design avoid acronyms in identifiers that round-trip through
+kebab. None of the Component-Model canon-op names have any.
+
+### `CanonAsyncAttribute` — parameterless overload
+
+Added a no-argument constructor:
+
+```csharp
+[CanonAsync]                       // auto-derive: method name -> ToKebab
+public void TaskReturn(...) { ... }
+
+[CanonAsync("stream-write")]       // explicit override (rare divergence)
+public int StreamWriteFromMemory(...) { ... }
+```
+
+`Name` becomes nullable. The parameterless form is the
+default; the explicit-name form is the override.
+
+### Source generator extended
+
+`CanonOpRegistryGenerator.CollectCanonAsyncNames` now:
+
+- For explicit-name attributes (`[CanonAsync("foo-bar")]`):
+  use the literal.
+- For parameterless attributes (`[CanonAsync]`): derive via
+  `PascalToKebab(method.Name)`. The conversion logic is
+  inlined in the generator (netstandard2.0 generator can't
+  reference the runtime `NameMangler` — but the inlined
+  version is round-trip tested against the runtime version
+  through `NameManglerTests.ToKebab_round_trips_through_ToPascalCase`).
+
+### `AsyncDispatcher` cleaned
+
+Of 30 `[CanonAsync(...)]` decorations: 26 dropped their
+explicit names (now `[CanonAsync]`), 4 keep the explicit
+override:
+
+- `StreamWriteFromMemory` → `"stream-write"`
+- `StreamReadToMemory` → `"stream-read"`
+- `ErrorContextNewFromMemory` → `"error-context-new"`
+- `ErrorContextDebugMessageToMemory` → `"error-context-debug-message"`
+
+These 4 method names carry a `FromMemory`/`ToMemory` suffix
+to distinguish from host-side overloads — the canon-op
+spelling matches wasmtime, the method name doesn't.
+Explicit override is the right tool for the intentional
+divergence.
+
+### Tests
+
+13 new `NameManglerTests` entries (8 ToKebab inputs + 5
+round-trip property cases). 518/518 ComponentModel + 833/833
+Transpiler tests pass (was 505).
+
+Generated `CanonOpRegistry.g.cs` still emits all 30 names —
+identical set to the pre-refactor version, just derived
+through the convention rather than re-spelled by hand.
+
 ## WACS.ComponentModel.Async.SourceGen 0.1.0 / WACS.ComponentModel 0.8.11 — source generator replaces reflection (Phase 3 Slice G2)
 
 Eliminates Slice G1's reflective scan of

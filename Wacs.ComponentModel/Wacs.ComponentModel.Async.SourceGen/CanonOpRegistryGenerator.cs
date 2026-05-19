@@ -77,15 +77,51 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     if (!SymbolEqualityComparer.Default.Equals(
                             attr.AttributeClass, attrType))
                         continue;
-                    if (attr.ConstructorArguments.Length == 0) continue;
-                    if (attr.ConstructorArguments[0].Value is string name
-                        && !string.IsNullOrEmpty(name))
+
+                    // Explicit-name form: [CanonAsync("foo-bar")].
+                    if (attr.ConstructorArguments.Length > 0
+                        && attr.ConstructorArguments[0].Value is string explicitName
+                        && !string.IsNullOrEmpty(explicitName))
                     {
-                        names.Add(name);
+                        names.Add(explicitName);
+                    }
+                    else
+                    {
+                        // Parameterless form: [CanonAsync]. Derive
+                        // the canon-op name from the method's
+                        // PascalCase identifier via the kebab
+                        // conversion that mirrors
+                        // NameMangler.ToKebab in the runtime.
+                        names.Add(PascalToKebab(method.Name));
                     }
                 }
             }
             return names.ToImmutableArray();
+        }
+
+        // PascalCase → kebab-case, matching the rule in
+        // Wacs.ComponentModel.CSharpEmit.NameMangler.ToKebab.
+        // Inlined here because the generator targets netstandard2.0
+        // and can't reference the runtime assembly. Round-trip
+        // tested in NameManglerTests.
+        private static string PascalToKebab(string pascal)
+        {
+            if (string.IsNullOrEmpty(pascal)) return pascal;
+            var sb = new StringBuilder(pascal.Length + 4);
+            for (int i = 0; i < pascal.Length; i++)
+            {
+                var c = pascal[i];
+                if (char.IsUpper(c))
+                {
+                    if (i > 0) sb.Append('-');
+                    sb.Append(char.ToLowerInvariant(c));
+                }
+                else
+                {
+                    sb.Append(c);
+                }
+            }
+            return sb.ToString();
         }
 
         private static string EmitRegistryPartial(ImmutableArray<string> names)

@@ -74,6 +74,40 @@ namespace Wacs.ComponentModel.CSharpEmit
             return kebab.Replace('-', '_').ToUpperInvariant();
         }
 
+        /// <summary>
+        /// PascalCase → kebab-case.
+        /// <c>InputStream</c> → <c>input-stream</c>;
+        /// <c>WaitableSetWait</c> → <c>waitable-set-wait</c>.
+        ///
+        /// <para>Lowercases the leading character; each subsequent
+        /// uppercase letter becomes a <c>-</c> prefix + lowercase.
+        /// Round-trips with <see cref="ToPascalCase"/> for inputs
+        /// composed of single-word segments (the common case for
+        /// WIT names and Component-Model canon-op spellings).
+        /// Acronyms (e.g. <c>AOT</c>) get one dash per letter
+        /// (<c>a-o-t</c>) — by design avoid acronyms in identifiers
+        /// that round-trip through kebab.</para>
+        /// </summary>
+        public static string ToKebab(string pascal)
+        {
+            if (string.IsNullOrEmpty(pascal)) return pascal;
+            var sb = new StringBuilder(pascal.Length + 4);
+            for (int i = 0; i < pascal.Length; i++)
+            {
+                var c = pascal[i];
+                if (char.IsUpper(c))
+                {
+                    if (i > 0) sb.Append('-');
+                    sb.Append(char.ToLowerInvariant(c));
+                }
+                else
+                {
+                    sb.Append(c);
+                }
+            }
+            return sb.ToString();
+        }
+
         // ---- Version sanitization ----------------------------------------
 
         /// <summary>
