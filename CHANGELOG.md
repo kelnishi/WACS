@@ -1,5 +1,69 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.30 — request option<string> getters/setters (Phase 5 Slice BB)
+
+Wires `request.get-path-with-query` / `set-path-with-query` and
+`request.get-authority` / `set-authority`. Both pairs share the
+`option<string>` wire shape — first reusable template for the
+request/response setter/getter cluster.
+
+### Wire shapes
+
+```
+get-X: () -> option<string>
+  retptr: 12 bytes 4-aligned (option-disc + ptr + len)
+  Action<ExecContext, self, retptr>
+
+set-X(option<string>) -> result
+  arg: 3 flat slots (option-disc + ptr + len)
+  return: 1 flat i32 slot (result disc; always 0 — impl setters
+          can't fail)
+  Func<ExecContext, self, optDisc, strPtr, strLen, int>
+```
+
+### Shared dispatch
+
+```csharp
+internal void InvokeRequestGetOptionString(
+    int self, int retptr, ICabiRealloc realloc,
+    Func<IRequest, string?> getter)
+
+internal int InvokeRequestSetOptionString(
+    int self, int optDisc, int strPtr, int strLen,
+    Action<IRequest, string?> setter)
+```
+
+Same template pattern as the buffer-size getter from Slice O —
+per-method body is a one-line lambda routing through the right
+impl method.
+
+The retptr layout for the getter is:
+```
++0:    option-disc (u8) + 3 pad
++4..8: string-ptr (i32; 0 when none)
++8..12: string-len (i32; 0 when none)
+```
+
+The setter decodes `optDisc == 0` as `null` and `optDisc == 1`
+as `ReadGuestUtf8(strPtr, strLen)` (the `some` arm; empty
+string is distinct from `none`).
+
+### Test coverage
+
+7 tests in `RequestOptionStringWireTests.cs`:
+- `BindToRuntime` registers all four host functions.
+- `get-path-with-query` writes none-disc + zero pair when unset.
+- `set-path-with-query` round-trips `/api/v1?q=1` through the
+  setter, impl-side mutation, and wire getter.
+- `set-path-with-query(none)` clears a previously-set value.
+- `set-authority` + `get-authority` round-trip
+  `example.com:8080`.
+- `set-authority(some(""))` is distinct from `none` — disc=1
+  with len=0 round-trips as empty-string-Some.
+- `get-X` misaligned retptr throws.
+
+304/304 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.29 — HTTP fields collection methods (Phase 5 Slice AA)
 
 Wires the remaining `wasi:http/types.fields` methods: `get`,

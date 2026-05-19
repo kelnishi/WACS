@@ -492,6 +492,48 @@ namespace Wacs.WASI.Preview3
                     return RequestOptionsHandles.Allocate(opt.Clone());
                 }));
 
+            // ---- request option<string> getters/setters (Slice BB) ----
+            //
+            // path-with-query, authority: option<string> shape.
+            // Setters take (self, optDisc, strPtr, strLen) and
+            // return result (1 flat i32 slot, always 0 since the
+            // impl setters can't fail). Getters write a 12-byte
+            // 4-aligned option<string> retptr.
+
+            runtime.BindHostFunction(
+                (HttpTypesModuleName,
+                    "[method]request.get-path-with-query"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeRequestGetOptionString(
+                        self, retptr, realloc,
+                        r => r.GetPathWithQuery())));
+
+            runtime.BindHostFunction(
+                (HttpTypesModuleName,
+                    "[method]request.set-path-with-query"),
+                (Func<ExecContext, int, int, int, int, int>)(
+                    (_, self, optDisc, strPtr, strLen) =>
+                        InvokeRequestSetOptionString(
+                            self, optDisc, strPtr, strLen,
+                            (r, v) => r.SetPathWithQuery(v))));
+
+            runtime.BindHostFunction(
+                (HttpTypesModuleName,
+                    "[method]request.get-authority"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeRequestGetOptionString(
+                        self, retptr, realloc,
+                        r => r.GetAuthority())));
+
+            runtime.BindHostFunction(
+                (HttpTypesModuleName,
+                    "[method]request.set-authority"),
+                (Func<ExecContext, int, int, int, int, int>)(
+                    (_, self, optDisc, strPtr, strLen) =>
+                        InvokeRequestSetOptionString(
+                            self, optDisc, strPtr, strLen,
+                            (r, v) => r.SetAuthority(v))));
+
             // wasi:http/types.response — drop + status getter/setter.
             // The constructor (static `new`) returns a
             // tuple<response, future<...>> which needs the
@@ -3150,6 +3192,69 @@ namespace Wacs.WASI.Preview3
                     $"wasi:http/types.request: handle {handle} " +
                     "is not allocated.");
             return req;
+        }
+
+        // ---- request option<string> shared dispatch (Slice BB) ------
+
+        /// <summary>Shared body for option&lt;string&gt; getters
+        /// on the request resource (path-with-query, authority).
+        /// Writes a 12-byte 4-aligned option&lt;string&gt; retptr.
+        ///
+        /// <para>Layout (12 bytes, align 4):</para>
+        /// <code>
+        /// +0:    option-disc (u8) + 3 pad
+        /// +4..8: string-ptr (i32; 0 when option is none)
+        /// +8..12: string-len (i32; 0 when option is none)
+        /// </code>
+        /// </summary>
+        internal void InvokeRequestGetOptionString(
+            int self, int retptr, ICabiRealloc realloc,
+            Func<IRequest, string?> getter)
+        {
+            var memory = RequireMemoryForHttp();
+            if (retptr < 0 || (retptr & 0x3) != 0
+                || retptr + 12 > memory.Data.Length)
+                throw new InvalidOperationException(
+                    "wasi:http/types.request: option<string> " +
+                    $"retptr 0x{retptr:X8} misaligned or out of " +
+                    "range (needs 12 bytes 4-aligned).");
+
+            var dest = memory.AsSpan(retptr, 12);
+            dest.Clear();
+            string? value = getter(RequireRequest(self));
+            if (value == null)
+            {
+                // option-disc = none; payload stays zero.
+                return;
+            }
+            dest[0] = 1; // option-disc = some
+            byte[] bytes = System.Text.Encoding.UTF8.GetBytes(value);
+            int strPtr = bytes.Length > 0
+                ? realloc.Allocate(1, bytes.Length) : 0;
+            if (bytes.Length > 0)
+                new ReadOnlySpan<byte>(bytes)
+                    .CopyTo(memory.AsSpan(strPtr, bytes.Length));
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(dest.Slice(4), strPtr);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(dest.Slice(8), bytes.Length);
+        }
+
+        /// <summary>Shared body for option&lt;string&gt; setters
+        /// on the request resource. Decodes the 3-slot variant
+        /// arg (disc + ptr + len), invokes the setter delegate,
+        /// returns the result-disc (always 0 since the impl
+        /// setters can't fail). The wire return is the i32
+        /// discriminant of <c>result</c> (no payload).</summary>
+        internal int InvokeRequestSetOptionString(
+            int self, int optDisc, int strPtr, int strLen,
+            Action<IRequest, string?> setter)
+        {
+            string? value;
+            if (optDisc == 0) value = null;
+            else value = ReadGuestUtf8(strPtr, strLen);
+            setter(RequireRequest(self), value);
+            return 0; // result disc = ok
         }
 
         // Helper that registers the get/set pair for an
