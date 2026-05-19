@@ -123,6 +123,95 @@ namespace Wacs.ComponentModel.Test
             } while (value != 0);
         }
 
+        // Build a wasm binary with a Type section + Import section
+        // (one func import per imported (module, name) pair) and an
+        // optional name section. Used for testing the structural
+        // shim recognizer.
+        private static byte[] BuildWasmWithImports(
+            (string Module, string Name)[] imports,
+            string? moduleName = null,
+            Dictionary<uint, string>? funcNames = null)
+        {
+            using var ms = new MemoryStream();
+            using var w = new BinaryWriter(ms);
+            w.Write(new byte[] { 0x00, 0x61, 0x73, 0x6D });
+            w.Write(new byte[] { 0x01, 0x00, 0x00, 0x00 });
+
+            // Type section (id=1): one void→void func type.
+            using var typeMs = new MemoryStream();
+            using var typeW = new BinaryWriter(typeMs);
+            WriteLeb128U32(typeW, 1);    // 1 type entry
+            typeW.Write((byte)0x60);     // func type tag
+            WriteLeb128U32(typeW, 0);    // 0 params
+            WriteLeb128U32(typeW, 0);    // 0 results
+            WriteSection(w, sectionId: 1, body: typeMs.ToArray());
+
+            // Import section (id=2).
+            using var impMs = new MemoryStream();
+            using var impW = new BinaryWriter(impMs);
+            WriteLeb128U32(impW, (uint)imports.Length);
+            foreach (var (mod, name) in imports)
+            {
+                WriteName(impW, mod);
+                WriteName(impW, name);
+                impW.Write((byte)0x00);   // import kind = func
+                WriteLeb128U32(impW, 0);  // type index = 0
+            }
+            WriteSection(w, sectionId: 2, body: impMs.ToArray());
+
+            // Optional custom "name" section.
+            if (moduleName != null || (funcNames?.Count ?? 0) > 0)
+            {
+                using var nameMs = new MemoryStream();
+                using var nameW = new BinaryWriter(nameMs);
+                WriteName(nameW, "name");
+                if (moduleName != null)
+                {
+                    using var modMs = new MemoryStream();
+                    using var modW = new BinaryWriter(modMs);
+                    WriteName(modW, moduleName);
+                    WriteSubsection(nameW, subId: 0, modMs.ToArray());
+                }
+                if (funcNames is { Count: > 0 })
+                {
+                    using var fnMs = new MemoryStream();
+                    using var fnW = new BinaryWriter(fnMs);
+                    WriteLeb128U32(fnW, (uint)funcNames.Count);
+                    foreach (var (idx, nm) in funcNames.OrderBy(kv => kv.Key))
+                    {
+                        WriteLeb128U32(fnW, idx);
+                        WriteName(fnW, nm);
+                    }
+                    WriteSubsection(nameW, subId: 1, fnMs.ToArray());
+                }
+                WriteSection(w, sectionId: 0, body: nameMs.ToArray());
+            }
+
+            return ms.ToArray();
+        }
+
+        private static void WriteSection(BinaryWriter w, byte sectionId, byte[] body)
+        {
+            w.Write(sectionId);
+            WriteLeb128U32(w, (uint)body.Length);
+            w.Write(body);
+        }
+
+        private static Module ParseModule(byte[] bytes)
+        {
+            var prev = BinaryModuleParser.ParseCustomNames;
+            BinaryModuleParser.ParseCustomNames = true;
+            try
+            {
+                using var ms = new MemoryStream(bytes);
+                return BinaryModuleParser.ParseWasm(ms);
+            }
+            finally
+            {
+                BinaryModuleParser.ParseCustomNames = prev;
+            }
+        }
+
         // ---- Module-name detection -------------------------------------
 
         [Fact]
@@ -236,6 +325,91 @@ namespace Wacs.ComponentModel.Test
         }
 
         // ---- Cross-validation against CanonOpRegistry ------------------
+
+        // ---- Structural fallback (LooksLikeShimByStructure) -----------
+
+        [Fact]
+        public void LooksLikeShimByStructure_recognizes_imports_from_empty_module_with_digit_names()
+        {
+            var m = ParseModule(BuildWasmWithImports(new[]
+            {
+                ("", "0"),
+                ("", "1"),
+                ("", "2"),
+            }));
+            Assert.True(ShimModuleRecognizer.LooksLikeShimByStructure(m));
+        }
+
+        [Fact]
+        public void LooksLikeShimByStructure_rejects_non_digit_names()
+        {
+            // Empty module, but names are descriptive — not the
+            // wit-component integer convention.
+            var m = ParseModule(BuildWasmWithImports(new[]
+            {
+                ("", "do-thing"),
+                ("", "other"),
+            }));
+            Assert.False(ShimModuleRecognizer.LooksLikeShimByStructure(m));
+        }
+
+        [Fact]
+        public void LooksLikeShimByStructure_rejects_named_modules()
+        {
+            // Normal imports from a named module — definitely
+            // not a shim.
+            var m = ParseModule(BuildWasmWithImports(new[]
+            {
+                ("env", "puts"),
+                ("env", "exit"),
+            }));
+            Assert.False(ShimModuleRecognizer.LooksLikeShimByStructure(m));
+        }
+
+        [Fact]
+        public void IsShimModule_uses_structural_fallback_when_name_section_stripped()
+        {
+            // Real wit-component output with the name section
+            // stripped by wasm-opt or similar. Module name +
+            // function names are gone, but the import shape
+            // survives.
+            var stripped = ParseModule(BuildWasmWithImports(
+                new[] { ("", "0"), ("", "1") },
+                moduleName: null,    // no module name
+                funcNames: null));   // no function names
+            Assert.True(ShimModuleRecognizer.IsShimModule(stripped));
+        }
+
+        [Fact]
+        public void IsShimModule_returns_true_when_both_signals_present()
+        {
+            var full = ParseModule(BuildWasmWithImports(
+                new[] { ("", "0") },
+                moduleName: ShimModuleRecognizer.ShimModuleName,
+                funcNames: new Dictionary<uint, string> { { 0, "task.return" } }));
+            Assert.True(ShimModuleRecognizer.IsShimModule(full));
+        }
+
+        // ---- Stripped function-name subsection (hard limit) ------------
+
+        [Fact]
+        public void ExtractCanonOpNames_returns_empty_when_function_names_stripped()
+        {
+            // Module is structurally a shim but the function-name
+            // subsection is gone — the per-shim canon-op identity
+            // is unrecoverable. This is the documented hard limit:
+            // embedders who strip canon-async-component names
+            // break their hostability.
+            var stripped = ParseModule(BuildWasmWithImports(
+                new[] { ("", "0"), ("", "1") },
+                moduleName: ShimModuleRecognizer.ShimModuleName,
+                funcNames: null));
+            // IsShimModule still recognizes it (by name + structure):
+            Assert.True(ShimModuleRecognizer.IsShimModule(stripped));
+            // But ExtractCanonOpNames returns an empty map — caller
+            // surfaces "stripped names — cannot bind".
+            Assert.Empty(ShimModuleRecognizer.ExtractCanonOpNames(stripped));
+        }
 
         [Fact]
         public void ExtractCanonOpNames_extracted_names_match_registry()

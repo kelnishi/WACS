@@ -1,5 +1,86 @@
 # Changelog
 
+## WACS.ComponentModel 0.8.14 — structural shim fallback + stripped-names hard limit
+
+Hardens `ShimModuleRecognizer` against downstream tools that
+strip name sections from canon-async-using components
+(`wasm-opt --strip-debug`, `wasm-tools strip`, custom
+pipelines). Documents the hard limit when function-name
+subsections are stripped.
+
+### `LooksLikeShimByStructure` — name-section-less recognition
+
+New public method:
+
+```csharp
+public static bool LooksLikeShimByStructure(Module core);
+```
+
+Returns true iff the module has ≥1 import whose module-name
+is the empty string and whose function-name parses as a
+non-negative integer (<c>"0"</c>, <c>"1"</c>, …). Matches
+wit-component's shim-import convention
+(<c>imports_section.import("", &shim.name, …)</c> where
+<c>shim.name</c> is the shim index as a string), which
+survives name-section stripping.
+
+The all-digit constraint keeps false positives near zero:
+normal core modules occasionally import from an empty module
+namespace with descriptive function names (rare but legal),
+but the integer-name convention is wit-component-specific.
+
+### `IsShimModule` now combines both signals
+
+```csharp
+public static bool IsShimModule(Module core) =>
+    core != null
+    && (NameSectionSaysShim(core) || LooksLikeShimByStructure(core));
+```
+
+Cheapest path: module-name from the name section. Fallback:
+structural pattern. Either signal alone is sufficient.
+
+### Documented hard limit on stripped function-name subsections
+
+The module-name strip degrades gracefully; the function-name
+strip does not. Per the spec, the main module's calls become
+opaque integer-indexed indirect jumps once the function-name
+subsection is gone — the position-to-canon-op mapping is
+wit-component's internal emit order, not derivable from
+anything else in the binary.
+
+`ExtractCanonOpNames` returns an empty dictionary on a
+stripped module; the recognizer's doc comment now spells
+out:
+
+> Embedders who strip names from canon-async-using
+> components break their own ability to be hosted by WACS.
+
+The "stripped" test
+(`ExtractCanonOpNames_returns_empty_when_function_names_stripped`)
+asserts the recognizer correctly identifies the shape AND
+returns empty extraction — caller logic needs to surface
+that as a "stripped names — cannot bind" diagnostic.
+
+### Tests
+
+6 new in `ShimModuleRecognizerTests`:
+
+- `LooksLikeShimByStructure_recognizes_imports_from_empty_module_with_digit_names`.
+- `LooksLikeShimByStructure_rejects_non_digit_names`.
+- `LooksLikeShimByStructure_rejects_named_modules`.
+- `IsShimModule_uses_structural_fallback_when_name_section_stripped`.
+- `IsShimModule_returns_true_when_both_signals_present`.
+- `ExtractCanonOpNames_returns_empty_when_function_names_stripped`
+  (hard-limit assertion).
+
+Fixtures extended with `BuildWasmWithImports` — a minimal
+wasm with a type section + import section, optional name
+section. Lets us model the strip scenarios faithfully against
+the public `BinaryModuleParser` API.
+
+534/534 ComponentModel tests pass (was 528).
+
 ## WACS.ComponentModel 0.8.13 — wit-component shim-module recognizer (Phase 3 Slice G3)
 
 Lands the recognizer for wit-component's canon-async shim

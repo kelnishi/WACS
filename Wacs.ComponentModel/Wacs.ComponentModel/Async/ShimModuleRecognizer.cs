@@ -52,6 +52,21 @@ namespace Wacs.ComponentModel.Async
     /// (multi-core-module shim handling) is the natural next
     /// step once a real wit-component fixture is available to
     /// validate against.</para>
+    ///
+    /// <para><b>Stripped-name-section hard limit:</b> wit-component
+    /// always emits both the module-name and function-name
+    /// subsections for the shim, but downstream tooling
+    /// (<c>wasm-opt --strip-debug</c>, <c>wasm-tools strip</c>,
+    /// some release pipelines) can remove them. This recognizer
+    /// degrades gracefully on stripped module-name (via
+    /// <see cref="LooksLikeShimByStructure"/>) — but if the
+    /// function-name subsection is stripped, the per-shim
+    /// canon-op identity is unrecoverable. The integer indices
+    /// the main module imports are positional, and the
+    /// position-to-op mapping is wit-component's internal emit
+    /// order — not derivable from structure alone. Embedders who
+    /// strip names from canon-async-using components break their
+    /// own ability to be hosted by WACS.</para>
     /// </summary>
     public static class ShimModuleRecognizer
     {
@@ -60,17 +75,74 @@ namespace Wacs.ComponentModel.Async
         public const string ShimModuleName = "wit-component:shim";
 
         /// <summary>
-        /// True iff <paramref name="core"/>'s name section
-        /// declares it as the wit-component canon-async shim.
-        /// Requires the consumer to have set
-        /// <see cref="BinaryModuleParser.ParseCustomNames"/> to
-        /// <c>true</c> before parsing — without that, the name
-        /// section is skipped and this returns <c>false</c> even
-        /// for genuine shims.
+        /// True iff <paramref name="core"/> is recognizable as
+        /// wit-component's canon-async shim. Combines two signals:
+        ///
+        /// <list type="number">
+        ///   <item>Primary: name section's module-name equals
+        ///     <see cref="ShimModuleName"/>. Cheapest +
+        ///     definitive, but requires
+        ///     <see cref="BinaryModuleParser.ParseCustomNames"/>
+        ///     and an unstripped name section.</item>
+        ///   <item>Fallback: structural pattern via
+        ///     <see cref="LooksLikeShimByStructure"/> — checks
+        ///     for imports from module <c>""</c> with all-digit
+        ///     names. Normal core modules don't import from the
+        ///     empty namespace, so false-positives are negligible
+        ///     in practice.</item>
+        /// </list>
+        ///
+        /// <para>Returns false when both signals miss — including
+        /// the case where the name section IS present but the
+        /// module name was stripped or set to something else by
+        /// an aggressive optimizer.</para>
         /// </summary>
         public static bool IsShimModule(Module core) =>
             core != null
-            && string.Equals(core.Name, ShimModuleName, System.StringComparison.Ordinal);
+            && (NameSectionSaysShim(core)
+                || LooksLikeShimByStructure(core));
+
+        private static bool NameSectionSaysShim(Module core) =>
+            string.Equals(core.Name, ShimModuleName,
+                System.StringComparison.Ordinal);
+
+        /// <summary>
+        /// Structural fallback for <see cref="IsShimModule"/>.
+        /// Returns true iff <paramref name="core"/> has at least
+        /// one import whose module name is the empty string and
+        /// whose function name parses as a non-negative integer
+        /// (<c>"0"</c>, <c>"1"</c>, …). This matches wit-component's
+        /// shim-import convention
+        /// (<c>imports_section.import("", &amp;shim.name, …)</c>
+        /// where <c>shim.name</c> is <c>shims.len().to_string()</c>)
+        /// and survives name-section stripping.
+        ///
+        /// <para>The all-digit constraint is important: normal
+        /// core modules occasionally import from an empty module
+        /// name with descriptive function names (rare but legal),
+        /// and we don't want to confuse those for shims. The
+        /// integer-name convention is wit-component-specific.</para>
+        /// </summary>
+        public static bool LooksLikeShimByStructure(Module core)
+        {
+            if (core?.Imports == null) return false;
+            foreach (var imp in core.Imports)
+            {
+                if (imp.ModuleName != string.Empty) continue;
+                if (IsAllDigits(imp.Name)) return true;
+            }
+            return false;
+        }
+
+        private static bool IsAllDigits(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return false;
+            for (int i = 0; i < s.Length; i++)
+            {
+                if (s[i] < '0' || s[i] > '9') return false;
+            }
+            return true;
+        }
 
         /// <summary>
         /// Read the shim's function-name custom section and
@@ -85,9 +157,16 @@ namespace Wacs.ComponentModel.Async
         /// and surface a diagnostic for unrecognized entries.</para>
         ///
         /// <para>Returns an empty dictionary when the shim has no
-        /// function-name custom section (which would indicate a
-        /// degenerate wit-component output — every real shim
-        /// includes the section).</para>
+        /// function-name custom section. This is the
+        /// <b>hard-limit case</b>: when downstream tooling strips
+        /// the function-name subsection (`wasm-opt
+        /// --strip-debug`, `wasm-tools strip`, etc.), the per-
+        /// shim canon-op identity is unrecoverable from anything
+        /// else in the binary. The main module's calls become
+        /// opaque integer-indexed indirect jumps. WACS surfaces
+        /// the empty map; the caller should treat it as a
+        /// "stripped names — cannot bind this component"
+        /// diagnostic.</para>
         /// </summary>
         public static Dictionary<uint, string> ExtractCanonOpNames(Module core)
         {
