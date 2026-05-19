@@ -1,5 +1,57 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.13 — synthetic .wasm fixture round-trip (Phase 5 Slice K)
+
+Validates the prior slices' wire-ups end-to-end. Hand-crafts
+minimal core .wasm modules that import a Preview 3 host
+function, wrap it in an exported function, and round-trip
+through `WasmRuntime`. The interpreter loop runs the wasm
+wrapper, the wrapper calls the host function via the
+registered binding, and the test confirms the value comes
+back.
+
+This is the integration validation that the prior slices'
+unit tests can't directly provide — they exercise the
+`Invoke*` host bodies directly. Slice K wraps the same
+bodies behind the wasm-runtime indirection that real
+wit-component-emitted modules would, without needing a
+build-time wasm toolchain in the test project.
+
+### Two fixtures
+
+1. **`test-now`** — imports
+   `(wasi:clocks/monotonic-clock@0.3.0-rc-2026-03-15, "now")`
+   of type `() -> i64`, wraps in an exported `test-now`
+   function. Asserts the returned value is positive and
+   non-decreasing across two calls.
+
+2. **`test-random`** — imports
+   `(wasi:random/random@0.3.0-rc-2026-03-15, "get-random-u64")`,
+   wraps in `test-random`. Asserts at least one of three
+   consecutive reads is non-zero (three consecutive zeros
+   from a CSPRNG would be astronomically unlikely).
+
+### Hand-built wasm-bytes helpers
+
+`WriteLeb128U32` + `WriteName` + per-section builder pattern
+follow the existing `ShimModuleRecognizerTests` style. The
+fixture bytes are constructed inline: magic + version + type
+section + import section + function section + export section
++ code section. Total ~40-50 bytes per fixture.
+
+### What this proves
+
+- The `WasmRuntime.BindHostFunction` registrations from
+  `WasiPreview3Host.BindToRuntime` are visible to import
+  resolution at module instantiation.
+- The interpreter's `call` opcode dispatches through to the
+  registered delegate.
+- The return value flows back from the host body through
+  the wasm interpreter to the `CreateInvokerFunc<long>`
+  caller.
+
+162/162 Preview3 tests green. Phase 5 wire-ups complete.
+
 ## WACS.WASI.Preview3 0.1.12 — sockets resource tables + `ip-name-lookup` wire-up (Phase 5 Slice J)
 
 Adds socket resource tables and wires the
