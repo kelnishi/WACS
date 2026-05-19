@@ -585,6 +585,30 @@ namespace Wacs.WASI.Preview3
                 (Func<ExecContext, int, int>)((_, self) =>
                     RequireResponse(self).GetStatusCode()));
 
+            // ---- get-headers: own<fields> (Slice DD) ---------------
+            //
+            // Allocates a fresh fields handle pointing at the
+            // request/response impl's existing IFields instance.
+            // Mutations through the returned handle are visible
+            // through the parent request/response's own reads
+            // (and vice versa) since both share the same impl
+            // object. Resource drop on the returned handle
+            // removes only that handle's entry — the parent
+            // resource keeps its independent reference.
+            runtime.BindHostFunction(
+                (HttpTypesModuleName,
+                    "[method]request.get-headers"),
+                (Func<ExecContext, int, int>)((_, self) =>
+                    FieldsHandles.Allocate(
+                        RequireRequest(self).GetHeaders())));
+
+            runtime.BindHostFunction(
+                (HttpTypesModuleName,
+                    "[method]response.get-headers"),
+                (Func<ExecContext, int, int>)((_, self) =>
+                    FieldsHandles.Allocate(
+                        RequireResponse(self).GetHeaders())));
+
             runtime.BindHostFunction(
                 (HttpTypesModuleName, "[method]response.set-status-code"),
                 (Action<ExecContext, int, int>)((_, self, code) =>

@@ -1,5 +1,52 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.32 — request/response get-headers (Phase 5 Slice DD)
+
+Wires `request.get-headers` and `response.get-headers`. Both
+return `own<fields>` — the wire allocates a fresh fields handle
+pointing at the parent's existing `IFields` impl. Mutations
+through the returned handle are visible through the parent's
+own reads (and vice versa) since both share the same impl
+object.
+
+### Wire signature
+
+```
+Func<ExecContext, int self, int>  // returns fields handle
+```
+
+A bare-flat return (no retptr): 1 i32 slot = handle index. The
+impl reads as `FieldsHandles.Allocate(request.GetHeaders())` —
+a one-liner using the existing resource table.
+
+### Ownership semantics
+
+The WIT says `get-headers: func() -> headers` where `type
+headers = fields;`. A bare resource type in return position
+means `own<...>` per the canonical-ABI spec. The pragmatic
+interpretation here is "fresh handle bound to the same impl":
+the parent request/response keeps its independent `_headers`
+reference; resource-drop on the returned handle only removes
+that handle's slot — the impl stays reachable through the
+parent.
+
+### Test coverage
+
+6 tests in `GetHeadersWireTests.cs`:
+- `BindToRuntime` registers both methods.
+- Request `get-headers` allocates a handle pointing to the
+  same `IFields` instance (`Assert.Same`).
+- Mutations through the returned handle are visible through
+  the parent's own `GetHeaders()` (impl-sharing assertion).
+- Response `get-headers` allocates a handle to the same impl.
+- Mutations through the response's returned handle are
+  reflected in the response's own reads.
+- Resource-drop on the returned handle doesn't invalidate the
+  parent's headers — verified by reading the parent's
+  `_headers` after dropping the handle.
+
+320/320 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.31 — request method + scheme getters/setters (Phase 5 Slice CC)
 
 Wires `request.get-method`/`set-method` (bare `method` variant)
