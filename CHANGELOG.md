@@ -1,5 +1,58 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.27 — UDP receive wire-up (Phase 5 Slice Y)
+
+Wires `udp-socket.receive` with a 44-byte 4-aligned retptr for
+`result<tuple<list<u8>, ip-socket-address>, error-code>`. UDP is
+now fully usable from a guest except for `send` (which requires
+paramptr-by-pointer lowering for its 17 flat params).
+
+### 44-byte retptr layout
+
+```
++0:    result-disc (u8) + 3-byte pad
++4..44: payload section (40 bytes, sized to the ok tuple)
+
+  ok (tuple<list<u8>, ip-socket-address>):
+    +4..8:   list-ptr (i32, ICabiRealloc-allocated)
+    +8..12:  list-len (i32)
+    +12..44: ip-socket-address (32 bytes)
+      +12:    ip-sock-addr disc (u8) + 3 pad
+      +16..18: port (u16 LE)
+      +18..22: 4 octets (ipv4) / +20..24: flow-info (u32 ipv6)
+      +24..40: 8×u16 BE address groups (ipv6)
+      +40..44: scope-id (u32 ipv6)
+
+  err (error-code variant):
+    +4..16: error-code variant + payload
+    +16..44: unused, zero-filled
+```
+
+The ip-socket-address embedding here is decoupled from the
+standalone `result<ip-socket-address, error-code>` encoder from
+Slice U — same variant layout but at a different starting offset
+within a larger retptr. The encoder writes the variant inline
+rather than calling Slice U's encoder (which assumes the variant
+sits at offset +4 of its own result retptr).
+
+### Test coverage
+
+6 tests in `UdpReceiveWireTests.cs` driven by stubbed
+`IUdpSocket` impls (bypassing System.Net.Sockets to exercise the
+encoder against deterministic inputs):
+- `BindToRuntime` registers `udp-socket.receive`.
+- ipv4 source: list-ptr/len round-trips through cabi_realloc,
+  port and octets land at +16..22 with disc=0 at +12.
+- ipv6 source: BE u16 groups at +24..40, flow-info LE at +20..24,
+  scope-id LE at +40..44, disc=1 at +12. Test address is `::1`
+  with flow-info `0xCAFEBABE` and scope-id `42`.
+- err path: `Timeout` error code lands at +4 with result-disc=1.
+- Zero-length payload writes list-ptr=0 / list-len=0 (no
+  cabi_realloc allocation).
+- Misaligned retptr throws.
+
+287/287 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.26 — TCP simple-options cluster + UDP disconnect (Phase 5 Slice X)
 
 Wires the remaining flat tcp-socket getters/setters

@@ -1065,6 +1065,19 @@ namespace Wacs.WASI.Preview3
                             self, unchecked((ulong)value),
                             retptr, realloc, sendBuffer: true)));
 
+            // ---- UDP receive (Slice Y) -----------------------------
+            //
+            // udp-socket.receive: () -> result<tuple<list<u8>,
+            // ip-socket-address>, error-code>. 44-byte 4-aligned
+            // retptr. Sync-blocks the async ReceiveAsync via
+            // .GetAwaiter().GetResult() — cooperative-yield
+            // migration is a separate large slice.
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]udp-socket.receive"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeUdpSocketReceive(self, retptr, realloc)));
+
             // ---- TCP simple getter/setter cluster (Slice X) -------
             //
             // The remaining flat tcp-socket methods:
@@ -1319,6 +1332,123 @@ namespace Wacs.WASI.Preview3
             WriteSocketsErrorCodeResult(
                 memory.AsSpan(retptr, ResultSocketsErrorCodeSize),
                 caught, realloc, memory);
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]udp-socket.receive()</c>. Writes
+        /// <c>result&lt;tuple&lt;list&lt;u8&gt;,
+        /// ip-socket-address&gt;, error-code&gt;</c> through a
+        /// 44-byte 4-aligned retptr. Sync-blocks the async impl
+        /// (same pattern as the rest of the Slice O sockets).
+        ///
+        /// Retptr layout (44 bytes 4-aligned):
+        /// <code>
+        /// +0:    result-disc (u8) + 3 pad
+        /// +4..44: payload section (40 bytes, sized to the ok tuple)
+        ///
+        ///   ok (tuple):
+        ///     +4..8:   list-ptr (i32, ICabiRealloc-allocated)
+        ///     +8..12:  list-len (i32)
+        ///     +12..44: ip-socket-address (32 bytes)
+        ///       +12:    ip-sock-addr disc (u8) + 3 pad
+        ///       +16..20: port (u16, ipv6 pads u16 to align-4)
+        ///       +20..24: flow-info (u32, ipv6 only)
+        ///       +24..40: 8×u16 BE addr groups (ipv6) /
+        ///                ipv4 fills +16..22 only (port + octets)
+        ///       +40..44: scope-id (u32, ipv6 only)
+        ///
+        ///   err (error-code variant):
+        ///     +4..16: error-code variant + payload (per
+        ///             WriteSocketsErrorCodeBytes)
+        ///     +16..44: unused, zero-filled
+        /// </code>
+        /// </summary>
+        public void InvokeUdpSocketReceive(
+            int self, int retptr, ICabiRealloc realloc)
+        {
+            var memory = RequireMemoryForHttp();
+            if (retptr < 0 || (retptr & 0x3) != 0
+                || retptr + 44 > memory.Data.Length)
+                throw new InvalidOperationException(
+                    "udp-socket.receive: retptr " +
+                    $"0x{retptr:X8} misaligned or out of range " +
+                    $"(memory size = {memory.Data.Length}). " +
+                    "Caller must allocate a 44-byte 4-aligned " +
+                    "return area.");
+
+            SocketsException? caught = null;
+            byte[] data = Array.Empty<byte>();
+            IpSocketAddress source = default;
+            try
+            {
+                var sock = RequireUdpSocket(self);
+                (data, source) = sock.ReceiveAsync()
+                    .GetAwaiter().GetResult();
+            }
+            catch (SocketsException ex) { caught = ex; }
+
+            var dest = memory.AsSpan(retptr, 44);
+            dest.Clear();
+            if (caught != null)
+            {
+                dest[0] = 1;
+                WriteSocketsErrorCodeBytes(
+                    dest.Slice(4, 12), caught, realloc, memory);
+                return;
+            }
+
+            dest[0] = 0; // ok disc
+            // list<u8>: allocate via cabi_realloc and copy.
+            int listPtr = data.Length > 0
+                ? realloc.Allocate(1, data.Length) : 0;
+            if (data.Length > 0)
+                new ReadOnlySpan<byte>(data)
+                    .CopyTo(memory.AsSpan(listPtr, data.Length));
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(dest.Slice(4), listPtr);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(dest.Slice(8), data.Length);
+
+            // ip-socket-address variant at +12..44.
+            //   +12: variant disc (u8) + 3 pad
+            //   +16..: payload (28 bytes max for ipv6; ipv4 fits
+            //          in +16..22 only)
+            dest[12] = (byte)(source.Family == IpAddressFamily.Ipv4
+                ? 0 : 1);
+            if (source.Family == IpAddressFamily.Ipv4)
+            {
+                dest[16] = (byte)(source.V4.Port & 0xFF);
+                dest[17] = (byte)((source.V4.Port >> 8) & 0xFF);
+                dest[18] = source.V4.Address.A;
+                dest[19] = source.V4.Address.B;
+                dest[20] = source.V4.Address.C;
+                dest[21] = source.V4.Address.D;
+            }
+            else
+            {
+                dest[16] = (byte)(source.V6.Port & 0xFF);
+                dest[17] = (byte)((source.V6.Port >> 8) & 0xFF);
+                // +18..20 pad (to align-4 for flow-info at +20)
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteUInt32LittleEndian(
+                        dest.Slice(20, 4), source.V6.FlowInfo);
+                var v6 = source.V6.Address;
+                ushort[] groups = new ushort[]
+                {
+                    v6.G0, v6.G1, v6.G2, v6.G3,
+                    v6.G4, v6.G5, v6.G6, v6.G7,
+                };
+                for (int slot = 0; slot < 8; slot++)
+                {
+                    dest[24 + slot * 2 + 0] =
+                        (byte)((groups[slot] >> 8) & 0xFF);
+                    dest[24 + slot * 2 + 1] =
+                        (byte)(groups[slot] & 0xFF);
+                }
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteUInt32LittleEndian(
+                        dest.Slice(40, 4), source.V6.ScopeId);
+            }
         }
 
         private IUdpSocket RequireUdpSocket(int handle)
