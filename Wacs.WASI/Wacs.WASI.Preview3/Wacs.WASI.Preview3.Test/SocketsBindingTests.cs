@@ -81,7 +81,7 @@ namespace Wacs.WASI.Preview3.Test
         // ---- ip-name-lookup wire-up ----------------------------------
 
         [Fact]
-        public void InvokeResolveAddresses_empty_result_writes_zero_ptr_zero_count()
+        public void InvokeResolveAddresses_empty_result_writes_ok_disc_zero_list()
         {
             var dispatcher = new AsyncDispatcher();
             dispatcher.Memory = MakeMemory();
@@ -99,11 +99,14 @@ namespace Wacs.WASI.Preview3.Test
             const int retptr = 64;
             host.InvokeResolveAddresses(0, 0, retptr, realloc);
 
-            var bytes = dispatcher.Memory.AsSpan(retptr, 8);
-            Assert.Equal(0,
-                BinaryPrimitives.ReadInt32LittleEndian(bytes.Slice(0)));
+            // 16-byte result<list<ip-address>, error-code> retptr.
+            // disc=0 (ok) at +0; list-ptr/len at +4..12.
+            var bytes = dispatcher.Memory.AsSpan(retptr, 12);
+            Assert.Equal(0, bytes[0]);
             Assert.Equal(0,
                 BinaryPrimitives.ReadInt32LittleEndian(bytes.Slice(4)));
+            Assert.Equal(0,
+                BinaryPrimitives.ReadInt32LittleEndian(bytes.Slice(8)));
         }
 
         [Fact]
@@ -134,7 +137,10 @@ namespace Wacs.WASI.Preview3.Test
             host.InvokeResolveAddresses(
                 namePtr, name.Length, retptr, realloc);
 
-            var outer = dispatcher.Memory.AsSpan(retptr, 8);
+            // disc=0 (ok) at +0; list-ptr/len at +4..12 within
+            // the 16-byte result retptr.
+            Assert.Equal(0, dispatcher.Memory.AsSpan(retptr, 1)[0]);
+            var outer = dispatcher.Memory.AsSpan(retptr + 4, 8);
             int listPtr = BinaryPrimitives.ReadInt32LittleEndian(outer.Slice(0));
             int listCount = BinaryPrimitives.ReadInt32LittleEndian(outer.Slice(4));
             Assert.Equal(256, listPtr); // first realloc allocation
@@ -213,7 +219,7 @@ namespace Wacs.WASI.Preview3.Test
         }
 
         [Fact]
-        public void InvokeResolveAddresses_propagates_sockets_exception()
+        public void InvokeResolveAddresses_writes_error_code_on_resolver_failure()
         {
             var dispatcher = new AsyncDispatcher();
             dispatcher.Memory = MakeMemory();
@@ -229,10 +235,14 @@ namespace Wacs.WASI.Preview3.Test
             };
             var realloc = new StubRealloc(Array.Empty<int>());
 
-            var ex = Assert.Throws<SocketsException>(
-                () => host.InvokeResolveAddresses(0, 0, 64, realloc));
-            Assert.Equal(
-                ErrorCode.PermanentResolverFailure, ex.Code);
+            const int retptr = 64;
+            host.InvokeResolveAddresses(0, 0, retptr, realloc);
+
+            // disc=1 (err) at +0; error-code variant at +4..16.
+            // The variant disc identifies the ErrorCode value.
+            Assert.Equal(1, dispatcher.Memory.AsSpan(retptr, 1)[0]);
+            Assert.Equal((byte)ErrorCode.PermanentResolverFailure,
+                dispatcher.Memory.AsSpan(retptr + 4, 1)[0]);
         }
 
         // ---- Test stubs ----------------------------------------------

@@ -1,5 +1,64 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.28 — resolve-addresses result-variant encoding fix (Phase 5 Slice Z)
+
+`ip-name-lookup.resolve-addresses` was writing `(list-ptr,
+list-count)` directly at retptr — missing the outer result
+discriminant entirely. The WIT says
+`result<list<ip-address>, error-code>`, which canon-ABI lowers
+to a 16-byte 4-aligned retptr (disc + payload), not 8 bytes.
+Guests would mis-decode the result variant; a guest expecting
+`disc + list-ptr + list-len` would read disc=list-ptr's first
+byte (almost always garbage), then the list-ptr/len would be
+shifted by 4 bytes off, dereferencing into junk.
+
+### Corrected retptr layout
+
+```
++0:    result-disc (u8) + 3 pad
++4..16: payload section (12 bytes, sized to the error-code
+        variant's 12-byte arm — dominates the 8-byte list arm)
+
+  ok (list<ip-address>):
+    +4..8:   list-ptr (i32)
+    +8..12:  list-len (i32)
+    +12..16: unused, zero
+
+  err (error-code variant):
+    +4..16: variant disc + payload (per
+            WriteSocketsErrorCodeBytes)
+```
+
+The list-element layout (18 bytes per `ip-address` entry,
+2-aligned, with ipv6 groups in BE) is unchanged from the
+previous wire-up — only the outer retptr framing moved.
+
+### SocketsException now lowered to err variant
+
+Previously a `SocketsException` from
+`IIpNameLookup.ResolveAddressesAsync` propagated out of the
+wire call as a host-side CLR exception. Now it's caught and
+encoded as the err variant at `+4..16` per the layout above,
+matching every other `result<_, error-code>` wire-up in the
+sockets surface.
+
+### Test coverage
+
+- Existing `InvokeResolveAddresses_empty_result_*` updated to
+  assert disc=0 at +0 with the list pair at +4..12.
+- `*_ipv4_addresses_*` test now asserts disc=0 at +0; list
+  pair at +4..12; element layout at listPtr unchanged.
+- `*_ipv6_address_*` test unchanged (reads only the listPtr
+  entry — element layout didn't move).
+- `*_misaligned_retptr_throws` unchanged (alignment check
+  fires before size check; retptr=5 is still misaligned).
+- `*_propagates_sockets_exception` flipped to
+  `*_writes_error_code_on_resolver_failure` — verifies the
+  `NoNameLookup` `PermanentResolverFailure` lands as disc=1
+  at +0 and error-code variant at +4.
+
+287/287 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.27 — UDP receive wire-up (Phase 5 Slice Y)
 
 Wires `udp-socket.receive` with a 44-byte 4-aligned retptr for

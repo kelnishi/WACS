@@ -6,6 +6,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Wacs.ComponentModel.Async;
 using Wacs.ComponentModel.CanonicalABI;
@@ -2166,9 +2167,27 @@ namespace Wacs.WASI.Preview3
         /// <summary>Invoke
         /// <c>wasi:sockets/ip-name-lookup.resolve-addresses</c>'s
         /// body. Reads the hostname from guest memory, blocks
-        /// on the Task<IReadOnlyList<IpAddress>>, allocates the
-        /// canon-ABI-lowered variant list through cabi_realloc,
-        /// writes the outer (list-ptr, list-count) at retptr.</summary>
+        /// on the Task&lt;IReadOnlyList&lt;IpAddress&gt;&gt;,
+        /// allocates the canon-ABI-lowered variant list through
+        /// cabi_realloc, writes
+        /// <c>result&lt;list&lt;ip-address&gt;, error-code&gt;</c>
+        /// through a 16-byte 4-aligned retptr.
+        ///
+        /// <para>Retptr layout:</para>
+        /// <code>
+        /// +0:    result-disc (u8) + 3 pad
+        /// +4..16: payload section (12 bytes, sized to the
+        ///         error-code variant arm which dominates the
+        ///         8-byte list arm)
+        ///   ok (list&lt;ip-address&gt;):
+        ///     +4..8:  list-ptr (i32)
+        ///     +8..12: list-len (i32)
+        ///     +12..16: unused, zero
+        ///   err (error-code variant):
+        ///     +4..16: variant disc + payload (per
+        ///             WriteSocketsErrorCodeBytes)
+        /// </code>
+        /// </summary>
         public void InvokeResolveAddresses(
             int namePtr, int nameLen, int retptr, ICabiRealloc realloc)
         {
@@ -2179,13 +2198,17 @@ namespace Wacs.WASI.Preview3
                     "wasi:sockets/ip-name-lookup.resolve-addresses: " +
                     "dispatcher.Memory must be set before this " +
                     "import is invoked.");
+            // result<list<ip-address>, error-code>:
+            //   align = max(4, 4) = 4
+            //   max_case = max(8 (list), 12 (error-code)) = 12
+            //   size = align-up(1 + 12, 4) = 16
             if (retptr < 0 || (retptr & 0x3) != 0
-                || retptr + 8 > memory.Data.Length)
+                || retptr + 16 > memory.Data.Length)
                 throw new InvalidOperationException(
                     "wasi:sockets/ip-name-lookup.resolve-addresses: " +
                     $"retptr 0x{retptr:X8} misaligned or out of range " +
                     $"(memory size = {memory.Data.Length}). " +
-                    "Caller must allocate an 8-byte 4-aligned " +
+                    "Caller must allocate a 16-byte 4-aligned " +
                     "return area.");
 
             // Read the hostname string.
@@ -2196,76 +2219,91 @@ namespace Wacs.WASI.Preview3
                 name = System.Text.Encoding.UTF8.GetString(
                     memory.AsSpan(namePtr, nameLen));
 
-            // Resolve (sync-blocking).
-            var addresses = IpNameLookup
-                .ResolveAddressesAsync(name)
-                .GetAwaiter().GetResult();
-
-            // Empty list: (0, 0) at retptr.
-            int count = addresses.Count;
-            if (count == 0)
+            // Resolve (sync-blocking). Catch SocketsException
+            // and lower to the err variant; other exceptions
+            // propagate as host-side bugs.
+            SocketsException? caught = null;
+            IReadOnlyList<IpAddress>? addresses = null;
+            try
             {
-                var emptyDest = memory.AsSpan(retptr, 8);
-                System.Buffers.Binary.BinaryPrimitives
-                    .WriteInt32LittleEndian(emptyDest.Slice(0), 0);
-                System.Buffers.Binary.BinaryPrimitives
-                    .WriteInt32LittleEndian(emptyDest.Slice(4), 0);
+                addresses = IpNameLookup
+                    .ResolveAddressesAsync(name)
+                    .GetAwaiter().GetResult();
+            }
+            catch (SocketsException ex) { caught = ex; }
+
+            var dest = memory.AsSpan(retptr, 16);
+            dest.Clear();
+            if (caught != null)
+            {
+                dest[0] = 1; // result-disc = err
+                WriteSocketsErrorCodeBytes(
+                    dest.Slice(4, 12), caught, realloc, memory);
                 return;
             }
 
-            // ip-address wire entry: 18 bytes, 2-aligned.
-            //   +0: disc (u8: 0=ipv4, 1=ipv6)
-            //   +1: align pad
-            //   +2..18: payload (max(ipv4 = 4, ipv6 = 16) = 16 bytes)
-            const int entrySize = 18;
-            int listPtr = realloc.Allocate(
-                align: 2, size: count * entrySize);
-            var listSpan = memory.AsSpan(listPtr, count * entrySize);
-            for (int i = 0; i < count; i++)
-            {
-                int off = i * entrySize;
-                var addr = addresses[i];
-                // Zero the entire entry first to keep the pad
-                // bytes deterministic.
-                for (int j = 0; j < entrySize; j++)
-                    listSpan[off + j] = 0;
+            dest[0] = 0; // result-disc = ok
+            int count = addresses!.Count;
 
-                if (addr.Family == IpAddressFamily.Ipv4)
+            int listPtr;
+            if (count == 0)
+            {
+                listPtr = 0;
+            }
+            else
+            {
+                // ip-address wire entry: 18 bytes, 2-aligned.
+                //   +0: disc (u8: 0=ipv4, 1=ipv6)
+                //   +1: align pad
+                //   +2..18: payload (max(ipv4 = 4, ipv6 = 16))
+                const int entrySize = 18;
+                listPtr = realloc.Allocate(
+                    align: 2, size: count * entrySize);
+                var listSpan = memory.AsSpan(
+                    listPtr, count * entrySize);
+                for (int i = 0; i < count; i++)
                 {
-                    listSpan[off + 0] = 0; // disc
-                    // payload at +2: 4 bytes.
-                    listSpan[off + 2] = addr.V4.A;
-                    listSpan[off + 3] = addr.V4.B;
-                    listSpan[off + 4] = addr.V4.C;
-                    listSpan[off + 5] = addr.V4.D;
-                }
-                else
-                {
-                    listSpan[off + 0] = 1; // disc = ipv6
-                    // payload at +2: 8 u16s, 16 bytes, network
-                    // byte order (BE) to match the WIT tuple
-                    // semantics.
-                    ushort[] groups = new ushort[]
+                    int off = i * entrySize;
+                    var addr = addresses[i];
+                    // Zero the entire entry first to keep the
+                    // pad bytes deterministic.
+                    for (int j = 0; j < entrySize; j++)
+                        listSpan[off + j] = 0;
+
+                    if (addr.Family == IpAddressFamily.Ipv4)
                     {
-                        addr.V6.G0, addr.V6.G1, addr.V6.G2, addr.V6.G3,
-                        addr.V6.G4, addr.V6.G5, addr.V6.G6, addr.V6.G7,
-                    };
-                    for (int slot = 0; slot < 8; slot++)
+                        listSpan[off + 0] = 0; // disc
+                        listSpan[off + 2] = addr.V4.A;
+                        listSpan[off + 3] = addr.V4.B;
+                        listSpan[off + 4] = addr.V4.C;
+                        listSpan[off + 5] = addr.V4.D;
+                    }
+                    else
                     {
-                        listSpan[off + 2 + slot * 2 + 0] =
-                            (byte)((groups[slot] >> 8) & 0xFF);
-                        listSpan[off + 2 + slot * 2 + 1] =
-                            (byte)(groups[slot] & 0xFF);
+                        listSpan[off + 0] = 1; // disc = ipv6
+                        // payload at +2: 8 u16s, 16 bytes, BE
+                        // (network byte order).
+                        ushort[] groups = new ushort[]
+                        {
+                            addr.V6.G0, addr.V6.G1, addr.V6.G2, addr.V6.G3,
+                            addr.V6.G4, addr.V6.G5, addr.V6.G6, addr.V6.G7,
+                        };
+                        for (int slot = 0; slot < 8; slot++)
+                        {
+                            listSpan[off + 2 + slot * 2 + 0] =
+                                (byte)((groups[slot] >> 8) & 0xFF);
+                            listSpan[off + 2 + slot * 2 + 1] =
+                                (byte)(groups[slot] & 0xFF);
+                        }
                     }
                 }
             }
 
-            // Outer (list-ptr, list-count) at retptr.
-            var outerDest = memory.AsSpan(retptr, 8);
+            // Outer (list-ptr, list-count) at +4..12.
             System.Buffers.Binary.BinaryPrimitives
-                .WriteInt32LittleEndian(outerDest.Slice(0), listPtr);
+                .WriteInt32LittleEndian(dest.Slice(4), listPtr);
             System.Buffers.Binary.BinaryPrimitives
-                .WriteInt32LittleEndian(outerDest.Slice(4), count);
+                .WriteInt32LittleEndian(dest.Slice(8), count);
         }
 
         // ---- wasi:filesystem binding bodies (Slice I) ---------------
