@@ -6,7 +6,10 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 
 using System.Collections.Generic;
+using System.Linq;
+using Wacs.ComponentModel.Runtime.Parser;
 using Wacs.Core;
+using Wacs.Core.Runtime;
 
 namespace Wacs.ComponentModel.Async
 {
@@ -191,5 +194,179 @@ namespace Wacs.ComponentModel.Async
             if (string.IsNullOrEmpty(debugName)) return debugName;
             return debugName.Replace('.', '-');
         }
+
+        /// <summary>
+        /// Result of binding a wit-component shim module — counts
+        /// of bound, mismatched, and skipped (deferred) entries
+        /// so callers can surface diagnostics.
+        /// </summary>
+        public readonly struct BindResult
+        {
+            /// <summary>Delegates successfully bound under
+            /// <c>("", "&lt;i&gt;")</c>.</summary>
+            public int Bound { get; }
+            /// <summary>Shim functions whose debug-name didn't
+            /// match the canon-op of the positional canon entry
+            /// — surfaces wit-component emit-order surprises.</summary>
+            public int Mismatched { get; }
+            /// <summary>Canon entries whose typed delegate
+            /// construction returned null
+            /// (aggregate task.return, non-primitive context, etc.).
+            /// Awaits the canon-ABI lift adapter.</summary>
+            public int Skipped { get; }
+
+            public BindResult(int bound, int mismatched, int skipped)
+            {
+                Bound = bound;
+                Mismatched = mismatched;
+                Skipped = skipped;
+            }
+        }
+
+        /// <summary>
+        /// Walk the shim's function-name custom section, pair each
+        /// shim function with the positionally-matching canon-async
+        /// entry from <paramref name="canonEntries"/>, build the
+        /// typed delegate via
+        /// <see cref="CanonAsyncBinder.TryBuildDelegateForEntry"/>,
+        /// and register it on <paramref name="runtime"/> under the
+        /// shim's <c>("", "&lt;funcIdx&gt;")</c> import name.
+        ///
+        /// <para><b>Pairing convention:</b> wit-component emits
+        /// shim functions in the order it processes the
+        /// component's canon-async entries during encoding. The
+        /// shim function at index <c>i</c> corresponds to the
+        /// <c>i</c>-th canon-async entry in <paramref name="canonEntries"/>
+        /// (skipping <see cref="CanonLift"/>, which produces a
+        /// component-level func not a core one). The shim's
+        /// debug-name custom section serves as a validation
+        /// signal: if the kebab-normalized debug-name doesn't
+        /// match the positional canon entry's op, the recognizer
+        /// reports it as <see cref="BindResult.Mismatched"/> and
+        /// skips that binding rather than guessing.</para>
+        ///
+        /// <para>Returns <see cref="BindResult"/> with
+        /// per-category counts so the caller can surface "bound 8
+        /// of 10 — 1 mismatched, 1 deferred" diagnostics.</para>
+        ///
+        /// <para>No-op (returns zero-counts) when
+        /// <paramref name="shim"/> is not a shim module, or its
+        /// function-name subsection is stripped (the
+        /// hard-limit case documented above).</para>
+        /// </summary>
+        public static BindResult BindShimImports(
+            WasmRuntime runtime,
+            Module shim,
+            IReadOnlyList<CanonEntry> canonEntries,
+            AsyncDispatcher dispatcher)
+        {
+            if (!IsShimModule(shim)) return default;
+            var names = ExtractCanonOpNames(shim);
+            if (names.Count == 0) return default;
+
+            // Filter the canon list to async entries only. Order
+            // preserved — that's the pairing key.
+            var asyncEntries = canonEntries
+                .Where(IsCanonAsync)
+                .ToList();
+
+            int bound = 0, mismatched = 0, skipped = 0;
+            foreach (var (shimFuncIdx, opName) in
+                     names.OrderBy(kv => kv.Key))
+            {
+                if (shimFuncIdx >= asyncEntries.Count) { mismatched++; continue; }
+                var entry = asyncEntries[(int)shimFuncIdx];
+                var entryOpName = CanonOpNameFor(entry);
+                if (entryOpName != opName) { mismatched++; continue; }
+
+                var del = CanonAsyncBinder.TryBuildDelegateForEntry(entry, dispatcher);
+                if (del == null) { skipped++; continue; }
+
+                runtime.BindHostFunction(
+                    (string.Empty, shimFuncIdx.ToString()), del);
+                bound++;
+            }
+            return new BindResult(bound, mismatched, skipped);
+        }
+
+        // Distinct from CanonLift — the latter produces a
+        // component-level func and doesn't get a shim entry.
+        private static bool IsCanonAsync(CanonEntry e) => e switch
+        {
+            CanonLift _ => false,
+            CanonLower _ => false,
+            CanonResourceOp _ => false,
+            // Async-family entries match. Everything else does too
+            // by elimination, but listing them explicitly makes
+            // the contract auditable.
+            CanonTaskReturn _ or CanonTaskCancel _
+                or CanonSubtaskCancel _ or CanonSubtaskDrop _
+                or CanonBackpressureOp _ or CanonContextOp _
+                or CanonThreadYield _ or CanonStreamOp _
+                or CanonFutureOp _ or CanonErrorContextOp _
+                or CanonWaitableSetOp _ or CanonWaitableJoin _ => true,
+            _ => false,
+        };
+
+        // Map a canon entry to its wasmtime symbol_name() spelling.
+        // Mirrors the [CanonAsync] attribute decorations on
+        // AsyncDispatcher — keep them in sync if either side
+        // adds a canon op.
+        private static string CanonOpNameFor(CanonEntry e) => e switch
+        {
+            CanonTaskReturn _ => "task-return",
+            CanonTaskCancel _ => "task-cancel",
+            CanonSubtaskCancel _ => "subtask-cancel",
+            CanonSubtaskDrop _ => "subtask-drop",
+            CanonBackpressureOp bp => bp.Op switch
+            {
+                CanonBackpressureOp.Kind.Set => "backpressure-set",
+                CanonBackpressureOp.Kind.Inc => "backpressure-inc",
+                CanonBackpressureOp.Kind.Dec => "backpressure-dec",
+                _ => "",
+            },
+            CanonContextOp cx => cx.Op == CanonContextOp.Kind.Get
+                ? "context-get" : "context-set",
+            CanonThreadYield _ => "thread-yield",
+            CanonStreamOp s => s.Op switch
+            {
+                CanonStreamOp.Kind.New => "stream-new",
+                CanonStreamOp.Kind.Read => "stream-read",
+                CanonStreamOp.Kind.Write => "stream-write",
+                CanonStreamOp.Kind.CancelRead => "stream-cancel-read",
+                CanonStreamOp.Kind.CancelWrite => "stream-cancel-write",
+                CanonStreamOp.Kind.DropReadable => "stream-drop-readable",
+                CanonStreamOp.Kind.DropWritable => "stream-drop-writable",
+                _ => "",
+            },
+            CanonFutureOp f => f.Op switch
+            {
+                CanonFutureOp.Kind.New => "future-new",
+                CanonFutureOp.Kind.Read => "future-read",
+                CanonFutureOp.Kind.Write => "future-write",
+                CanonFutureOp.Kind.CancelRead => "future-cancel-read",
+                CanonFutureOp.Kind.CancelWrite => "future-cancel-write",
+                CanonFutureOp.Kind.DropReadable => "future-drop-readable",
+                CanonFutureOp.Kind.DropWritable => "future-drop-writable",
+                _ => "",
+            },
+            CanonErrorContextOp ec => ec.Op switch
+            {
+                CanonErrorContextOp.Kind.New => "error-context-new",
+                CanonErrorContextOp.Kind.DebugMessage => "error-context-debug-message",
+                CanonErrorContextOp.Kind.Drop => "error-context-drop",
+                _ => "",
+            },
+            CanonWaitableSetOp ws => ws.Op switch
+            {
+                CanonWaitableSetOp.Kind.New => "waitable-set-new",
+                CanonWaitableSetOp.Kind.Wait => "waitable-set-wait",
+                CanonWaitableSetOp.Kind.Poll => "waitable-set-poll",
+                CanonWaitableSetOp.Kind.Drop => "waitable-set-drop",
+                _ => "",
+            },
+            CanonWaitableJoin _ => "waitable-join",
+            _ => "",
+        };
     }
 }

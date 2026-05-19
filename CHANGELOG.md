@@ -1,5 +1,103 @@
 # Changelog
 
+## WACS.ComponentModel 0.8.15 — multi-core shim integration (Phase 3 Slice H)
+
+Wires `ShimModuleRecognizer` into `ComponentInstance.InstantiateMultiCore`
+so a parsed multi-core component containing wit-component's
+canon-async shim module gets its `("", "<i>")` imports bound
+to dispatcher delegates before primary-module instantiation.
+
+### `CanonAsyncBinder.TryBuildDelegateForEntry` exposed
+
+The per-shape delegate-construction logic in
+`CanonAsyncBinder` was private (`TryBuildDelegate`). Added a
+public wrapper:
+
+```csharp
+public static Delegate? TryBuildDelegateForEntry(
+    CanonEntry entry, AsyncDispatcher dispatcher);
+```
+
+Returns null when the entry kind isn't currently buildable
+(aggregate task.return, non-primitive context — awaiting the
+canon-ABI lift adapter). The existing `BindImports` keeps
+its same behavior.
+
+### `ShimModuleRecognizer.BindShimImports`
+
+New method walks the shim's function-name custom section,
+pairs each shim function with the positionally-matching
+canon-async entry from `component.Canons` (filtering out
+`CanonLift`/`CanonLower`/`CanonResourceOp` which don't get
+shim entries), validates the kebab-normalized debug-name
+matches the canon entry's op via a build-time-pinned
+`CanonOpNameFor` table, builds the typed delegate via
+`TryBuildDelegateForEntry`, and registers under
+`("", "<funcIdx>")`.
+
+Returns a `BindResult` with `(Bound, Mismatched, Skipped)`
+counts so the caller can surface diagnostics like "bound 8
+of 10 — 1 position mismatch, 1 entry deferred to lift
+adapter."
+
+### Pairing convention
+
+The shim function at index `i` corresponds to the `i`-th
+canon-async entry in the component's `Canons` list (in file
+order, skipping non-async entries). The kebab-normalized
+debug-name is the validation key — if it disagrees with the
+canon entry's op-kind, the recognizer reports
+`Mismatched` and skips that binding rather than guessing.
+
+If wit-component's emit order turns out to differ from the
+canon section order for some component, a name-based fallback
+pairing pass would be the natural follow-up. For the
+common case this positional rule works.
+
+### `ComponentInstance.InstantiateMultiCore` integration
+
+Before primary-module instantiation:
+
+1. Toggle `BinaryModuleParser.ParseCustomNames = true` for
+   the duration (saved + restored in `finally`).
+2. Scan every non-primary core binary; for each that
+   `IsShimModule(...)`, allocate an `AsyncDispatcher` (lazily,
+   first hit), and call `BindShimImports`.
+3. Multiple shims (e.g. wit-component's `:shim` + `:fixups`
+   pair) all get a pass.
+4. The dispatcher is stashed on
+   `ComponentInstance.AsyncDispatcher` (already public from
+   Slice E).
+5. Parse + instantiate the primary module as before; its
+   imports of the shim's exports resolve through the binder.
+
+### Tests
+
+5 new in `ShimModuleRecognizerTests`:
+
+- `BindShimImports_no_op_on_non_shim_module`.
+- `BindShimImports_no_op_on_shim_with_stripped_function_names`
+  (hard-limit binding behavior).
+- `BindShimImports_binds_matching_marker_op_positionally`.
+- `BindShimImports_skips_non_async_canon_entries_in_pairing`
+  (CanonLower/Resource don't take shim positions).
+- `BindShimImports_reports_mismatch_when_debug_name_disagrees_with_position`.
+
+539/539 ComponentModel + 833/833 Transpiler tests pass
+(was 534).
+
+### What remains
+
+- **Real `.component.wasm` fixture**: now that the integration
+  is in place, a real wit-component-emitted Preview 3
+  component would close the loop end-to-end. The recognizer
+  + binder + dispatcher together cover the read side.
+- **Name-based pairing fallback**: if a fixture surfaces
+  positional mismatches, walk by debug-name → canon-op-kind
+  matching instead of by index.
+- **Aggregate task.return / context with typed lift**: still
+  the genuine "wait for lift adapter" frontier.
+
 ## WACS.ComponentModel 0.8.14 — structural shim fallback + stripped-names hard limit
 
 Hardens `ShimModuleRecognizer` against downstream tools that

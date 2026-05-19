@@ -433,12 +433,63 @@ namespace Wacs.ComponentModel.Runtime
             Action<WasmRuntime>? configureImports)
         {
             var runtime = new WasmRuntime();
-            using var coreMs = new MemoryStream(coreBinaries[primaryIdx]);
-            var coreModule = BinaryModuleParser.ParseWasm(coreMs);
-            configureImports?.Invoke(runtime);
-            var coreInstance = runtime.InstantiateModule(coreModule,
-                new RuntimeOptions { MemoryStorage = AmbientRuntime.MemoryStorage });
-            return new ComponentInstance(component, runtime, coreInstance);
+
+            // wit-component-emitted multi-core components include a
+            // shim module that proxies canon-async builtin imports.
+            // Recognize + bind it BEFORE the primary module
+            // instantiates so its imports of the shim's exports
+            // resolve through the binder.
+            //
+            // ParseCustomNames is opt-in process-wide; flip it on
+            // for the shim-scan window then restore. The primary
+            // module is parsed below with this also enabled, which
+            // costs a few µs but harms nothing.
+            Wacs.ComponentModel.Async.AsyncDispatcher? asyncDispatcher = null;
+            var prevParseNames = BinaryModuleParser.ParseCustomNames;
+            BinaryModuleParser.ParseCustomNames = true;
+            try
+            {
+                // Scan every binary for a shim module — wit-component
+                // can put it anywhere in the module list.
+                for (int i = 0; i < coreBinaries.Count; i++)
+                {
+                    if (i == primaryIdx) continue;
+                    using var ms = new MemoryStream(coreBinaries[i]);
+                    var candidate = BinaryModuleParser.ParseWasm(ms);
+                    if (!Wacs.ComponentModel.Async.ShimModuleRecognizer
+                            .IsShimModule(candidate))
+                        continue;
+
+                    asyncDispatcher ??=
+                        new Wacs.ComponentModel.Async.AsyncDispatcher();
+                    Wacs.ComponentModel.Async.ShimModuleRecognizer
+                        .BindShimImports(
+                            runtime, candidate, component.Canons,
+                            asyncDispatcher);
+                    // Multiple shims (wit-component:shim and a
+                    // matching fixups module) can appear — keep
+                    // scanning so each one gets a pass.
+                }
+
+                // Parse the primary module after the shim binder
+                // has registered its delegates.
+                using var coreMs = new MemoryStream(coreBinaries[primaryIdx]);
+                var coreModule = BinaryModuleParser.ParseWasm(coreMs);
+                configureImports?.Invoke(runtime);
+                var coreInstance = runtime.InstantiateModule(coreModule,
+                    new RuntimeOptions
+                    {
+                        MemoryStorage = AmbientRuntime.MemoryStorage,
+                    });
+                return new ComponentInstance(component, runtime, coreInstance)
+                {
+                    AsyncDispatcher = asyncDispatcher,
+                };
+            }
+            finally
+            {
+                BinaryModuleParser.ParseCustomNames = prevParseNames;
+            }
         }
 
         /// <summary>Build a composer-mode instance: recursively

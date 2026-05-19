@@ -10,7 +10,9 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using Wacs.ComponentModel.Async;
+using Wacs.ComponentModel.Runtime.Parser;
 using Wacs.Core;
+using Wacs.Core.Runtime;
 using Xunit;
 
 namespace Wacs.ComponentModel.Test
@@ -441,6 +443,113 @@ namespace Wacs.ComponentModel.Test
                 Assert.True(CanonOpRegistry.IsKnown(opName),
                     $"Normalized debug name '{opName}' should be a known canon op.");
             }
+        }
+
+        // ---- BindShimImports ------------------------------------------
+
+        [Fact]
+        public void BindShimImports_no_op_on_non_shim_module()
+        {
+            var runtime = new WasmRuntime();
+            var dispatcher = new AsyncDispatcher();
+            var notAShim = MakeModuleWithNames(
+                "regular-module", new Dictionary<uint, string>());
+            var result = ShimModuleRecognizer.BindShimImports(
+                runtime, notAShim, System.Array.Empty<CanonEntry>(), dispatcher);
+            Assert.Equal(0, result.Bound);
+            Assert.Equal(0, result.Mismatched);
+            Assert.Equal(0, result.Skipped);
+        }
+
+        [Fact]
+        public void BindShimImports_no_op_on_shim_with_stripped_function_names()
+        {
+            var runtime = new WasmRuntime();
+            var dispatcher = new AsyncDispatcher();
+            var stripped = ParseModule(BuildWasmWithImports(
+                new[] { ("", "0") },
+                moduleName: ShimModuleRecognizer.ShimModuleName,
+                funcNames: null));
+            var canons = new CanonEntry[] { new CanonTaskCancel() };
+            var result = ShimModuleRecognizer.BindShimImports(
+                runtime, stripped, canons, dispatcher);
+            // Caller surfaces "stripped — cannot bind" via the
+            // zero-counts return.
+            Assert.Equal(0, result.Bound);
+            Assert.Equal(0, result.Mismatched);
+            Assert.Equal(0, result.Skipped);
+        }
+
+        [Fact]
+        public void BindShimImports_binds_matching_marker_op_positionally()
+        {
+            var runtime = new WasmRuntime();
+            var dispatcher = new AsyncDispatcher();
+            // Shim has one function at idx 0 named "task.cancel"
+            // (wit-component dotted style — recognizer normalizes
+            // to "task-cancel"). Canon entries list has one
+            // CanonTaskCancel at the same position.
+            var shim = MakeModuleWithNames(
+                ShimModuleRecognizer.ShimModuleName,
+                new Dictionary<uint, string> { { 0, "task.cancel" } });
+            var canons = new CanonEntry[] { new CanonTaskCancel() };
+
+            var result = ShimModuleRecognizer.BindShimImports(
+                runtime, shim, canons, dispatcher);
+            Assert.Equal(1, result.Bound);
+            Assert.Equal(0, result.Mismatched);
+            Assert.Equal(0, result.Skipped);
+        }
+
+        [Fact]
+        public void BindShimImports_skips_non_async_canon_entries_in_pairing()
+        {
+            // CanonLift/CanonLower/CanonResourceOp are not async —
+            // they don't get shim entries. Pairing should skip
+            // them when counting positions.
+            var runtime = new WasmRuntime();
+            var dispatcher = new AsyncDispatcher();
+            var shim = MakeModuleWithNames(
+                ShimModuleRecognizer.ShimModuleName,
+                new Dictionary<uint, string>
+                {
+                    { 0, "task.cancel" },
+                    { 1, "subtask.drop" },
+                });
+
+            var canons = new CanonEntry[]
+            {
+                new CanonLower(0, System.Array.Empty<CanonOption>()),
+                new CanonTaskCancel(),         // matches shim 0
+                new CanonResourceOp(CanonResourceOp.Kind.New, 0),
+                new CanonSubtaskDrop(),        // matches shim 1
+            };
+
+            var result = ShimModuleRecognizer.BindShimImports(
+                runtime, shim, canons, dispatcher);
+            Assert.Equal(2, result.Bound);
+            Assert.Equal(0, result.Mismatched);
+        }
+
+        [Fact]
+        public void BindShimImports_reports_mismatch_when_debug_name_disagrees_with_position()
+        {
+            // Shim says position 0 is "stream.new" but the canon
+            // entry at position 0 is task.cancel — wit-component
+            // wouldn't emit this, but the recognizer should
+            // detect rather than silently mis-bind.
+            var runtime = new WasmRuntime();
+            var dispatcher = new AsyncDispatcher();
+            var shim = MakeModuleWithNames(
+                ShimModuleRecognizer.ShimModuleName,
+                new Dictionary<uint, string> { { 0, "stream.new" } });
+            var canons = new CanonEntry[] { new CanonTaskCancel() };
+
+            var result = ShimModuleRecognizer.BindShimImports(
+                runtime, shim, canons, dispatcher);
+            Assert.Equal(0, result.Bound);
+            Assert.Equal(1, result.Mismatched);
+            Assert.Equal(0, result.Skipped);
         }
     }
 }

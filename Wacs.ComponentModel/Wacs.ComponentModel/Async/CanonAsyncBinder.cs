@@ -186,6 +186,28 @@ namespace Wacs.ComponentModel.Async
             return bound;
         }
 
+        /// <summary>
+        /// Build the typed host-function delegate for a single
+        /// canon-async <paramref name="entry"/> over the supplied
+        /// <paramref name="dispatcher"/>. Returns null when the
+        /// entry kind isn't currently buildable (e.g. aggregate-
+        /// typed task.return / context with a non-primitive
+        /// valtype — those need the canon-ABI lift adapter).
+        ///
+        /// <para>Public so the shim-module recognizer can consume
+        /// the same delegate-construction logic without
+        /// duplicating the per-shape switch.</para>
+        /// </summary>
+        public static Delegate? TryBuildDelegateForEntry(
+            CanonEntry entry, AsyncDispatcher dispatcher)
+        {
+            if (entry == null)
+                throw new ArgumentNullException(nameof(entry));
+            if (dispatcher == null)
+                throw new ArgumentNullException(nameof(dispatcher));
+            return TryBuildDelegate(entry, dispatcher, out var del) ? del : null;
+        }
+
         // Build the typed delegate for a canon-async entry. The
         // signatures match the spec's "produces a (core func)"
         // shape for each canon form.
