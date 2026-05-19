@@ -1,5 +1,119 @@
 # Changelog
 
+## WACS.ComponentModel 0.8.7 — canon-async binder + ComponentInstance integration (Phase 3 Slice E)
+
+Bridges the canon-async entries to host-function bindings on
+the `WasmRuntime` via the new `CanonAsyncBinder`. Engine-
+symmetric by virtue of living in the runtime layer — the
+interpreter and the transpiler both reach the dispatcher
+through `ComponentInstance.Instantiate`'s shared path.
+
+### `CanonAsyncBinder`
+
+Mirrors `CanonResourceBinder`'s pattern: walks the canon
+entries, builds typed delegates over `AsyncDispatcher`
+methods, registers them via `WasmRuntime.BindHostFunction`.
+
+**Default name convention** (placeholder until wit-component
+output settles):
+```
+module = "[canon]"
+name   = "[<op-kebab>]" or "[<op-kebab>]#<typeidx>"
+         for ops carrying a typeidx (stream.*, future.*).
+```
+
+Examples: `[task-cancel]`, `[stream-new]#5`,
+`[error-context-debug-message]`, `[waitable-join]`.
+
+**Override path**: `BindImports(runtime, canons, dispatcher, NameResolver)`
+accepts a custom resolver so embedders adopt their toolchain's
+convention. The default mapping is exposed as
+`CanonAsyncBinder.DefaultNameResolver` for inspection/diff.
+
+### What's bound
+
+Implemented (delegates that don't need memory access or
+suspend integration):
+
+- `task.cancel` — `() → ()`.
+- `subtask.cancel` (async flag captured at bind) — `(i32) → ()`.
+- `subtask.drop` — `(i32) → ()`.
+- `backpressure.{set,inc,dec}` — `() → ()`.
+- `stream.new` (typeidx captured) — `() → i32`.
+- `stream.{drop-readable,drop-writable,cancel-read,cancel-write}`
+  — `(i32) → i32` (0/1 success).
+- `future.new` (typeidx captured) — `() → i32`.
+- `future.{drop-readable,drop-writable,cancel-read,cancel-write}`
+  — `(i32) → i32`.
+- `error-context.drop` — `(i32) → i32`.
+- `waitable-set.{new,drop}` — `() → i32` / `(i32) → i32`.
+- `waitable.join` — `(i32, i32) → ()`.
+- `thread.yield` (cancellable captured) — `() → ()`.
+
+Skipped (Slice F — need lift adapter, memory access, or
+suspend bridge):
+
+- `task.return` (depends on resultlist marshaling).
+- `context.{get,set}` (depends on Value marshaling).
+- `stream.{read,write}` / `future.{read,write}` (depend on
+  component memory access for buffer copy).
+- `error-context.{new,debug-message}` (depend on memory-
+  resident string read/write).
+- `waitable-set.{wait,poll}` — wait needs the suspend bridge;
+  poll's typed signature requires `IContinuationContext`.
+
+### `ComponentInstance` integration
+
+`Instantiate` now:
+
+1. Walks `component.Canons` for any async-ABI entry.
+2. If found, allocates a fresh `AsyncDispatcher` and binds
+   the host functions via `CanonAsyncBinder.BindImports`
+   BEFORE `configureImports` + `InstantiateModule` — so the
+   inner core module's import resolution finds them.
+3. Stashes the dispatcher on
+   `ComponentInstance.AsyncDispatcher` (public).
+
+No-op for components with no canon-async entries (the
+dispatcher property stays null). Backward-compatible with
+every existing component fixture.
+
+### Tests
+
+9 new in `CanonAsyncBinderTests`:
+
+- Default name resolver shape (module, name).
+- Typeidx inclusion for stream / future ops.
+- Null-pair return for unsupported (Slice F) entries.
+- BindImports registers expected delegates.
+- BindImports honors a custom NameResolver.
+- Smoke test: dispatcher state is unchanged after binding.
+
+480/480 ComponentModel + 833/833 Transpiler tests pass
+(was 471). Symmetric across engines.
+
+### Engine-symmetry note
+
+Per `feedback_symmetric_engines`: the transpiler doesn't
+emit canon-async-specific CIL because the binder lives in
+the runtime layer. Transpiled components still flow through
+`ComponentInstance.Instantiate` for component-level
+instantiation; the canon-async host functions are bound
+identically regardless of whether the wasm body is
+interpreted or transpiled. The dispatcher methods are
+`callvirt` targets either way.
+
+### What ships in Slice F
+
+- Lift adapter for `async func()` entries: creates a
+  `ComponentTask`, registers it, runs the body, pops on
+  exit.
+- `WaitableSetWait` suspend bridge via
+  `StackSwitchingHelpers.Suspend`.
+- Memory-touching ops (`stream.read/.write`, `task.return`,
+  `error-context.new`).
+- Producer/consumer acceptance fixture under both engines.
+
 ## WACS.ComponentModel 0.8.6 — dispatcher state + canon-async index alignment (Phase 3 Slice D)
 
 Fills in the dispatcher state-machine surface that doesn't

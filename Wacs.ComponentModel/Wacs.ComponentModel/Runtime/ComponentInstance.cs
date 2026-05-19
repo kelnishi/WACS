@@ -95,6 +95,14 @@ namespace Wacs.ComponentModel.Runtime
         internal Dictionary<string, Wacs.Core.Runtime.ResourceHandleTable> _resourceTables
             = new();
 
+        /// <summary>Component-scope async dispatcher — Phase 3
+        /// surface. Holds the per-component handle tables for
+        /// tasks, subtasks, waitable-sets, streams, futures, and
+        /// error-contexts; the canon-async builtins route through
+        /// here. Null when the component declared no async-ABI
+        /// canon entries.</summary>
+        public Wacs.ComponentModel.Async.AsyncDispatcher? AsyncDispatcher { get; internal set; }
+
         private ComponentInstance(
             ComponentModule component,
             WasmRuntime runtime,
@@ -194,6 +202,22 @@ namespace Wacs.ComponentModel.Runtime
                     Wacs.Core.Runtime.CanonResourceBinder
                         .BindImports(runtime, coreModule);
 
+                // Canon-async builtins — bind host functions for
+                // the canon entries in this component (task/subtask/
+                // stream/future/error-context/waitable-set/etc.).
+                // No-op when the component has no canon-async
+                // entries. See CanonAsyncBinder for the placeholder
+                // name convention; embedders can override via the
+                // NameResolver hook when wit-component's convention
+                // settles.
+                Wacs.ComponentModel.Async.AsyncDispatcher? asyncDispatcher = null;
+                if (HasAnyCanonAsync(component.Canons))
+                {
+                    asyncDispatcher = new Wacs.ComponentModel.Async.AsyncDispatcher();
+                    Wacs.ComponentModel.Async.CanonAsyncBinder.BindImports(
+                        runtime, component.Canons, asyncDispatcher);
+                }
+
                 configureImports?.Invoke(runtime);
                 var coreInstance = runtime.InstantiateModule(coreModule,
                     new RuntimeOptions { MemoryStorage = AmbientRuntime.MemoryStorage });
@@ -202,7 +226,7 @@ namespace Wacs.ComponentModel.Runtime
                     .ResolveDtorTrampolines(runtime, coreInstance, dtorBindings);
 
                 return new ComponentInstance(component, runtime, coreInstance)
-                    { _resourceTables = tables };
+                    { _resourceTables = tables, AsyncDispatcher = asyncDispatcher };
             }
 
             // Composer mode: no core modules of our own — every
@@ -270,6 +294,36 @@ namespace Wacs.ComponentModel.Runtime
         /// fails (unrecognized layout). Public so the transpiler
         /// can reuse the same heuristic.
         /// </summary>
+        /// <summary>True iff <paramref name="canons"/> contains any
+        /// Component Model async-ABI canon entry (task / subtask /
+        /// stream / future / error-context / waitable-set /
+        /// waitable.join / backpressure / context / thread.yield).
+        /// Used to decide whether to allocate an
+        /// <see cref="Wacs.ComponentModel.Async.AsyncDispatcher"/>.</summary>
+        private static bool HasAnyCanonAsync(IReadOnlyList<CanonEntry> canons)
+        {
+            foreach (var c in canons)
+            {
+                switch (c)
+                {
+                    case CanonTaskReturn _:
+                    case CanonTaskCancel _:
+                    case CanonSubtaskCancel _:
+                    case CanonSubtaskDrop _:
+                    case CanonBackpressureOp _:
+                    case CanonContextOp _:
+                    case CanonThreadYield _:
+                    case CanonStreamOp _:
+                    case CanonFutureOp _:
+                    case CanonErrorContextOp _:
+                    case CanonWaitableSetOp _:
+                    case CanonWaitableJoin _:
+                        return true;
+                }
+            }
+            return false;
+        }
+
         public static int? FindPrimaryCoreModuleIdx(ComponentModule component)
         {
             // Build core-func-idx → core-instance-idx map from
