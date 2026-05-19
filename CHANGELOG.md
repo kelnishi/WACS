@@ -1,5 +1,59 @@
 # Changelog
 
+## WACS.ComponentModel 0.8.19 — FlatLowering analyzer + enum / flags task.return lift (Phase 3 Slice K1)
+
+Adds the canon-ABI flat-lowering analyzer the typed-lifter work
+will lean on, plus two cheap aggregate lifters that fall out
+once the analyzer is in place: `enum` and ≤32-bit `flags`.
+
+### `FlatLowering` — canon-ABI flat-count analyzer
+
+`Wacs.ComponentModel.CanonicalABI.FlatLowering.FlatCount(t, types)`
+computes how many core values an arbitrary `ComponentValType`
+flattens to per `component-model/design/mvp/CanonicalABI.md`.
+Resolves typeidx references recursively through the supplied
+type table; returns `-1` when an aggregate references a typeidx
+outside the table or a shape not yet recognized (callers use
+this as a "fall back to return-area indirection" sentinel).
+
+Covers every `DefTypeEntry` subclass: primitives (1, except
+`string` = 2), `list` (2), `record`/`tuple` (sum of fields),
+`variant` (1 + max-payload, unit cases = 0), `enum` (1),
+`flags` (⌈N/32⌉), `option` (1 + inner), `result` (1 + max(ok,
+err)), `own`/`borrow`/`stream`/`future`/`error-context` (1).
+Returns `-1` for `RawDefType` / `ComponentFuncType`.
+
+### `task.return enum`
+
+When the result typeidx resolves to `ComponentEnumType`, the
+binder emits an `Action<ExecContext, int>` that surfaces the
+discriminant as a plain CLR `int` and validates it against the
+declared case count — out-of-range discriminants throw with a
+clear message. Case-name spellings stay with the WIT-side
+metadata; typed CLR-enum lifts are the Session 3 source
+generator's job.
+
+### `task.return flags` (≤32 flags)
+
+`ComponentFlagsType` with ≤32 declared flags lifts the i32
+bitfield as a CLR `uint`. The high bits beyond the declared
+count are validated to be zero — a non-zero reserved bit is a
+wire-protocol error and throws. `>32` flags decline (return
+null delegate); the source generator path will lift those as
+`[Flags]` enums directly.
+
+### Test coverage
+
+- `Wacs.ComponentModel.Test/FlatLoweringTests.cs` — 23 cases
+  covering every shape, sentinel returns, nested-aggregate
+  resolution.
+- `Wacs.ComponentModel.Test/AsyncLiftAdapterTests.cs` — five
+  enum/flags task.return lift cases (happy path, out-of-range
+  rejection, full 32-bit round-trip, reserved-bit rejection,
+  >32-flag decline).
+
+591/591 tests green.
+
 ## WACS.WASI.Preview3 0.1.1 / WACS.ComponentModel 0.8.18 — wire-level stdout/stderr binding (Phase 4 Slice J)
 
 `WasiPreview3Host.BindToRuntime` now registers concrete host

@@ -432,6 +432,10 @@ namespace Wacs.ComponentModel.Async
                         TryBuildTaskReturnResult(res, d, out del),
                     ComponentTupleType tup =>
                         TryBuildTaskReturnTuple(tup, d, out del),
+                    ComponentEnumType en =>
+                        TryBuildTaskReturnEnum(en, d, out del),
+                    ComponentFlagsType fl =>
+                        TryBuildTaskReturnFlags(fl, d, out del),
                     _ => false,
                 };
             }
@@ -838,6 +842,63 @@ namespace Wacs.ComponentModel.Async
                 default:
                     return false;
             }
+        }
+
+        // task.return enum: flat-lowered to a single i32
+        // discriminant per canon-ABI (FlatLowering.FlatCountDef
+        // returns 1 for enum). The lift adapter materializes the
+        // discriminant as a plain int — the named-case spelling
+        // lives in the WIT-side metadata. Host code that wants a
+        // CLR enum value reaches for the typed lifter generated
+        // by the source generator (Session 3) — here we surface
+        // the raw discriminant so the binder remains usable from
+        // generic untyped invocation paths.
+        private static bool TryBuildTaskReturnEnum(
+            ComponentEnumType en, AsyncDispatcher d, out Delegate? del)
+        {
+            // Validate the discriminant is in-range against the
+            // case count; out-of-range guest-supplied discriminants
+            // are a wire-protocol error.
+            int caseCount = en.Cases.Count;
+            del = (Action<ExecContext, int>)((_, disc) =>
+            {
+                if ((uint)disc >= (uint)caseCount)
+                    throw new InvalidOperationException(
+                        $"task.return enum: discriminant {disc} " +
+                        $"out of range for enum with {caseCount} cases");
+                d.TaskReturn(null!, disc);
+            });
+            return true;
+        }
+
+        // task.return flags ≤32: flat-lowered to a single i32
+        // bitfield per canon-ABI (FlatLowering.FlatCountDef
+        // returns ⌈N/32⌉, so ≤32 flags → 1). Each bit position
+        // corresponds to a named flag in declaration order. >32
+        // flags requires multiple i32 slots — declined here;
+        // the source generator path will lift those into a CLR
+        // [Flags] enum directly.
+        private static bool TryBuildTaskReturnFlags(
+            ComponentFlagsType fl, AsyncDispatcher d, out Delegate? del)
+        {
+            del = null;
+            if (fl.Flags.Count > 32) return false;
+            // The high bits beyond the declared count must be
+            // zero; mask & validate to catch malformed guest output.
+            int flagCount = fl.Flags.Count;
+            uint validMask = flagCount == 32 ? 0xFFFFFFFFu
+                : (1u << flagCount) - 1u;
+            del = (Action<ExecContext, int>)((_, bits) =>
+            {
+                uint u = unchecked((uint)bits);
+                if ((u & ~validMask) != 0)
+                    throw new InvalidOperationException(
+                        $"task.return flags: bits 0x{u:X8} have " +
+                        $"reserved high bits set " +
+                        $"(declared count = {flagCount})");
+                d.TaskReturn(null!, u);
+            });
+            return true;
         }
     }
 }

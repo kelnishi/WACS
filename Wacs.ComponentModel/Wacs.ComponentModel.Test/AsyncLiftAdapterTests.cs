@@ -694,5 +694,169 @@ namespace Wacs.ComponentModel.Test
                 d.PopCurrentTask();
             }
         }
+
+        // ---- Slice K1: enum / flags task.return lift -----------------
+
+        [Fact]
+        public async Task TaskReturn_enum_lifts_discriminant_int()
+        {
+            var d = new AsyncDispatcher();
+            d.Types = new Wacs.ComponentModel.Runtime.Parser.DefTypeEntry[]
+            {
+                new Wacs.ComponentModel.Runtime.Parser.ComponentEnumType(
+                    new[] { "alpha", "beta", "gamma" }),
+            };
+
+            var task = d.RegisterTask(MakeCont());
+            d.PushCurrentTask(task);
+            try
+            {
+                var entry = new Wacs.ComponentModel.Runtime.Parser.CanonTaskReturn(
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfRef(0),
+                    System.Array.Empty<Wacs.ComponentModel.Runtime.Parser.CanonOption>());
+                var del = (Action<ExecContext, int>)
+                    Wacs.ComponentModel.Async.CanonAsyncBinder
+                        .TryBuildDelegateForEntry(entry, d)!;
+                del(null!, 1);
+            }
+            finally { d.PopCurrentTask(); }
+
+            var result = await task.Completion.Task;
+            Assert.Equal(1, result);
+        }
+
+        [Fact]
+        public void TaskReturn_enum_rejects_out_of_range_discriminant()
+        {
+            var d = new AsyncDispatcher();
+            d.Types = new Wacs.ComponentModel.Runtime.Parser.DefTypeEntry[]
+            {
+                new Wacs.ComponentModel.Runtime.Parser.ComponentEnumType(
+                    new[] { "a", "b" }),
+            };
+            var task = d.RegisterTask(MakeCont());
+            d.PushCurrentTask(task);
+            try
+            {
+                var entry = new Wacs.ComponentModel.Runtime.Parser.CanonTaskReturn(
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfRef(0),
+                    System.Array.Empty<Wacs.ComponentModel.Runtime.Parser.CanonOption>());
+                var del = (Action<ExecContext, int>)
+                    Wacs.ComponentModel.Async.CanonAsyncBinder
+                        .TryBuildDelegateForEntry(entry, d)!;
+
+                var thrown = Assert.Throws<InvalidOperationException>(
+                    () => del(null!, 5));
+                Assert.Contains("out of range", thrown.Message);
+            }
+            finally { d.PopCurrentTask(); }
+        }
+
+        [Fact]
+        public async Task TaskReturn_flags_lifts_bitfield_as_uint()
+        {
+            var d = new AsyncDispatcher();
+            d.Types = new Wacs.ComponentModel.Runtime.Parser.DefTypeEntry[]
+            {
+                new Wacs.ComponentModel.Runtime.Parser.ComponentFlagsType(
+                    new[] { "read", "write", "exec" }),
+            };
+
+            var task = d.RegisterTask(MakeCont());
+            d.PushCurrentTask(task);
+            try
+            {
+                var entry = new Wacs.ComponentModel.Runtime.Parser.CanonTaskReturn(
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfRef(0),
+                    System.Array.Empty<Wacs.ComponentModel.Runtime.Parser.CanonOption>());
+                var del = (Action<ExecContext, int>)
+                    Wacs.ComponentModel.Async.CanonAsyncBinder
+                        .TryBuildDelegateForEntry(entry, d)!;
+                // read | exec = 0b101
+                del(null!, 0b101);
+            }
+            finally { d.PopCurrentTask(); }
+
+            var result = await task.Completion.Task;
+            Assert.Equal(0b101u, result);
+        }
+
+        [Fact]
+        public async Task TaskReturn_flags_full_32_bits_round_trip()
+        {
+            var d = new AsyncDispatcher();
+            var names = new System.Collections.Generic.List<string>();
+            for (int i = 0; i < 32; i++) names.Add($"f{i}");
+            d.Types = new Wacs.ComponentModel.Runtime.Parser.DefTypeEntry[]
+            {
+                new Wacs.ComponentModel.Runtime.Parser.ComponentFlagsType(names),
+            };
+
+            var task = d.RegisterTask(MakeCont());
+            d.PushCurrentTask(task);
+            try
+            {
+                var entry = new Wacs.ComponentModel.Runtime.Parser.CanonTaskReturn(
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfRef(0),
+                    System.Array.Empty<Wacs.ComponentModel.Runtime.Parser.CanonOption>());
+                var del = (Action<ExecContext, int>)
+                    Wacs.ComponentModel.Async.CanonAsyncBinder
+                        .TryBuildDelegateForEntry(entry, d)!;
+                // All bits set — valid when flag count == 32.
+                del(null!, unchecked((int)0xFFFFFFFFu));
+            }
+            finally { d.PopCurrentTask(); }
+
+            var result = await task.Completion.Task;
+            Assert.Equal(0xFFFFFFFFu, result);
+        }
+
+        [Fact]
+        public void TaskReturn_flags_rejects_reserved_high_bits()
+        {
+            // 3 declared flags → validMask = 0b111. Setting bit 3
+            // (0b1000) is a wire-protocol violation.
+            var d = new AsyncDispatcher();
+            d.Types = new Wacs.ComponentModel.Runtime.Parser.DefTypeEntry[]
+            {
+                new Wacs.ComponentModel.Runtime.Parser.ComponentFlagsType(
+                    new[] { "a", "b", "c" }),
+            };
+            var task = d.RegisterTask(MakeCont());
+            d.PushCurrentTask(task);
+            try
+            {
+                var entry = new Wacs.ComponentModel.Runtime.Parser.CanonTaskReturn(
+                    Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfRef(0),
+                    System.Array.Empty<Wacs.ComponentModel.Runtime.Parser.CanonOption>());
+                var del = (Action<ExecContext, int>)
+                    Wacs.ComponentModel.Async.CanonAsyncBinder
+                        .TryBuildDelegateForEntry(entry, d)!;
+                var thrown = Assert.Throws<InvalidOperationException>(
+                    () => del(null!, 0b1000));
+                Assert.Contains("reserved high bits", thrown.Message);
+            }
+            finally { d.PopCurrentTask(); }
+        }
+
+        [Fact]
+        public void TaskReturn_flags_over_32_returns_null_delegate()
+        {
+            // >32 flags need multiple i32 slots — Slice K1 declines.
+            var d = new AsyncDispatcher();
+            var names = new System.Collections.Generic.List<string>();
+            for (int i = 0; i < 64; i++) names.Add($"f{i}");
+            d.Types = new Wacs.ComponentModel.Runtime.Parser.DefTypeEntry[]
+            {
+                new Wacs.ComponentModel.Runtime.Parser.ComponentFlagsType(names),
+            };
+
+            var entry = new Wacs.ComponentModel.Runtime.Parser.CanonTaskReturn(
+                Wacs.ComponentModel.Runtime.Parser.ComponentValType.OfRef(0),
+                System.Array.Empty<Wacs.ComponentModel.Runtime.Parser.CanonOption>());
+            var del = Wacs.ComponentModel.Async.CanonAsyncBinder
+                .TryBuildDelegateForEntry(entry, d);
+            Assert.Null(del);
+        }
     }
 }
