@@ -1,5 +1,80 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.25 — variant-bearing filesystem descriptor methods (Phase 5 Slice W)
+
+Closes the variant-arg gap on `wasi:filesystem/types.descriptor`:
+`set-times`, `set-times-at` (both take two `new-timestamp`
+variants), `link-at`, `rename-at` (borrowed-descriptor handles),
+`symlink-at`. With Slice V's no-variant-arg methods and Slice W's
+variant-arg / cross-descriptor methods, every method on
+`descriptor` other than `[constructor]` is now wired through to
+the host backend.
+
+### `new-timestamp` flat-lowering
+
+```
+variant new-timestamp { no-change, now, timestamp(instant) }
+```
+
+`instant` is `(s64 seconds, u32 nanoseconds)`, flat-lowering to
+`(i64, i32)`. Variant flat-lowering yields 3 slots:
+`(disc i32, seconds i64, nanoseconds i32)`. The
+no-change/now arms leave the payload slots unused per the disc.
+
+```csharp
+public static NewTimestamp ReadNewTimestampFromSlots(
+    int disc, long seconds, int nanoseconds)
+```
+
+Public static helper so test fixtures and downstream binders
+can validate flat-lowering independently of the host body.
+
+### Five host functions wired
+
+```
+[method]descriptor.set-times       — self + (new-timestamp × 2) + retptr (8 flat params, 2 i64s)
+[method]descriptor.set-times-at    — self + path-flags + path + (new-timestamp × 2) + retptr (11 flat params)
+[method]descriptor.link-at         — self + old-path-flags + old-path + borrow<descriptor> + new-path + retptr (8 flat params)
+[method]descriptor.rename-at       — self + old-path + borrow<descriptor> + new-path + retptr (7 flat params)
+[method]descriptor.symlink-at      — self + old-path + new-path + retptr (6 flat params)
+```
+
+All five route through the shared
+`InvokeDescriptorResultErrorCodeNoArgs` template from Slice V —
+the wire shape is `result<_, error-code>` in every case. The
+per-method body just constructs the right impl-call lambda.
+
+`borrow<descriptor>` shows up at the wire as a plain i32 handle;
+`RequireDescriptor(newDescHandle)` resolves it against the
+host's resource table. Note that `link-at` and `symlink-at` in
+the default System.IO-backed `Descriptor` impl throw
+`Unsupported` — .NET's cross-platform hard-link / symlink
+creation story isn't uniform across targets. The wire bindings
+route those `Unsupported` errors through the standard
+error-code encoder.
+
+### Test coverage
+
+11 tests in `VariantBearingDescriptorWireTests.cs`:
+- `BindToRuntime` registers all five host functions.
+- `new-timestamp` decoder: `no-change` (disc=0), `now`
+  (disc=1), `timestamp(instant)` (disc=2 with secs+nanos),
+  invalid-disc throws `FilesystemException(Invalid)`.
+- `set-times-at` with `timestamp` access + `no-change` mod
+  actually changes the file's `LastAccessTimeUtc`.
+- `set-times-at` on missing path writes
+  `error-code = NoEntry`.
+- `link-at` default impl writes
+  `error-code = Unsupported`.
+- `rename-at` moves a file within the root and asserts old
+  path gone + new path present with content preserved.
+- `rename-at` missing source writes
+  `error-code = NoEntry`.
+- `symlink-at` default impl writes
+  `error-code = Unsupported`.
+
+269/269 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.24 — remaining filesystem descriptor methods (Phase 5 Slice V)
 
 Wires seven more descriptor host functions, picking off the

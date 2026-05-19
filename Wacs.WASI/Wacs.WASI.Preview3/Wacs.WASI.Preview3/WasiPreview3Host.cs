@@ -718,6 +718,101 @@ namespace Wacs.WASI.Preview3
                         InvokeDescriptorReadlinkAt(
                             self, pathPtr, pathLen, retptr, realloc)));
 
+            // ---- variant-bearing descriptor methods ----------------
+            //
+            // new-timestamp variant flat-lowering: 3 slots
+            // (disc i32, seconds i64, nanoseconds i32). The
+            // joined payload is sized to the timestamp(instant)
+            // arm — instant flat-lowers to (i64, i32). Arms
+            // no-change/now leave seconds/nanoseconds slots
+            // unused per the disc.
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[method]descriptor.set-times"),
+                (Action<ExecContext,
+                    int,
+                    int, long, int,
+                    int, long, int,
+                    int>)(
+                    (_, self,
+                     aDisc, aSecs, aNanos,
+                     mDisc, mSecs, mNanos,
+                     retptr) =>
+                        InvokeDescriptorResultErrorCodeNoArgs(
+                            self, retptr, realloc,
+                            desc => desc.SetTimesAsync(
+                                ReadNewTimestampFromSlots(
+                                    aDisc, aSecs, aNanos),
+                                ReadNewTimestampFromSlots(
+                                    mDisc, mSecs, mNanos))
+                                .GetAwaiter().GetResult())));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[method]descriptor.set-times-at"),
+                (Action<ExecContext,
+                    int,
+                    int, int, int,
+                    int, long, int,
+                    int, long, int,
+                    int>)(
+                    (_, self,
+                     pathFlags, pathPtr, pathLen,
+                     aDisc, aSecs, aNanos,
+                     mDisc, mSecs, mNanos,
+                     retptr) =>
+                        InvokeDescriptorSetTimesAt(
+                            self,
+                            unchecked((uint)pathFlags),
+                            pathPtr, pathLen,
+                            aDisc, aSecs, aNanos,
+                            mDisc, mSecs, mNanos,
+                            retptr, realloc)));
+
+            // link-at / rename-at: borrow<descriptor> arg shows
+            // up as a plain i32 handle in the flat lowering, the
+            // same shape as any other resource handle.
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[method]descriptor.link-at"),
+                (Action<ExecContext,
+                    int, int, int, int, int, int, int, int>)(
+                    (_, self, oldPathFlags,
+                     oldPathPtr, oldPathLen,
+                     newDesc, newPathPtr, newPathLen, retptr) =>
+                        InvokeDescriptorLinkAt(
+                            self,
+                            unchecked((uint)oldPathFlags),
+                            oldPathPtr, oldPathLen,
+                            newDesc, newPathPtr, newPathLen,
+                            retptr, realloc)));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[method]descriptor.rename-at"),
+                (Action<ExecContext,
+                    int, int, int, int, int, int, int>)(
+                    (_, self,
+                     oldPathPtr, oldPathLen,
+                     newDesc, newPathPtr, newPathLen, retptr) =>
+                        InvokeDescriptorRenameAt(
+                            self, oldPathPtr, oldPathLen,
+                            newDesc, newPathPtr, newPathLen,
+                            retptr, realloc)));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[method]descriptor.symlink-at"),
+                (Action<ExecContext,
+                    int, int, int, int, int, int>)(
+                    (_, self,
+                     oldPathPtr, oldPathLen,
+                     newPathPtr, newPathLen, retptr) =>
+                        InvokeDescriptorSymlinkAt(
+                            self, oldPathPtr, oldPathLen,
+                            newPathPtr, newPathLen,
+                            retptr, realloc)));
+
             // wasi:sockets — resource drops + ip-name-lookup.
             // Full ITcpSocket/IUdpSocket method wire-ups + a
             // System.Net.Sockets-backed default impl ship in
@@ -2023,6 +2118,110 @@ namespace Wacs.WASI.Preview3
                 WriteErrorCodeBytes(
                     dest.Slice(4, 16), caught, realloc, memory);
             }
+        }
+
+        // ---- Variant-bearing descriptor methods (Slice W) ------------
+
+        /// <summary>Decode a flat-lowered <c>new-timestamp</c>
+        /// variant from 3 wire slots
+        /// <c>(disc, seconds, nanoseconds)</c>. Variant
+        /// flat-lowering rule: disc i32 + joined payload sized to
+        /// the largest arm. <c>timestamp(instant)</c> is the only
+        /// payload-bearing arm and instant flat-lowers to
+        /// <c>(i64, i32)</c>; the <c>no-change</c> / <c>now</c>
+        /// arms leave the payload slots unused.</summary>
+        public static NewTimestamp ReadNewTimestampFromSlots(
+            int disc, long seconds, int nanoseconds)
+        {
+            switch (disc)
+            {
+                case 0: return NewTimestamp.NoChange;
+                case 1: return NewTimestamp.Now;
+                case 2:
+                    return NewTimestamp.Timestamp(
+                        new Instant(seconds,
+                            unchecked((uint)nanoseconds)));
+                default:
+                    throw new FilesystemException(
+                        Filesystem.ErrorCode.Invalid,
+                        $"new-timestamp: invalid discriminant " +
+                        $"{disc} (expected 0/1/2 for " +
+                        "no-change/now/timestamp).");
+            }
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]descriptor.set-times-at(path-flags, path,
+        /// access, mod)</c>.</summary>
+        public void InvokeDescriptorSetTimesAt(
+            int self,
+            uint pathFlags, int pathPtr, int pathLen,
+            int aDisc, long aSecs, int aNanos,
+            int mDisc, long mSecs, int mNanos,
+            int retptr, ICabiRealloc realloc)
+        {
+            InvokeDescriptorResultErrorCodeNoArgs(
+                self, retptr, realloc,
+                desc => desc.SetTimesAtAsync(
+                    (PathFlags)pathFlags,
+                    ReadGuestUtf8(pathPtr, pathLen),
+                    ReadNewTimestampFromSlots(aDisc, aSecs, aNanos),
+                    ReadNewTimestampFromSlots(mDisc, mSecs, mNanos))
+                    .GetAwaiter().GetResult());
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]descriptor.link-at(old-path-flags, old-path,
+        /// new-descriptor, new-path)</c>.</summary>
+        public void InvokeDescriptorLinkAt(
+            int self,
+            uint oldPathFlags, int oldPathPtr, int oldPathLen,
+            int newDescHandle, int newPathPtr, int newPathLen,
+            int retptr, ICabiRealloc realloc)
+        {
+            InvokeDescriptorResultErrorCodeNoArgs(
+                self, retptr, realloc,
+                desc => desc.LinkAtAsync(
+                    (PathFlags)oldPathFlags,
+                    ReadGuestUtf8(oldPathPtr, oldPathLen),
+                    RequireDescriptor(newDescHandle),
+                    ReadGuestUtf8(newPathPtr, newPathLen))
+                    .GetAwaiter().GetResult());
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]descriptor.rename-at(old-path,
+        /// new-descriptor, new-path)</c>.</summary>
+        public void InvokeDescriptorRenameAt(
+            int self,
+            int oldPathPtr, int oldPathLen,
+            int newDescHandle, int newPathPtr, int newPathLen,
+            int retptr, ICabiRealloc realloc)
+        {
+            InvokeDescriptorResultErrorCodeNoArgs(
+                self, retptr, realloc,
+                desc => desc.RenameAtAsync(
+                    ReadGuestUtf8(oldPathPtr, oldPathLen),
+                    RequireDescriptor(newDescHandle),
+                    ReadGuestUtf8(newPathPtr, newPathLen))
+                    .GetAwaiter().GetResult());
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]descriptor.symlink-at(old-path,
+        /// new-path)</c>.</summary>
+        public void InvokeDescriptorSymlinkAt(
+            int self,
+            int oldPathPtr, int oldPathLen,
+            int newPathPtr, int newPathLen,
+            int retptr, ICabiRealloc realloc)
+        {
+            InvokeDescriptorResultErrorCodeNoArgs(
+                self, retptr, realloc,
+                desc => desc.SymlinkAtAsync(
+                    ReadGuestUtf8(oldPathPtr, oldPathLen),
+                    ReadGuestUtf8(newPathPtr, newPathLen))
+                    .GetAwaiter().GetResult());
         }
 
         /// <summary>Invoke
