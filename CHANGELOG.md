@@ -1,5 +1,88 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.34 — UDP send via 17-flat-param custom delegate (Phase 5 Slice FF)
+
+Wires `udp-socket.send` — the last unbound UDP method. Closes
+the UDP method surface. The send signature is
+`async func(data: list<u8>, remote-address: option<ip-socket-address>) -> result<_, error-code>`
+which canon-ABI flat-lowers to 17 wire i32 slots:
+
+```
+self                       (1)
+list<u8>: ptr, len         (2)
+option<ip-socket-address>:
+  opt-disc                 (1)
+  ip-sock-addr variant:
+    disc                   (1)
+    joined payload         (11 — sized to ipv6's
+                                port + flow-info + 8×u16 addr +
+                                scope-id)
+retArea                    (1)
+                          ----
+Total                      17
+```
+
+This sits exactly at MAX_FLAT_PARAMS=16 for the params (16
+slots, not strictly greater) so the canon-ABI keeps them flat
+rather than packing into a paramptr. Plus the retArea hoist =
+17 total wire params — one over System.Action's 16-arg limit
+(17 type args including the leading ExecContext).
+
+### Custom delegate type
+
+```csharp
+public delegate void UdpSendDelegate(
+    ExecContext ctx,
+    int self,
+    int dataPtr, int dataLen,
+    int optDisc,
+    int addrDisc,
+    int s1, int s2, int s3, int s4, int s5,
+    int s6, int s7, int s8, int s9, int s10, int s11,
+    int retptr);
+```
+
+Declared at the namespace level alongside `WasiPreview3Host`.
+`WasmRuntimeBinding.BindHostFunction<TDelegate>` works with any
+custom delegate type via reflection — no special framework
+support needed.
+
+### Body reuses Slice T's decoder
+
+```csharp
+public void InvokeUdpSocketSend(
+    int self,
+    int dataPtr, int dataLen,
+    int optDisc, int addrDisc,
+    int s1, int s2, int s3, int s4, int s5,
+    int s6, int s7, int s8, int s9, int s10, int s11,
+    int retptr, ICabiRealloc realloc)
+```
+
+Decodes via `ReadIpSocketAddressFromSlots(addrDisc, s1..s11)`
+when `optDisc != 0` (some path; none → null remote, send to
+connected peer). Reads `data` as a byte[] from guest memory,
+sync-blocks `SendAsync`, writes the standard 20-byte
+sockets-error-code retptr.
+
+### Test coverage
+
+5 tests in `UdpSendWireTests.cs` driven by a `RecordingUdpSocket`
+stub that captures the (data, remote) args passed to
+`SendAsync`:
+- `BindToRuntime` registers udp-socket.send and the wire arity
+  matches exactly: 17 params, 0 results (verified via
+  `runtime.GetFunctionType`).
+- `none` remote routes through with null `LastRemote` (use
+  connected peer).
+- ipv4 192.168.1.1:5353 decodes correctly through slots 1..5.
+- ipv6 ::1 with flow-info 0xCAFEBABE and scope-id 7 decodes
+  through all 11 ipv6 slots.
+- `SendAsync` failure (AddressNotBindable) writes err-disc + 
+  error-code at retptr+4.
+
+330/330 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.33 — request.get-options + set-status-code result fix (Phase 5 Slice EE)
 
 ### `response.set-status-code` wire arity fix

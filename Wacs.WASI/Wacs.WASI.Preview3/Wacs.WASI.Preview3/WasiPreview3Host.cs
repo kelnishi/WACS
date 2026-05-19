@@ -23,6 +23,25 @@ using Wacs.WASI.Preview3.Sockets;
 namespace Wacs.WASI.Preview3
 {
     /// <summary>
+    /// 17-wire-param custom delegate for udp-socket.send. The
+    /// canon-ABI flat lowering totals 17 wire i32 slots: self +
+    /// list&lt;u8&gt; ptr/len + option&lt;ip-socket-address&gt;
+    /// (1 opt-disc + 12 variant slots) + retArea. System.Action
+    /// only goes up to <c>Action&lt;T1..T16&gt;</c>, so we
+    /// declare this delegate to reach 18 type args (including
+    /// the leading ExecContext).
+    /// </summary>
+    public delegate void UdpSendDelegate(
+        ExecContext ctx,
+        int self,
+        int dataPtr, int dataLen,
+        int optDisc,
+        int addrDisc,
+        int s1, int s2, int s3, int s4, int s5,
+        int s6, int s7, int s8, int s9, int s10, int s11,
+        int retptr);
+
+    /// <summary>
     /// Composite host configuration for WASI Preview 3 imports.
     /// Sibling of <c>WACS.WASI.Preview2.WasiPreview2Host</c>, but
     /// the wire surface is the Component Model async ABI —
@@ -1219,6 +1238,42 @@ namespace Wacs.WASI.Preview3
                             self, unchecked((ulong)value),
                             retptr, realloc, sendBuffer: true)));
 
+            // ---- UDP send (Slice FF) ------------------------------
+            //
+            // udp-socket.send(data: list<u8>,
+            //                 remote-address: option<ip-socket-address>)
+            //   -> result<_, error-code>
+            //
+            // Flat-lowered wire signature:
+            //   self                        (1)
+            //   list<u8>: ptr, len          (2)
+            //   option<ip-socket-address>:
+            //     opt-disc                  (1)
+            //     ip-sock-addr variant:
+            //       disc                    (1)
+            //       joined payload (11 slots, sized to ipv6's
+            //       port+flow-info+8×u16-addr+scope-id)
+            //                               (12 total)
+            //   retArea                     (1)
+            //
+            // Total = 17 wire params. System.Action only goes up
+            // to 16 generic args (= 17 type args including
+            // ExecContext), so we need a custom delegate type
+            // (UdpSendDelegate, declared below) to reach 18.
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName, "[method]udp-socket.send"),
+                (UdpSendDelegate)((_, self,
+                    dataPtr, dataLen,
+                    optDisc, addrDisc,
+                    s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11,
+                    retptr) =>
+                        InvokeUdpSocketSend(
+                            self,
+                            dataPtr, dataLen,
+                            optDisc, addrDisc,
+                            s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11,
+                            retptr, realloc)));
+
             // ---- UDP receive (Slice Y) -----------------------------
             //
             // udp-socket.receive: () -> result<tuple<list<u8>,
@@ -1481,6 +1536,47 @@ namespace Wacs.WASI.Preview3
                 var sock = RequireUdpSocket(self);
                 if (sendBuffer) sock.SetSendBufferSize(value);
                 else sock.SetReceiveBufferSize(value);
+            }
+            catch (SocketsException ex) { caught = ex; }
+            WriteSocketsErrorCodeResult(
+                memory.AsSpan(retptr, ResultSocketsErrorCodeSize),
+                caught, realloc, memory);
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]udp-socket.send(data, remote-address)</c>.
+        /// Reads the list&lt;u8&gt; payload from guest memory,
+        /// decodes the option&lt;ip-socket-address&gt; arg from
+        /// its 13 flat slots, sync-blocks SendAsync, writes the
+        /// standard 20-byte sockets-error-code retptr.</summary>
+        public void InvokeUdpSocketSend(
+            int self,
+            int dataPtr, int dataLen,
+            int optDisc, int addrDisc,
+            int s1, int s2, int s3, int s4, int s5,
+            int s6, int s7, int s8, int s9, int s10, int s11,
+            int retptr, ICabiRealloc realloc)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateResultSocketsErrorCodeRetptr(retptr, memory);
+
+            SocketsException? caught = null;
+            try
+            {
+                byte[] data = dataLen > 0
+                    ? memory.AsSpan(dataPtr, dataLen).ToArray()
+                    : Array.Empty<byte>();
+                IpSocketAddress? remote = null;
+                if (optDisc != 0)
+                {
+                    // some(ip-socket-address) — decode via the
+                    // shared Slice-T reader.
+                    remote = ReadIpSocketAddressFromSlots(
+                        addrDisc,
+                        s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11);
+                }
+                RequireUdpSocket(self).SendAsync(data, remote)
+                    .GetAwaiter().GetResult();
             }
             catch (SocketsException ex) { caught = ex; }
             WriteSocketsErrorCodeResult(
