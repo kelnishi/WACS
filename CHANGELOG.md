@@ -1,5 +1,94 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.0 / .DependencyInjection 0.1.0 / .Test 0.1.0 — vertical-slice skeleton (Phase 4 v0)
+
+First Phase 4 commit: stand up the
+`WACS.WASI.Preview3` sibling-package family mirroring the
+`Preview2` layout. v0 scope is the `cli/run` + `cli/{stdin,
+stdout,stderr}` vertical slice — the rest of the WASIp3
+host packages (clocks, random, filesystem, sockets, http)
+follow in Phase 5 once the v0 slice validates against a real
+wit-component-emitted `.component.wasm`.
+
+### New packages (all at 0.1.0)
+
+- **`WACS.WASI.Preview3`** — host-interface package.
+  - `WasiPreview3Host` composite `IBindable` + fluent
+    `WasiPreview3HostBuilder`, mirroring the Preview2 host
+    shape.
+  - `Cli/CliRun.cs` — placeholder for invoking exported
+    `wasi:cli/run.run` once fixture lands; pins the public-
+    API contract.
+  - `Cli/CliStdio.cs` — `IStdin` / `IStdout` / `IStderr`
+    interfaces matching wasip3 wire shapes
+    (`read-via-stream` / `write-via-stream`); default
+    `StreamBackedStdin` / `StreamBackedSink` impls over
+    `System.IO.Stream` backings.
+  - `Io/StreamBridge.cs` — adapter helpers bridging
+    canon-async `StreamBuffer<byte>` to host
+    `System.IO.Stream`. Two directions: `DrainToStream`
+    (guest writes → host sink) and `PumpFromStream` (host
+    source → guest reads).
+  - Vendored WIT under
+    `wit/deps/wasi-cli-0.3.0-rc-2026-03-15/package.wit`
+    (copied from the wasi-testsuite submodule); embedded
+    as a resource for downstream contract recovery.
+
+- **`WACS.WASI.Preview3.DependencyInjection`** —
+  `Microsoft.Extensions.DependencyInjection` extensions.
+  `AddWacsWasiPreview3(opts => ...)` registers the host
+  singletons (`IStdin` / `IStdout` / `IStderr` /
+  `WasiPreview3Host`).
+
+- **`WACS.WASI.Preview3.Test`** — xunit harness.
+  - `StreamBridgeTests` (5) — pin the
+    `DrainToStream` / `PumpFromStream` round trips +
+    large-payload chunking + null-arg validation.
+  - `WasiPreview3HostTests` (6) — default-construct
+    surface, builder-override threading, no-op
+    `BindToRuntime` (intentional pending Slice J),
+    `UseWasiPreview3` extension method, DI singleton
+    registration and override.
+
+### What Slice J will land
+
+The current `BindToRuntime` is intentionally a no-op. The
+wire-level binding — registering host delegates under the
+canon-async-shim-resolved `("", "<funcIdx>")` import names
+that wit-component's shim emits — depends on validating the
+convention against a real `.component.wasm`. The
+`WACS.ComponentModel` 0.8.13+ shim recognizer + binder
+pipeline does the routing; this layer just wires the
+`IStdio` impls into the delegate bodies.
+
+When a fixture lands:
+
+1. Compile a wit-bindgen rust crate against the vendored
+   `wasi-cli-0.3.0-rc-2026-03-15` WIT.
+2. Add a `Spec.Test/wasi/tests/rust/wasm32-wasip3/cli-hello/`
+   fixture (the plan's acceptance gate).
+3. Wire `BindToRuntime` to register the right `("", "<N>")`
+   delegates per the shim's debug-name section.
+4. The end-to-end stdout-capture test asserts the bytes
+   round-trip.
+
+### Bug found and fixed during skeleton work
+
+The host's lazy stdio defaults were constructing a fresh
+`StreamBackedSink` on every property access. DI singleton
+registration via `services.AddWacsWasiPreview3()` would
+have surfaced this as
+`provider.GetRequiredService<IStdout>() != host.Stdout`.
+Caught by `AddWacsWasiPreview3_registers_stdio_singletons`;
+fixed by caching the lazily-constructed defaults in
+private fields (`_stdin` / `_stdout` / `_stderr`).
+
+### Build + test
+
+All three projects build clean. 11/11 Preview3 tests pass.
+552/552 ComponentModel + 833/833 Transpiler tests
+unchanged.
+
 ## WACS.ComponentModel 0.8.17 — tuple of same-primitive task.return lift (Phase 3 Slice I.4)
 
 Extends `task.return` aggregate lift support to
