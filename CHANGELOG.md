@@ -1,5 +1,93 @@
 # Changelog
 
+## WACS.ComponentModel.Async.SourceGen 0.1.0 / WACS.ComponentModel 0.8.11 — source generator replaces reflection (Phase 3 Slice G2)
+
+Eliminates Slice G1's reflective scan of
+`AsyncDispatcher` for `[CanonAsync(...)]`-decorated methods.
+A new Roslyn source generator emits the
+`CanonOpRegistry.BuildKnownNames()` partial at build time.
+The `[RequiresDynamicCode]` annotations are gone.
+
+### New package: `WACS.ComponentModel.Async.SourceGen` (0.1.0)
+
+Roslyn `IIncrementalGenerator` in
+`Wacs.ComponentModel.Async.SourceGen.CanonOpRegistryGenerator`.
+At consumer-compile time it:
+
+1. Resolves the `AsyncDispatcher` type via
+   `Compilation.GetTypeByMetadataName`.
+2. Walks its methods, collects every
+   `[CanonAsync("...")]` first-constructor-arg string into a
+   `SortedSet<string>`.
+3. Emits `CanonOpRegistry.g.cs` — a partial-class file in
+   `Wacs.ComponentModel.Async` supplying the
+   `private static partial HashSet<string> BuildKnownNames()`
+   implementation with the literal name set.
+
+No-ops on consumer compilations that don't include
+`AsyncDispatcher` (the registry's data lives in the
+declaring assembly only).
+
+Standard Roslyn-component csproj shape: `netstandard2.0`,
+`IsRoslynComponent=true`, `IncludeBuildOutput=false`, packed
+into `analyzers/dotnet/cs`.
+
+### `CanonOpRegistry` refactored
+
+- Changed from `static class` to `static partial class`.
+- Removed Slice G1's reflection cache and `EnsureCache()`.
+- Removed `GetMethod(string) → MethodInfo?` — required
+  reflection, not actually needed by the binding flow
+  (`CanonAsyncBinder.TryBuildDelegate` is already
+  hardcoded per shape).
+- Added `IsKnown(string) → bool` — the validation surface
+  the shim-module recognizer (G3) consumes.
+- Kept `Names` (now `IReadOnlyCollection<string>`) and
+  `Count`.
+- The `[RequiresDynamicCode]` / `[RequiresUnreferencedCode]`
+  annotations are gone.
+
+### Generated file structure
+
+The generator writes a single file per consumer
+compilation:
+
+```
+obj/Release/{tfm}/generated/Wacs.ComponentModel.Async.SourceGen/
+  Wacs.ComponentModel.Async.SourceGen.CanonOpRegistryGenerator/
+    CanonOpRegistry.g.cs
+```
+
+Verified emission of all 30 canon-op names matches the
+expected Slice G1 set.
+
+### Tests
+
+`CanonOpRegistryTests` updated for the new API:
+
+- `Registry_IsKnown_returns_true_for_each_expected_name`.
+- `Registry_IsKnown_returns_false_for_unknown_name` (dotted
+  spelling like `"future.read"` correctly rejected).
+- `Registry_IsKnown_throws_on_null`.
+
+The "expected name set" (30 entries) + kebab-case
+discipline + Count tests carry over unchanged. Source
+generator's output passes them — confirms the build-time
+scan matches the hand-written expectations.
+
+505/505 ComponentModel + 833/833 Transpiler tests pass
+(was 504).
+
+### Why this matters
+
+Per the standing AOT-safety rule, runtime reflection paths
+get caught by the `Wacs.Core` AOT acceptance test (and
+should be caught by analyzers on `Wacs.ComponentModel` once
+AOT-publish is exercised there). The reflective registry
+introduced in G1 was a deliberate scaffold to settle the
+contract — replaced immediately so no consumer code ever
+encounters the `[RequiresDynamicCode]`-annotated surface.
+
 ## WACS.ComponentModel 0.8.10 — CanonAsyncAttribute + reflective CanonOpRegistry (Phase 3 Slice G1)
 
 First half of the attribute-driven discovery pair. The

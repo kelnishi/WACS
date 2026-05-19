@@ -73,21 +73,27 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
-        public void Registry_GetMethod_returns_decorated_method_for_each_name()
+        public void Registry_IsKnown_returns_true_for_each_expected_name()
         {
             foreach (var name in Expected)
             {
-                var mi = CanonOpRegistry.GetMethod(name);
-                Assert.NotNull(mi);
-                Assert.Equal(typeof(AsyncDispatcher), mi!.DeclaringType);
+                Assert.True(CanonOpRegistry.IsKnown(name),
+                    $"Expected canon op '{name}' not in registry.");
             }
         }
 
         [Fact]
-        public void Registry_GetMethod_returns_null_for_unknown_name()
+        public void Registry_IsKnown_returns_false_for_unknown_name()
         {
-            Assert.Null(CanonOpRegistry.GetMethod("not-a-canon-op"));
-            Assert.Null(CanonOpRegistry.GetMethod("future.read")); // dot, not dash
+            Assert.False(CanonOpRegistry.IsKnown("not-a-canon-op"));
+            Assert.False(CanonOpRegistry.IsKnown("future.read")); // dot, not dash
+        }
+
+        [Fact]
+        public void Registry_IsKnown_throws_on_null()
+        {
+            Assert.Throws<System.ArgumentNullException>(
+                () => CanonOpRegistry.IsKnown(null!));
         }
 
         [Fact]

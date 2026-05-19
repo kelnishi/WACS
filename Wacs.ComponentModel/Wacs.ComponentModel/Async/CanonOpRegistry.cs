@@ -7,99 +7,68 @@
 
 using System;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
-using System.Reflection;
 
 namespace Wacs.ComponentModel.Async
 {
     /// <summary>
-    /// Canon-op-name → <see cref="MethodInfo"/> registry for the
-    /// methods on <see cref="AsyncDispatcher"/> tagged with
-    /// <see cref="CanonAsyncAttribute"/>. The shim-module
-    /// recognizer (Slice G3) consumes this when binding
-    /// wit-component-emitted components — read the shim's
-    /// function-name custom section to get debug names like
-    /// <c>"task.return"</c>, normalize to wasmtime kebab
-    /// spelling (<c>"task-return"</c>), look up the dispatcher
-    /// method here.
+    /// Build-time-resolved set of canon-async op names the
+    /// <see cref="AsyncDispatcher"/> handles — derived from the
+    /// <see cref="CanonAsyncAttribute"/>-decorated methods on
+    /// the dispatcher at compile time by the
+    /// <c>WACS.ComponentModel.Async.SourceGen</c> Roslyn source
+    /// generator.
     ///
-    /// <para><b>Slice G1 (this slice)</b>: discovery happens at
-    /// first access via <see cref="System.Reflection"/>. The
-    /// reflection requires runtime dynamic-code generation
-    /// (<see cref="MethodInfo.Invoke"/> path), so the API is
-    /// annotated with <see cref="RequiresDynamicCodeAttribute"/>
-    /// and <see cref="RequiresUnreferencedCodeAttribute"/>.</para>
+    /// <para>The shim-module recognizer (future slice) consumes
+    /// this to validate that a debug-name from a wit-component-
+    /// emitted <c>"wit-component:shim"</c> module's function-name
+    /// custom section (after dot→dash normalization) corresponds
+    /// to a canon op WACS knows how to dispatch. The actual
+    /// delegate construction goes through
+    /// <see cref="CanonAsyncBinder"/>'s per-shape switch — this
+    /// registry is the name-validation surface.</para>
     ///
-    /// <para><b>Slice G2</b>: a Roslyn source generator emits
-    /// the same lookup table at build time. The registry's
-    /// public API stays identical; the reflection path is
-    /// replaced with a generated static dictionary and the
-    /// AOT annotations come off.</para>
+    /// <para><b>No runtime reflection.</b> The generator emits
+    /// <see cref="BuildKnownNames"/> as a static partial method
+    /// that returns the literal set. The hand-written portion
+    /// of this class only exposes the lookup API; the data is
+    /// build-time.</para>
     /// </summary>
-    public static class CanonOpRegistry
+    public static partial class CanonOpRegistry
     {
-        private static Dictionary<string, MethodInfo>? _cache;
+        // Lazy-initialized from the generator-supplied
+        // BuildKnownNames(). Initialization is allocation-free
+        // once the cache is set.
+        private static HashSet<string>? _cache;
 
-        /// <summary>Look up the <see cref="AsyncDispatcher"/>
-        /// method tagged with
-        /// <c>[CanonAsync(<paramref name="canonOpName"/>)]</c>,
-        /// or <c>null</c> when no method matches.</summary>
-        [RequiresDynamicCode("Slice G1 uses reflection over " +
-            "AsyncDispatcher's [CanonAsync] attributes. Slice G2 " +
-            "replaces this with a build-time source generator.")]
-        [RequiresUnreferencedCode("Reflection over methods may " +
-            "remove decorated methods through trimming.")]
-        public static MethodInfo? GetMethod(string canonOpName)
+        private static HashSet<string> Cache =>
+            _cache ??= BuildKnownNames();
+
+        /// <summary>
+        /// True iff <paramref name="canonOpName"/> matches a
+        /// <see cref="CanonAsyncAttribute"/>-decorated method on
+        /// <see cref="AsyncDispatcher"/>. The expected spelling
+        /// is wasmtime's <c>Trampoline::symbol_name()</c> form —
+        /// kebab-case (<c>"task-return"</c>, <c>"stream-new"</c>,
+        /// <c>"waitable-set-wait"</c>).
+        /// </summary>
+        public static bool IsKnown(string canonOpName)
         {
             if (canonOpName == null)
                 throw new ArgumentNullException(nameof(canonOpName));
-            EnsureCache();
-            return _cache!.TryGetValue(canonOpName, out var mi) ? mi : null;
+            return Cache.Contains(canonOpName);
         }
 
-        /// <summary>All canon-op names registered on
-        /// <see cref="AsyncDispatcher"/>.</summary>
-        public static IEnumerable<string> Names
-        {
-            [RequiresDynamicCode("Slice G1 uses reflection (see " +
-                nameof(GetMethod) + " note).")]
-            [RequiresUnreferencedCode("Reflection over methods.")]
-            get { EnsureCache(); return _cache!.Keys; }
-        }
+        /// <summary>All registered canon-op names, sorted.</summary>
+        public static IReadOnlyCollection<string> Names => Cache;
 
-        /// <summary>Count of registered canon ops. Useful for
-        /// the source generator's correctness check: regenerated
-        /// table size must match the reflective scan's count.</summary>
-        public static int Count
-        {
-            [RequiresDynamicCode("Slice G1 uses reflection (see " +
-                nameof(GetMethod) + " note).")]
-            [RequiresUnreferencedCode("Reflection over methods.")]
-            get { EnsureCache(); return _cache!.Count; }
-        }
+        /// <summary>Count of registered canon ops. Source
+        /// generator emits the literal value via the partial; the
+        /// count is a quick sanity check for tests.</summary>
+        public static int Count => Cache.Count;
 
-        [RequiresDynamicCode("Reflection scan over " +
-            nameof(AsyncDispatcher) + ".")]
-        [RequiresUnreferencedCode("Reflection over methods.")]
-        private static void EnsureCache()
-        {
-            if (_cache != null) return;
-            var map = new Dictionary<string, MethodInfo>(StringComparer.Ordinal);
-            var dispatcher = typeof(AsyncDispatcher);
-            var methods = dispatcher.GetMethods(
-                BindingFlags.Instance | BindingFlags.Public);
-            foreach (var m in methods)
-            {
-                var attr = m.GetCustomAttribute<CanonAsyncAttribute>();
-                if (attr == null) continue;
-                if (map.ContainsKey(attr.Name))
-                    throw new InvalidOperationException(
-                        $"Duplicate [CanonAsync(\"{attr.Name}\")] on " +
-                        $"{dispatcher.Name}.{m.Name} (already bound to " +
-                        $"{map[attr.Name].Name}).");
-                map[attr.Name] = m;
-            }
-            _cache = map;
-        }
+        // Supplied by the source generator. The hand-written
+        // declaration here is the contract; the implementation
+        // lives in CanonOpRegistry.g.cs.
+        private static partial HashSet<string> BuildKnownNames();
     }
 }
