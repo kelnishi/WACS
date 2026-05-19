@@ -406,6 +406,30 @@ namespace Wacs.WASI.Preview3
                         InvokeFieldsAppend(self, namePtr, nameLen,
                             valuePtr, valueLen)));
 
+            runtime.BindHostFunction(
+                (HttpTypesModuleName, "[method]fields.set"),
+                (Action<ExecContext, int, int, int, int, int, int>)(
+                    (_, self, namePtr, nameLen, listPtr, listCount, retptr) =>
+                        InvokeFieldsSet(self, namePtr, nameLen,
+                            listPtr, listCount, retptr, realloc)));
+
+            runtime.BindHostFunction(
+                (HttpTypesModuleName, "[method]fields.delete"),
+                (Action<ExecContext, int, int, int, int>)(
+                    (_, self, namePtr, nameLen, retptr) =>
+                        InvokeFieldsDelete(self, namePtr, nameLen,
+                            retptr, realloc)));
+
+            runtime.BindHostFunction(
+                (HttpTypesModuleName, "[method]fields.clone"),
+                (Func<ExecContext, int, int>)((_, self) =>
+                    InvokeFieldsClone(self)));
+
+            runtime.BindHostFunction(
+                (HttpTypesModuleName, "[resource-drop]request"),
+                (Action<ExecContext, int>)((_, handle) =>
+                    RequestHandles.Drop(handle)));
+
             // wasi:http/types.request-options — fully wired.
             // All methods are simple primitive round-trips
             // (the option<duration> wire shape lowers to
@@ -952,6 +976,150 @@ namespace Wacs.WASI.Preview3
             if (valueLen > 0)
                 memory.AsSpan(valuePtr, valueLen).CopyTo(value);
             fields.Append(name, value);
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]fields.set(name, list&lt;list&lt;u8&gt;&gt;)</c>.
+        /// Reads the name + value list from guest memory,
+        /// forwards to <see cref="IFields.Set"/>, writes the
+        /// <c>result&lt;_, header-error&gt;</c> at retptr.</summary>
+        public void InvokeFieldsSet(
+            int self, int namePtr, int nameLen,
+            int listPtr, int listCount,
+            int retptr, ICabiRealloc realloc)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateResultHeaderErrorRetptr(retptr, memory);
+            HeaderException? caught = null;
+            try
+            {
+                var fields = RequireFields(self);
+                var name = ReadGuestUtf8(namePtr, nameLen);
+                var values = ReadListOfByteLists(listPtr, listCount);
+                fields.Set(name, values);
+            }
+            catch (HeaderException ex) { caught = ex; }
+            WriteHeaderErrorResult(
+                memory.AsSpan(retptr, ResultHeaderErrorSize),
+                caught, realloc, memory);
+        }
+
+        /// <summary>Invoke <c>[method]fields.delete(name)</c>.
+        /// Forwards to <see cref="IFields.Delete"/>, writes
+        /// the <c>result&lt;_, header-error&gt;</c> at retptr.</summary>
+        public void InvokeFieldsDelete(
+            int self, int namePtr, int nameLen,
+            int retptr, ICabiRealloc realloc)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateResultHeaderErrorRetptr(retptr, memory);
+            HeaderException? caught = null;
+            try
+            {
+                var fields = RequireFields(self);
+                fields.Delete(ReadGuestUtf8(namePtr, nameLen));
+            }
+            catch (HeaderException ex) { caught = ex; }
+            WriteHeaderErrorResult(
+                memory.AsSpan(retptr, ResultHeaderErrorSize),
+                caught, realloc, memory);
+        }
+
+        /// <summary>Invoke <c>[method]fields.clone() -&gt;
+        /// own&lt;fields&gt;</c>. Returns a fresh handle bound
+        /// to the cloned IFields. No err path (the WIT clone
+        /// signature has no result wrapper).</summary>
+        public int InvokeFieldsClone(int self)
+        {
+            var fields = RequireFields(self);
+            var cloned = fields.Clone();
+            return FieldsHandles.Allocate(cloned);
+        }
+
+        // ---- result<_, header-error> wire encoding -------------------
+        //
+        // Canon-ABI layout for `result<_, header-error>` (size 20,
+        // align 4):
+        //
+        //   retptr+0: result-disc (u8) + 3-byte pad
+        //   retptr+4: header-error variant (16 bytes, used when disc=1):
+        //     +4: header-error-disc (u8) + 3-byte pad
+        //     +8: option<string> (12 bytes — only the `other` case):
+        //       +8: option-disc (u8) + 3-byte pad
+        //       +12: string-ptr (i32)
+        //       +16: string-len (i32)
+
+        private const int ResultHeaderErrorSize = 20;
+
+        private static void ValidateResultHeaderErrorRetptr(
+            int retptr, Wacs.Core.Runtime.Types.MemoryInstance memory)
+        {
+            if (retptr < 0 || (retptr & 0x3) != 0
+                || retptr + ResultHeaderErrorSize > memory.Data.Length)
+                throw new InvalidOperationException(
+                    "wasi:http/types.fields: result<_, header-error> " +
+                    $"retptr 0x{retptr:X8} misaligned or out of range " +
+                    $"(memory size = {memory.Data.Length}). " +
+                    "Caller must allocate a 20-byte 4-aligned " +
+                    "return area.");
+        }
+
+        private static void WriteHeaderErrorResult(
+            Span<byte> dest, HeaderException? ex,
+            ICabiRealloc realloc,
+            Wacs.Core.Runtime.Types.MemoryInstance memory)
+        {
+            dest.Clear();
+            if (ex == null)
+            {
+                dest[0] = 0; // result-disc = ok
+                return;
+            }
+            dest[0] = 1; // result-disc = err
+            dest[4] = (byte)ex.Code; // header-error-disc (0..4)
+            if (ex.Code == HeaderError.Other && ex.OtherPayload != null)
+            {
+                dest[8] = 1; // option-disc = some
+                var bytes = System.Text.Encoding.UTF8
+                    .GetBytes(ex.OtherPayload);
+                int strPtr = bytes.Length > 0
+                    ? realloc.Allocate(align: 1, size: bytes.Length)
+                    : 0;
+                if (bytes.Length > 0)
+                    new ReadOnlySpan<byte>(bytes)
+                        .CopyTo(memory.AsSpan(strPtr, bytes.Length));
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(dest.Slice(12), strPtr);
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(dest.Slice(16), bytes.Length);
+            }
+            // For unit-payload cases (invalid-syntax / forbidden /
+            // immutable / size-exceeded), the bytes at +8..20
+            // remain zero from the Clear() above — those fields
+            // are payload-irrelevant since the disc selects the
+            // unit case.
+        }
+
+        // Reads list<list<u8>> from guest memory at listPtr.
+        // Each outer-list element is 8 bytes (i32 ptr, i32 len);
+        // each inner list is a contiguous byte run at its ptr.
+        private byte[][] ReadListOfByteLists(int listPtr, int listCount)
+        {
+            var memory = RequireMemoryForHttp();
+            var result = new byte[listCount][];
+            for (int i = 0; i < listCount; i++)
+            {
+                var entrySpan = memory.AsSpan(listPtr + i * 8, 8);
+                int ptr = System.Buffers.Binary.BinaryPrimitives
+                    .ReadInt32LittleEndian(entrySpan.Slice(0));
+                int len = System.Buffers.Binary.BinaryPrimitives
+                    .ReadInt32LittleEndian(entrySpan.Slice(4));
+                var bytes = new byte[len];
+                if (len > 0)
+                    memory.AsSpan(ptr, len).CopyTo(bytes);
+                result[i] = bytes;
+            }
+            return result;
         }
 
         private IFields RequireFields(int handle)

@@ -1,5 +1,84 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.15 — `result<_, header-error>` encoding + fields gaps (Phase 5 Slice M)
+
+Closes the first batch of HTTP wire-up gaps. Adds the
+foundational canon-ABI `result<_, header-error>` retptr
+encoder, wires three more `fields` methods (set, delete,
+clone), and registers `[resource-drop]request`.
+
+### `WriteHeaderErrorResult` + `ResultHeaderErrorSize`
+
+Foundational helper that encodes the 20-byte 4-aligned
+`result<_, header-error>` payload at a retptr:
+
+```
++0:  result-disc (u8) + 3-byte pad
++4:  header-error variant (16 bytes, used when disc=1):
+     +4:  header-error-disc (u8) + 3-byte pad
+     +8:  option<string> (12 bytes — only the `other` case):
+          +8:  option-disc (u8) + 3-byte pad
+          +12: string-ptr (i32)
+          +16: string-len (i32)
+```
+
+`null` exception → success (disc=0, payload zero).
+`HeaderException(NonOther)` → disc=1 + the code at +4.
+`HeaderException(Other, msg)` → disc=1 + code=4 at +4 +
+option-some at +8 + cabi_realloc-allocated UTF-8 string.
+
+This is the wire encoder reused by every method that
+returns `result<_, header-error>`.
+
+### `wasi:http/types.fields.set`
+
+```
+(self, name-ptr, name-len, list-ptr, list-count, retptr) -> ()
+```
+
+Reads name + `list<list<u8>>` from guest memory (each
+outer entry is 8 bytes: i32 ptr + i32 len), forwards to
+`IFields.Set`, writes the result encoding. `ReadListOfByteLists`
+helper handles the list-of-byte-lists decode.
+
+### `wasi:http/types.fields.delete`
+
+Same shape as `set` but only takes the name.
+
+### `wasi:http/types.fields.clone`
+
+`(self) -> own<fields>`. Allocates a fresh handle bound to
+`IFields.Clone()`. No err path — the WIT signature has no
+result wrapper.
+
+### `wasi:http/types.[resource-drop]request`
+
+Releases the request handle. Mirror of `[resource-drop]response`
+from Slice G; the Slice H wire-up of `client.send` /
+`handler.handle` allocates request handles into
+`RequestHandles`, and guests release them via this drop.
+
+### Test coverage
+
+9 new tests in `HttpFieldsResultEncodingTests.cs`:
+- `BindToRuntime` registers all four new functions.
+- `fields.set` success writes disc=0 + the field actually
+  gets set on the IFields impl.
+- `fields.set` invalid name writes disc=1 + code=0
+  (InvalidSyntax).
+- `fields.set` frozen collection writes disc=1 + code=2
+  (Immutable).
+- `fields.delete` success writes disc=0 + field is gone.
+- `fields.clone` returns a fresh handle, independent of
+  original.
+- The `Other(string)` path uses the realloc-allocated
+  string write — explicit assertion that the UTF-8 bytes
+  land at the cabi_realloc address.
+- Misaligned retptr throws.
+- Request resource-drop releases the handle.
+
+173/173 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.14 — transpiler-parity equivalence tests (Phase 5 Slice L)
 
 Closes the transpiler-parity question for Phase 5: the
