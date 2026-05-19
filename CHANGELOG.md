@@ -1,5 +1,68 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.9 — `request-options` full wire-up + `response` status methods (Phase 5 Slice G)
+
+Builds on Slice F's host-resource binding pattern. Wires all
+9 `wasi:http/types.request-options` methods + the 3 simple
+`response` methods (drop, get-status-code, set-status-code).
+
+### `request-options` (full)
+
+- `[constructor]request-options` — allocates a fresh
+  `RequestOptions` instance.
+- `[resource-drop]request-options` — releases the handle.
+- `[method]request-options.get-{connect,first-byte,between-bytes}-timeout`
+  — writes `option<duration>` at retptr. Wire layout 16 bytes
+  8-aligned: `i32 disc` at +0 (with 4-byte tail-pad to satisfy
+  the i64 payload's alignment), `i64 value` at +8.
+- `[method]request-options.set-{connect,first-byte,between-bytes}-timeout`
+  — takes `(self, i32 is-some, i64 value)`. `is-some == 0`
+  clears the timeout to null.
+- `[method]request-options.clone` — allocates a fresh handle
+  bound to a deep-copy of the original.
+
+`BindOptionalDurationTimeout` is the per-property pair-binder
+that registers both getter + setter for one of the three
+timeout properties. The three setter/getter
+`Func<IRequestOptions, ulong?>` lambdas are the only
+per-property variation; the canon-ABI lift/lower is shared.
+
+### `response` (status methods)
+
+- `[resource-drop]response` — releases the handle.
+- `[method]response.get-status-code` — returns `u16`.
+- `[method]response.set-status-code` — takes `u16`.
+
+The static `response.new` constructor returns
+`tuple<response, future<...>>` which needs the multi-return
+shape from Slice K plus future allocation; deferred until the
+future-handle pathway lands. Other simple `response` methods
+(`get-headers`) need the shared-fields-handle resolution
+model and ship in a later slice.
+
+### `WasiPreview3Host.RequestOptionsHandles` / `ResponseHandles`
+
+New `HostResourceTable` properties matching the
+`FieldsHandles` shape from Slice F.
+
+### Test coverage
+
+10 new tests in `HostResourceBindingExtraTests.cs`:
+- `BindToRuntime` registers all 9 request-options host
+  functions + the 3 response methods.
+- `InvokeRequestOptionsSetTimeout` honors `is-some`: 1 sets
+  the value, 0 clears.
+- `InvokeRequestOptionsGetTimeout` writes the
+  `(disc, value)` pair correctly for both Some and None
+  cases.
+- Misaligned retptr throws
+  `RequestOptionsException(Other)`.
+- Invalid handle throws `RequestOptionsException(Other)`.
+- `Response` status round-trips via handle indirection.
+- `Response` drop releases the handle.
+
+138/138 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.8 — host-resource binding infrastructure + `wasi:http/types.fields` wire-up (Phase 5 Slice F)
 
 Establishes the canonical host-resource binding pattern.

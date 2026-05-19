@@ -81,6 +81,16 @@ namespace Wacs.WASI.Preview3
         public HostResourceTable<IFields> FieldsHandles { get; } =
             new HostResourceTable<IFields>();
 
+        /// <summary>Host-side handle table for
+        /// <c>wasi:http/types.request-options</c> resources.</summary>
+        public HostResourceTable<IRequestOptions> RequestOptionsHandles { get; } =
+            new HostResourceTable<IRequestOptions>();
+
+        /// <summary>Host-side handle table for
+        /// <c>wasi:http/types.response</c> resources.</summary>
+        public HostResourceTable<IResponse> ResponseHandles { get; } =
+            new HostResourceTable<IResponse>();
+
         public WasiPreview3Host() : this(new WasiPreview3HostBuilder()) { }
 
         public WasiPreview3Host(WasiPreview3HostBuilder builder)
@@ -375,6 +385,158 @@ namespace Wacs.WASI.Preview3
                     (_, self, namePtr, nameLen, valuePtr, valueLen) =>
                         InvokeFieldsAppend(self, namePtr, nameLen,
                             valuePtr, valueLen)));
+
+            // wasi:http/types.request-options — fully wired.
+            // All methods are simple primitive round-trips
+            // (the option<duration> wire shape lowers to
+            // (i32 is-some, i64 value)).
+            runtime.BindHostFunction(
+                (HttpTypesModuleName, "[constructor]request-options"),
+                (Func<ExecContext, int>)(_ =>
+                    RequestOptionsHandles.Allocate(new RequestOptions())));
+
+            runtime.BindHostFunction(
+                (HttpTypesModuleName, "[resource-drop]request-options"),
+                (Action<ExecContext, int>)((_, handle) =>
+                    RequestOptionsHandles.Drop(handle)));
+
+            BindOptionalDurationTimeout(runtime, "connect-timeout",
+                opt => opt.GetConnectTimeout(),
+                (opt, v) => opt.SetConnectTimeout(v));
+            BindOptionalDurationTimeout(runtime, "first-byte-timeout",
+                opt => opt.GetFirstByteTimeout(),
+                (opt, v) => opt.SetFirstByteTimeout(v));
+            BindOptionalDurationTimeout(runtime, "between-bytes-timeout",
+                opt => opt.GetBetweenBytesTimeout(),
+                (opt, v) => opt.SetBetweenBytesTimeout(v));
+
+            runtime.BindHostFunction(
+                (HttpTypesModuleName, "[method]request-options.clone"),
+                (Func<ExecContext, int, int>)((_, self) =>
+                {
+                    var opt = RequireRequestOptions(self);
+                    return RequestOptionsHandles.Allocate(opt.Clone());
+                }));
+
+            // wasi:http/types.response — drop + status getter/setter.
+            // The constructor (static `new`) returns a
+            // tuple<response, future<...>> which needs the
+            // multi-return shape from Slice K plus future
+            // allocation; ships in a later slice. Other simple
+            // methods (get-headers) follow once the headers
+            // shared-handle resolution model is in place.
+            runtime.BindHostFunction(
+                (HttpTypesModuleName, "[resource-drop]response"),
+                (Action<ExecContext, int>)((_, handle) =>
+                    ResponseHandles.Drop(handle)));
+
+            runtime.BindHostFunction(
+                (HttpTypesModuleName, "[method]response.get-status-code"),
+                (Func<ExecContext, int, int>)((_, self) =>
+                    RequireResponse(self).GetStatusCode()));
+
+            runtime.BindHostFunction(
+                (HttpTypesModuleName, "[method]response.set-status-code"),
+                (Action<ExecContext, int, int>)((_, self, code) =>
+                    RequireResponse(self).SetStatusCode(
+                        unchecked((ushort)code))));
+        }
+
+        // Helper that registers the get/set pair for an
+        // option<duration>-shaped timeout property. The lowered
+        // signature is (self, i32 is-some, i64 value) on the
+        // setter and returns (i32 is-some, i64 value) on the
+        // getter via a 16-byte retArea (option<duration>
+        // flat-count = 2 = i32 disc + i64 payload, exceeds
+        // MAX_FLAT_RESULTS).
+        private void BindOptionalDurationTimeout(
+            WasmRuntime runtime, string propertyName,
+            Func<IRequestOptions, ulong?> getter,
+            Action<IRequestOptions, ulong?> setter)
+        {
+            runtime.BindHostFunction(
+                (HttpTypesModuleName,
+                    $"[method]request-options.get-{propertyName}"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeRequestOptionsGetTimeout(
+                        self, retptr, getter)));
+
+            runtime.BindHostFunction(
+                (HttpTypesModuleName,
+                    $"[method]request-options.set-{propertyName}"),
+                (Action<ExecContext, int, int, long>)(
+                    (_, self, isSome, value) =>
+                        InvokeRequestOptionsSetTimeout(
+                            self, isSome, value, setter)));
+        }
+
+        // ---- wasi:http/types binding bodies (Slice G additions) ----
+
+        /// <summary>Invoke
+        /// <c>[method]request-options.get-{connect,first-byte,between-bytes}-timeout</c>'s
+        /// body. Writes the option&lt;duration&gt; at retptr:
+        /// (i32 disc, i64 value), 16 bytes 8-aligned.</summary>
+        public void InvokeRequestOptionsGetTimeout(
+            int self, int retptr,
+            Func<IRequestOptions, ulong?> getter)
+        {
+            var opt = RequireRequestOptions(self);
+            var memory = RequireMemoryForHttp();
+            if (retptr < 0 || (retptr & 0x7) != 0
+                || retptr + 16 > memory.Data.Length)
+                throw new RequestOptionsException(
+                    RequestOptionsError.Other,
+                    "request-options.get-timeout: retptr " +
+                    $"0x{retptr:X8} misaligned or out of range " +
+                    $"(memory size = {memory.Data.Length}). " +
+                    "Caller must allocate a 16-byte 8-aligned " +
+                    "return area.");
+            var dest = memory.AsSpan(retptr, 16);
+            var value = getter(opt);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(
+                    dest.Slice(0), value.HasValue ? 1 : 0);
+            // 4-byte tail-pad in the disc slot (option<u64>
+            // align = 8 forces the payload to start at +8).
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteUInt64LittleEndian(
+                    dest.Slice(8), value ?? 0UL);
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]request-options.set-{connect,first-byte,between-bytes}-timeout</c>'s
+        /// body. The option&lt;duration&gt; param flat-lowers to
+        /// (i32 is-some, i64 value).</summary>
+        public void InvokeRequestOptionsSetTimeout(
+            int self, int isSome, long value,
+            Action<IRequestOptions, ulong?> setter)
+        {
+            var opt = RequireRequestOptions(self);
+            setter(opt, isSome != 0
+                ? unchecked((ulong)value)
+                : (ulong?)null);
+        }
+
+        private IRequestOptions RequireRequestOptions(int handle)
+        {
+            var opt = RequestOptionsHandles.Get(handle);
+            if (opt == null)
+                throw new RequestOptionsException(
+                    RequestOptionsError.Other,
+                    $"wasi:http/types.request-options: handle " +
+                    $"{handle} is not allocated.");
+            return opt;
+        }
+
+        private IResponse RequireResponse(int handle)
+        {
+            var resp = ResponseHandles.Get(handle);
+            if (resp == null)
+                throw new HttpException(
+                    HttpErrorCode.InternalError,
+                    $"wasi:http/types.response: handle {handle} " +
+                    "is not allocated.");
+            return resp;
         }
 
         // ---- wasi:http/types.fields binding bodies --------------------
