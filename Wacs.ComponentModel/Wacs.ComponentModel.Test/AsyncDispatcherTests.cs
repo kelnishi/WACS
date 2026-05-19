@@ -414,15 +414,69 @@ namespace Wacs.ComponentModel.Test
             d.ThreadYield(null!, cancellable: true);
         }
 
-        // ---- Pinned Slice-F marker for the suspend bridge --------------
+        // ---- WaitableSetWait (now implemented as blocking WaitAny) -----
 
         [Fact]
-        public void WaitableSetWait_throws_NotImplemented_pinned_for_SliceF()
+        public void WaitableSetWait_returns_zero_for_empty_set()
         {
             var d = new AsyncDispatcher();
-            var ex = Assert.Throws<NotImplementedException>(
-                () => d.WaitableSetWait(null!, 1, 0, false));
-            Assert.Contains("Slice F", ex.Message);
+            var ws = d.WaitableSetNew();
+            // No members joined — wait returns 0 (canon null) immediately.
+            Assert.Equal(0, d.WaitableSetWait(null!, ws, 0, false));
+        }
+
+        [Fact]
+        public void WaitableSetWait_returns_member_already_deliverable()
+        {
+            var d = new AsyncDispatcher();
+            var ws = d.WaitableSetNew();
+            var f = d.FutureNew(0);
+            d.WaitableJoin(ws, f);
+            d.FutureWrite(f, "ready"); // future already resolved
+
+            // Pre-deliverable member — wait returns it without blocking.
+            Assert.Equal(f, d.WaitableSetWait(null!, ws, 0, false));
+        }
+
+        [Fact]
+        public async Task WaitableSetWait_unblocks_when_future_resolves_asynchronously()
+        {
+            var d = new AsyncDispatcher();
+            var ws = d.WaitableSetNew();
+            var f = d.FutureNew(0);
+            d.WaitableJoin(ws, f);
+
+            // Kick off the blocking wait on a background thread.
+            var waitTask = Task.Run(() =>
+                d.WaitableSetWait(null!, ws, 0, false));
+
+            // Future not yet resolved — wait should still be running.
+            await Task.Delay(50);
+            Assert.False(waitTask.IsCompleted);
+
+            // Resolve the future — wait wakes and returns the handle.
+            d.FutureWrite(f, "now-ready");
+            var deliverable = await waitTask.WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.Equal(f, deliverable);
+        }
+
+        [Fact]
+        public async Task WaitableSetWait_returns_first_resolver_when_multiple_pending()
+        {
+            var d = new AsyncDispatcher();
+            var ws = d.WaitableSetNew();
+            var f1 = d.FutureNew(0);
+            var f2 = d.FutureNew(0);
+            d.WaitableJoin(ws, f1);
+            d.WaitableJoin(ws, f2);
+
+            var waitTask = Task.Run(() =>
+                d.WaitableSetWait(null!, ws, 0, false));
+
+            await Task.Delay(20);
+            d.FutureWrite(f2, "two-first"); // f2 resolves first
+            var deliverable = await waitTask.WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.Equal(f2, deliverable);
         }
     }
 }

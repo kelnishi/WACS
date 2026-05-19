@@ -1,5 +1,113 @@
 # Changelog
 
+## WACS.ComponentModel 0.8.9 — Phase 3 deferrals closed (WaitableSetWait + typed task.return / context.{get,set})
+
+Closes the two tractable Phase 3 deferrals from Slice F. The
+remaining deferral — full `.component.wasm` end-to-end against
+wit-component output — stays open until the upstream tooling
+settles its canon-async emit convention.
+
+### `WaitableSetWait` implemented
+
+`AsyncDispatcher.WaitableSetWait(ctx, setHandle, memIdx, cancellable)`
+now blocks until any member of the set becomes deliverable,
+then returns the member's handle (`0` for an empty set).
+
+**Implementation:** synchronous-scan-then-`Task.WaitAny` loop
+over each member's completion task. The wait completes on:
+
+- `ComponentTask.Completion` (for task / subtask members).
+- `FutureCell<T>.Task` (for future members).
+- `ChannelReader<T>.WaitToReadAsync` (for stream members —
+  wakes on buffered-data or EOS).
+
+A new `GetMemberWaitTask` helper builds the awaitable per
+member; members without a wait-able source are skipped.
+`Task.WaitAny` only proves "some" task completed, so the
+implementation re-scans after each wakeup before returning.
+
+**Caveats** captured in doc comments:
+
+- The calling CLR thread parks (same OS thread as the wasm
+  body) — fine for Phase 3's single-task-per-component model
+  but a stackful-suspend variant where the wasm continuation
+  yields to a host scheduler is a future refinement.
+- The `memoryIdx` parameter is the spec's deliverable-event
+  struct target; this implementation returns the handle via
+  the return value instead. The memory write lands when the
+  canon-ABI lift adapter generates per-call memory marshaling.
+
+### Binder picks up `waitable-set.{wait,poll}`
+
+`CanonAsyncBinder` now binds both, with the cancellable flag
+captured at bind time:
+
+- `[waitable-set-wait]` → `Func<ExecContext, int, int, int>`
+  (set, memidx → deliverable handle).
+- `[waitable-set-poll]` → same shape (non-blocking variant
+  already implemented).
+
+### Typed primitive binding for `task.return` and `context.{get,set}`
+
+The binder now generates typed delegates for the primitive-
+valued forms of these canon ops:
+
+- `task.return` resultlist: `()` / `i32` / `i64` / `f32` /
+  `f64` produce `Action<ExecContext, T>` delegates (with `T`
+  unboxed and forwarded to `dispatcher.TaskReturn(object?)`).
+- `context.get` per (slot, valtype): `Func<ExecContext, T>`
+  returning the slot value as the requested primitive.
+- `context.set` per (slot, valtype): `Action<ExecContext, T>`
+  packing the value into a `Value` and writing the slot.
+
+Slot index is captured at bind time so each `(slot, valtype)`
+pair gets its own delegate.
+
+Aggregate / string resultlists + non-primitive context
+valtypes still skip — they need the full canon-ABI lift
+adapter to marshal typed values across the boundary. That
+remains the genuine "wait for upstream" deferral for the
+full `.component.wasm` e2e.
+
+### Name convention extensions
+
+- `[task-return]` — no slot suffix (resultlist isn't a
+  typeidx).
+- `[context-get]#<slot>` / `[context-set]#<slot>` — slot
+  index baked into the name so distinct slots get separate
+  bindings.
+
+### Tests
+
+7 new (4 dispatcher + 3 binder):
+
+- `WaitableSetWait_returns_zero_for_empty_set`.
+- `WaitableSetWait_returns_member_already_deliverable`.
+- `WaitableSetWait_unblocks_when_future_resolves_asynchronously`
+  — Task.Run kicks the blocking wait, future write wakes it.
+- `WaitableSetWait_returns_first_resolver_when_multiple_pending`.
+- `DefaultNameResolver_resolves_primitive_task_return_and_context_ops`.
+- `DefaultNameResolver_skips_aggregate_resultlist_and_valtype`.
+- `BindImports_registers_primitive_task_return_variants` /
+  `BindImports_registers_context_get_and_set_with_per_slot_names` /
+  `BindImports_skips_aggregate_resultlist_and_valtype_entries`.
+
+499/499 ComponentModel + 833/833 Transpiler tests pass (was 492).
+
+### What still requires upstream
+
+- **Full `.component.wasm` e2e** against wit-component output:
+  the binder name convention is documented + override-friendly,
+  but the conventions wit-component actually emits in
+  Preview 3 RC haven't settled. The `NameResolver` hook lets a
+  consumer adopt the convention in one place when fixtures
+  arrive.
+- **Aggregate-typed `task.return` and `context.{get,set}`**:
+  string / list / record / variant results need the canon-ABI
+  lift adapter (component Value ↔ wasm-frame Value with full
+  marshaling). Cleanest after wit-component fixtures verify
+  the shape of those calls.
+
 ## WACS.ComponentModel 0.8.8 — lift adapter + memory ops + producer/consumer (Phase 3 Slice F)
 
 Closes Phase 3's tractable surface: the task-lifecycle wrapper,

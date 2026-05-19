@@ -43,20 +43,42 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
-        public void DefaultNameResolver_returns_null_for_unsupported_entries()
+        public void DefaultNameResolver_resolves_primitive_task_return_and_context_ops()
         {
-            // task.return / context.get / context.set need a lift
-            // adapter or Value marshaling; Slice F.
+            // Phase 3 deferral closeout: primitive task.return and
+            // context.{get,set} now bind. Aggregate resultlists /
+            // valtypes still skip — they need the canon-ABI lift
+            // adapter.
             var (m1, n1) = CanonAsyncBinder.DefaultNameResolver(
                 new CanonTaskReturn(null, System.Array.Empty<CanonOption>()));
-            Assert.Null(m1);
-            Assert.Null(n1);
+            Assert.Equal("[canon]", m1);
+            Assert.Equal("[task-return]", n1);
 
             var (m2, n2) = CanonAsyncBinder.DefaultNameResolver(
                 new CanonContextOp(CanonContextOp.Kind.Get,
-                    ComponentValType.OfPrim(ComponentPrim.U32), 0));
-            Assert.Null(m2);
-            Assert.Null(n2);
+                    ComponentValType.OfPrim(ComponentPrim.U32), 7));
+            Assert.Equal("[canon]", m2);
+            Assert.Equal("[context-get]#7", n2);
+
+            var (m3, n3) = CanonAsyncBinder.DefaultNameResolver(
+                new CanonContextOp(CanonContextOp.Kind.Set,
+                    ComponentValType.OfPrim(ComponentPrim.F64), 3));
+            Assert.Equal("[canon]", m3);
+            Assert.Equal("[context-set]#3", n3);
+        }
+
+        [Fact]
+        public void DefaultNameResolver_skips_aggregate_resultlist_and_valtype()
+        {
+            // String / aggregate resultlists still need the lift
+            // adapter — name resolver returns null so the binder
+            // skips them.
+            var (m, n) = CanonAsyncBinder.DefaultNameResolver(
+                new CanonTaskReturn(
+                    ComponentValType.OfPrim(ComponentPrim.String),
+                    System.Array.Empty<CanonOption>()));
+            Assert.Null(m);
+            Assert.Null(n);
         }
 
         // ---- BindImports registers delegates the runtime can resolve ---
@@ -83,17 +105,21 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
-        public void BindImports_skips_ops_with_null_resolver_pairs()
+        public void BindImports_skips_aggregate_resultlist_and_valtype_entries()
         {
-            // task.return + context.get are explicitly skipped by
-            // the default resolver — they need Slice F surfaces.
+            // Aggregate / string resultlists + non-primitive
+            // context valtypes still skip — they need the full
+            // canon-ABI lift adapter to marshal the typed value
+            // across the boundary. Primitive forms bind.
             var runtime = new WasmRuntime();
             var dispatcher = new AsyncDispatcher();
             var entries = new List<CanonEntry>
             {
-                new CanonTaskReturn(null, System.Array.Empty<CanonOption>()),
+                new CanonTaskReturn(
+                    ComponentValType.OfPrim(ComponentPrim.String),
+                    System.Array.Empty<CanonOption>()),
                 new CanonContextOp(CanonContextOp.Kind.Get,
-                    ComponentValType.OfPrim(ComponentPrim.U32), 0),
+                    ComponentValType.OfRef(0), 0),
                 new CanonTaskCancel(),
             };
 
@@ -120,11 +146,10 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
-        public void BindImports_registers_waitable_set_family_minus_wait_and_poll()
+        public void BindImports_registers_full_waitable_set_family()
         {
-            // Default convention names all four; the binder
-            // declines wait/poll (Slice F suspend bridge) but
-            // still surfaces the name pair.
+            // All four bind now that WaitableSetWait + Poll are
+            // implemented (blocking WaitAny over member tasks).
             var runtime = new WasmRuntime();
             var dispatcher = new AsyncDispatcher();
             var entries = new List<CanonEntry>
@@ -138,9 +163,10 @@ namespace Wacs.ComponentModel.Test
             };
 
             var bound = CanonAsyncBinder.BindImports(runtime, entries, dispatcher);
-            // new + drop bind; wait + poll skip per TryBuildDelegate.
-            Assert.Equal(2, bound.Count);
+            Assert.Equal(4, bound.Count);
             Assert.Contains(bound, b => b.Name == "[waitable-set-new]");
+            Assert.Contains(bound, b => b.Name == "[waitable-set-wait]");
+            Assert.Contains(bound, b => b.Name == "[waitable-set-poll]");
             Assert.Contains(bound, b => b.Name == "[waitable-set-drop]");
         }
 
@@ -189,6 +215,73 @@ namespace Wacs.ComponentModel.Test
             // confirmation that the binder didn't perturb state.
             var h = dispatcher.StreamNew(0);
             Assert.True(h > 0);
+        }
+
+        // ---- Typed-primitive binder closeout ----------------------------
+
+        [Fact]
+        public void BindImports_registers_primitive_task_return_variants()
+        {
+            var runtime = new WasmRuntime();
+            var dispatcher = new AsyncDispatcher();
+            var entries = new List<CanonEntry>
+            {
+                new CanonTaskReturn(null, System.Array.Empty<CanonOption>()),
+                new CanonTaskReturn(
+                    ComponentValType.OfPrim(ComponentPrim.S32),
+                    System.Array.Empty<CanonOption>()),
+                new CanonTaskReturn(
+                    ComponentValType.OfPrim(ComponentPrim.F64),
+                    System.Array.Empty<CanonOption>()),
+            };
+            var bound = CanonAsyncBinder.BindImports(runtime, entries, dispatcher);
+            Assert.Equal(3, bound.Count);
+            // All three resolve to the same [task-return] name —
+            // the typed signature differs per binding but the
+            // canon-spec opcode doesn't carry it in the name. A
+            // real component would only have one [task-return]
+            // per export; this test just confirms the binder
+            // doesn't crash on multiple shapes.
+        }
+
+        [Fact]
+        public void BindImports_registers_context_get_and_set_with_per_slot_names()
+        {
+            var runtime = new WasmRuntime();
+            var dispatcher = new AsyncDispatcher();
+            var entries = new List<CanonEntry>
+            {
+                new CanonContextOp(CanonContextOp.Kind.Get,
+                    ComponentValType.OfPrim(ComponentPrim.S32), 0),
+                new CanonContextOp(CanonContextOp.Kind.Get,
+                    ComponentValType.OfPrim(ComponentPrim.S64), 1),
+                new CanonContextOp(CanonContextOp.Kind.Set,
+                    ComponentValType.OfPrim(ComponentPrim.F32), 2),
+            };
+            var bound = CanonAsyncBinder.BindImports(runtime, entries, dispatcher);
+            Assert.Equal(3, bound.Count);
+            Assert.Contains(bound, b => b.Name == "[context-get]#0");
+            Assert.Contains(bound, b => b.Name == "[context-get]#1");
+            Assert.Contains(bound, b => b.Name == "[context-set]#2");
+        }
+
+        [Fact]
+        public void BindImports_skips_aggregate_task_return_and_context()
+        {
+            var runtime = new WasmRuntime();
+            var dispatcher = new AsyncDispatcher();
+            var entries = new List<CanonEntry>
+            {
+                // string resultlist — needs lift adapter, skipped.
+                new CanonTaskReturn(
+                    ComponentValType.OfPrim(ComponentPrim.String),
+                    System.Array.Empty<CanonOption>()),
+                // typeidx-referenced valtype (aggregate) — skipped.
+                new CanonContextOp(CanonContextOp.Kind.Get,
+                    ComponentValType.OfRef(5), 0),
+            };
+            var bound = CanonAsyncBinder.BindImports(runtime, entries, dispatcher);
+            Assert.Empty(bound);
         }
     }
 }

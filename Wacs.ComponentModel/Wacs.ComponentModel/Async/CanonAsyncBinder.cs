@@ -68,10 +68,40 @@ namespace Wacs.ComponentModel.Async
                 case CanonWaitableSetOp ws:       return ("[canon]", $"[waitable-set-{WaitableSetSuffix(ws.Op)}]");
                 case CanonWaitableJoin _:         return ("[canon]", "[waitable-join]");
                 case CanonThreadYield _:          return ("[canon]", "[thread-yield]");
-                // Skipped in Slice E — listed for completeness:
-                case CanonTaskReturn _:           return (null, null);
-                case CanonContextOp _:            return (null, null);
+                // task.return: bind iff the resultlist is a
+                // primitive valtype (or empty). Aggregate/string
+                // results need the canon-ABI lift adapter and
+                // remain deferred.
+                case CanonTaskReturn tr:
+                    if (tr.Result == null || IsBindablePrimitive(tr.Result.Value))
+                        return ("[canon]", "[task-return]");
+                    return (null, null);
+                // context.{get,set}: bind iff valtype is a
+                // primitive. Slot index is part of the name so
+                // each (slot, valtype) gets its own binding.
+                case CanonContextOp cx:
+                    if (IsBindablePrimitive(cx.ValType))
+                        return ("[canon]",
+                            $"[context-{(cx.Op == CanonContextOp.Kind.Get ? "get" : "set")}]#{cx.Index}");
+                    return (null, null);
                 default:                          return (null, null);
+            }
+        }
+
+        private static bool IsBindablePrimitive(ComponentValType v)
+        {
+            if (!v.IsPrimitive) return false;
+            switch (v.Prim)
+            {
+                case ComponentPrim.S32:
+                case ComponentPrim.U32:
+                case ComponentPrim.S64:
+                case ComponentPrim.U64:
+                case ComponentPrim.F32:
+                case ComponentPrim.F64:
+                    return true;
+                default:
+                    return false;
             }
         }
 
@@ -278,10 +308,26 @@ namespace Wacs.ComponentModel.Async
                     del = (Func<ExecContext, int, int>)((_, h) =>
                         d.WaitableSetDrop(h) ? 1 : 0);
                     return true;
-                // waitable-set.wait / .poll need IContinuationContext +
-                // memidx handling — Slice F.
-                case CanonWaitableSetOp _:
-                    return false;
+                // (i32, i32) -> i32   (waitable-set.wait set memidx)
+                //   blocks until a member becomes deliverable; returns
+                //   the deliverable handle (0 for empty set).
+                case CanonWaitableSetOp { Op: CanonWaitableSetOp.Kind.Wait } wsw:
+                    {
+                        bool cancellable = wsw.Cancellable ?? false;
+                        del = (Func<ExecContext, int, int, int>)((_, set, mem) =>
+                            d.WaitableSetWait(null!, set, mem, cancellable));
+                        return true;
+                    }
+                // (i32, i32) -> i32   (waitable-set.poll set memidx)
+                //   non-blocking; returns 0 (canon null) when no
+                //   member is deliverable.
+                case CanonWaitableSetOp { Op: CanonWaitableSetOp.Kind.Poll } wsp:
+                    {
+                        bool cancellable = wsp.Cancellable ?? false;
+                        del = (Func<ExecContext, int, int, int>)((_, set, mem) =>
+                            d.WaitableSetPoll(null!, set, mem, cancellable));
+                        return true;
+                    }
 
                 // (i32, i32) -> ()    (waitable.join: set, member)
                 case CanonWaitableJoin _:
@@ -298,7 +344,120 @@ namespace Wacs.ComponentModel.Async
                         return true;
                     }
 
-                // task.return / context.get / context.set — Slice F.
+                // task.return rs opts — bind for primitive
+                // resultlists. Aggregate / string results need
+                // the canon-ABI lift adapter and stay deferred.
+                case CanonTaskReturn tr:
+                    return TryBuildTaskReturn(tr, d, out del);
+
+                // context.get v i / context.set v i — bind for
+                // primitive valtypes.
+                case CanonContextOp cx:
+                    return TryBuildContextOp(cx, d, out del);
+
+                default:
+                    return false;
+            }
+        }
+
+        // task.return shape: () for empty resultlist; (T) for a
+        // single-primitive result. T is unwrapped and forwarded
+        // to dispatcher.TaskReturn(object?).
+        private static bool TryBuildTaskReturn(
+            CanonTaskReturn tr, AsyncDispatcher d, out Delegate? del)
+        {
+            del = null;
+            if (tr.Result == null)
+            {
+                del = (Action<ExecContext>)((_) => d.TaskReturn(null!, null));
+                return true;
+            }
+            if (!tr.Result.Value.IsPrimitive) return false;
+            switch (tr.Result.Value.Prim)
+            {
+                case ComponentPrim.S32:
+                case ComponentPrim.U32:
+                    del = (Action<ExecContext, int>)((_, x) =>
+                        d.TaskReturn(null!, x));
+                    return true;
+                case ComponentPrim.S64:
+                case ComponentPrim.U64:
+                    del = (Action<ExecContext, long>)((_, x) =>
+                        d.TaskReturn(null!, x));
+                    return true;
+                case ComponentPrim.F32:
+                    del = (Action<ExecContext, float>)((_, x) =>
+                        d.TaskReturn(null!, x));
+                    return true;
+                case ComponentPrim.F64:
+                    del = (Action<ExecContext, double>)((_, x) =>
+                        d.TaskReturn(null!, x));
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        // context.get v i  ->  () -> v
+        // context.set v i  ->  (v) -> ()
+        // The slot index is captured at bind time; only the typed
+        // value crosses the runtime boundary at each call.
+        private static bool TryBuildContextOp(
+            CanonContextOp cx, AsyncDispatcher d, out Delegate? del)
+        {
+            del = null;
+            if (!cx.ValType.IsPrimitive) return false;
+            int slot = (int)cx.Index;
+            switch (cx.Op)
+            {
+                case CanonContextOp.Kind.Get:
+                    switch (cx.ValType.Prim)
+                    {
+                        case ComponentPrim.S32:
+                        case ComponentPrim.U32:
+                            del = (Func<ExecContext, int>)((_) =>
+                                d.ContextGet(slot).Data.Int32);
+                            return true;
+                        case ComponentPrim.S64:
+                        case ComponentPrim.U64:
+                            del = (Func<ExecContext, long>)((_) =>
+                                d.ContextGet(slot).Data.Int64);
+                            return true;
+                        case ComponentPrim.F32:
+                            del = (Func<ExecContext, float>)((_) =>
+                                d.ContextGet(slot).Data.Float32);
+                            return true;
+                        case ComponentPrim.F64:
+                            del = (Func<ExecContext, double>)((_) =>
+                                d.ContextGet(slot).Data.Float64);
+                            return true;
+                        default:
+                            return false;
+                    }
+                case CanonContextOp.Kind.Set:
+                    switch (cx.ValType.Prim)
+                    {
+                        case ComponentPrim.S32:
+                        case ComponentPrim.U32:
+                            del = (Action<ExecContext, int>)((_, x) =>
+                                d.ContextSet(slot, new Wacs.Core.Runtime.Value(x)));
+                            return true;
+                        case ComponentPrim.S64:
+                        case ComponentPrim.U64:
+                            del = (Action<ExecContext, long>)((_, x) =>
+                                d.ContextSet(slot, new Wacs.Core.Runtime.Value(x)));
+                            return true;
+                        case ComponentPrim.F32:
+                            del = (Action<ExecContext, float>)((_, x) =>
+                                d.ContextSet(slot, new Wacs.Core.Runtime.Value(x)));
+                            return true;
+                        case ComponentPrim.F64:
+                            del = (Action<ExecContext, double>)((_, x) =>
+                                d.ContextSet(slot, new Wacs.Core.Runtime.Value(x)));
+                            return true;
+                        default:
+                            return false;
+                    }
                 default:
                     return false;
             }

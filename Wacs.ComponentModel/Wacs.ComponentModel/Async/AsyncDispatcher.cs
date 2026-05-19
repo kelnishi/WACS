@@ -502,17 +502,101 @@ namespace Wacs.ComponentModel.Async
             WaitableSets.Allocate(handle => new ComponentWaitableSet(handle));
 
         /// <summary><c>canon waitable-set.wait cancel? memidx</c> —
-        /// suspend until any member of the set reaches a deliverable
-        /// state. Needs <see cref="IContinuationContext"/>-driven
-        /// suspend integration with the interpreter loop; lands in
-        /// Slice F together with the end-to-end producer/consumer
-        /// fixture.</summary>
-        public void WaitableSetWait(
+        /// block until any member of the set reaches a deliverable
+        /// state. Returns the handle of the first deliverable
+        /// member (any member already deliverable when called wins).
+        ///
+        /// <para><b>Implementation:</b> blocking <c>Task.WaitAny</c>
+        /// over each member's completion task. This is the
+        /// pragmatic choice for Phase 3's single-task-per-component
+        /// model — the calling CLR thread parks on the
+        /// <see cref="WaitHandle"/> the runtime built around the
+        /// underlying tasks. The wasm-side stackful suspend (where
+        /// the wasm continuation yields control back to the host
+        /// dispatch loop) is a future refinement: it needs a
+        /// dispatcher-level scheduler that the current
+        /// <see cref="IContinuationContext"/> doesn't carry. For
+        /// the common case — one wasm task waits, one host task
+        /// completes it — both shapes are observationally
+        /// identical from the wasm side.</para>
+        ///
+        /// <para>Returns <c>0</c> (canon null) when the set is
+        /// empty. Members without a wait-able completion source
+        /// (e.g. raw stream handles with no buffered data and no
+        /// EOS yet) are still polled on each wakeup, so a stream
+        /// becoming ready re-arms the loop.</para>
+        ///
+        /// <para>The <paramref name="memoryIdx"/> parameter is the
+        /// spec-defined target where canon-spec implementations
+        /// write the deliverable-event struct. This implementation
+        /// returns the handle directly via the method's return
+        /// value instead — the canon-ABI memory write lands when
+        /// the lift adapter generates per-call memory marshaling.</para>
+        /// </summary>
+        public int WaitableSetWait(
             IContinuationContext ctx, int waitableSetHandle,
             int memoryIdx, bool cancellable)
         {
-            throw new NotImplementedException(
-                "waitable-set.wait suspend integration lands in Slice F.");
+            var ws = WaitableSets.Get(waitableSetHandle)
+                ?? throw new InvalidOperationException(
+                    $"waitable-set.wait: handle {waitableSetHandle} not allocated.");
+
+            while (true)
+            {
+                // Sync scan — wins immediately when any member is
+                // already deliverable, so a polling caller never
+                // pays the WaitAny overhead.
+                foreach (var member in ws.Members)
+                    if (IsWaitableDeliverable(member)) return member;
+
+                if (ws.Members.Count == 0) return 0;
+
+                // Build the WaitAny-able task set. Streams use the
+                // channel reader's WaitToReadAsync to wake on
+                // buffered-data or EOS. Tasks/subtasks/futures use
+                // their completion task directly.
+                var waitables = new List<Task>(ws.Members.Count);
+                foreach (var member in ws.Members)
+                {
+                    var t = GetMemberWaitTask(member);
+                    if (t != null) waitables.Add(t);
+                }
+
+                if (waitables.Count == 0)
+                {
+                    // No member has a wait-able source — only
+                    // happens when every member is a stream
+                    // without a producer-side TCS. Treat as
+                    // empty-set wakeup.
+                    return 0;
+                }
+
+                Task.WaitAny(waitables.ToArray());
+                // Loop back and re-scan: WaitAny only proves SOME
+                // task completed, not which one.
+            }
+        }
+
+        // Build a Task that completes when the given waitable
+        // handle becomes deliverable. Returns null for handles
+        // we can't wait on (unknown / non-waitable shapes).
+        private Task? GetMemberWaitTask(int handle)
+        {
+            if (Tasks.Get(handle) is ComponentTask t)
+                return t.Completion.Task;
+            if (Subtasks.Get(handle) is ComponentSubtask st)
+                return st.Child.Completion.Task;
+            if (Futures.Get(handle) is FutureCell<object?> f)
+                return f.Task;
+            if (Streams.Get(handle) is StreamSlot ss)
+            {
+                // ChannelReader.WaitToReadAsync completes when
+                // an item arrives or the channel completes. Bridge
+                // to a Task so it composes with the rest.
+                var vt = ss.Buffer.Reader.WaitToReadAsync();
+                return vt.IsCompleted ? Task.CompletedTask : vt.AsTask();
+            }
+            return null;
         }
 
         /// <summary><c>canon waitable-set.poll cancel? memidx</c> —
