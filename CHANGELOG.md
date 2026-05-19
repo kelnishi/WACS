@@ -1,5 +1,62 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.24 — remaining filesystem descriptor methods (Phase 5 Slice V)
+
+Wires seven more descriptor host functions, picking off the
+no-variant-arg methods on `wasi:filesystem/types.descriptor`
+that share a common result encoding. Closes the gap between the
+heavy variant-bearing methods (`set-times`, `link-at`,
+`rename-at`, `symlink-at`, `set-times-at`) and the simpler
+ones that just take a self + optional u64/path and return
+`result<_, error-code>` or a small fixed-size payload.
+
+### Seven host functions wired
+
+```
+[method]descriptor.set-size           — self + u64 size
+[method]descriptor.sync               — self only
+[method]descriptor.sync-data          — self only
+[method]descriptor.advise             — self + u64 offset + u64 length + u8 hint
+[method]descriptor.metadata-hash      — self only, returns result<metadata-hash-value, error-code>
+[method]descriptor.metadata-hash-at   — self + path-flags + path, returns result<metadata-hash-value, error-code>
+[method]descriptor.readlink-at        — self + path, returns result<string, error-code>
+```
+
+### Three retptr encoders / dispatch helpers
+
+- **`InvokeDescriptorResultErrorCodeNoArgs`** — private template
+  for the four `result<_, error-code>` methods (set-size, sync,
+  sync-data, advise). Routes through the appropriate impl
+  delegate, writes a 20-byte retptr through
+  `WriteErrorCodeResult` from Slice N.
+- **`InvokeDescriptorMetadataHash`** — 24-byte 8-aligned retptr
+  for `result<metadata-hash-value, error-code>`. The
+  metadata-hash-value record is two u64s (lower + upper) at
+  offset +8 on the ok path; err path reuses the 20-byte
+  error-code layout at +4..20 (lower 4 bytes of the trailing
+  8-byte pad slot stay zero).
+- **`InvokeDescriptorReadlinkAt`** — 20-byte 4-aligned retptr
+  for `result<string, error-code>`. On ok, writes
+  `(ptr: u32, len: u32)` at +4..12 after `ICabiRealloc`-backed
+  UTF-8 allocation. On err, falls back to `WriteErrorCodeBytes`.
+
+### Test coverage
+
+7 tests in `RemainingDescriptorWireTests.cs`:
+- `BindToRuntime` registers all seven host functions.
+- `metadata-hash` writes the impl's `(lower, upper)` u64 pair
+  to the +8..24 slot.
+- `metadata-hash` err path writes the error-code variant at
+  +4..20 and the ok-slot lower bytes stay zero.
+- `metadata-hash-at` round-trips the path string through
+  `ICabiRealloc` and forwards path-flags.
+- `readlink-at` writes the symlink target as a UTF-8 string
+  pair `(ptr, len)` at +4..12 of the 20-byte retptr.
+- `readlink-at` err path writes the error-code variant.
+- `readlink-at` misaligned retptr throws.
+
+258/258 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.23 — get-local/remote-address variant-return wire-up (Phase 5 Slice U)
 
 Mirror of Slice T's variant-arg work in the return direction:

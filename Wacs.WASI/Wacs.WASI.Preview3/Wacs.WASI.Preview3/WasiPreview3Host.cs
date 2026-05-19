@@ -647,6 +647,77 @@ namespace Wacs.WASI.Preview3
                     InvokeDescriptorReadDirectory(
                         self, retptr, realloc)));
 
+            // ---- Remaining result<_, error-code> methods ----------
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[method]descriptor.set-size"),
+                (Action<ExecContext, int, long, int>)(
+                    (_, self, size, retptr) =>
+                        InvokeDescriptorResultErrorCodeNoArgs(
+                            self, retptr, realloc,
+                            desc => desc.SetSizeAsync(
+                                new FileSize(unchecked((ulong)size)))
+                                .GetAwaiter().GetResult())));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[method]descriptor.sync"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeDescriptorResultErrorCodeNoArgs(
+                        self, retptr, realloc,
+                        desc => desc.SyncAsync()
+                            .GetAwaiter().GetResult())));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[method]descriptor.sync-data"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeDescriptorResultErrorCodeNoArgs(
+                        self, retptr, realloc,
+                        desc => desc.SyncDataAsync()
+                            .GetAwaiter().GetResult())));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[method]descriptor.advise"),
+                (Action<ExecContext, int, long, long, int, int>)(
+                    (_, self, offset, length, advice, retptr) =>
+                        InvokeDescriptorResultErrorCodeNoArgs(
+                            self, retptr, realloc,
+                            desc => desc.AdviseAsync(
+                                new FileSize(unchecked((ulong)offset)),
+                                new FileSize(unchecked((ulong)length)),
+                                (Advice)advice)
+                                .GetAwaiter().GetResult())));
+
+            // ---- metadata-hash / metadata-hash-at ------------------
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[method]descriptor.metadata-hash"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeDescriptorMetadataHash(
+                        self, retptr, realloc, atPath: null,
+                        pathFlags: 0)));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[method]descriptor.metadata-hash-at"),
+                (Action<ExecContext, int, int, int, int, int>)(
+                    (_, self, pathFlags, pathPtr, pathLen, retptr) =>
+                        InvokeDescriptorMetadataHash(
+                            self, retptr, realloc,
+                            atPath: ReadGuestUtf8(pathPtr, pathLen),
+                            pathFlags: unchecked((uint)pathFlags))));
+
+            // ---- readlink-at ---------------------------------------
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[method]descriptor.readlink-at"),
+                (Action<ExecContext, int, int, int, int>)(
+                    (_, self, pathPtr, pathLen, retptr) =>
+                        InvokeDescriptorReadlinkAt(
+                            self, pathPtr, pathLen, retptr, realloc)));
+
             // wasi:sockets — resource drops + ip-name-lookup.
             // Full ITcpSocket/IUdpSocket method wire-ups + a
             // System.Net.Sockets-backed default impl ship in
@@ -1817,6 +1888,141 @@ namespace Wacs.WASI.Preview3
             var (futureHandle, _) = desc.AppendViaStream(
                 dispatcher, streamHandle);
             return futureHandle;
+        }
+
+        // Shared invocation for descriptor methods that take no
+        // string-path arg (set-size, sync, sync-data, advise)
+        // and return result<_, error-code>.
+        private void InvokeDescriptorResultErrorCodeNoArgs(
+            int self, int retptr, ICabiRealloc realloc,
+            Action<IDescriptor> body)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateResultErrorCodeRetptr(retptr, memory);
+            FilesystemException? caught = null;
+            try { body(RequireDescriptor(self)); }
+            catch (FilesystemException ex) { caught = ex; }
+            WriteErrorCodeResult(
+                memory.AsSpan(retptr, ResultErrorCodeSize),
+                caught, realloc, memory);
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]descriptor.metadata-hash()</c> or
+        /// <c>metadata-hash-at(path-flags, path)</c>. Returns
+        /// <c>result&lt;metadata-hash-value, error-code&gt;</c>
+        /// via a 24-byte 8-aligned retptr: disc at +0,
+        /// metadata-hash-value (16 bytes: lower u64 + upper u64)
+        /// at +8 on success, error-code at +8 on err.</summary>
+        public void InvokeDescriptorMetadataHash(
+            int self, int retptr, ICabiRealloc realloc,
+            string? atPath, uint pathFlags)
+        {
+            var memory = RequireMemoryForHttp();
+            // result<metadata-hash-value, error-code>:
+            //   align = max(8 (u64), 4) = 8
+            //   max_case = max(16, 16) = 16
+            //   size = round_up(1 + 16, 8) = 24
+            //   payload offset = 8
+            if (retptr < 0 || (retptr & 0x7) != 0
+                || retptr + 24 > memory.Data.Length)
+                throw new InvalidOperationException(
+                    "descriptor.metadata-hash: retptr " +
+                    $"0x{retptr:X8} misaligned or out of range " +
+                    $"(memory size = {memory.Data.Length}). " +
+                    "Caller must allocate a 24-byte 8-aligned " +
+                    "return area.");
+
+            FilesystemException? caught = null;
+            MetadataHashValue? hash = null;
+            try
+            {
+                var desc = RequireDescriptor(self);
+                hash = atPath != null
+                    ? desc.MetadataHashAtAsync(
+                        (PathFlags)pathFlags, atPath)
+                        .GetAwaiter().GetResult()
+                    : desc.MetadataHashAsync()
+                        .GetAwaiter().GetResult();
+            }
+            catch (FilesystemException ex) { caught = ex; }
+
+            var dest = memory.AsSpan(retptr, 24);
+            dest.Clear();
+            if (caught == null)
+            {
+                dest[0] = 0;
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteUInt64LittleEndian(
+                        dest.Slice(8, 8), hash!.Lower);
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteUInt64LittleEndian(
+                        dest.Slice(16, 8), hash.Upper);
+            }
+            else
+            {
+                dest[0] = 1;
+                WriteErrorCodeBytes(
+                    dest.Slice(8, 16), caught, realloc, memory);
+            }
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]descriptor.readlink-at(path)</c>. Returns
+        /// <c>result&lt;string, error-code&gt;</c> via a 20-byte
+        /// 4-aligned retptr: disc at +0, string (ptr+len at +4)
+        /// or error-code at +4.</summary>
+        public void InvokeDescriptorReadlinkAt(
+            int self, int pathPtr, int pathLen, int retptr,
+            ICabiRealloc realloc)
+        {
+            var memory = RequireMemoryForHttp();
+            // result<string, error-code>:
+            //   align = max(4, 4) = 4
+            //   max_case = max(8, 16) = 16
+            //   size = round_up(1 + 16, 4) = 20
+            //   payload offset = 4
+            if (retptr < 0 || (retptr & 0x3) != 0
+                || retptr + 20 > memory.Data.Length)
+                throw new InvalidOperationException(
+                    "descriptor.readlink-at: retptr " +
+                    $"0x{retptr:X8} misaligned or out of range " +
+                    $"(memory size = {memory.Data.Length}).");
+
+            FilesystemException? caught = null;
+            string? target = null;
+            try
+            {
+                var desc = RequireDescriptor(self);
+                var path = ReadGuestUtf8(pathPtr, pathLen);
+                target = desc.ReadlinkAtAsync(path)
+                    .GetAwaiter().GetResult();
+            }
+            catch (FilesystemException ex) { caught = ex; }
+
+            var dest = memory.AsSpan(retptr, 20);
+            dest.Clear();
+            if (caught == null)
+            {
+                dest[0] = 0;
+                var bytes = System.Text.Encoding.UTF8
+                    .GetBytes(target ?? string.Empty);
+                int strPtr = bytes.Length > 0
+                    ? realloc.Allocate(1, bytes.Length) : 0;
+                if (bytes.Length > 0)
+                    new ReadOnlySpan<byte>(bytes)
+                        .CopyTo(memory.AsSpan(strPtr, bytes.Length));
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(dest.Slice(4), strPtr);
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(dest.Slice(8), bytes.Length);
+            }
+            else
+            {
+                dest[0] = 1;
+                WriteErrorCodeBytes(
+                    dest.Slice(4, 16), caught, realloc, memory);
+            }
         }
 
         /// <summary>Invoke
