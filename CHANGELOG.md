@@ -1,5 +1,96 @@
 # Changelog
 
+## WACS.ComponentModel 0.8.13 — wit-component shim-module recognizer (Phase 3 Slice G3)
+
+Lands the recognizer for wit-component's canon-async shim
+module. The pure-function surface — module-name detection
+and (funcIdx → kebab-canon-op-name) extraction — closes the
+last piece needed to consume real `.component.wasm` output
+once a fixture is available.
+
+### `ShimModuleRecognizer`
+
+Public static class in `Wacs.ComponentModel.Async`:
+
+```csharp
+const string ShimModuleName = "wit-component:shim";
+bool IsShimModule(Module core);
+Dictionary<uint, string> ExtractCanonOpNames(Module core);
+string NormalizeDebugName(string debugName);
+```
+
+- `IsShimModule` checks `core.Name == "wit-component:shim"`
+  (requires `BinaryModuleParser.ParseCustomNames = true` on
+  the consumer side — without that, the name section is
+  skipped and detection fails silently).
+- `ExtractCanonOpNames` reads the shim's function-name custom
+  section and returns a map from `funcIdx` to the kebab-
+  normalized canon-op name. wit-component writes dotted
+  debug names like `"task.return"` and `"waitable-set.wait"`;
+  the recognizer normalizes to `"task-return"` /
+  `"waitable-set-wait"` so they match
+  `CanonOpRegistry.IsKnown`.
+- `NormalizeDebugName` is the single-purpose dot→dash helper
+  exposed for embedders building custom recognition flows.
+
+### How it fits with the binder
+
+The picture for consuming a wit-component-emitted component
+that uses canon-async:
+
+1. `BinaryModuleParser.ParseCustomNames = true` (set before
+   parsing the core modules).
+2. For each parsed core module, call
+   `ShimModuleRecognizer.IsShimModule(core)`. The shim has
+   imports of shape `("", "<int>")` waiting to be filled.
+3. `ExtractCanonOpNames(shim)` yields `funcIdx → canon-op-
+   name` (kebab).
+4. For each entry: validate via `CanonOpRegistry.IsKnown`;
+   resolve the matching `CanonEntry` from the component's
+   `Canons` list (by positional alignment with the
+   non-`CanonLift` entries); build the typed delegate via
+   `CanonAsyncBinder.TryBuildDelegate`; register under
+   `("", "<funcIdx>")`.
+
+The recognizer + registry + binder together cover the read
+side. Full `ComponentInstance.Instantiate` integration is
+the natural next step but needs concurrent design with the
+multi-core-module path (where wit-component's shim emission
+actually shows up).
+
+### Tests
+
+10 new in `ShimModuleRecognizerTests`:
+
+- Detection: positive on `"wit-component:shim"`,
+  negative on other names + null + unnamed module.
+- Name extraction: empty map for module with no function
+  names, full map with dot→dash normalization for a populated
+  shim.
+- `NormalizeDebugName`: dot→dash conversion, idempotent on
+  already-kebab spellings, handles empty.
+- Cross-validation: every extracted name (for a sample of 11
+  common canon ops) is `CanonOpRegistry.IsKnown`.
+
+Fixtures are minimal hand-built wasm binaries (magic +
+version + custom name section) parsed via the public
+`BinaryModuleParser.ParseWasm` API — exercises the real
+name-section parser end-to-end without needing wit-component
+output.
+
+528/528 ComponentModel tests pass (was 518).
+
+### What remains for full end-to-end
+
+- **Multi-core-module shim integration**: wire the recognizer
+  into `ComponentInstance.InstantiateMultiCore` so a parsed
+  component with a shim module gets the recognizer pass
+  before main-module instantiation. Bind delegates under
+  `("", "<int>")` per the shim's debug names.
+- **Real `.component.wasm` fixture**: once wit-component's
+  Preview 3 canon-async emit stabilizes and a sample is
+  available, validate against it.
+
 ## WACS.ComponentModel 0.8.12 / WACS.ComponentModel.Async.SourceGen 0.1.1 — parameterless [CanonAsync] + NameMangler.ToKebab
 
 Closes the missed-utility loop on the canon-async attribute
