@@ -158,11 +158,135 @@ namespace Wacs.WASI.Preview3.Sockets
         }
 
         public int Listen(AsyncDispatcher dispatcher)
+            => ListenInternal(dispatcher, host: null);
+
+        /// <summary>Internal entry that lets the host pre-create
+        /// the stream + handles for accepted sockets. When
+        /// <paramref name="host"/> is null we use the dispatcher's
+        /// stream machinery directly and the accept loop never
+        /// allocates resource handles (since there's no host
+        /// table to allocate into). Embedders calling this
+        /// through the WasiPreview3Host wire-up supply the host
+        /// so accepted sockets land in
+        /// <see cref="WasiPreview3Host.TcpSocketHandles"/>.</summary>
+        internal int ListenInternal(
+            AsyncDispatcher dispatcher,
+            WasiPreview3Host? host)
         {
-            throw new SocketsException(
-                ErrorCode.NotSupported,
-                "tcp-socket.listen: pending stream<tcp-socket> " +
-                "return shape.");
+            if (dispatcher == null)
+                throw new ArgumentNullException(nameof(dispatcher));
+            if (_state == State.Listening)
+                throw new SocketsException(
+                    ErrorCode.InvalidState,
+                    "tcp-socket.listen: socket is already listening.");
+            if (_state != State.Bound)
+                throw new SocketsException(
+                    ErrorCode.InvalidState,
+                    $"tcp-socket.listen: socket is in state {_state}, " +
+                    "expected Bound.");
+
+            try
+            {
+                _socket.Listen(_backlogHint);
+                _state = State.Listening;
+            }
+            catch (SocketException sx)
+            {
+                _state = State.Closed;
+                throw TcpEndpointHelper.MapSocketException(sx);
+            }
+
+            // Allocate a perpetual stream — the spec calls out
+            // that listen's stream is closed only on fatal
+            // errors, not on individual accept failures.
+            var streamHandle = dispatcher.StreamNew(typeIdx: 0);
+
+            var listener = _socket;
+            var family = _family;
+            var cap = host;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    while (true)
+                    {
+                        Socket accepted;
+                        try
+                        {
+                            accepted = await listener.AcceptAsync()
+                                .ConfigureAwait(false);
+                        }
+                        catch (ObjectDisposedException)
+                        {
+                            break;
+                        }
+                        catch (SocketException sx)
+                            when (IsTransient(sx.SocketErrorCode))
+                        {
+                            // Per the spec implementor's note:
+                            // transient accept errors can be
+                            // swallowed; the stream stays open.
+                            continue;
+                        }
+                        catch (SocketException)
+                        {
+                            break;
+                        }
+
+                        // Wrap the accepted socket in a fresh
+                        // TcpSocket(state=Connected) and allocate
+                        // its handle into the host table (if
+                        // the host was passed in).
+                        var wrapper = new TcpSocket(family, accepted);
+                        int handle = cap != null
+                            ? cap.TcpSocketHandles.Allocate(wrapper)
+                            : 0;
+                        // Serialize the i32 handle into the
+                        // byte stream as 4 LE bytes — that's
+                        // the canon-ABI wire form of
+                        // own<tcp-socket>.
+                        byte b0 = (byte)(handle & 0xFF);
+                        byte b1 = (byte)((handle >> 8) & 0xFF);
+                        byte b2 = (byte)((handle >> 16) & 0xFF);
+                        byte b3 = (byte)((handle >> 24) & 0xFF);
+                        dispatcher.StreamTryWrite(streamHandle, b0);
+                        dispatcher.StreamTryWrite(streamHandle, b1);
+                        dispatcher.StreamTryWrite(streamHandle, b2);
+                        dispatcher.StreamTryWrite(streamHandle, b3);
+                    }
+                }
+                finally
+                {
+                    dispatcher.StreamDropWritable(streamHandle);
+                }
+            });
+
+            return streamHandle;
+        }
+
+        // Per the Linux accept(2) docs cited in the WIT spec,
+        // these are network errors the implementor is encouraged
+        // to retry rather than surface to the guest.
+        private static bool IsTransient(SocketError code) => code switch
+        {
+            SocketError.NetworkDown
+            or SocketError.ProtocolNotSupported
+            or SocketError.HostDown
+            or SocketError.HostUnreachable
+            or SocketError.OperationAborted
+            or SocketError.NetworkUnreachable
+            or SocketError.ProtocolOption => true,
+            _ => false,
+        };
+
+        // Wrap an already-accepted Socket from a listening
+        // socket's accept loop. Skips the constructor's fresh-
+        // Socket allocation and lands in the Connected state.
+        internal TcpSocket(IpAddressFamily family, Socket accepted)
+        {
+            _family = family;
+            _socket = accepted;
+            _state = State.Connected;
         }
 
         public (int futureHandle, Task SendCompletion) Send(

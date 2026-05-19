@@ -1,5 +1,91 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.20 — `tcp-socket.listen` typed-stream return (Phase 5 Slice R)
+
+First typed-stream return wired end-to-end:
+`tcp-socket.listen` produces a `stream<tcp-socket>` whose
+elements are accepted-socket handles. The accept loop runs in
+the background; the stream stays open for the listener's
+lifetime per the spec's "perpetual stream" semantics.
+
+### Wire encoding for `stream<tcp-socket>`
+
+Each `own<tcp-socket>` value (i32 handle) is serialized as 4
+LE bytes into the dispatcher's existing
+`StreamBuffer<byte>` — that's the canon-ABI wire form of an
+i32 handle. Guest code reading the stream gets 4 bytes per
+accepted socket and interprets each i32 as a fresh resource
+handle. No new typed-stream machinery in the dispatcher; just
+reuse the byte-stream transport with explicit
+serialization at the host boundary.
+
+### `TcpSocket.Listen` / `ListenInternal`
+
+Public `Listen(dispatcher)` is the spec-facing entry; the
+`internal ListenInternal(dispatcher, host)` overload accepts
+a `WasiPreview3Host` reference so the accept loop can
+allocate accepted sockets into
+<see cref="WasiPreview3Host.TcpSocketHandles"/>. Tests use
+the public entry; the wire-up uses the internal overload to
+ensure accepted handles are reachable through the host's
+resource table.
+
+Accept loop semantics:
+- `ObjectDisposedException` / fatal `SocketException` → break,
+  close the stream.
+- Transient `SocketException` codes (network-down, host-down,
+  network-unreachable, etc., per the WIT spec's Linux
+  accept(2) reference) → swallow + retry; the stream stays
+  open.
+
+### New internal `TcpSocket(family, Socket)` constructor
+
+Wraps an already-accepted `System.Net.Sockets.Socket` from a
+listener's accept loop. Lands in
+<see cref="TcpSocket.State.Connected"/> immediately; the
+caller's send/receive paths work without extra handshake.
+
+### Host-function wire-up
+
+```
+[method]tcp-socket.listen
+  -> result<stream<tcp-socket>, error-code> at 20-byte retptr
+```
+
+`InvokeTcpSocketListen` validates state via
+`TcpSocket.ListenInternal`. On ok writes
+`(disc=0, stream-handle)` at retptr; on err uses the standard
+sockets error-code variant encoder. Validates the impl is the
+`Wacs.WASI.Preview3.Sockets.TcpSocket` concrete type (custom
+`ITcpSocket` impls don't participate in the accept-loop
+pathway).
+
+### Test coverage
+
+7 new tests in `TcpListenStreamTests.cs`:
+- Listen + dial two .NET clients → 8 bytes (2× 4-byte handles)
+  arrive on the stream; each resolves to a Connected accepted
+  socket in the host table.
+- Listen on unbound throws `InvalidState`.
+- Re-Listen throws `InvalidState`.
+- `BindToRuntime` registers the host function.
+- `InvokeTcpSocketListen` writes (disc=0, stream-handle) at
+  retptr; the stream then receives the accepted-handle bytes.
+- Unbound socket → err written at retptr with code
+  `InvalidState`.
+- **Full server-side loop**: listen → accept → read the
+  accepted handle off the stream → use it to receive bytes
+  from a connected client. Validates the typed-stream return
+  composes with the byte-stream return from Slice Q.
+
+### `InternalsVisibleTo` for the test project
+
+Added to `Wacs.WASI.Preview3.csproj` so tests can drive
+`TcpSocket.ListenInternal` directly. Sibling pattern to the
+existing `InternalsVisibleTo` items in `Wacs.ComponentModel`.
+
+225/225 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.19 — stream-shape bindings: descriptor I/O + TCP send/receive (Phase 5 Slice Q)
 
 Wires the stream-shape host bindings that turn the

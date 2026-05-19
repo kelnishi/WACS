@@ -743,6 +743,11 @@ namespace Wacs.WASI.Preview3
                 (Action<ExecContext, int, int>)((_, self, retptr) =>
                     InvokeTcpSocketReceive(self, retptr)));
 
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName, "[method]tcp-socket.listen"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeTcpSocketListen(self, retptr, realloc)));
+
             // ---- wasi:sockets/types.udp-socket simple methods ----
             runtime.BindHostFunction(
                 (SocketsTypesModuleName, "[static]udp-socket.create"),
@@ -1064,6 +1069,57 @@ namespace Wacs.WASI.Preview3
             var socket = RequireTcpSocket(self);
             var (futureHandle, _) = socket.Send(dispatcher, streamHandle);
             return futureHandle;
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]tcp-socket.listen()</c>. Returns
+        /// <c>result&lt;stream&lt;tcp-socket&gt;,
+        /// error-code&gt;</c> via the 20-byte 4-aligned retptr —
+        /// on ok writes disc=0 + i32 stream-handle at +4; on
+        /// err writes the standard sockets error-code variant.
+        ///
+        /// <para>The accept loop's bookkeeping is wired through
+        /// <see cref="TcpSocket.ListenInternal"/>: the host
+        /// passes itself in so accepted sockets land in
+        /// <see cref="TcpSocketHandles"/>, and the i32 handles
+        /// get serialized as 4 LE bytes per accepted socket
+        /// into the stream's byte buffer. Guests reading the
+        /// stream read 4 bytes per accepted socket and
+        /// interpret as <c>own&lt;tcp-socket&gt;</c>.</para>
+        /// </summary>
+        public void InvokeTcpSocketListen(
+            int self, int retptr, ICabiRealloc realloc)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateResultSocketsErrorCodeRetptr(retptr, memory);
+            SocketsException? caught = null;
+            int streamHandle = 0;
+            try
+            {
+                var socket = RequireTcpSocket(self) as TcpSocket
+                    ?? throw new SocketsException(
+                        Sockets.ErrorCode.Other,
+                        "tcp-socket.listen: socket impl is not a " +
+                        "Wacs.WASI.Preview3.Sockets.TcpSocket; " +
+                        "custom impls don't currently participate " +
+                        "in the listen accept-loop pathway.");
+                streamHandle = socket.ListenInternal(
+                    RequireDispatcher(), host: this);
+            }
+            catch (SocketsException ex) { caught = ex; }
+
+            var dest = memory.AsSpan(retptr, ResultSocketsErrorCodeSize);
+            if (caught == null)
+            {
+                dest.Clear();
+                dest[0] = 0;
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(dest.Slice(4), streamHandle);
+            }
+            else
+            {
+                WriteSocketsErrorCodeResult(dest, caught, realloc, memory);
+            }
         }
 
         /// <summary>Invoke
