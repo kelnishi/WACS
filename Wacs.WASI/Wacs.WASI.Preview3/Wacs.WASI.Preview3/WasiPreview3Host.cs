@@ -695,6 +695,212 @@ namespace Wacs.WASI.Preview3
                         InvokeTcpSocketSetBufferSize(
                             self, unchecked((ulong)value),
                             retptr, realloc, sendBuffer: true)));
+
+            // ---- wasi:sockets/types.udp-socket simple methods ----
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName, "[static]udp-socket.create"),
+                (Action<ExecContext, int, int>)((_, family, retptr) =>
+                    InvokeUdpSocketCreate(
+                        (IpAddressFamily)family, retptr, realloc)));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]udp-socket.get-address-family"),
+                (Func<ExecContext, int, int>)((_, self) =>
+                    (int)RequireUdpSocket(self).GetAddressFamily()));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]udp-socket.get-unicast-hop-limit"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeUdpSocketGetHopLimit(self, retptr, realloc)));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]udp-socket.set-unicast-hop-limit"),
+                (Action<ExecContext, int, int, int>)(
+                    (_, self, value, retptr) =>
+                        InvokeUdpSocketSetHopLimit(
+                            self, (byte)value, retptr, realloc)));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]udp-socket.get-receive-buffer-size"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeUdpSocketGetBufferSize(
+                        self, retptr, realloc, sendBuffer: false)));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]udp-socket.set-receive-buffer-size"),
+                (Action<ExecContext, int, long, int>)(
+                    (_, self, value, retptr) =>
+                        InvokeUdpSocketSetBufferSize(
+                            self, unchecked((ulong)value),
+                            retptr, realloc, sendBuffer: false)));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]udp-socket.get-send-buffer-size"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeUdpSocketGetBufferSize(
+                        self, retptr, realloc, sendBuffer: true)));
+
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[method]udp-socket.set-send-buffer-size"),
+                (Action<ExecContext, int, long, int>)(
+                    (_, self, value, retptr) =>
+                        InvokeUdpSocketSetBufferSize(
+                            self, unchecked((ulong)value),
+                            retptr, realloc, sendBuffer: true)));
+        }
+
+        // ---- wasi:sockets udp-socket binding bodies (Slice P) -------
+
+        /// <summary>Invoke <c>[static]udp-socket.create(family)</c>.</summary>
+        public void InvokeUdpSocketCreate(
+            IpAddressFamily family, int retptr, ICabiRealloc realloc)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateResultSocketsErrorCodeRetptr(retptr, memory);
+            SocketsException? caught = null;
+            int handle = 0;
+            try
+            {
+                var socket = new UdpSocket(family);
+                handle = UdpSocketHandles.Allocate(socket);
+            }
+            catch (SocketsException ex) { caught = ex; }
+
+            var dest = memory.AsSpan(retptr, ResultSocketsErrorCodeSize);
+            if (caught == null)
+            {
+                dest.Clear();
+                dest[0] = 0;
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(dest.Slice(4), handle);
+            }
+            else
+            {
+                WriteSocketsErrorCodeResult(dest, caught, realloc, memory);
+            }
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]udp-socket.get-unicast-hop-limit()</c>. Result
+        /// is <c>result&lt;u8, error-code&gt;</c> — 20-byte 4-aligned
+        /// retptr: disc at +0, u8 value at +4 (3-byte tail pad), err
+        /// payload at +4 on err.</summary>
+        public void InvokeUdpSocketGetHopLimit(
+            int self, int retptr, ICabiRealloc realloc)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateResultSocketsErrorCodeRetptr(retptr, memory);
+            SocketsException? caught = null;
+            byte value = 0;
+            try { value = RequireUdpSocket(self).GetUnicastHopLimit(); }
+            catch (SocketsException ex) { caught = ex; }
+
+            var dest = memory.AsSpan(retptr, 20);
+            if (caught == null)
+            {
+                dest.Clear();
+                dest[0] = 0;
+                dest[4] = value;
+            }
+            else
+            {
+                WriteSocketsErrorCodeResult(dest, caught, realloc, memory);
+            }
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]udp-socket.set-unicast-hop-limit(value)</c>.</summary>
+        public void InvokeUdpSocketSetHopLimit(
+            int self, byte value, int retptr, ICabiRealloc realloc)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateResultSocketsErrorCodeRetptr(retptr, memory);
+            SocketsException? caught = null;
+            try { RequireUdpSocket(self).SetUnicastHopLimit(value); }
+            catch (SocketsException ex) { caught = ex; }
+            WriteSocketsErrorCodeResult(
+                memory.AsSpan(retptr, ResultSocketsErrorCodeSize),
+                caught, realloc, memory);
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]udp-socket.get-{send,receive}-buffer-size()</c>.
+        /// Same 24-byte 8-aligned result&lt;u64, error-code&gt;
+        /// layout as <see cref="InvokeTcpSocketGetBufferSize"/>.</summary>
+        public void InvokeUdpSocketGetBufferSize(
+            int self, int retptr, ICabiRealloc realloc, bool sendBuffer)
+        {
+            var memory = RequireMemoryForHttp();
+            if (retptr < 0 || (retptr & 0x7) != 0
+                || retptr + 24 > memory.Data.Length)
+                throw new InvalidOperationException(
+                    "udp-socket.get-{buffer}-size: retptr " +
+                    $"0x{retptr:X8} misaligned or out of range " +
+                    $"(memory size = {memory.Data.Length}).");
+            SocketsException? caught = null;
+            ulong value = 0;
+            try
+            {
+                var sock = RequireUdpSocket(self);
+                value = sendBuffer
+                    ? sock.GetSendBufferSize()
+                    : sock.GetReceiveBufferSize();
+            }
+            catch (SocketsException ex) { caught = ex; }
+
+            var dest = memory.AsSpan(retptr, 24);
+            dest.Clear();
+            if (caught == null)
+            {
+                dest[0] = 0;
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteUInt64LittleEndian(dest.Slice(8), value);
+            }
+            else
+            {
+                dest[0] = 1;
+                WriteSocketsErrorCodeBytes(
+                    dest.Slice(8, 16), caught, realloc, memory);
+            }
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]udp-socket.set-{send,receive}-buffer-size(value)</c>.</summary>
+        public void InvokeUdpSocketSetBufferSize(
+            int self, ulong value, int retptr,
+            ICabiRealloc realloc, bool sendBuffer)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateResultSocketsErrorCodeRetptr(retptr, memory);
+            SocketsException? caught = null;
+            try
+            {
+                var sock = RequireUdpSocket(self);
+                if (sendBuffer) sock.SetSendBufferSize(value);
+                else sock.SetReceiveBufferSize(value);
+            }
+            catch (SocketsException ex) { caught = ex; }
+            WriteSocketsErrorCodeResult(
+                memory.AsSpan(retptr, ResultSocketsErrorCodeSize),
+                caught, realloc, memory);
+        }
+
+        private IUdpSocket RequireUdpSocket(int handle)
+        {
+            var s = UdpSocketHandles.Get(handle);
+            if (s == null)
+                throw new SocketsException(
+                    Sockets.ErrorCode.InvalidState,
+                    $"wasi:sockets/types.udp-socket: handle " +
+                    $"{handle} is not allocated.");
+            return s;
         }
 
         // ---- wasi:sockets tcp-socket binding bodies (Slice O) -------

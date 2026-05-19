@@ -1,5 +1,60 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.18 — UDP socket backing + simple wire-up (Phase 5 Slice P)
+
+Closes the same gap for UDP that Slice O closed for TCP.
+Adds <see cref="UdpSocket"/> System.Net.Sockets-backed default
+and wires the static factory + simple primitive accessors.
+
+### `Wacs.WASI.Preview3.Sockets.UdpSocket`
+
+Wraps `Socket(family, SocketType.Dgram, ProtocolType.Udp)`.
+Simpler state machine than TCP: `unbound → bound →
+(optionally) connected`. `Bind` / `Connect` / `Disconnect`
+are sync (UDP has no async handshake).
+`SendAsync` / `ReceiveAsync` throw `NotSupported` pending
+the canon-async list-arg and tuple-return wire-up.
+
+### `TcpEndpointHelper` (internal)
+
+Extracted the `IpSocketAddress ↔ IPEndPoint` conversion +
+the `SocketException → SocketsException` mapping from
+`TcpSocket` into a shared internal helper. Both `TcpSocket`
+and `UdpSocket` use it.
+
+### Eight host functions wired
+
+```
+[static]udp-socket.create
+[method]udp-socket.get-address-family
+[method]udp-socket.get-unicast-hop-limit
+[method]udp-socket.set-unicast-hop-limit
+[method]udp-socket.get-receive-buffer-size
+[method]udp-socket.set-receive-buffer-size
+[method]udp-socket.get-send-buffer-size
+[method]udp-socket.set-send-buffer-size
+```
+
+The hop-limit getter uses the 20-byte 4-aligned
+`result<u8, error-code>` layout (disc at +0, u8 at +4 with
+3-byte tail-pad). The buffer-size getter reuses the same
+24-byte 8-aligned `result<u64, error-code>` layout from
+Slice O's TCP wire-up.
+
+### Test coverage
+
+8 new tests in `UdpSocketBindingTests.cs`:
+- `UdpSocket` starts unbound with correct family.
+- Bind to loopback transitions to Bound + `get-local-address`
+  reports the ephemeral port.
+- Buffer size + hop-limit round-trip.
+- `BindToRuntime` registers all 8 host functions.
+- `InvokeUdpSocketCreate` returns a fresh handle.
+- `InvokeUdpSocketGetHopLimit` writes the result-u8 at +4.
+- `InvokeUdpSocketGetBufferSize` writes the result-u64 at +8.
+
+210/210 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.17 — TCP socket System.Net.Sockets backing + create/getters (Phase 5 Slice O)
 
 Adds the `TcpSocket` System.Net.Sockets-backed default impl
