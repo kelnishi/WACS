@@ -1,5 +1,57 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.2 — `wasi:cli/stdin.read-via-stream` multi-return binding (Phase 4 Slice K)
+
+Closes the Slice J deferral for the multi-result host import
+shape. `read-via-stream` returns
+`tuple<stream<u8>, future<result<_, error-code>>>`, which
+flattens to 2 i32s — exceeding the canon-ABI's
+`MAX_FLAT_RESULTS = 1`. The lowered host signature is
+`(retptr: i32) -> ()`; the host writes the two handles into
+the component's linear memory at `retptr`.
+
+### Registered host import
+
+```
+(wasi:cli/stdin@0.3.0-rc-2026-03-15, read-via-stream)
+```
+
+Delegate body (`InvokeReadViaStream(IStdin, int retptr)`):
+
+1. Validate dispatcher + dispatcher.Memory are set; reject
+   negative / misaligned / out-of-range `retptr`.
+2. Call `IStdin.ReadViaStream(dispatcher)` →
+   `(streamHandle, futureHandle, ReadCompletion)`.
+3. Write `streamHandle` at `memory[retptr + 0..4]` (i32 LE).
+4. Write `futureHandle` at `memory[retptr + 4..8]` (i32 LE).
+5. Return void. `ReadCompletion` fires when the
+   host-side read finishes; embedders observe completion
+   through the future the guest now holds a handle to.
+
+### Validation
+
+`InvokeReadViaStream` rejects:
+- Null dispatcher (`Dispatcher` property unset)
+- Null `dispatcher.Memory`
+- Misaligned `retptr` (must be 4-byte aligned)
+- Out-of-range `retptr` (`retptr + 8 > memory.Data.Length`)
+- Negative `retptr`
+- Null source
+
+Each path throws `InvalidOperationException` /
+`ArgumentNullException` with a diagnostic naming the canon op
+and the failing constraint.
+
+### Test coverage
+
+8 new tests in
+`Wacs.WASI.Preview3.Test/WasiPreview3HostTests.cs`:
+binding registered, happy-path memory write, dispatcher
+unset, memory unset, misaligned / out-of-range / negative
+retptr, null source.
+
+24/24 Preview3 tests green; 623/623 ComponentModel green.
+
 ## WACS.ComponentModel 0.8.22 — WaitableSet wait suspend bridge (Phase 3 Slice L)
 
 Replaces the blocking `Task.WaitAny` in

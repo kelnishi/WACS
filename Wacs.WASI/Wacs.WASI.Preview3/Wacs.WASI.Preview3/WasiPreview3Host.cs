@@ -8,6 +8,7 @@
 using System;
 using System.IO;
 using Wacs.ComponentModel.Async;
+using Wacs.ComponentModel.CanonicalABI;
 using Wacs.Core.Runtime;
 using Wacs.WASI.Preview3.Cli;
 
@@ -112,10 +113,15 @@ namespace Wacs.WASI.Preview3
         /// is the binding shape + delegate body, not the wire-
         /// name lockdown.</para>
         ///
-        /// <para><c>read-via-stream</c> (stdin) returns a
-        /// two-value tuple (stream + future); the multi-return
-        /// host-function path needs an extra binder shape and
-        /// remains deferred to a follow-up.</para>
+        /// <para><c>read-via-stream</c> (stdin) returns
+        /// <c>tuple&lt;stream&lt;u8&gt;, future&lt;result&lt;_,
+        /// error-code&gt;&gt;&gt;</c>. Per canon-ABI flat-lowering
+        /// rules (<c>MAX_FLAT_RESULTS = 1</c>; this tuple flattens
+        /// to 2 i32s) the lowered host signature is
+        /// <c>(retptr: i32) -&gt; ()</c> — the host writes a
+        /// <c>(stream-handle, future-handle)</c> i32 pair into
+        /// the component's linear memory at <c>retptr</c>
+        /// (8 bytes, 4-aligned).</para>
         /// </summary>
         public void BindToRuntime(WasmRuntime runtime)
         {
@@ -130,6 +136,11 @@ namespace Wacs.WASI.Preview3
                 (StderrModuleName, "write-via-stream"),
                 (Func<ExecContext, int, int>)((_, streamHandle) =>
                     InvokeWriteViaStream(Stderr, streamHandle)));
+
+            runtime.BindHostFunction(
+                (StdinModuleName, "read-via-stream"),
+                (Action<ExecContext, int>)((_, retptr) =>
+                    InvokeReadViaStream(Stdin, retptr)));
         }
 
         /// <summary>
@@ -156,6 +167,59 @@ namespace Wacs.WASI.Preview3
             var dispatcher = RequireDispatcher();
             var (futureHandle, _) = sink.WriteViaStream(dispatcher, streamHandle);
             return futureHandle;
+        }
+
+        /// <summary>
+        /// Invoke <c>wasi:cli/stdin.read-via-stream</c>'s host-side
+        /// delegate logic. Calls
+        /// <see cref="IStdin.ReadViaStream(AsyncDispatcher)"/> to
+        /// allocate the stream + future pair and start the
+        /// host-side read loop, then writes both handles to the
+        /// component's linear memory at
+        /// <paramref name="retptr"/>:
+        ///
+        /// <list type="bullet">
+        ///   <item><c>memory[retptr + 0..4]</c> = stream handle (i32 LE)</item>
+        ///   <item><c>memory[retptr + 4..8]</c> = future handle (i32 LE)</item>
+        /// </list>
+        ///
+        /// <para>Per canon-ABI: <c>retptr</c> must be 4-byte
+        /// aligned and the 8-byte struct must fit within the
+        /// memory bounds. Misaligned or out-of-bounds pointers
+        /// throw <see cref="InvalidOperationException"/> with a
+        /// diagnostic — the wasm caller's contract requires it
+        /// to allocate the slot properly.</para>
+        ///
+        /// <para>Returns nothing — the future the
+        /// <see cref="IStdin"/> impl produced fires when reading
+        /// finishes; embedders observe completion through that
+        /// future's await-able task.</para>
+        /// </summary>
+        public void InvokeReadViaStream(IStdin source, int retptr)
+        {
+            if (source == null) throw new ArgumentNullException(nameof(source));
+            var dispatcher = RequireDispatcher();
+            var memory = dispatcher.Memory
+                ?? throw new InvalidOperationException(
+                    "wasi:cli/stdin.read-via-stream: dispatcher.Memory " +
+                    "must be set before this import is invoked. Wire it " +
+                    "from ComponentInstance after core-module " +
+                    "instantiation.");
+
+            if (retptr < 0 || (retptr & 0x3) != 0
+                || retptr + 8 > memory.Data.Length)
+                throw new InvalidOperationException(
+                    "wasi:cli/stdin.read-via-stream: retptr " +
+                    $"0x{retptr:X8} is misaligned or out of range " +
+                    $"(memory size = {memory.Data.Length}). The caller " +
+                    "must allocate an 8-byte 4-aligned return area.");
+
+            var (streamHandle, futureHandle, _) =
+                source.ReadViaStream(dispatcher);
+
+            var dest = memory.AsSpan(retptr, 8);
+            StreamMarshal.WriteHandle(dest, 0, streamHandle);
+            FutureMarshal.WriteHandle(dest, 4, futureHandle);
         }
 
         private AsyncDispatcher RequireDispatcher()

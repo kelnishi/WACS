@@ -213,5 +213,156 @@ namespace Wacs.WASI.Preview3.Test
             var stdout = provider.GetRequiredService<IStdout>();
             Assert.Same(custom, stdout);
         }
+
+        // ---- Slice K: stdin.read-via-stream multi-return binding -----
+
+        private static Wacs.Core.Runtime.Types.MemoryInstance MakeMemory()
+        {
+            var memType = new Wacs.Core.Types.MemoryType(
+                new Wacs.Core.Types.Limits(
+                    Wacs.Core.Types.Defs.AddrType.I32, 1, 1));
+            return new Wacs.Core.Runtime.Types.MemoryInstance(memType);
+        }
+
+        [Fact]
+        public void BindToRuntime_also_registers_stdin_read_via_stream()
+        {
+            var host = new WasiPreview3Host();
+            var runtime = new WasmRuntime();
+            host.BindToRuntime(runtime);
+            Assert.True(runtime.TryGetExportedFunction(
+                (WasiPreview3Host.StdinModuleName, "read-via-stream"),
+                out _));
+        }
+
+        [Fact]
+        public void InvokeReadViaStream_writes_stream_and_future_handles_to_memory()
+        {
+            // Synthetic in-memory stdin source so the test
+            // doesn't need a real System.IO.Stream. The host
+            // allocates a stream + future via the dispatcher
+            // and writes both handles at retptr.
+            var dispatcher = new AsyncDispatcher();
+            var memory = MakeMemory();
+            dispatcher.Memory = memory;
+
+            using var sourceStream = new MemoryStream(
+                Encoding.UTF8.GetBytes("hello-stdin"));
+            var stdin = new StreamBackedStdin(sourceStream);
+
+            var host = new WasiPreview3Host(
+                new WasiPreview3HostBuilder { Stdin = stdin })
+            {
+                Dispatcher = dispatcher,
+            };
+
+            const int retptr = 16;
+            host.InvokeReadViaStream(stdin, retptr);
+
+            // Read back the i32 pair: stream handle at +0,
+            // future handle at +4.
+            var dest = memory.AsSpan(retptr, 8);
+            int streamHandle = System.Buffers.Binary.BinaryPrimitives
+                .ReadInt32LittleEndian(dest.Slice(0));
+            int futureHandle = System.Buffers.Binary.BinaryPrimitives
+                .ReadInt32LittleEndian(dest.Slice(4));
+
+            Assert.True(streamHandle > 0);
+            Assert.True(futureHandle > 0);
+            // Handles are drawn from different per-kind tables;
+            // they typically share an integer (both start at 1).
+            // What matters is the wire layout — confirmed above.
+        }
+
+        [Fact]
+        public void InvokeReadViaStream_throws_when_dispatcher_unset()
+        {
+            var host = new WasiPreview3Host();
+            using var sourceStream = new MemoryStream();
+            var stdin = new StreamBackedStdin(sourceStream);
+            var thrown = Assert.Throws<InvalidOperationException>(
+                () => host.InvokeReadViaStream(stdin, 0));
+            Assert.Contains("Dispatcher", thrown.Message);
+        }
+
+        [Fact]
+        public void InvokeReadViaStream_throws_when_dispatcher_memory_unset()
+        {
+            var host = new WasiPreview3Host
+            {
+                Dispatcher = new AsyncDispatcher(),
+            };
+            using var sourceStream = new MemoryStream();
+            var stdin = new StreamBackedStdin(sourceStream);
+            var thrown = Assert.Throws<InvalidOperationException>(
+                () => host.InvokeReadViaStream(stdin, 0));
+            Assert.Contains("Memory", thrown.Message);
+        }
+
+        [Fact]
+        public void InvokeReadViaStream_rejects_misaligned_retptr()
+        {
+            var dispatcher = new AsyncDispatcher();
+            dispatcher.Memory = MakeMemory();
+            var host = new WasiPreview3Host { Dispatcher = dispatcher };
+            using var sourceStream = new MemoryStream();
+            var stdin = new StreamBackedStdin(sourceStream);
+
+            var thrown = Assert.Throws<InvalidOperationException>(
+                () => host.InvokeReadViaStream(stdin, 17 /* not 4-aligned */));
+            Assert.Contains("misaligned", thrown.Message);
+        }
+
+        [Fact]
+        public void InvokeReadViaStream_rejects_out_of_range_retptr()
+        {
+            var dispatcher = new AsyncDispatcher();
+            var memory = MakeMemory();
+            dispatcher.Memory = memory;
+            var host = new WasiPreview3Host { Dispatcher = dispatcher };
+            using var sourceStream = new MemoryStream();
+            var stdin = new StreamBackedStdin(sourceStream);
+
+            // memory.Data.Length is at least one page = 64 KiB.
+            int outOfRange = memory.Data.Length - 4;
+            var thrown = Assert.Throws<InvalidOperationException>(
+                () => host.InvokeReadViaStream(stdin, outOfRange));
+            Assert.Contains("out of range", thrown.Message);
+        }
+
+        [Fact]
+        public void InvokeReadViaStream_rejects_negative_retptr()
+        {
+            var dispatcher = new AsyncDispatcher();
+            dispatcher.Memory = MakeMemory();
+            var host = new WasiPreview3Host { Dispatcher = dispatcher };
+            using var sourceStream = new MemoryStream();
+            var stdin = new StreamBackedStdin(sourceStream);
+
+            var thrown = Assert.Throws<InvalidOperationException>(
+                () => host.InvokeReadViaStream(stdin, -4));
+            // The misalignment check fires first for negative
+            // offsets — the bit-3 mask is non-zero. Either
+            // "misaligned" or "out of range" is acceptable; the
+            // important thing is we reject it.
+            Assert.True(
+                thrown.Message.Contains("misaligned")
+                || thrown.Message.Contains("out of range"),
+                $"Expected misaligned/out-of-range, got: {thrown.Message}");
+        }
+
+        [Fact]
+        public void InvokeReadViaStream_rejects_null_source()
+        {
+            var host = new WasiPreview3Host
+            {
+                Dispatcher = new AsyncDispatcher
+                {
+                    Memory = MakeMemory(),
+                },
+            };
+            Assert.Throws<ArgumentNullException>(
+                () => host.InvokeReadViaStream(null!, 0));
+        }
     }
 }
