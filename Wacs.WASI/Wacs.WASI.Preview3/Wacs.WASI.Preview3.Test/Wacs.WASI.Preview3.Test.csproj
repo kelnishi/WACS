@@ -6,13 +6,14 @@
         <Nullable>enable</Nullable>
         <Title>WACS WASI Preview 3 Tests</Title>
         <Authors>Kelvin Nishikawa</Authors>
-        <TargetFramework>net8.0</TargetFramework>
+        <TargetFramework>net9.0</TargetFramework>
         <IsPackable>false</IsPackable>
     </PropertyGroup>
 
     <ItemGroup>
       <ProjectReference Include="..\..\..\Wacs.Core\Wacs.Core\Wacs.Core.csproj" />
       <ProjectReference Include="..\..\..\Wacs.ComponentModel\Wacs.ComponentModel\Wacs.ComponentModel.csproj" />
+      <ProjectReference Include="..\..\..\Wacs.Transpiler\Wacs.Transpiler.Lib\Wacs.Transpiler.Lib.csproj" />
       <ProjectReference Include="..\Wacs.WASI.Preview3\Wacs.WASI.Preview3.csproj" />
       <ProjectReference Include="..\Wacs.WASI.Preview3.DependencyInjection\Wacs.WASI.Preview3.DependencyInjection.csproj" />
     </ItemGroup>

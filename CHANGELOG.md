@@ -1,5 +1,53 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.14 — transpiler-parity equivalence tests (Phase 5 Slice L)
+
+Closes the transpiler-parity question for Phase 5: the
+synthetic .wasm fixtures from Slice K now round-trip through
+the AOT transpiler as well as the interpreter. Same wasm
+bytes, same `WasiPreview3Host.BindToRuntime`, IL-emitted call
+sites, identical i64 returns.
+
+### `TranspilerEquivalenceTests`
+
+Two equivalence tests in
+`Wacs.WASI.Preview3.Test/TranspilerEquivalenceTests.cs`:
+
+- `Transpiler_test_now_invokes_monotonic_clock_now` —
+  rebuilds the `wasi:clocks/monotonic-clock.now` fixture,
+  transpiles, activates the generated Module class with an
+  IImports proxy that routes through `runtime.CreateStackInvoker`,
+  invokes the export. Asserts the result is positive and
+  non-decreasing across two transpiler runs.
+
+- `Transpiler_test_random_invokes_get_random_u64` — same
+  shape for `wasi:random/random.get-random-u64`. Asserts at
+  least one non-zero across three transpiled CSPRNG reads.
+
+Both reach the bound host body through emitted IL, confirming
+the `feedback_symmetric_engines` contract holds: the
+interpreter and transpiler share the same host-binding
+surface, and any binding registered via `BindHostFunction`
+is observable from either engine.
+
+### Test-project transpiler reference
+
+`Wacs.WASI.Preview3.Test.csproj` now references
+`Wacs.Transpiler.Lib`. The framework moves from `net8.0` to
+`net9.0` (Transpiler.Lib only targets `net9.0`) — Preview 3
+itself remains `net8.0 + netstandard2.1`; only the test
+assembly bumps.
+
+### What this validates
+
+The 26 host functions registered across Slices A/B + F/G/H/I/J
+are reachable from transpiled code through the same
+`WasmRuntime.BindHostFunction` table the interpreter uses.
+End-to-end IL emit + import-resolution + delegate-invocation
++ return-flow are all confirmed for the bound host pathway.
+
+164/164 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.13 — synthetic .wasm fixture round-trip (Phase 5 Slice K)
 
 Validates the prior slices' wire-ups end-to-end. Hand-crafts
