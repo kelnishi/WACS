@@ -1,5 +1,91 @@
 # Changelog
 
+## WACS.ComponentModel 0.8.10 — CanonAsyncAttribute + reflective CanonOpRegistry (Phase 3 Slice G1)
+
+First half of the attribute-driven discovery pair. The
+canonical wasmtime `Trampoline::symbol_name()` spellings —
+`"task-return"`, `"stream-new"`, `"waitable-set-wait"`, etc. —
+are now the public name set for canon-async ops, with
+attribute-tagged dispatcher methods discoverable by name.
+
+Slice G2 follows immediately to replace the reflection with
+a build-time source generator, per the standing rule of not
+leaving reflection paths live.
+
+### `CanonAsyncAttribute`
+
+Tags `AsyncDispatcher` methods with their wasmtime kebab-case
+canon-op name. All 30 canon-op dispatcher methods decorated:
+task/subtask, backpressure, context, thread-yield, full
+stream/future families, error-context (memory variants),
+waitable-set family + waitable-join.
+
+The attribute spelling matches:
+- wasmtime `crates/environ/src/component/info.rs`
+  `Trampoline::symbol_name()` exactly.
+- wit-component's shim-module debug-name strings after
+  dot→dash normalization (`"task.return"` → `"task-return"`).
+
+Adopting this set keeps WACS interoperable with the existing
+wasm-tools community without inventing a parallel vocabulary.
+
+### `CanonOpRegistry`
+
+Static lookup surface for the shim-module recognizer (G3) to
+consume. Public API:
+
+```csharp
+MethodInfo? GetMethod(string canonOpName);
+IEnumerable<string> Names;
+int Count;
+```
+
+In Slice G1 the cache is populated at first access via
+`System.Reflection`. Every public API is annotated with
+`[RequiresDynamicCode]` + `[RequiresUnreferencedCode]`
+referencing G2 — the AOT analyzer will flag any consumer
+that touches the API before the source generator lands.
+
+Duplicate-attribute detection: throws at registry init if
+two methods share the same `[CanonAsync("...")]` name.
+
+### Why this split
+
+Phase 3's binding flow has two orthogonal concerns:
+
+1. **Name resolution** — which dispatcher method handles
+   canon op `"task-return"`? Answered by the attribute + registry.
+2. **Delegate adaptation** — given a `CanonTaskReturn { Result }`
+   entry, build the typed `Action<ExecContext, T>` to register
+   with the runtime. Answered by `CanonAsyncBinder.TryBuildDelegate`'s
+   per-shape switch.
+
+G1 wires concern (1) without changing concern (2). The
+existing `CanonAsyncBinder` keeps its placeholder name
+convention; the shim-module recognizer (G3) will read
+wit-component's debug names from the shim's name section,
+look up methods via the registry, and build delegates
+through the existing switch.
+
+### Tests
+
+5 new in `CanonOpRegistryTests`:
+
+- Full expected name set (30 entries) round-trips through
+  `Names`.
+- `GetMethod` returns the decorated method for each name;
+  null for unknown.
+- `Count` matches.
+- Op-name kebab-case discipline (lowercase ASCII letters /
+  digits / dashes only — no dots, underscores, whitespace).
+
+504/504 ComponentModel tests pass (was 499).
+
+### Up next: Slice G2
+
+Roslyn source generator that emits the registry's lookup
+table at build time. Reflection annotations come off.
+
 ## WACS.ComponentModel 0.8.9 — Phase 3 deferrals closed (WaitableSetWait + typed task.return / context.{get,set})
 
 Closes the two tractable Phase 3 deferrals from Slice F. The

@@ -139,6 +139,7 @@ namespace Wacs.ComponentModel.Async
         /// ABI lift converted the wasm-side value before reaching
         /// here). Body continues to its natural return after this
         /// call; the lift adapter pops the task on body exit.</summary>
+        [CanonAsync("task-return")]
         public void TaskReturn(IContinuationContext ctx, object? result)
         {
             var task = CurrentTask
@@ -156,6 +157,7 @@ namespace Wacs.ComponentModel.Async
         /// body continues to its natural exit after this call —
         /// like <see cref="TaskReturn"/> the lift adapter handles
         /// the pop.</summary>
+        [CanonAsync("task-cancel")]
         public void TaskCancel(IContinuationContext ctx)
         {
             var task = CurrentTask
@@ -204,6 +206,7 @@ namespace Wacs.ComponentModel.Async
         /// to wait synchronously — Phase 3 implementation treats
         /// both the same (the caller decides whether to await the
         /// canceled completion).</summary>
+        [CanonAsync("subtask-cancel")]
         public void SubtaskCancel(int subtaskHandle, bool asyncFlag)
         {
             var sub = Subtasks.Get(subtaskHandle)
@@ -223,6 +226,7 @@ namespace Wacs.ComponentModel.Async
         /// handle. The child task itself is owned through its own
         /// task-table slot; dropping the subtask handle just severs
         /// the parent relationship.</summary>
+        [CanonAsync("subtask-drop")]
         public bool SubtaskDrop(int subtaskHandle) =>
             Subtasks.Drop(subtaskHandle) != null;
 
@@ -235,6 +239,7 @@ namespace Wacs.ComponentModel.Async
         /// implementation hard-codes byte buffers (the producer/
         /// consumer fixture's <c>stream&lt;u8&gt;</c>). Slice D
         /// generalizes to other element widths.</summary>
+        [CanonAsync("stream-new")]
         public int StreamNew(int typeIdx, int capacity = 64)
         {
             var slot = new StreamSlot { Buffer = new StreamBuffer<byte>(capacity) };
@@ -279,6 +284,7 @@ namespace Wacs.ComponentModel.Async
         /// Returns the number of bytes actually written (less than
         /// <paramref name="length"/> when the buffer fills up).
         /// </summary>
+        [CanonAsync("stream-write")]
         public int StreamWriteFromMemory(
             int streamHandle, MemoryInstance memory, uint ptr, int length)
         {
@@ -304,6 +310,7 @@ namespace Wacs.ComponentModel.Async
         /// actually transferred (less than <paramref name="capacity"/>
         /// when the stream had less data, or zero when empty).
         /// </summary>
+        [CanonAsync("stream-read")]
         public int StreamReadToMemory(
             int streamHandle, MemoryInstance memory, uint ptr, int capacity)
         {
@@ -327,6 +334,7 @@ namespace Wacs.ComponentModel.Async
         /// The buffer keeps any unread items (writer may still call
         /// <see cref="StreamTryWrite"/>); the reader half is marked
         /// done. Returns true on a known handle.</summary>
+        [CanonAsync("stream-cancel-read")]
         public bool StreamCancelRead(int streamHandle, bool asyncFlag)
         {
             // For the byte stream slice, cancel-read is observationally
@@ -339,6 +347,7 @@ namespace Wacs.ComponentModel.Async
         /// <summary><c>canon stream.cancel-write t async?</c> —
         /// signals the stream that no further writes will arrive.
         /// Completes the channel so the reader observes EOS.</summary>
+        [CanonAsync("stream-cancel-write")]
         public bool StreamCancelWrite(int streamHandle, bool asyncFlag) =>
             StreamDropWritable(streamHandle);
 
@@ -349,6 +358,7 @@ namespace Wacs.ComponentModel.Async
         /// is dropped (the spec allows the runtime to short-circuit
         /// further writes, but this implementation just keeps
         /// buffering until the writer-side also closes).</summary>
+        [CanonAsync("stream-drop-readable")]
         public bool StreamDropReadable(int streamHandle)
         {
             if (Streams.Get(streamHandle) is not StreamSlot slot)
@@ -362,6 +372,7 @@ namespace Wacs.ComponentModel.Async
         /// writer half. Completes the channel so the reader observes
         /// end-of-stream once the buffer drains; the table slot is
         /// retained until the reader-side also drops.</summary>
+        [CanonAsync("stream-drop-writable")]
         public bool StreamDropWritable(int streamHandle)
         {
             if (Streams.Get(streamHandle) is not StreamSlot slot)
@@ -377,6 +388,7 @@ namespace Wacs.ComponentModel.Async
         /// <summary><c>canon future.new t</c> — allocate a fresh
         /// future cell. Element type is <c>object</c> (typed
         /// boxing); Slice D generalizes typed cells.</summary>
+        [CanonAsync("future-new")]
         public int FutureNew(int typeIdx)
         {
             var cell = new FutureCell<object?>();
@@ -407,17 +419,20 @@ namespace Wacs.ComponentModel.Async
 
         /// <summary><c>canon future.cancel-read t async?</c> —
         /// abandon the reader side. Pending read is cancelled.</summary>
+        [CanonAsync("future-cancel-read")]
         public bool FutureCancelRead(int futureHandle, bool asyncFlag) =>
             FutureDropReadable(futureHandle);
 
         /// <summary><c>canon future.cancel-write t async?</c> —
         /// abandon the writer side without resolving. Reader
         /// observes cancellation.</summary>
+        [CanonAsync("future-cancel-write")]
         public bool FutureCancelWrite(int futureHandle, bool asyncFlag) =>
             FutureDropReadable(futureHandle);
 
         /// <summary><c>canon future.drop-readable t</c>. Cancels any
         /// pending reader and drops the handle.</summary>
+        [CanonAsync("future-drop-readable")]
         public bool FutureDropReadable(int futureHandle)
         {
             if (Futures.Get(futureHandle) is FutureCell<object?> cell)
@@ -428,6 +443,7 @@ namespace Wacs.ComponentModel.Async
         /// <summary><c>canon future.drop-writable t</c>. Same as
         /// drop-readable at this slice; full single-direction
         /// semantics land in Slice D.</summary>
+        [CanonAsync("future-drop-writable")]
         public bool FutureDropWritable(int futureHandle) =>
             FutureDropReadable(futureHandle);
 
@@ -445,6 +461,7 @@ namespace Wacs.ComponentModel.Async
         /// message as a UTF-8 string from
         /// <paramref name="memory"/> at <paramref name="ptr"/>,
         /// <paramref name="len"/>, then allocates a handle.</summary>
+        [CanonAsync("error-context-new")]
         public int ErrorContextNewFromMemory(
             MemoryInstance memory, uint ptr, uint len)
         {
@@ -467,6 +484,7 @@ namespace Wacs.ComponentModel.Async
         /// <paramref name="dstPtr"/> is 0 — that's the spec-defined
         /// way to query the size before allocating.</para>
         /// </summary>
+        [CanonAsync("error-context-debug-message")]
         public int ErrorContextDebugMessageToMemory(
             int errorContextHandle, MemoryInstance memory, uint dstPtr)
         {
@@ -492,12 +510,14 @@ namespace Wacs.ComponentModel.Async
         }
 
         /// <summary><c>canon error-context.drop</c>. Releases the handle.</summary>
+        [CanonAsync("error-context-drop")]
         public bool ErrorContextDrop(int errorContextHandle) =>
             ErrorContexts.Drop(errorContextHandle) != null;
 
         // ---- Waitable set ------------------------------------------------
 
         /// <summary><c>canon waitable-set.new</c>.</summary>
+        [CanonAsync("waitable-set-new")]
         public int WaitableSetNew() =>
             WaitableSets.Allocate(handle => new ComponentWaitableSet(handle));
 
@@ -533,6 +553,7 @@ namespace Wacs.ComponentModel.Async
         /// value instead — the canon-ABI memory write lands when
         /// the lift adapter generates per-call memory marshaling.</para>
         /// </summary>
+        [CanonAsync("waitable-set-wait")]
         public int WaitableSetWait(
             IContinuationContext ctx, int waitableSetHandle,
             int memoryIdx, bool cancellable)
@@ -607,6 +628,7 @@ namespace Wacs.ComponentModel.Async
         /// <see cref="FutureCell{T}"/> is completed, or
         /// <see cref="StreamBuffer{T}"/> has buffered items or has
         /// completed.</summary>
+        [CanonAsync("waitable-set-poll")]
         public int WaitableSetPoll(
             IContinuationContext ctx, int waitableSetHandle,
             int memoryIdx, bool cancellable)
@@ -639,12 +661,14 @@ namespace Wacs.ComponentModel.Async
         }
 
         /// <summary><c>canon waitable-set.drop</c>.</summary>
+        [CanonAsync("waitable-set-drop")]
         public bool WaitableSetDrop(int waitableSetHandle) =>
             WaitableSets.Drop(waitableSetHandle) != null;
 
         /// <summary><c>canon waitable.join</c> — adds the current
         /// waitable to the set. The "current waitable-set context"
         /// is needed; Slice D wires it.</summary>
+        [CanonAsync("waitable-join")]
         public void WaitableJoin(int waitableSetHandle, int waitableHandle)
         {
             var ws = WaitableSets.Get(waitableSetHandle)
@@ -658,15 +682,18 @@ namespace Wacs.ComponentModel.Async
         /// <summary><c>canon backpressure.set</c> — clear the
         /// component's backpressure flag. Embedders are free to
         /// resume creating new tasks.</summary>
+        [CanonAsync("backpressure-set")]
         public void BackpressureSet() { _backpressureLevel = 0; }
 
         /// <summary><c>canon backpressure.inc</c> — raise the
         /// backpressure level by one. Multiple increments stack;
         /// the embedder reads <see cref="BackpressureLevel"/>.</summary>
+        [CanonAsync("backpressure-inc")]
         public void BackpressureInc() { _backpressureLevel++; }
 
         /// <summary><c>canon backpressure.dec</c> — drop the
         /// level by one (floor 0).</summary>
+        [CanonAsync("backpressure-dec")]
         public void BackpressureDec()
         {
             if (_backpressureLevel > 0) _backpressureLevel--;
@@ -678,6 +705,7 @@ namespace Wacs.ComponentModel.Async
         /// task's context slot <paramref name="slotIdx"/>. Returns
         /// a default-initialized <see cref="Value"/> when the slot
         /// has never been written. Throws when no task is ambient.</summary>
+        [CanonAsync("context-get")]
         public Value ContextGet(int slotIdx)
         {
             var task = CurrentTask
@@ -688,6 +716,7 @@ namespace Wacs.ComponentModel.Async
 
         /// <summary><c>canon context.set v i</c> — write the ambient
         /// task's context slot. Throws when no task is ambient.</summary>
+        [CanonAsync("context-set")]
         public void ContextSet(int slotIdx, Value value)
         {
             var task = CurrentTask
@@ -712,6 +741,7 @@ namespace Wacs.ComponentModel.Async
         /// yield point — at that time the suspend integration
         /// with <see cref="IContinuationContext"/> lands.</para>
         /// </summary>
+        [CanonAsync("thread-yield")]
         public void ThreadYield(IContinuationContext ctx, bool cancellable)
         {
             // Intentional no-op. See doc comment.
