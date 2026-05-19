@@ -1,5 +1,55 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.33 — request.get-options + set-status-code result fix (Phase 5 Slice EE)
+
+### `response.set-status-code` wire arity fix
+
+The existing wire-up bound `set-status-code` as
+`Action<ExecContext, int, int>` — no return. The WIT signature
+is `set-status-code: func(status-code: status-code) -> result`,
+which canon-ABI flat-lowers to a 1-slot i32 return (the result
+discriminant). Guests expecting that return slot were reading
+garbage off the operand stack.
+
+The impl setter can't fail, so the disc is always 0 — but the
+wire arity needs to match the canonical-ABI contract. Bound as
+`Func<ExecContext, int, int, int>` returning 0.
+
+### `request.get-options` wire-up
+
+```
+get-options: func() -> option<request-options>
+```
+
+`option<own<request-options>>` flat-lowers to 2 slots
+(opt-disc + handle) > MAX_FLAT_RESULTS=1 → retptr. 8-byte
+4-aligned retptr layout:
+
+```
++0:   option-disc (u8) + 3 pad
++4..8: request-options handle (i32; 0 when none)
+```
+
+Allocates a fresh request-options handle pointing at the
+parent request's existing `IRequestOptions` impl — same
+shared-impl pattern as `get-headers` (Slice DD).
+
+### Test coverage
+
+5 tests in `RequestGetOptionsAndStatusFixTests.cs`:
+- `BindToRuntime` registers both methods.
+- `get-options` on a request with no options writes
+  option-disc=0 + zero handle.
+- `get-options` on a request with options allocates a fresh
+  request-options handle; the resolved impl is the same
+  instance (`Assert.Same`).
+- `get-options` misaligned retptr throws.
+- `set-status-code` function-type assertion: registered type
+  has exactly 2 param slots and 1 result slot (proves the
+  arity fix).
+
+325/325 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.32 — request/response get-headers (Phase 5 Slice DD)
 
 Wires `request.get-headers` and `response.get-headers`. Both

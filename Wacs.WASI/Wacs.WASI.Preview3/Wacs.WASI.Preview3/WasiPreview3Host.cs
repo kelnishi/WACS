@@ -609,11 +609,35 @@ namespace Wacs.WASI.Preview3
                     FieldsHandles.Allocate(
                         RequireResponse(self).GetHeaders())));
 
+            // Per the WIT signature, set-status-code returns
+            // `result` (1 flat i32 slot, no payload). The impl
+            // setter can't fail, so the disc is always 0 — but
+            // the wire arity needs to match the canon-ABI shape.
             runtime.BindHostFunction(
                 (HttpTypesModuleName, "[method]response.set-status-code"),
-                (Action<ExecContext, int, int>)((_, self, code) =>
+                (Func<ExecContext, int, int, int>)((_, self, code) =>
+                {
                     RequireResponse(self).SetStatusCode(
-                        unchecked((ushort)code))));
+                        unchecked((ushort)code));
+                    return 0; // result disc = ok
+                }));
+
+            // ---- request.get-options (Slice EE) ---------------------
+            //
+            // option<request-options> = option<own<request-options>>:
+            //   flat lowering 2 slots (opt-disc + handle) > 1 →
+            //   retptr 8 bytes 4-aligned.
+            //   +0: option-disc (u8) + 3 pad
+            //   +4: request-options handle (i32; 0 when none)
+            //
+            // Allocates a fresh request-options handle pointing
+            // at the parent request's existing IRequestOptions
+            // impl (same shared-impl pattern as get-headers).
+            runtime.BindHostFunction(
+                (HttpTypesModuleName,
+                    "[method]request.get-options"),
+                (Action<ExecContext, int, int>)((_, self, retptr) =>
+                    InvokeRequestGetOptions(self, retptr)));
 
             // wasi:http/client.send and wasi:http/handler.handle.
             // Both are async func in the WIT and lower as a
@@ -3250,6 +3274,37 @@ namespace Wacs.WASI.Preview3
                     $"wasi:http/types.request: handle {handle} " +
                     "is not allocated.");
             return req;
+        }
+
+        // ---- request.get-options (Slice EE) -------------------------
+
+        /// <summary>Invoke
+        /// <c>[method]request.get-options() -&gt;
+        /// option&lt;request-options&gt;</c>. Writes an 8-byte
+        /// 4-aligned retptr: option-disc at +0, handle at +4
+        /// (zero when the request has no options).</summary>
+        internal void InvokeRequestGetOptions(int self, int retptr)
+        {
+            var memory = RequireMemoryForHttp();
+            if (retptr < 0 || (retptr & 0x3) != 0
+                || retptr + 8 > memory.Data.Length)
+                throw new InvalidOperationException(
+                    "wasi:http/types.request.get-options: " +
+                    $"retptr 0x{retptr:X8} misaligned or out of " +
+                    "range (needs 8 bytes 4-aligned).");
+
+            var dest = memory.AsSpan(retptr, 8);
+            dest.Clear();
+            var opts = RequireRequest(self).GetOptions();
+            if (opts == null)
+            {
+                // option-disc = none; handle stays zero.
+                return;
+            }
+            dest[0] = 1; // option-disc = some
+            int handle = RequestOptionsHandles.Allocate(opts);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(dest.Slice(4), handle);
         }
 
         // ---- request method + scheme (Slice CC) ---------------------
