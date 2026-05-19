@@ -11,6 +11,7 @@ using Wacs.ComponentModel.Async;
 using Wacs.ComponentModel.CanonicalABI;
 using Wacs.Core.Runtime;
 using Wacs.WASI.Preview3.Cli;
+using Wacs.WASI.Preview3.Clocks;
 
 namespace Wacs.WASI.Preview3
 {
@@ -49,6 +50,8 @@ namespace Wacs.WASI.Preview3
         private IStdin? _stdin;
         private IStdout? _stdout;
         private IStderr? _stderr;
+        private IMonotonicClock? _monotonic;
+        private ISystemClock? _system;
 
         public WasiPreview3Host() : this(new WasiPreview3HostBuilder()) { }
 
@@ -66,6 +69,12 @@ namespace Wacs.WASI.Preview3
         public IStderr Stderr => _stderr ??=
             (_config.Stderr as IStderr)
                 ?? new StreamBackedSink(Console.OpenStandardError());
+
+        public IMonotonicClock MonotonicClock =>
+            _monotonic ??= _config.MonotonicClock ?? new MonotonicClock();
+
+        public ISystemClock SystemClock =>
+            _system ??= _config.SystemClock ?? new SystemClock();
 
         /// <summary>
         /// The component-instance dispatcher the host bindings
@@ -141,6 +150,104 @@ namespace Wacs.WASI.Preview3
                 (StdinModuleName, "read-via-stream"),
                 (Action<ExecContext, int>)((_, retptr) =>
                     InvokeReadViaStream(Stdin, retptr)));
+
+            // wasi:clocks/monotonic-clock@0.3.0-rc-2026-03-15
+            //   now: () -> mark (u64)
+            //   get-resolution: () -> duration (u64)
+            //   wait-until: async (when: mark) -> ()
+            //   wait-for: async (how-long: duration) -> ()
+            //
+            // The async `wait-*` functions bind here as
+            // synchronous-blocking shapes: the host-side
+            // implementation completes the Task.Delay synchronously
+            // from the wasm caller's perspective. The lowered wire
+            // signature for an async-func import depends on the
+            // caller's canon-lower opts (`async`/`callback`); the
+            // sync-blocking form below is the conservative starting
+            // point until a real wit-component fixture pins the
+            // exact convention.
+            runtime.BindHostFunction(
+                (MonotonicClockModuleName, "now"),
+                (Func<ExecContext, long>)(_ =>
+                    unchecked((long)MonotonicClock.Now())));
+
+            runtime.BindHostFunction(
+                (MonotonicClockModuleName, "get-resolution"),
+                (Func<ExecContext, long>)(_ =>
+                    unchecked((long)MonotonicClock.GetResolution())));
+
+            runtime.BindHostFunction(
+                (MonotonicClockModuleName, "wait-until"),
+                (Action<ExecContext, long>)((_, when) =>
+                    MonotonicClock.WaitUntilAsync(
+                        unchecked((ulong)when)).GetAwaiter().GetResult()));
+
+            runtime.BindHostFunction(
+                (MonotonicClockModuleName, "wait-for"),
+                (Action<ExecContext, long>)((_, howLong) =>
+                    MonotonicClock.WaitForAsync(
+                        unchecked((ulong)howLong)).GetAwaiter().GetResult()));
+
+            // wasi:clocks/system-clock@0.3.0-rc-2026-03-15
+            //   record instant { seconds: s64, nanoseconds: u32 }
+            //   now: () -> instant
+            //   get-resolution: () -> duration (u64)
+            //
+            // instant flat-count = 2 (s64 + u32). Exceeds
+            // MAX_FLAT_RESULTS = 1 → lowered shape is
+            // (retptr: i32) -> () with the record laid out at
+            // retptr (16 bytes, 8-aligned). Wire layout:
+            //   +0..8: seconds (s64 LE)
+            //   +8..12: nanoseconds (u32 LE)
+            //   +12..16: 4-byte tail pad (record's align is 8)
+            runtime.BindHostFunction(
+                (SystemClockModuleName, "now"),
+                (Action<ExecContext, int>)((_, retptr) =>
+                    InvokeSystemClockNow(SystemClock, retptr)));
+
+            runtime.BindHostFunction(
+                (SystemClockModuleName, "get-resolution"),
+                (Func<ExecContext, long>)(_ =>
+                    unchecked((long)SystemClock.GetResolution())));
+        }
+
+        /// <summary>
+        /// Invoke <c>wasi:clocks/system-clock.now</c>'s host-side
+        /// delegate body. Writes the
+        /// <see cref="Wacs.WASI.Preview3.Clocks.Instant"/> at
+        /// <paramref name="retptr"/> per canon-ABI layout
+        /// (16 bytes, 8-aligned: s64 seconds at +0, u32 nanoseconds
+        /// at +8, 4-byte tail pad). Public for test access; the
+        /// runtime calls this via the bound delegate above.
+        /// </summary>
+        public void InvokeSystemClockNow(ISystemClock source, int retptr)
+        {
+            if (source == null) throw new ArgumentNullException(nameof(source));
+            var dispatcher = RequireDispatcher();
+            var memory = dispatcher.Memory
+                ?? throw new InvalidOperationException(
+                    "wasi:clocks/system-clock.now: dispatcher.Memory " +
+                    "must be set before this import is invoked.");
+
+            // record { seconds: s64, nanoseconds: u32 }, align 8,
+            // size 16. retptr must be 8-aligned to satisfy the
+            // s64 field's alignment.
+            if (retptr < 0 || (retptr & 0x7) != 0
+                || retptr + 16 > memory.Data.Length)
+                throw new InvalidOperationException(
+                    "wasi:clocks/system-clock.now: retptr " +
+                    $"0x{retptr:X8} is misaligned or out of range " +
+                    $"(memory size = {memory.Data.Length}). The caller " +
+                    "must allocate a 16-byte 8-aligned return area.");
+
+            var instant = source.Now();
+            var dest = memory.AsSpan(retptr, 16);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt64LittleEndian(dest.Slice(0), instant.Seconds);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteUInt32LittleEndian(dest.Slice(8), instant.Nanoseconds);
+            // Bytes 12..16 are tail padding; leave as-is (canon
+            // ABI doesn't require zeroing).
         }
 
         /// <summary>
@@ -242,6 +349,14 @@ namespace Wacs.WASI.Preview3
         /// <summary>Wire-level WASI module name for stdin.</summary>
         public const string StdinModuleName =
             "wasi:cli/stdin@0.3.0-rc-2026-03-15";
+
+        /// <summary>Wire-level WASI module name for the monotonic clock.</summary>
+        public const string MonotonicClockModuleName =
+            "wasi:clocks/monotonic-clock@0.3.0-rc-2026-03-15";
+
+        /// <summary>Wire-level WASI module name for the system clock.</summary>
+        public const string SystemClockModuleName =
+            "wasi:clocks/system-clock@0.3.0-rc-2026-03-15";
     }
 
     /// <summary>Fluent builder for <see cref="WasiPreview3Host"/>.</summary>
@@ -250,6 +365,8 @@ namespace Wacs.WASI.Preview3
         public IStdin? Stdin { get; set; }
         public IStdout? Stdout { get; set; }
         public IStderr? Stderr { get; set; }
+        public IMonotonicClock? MonotonicClock { get; set; }
+        public ISystemClock? SystemClock { get; set; }
     }
 
     /// <summary>Ergonomic one-liner mirroring

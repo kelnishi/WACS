@@ -1,5 +1,81 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.3 — `wasi:clocks` port (Phase 5 Slice A)
+
+First Phase 5 host-interface port. Adds host bindings for the
+two stable WASI Preview 3 clocks interfaces; the unstable
+`timezone` interface (feature-flagged `clocks-timezone` in the
+WIT) is deferred until it stabilizes.
+
+### Vendored WIT
+
+`wit/deps/wasi-clocks-0.3.0-rc-2026-03-15/package.wit` copied
+from the Spec.Test/wasi submodule. Embedded into the assembly
+via the existing `EmbeddedResource` pattern.
+
+### `IMonotonicClock` + default `MonotonicClock`
+
+Backs `wasi:clocks/monotonic-clock@0.3.0-rc-2026-03-15`:
+
+- `now: func() -> mark` — `Stopwatch`-backed high-resolution
+  nanosecond counter (QPC on Windows / `CLOCK_MONOTONIC` on
+  POSIX). Epoch is process start.
+- `get-resolution: func() -> duration` — smallest reportable
+  step, in nanoseconds.
+- `wait-until: async func(when: mark)` — `Task.Delay`-backed
+  cooperative wait until the absolute mark.
+- `wait-for: async func(how-long: duration)` — `Task.Delay`-
+  backed cooperative wait for a duration.
+
+The two async functions surface as `Task`-returning host
+methods so the canon-async dispatcher can yield cooperatively
+once a real wit-component fixture lights up the canon-async
+import lowering. Today's bindings call `GetAwaiter().GetResult()`
+in the delegate — sync-blocking against the wasm caller's
+perspective. This is the conservative starting point; the
+async-import wire signature lands when the spec settles.
+
+### `ISystemClock` + default `SystemClock` + `Instant` record
+
+Backs `wasi:clocks/system-clock@0.3.0-rc-2026-03-15`:
+
+- `record instant { seconds: s64, nanoseconds: u32 }`
+- `now: func() -> instant` — `DateTimeOffset.UtcNow`-backed.
+  Handles negative-time edge cases (skewed-back clocks) per the
+  spec's "incrementing nanoseconds always moves forward" rule.
+- `get-resolution: func() -> duration` — returns 100 (the .NET
+  DateTime tick is 100 ns).
+
+`now` returns through a memory retptr (canon-ABI: `instant`
+flat-count = 2 exceeds `MAX_FLAT_RESULTS = 1`). Wire layout:
+16 bytes, 8-aligned. The `InvokeSystemClockNow` helper writes
+the record at the retptr; rejects misaligned / out-of-range
+pointers with diagnostic messages.
+
+### `WasiPreview3Host` integration
+
+`MonotonicClock` and `SystemClock` properties on the host
+(default-constructed lazily, overridable through the builder).
+`BindToRuntime` registers all six clocks host functions.
+`MonotonicClockModuleName` and `SystemClockModuleName`
+constants for the wire-level module names.
+
+### Test coverage
+
+15 new tests in `ClocksTests.cs`:
+- `MonotonicClock` non-decreasing, positive resolution, `wait-for`
+  honors the requested duration, zero-wait completes immediately,
+  past-mark `wait-until` completes immediately, `wait-for` honors
+  CancellationToken.
+- `SystemClock` returns a current-era time, 100ns resolution.
+- `BindToRuntime` registers all six clocks host functions.
+- `InvokeSystemClockNow` writes the canon-ABI record, rejects
+  misaligned / out-of-range retptr, throws when dispatcher unset.
+- Default-construct provides clocks; builder override threads
+  through.
+
+39/39 Preview3 tests green.
+
 ## WACS.ComponentModel 0.8.23 — shared per-component handle space (Phase 3 Slice M)
 
 Spec-aligned restructure of the canon-async handle storage.
