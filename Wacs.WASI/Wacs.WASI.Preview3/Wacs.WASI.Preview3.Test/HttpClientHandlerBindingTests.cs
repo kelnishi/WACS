@@ -5,10 +5,15 @@
 //
 //     http://www.apache.org/licenses/LICENSE-2.0
 
+using System.Buffers.Binary;
 using System.Threading;
 using System.Threading.Tasks;
 using Wacs.ComponentModel.Async;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Types;
+using Wacs.Core.Types;
+using Wacs.Core.Types.Defs;
+using Wacs.WASI.Preview3.CanonicalAbi;
 using Wacs.WASI.Preview3.Http;
 using Xunit;
 
@@ -23,6 +28,25 @@ namespace Wacs.WASI.Preview3.Test
     /// </summary>
     public class HttpClientHandlerBindingTests
     {
+        private static MemoryInstance MakeMemory()
+        {
+            var memType = new MemoryType(new Limits(AddrType.I32, 1, 1));
+            return new MemoryInstance(memType);
+        }
+
+        private sealed class SequentialRealloc : ICabiRealloc
+        {
+            private int _next;
+            public SequentialRealloc(int baseAddr) { _next = baseAddr; }
+            public int Allocate(int align, int size)
+            {
+                _next = (_next + (align - 1)) & ~(align - 1);
+                int ptr = _next;
+                _next += size;
+                return ptr;
+            }
+        }
+
         [Fact]
         public void BindToRuntime_registers_client_send_and_handler_handle()
         {
@@ -38,15 +62,16 @@ namespace Wacs.WASI.Preview3.Test
         }
 
         [Fact]
-        public void InvokeClientSend_returns_response_handle_from_configured_client()
+        public void InvokeClientSend_writes_ok_disc_and_response_handle()
         {
+            var dispatcher = new AsyncDispatcher { Memory = MakeMemory() };
             var host = new WasiPreview3Host(
                 new WasiPreview3HostBuilder
                 {
                     HttpClient = new StubClient(),
                 })
             {
-                Dispatcher = new AsyncDispatcher(),
+                Dispatcher = dispatcher,
             };
 
             var req = new Request(new Fields());
@@ -54,8 +79,15 @@ namespace Wacs.WASI.Preview3.Test
             req.SetScheme(HttpScheme.Http);
             req.SetPathWithQuery("/");
             var reqHandle = host.RequestHandles.Allocate(req);
+            var realloc = new SequentialRealloc(1024);
 
-            var respHandle = host.InvokeClientSend(reqHandle);
+            const int retptr = 64;
+            host.InvokeClientSend(reqHandle, retptr, realloc);
+
+            // disc=0 (ok) at +0; handle at +4.
+            Assert.Equal(0, dispatcher.Memory.AsSpan(retptr, 1)[0]);
+            int respHandle = BinaryPrimitives.ReadInt32LittleEndian(
+                dispatcher.Memory.AsSpan(retptr + 4, 4));
             Assert.True(respHandle > 0);
             var resp = host.ResponseHandles.Get(respHandle);
             Assert.NotNull(resp);
@@ -63,8 +95,9 @@ namespace Wacs.WASI.Preview3.Test
         }
 
         [Fact]
-        public void InvokeClientSend_propagates_http_exception_from_client()
+        public void InvokeClientSend_writes_err_disc_on_http_exception()
         {
+            var dispatcher = new AsyncDispatcher { Memory = MakeMemory() };
             var host = new WasiPreview3Host(
                 new WasiPreview3HostBuilder
                 {
@@ -74,69 +107,95 @@ namespace Wacs.WASI.Preview3.Test
                             "no route")),
                 })
             {
-                Dispatcher = new AsyncDispatcher(),
+                Dispatcher = dispatcher,
             };
 
             var req = new Request(new Fields());
             var reqHandle = host.RequestHandles.Allocate(req);
+            var realloc = new SequentialRealloc(1024);
 
-            var ex = Assert.Throws<HttpException>(
-                () => host.InvokeClientSend(reqHandle));
-            Assert.Equal(HttpErrorCode.ConnectionRefused, ex.Code);
+            const int retptr = 64;
+            host.InvokeClientSend(reqHandle, retptr, realloc);
+
+            // disc=1 (err) at +0; error-code variant disc at +4.
+            Assert.Equal(1, dispatcher.Memory.AsSpan(retptr, 1)[0]);
+            Assert.Equal((byte)HttpErrorCode.ConnectionRefused,
+                dispatcher.Memory.AsSpan(retptr + 4, 1)[0]);
         }
 
         [Fact]
-        public void InvokeClientSend_invalid_request_handle_throws()
+        public void InvokeClientSend_invalid_request_handle_writes_internal_err()
         {
+            var dispatcher = new AsyncDispatcher { Memory = MakeMemory() };
             var host = new WasiPreview3Host
             {
-                Dispatcher = new AsyncDispatcher(),
+                Dispatcher = dispatcher,
             };
-            var ex = Assert.Throws<HttpException>(
-                () => host.InvokeClientSend(999));
-            Assert.Equal(HttpErrorCode.InternalError, ex.Code);
-            Assert.Contains("999", ex.Message);
+            var realloc = new SequentialRealloc(1024);
+
+            const int retptr = 64;
+            host.InvokeClientSend(
+                requestHandle: 999, retptr, realloc);
+
+            // RequireRequest throws HttpException(InternalError);
+            // wire layer routes it to disc=1 + error-code at +4.
+            Assert.Equal(1, dispatcher.Memory.AsSpan(retptr, 1)[0]);
+            Assert.Equal((byte)HttpErrorCode.InternalError,
+                dispatcher.Memory.AsSpan(retptr + 4, 1)[0]);
         }
 
         [Fact]
         public void InvokeHandlerHandle_routes_to_configured_handler()
         {
+            var dispatcher = new AsyncDispatcher { Memory = MakeMemory() };
             var host = new WasiPreview3Host(
                 new WasiPreview3HostBuilder
                 {
                     HttpHandler = new StubHandler(statusCode: 418),
                 })
             {
-                Dispatcher = new AsyncDispatcher(),
+                Dispatcher = dispatcher,
             };
 
             var req = new Request(new Fields());
             var reqHandle = host.RequestHandles.Allocate(req);
+            var realloc = new SequentialRealloc(1024);
 
-            var respHandle = host.InvokeHandlerHandle(reqHandle);
+            const int retptr = 64;
+            host.InvokeHandlerHandle(reqHandle, retptr, realloc);
+
+            Assert.Equal(0, dispatcher.Memory.AsSpan(retptr, 1)[0]);
+            int respHandle = BinaryPrimitives.ReadInt32LittleEndian(
+                dispatcher.Memory.AsSpan(retptr + 4, 4));
             var resp = host.ResponseHandles.Get(respHandle);
             Assert.Equal(418, resp!.GetStatusCode());
         }
 
         [Fact]
-        public void InvokeHandlerHandle_throws_configuration_error_when_unset()
+        public void InvokeHandlerHandle_writes_configuration_error_when_unset()
         {
+            var dispatcher = new AsyncDispatcher { Memory = MakeMemory() };
             var host = new WasiPreview3Host
             {
-                Dispatcher = new AsyncDispatcher(),
+                Dispatcher = dispatcher,
             };
             var req = new Request(new Fields());
             var reqHandle = host.RequestHandles.Allocate(req);
+            var realloc = new SequentialRealloc(1024);
 
-            var ex = Assert.Throws<HttpException>(
-                () => host.InvokeHandlerHandle(reqHandle));
-            Assert.Equal(HttpErrorCode.ConfigurationError, ex.Code);
-            Assert.Contains("WasiPreview3HostBuilder.HttpHandler", ex.Message);
+            const int retptr = 64;
+            host.InvokeHandlerHandle(reqHandle, retptr, realloc);
+
+            // ConfigurationError lowered to err-variant.
+            Assert.Equal(1, dispatcher.Memory.AsSpan(retptr, 1)[0]);
+            Assert.Equal((byte)HttpErrorCode.ConfigurationError,
+                dispatcher.Memory.AsSpan(retptr + 4, 1)[0]);
         }
 
         [Fact]
-        public void InvokeHandlerHandle_propagates_http_exception_from_handler()
+        public void InvokeHandlerHandle_writes_err_disc_on_http_exception()
         {
+            var dispatcher = new AsyncDispatcher { Memory = MakeMemory() };
             var host = new WasiPreview3Host(
                 new WasiPreview3HostBuilder
                 {
@@ -146,12 +205,18 @@ namespace Wacs.WASI.Preview3.Test
                             "took too long")),
                 })
             {
-                Dispatcher = new AsyncDispatcher(),
+                Dispatcher = dispatcher,
             };
-            var reqHandle = host.RequestHandles.Allocate(new Request(new Fields()));
-            var ex = Assert.Throws<HttpException>(
-                () => host.InvokeHandlerHandle(reqHandle));
-            Assert.Equal(HttpErrorCode.HttpResponseTimeout, ex.Code);
+            var reqHandle = host.RequestHandles.Allocate(
+                new Request(new Fields()));
+            var realloc = new SequentialRealloc(1024);
+
+            const int retptr = 64;
+            host.InvokeHandlerHandle(reqHandle, retptr, realloc);
+
+            Assert.Equal(1, dispatcher.Memory.AsSpan(retptr, 1)[0]);
+            Assert.Equal((byte)HttpErrorCode.HttpResponseTimeout,
+                dispatcher.Memory.AsSpan(retptr + 4, 1)[0]);
         }
 
         // ---- Test stubs ----------------------------------------------

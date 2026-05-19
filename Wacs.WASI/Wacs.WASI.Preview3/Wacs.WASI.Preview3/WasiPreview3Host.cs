@@ -670,15 +670,27 @@ namespace Wacs.WASI.Preview3
             // a response handle. The err path throws
             // HttpException; the canon-async binding lowers to
             // result<response, error-code>::err.
+            // result<response, error-code> retptr layout (32 bytes
+            // 4-aligned):
+            //   +0:   result-disc (u8) + 3 pad
+            //   +4..32: payload section (28 bytes — sized to the
+            //           error-code variant which dominates the
+            //           4-byte response handle)
+            //     ok:  response handle at +4 (i32)
+            //     err: error-code variant at +4..32 (28 bytes)
             runtime.BindHostFunction(
                 (HttpClientModuleName, "send"),
-                (Func<ExecContext, int, int>)((_, requestHandle) =>
-                    InvokeClientSend(requestHandle)));
+                (Action<ExecContext, int, int>)(
+                    (_, requestHandle, retptr) =>
+                        InvokeClientSend(
+                            requestHandle, retptr, realloc)));
 
             runtime.BindHostFunction(
                 (HttpHandlerModuleName, "handle"),
-                (Func<ExecContext, int, int>)((_, requestHandle) =>
-                    InvokeHandlerHandle(requestHandle)));
+                (Action<ExecContext, int, int>)(
+                    (_, requestHandle, retptr) =>
+                        InvokeHandlerHandle(
+                            requestHandle, retptr, realloc)));
 
             // wasi:filesystem/types.descriptor — drop + the
             // simplest sync method as a representative wire-up.
@@ -3326,16 +3338,28 @@ namespace Wacs.WASI.Preview3
         /// <summary>Invoke <c>wasi:http/client.send</c>'s body.
         /// Resolves the request handle, calls
         /// <see cref="IClient.SendAsync(IRequest, System.Threading.CancellationToken)"/>
-        /// sync-blocking, allocates a response handle bound to
-        /// the lifted response. The async-func cooperative-yield
-        /// shape will replace the sync block once the canon-async-
-        /// func wire convention stabilizes.</summary>
-        public int InvokeClientSend(int requestHandle)
+        /// sync-blocking, writes a 32-byte 4-aligned
+        /// <c>result&lt;response, error-code&gt;</c> retptr.
+        /// HttpException is caught and lowered to the err
+        /// variant; other exceptions propagate.</summary>
+        public void InvokeClientSend(
+            int requestHandle, int retptr, ICabiRealloc realloc)
         {
-            var request = RequireRequest(requestHandle);
-            var response = HttpClient.SendAsync(request)
-                .GetAwaiter().GetResult();
-            return ResponseHandles.Allocate(response);
+            var memory = RequireMemoryForHttp();
+            ValidateResultResponseErrorCodeRetptr(retptr, memory);
+
+            HttpException? caught = null;
+            IResponse? response = null;
+            try
+            {
+                var request = RequireRequest(requestHandle);
+                response = HttpClient.SendAsync(request)
+                    .GetAwaiter().GetResult();
+            }
+            catch (HttpException ex) { caught = ex; }
+            WriteResultResponseErrorCode(
+                memory.AsSpan(retptr, ResultResponseErrorCodeSize),
+                caught, response, realloc, memory);
         }
 
         /// <summary>Invoke <c>wasi:http/handler.handle</c>'s body.
@@ -3345,20 +3369,93 @@ namespace Wacs.WASI.Preview3
         /// <see cref="HttpErrorCode.ConfigurationError"/> when
         /// no handler is configured — guests importing
         /// <c>wasi:http/handler</c> need an embedder-provided
-        /// inbound handler.</summary>
-        public int InvokeHandlerHandle(int requestHandle)
+        /// inbound handler. Writes a 32-byte
+        /// <c>result&lt;response, error-code&gt;</c> retptr.</summary>
+        public void InvokeHandlerHandle(
+            int requestHandle, int retptr, ICabiRealloc realloc)
         {
-            var handler = HttpHandler;
-            if (handler == null)
-                throw new HttpException(
-                    HttpErrorCode.ConfigurationError,
-                    "wasi:http/handler.handle: no IHandler " +
-                    "configured. Set " +
-                    "WasiPreview3HostBuilder.HttpHandler.");
-            var request = RequireRequest(requestHandle);
-            var response = handler.HandleAsync(request)
-                .GetAwaiter().GetResult();
-            return ResponseHandles.Allocate(response);
+            var memory = RequireMemoryForHttp();
+            ValidateResultResponseErrorCodeRetptr(retptr, memory);
+
+            HttpException? caught = null;
+            IResponse? response = null;
+            try
+            {
+                var handler = HttpHandler
+                    ?? throw new HttpException(
+                        HttpErrorCode.ConfigurationError,
+                        "wasi:http/handler.handle: no IHandler " +
+                        "configured. Set " +
+                        "WasiPreview3HostBuilder.HttpHandler.");
+                var request = RequireRequest(requestHandle);
+                response = handler.HandleAsync(request)
+                    .GetAwaiter().GetResult();
+            }
+            catch (HttpException ex) { caught = ex; }
+            WriteResultResponseErrorCode(
+                memory.AsSpan(retptr, ResultResponseErrorCodeSize),
+                caught, response, realloc, memory);
+        }
+
+        // ---- result<response, error-code> encoder (Slice GG) --------
+        //
+        // 32-byte 4-aligned retptr:
+        //   +0:   result-disc (u8) + 3 pad
+        //   +4..32: payload section (28 bytes)
+        //
+        //   ok:
+        //     +4..8: response handle (i32)
+        //     +8..32: unused, zero
+        //
+        //   err (http error-code variant, 28 bytes):
+        //     +4:    variant disc (u8) + 3 pad
+        //     +8..32: payload section (24 bytes — sized to the
+        //             dominant arm, option<field-size-payload>)
+        //
+        // Slice GG implements the simple (no-payload) arms — most
+        // common case for HTTP errors. Typed-payload arms
+        // (DnsError, TlsAlertReceived, body-size, field-size,
+        // transfer-coding, content-coding, internal-error) write
+        // the disc only; payload encoding lands in a follow-up.
+
+        private const int ResultResponseErrorCodeSize = 32;
+
+        private static void ValidateResultResponseErrorCodeRetptr(
+            int retptr,
+            Wacs.Core.Runtime.Types.MemoryInstance memory)
+        {
+            if (retptr < 0 || (retptr & 0x3) != 0
+                || retptr + ResultResponseErrorCodeSize > memory.Data.Length)
+                throw new InvalidOperationException(
+                    "wasi:http/client.send / handler.handle: " +
+                    $"retptr 0x{retptr:X8} misaligned or out of " +
+                    "range (needs 32 bytes 4-aligned).");
+        }
+
+        private void WriteResultResponseErrorCode(
+            Span<byte> dest, HttpException? ex, IResponse? response,
+            ICabiRealloc realloc,
+            Wacs.Core.Runtime.Types.MemoryInstance memory)
+        {
+            dest.Clear();
+            if (ex == null)
+            {
+                if (response == null)
+                    throw new InvalidOperationException(
+                        "WriteResultResponseErrorCode: ok path " +
+                        "requires a non-null IResponse.");
+                dest[0] = 0; // result-disc = ok
+                int handle = ResponseHandles.Allocate(response);
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(dest.Slice(4), handle);
+                return;
+            }
+            dest[0] = 1; // result-disc = err
+            // error-code variant disc at +4. Slice GG: simple
+            // arms only; payload section (+8..32) stays zero.
+            // Typed-payload arms write only the disc here and
+            // populate +8..32 in a follow-up slice.
+            dest[4] = (byte)ex.Code;
         }
 
         private IRequest RequireRequest(int handle)

@@ -1,5 +1,77 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.35 — client.send / handler.handle result<response, error-code> wire fix (Phase 5 Slice GG)
+
+Same shape of bug as Slice Z (resolve-addresses): the existing
+wire-up for `wasi:http/client.send` and `wasi:http/handler.handle`
+returned the response handle directly as an i32 flat return,
+omitting the outer result discriminant. The WIT says both
+methods return `result<response, error-code>`, which canon-ABI
+lowers to a 32-byte 4-aligned retptr with payload at +4.
+
+### Corrected retptr layout
+
+```
++0:    result-disc (u8) + 3 pad
++4..32: payload section (28 bytes — sized to the error-code
+        variant which dominates the 4-byte response handle)
+
+  ok:
+    +4..8:  response handle (i32)
+    +8..32: unused, zero
+
+  err (http error-code variant, 28 bytes — align 4):
+    +4:    error-code disc (u8) + 3 pad  (40 cases total)
+    +8..32: payload section (24 bytes — sized to the dominant
+            arm, option<field-size-payload>)
+```
+
+Slice GG implements the simple (no-payload) arms — the common
+case for HTTP errors (ConnectionRefused, HttpResponseTimeout,
+ConfigurationError, InternalError, etc.). Typed-payload arms
+(DnsError, TlsAlertReceived, body-size, field-size,
+transfer-coding, content-coding, internal-error-with-message)
+write only the discriminant for now; payload encoding lands in
+a follow-up slice.
+
+### Caught HttpException now lowered to err variant
+
+Previously an HttpException from `IClient.SendAsync` or
+`IHandler.HandleAsync` propagated out of the wire call as a
+host-side CLR exception — guests calling the import would see
+their canon-async-func dispatch fail with no result encoding.
+Now the wire catches HttpException and routes it through
+`WriteResultResponseErrorCode` so the err arm lands in the
+retptr properly. Same pattern as every other
+`result<_, error-code>` wire-up in the sockets and filesystem
+surfaces.
+
+### Wire signature change
+
+Both methods change from `Func<ExecContext, int, int>` (return
+handle) to `Action<ExecContext, int, int>` (self + retptr). The
+public Invoke* methods change shape accordingly:
+
+```csharp
+public void InvokeClientSend(
+    int requestHandle, int retptr, ICabiRealloc realloc)
+public void InvokeHandlerHandle(
+    int requestHandle, int retptr, ICabiRealloc realloc)
+```
+
+### Test updates
+
+`HttpClientHandlerBindingTests.cs` updated — 6 existing tests
+flipped from the old "returns handle / propagates exception"
+shape to "writes ok-disc + handle at +4 / writes err-disc +
+error-code at +4". A 7th test (registration) was unchanged.
+
+All previous CLR-exception assertions (Assert.Throws<HttpException>)
+became wire-encoding assertions reading the retptr's result-disc
+and error-code disc.
+
+330/330 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.34 — UDP send via 17-flat-param custom delegate (Phase 5 Slice FF)
 
 Wires `udp-socket.send` — the last unbound UDP method. Closes
