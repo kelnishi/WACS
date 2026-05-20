@@ -1,5 +1,71 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.45 — completion future resolution on client.send / handler.handle (Phase 5 Slice QQ)
+
+Closes the last v0 caveat on the request/response canon-async
+wire lifecycle. The completion future returned by `request.new`
+(the second slot of the `tuple<request, future<result<_,
+error-code>>>`) now resolves when `client.send` or
+`handler.handle` settles the request — `null` on success,
+cancellation on `HttpException`.
+
+### Identity-keyed completion-future map
+
+```csharp
+private readonly Dictionary<IRequest, int> _requestCompletionFutures;
+private readonly Dictionary<IResponse, int> _responseCompletionFutures;
+```
+
+`ReferenceEqualityComparer<T>.Instance` isn't on
+netstandard2.1, so a local `IdentityComparer<T>` wraps
+`RuntimeHelpers.GetHashCode` + `ReferenceEquals` for identity
+semantics.
+
+`InvokeRequestNew` / `InvokeResponseNew` register
+`request → future-handle` after allocating the future via
+`dispatcher.FutureNew()`. The `[resource-drop]` bindings
+clean up the dict entry on resource-drop so abandoned
+requests don't accumulate orphaned futures.
+
+### Resolution path
+
+`InvokeClientSend` / `InvokeHandlerHandle` call
+`ResolveRequestCompletionFuture` after `SendAsync` /
+`HandleAsync` settles:
+
+```csharp
+private void ResolveRequestCompletionFuture(
+    IRequest? request, HttpException? ex)
+```
+
+- Success: `FutureWrite(handle, null)` — the ok arm of
+  `result<_, error-code>`.
+- Failure: cancel the FutureCell directly (`Futures.Get` →
+  `TrySetCanceled`) without dropping the handle, so guests
+  already awaiting observe `TaskCanceledException` — same
+  cancel-without-drop pattern as Slice PP's trailers future.
+
+### Test coverage
+
+4 tests in `CompletionFutureTests.cs`:
+- `client.send` success → completion future resolves with
+  `null` (await yields null).
+- `client.send` HttpException → completion future cancels
+  (await yields TaskCanceledException).
+- `client.send` with a request allocated directly (not via
+  `request.new`) doesn't throw — the wire layer's
+  `ResolveRequestCompletionFuture` is a no-op when there's
+  no tracked future.
+- Resource-drop cleanup is exercised indirectly through the
+  wire-bound drop binding.
+
+With Slice QQ, every method on the wasi:http/types resource
+surface has spec-compliant wire shapes AND meaningful data
+flow at the canon-async lifecycle level. The remaining
+foundational work is the cooperative-yield refactor itself.
+
+409/409 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.44 — consume-body trailers future resolution (Phase 5 Slice PP)
 
 Closes the trailers-side caveat from Slice JJ. The trailers

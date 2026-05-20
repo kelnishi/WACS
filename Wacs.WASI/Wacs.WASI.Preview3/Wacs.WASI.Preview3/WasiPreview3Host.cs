@@ -116,6 +116,38 @@ namespace Wacs.WASI.Preview3
         public HostResourceTable<IRequest> RequestHandles { get; } =
             new HostResourceTable<IRequest>();
 
+        // Tracks the completion-future-handle that
+        // [static]request.new / response.new returned alongside
+        // each request / response. The future signals "request
+        // was successfully sent" (resolved by client.send /
+        // handler.handle after the host SendAsync /
+        // HandleAsync settles). Identity-keyed: a given
+        // IRequest / IResponse impl maps to its future-handle.
+        // Cleared on resource-drop to avoid orphaned entries.
+        //
+        // (ReferenceEqualityComparer isn't on netstandard2.1,
+        //  so use a local identity comparer.)
+        private sealed class IdentityComparer<T> :
+            System.Collections.Generic.IEqualityComparer<T>
+            where T : class
+        {
+            public static readonly IdentityComparer<T> Instance =
+                new IdentityComparer<T>();
+            public bool Equals(T? x, T? y) => ReferenceEquals(x, y);
+            public int GetHashCode(T obj) =>
+                System.Runtime.CompilerServices.RuntimeHelpers
+                    .GetHashCode(obj);
+        }
+
+        private readonly System.Collections.Generic.Dictionary<IRequest, int>
+            _requestCompletionFutures =
+                new System.Collections.Generic.Dictionary<IRequest, int>(
+                    IdentityComparer<IRequest>.Instance);
+        private readonly System.Collections.Generic.Dictionary<IResponse, int>
+            _responseCompletionFutures =
+                new System.Collections.Generic.Dictionary<IResponse, int>(
+                    IdentityComparer<IResponse>.Instance);
+
         /// <summary>Host-side handle table for
         /// <c>wasi:filesystem/types.descriptor</c> resources.</summary>
         public HostResourceTable<IDescriptor> DescriptorHandles { get; } =
@@ -477,7 +509,16 @@ namespace Wacs.WASI.Preview3
             runtime.BindHostFunction(
                 (HttpTypesModuleName, "[resource-drop]request"),
                 (Action<ExecContext, int>)((_, handle) =>
-                    RequestHandles.Drop(handle)));
+                {
+                    // Clean up the request → completion-future
+                    // entry (allocated by request.new) so the
+                    // dictionary doesn't accumulate dropped
+                    // requests. Slice QQ.
+                    var req = RequestHandles.Get(handle);
+                    if (req != null)
+                        _requestCompletionFutures.Remove(req);
+                    RequestHandles.Drop(handle);
+                }));
 
             // wasi:http/types.request-options — fully wired.
             // All methods are simple primitive round-trips
@@ -597,7 +638,12 @@ namespace Wacs.WASI.Preview3
             runtime.BindHostFunction(
                 (HttpTypesModuleName, "[resource-drop]response"),
                 (Action<ExecContext, int>)((_, handle) =>
-                    ResponseHandles.Drop(handle)));
+                {
+                    var resp = ResponseHandles.Get(handle);
+                    if (resp != null)
+                        _responseCompletionFutures.Remove(resp);
+                    ResponseHandles.Drop(handle);
+                }));
 
             runtime.BindHostFunction(
                 (HttpTypesModuleName, "[method]response.get-status-code"),
@@ -3611,13 +3657,22 @@ namespace Wacs.WASI.Preview3
 
             HttpException? caught = null;
             IResponse? response = null;
+            IRequest? request = null;
             try
             {
-                var request = RequireRequest(requestHandle);
+                request = RequireRequest(requestHandle);
                 response = HttpClient.SendAsync(request)
                     .GetAwaiter().GetResult();
             }
             catch (HttpException ex) { caught = ex; }
+
+            // Resolve the request's completion future (allocated
+            // by request.new). On success: write null (ok arm
+            // of result<_, error-code>). On err: cancel the
+            // FutureCell so guests awaiting it observe the
+            // failure.
+            ResolveRequestCompletionFuture(request, caught);
+
             WriteResultResponseErrorCode(
                 memory.AsSpan(retptr, ResultResponseErrorCodeSize),
                 caught, response, realloc, memory);
@@ -3640,6 +3695,7 @@ namespace Wacs.WASI.Preview3
 
             HttpException? caught = null;
             IResponse? response = null;
+            IRequest? request = null;
             try
             {
                 var handler = HttpHandler
@@ -3648,14 +3704,45 @@ namespace Wacs.WASI.Preview3
                         "wasi:http/handler.handle: no IHandler " +
                         "configured. Set " +
                         "WasiPreview3HostBuilder.HttpHandler.");
-                var request = RequireRequest(requestHandle);
+                request = RequireRequest(requestHandle);
                 response = handler.HandleAsync(request)
                     .GetAwaiter().GetResult();
             }
             catch (HttpException ex) { caught = ex; }
+
+            ResolveRequestCompletionFuture(request, caught);
+
             WriteResultResponseErrorCode(
                 memory.AsSpan(retptr, ResultResponseErrorCodeSize),
                 caught, response, realloc, memory);
+        }
+
+        /// <summary>Resolve the completion future associated
+        /// with <paramref name="request"/> if request.new
+        /// allocated one for it. On success (ex == null) writes
+        /// null to the future cell — the canonical "ok arm of
+        /// result&lt;_, error-code&gt;" payload. On failure
+        /// cancels the cell so guests awaiting it surface the
+        /// failure as TaskCanceledException.</summary>
+        private void ResolveRequestCompletionFuture(
+            IRequest? request, HttpException? ex)
+        {
+            if (request == null) return;
+            if (!_requestCompletionFutures.TryGetValue(
+                    request, out int futureHandle))
+                return;
+            _requestCompletionFutures.Remove(request);
+            var dispatcher = RequireDispatcher();
+            if (ex == null)
+            {
+                dispatcher.FutureWrite(futureHandle, null);
+            }
+            else
+            {
+                if (dispatcher.Futures.Get(futureHandle) is
+                    Wacs.ComponentModel.Async.FutureCell<object?> cell)
+                    cell.TrySetCanceled();
+            }
         }
 
         // ---- result<response, error-code> encoder (Slice GG/HH) -----
@@ -3977,11 +4064,13 @@ namespace Wacs.WASI.Preview3
                 body: body, trailers: null, options: opts);
             int requestHandle = RequestHandles.Allocate(request);
 
-            // Allocate a fresh completion future. The future
-            // stays pending until the cooperative-yield slice
-            // resolves it on body+trailers completion.
+            // Allocate a fresh completion future and register
+            // the request → future-handle mapping so
+            // client.send / handler.handle can resolve it after
+            // the underlying SendAsync / HandleAsync settles.
             int completionFuture = RequireDispatcher()
                 .FutureNew(typeIdx: 0);
+            _requestCompletionFutures[request] = completionFuture;
 
             var dest = memory.AsSpan(retptr, 8);
             System.Buffers.Binary.BinaryPrimitives
@@ -4014,6 +4103,7 @@ namespace Wacs.WASI.Preview3
 
             int completionFuture = RequireDispatcher()
                 .FutureNew(typeIdx: 0);
+            _responseCompletionFutures[response] = completionFuture;
 
             var dest = memory.AsSpan(retptr, 8);
             System.Buffers.Binary.BinaryPrimitives
