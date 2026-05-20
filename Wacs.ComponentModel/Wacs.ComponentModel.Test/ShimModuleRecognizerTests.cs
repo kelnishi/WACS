@@ -462,8 +462,16 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
-        public void BindShimImports_no_op_on_shim_with_stripped_function_names()
+        public void BindShimImports_binds_via_canon_walk_when_function_names_stripped()
         {
+            // Per component-model#654: even when the
+            // function-name custom subsection has been
+            // stripped, the wit-component shim's slot-to-op
+            // pairing is structurally recoverable from the
+            // component's canon section (the i-th async canon
+            // entry corresponds to shim slot i). Binding should
+            // succeed without the name section; cross-check
+            // diagnostics just go silent.
             var runtime = new WasmRuntime();
             var dispatcher = new AsyncDispatcher();
             var stripped = ParseModule(BuildWasmWithImports(
@@ -473,9 +481,7 @@ namespace Wacs.ComponentModel.Test
             var canons = new CanonEntry[] { new CanonTaskCancel() };
             var result = ShimModuleRecognizer.BindShimImports(
                 runtime, stripped, canons, dispatcher);
-            // Caller surfaces "stripped — cannot bind" via the
-            // zero-counts return.
-            Assert.Equal(0, result.Bound);
+            Assert.Equal(1, result.Bound);
             Assert.Equal(0, result.Mismatched);
             Assert.Equal(0, result.Skipped);
         }
@@ -532,12 +538,15 @@ namespace Wacs.ComponentModel.Test
         }
 
         [Fact]
-        public void BindShimImports_reports_mismatch_when_debug_name_disagrees_with_position()
+        public void BindShimImports_reports_mismatch_but_still_binds_structurally()
         {
             // Shim says position 0 is "stream.new" but the canon
             // entry at position 0 is task.cancel — wit-component
-            // wouldn't emit this, but the recognizer should
-            // detect rather than silently mis-bind.
+            // wouldn't emit this. Per component-model#654 the
+            // structural slot identity (canon section position)
+            // is authoritative; the debug-name cross-check
+            // surfaces as a diagnostic Mismatched count rather
+            // than gating the bind.
             var runtime = new WasmRuntime();
             var dispatcher = new AsyncDispatcher();
             var shim = MakeModuleWithNames(
@@ -547,9 +556,68 @@ namespace Wacs.ComponentModel.Test
 
             var result = ShimModuleRecognizer.BindShimImports(
                 runtime, shim, canons, dispatcher);
-            Assert.Equal(0, result.Bound);
-            Assert.Equal(1, result.Mismatched);
+            Assert.Equal(1, result.Bound);       // bound from canon section
+            Assert.Equal(1, result.Mismatched);  // debug-name disagreement noted
             Assert.Equal(0, result.Skipped);
+        }
+
+        [Fact]
+        public void BuildShimSlotMap_returns_position_per_qualified_op()
+        {
+            // Canon entries: TaskCancel @ async-slot 0,
+            // StreamOp(New, typeIdx=5) @ async-slot 1,
+            // CanonLift (skipped — not async),
+            // SubtaskDrop @ async-slot 2.
+            var canons = new CanonEntry[]
+            {
+                new CanonTaskCancel(),
+                new CanonStreamOp(CanonStreamOp.Kind.New, 5),
+                new CanonLift(0, 0, System.Array.Empty<CanonOption>()),
+                new CanonSubtaskDrop(),
+            };
+            var map = ShimModuleRecognizer.BuildShimSlotMap(canons);
+            Assert.Equal(0, map["task-cancel"]);
+            Assert.Equal(1, map["stream-new#5"]);
+            Assert.Equal(2, map["subtask-drop"]);
+            Assert.False(map.ContainsKey("stream-new")); // typeidx-qualified only
+        }
+
+        [Fact]
+        public void TryResolveShimSlot_returns_slot_or_false()
+        {
+            var canons = new CanonEntry[]
+            {
+                new CanonTaskReturn(null, System.Array.Empty<CanonOption>()),
+                new CanonContextOp(CanonContextOp.Kind.Get,
+                    ComponentValType.OfPrim(ComponentPrim.S32), 7),
+            };
+            Assert.True(ShimModuleRecognizer.TryResolveShimSlot(
+                canons, "task-return", out int s1));
+            Assert.Equal(0, s1);
+            Assert.True(ShimModuleRecognizer.TryResolveShimSlot(
+                canons, "context-get#7", out int s2));
+            Assert.Equal(1, s2);
+            Assert.False(ShimModuleRecognizer.TryResolveShimSlot(
+                canons, "context-set#7", out _));
+            Assert.False(ShimModuleRecognizer.TryResolveShimSlot(
+                canons, "", out _));
+        }
+
+        [Fact]
+        public void BuildShimSlotMapMultiValued_collects_all_slots_per_name()
+        {
+            // Two task-return entries (no natural disambiguator)
+            // — multi-valued map records both positions.
+            var canons = new CanonEntry[]
+            {
+                new CanonTaskReturn(null, System.Array.Empty<CanonOption>()),
+                new CanonTaskReturn(null, System.Array.Empty<CanonOption>()),
+                new CanonTaskCancel(),
+            };
+            var map = ShimModuleRecognizer
+                .BuildShimSlotMapMultiValued(canons);
+            Assert.Equal(new[] { 0, 1 }, map["task-return"]);
+            Assert.Equal(new[] { 2 }, map["task-cancel"]);
         }
     }
 }

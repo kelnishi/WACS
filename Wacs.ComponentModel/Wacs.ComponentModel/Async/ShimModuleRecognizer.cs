@@ -56,20 +56,21 @@ namespace Wacs.ComponentModel.Async
     /// step once a real wit-component fixture is available to
     /// validate against.</para>
     ///
-    /// <para><b>Stripped-name-section hard limit:</b> wit-component
-    /// always emits both the module-name and function-name
-    /// subsections for the shim, but downstream tooling
-    /// (<c>wasm-opt --strip-debug</c>, <c>wasm-tools strip</c>,
-    /// some release pipelines) can remove them. This recognizer
-    /// degrades gracefully on stripped module-name (via
-    /// <see cref="LooksLikeShimByStructure"/>) — but if the
-    /// function-name subsection is stripped, the per-shim
-    /// canon-op identity is unrecoverable. The integer indices
-    /// the main module imports are positional, and the
-    /// position-to-op mapping is wit-component's internal emit
-    /// order — not derivable from structure alone. Embedders who
-    /// strip names from canon-async-using components break their
-    /// own ability to be hosted by WACS.</para>
+    /// <para><b>Strip-resistance via canon-section walk:</b>
+    /// wit-component always emits both the module-name and
+    /// function-name subsections for the shim, but downstream
+    /// tooling (<c>wasm-opt --strip-debug</c>, <c>wasm-tools
+    /// strip</c>, some release pipelines) can remove them. Per
+    /// CM spec maintainer feedback (<c>component-model#654</c>),
+    /// the wit-component shim's slot-to-op pairing is positional:
+    /// shim slot <c>i</c> corresponds to the <c>i</c>-th
+    /// canon-async entry in the component's canon section. The
+    /// position-to-op mapping IS structurally recoverable — see
+    /// <see cref="BuildShimSlotMap"/> and
+    /// <see cref="TryResolveShimSlot"/>. The function-name
+    /// subsection, when present, serves as a cross-check signal;
+    /// absence degrades binding to "no validation" rather than
+    /// "no binding".</para>
     /// </summary>
     public static class ShimModuleRecognizer
     {
@@ -184,6 +185,111 @@ namespace Wacs.ComponentModel.Async
         }
 
         /// <summary>
+        /// Walk the component's canon section and produce the
+        /// structural <c>qualified-name → shim-slot</c> map.
+        /// Slot <c>i</c> is the position of the <c>i</c>-th
+        /// canon-async entry in <paramref name="canonEntries"/>
+        /// (the order wit-component encoded the shim's funcref
+        /// table). <see cref="CanonLift"/> / <see cref="CanonLower"/>
+        /// / <see cref="CanonResourceOp"/> entries are skipped —
+        /// they don't get shim slots.
+        ///
+        /// <para>This is the structural answer to
+        /// <c>component-model#654</c>: the canon-op identity
+        /// per shim slot is recoverable from the component's
+        /// own canon section without depending on the optional
+        /// function-name custom subsection.</para>
+        ///
+        /// <para><b>Key spelling</b> follows the typed-op
+        /// disambiguation convention: <c>"task-return"</c>,
+        /// <c>"stream-new#5"</c>, <c>"future-read#3"</c>,
+        /// <c>"context-get#0"</c>. The bare op name is used
+        /// when the entry doesn't carry a natural disambiguator.
+        /// If multiple canon entries share the same qualified
+        /// name (rare; possible for ops without disambiguators),
+        /// the dictionary records the <b>first</b> slot — call
+        /// <see cref="BuildShimSlotMapMultiValued"/> when all
+        /// slot positions matter.</para>
+        /// </summary>
+        public static Dictionary<string, int> BuildShimSlotMap(
+            IReadOnlyList<CanonEntry> canonEntries)
+        {
+            var map = new Dictionary<string, int>();
+            int slot = 0;
+            foreach (var entry in canonEntries)
+            {
+                if (!IsCanonAsync(entry)) continue;
+                var key = QualifiedCanonOpName(entry);
+                if (!string.IsNullOrEmpty(key)
+                    && !map.ContainsKey(key))
+                    map[key] = slot;
+                slot++;  // only async entries consume slot numbers
+            }
+            return map;
+        }
+
+        /// <summary>
+        /// Multi-valued sibling of <see cref="BuildShimSlotMap"/>
+        /// — records every slot per qualified name. Useful when
+        /// a component has multiple canon entries with the same
+        /// op kind and no disambiguator (e.g., two
+        /// <c>task-return</c> entries for two async-lifted
+        /// exports).
+        /// </summary>
+        public static Dictionary<string, List<int>> BuildShimSlotMapMultiValued(
+            IReadOnlyList<CanonEntry> canonEntries)
+        {
+            var map = new Dictionary<string, List<int>>();
+            int slot = 0;
+            foreach (var entry in canonEntries)
+            {
+                if (!IsCanonAsync(entry)) continue;
+                var key = QualifiedCanonOpName(entry);
+                if (!string.IsNullOrEmpty(key))
+                {
+                    if (!map.TryGetValue(key, out var list))
+                    {
+                        list = new List<int>();
+                        map[key] = list;
+                    }
+                    list.Add(slot);
+                }
+                slot++;  // only async entries consume slot numbers
+            }
+            return map;
+        }
+
+        /// <summary>
+        /// Debug convenience: resolve the shim slot index for
+        /// a qualified canon-op name. Returns <c>false</c> when
+        /// the name doesn't appear in the component's canon
+        /// section. Backed by <see cref="BuildShimSlotMap"/> —
+        /// callers that look up many names in a row should
+        /// build the map once and index it directly to avoid
+        /// re-walking the canon list each call.
+        /// </summary>
+        public static bool TryResolveShimSlot(
+            IReadOnlyList<CanonEntry> canonEntries,
+            string qualifiedOpName,
+            out int slot)
+        {
+            slot = -1;
+            if (string.IsNullOrEmpty(qualifiedOpName)) return false;
+            int idx = 0;
+            foreach (var entry in canonEntries)
+            {
+                if (!IsCanonAsync(entry)) continue;
+                if (QualifiedCanonOpName(entry) == qualifiedOpName)
+                {
+                    slot = idx;
+                    return true;
+                }
+                idx++;
+            }
+            return false;
+        }
+
+        /// <summary>
         /// Convert a wit-component debug name (dotted spelling
         /// like <c>"task.return"</c>) to the canonical wasmtime
         /// kebab spelling (<c>"task-return"</c>) used by
@@ -261,30 +367,57 @@ namespace Wacs.ComponentModel.Async
             AsyncDispatcher dispatcher)
         {
             if (!IsShimModule(shim)) return default;
-            var names = ExtractCanonOpNames(shim);
-            if (names.Count == 0) return default;
 
-            // Filter the canon list to async entries only. Order
-            // preserved — that's the pairing key.
-            var asyncEntries = canonEntries
-                .Where(IsCanonAsync)
-                .ToList();
+            // Debug-name cross-check map. Empty when the
+            // function-name custom subsection has been
+            // stripped — that drops the validation pass but
+            // doesn't gate binding.
+            var debugNames = ExtractCanonOpNames(shim);
 
+            // Single-pass walk of the component's canon
+            // section. The shim slot = position in the
+            // ASYNC-FILTERED canon sequence — wit-component
+            // emits one shim funcref per canon-async entry
+            // and skips CanonLift / CanonLower /
+            // CanonResourceOp. (See the wit-component shim
+            // emit code at crates/wit-component/src/encoding.rs
+            // for the pairing convention.)
+            //
+            // Follow-up to component-model#654: this single-
+            // pass mapping IS the structural recovery Luke's
+            // feedback pointed to — the slot identity doesn't
+            // depend on the optional name section.
             int bound = 0, mismatched = 0, skipped = 0;
-            foreach (var (shimFuncIdx, opName) in
-                     names.OrderBy(kv => kv.Key))
+            uint slot = 0;
+            foreach (var entry in canonEntries)
             {
-                if (shimFuncIdx >= asyncEntries.Count) { mismatched++; continue; }
-                var entry = asyncEntries[(int)shimFuncIdx];
-                var entryOpName = CanonOpNameFor(entry);
-                if (entryOpName != opName) { mismatched++; continue; }
+                if (!IsCanonAsync(entry)) continue;
 
-                var del = CanonAsyncBinder.TryBuildDelegateForEntry(entry, dispatcher);
-                if (del == null) { skipped++; continue; }
+                // Cross-check with the debug name section when
+                // present. A mismatch reports the slot for
+                // diagnostics but doesn't skip binding — the
+                // structural slot is the authority.
+                if (debugNames.TryGetValue(slot, out var debugName)
+                    && !string.Equals(debugName,
+                        CanonOpNameFor(entry),
+                        System.StringComparison.Ordinal))
+                {
+                    mismatched++;
+                }
+
+                var del = CanonAsyncBinder.TryBuildDelegateForEntry(
+                    entry, dispatcher);
+                if (del == null)
+                {
+                    skipped++;
+                    slot++;
+                    continue;
+                }
 
                 runtime.BindHostFunction(
-                    (string.Empty, shimFuncIdx.ToString()), del);
+                    (string.Empty, slot.ToString()), del);
                 bound++;
+                slot++;
             }
             return new BindResult(bound, mismatched, skipped);
         }
@@ -306,6 +439,19 @@ namespace Wacs.ComponentModel.Async
                 or CanonFutureOp _ or CanonErrorContextOp _
                 or CanonWaitableSetOp _ or CanonWaitableJoin _ => true,
             _ => false,
+        };
+
+        // Extends CanonOpNameFor with the typed-op disambiguator
+        // (stream/future typeidx, context slot index). The
+        // result is the dictionary key for the structural
+        // BuildShimSlotMap — multiple canon entries with the
+        // same op kind but different type indices stay distinct.
+        private static string QualifiedCanonOpName(CanonEntry e) => e switch
+        {
+            CanonStreamOp s => $"{CanonOpNameFor(s)}#{s.StreamTypeIdx}",
+            CanonFutureOp f => $"{CanonOpNameFor(f)}#{f.FutureTypeIdx}",
+            CanonContextOp cx => $"{CanonOpNameFor(cx)}#{cx.Index}",
+            _ => CanonOpNameFor(e),
         };
 
         // Map a canon entry to its wasmtime symbol_name() spelling.

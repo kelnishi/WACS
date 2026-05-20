@@ -1,5 +1,88 @@
 # Changelog
 
+## WACS.ComponentModel 0.8.25 — structural shim-slot resolution (component-model#654 follow-up)
+
+Acts on Luke Wagner's feedback in
+[component-model#654](https://github.com/WebAssembly/component-model/issues/654):
+the wit-component shim's slot-to-op pairing is structurally
+recoverable from the component's canon section even when the
+function-name custom subsection has been stripped. Previous
+behavior treated stripped names as a hard limit — the shim
+recognizer returned zero counts and embedders got
+"unbindable component" without explanation.
+
+### New public API
+
+```csharp
+public static Dictionary<string, int> BuildShimSlotMap(
+    IReadOnlyList<CanonEntry> canonEntries);
+
+public static Dictionary<string, List<int>>
+    BuildShimSlotMapMultiValued(
+        IReadOnlyList<CanonEntry> canonEntries);
+
+public static bool TryResolveShimSlot(
+    IReadOnlyList<CanonEntry> canonEntries,
+    string qualifiedOpName, out int slot);
+```
+
+`BuildShimSlotMap` produces a `qualified-name → slot` dict
+where the slot is the position of the canon entry in the
+filtered async-canon-entries sequence (wit-component's
+funcref-table layout). Key spelling uses typed-op
+disambiguators: `task-return`, `stream-new#5`, `future-read#3`,
+`context-get#0`. `BuildShimSlotMapMultiValued` records every
+slot per name when a component has duplicate-named canon
+entries (rare; possible for ops without natural
+disambiguators like two `task-return` entries for two
+async-lifted exports). `TryResolveShimSlot` is the debug
+convenience that walks the canon list inline — equivalent to
+indexing the map but doesn't require constructing it first.
+
+### `BindShimImports` single-pass walk
+
+Refactored from two-pass (extract names → look up entry per
+shim funcIdx) to a single canon-section walk:
+
+```csharp
+foreach (var entry in canonEntries) {
+    if (!IsCanonAsync(entry)) continue;
+    // cross-check debug name if present, but don't gate
+    if (debugNames.TryGetValue(slot, ...) && mismatch)
+        result.Mismatched++;
+    var del = TryBuildDelegateForEntry(entry, dispatcher);
+    if (del == null) { result.Skipped++; slot++; continue; }
+    runtime.BindHostFunction(("", slot.ToString()), del);
+    result.Bound++;
+    slot++;
+}
+```
+
+The function-name custom subsection becomes a cross-check
+diagnostic rather than a gating requirement. Stripped-names
+components bind successfully; debug-name disagreements
+report as `Mismatched` counts but still bind structurally
+(the canon-section position is authoritative).
+
+### Test updates
+
+Existing two tests flipped from "stripped-names → no binding"
+to "stripped-names → still bind via structural walk":
+
+- `BindShimImports_no_op_on_shim_with_stripped_function_names`
+  → `BindShimImports_binds_via_canon_walk_when_function_names_stripped`
+- `BindShimImports_reports_mismatch_when_debug_name_disagrees_with_position`
+  → `BindShimImports_reports_mismatch_but_still_binds_structurally`
+
+3 new tests in `ShimModuleRecognizerTests.cs` exercise the
+new APIs:
+- `BuildShimSlotMap_returns_position_per_qualified_op`
+- `TryResolveShimSlot_returns_slot_or_false`
+- `BuildShimSlotMapMultiValued_collects_all_slots_per_name`
+
+630/630 ComponentModel tests + 417/418 Preview3 tests green
+(1 documented skip).
+
 ## WACS.ComponentModel 0.8.24 / WACS.WASI.Preview3 0.1.48 — cli-hello permissive-stub instantiation
 
 Pushed the cli-hello fixture all the way through
