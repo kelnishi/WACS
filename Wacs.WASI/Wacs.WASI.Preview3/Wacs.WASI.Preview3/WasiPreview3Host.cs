@@ -4054,7 +4054,10 @@ namespace Wacs.WASI.Preview3
         /// <summary>Invoke
         /// <c>[static]request.consume-body(this, res)</c>.
         /// Allocates a stream&lt;u8&gt; and a trailers future,
-        /// writes the tuple at retptr.</summary>
+        /// writes the tuple at retptr. When the request has a
+        /// non-null Body Stream, spawns a background pump that
+        /// reads from Body and writes into the new
+        /// StreamBuffer (closing it on EOF).</summary>
         internal void InvokeRequestConsumeBody(
             int thisHandle, int resFutureHandle, int retptr)
         {
@@ -4066,13 +4069,16 @@ namespace Wacs.WASI.Preview3
             // `this` arg is consumed by the canon-ABI (owned
             // borrow), but v0 doesn't drop it here since the
             // resource-drop binding handles ownership.
-            _ = RequireRequest(thisHandle);
-            WriteConsumeBodyHandles(memory.AsSpan(retptr, 8));
+            var req = RequireRequest(thisHandle);
+            WriteConsumeBodyHandles(
+                memory.AsSpan(retptr, 8), req.Body);
         }
 
         /// <summary>Invoke
         /// <c>[static]response.consume-body(this, res)</c>.
-        /// Same shape as request.consume-body.</summary>
+        /// Same shape as request.consume-body — pumps the
+        /// response's Body into the returned StreamBuffer when
+        /// non-null.</summary>
         internal void InvokeResponseConsumeBody(
             int thisHandle, int resFutureHandle, int retptr)
         {
@@ -4080,13 +4086,20 @@ namespace Wacs.WASI.Preview3
             ValidateRequestResponseNewRetptr(retptr, memory,
                 "wasi:http/types.response.consume-body");
 
-            _ = RequireResponse(thisHandle);
-            WriteConsumeBodyHandles(memory.AsSpan(retptr, 8));
+            var resp = RequireResponse(thisHandle);
+            WriteConsumeBodyHandles(
+                memory.AsSpan(retptr, 8), resp.Body);
         }
 
         // Allocate the body stream + trailers future, write them
-        // as a tuple at offset 0 of `dest` (8 bytes).
-        private void WriteConsumeBodyHandles(Span<byte> dest)
+        // as a tuple at offset 0 of `dest` (8 bytes). When
+        // `bodySource` is non-null, spawns a background pump
+        // task that reads bytes from the Stream and writes them
+        // into the StreamBuffer until EOF, then completes it.
+        // The trailers future stays pending — IRequest.Trailers
+        // bridging is a separate slice.
+        private void WriteConsumeBodyHandles(
+            Span<byte> dest, System.IO.Stream? bodySource)
         {
             var dispatcher = RequireDispatcher();
             int streamHandle = dispatcher.StreamNew(typeIdx: 0);
@@ -4095,6 +4108,55 @@ namespace Wacs.WASI.Preview3
                 .WriteInt32LittleEndian(dest.Slice(0), streamHandle);
             System.Buffers.Binary.BinaryPrimitives
                 .WriteInt32LittleEndian(dest.Slice(4), trailersFuture);
+
+            if (bodySource != null)
+            {
+                var buffer = dispatcher.GetByteStreamBuffer(streamHandle);
+                if (buffer != null)
+                    _ = PumpBodyAsync(bodySource, buffer);
+            }
+            else
+            {
+                // No body — close the buffer immediately so the
+                // guest reading the stream observes EOF on the
+                // first read.
+                dispatcher.GetByteStreamBuffer(streamHandle)?.Complete();
+            }
+        }
+
+        /// <summary>Pump bytes from <paramref name="source"/>
+        /// into <paramref name="dest"/> until source EOF, then
+        /// Complete() the buffer. Runs as a fire-and-forget
+        /// background task — the caller doesn't await it.
+        /// Exceptions during reading complete the buffer with
+        /// whatever bytes were already drained.</summary>
+        private static async System.Threading.Tasks.Task PumpBodyAsync(
+            System.IO.Stream source,
+            Wacs.ComponentModel.Async.StreamBuffer<byte> dest)
+        {
+            try
+            {
+                byte[] buf = new byte[4096];
+                while (true)
+                {
+                    int n = await source.ReadAsync(buf, 0, buf.Length)
+                        .ConfigureAwait(false);
+                    if (n <= 0) break;
+                    for (int i = 0; i < n; i++)
+                        await dest.WriteAsync(buf[i])
+                            .ConfigureAwait(false);
+                }
+            }
+            catch
+            {
+                // Swallow — we close the buffer below to signal
+                // EOF; partial body bytes already drained stay
+                // visible to the guest reader.
+            }
+            finally
+            {
+                dest.Complete();
+            }
         }
 
         // ---- request.get-options (Slice EE) -------------------------

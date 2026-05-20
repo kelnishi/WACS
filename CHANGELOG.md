@@ -1,5 +1,60 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.43 — consume-body Body→StreamBuffer pump (Phase 5 Slice OO)
+
+Closes Slice JJ's "body data doesn't flow into the returned
+stream" caveat. When `consume-body` is invoked on a
+request/response with a non-null Body Stream, the wire layer
+spawns a background pump that reads bytes from Body and writes
+them into the StreamBuffer that backs the returned stream
+handle.
+
+### `PumpBodyAsync`
+
+```csharp
+private static async Task PumpBodyAsync(
+    Stream source, StreamBuffer<byte> dest)
+```
+
+Drains `source` 4096 bytes at a time, writing each byte into
+`dest` via `WriteAsync` (backpressure-aware). EOF (source
+read returns 0) or any thrown exception during reading
+triggers `dest.Complete()` so the guest observes EOF cleanly
+on the next read.
+
+### `WriteConsumeBodyHandles` updates
+
+```csharp
+private void WriteConsumeBodyHandles(
+    Span<byte> dest, Stream? bodySource)
+```
+
+- `bodySource != null` → spawn fire-and-forget pump task
+- `bodySource == null` → immediately call
+  `buffer.Complete()` so the guest sees EOF on first read
+  rather than blocking forever
+
+The trailers future stays pending — IRequest.Trailers
+bridging through the future's value-resolution is a separate
+slice (needs the cooperative-yield work).
+
+### Test coverage
+
+4 tests in `ConsumeBodyPumpTests.cs`:
+- `request.consume-body` with a `MemoryStream` body pumps
+  `"body bytes"` into the returned StreamBuffer; the guest
+  side reads it back through `DrainBufferAsync` and confirms
+  the buffer is Completed.
+- Null Body case closes the buffer immediately; guest reads
+  yield zero bytes via ChannelClosedException → EOF.
+- `response.consume-body` mirrors the request version with
+  a 4-byte payload.
+- Body-side exception (synthetic IOException after partial
+  read) still leaves the buffer completed; the guest reads
+  whatever bytes were drained before the throw.
+
+400/400 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.42 — StreamBufferBackedStream + body bridge (Phase 5 Slice NN)
 
 Closes Slice II's v0 caveat that `request.new` / `response.new`
