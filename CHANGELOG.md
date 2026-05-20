@@ -1,5 +1,79 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.47 — cli-hello E2E diagnostic + import inventory
+
+Drives the cli-hello Phase 4 fixture through `ComponentInstance.
+Instantiate` to surface the concrete gap between current state
+and full end-to-end execution. The actual stdout-capture
+assertion (`Assert.Equal("hello, wasip3\n", captured)`) lands
+in a later slice once the underlying plumbing is in place.
+
+### Why the E2E isn't reachable in a single slice
+
+`Core_module_imports_inventory` enumerates the cli-hello core
+modules and reports **57 function imports across 3 core
+modules**, decomposed by name prefix:
+
+```
+ 24 (unbracketed)        - facade interface methods
+  6 [resource-drop]
+  5 [method]
+  4 [async-lower]
+  1 [task-return]
+  1+ [future-cancel-*], [future-drop-*], [future-new],
+     [stream-cancel-*], [stream-drop-*], [stream-new],
+     [waitable-*], [context-*], [task-cancel]
+```
+
+The ~33 bracketed canon-prefix imports are wit-bindgen-emitted
+scaffolding: one helper set per imported async func per facade
+interface. The existing `CanonAsyncBinder` binds the
+component's own canon entries but not the wit-bindgen-emitted
+per-interface multiplications.
+
+`Instantiation_attempt_surfaces_first_missing_import` confirms
+the first failure WACS hits (after the `[task-return]run`
+stub is in place) is the wit-bindgen scaffolding —
+`wasi:cli/stdin@0.3.0-rc-2026-03-15.[async-lower][future-write-1]read-via-stream`.
+
+### Work needed to close the E2E
+
+1. **wit-bindgen scaffolding binder**: extend
+   `CanonAsyncBinder` (or add a sibling) to enumerate the
+   `[<canon-op>-N]<funcname>` shape per imported async func
+   and bind them automatically. Roughly 33 imports for
+   cli-hello.
+2. **Wasip2 facade implementations**: route the 24 unbracketed
+   facade imports through `WasiPreview2Host`-style bindings
+   (wasm-component-ld auto-injects these because the
+   toolchain compiles against `wasm32-wasip2`).
+3. **Canon-async lift adapter integration into
+   `ComponentInstance.Invoke`**: async-lifted exports like
+   `wasi:cli/run.run` return via `task.return`, not via the
+   core func's flat results. The synchronous Invoke path
+   needs to detect async lifts, wrap via
+   `AsyncLiftAdapter.InvokeAsync`, sync-block on the
+   resulting `Task`, and lift the dispatcher's task-return
+   value.
+4. **Cooperative-yield refactor** (Phase 6, unscheduled):
+   eventually replaces the sync-block with cooperative yield
+   through the dispatcher's `WaitableSetWaitAsync` path.
+
+### Test coverage
+
+4 tests in `CliHelloEndToEndTests.cs`:
+- `Component_structure_smoke`: parse + export listing.
+- `Instantiation_attempt_surfaces_first_missing_import`:
+  binds `[task-return]run` then surfaces the next blocking
+  import via xunit's output helper.
+- `Core_module_imports_inventory`: enumerates all 57 imports
+  with per-module and per-prefix breakdowns.
+- `CliHello_writes_expected_stdout` (Skip): the actual
+  acceptance, blocked on the four items above.
+
+417 total tests; 416 pass, 1 skipped (documented
+acceptance-deferred).
+
 ## WACS.WASI.Preview3 0.1.46 — cli-hello acceptance fixture (Phase 4 close)
 
 Builds the cli-hello Phase 4 acceptance fixture from the
