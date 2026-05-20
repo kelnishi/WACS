@@ -1,5 +1,54 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.53 — remaining cli fixtures (run-with-err, cli-terminal, cli-stdio-roundtrip, cli-stdio)
+
+Closes the last four cli fixtures from the wasip3 testsuite —
+10/10 cli-set fixtures now pass end-to-end.
+
+### `run-with-err`
+
+`async fn run() -> Err(())` — verifies the Err discriminant
+(= 1) surfaces through `InvokeCoreAsyncLift` as the lift
+adapter's return value, complementing cli-hello's Ok path.
+
+### `cli-terminal`
+
+Three sync getters `get-terminal-{stdin,stdout,stderr}: ()
+-> option<resource>` — exercised the
+`option<resource>` retArea encoding without any actual handles
+allocated. Bound as always-None: a default "no terminal
+connected" posture. Embedders that want to expose a real TTY
+override these later (analogous to how `IPreopens` is
+opt-in for filesystem access).
+
+New constants: `CliTerminalStdinModuleName`,
+`CliTerminalStdoutModuleName`, `CliTerminalStderrModuleName`.
+
+### `cli-stdio-roundtrip`
+
+Guest reads exactly 13 bytes from stdin via `read-via-stream`,
+then writes them to stdout AND stderr via `write-via-stream`.
+The first end-to-end test that drives both stdin (reader) and
+stdout (writer) async-stream paths.
+
+The default `StreamBackedStdin` drains its source on a
+background `Task.Run`, which races the guest's first read
+and currently returns `Completed(0)`, sending wit-bindgen-rt
+into a `while Complete(_)` poll loop (canon-async BLOCKED +
+waitable-set-wait wiring not landed yet). Test uses a
+`BufferedStdin` that pushes the payload synchronously inside
+`ReadViaStream` so the buffer's full before the guest's read
+fires. The async-stream BLOCKED path remains future work.
+
+### `cli-stdio`
+
+Three drop-end subtests: stdin reader dropped without reading,
+stdout/stderr guest-owned streams each writing 1 byte then
+dropped. Exercises the cleanup paths on both ends. Test uses
+an `EmptyStdin` impl that allocates handles, drops the
+writable end immediately, and resolves the completion future
+Ok — the configuration the guest expects when stdin is empty.
+
 ## WACS.WASI.Preview3 0.1.52 — cli-env acceptance (IEnvironment + canonical-ABI list/option/string)
 
 Closes the cli-env fixture acceptance. The guest reads env vars,

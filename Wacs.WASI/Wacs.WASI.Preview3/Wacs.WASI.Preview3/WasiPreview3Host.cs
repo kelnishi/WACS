@@ -512,6 +512,28 @@ namespace Wacs.WASI.Preview3
                 (Action<ExecContext, int>)((_, retptr) =>
                     InvokeGetInitialCwd(Environment, realloc, retptr)));
 
+            // wasi:cli/terminal-{stdin,stdout,stderr}@0.3.0-rc-2026-03-15
+            //   get-terminal-*: func() -> option<terminal-{input,output}>
+            //
+            // Default: always-None — the host doesn't expose a
+            // terminal handle to the guest. retArea = 8 bytes
+            // (disc:u8 + 3 pad + handle:u32). Embedders that
+            // want to expose a real TTY override these later.
+            runtime.BindHostFunction(
+                (CliTerminalStdinModuleName, "get-terminal-stdin"),
+                (Action<ExecContext, int>)((_, retptr) =>
+                    WriteOptionResourceNone(retptr)));
+
+            runtime.BindHostFunction(
+                (CliTerminalStdoutModuleName, "get-terminal-stdout"),
+                (Action<ExecContext, int>)((_, retptr) =>
+                    WriteOptionResourceNone(retptr)));
+
+            runtime.BindHostFunction(
+                (CliTerminalStderrModuleName, "get-terminal-stderr"),
+                (Action<ExecContext, int>)((_, retptr) =>
+                    WriteOptionResourceNone(retptr)));
+
             // wasi:http/types.fields — host-resource lifecycle +
             // representative method dispatch. Constructor allocates
             // a fresh empty Fields and returns its handle; methods
@@ -5516,6 +5538,17 @@ namespace Wacs.WASI.Preview3
                 .WriteInt32LittleEndian(memory.AsSpan(offset, 4), value);
         }
 
+        // Write canonical-ABI `option<resource>` = None at
+        // retptr. Layout: 8 bytes (disc:u8 + 3 pad + handle:u32),
+        // align 4. None means disc=0; payload doesn't matter but
+        // we zero it for hygiene.
+        private void WriteOptionResourceNone(int retptr)
+        {
+            var mem = RequireDispatcherMemory();
+            ValidateRetArea(retptr, 8, align: 4, mem);
+            mem.AsSpan(retptr, 8).Clear();
+        }
+
         /// <summary>
         /// Invoke <c>wasi:clocks/system-clock.now</c>'s host-side
         /// delegate body. Writes the
@@ -5684,6 +5717,18 @@ namespace Wacs.WASI.Preview3
         /// <summary>Wire-level WASI module name for the CLI environment interface.</summary>
         public const string CliEnvironmentModuleName =
             "wasi:cli/environment@0.3.0-rc-2026-03-15";
+
+        /// <summary>Wire-level WASI module name for the CLI terminal-stdin interface.</summary>
+        public const string CliTerminalStdinModuleName =
+            "wasi:cli/terminal-stdin@0.3.0-rc-2026-03-15";
+
+        /// <summary>Wire-level WASI module name for the CLI terminal-stdout interface.</summary>
+        public const string CliTerminalStdoutModuleName =
+            "wasi:cli/terminal-stdout@0.3.0-rc-2026-03-15";
+
+        /// <summary>Wire-level WASI module name for the CLI terminal-stderr interface.</summary>
+        public const string CliTerminalStderrModuleName =
+            "wasi:cli/terminal-stderr@0.3.0-rc-2026-03-15";
 
         /// <summary>Wire-level WASI module name for the monotonic clock.</summary>
         public const string MonotonicClockModuleName =
