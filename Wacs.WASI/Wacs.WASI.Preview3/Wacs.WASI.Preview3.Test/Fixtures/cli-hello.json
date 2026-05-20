@@ -1,0 +1,15 @@
+{
+  "operations": [
+    {
+      "type": "run"
+    },
+    {
+      "type": "read",
+      "id": "stdout",
+      "payload": "hello, wasip3\n"
+    },
+    {
+      "type": "wait"
+    }
+  ]
+}

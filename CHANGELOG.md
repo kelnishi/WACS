@@ -1,5 +1,68 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.46 — cli-hello acceptance fixture (Phase 4 close)
+
+Builds the cli-hello Phase 4 acceptance fixture from the
+WASIp3 plan — a wit-bindgen-compiled component exporting
+`wasi:cli/run@0.3.0-rc-2026-03-15` that writes
+`"hello, wasip3\n"` to stdout.
+
+### Fixture layout
+
+```
+Wacs.WASI.Preview3.Test/Fixtures/
+  cli-hello.rs    — Rust source (vendored)
+  cli-hello.json  — operations sidecar (run + stdout read)
+  cli-hello.wasm  — compiled component (118KB release build)
+  README.md       — rebuild instructions
+```
+
+Rebuilt by running the wasi-testsuite Cargo workspace's
+`cli-hello` bin (sources also staged at
+`Spec.Test/wasi/tests/rust/wasm32-wasip3/src/bin/cli-hello.rs`
+inside the submodule for compatibility with the existing
+`build.py` driver):
+
+```
+rustup +nightly target add wasm32-wasip2
+cargo install wasm-component-ld
+cargo +nightly build --release \
+    --manifest-path=Spec.Test/wasi/tests/rust/wasm32-wasip3/Cargo.toml \
+    --target=wasm32-wasip2 --bin=cli-hello
+```
+
+`wasm32-wasip3` triple doesn't yet exist; the toolchain builds
+against `wasm32-wasip2` and `wasm-component-ld` synthesizes
+the wasip3 component with embedded wasip2 facades.
+
+### Structural acceptance tests
+
+4 tests in `CliHelloFixtureTests.cs`:
+- `cli-hello.wasm` is present at the
+  `Fixtures/CopyToOutputDirectory` path and parses through
+  `ComponentBinaryParser`.
+- Component exports include
+  `wasi:cli/run@0.3.0-rc-2026-03-15`. (wit-bindgen emits both
+  the wasip2 0.2.0 and wasip3 RC variants; we pin the RC
+  one's presence.)
+- Component imports include
+  `wasi:cli/stdout@0.3.0-rc-2026-03-15` — confirms it depends
+  on the wasip3 interface WACS.WASI.Preview3 binds, not just
+  the wasip2 facade.
+- `cli-hello.json` sidecar parses with the expected
+  `run → read stdout "hello, wasip3\n" → wait` operations.
+
+### Phase 4 acceptance closeout state
+
+This commit covers the **fixture-construction** half of the
+Phase 4 acceptance criterion. The **end-to-end invocation**
+half — interpreter + transpiler executing `run()` with stdout
+captured against `"hello, wasip3\n"` — depends on the
+cooperative-yield refactor + binding the embedded wasip2
+facade imports, which lands in a follow-up slice.
+
+413/413 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.45 — completion future resolution on client.send / handler.handle (Phase 5 Slice QQ)
 
 Closes the last v0 caveat on the request/response canon-async

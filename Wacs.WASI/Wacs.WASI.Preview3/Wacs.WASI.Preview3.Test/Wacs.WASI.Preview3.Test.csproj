@@ -31,4 +31,13 @@
       </PackageReference>
     </ItemGroup>
 
+    <ItemGroup>
+      <None Update="Fixtures\cli-hello.wasm">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </None>
+      <None Update="Fixtures\cli-hello.json">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </None>
+    </ItemGroup>
+
 </Project>
