@@ -891,6 +891,17 @@ namespace Wacs.WASI.Preview3
                 (Action<ExecContext, int, int>)((_, self, retptr) =>
                     InvokeDescriptorStat(self, retptr, realloc)));
 
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[method]descriptor.stat-at"),
+                (Action<ExecContext, int, int, int, int, int>)(
+                    (_, self, pathFlags, pathPtr, pathLen, retptr) =>
+                        InvokeDescriptorStatAt(
+                            self,
+                            unchecked((uint)pathFlags),
+                            pathPtr, pathLen,
+                            retptr, realloc)));
+
             // ---- Stream-shape descriptor methods --------------------
             // read-via-stream(offset) -> tuple<stream, future>:
             //   8-byte 4-aligned retptr layout (stream-handle, future-handle)
@@ -3341,24 +3352,14 @@ namespace Wacs.WASI.Preview3
         /// <summary>Invoke
         /// <c>[method]descriptor.stat() -&gt;
         /// result&lt;descriptor-stat, error-code&gt;</c>. Writes
-        /// the 112-byte descriptor-stat at retptr on success or
-        /// the error-code variant otherwise.</summary>
+        /// the 104-byte descriptor-stat at retptr+8 on success
+        /// or the error-code variant at retptr+8..24 on
+        /// failure.</summary>
         public void InvokeDescriptorStat(
             int self, int retptr, ICabiRealloc realloc)
         {
             var memory = RequireMemoryForHttp();
-            // result<descriptor-stat, error-code>: 112-byte struct
-            // (8-aligned) for the ok payload, 16 bytes for the err
-            // payload. The result itself is 1 + max(112, 16) = 113
-            // rounded up to align-8 = 120 bytes. Validate.
-            if (retptr < 0 || (retptr & 0x7) != 0
-                || retptr + 120 > memory.Data.Length)
-                throw new InvalidOperationException(
-                    "wasi:filesystem/types.descriptor.stat: retptr " +
-                    $"0x{retptr:X8} misaligned or out of range " +
-                    $"(memory size = {memory.Data.Length}). " +
-                    "Caller must allocate a 120-byte 8-aligned " +
-                    "return area.");
+            ValidateDescriptorStatRetptr(retptr, memory);
 
             FilesystemException? caught = null;
             DescriptorStat? stat = null;
@@ -3369,22 +3370,88 @@ namespace Wacs.WASI.Preview3
             }
             catch (FilesystemException ex) { caught = ex; }
 
-            var dest = memory.AsSpan(retptr, 120);
-            dest.Clear();
-            if (caught != null)
+            WriteResultDescriptorStat(
+                memory.AsSpan(retptr, ResultDescriptorStatSize),
+                caught, stat, realloc, memory);
+        }
+
+        /// <summary>Invoke
+        /// <c>[method]descriptor.stat-at(path-flags, path) -&gt;
+        /// result&lt;descriptor-stat, error-code&gt;</c>. Same
+        /// retptr layout as stat — 112-byte 8-aligned. Routes
+        /// the string path through ReadGuestUtf8.</summary>
+        public void InvokeDescriptorStatAt(
+            int self, uint pathFlags, int pathPtr, int pathLen,
+            int retptr, ICabiRealloc realloc)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateDescriptorStatRetptr(retptr, memory);
+
+            FilesystemException? caught = null;
+            DescriptorStat? stat = null;
+            try
             {
-                dest[0] = 1; // result-disc = err
-                // Reuse the 16-byte error-code variant layout
-                // shifted by the 8-byte payload-offset (the
-                // payload section sits at +8 due to align-8).
+                var path = ReadGuestUtf8(pathPtr, pathLen);
+                stat = RequireDescriptor(self).StatAtAsync(
+                    (PathFlags)pathFlags, path)
+                    .GetAwaiter().GetResult();
+            }
+            catch (FilesystemException ex) { caught = ex; }
+
+            WriteResultDescriptorStat(
+                memory.AsSpan(retptr, ResultDescriptorStatSize),
+                caught, stat, realloc, memory);
+        }
+
+        // result<descriptor-stat, error-code> wire layout
+        // (112 bytes, align 8):
+        //
+        //   align = max(disc=1, max(stat=8, error-code=4)) = 8
+        //   max_case = max(stat=104, error-code=16) = 104
+        //   size = align-up(align-up(1, 8) + 104, 8) = 112
+        //
+        //   +0:    result-disc (u8) + 7 pad
+        //   +8..112: payload section (104 bytes — sized to stat)
+        //     ok:  descriptor-stat (104 bytes) at +8..112
+        //     err: error-code variant (16 bytes) at +8..24,
+        //          remaining 88 bytes unused / zero
+        //
+        // (Note: the prior version of this validator used 120
+        //  bytes which is the size before subtracting the
+        //  "pad to align-8" optimization — actually a bug. The
+        //  spec-correct size is 112.)
+        private const int ResultDescriptorStatSize = 112;
+
+        private static void ValidateDescriptorStatRetptr(
+            int retptr,
+            Wacs.Core.Runtime.Types.MemoryInstance memory)
+        {
+            if (retptr < 0 || (retptr & 0x7) != 0
+                || retptr + ResultDescriptorStatSize > memory.Data.Length)
+                throw new InvalidOperationException(
+                    "wasi:filesystem/types.descriptor.stat: retptr " +
+                    $"0x{retptr:X8} misaligned or out of range " +
+                    $"(memory size = {memory.Data.Length}). " +
+                    "Caller must allocate a 112-byte 8-aligned " +
+                    "return area.");
+        }
+
+        private void WriteResultDescriptorStat(
+            Span<byte> dest, FilesystemException? ex,
+            DescriptorStat? stat, ICabiRealloc realloc,
+            Wacs.Core.Runtime.Types.MemoryInstance memory)
+        {
+            dest.Clear();
+            if (ex != null)
+            {
+                dest[0] = 1;
                 WriteErrorCodeBytes(
-                    dest.Slice(8, 16), caught, realloc, memory);
+                    dest.Slice(8, 16), ex, realloc, memory);
                 return;
             }
-
-            // ok path: result-disc=0 + descriptor-stat at +8.
             dest[0] = 0;
-            WriteDescriptorStat(dest.Slice(8, 104), stat!, realloc, memory);
+            WriteDescriptorStat(
+                dest.Slice(8, 104), stat!, realloc, memory);
         }
 
         // ---- canon-ABI result<_, error-code> encoder -----------------

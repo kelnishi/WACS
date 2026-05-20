@@ -1,5 +1,60 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.40 — descriptor.stat retptr size fix + stat-at wire-up (Phase 5 Slice LL)
+
+Two related fixes on the `wasi:filesystem/types.descriptor`
+stat surface.
+
+### `descriptor.stat` retptr size: 120 → 112
+
+The existing validator required `retptr + 120 <= memory.Data.Length`
+but the canon-ABI-correct size is 112 bytes 8-aligned.
+
+```
+result<descriptor-stat, error-code>:
+  variant_align = max(disc=1, max(stat=8, error-code=4)) = 8
+  max_case_size = max(stat=104, error-code=16) = 104
+  s = align_to(1, 8) = 8
+  s += 104 = 112
+  s = align_to(112, 8) = 112
+```
+
+The extra 8 bytes were harmless padding for the writer but
+the validator would reject borderline allocations (e.g., a
+guest allocating exactly 112 bytes at the end of a memory
+page).
+
+### `descriptor.stat-at` wire-up
+
+Previously unwired. Identical retptr shape to `stat`; adds a
+`path-flags` (u32) + `path` (string ptr+len) param triplet.
+
+```csharp
+public void InvokeDescriptorStatAt(
+    int self, uint pathFlags, int pathPtr, int pathLen,
+    int retptr, ICabiRealloc realloc)
+```
+
+Both `stat` and `stat-at` now route through a shared
+`WriteResultDescriptorStat` helper that handles the
+112-byte retptr encoding for both ok and err paths.
+
+### Test coverage
+
+5 tests in `DescriptorStatAtWireTests.cs`:
+- `BindToRuntime` registers `stat` and `stat-at`.
+- Borderline-allocation test: 112-byte retptr placed at
+  `65536 - 112 = 65424` (8-aligned, page-end) succeeds —
+  would have been rejected under the old 120-byte size.
+- `stat-at` on a child file returns the descriptor-stat with
+  the right type variant disc (RegularFile=5) and size
+  (length 5 for content "12345") at the correct offsets.
+- `stat-at` on a missing path writes the `NoEntry` error-code
+  variant disc at +8 (within the 112-byte 8-aligned layout).
+- Misaligned retptr (offset 12, not 8-aligned) throws.
+
+385/385 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.39 — sockets error-code disc mapping fix (Phase 5 Slice KK)
 
 `wasi:sockets/types.error-code` (15 arms) and
