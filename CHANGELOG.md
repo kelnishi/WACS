@@ -1,5 +1,68 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.39 — sockets error-code disc mapping fix (Phase 5 Slice KK)
+
+`wasi:sockets/types.error-code` (15 arms) and
+`wasi:sockets/ip-name-lookup.error-code` (6 arms) are two
+distinct WIT variants that the host represents through a single
+shared C# `Sockets.ErrorCode` enum (18 values, since some arms
+overlap on AccessDenied / InvalidArgument / Other and others
+appear in only one variant).
+
+The existing `WriteSocketsErrorCodeBytes` cast `(byte)ex.Code`
+directly, treating the C# enum's integer values as the wire
+discriminant. This accidentally worked for the first ~14 arms
+of `sockets/types.error-code` (where the C# order and WIT
+order happened to align) but was wrong for:
+
+- `Other` on `sockets/types`: C# value 17, spec disc 14.
+- `Other` on `ip-name-lookup`: C# value 17, spec disc 5.
+- `InvalidArgument` on `ip-name-lookup`: C# value 2, spec
+  disc 1.
+- `NameUnresolvable` / `TemporaryResolverFailure` /
+  `PermanentResolverFailure` on `ip-name-lookup`: C# values
+  14/15/16, spec discs 2/3/4.
+
+### Per-variant disc mappers
+
+```csharp
+public static byte MapSocketsTypesErrorCodeDisc(Sockets.ErrorCode)
+public static byte MapIpNameLookupErrorCodeDisc(Sockets.ErrorCode)
+```
+
+Each maps the C# enum to the wire discriminant for its
+specific variant. Throws `ArgumentException` when the value
+doesn't apply (e.g., `NameUnresolvable` passed to the
+sockets/types mapper).
+
+### Two writers
+
+`WriteSocketsErrorCodeBytes` keeps its existing name (used by
+tcp-socket / udp-socket methods — the sockets/types variant)
+and now routes through `MapSocketsTypesErrorCodeDisc`. A new
+`WriteIpNameLookupErrorCodeBytes` handles the ip-name-lookup
+variant. `InvokeResolveAddresses` re-pointed to the new
+writer.
+
+Both share `WriteOtherPayloadString` which writes the
+`option<string>` payload at the `Other` arm's variant payload
+position (+4..16 within a 16-byte error-code variant: disc=1
+at +4, ptr at +8, len at +12).
+
+### Test coverage
+
+- Existing `*_writes_error_code_on_resolver_failure` test
+  updated: was asserting `(byte)PermanentResolverFailure` (16,
+  the C# enum value); now asserts wire disc `4` (the actual
+  spec disc).
+- 28 new theory tests in `SocketsErrorCodeDiscMapTests.cs`
+  exhaustively pin the disc-map for both variants — every
+  in-variant arm round-trips, and out-of-variant arms throw
+  `ArgumentException`. 21 valid mappings (15 sockets/types +
+  6 ip-name-lookup) + 7 rejection cases.
+
+380/380 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.38 — request/response.consume-body (Phase 5 Slice JJ)
 
 Wires `[static]request.consume-body` and

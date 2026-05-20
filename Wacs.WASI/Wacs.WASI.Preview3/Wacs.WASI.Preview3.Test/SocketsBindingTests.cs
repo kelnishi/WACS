@@ -239,10 +239,13 @@ namespace Wacs.WASI.Preview3.Test
             host.InvokeResolveAddresses(0, 0, retptr, realloc);
 
             // disc=1 (err) at +0; error-code variant at +4..16.
-            // The variant disc identifies the ErrorCode value.
+            // Per the Slice KK disc-map fix, this uses the
+            // wasi:sockets/ip-name-lookup.error-code variant
+            // (6 arms), not sockets/types — so
+            // PermanentResolverFailure lands at wire disc 4,
+            // not the C# enum's value 16.
             Assert.Equal(1, dispatcher.Memory.AsSpan(retptr, 1)[0]);
-            Assert.Equal((byte)ErrorCode.PermanentResolverFailure,
-                dispatcher.Memory.AsSpan(retptr + 4, 1)[0]);
+            Assert.Equal(4, dispatcher.Memory.AsSpan(retptr + 4, 1)[0]);
         }
 
         // ---- Test stubs ----------------------------------------------

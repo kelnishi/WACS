@@ -2495,30 +2495,117 @@ namespace Wacs.WASI.Preview3
                 dest.Slice(4, 16), ex, realloc, memory);
         }
 
+        // Encoder for `wasi:sockets/types.error-code` — the
+        // 15-arm variant used by tcp-socket / udp-socket method
+        // failures. The shared C# Sockets.ErrorCode enum
+        // includes ip-name-lookup-only arms
+        // (NameUnresolvable/etc.) — those throw at wire-time
+        // since they're not representable in the types
+        // variant.
         private static void WriteSocketsErrorCodeBytes(
             Span<byte> dest, SocketsException ex,
             ICabiRealloc realloc,
             Wacs.Core.Runtime.Types.MemoryInstance memory)
         {
             dest.Clear();
-            dest[0] = (byte)ex.Code;
+            dest[0] = MapSocketsTypesErrorCodeDisc(ex.Code);
             if (ex.Code == Sockets.ErrorCode.Other
                 && ex.OtherPayload != null)
             {
-                dest[4] = 1; // option-disc = some
-                var bytes = System.Text.Encoding.UTF8
-                    .GetBytes(ex.OtherPayload);
-                int strPtr = bytes.Length > 0
-                    ? realloc.Allocate(1, bytes.Length) : 0;
-                if (bytes.Length > 0)
-                    new ReadOnlySpan<byte>(bytes)
-                        .CopyTo(memory.AsSpan(strPtr, bytes.Length));
-                System.Buffers.Binary.BinaryPrimitives
-                    .WriteInt32LittleEndian(dest.Slice(8), strPtr);
-                System.Buffers.Binary.BinaryPrimitives
-                    .WriteInt32LittleEndian(dest.Slice(12), bytes.Length);
+                WriteOtherPayloadString(
+                    dest, ex.OtherPayload, realloc, memory);
             }
         }
+
+        // Encoder for `wasi:sockets/ip-name-lookup.error-code` —
+        // the 6-arm variant used by resolve-addresses failures.
+        // Wire disc map: AccessDenied=0, InvalidArgument=1,
+        // NameUnresolvable=2, TemporaryResolverFailure=3,
+        // PermanentResolverFailure=4, Other(option<string>)=5.
+        private static void WriteIpNameLookupErrorCodeBytes(
+            Span<byte> dest, SocketsException ex,
+            ICabiRealloc realloc,
+            Wacs.Core.Runtime.Types.MemoryInstance memory)
+        {
+            dest.Clear();
+            dest[0] = MapIpNameLookupErrorCodeDisc(ex.Code);
+            if (ex.Code == Sockets.ErrorCode.Other
+                && ex.OtherPayload != null)
+            {
+                WriteOtherPayloadString(
+                    dest, ex.OtherPayload, realloc, memory);
+            }
+        }
+
+        // option<string> at +4..16: disc=1 at +4, ptr at +8, len
+        // at +12. Shared between the two error-code writers.
+        private static void WriteOtherPayloadString(
+            Span<byte> dest, string payload,
+            ICabiRealloc realloc,
+            Wacs.Core.Runtime.Types.MemoryInstance memory)
+        {
+            dest[4] = 1;
+            var bytes = System.Text.Encoding.UTF8.GetBytes(payload);
+            int strPtr = bytes.Length > 0
+                ? realloc.Allocate(1, bytes.Length) : 0;
+            if (bytes.Length > 0)
+                new ReadOnlySpan<byte>(bytes)
+                    .CopyTo(memory.AsSpan(strPtr, bytes.Length));
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(dest.Slice(8), strPtr);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(dest.Slice(12), bytes.Length);
+        }
+
+        /// <summary>Map the C# Sockets.ErrorCode enum to the
+        /// wire discriminant for
+        /// <c>wasi:sockets/types.error-code</c> (15 arms).
+        /// Throws when the value is one of the ip-name-lookup-
+        /// only arms (NameUnresolvable / Temporary /
+        /// PermanentResolverFailure) — those aren't
+        /// representable in this variant.</summary>
+        public static byte MapSocketsTypesErrorCodeDisc(
+            Sockets.ErrorCode code) => code switch
+        {
+            Sockets.ErrorCode.AccessDenied        => 0,
+            Sockets.ErrorCode.NotSupported        => 1,
+            Sockets.ErrorCode.InvalidArgument     => 2,
+            Sockets.ErrorCode.OutOfMemory         => 3,
+            Sockets.ErrorCode.Timeout             => 4,
+            Sockets.ErrorCode.InvalidState        => 5,
+            Sockets.ErrorCode.AddressNotBindable  => 6,
+            Sockets.ErrorCode.AddressInUse        => 7,
+            Sockets.ErrorCode.RemoteUnreachable   => 8,
+            Sockets.ErrorCode.ConnectionRefused   => 9,
+            Sockets.ErrorCode.ConnectionBroken    => 10,
+            Sockets.ErrorCode.ConnectionReset     => 11,
+            Sockets.ErrorCode.ConnectionAborted   => 12,
+            Sockets.ErrorCode.DatagramTooLarge    => 13,
+            Sockets.ErrorCode.Other               => 14,
+            _ => throw new ArgumentException(
+                $"wasi:sockets/types.error-code: " +
+                $"{code} has no wire discriminant " +
+                "(only valid in ip-name-lookup.error-code)."),
+        };
+
+        /// <summary>Map the C# Sockets.ErrorCode enum to the
+        /// wire discriminant for
+        /// <c>wasi:sockets/ip-name-lookup.error-code</c>
+        /// (6 arms).</summary>
+        public static byte MapIpNameLookupErrorCodeDisc(
+            Sockets.ErrorCode code) => code switch
+        {
+            Sockets.ErrorCode.AccessDenied             => 0,
+            Sockets.ErrorCode.InvalidArgument          => 1,
+            Sockets.ErrorCode.NameUnresolvable         => 2,
+            Sockets.ErrorCode.TemporaryResolverFailure => 3,
+            Sockets.ErrorCode.PermanentResolverFailure => 4,
+            Sockets.ErrorCode.Other                    => 5,
+            _ => throw new ArgumentException(
+                $"wasi:sockets/ip-name-lookup.error-code: " +
+                $"{code} has no wire discriminant " +
+                "(only valid in sockets/types.error-code)."),
+        };
 
         // ---- wasi:sockets binding bodies (Slice J) -------------------
 
@@ -2595,7 +2682,11 @@ namespace Wacs.WASI.Preview3
             if (caught != null)
             {
                 dest[0] = 1; // result-disc = err
-                WriteSocketsErrorCodeBytes(
+                // Slice KK fix: this uses the
+                // ip-name-lookup.error-code variant (6 arms),
+                // not sockets/types.error-code. The disc map
+                // differs from the per-tcp/udp-method writers.
+                WriteIpNameLookupErrorCodeBytes(
                     dest.Slice(4, 12), caught, realloc, memory);
                 return;
             }
