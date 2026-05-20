@@ -82,6 +82,7 @@ namespace Wacs.WASI.Preview3
         private IInsecure? _insecure;
         private IInsecureSeed? _insecureSeed;
         private IExit? _exit;
+        private IEnvironment? _environment;
         private IPreopens? _preopens;
         private IIpNameLookup? _nameLookup;
         private IClient? _httpClient;
@@ -205,6 +206,16 @@ namespace Wacs.WASI.Preview3
         /// </summary>
         public IExit Exit =>
             _exit ??= _config.Exit ?? new ExitHandler();
+
+        /// <summary>
+        /// CLI environment / arguments / cwd provider. Default
+        /// <see cref="EnvironmentHandler"/> mirrors the host's
+        /// <c>System.Environment</c>; embedders that want
+        /// sandboxing supply a fixed-set implementation via the
+        /// builder.
+        /// </summary>
+        public IEnvironment Environment =>
+            _environment ??= _config.Environment ?? new EnvironmentHandler();
 
         /// <summary>
         /// Filesystem preopen set. Defaults to an empty list —
@@ -476,6 +487,30 @@ namespace Wacs.WASI.Preview3
                 (CliExitModuleName, "exit"),
                 (Action<ExecContext, int>)((_, status) =>
                     Exit.Exit(status == 0)));
+
+            // wasi:cli/environment@0.3.0-rc-2026-03-15
+            //   get-environment: () -> list<tuple<string, string>>
+            //   get-arguments:   () -> list<string>
+            //   get-initial-cwd: () -> option<string>
+            //
+            // All three returns exceed MAX_FLAT_RESULTS, so the
+            // lowered signatures take a retptr the host writes
+            // the canonical-ABI lowering into. Strings are
+            // allocated via cabi_realloc.
+            runtime.BindHostFunction(
+                (CliEnvironmentModuleName, "get-environment"),
+                (Action<ExecContext, int>)((_, retptr) =>
+                    InvokeGetEnvironment(Environment, realloc, retptr)));
+
+            runtime.BindHostFunction(
+                (CliEnvironmentModuleName, "get-arguments"),
+                (Action<ExecContext, int>)((_, retptr) =>
+                    InvokeGetArguments(Environment, realloc, retptr)));
+
+            runtime.BindHostFunction(
+                (CliEnvironmentModuleName, "get-initial-cwd"),
+                (Action<ExecContext, int>)((_, retptr) =>
+                    InvokeGetInitialCwd(Environment, realloc, retptr)));
 
             // wasi:http/types.fields — host-resource lifecycle +
             // representative method dispatch. Constructor allocates
@@ -5329,6 +5364,158 @@ namespace Wacs.WASI.Preview3
                 .WriteInt32LittleEndian(dest.Slice(4), data.Length);
         }
 
+        // wasi:cli/environment — canonical-ABI lowering helpers.
+        //
+        // The three returns share a pattern: allocate the
+        // payload(s) via cabi_realloc, write payload bytes into
+        // guest memory, then write the outer (ptr, len) or
+        // option-discriminator at the retptr the canon lower
+        // reserved. Memory must be re-fetched after each
+        // cabi_realloc call because realloc can grow the
+        // underlying buffer.
+
+        /// <summary>
+        /// Invoke <c>wasi:cli/environment.get-environment</c>.
+        /// retArea is 8 bytes: (list-ptr i32, list-len i32).
+        /// Each element occupies 16 bytes:
+        /// (k-ptr, k-len, v-ptr, v-len), align 4.
+        /// </summary>
+        public void InvokeGetEnvironment(
+            IEnvironment source, ICabiRealloc realloc, int retptr)
+        {
+            if (source == null) throw new ArgumentNullException(nameof(source));
+            if (realloc == null) throw new ArgumentNullException(nameof(realloc));
+            var pairs = source.GetEnvironment()
+                ?? Array.Empty<(string, string)>();
+
+            int count = pairs.Length;
+            int arrayPtr = count == 0
+                ? 0
+                : realloc.Allocate(align: 4, size: count * 16);
+            for (int i = 0; i < count; i++)
+            {
+                var (kPtr, kLen) = AllocateUtf8(realloc, pairs[i].Item1);
+                var (vPtr, vLen) = AllocateUtf8(realloc, pairs[i].Item2);
+                var mem = RequireDispatcherMemory();
+                int slot = arrayPtr + i * 16;
+                WriteI32LE(mem, slot + 0,  kPtr);
+                WriteI32LE(mem, slot + 4,  kLen);
+                WriteI32LE(mem, slot + 8,  vPtr);
+                WriteI32LE(mem, slot + 12, vLen);
+            }
+            var memEnd = RequireDispatcherMemory();
+            ValidateRetArea(retptr, 8, align: 4, memEnd);
+            WriteI32LE(memEnd, retptr + 0, arrayPtr);
+            WriteI32LE(memEnd, retptr + 4, count);
+        }
+
+        /// <summary>
+        /// Invoke <c>wasi:cli/environment.get-arguments</c>.
+        /// retArea is 8 bytes: (list-ptr, list-len). Each
+        /// element 8 bytes: (str-ptr, str-len).
+        /// </summary>
+        public void InvokeGetArguments(
+            IEnvironment source, ICabiRealloc realloc, int retptr)
+        {
+            if (source == null) throw new ArgumentNullException(nameof(source));
+            if (realloc == null) throw new ArgumentNullException(nameof(realloc));
+            var args = source.GetArguments() ?? Array.Empty<string>();
+
+            int count = args.Length;
+            int arrayPtr = count == 0
+                ? 0
+                : realloc.Allocate(align: 4, size: count * 8);
+            for (int i = 0; i < count; i++)
+            {
+                var (ptr, len) = AllocateUtf8(realloc, args[i]);
+                var mem = RequireDispatcherMemory();
+                int slot = arrayPtr + i * 8;
+                WriteI32LE(mem, slot + 0, ptr);
+                WriteI32LE(mem, slot + 4, len);
+            }
+            var memEnd = RequireDispatcherMemory();
+            ValidateRetArea(retptr, 8, align: 4, memEnd);
+            WriteI32LE(memEnd, retptr + 0, arrayPtr);
+            WriteI32LE(memEnd, retptr + 4, count);
+        }
+
+        /// <summary>
+        /// Invoke <c>wasi:cli/environment.get-initial-cwd</c>.
+        /// retArea is 12 bytes: disc(u8) + 3 pad + (ptr, len).
+        /// None: disc=0, payload zeros. Some: disc=1 + payload.
+        /// </summary>
+        public void InvokeGetInitialCwd(
+            IEnvironment source, ICabiRealloc realloc, int retptr)
+        {
+            if (source == null) throw new ArgumentNullException(nameof(source));
+            if (realloc == null) throw new ArgumentNullException(nameof(realloc));
+            var cwd = source.GetInitialCwd();
+
+            if (cwd == null)
+            {
+                var memNone = RequireDispatcherMemory();
+                ValidateRetArea(retptr, 12, align: 4, memNone);
+                var span = memNone.AsSpan(retptr, 12);
+                span.Clear();
+                return;
+            }
+
+            var (ptr, len) = AllocateUtf8(realloc, cwd);
+            var mem = RequireDispatcherMemory();
+            ValidateRetArea(retptr, 12, align: 4, mem);
+            var dst = mem.AsSpan(retptr, 12);
+            dst[0] = 1;
+            dst.Slice(1, 3).Clear();
+            WriteI32LE(mem, retptr + 4, ptr);
+            WriteI32LE(mem, retptr + 8, len);
+        }
+
+        // Allocate a UTF-8 buffer in guest memory and copy the
+        // bytes in. Returns (ptr, byte_count). Empty string
+        // returns (0, 0). Re-fetches dispatcher.Memory after
+        // realloc since it can grow the underlying buffer.
+        private (int ptr, int len) AllocateUtf8(
+            ICabiRealloc realloc, string value)
+        {
+            if (string.IsNullOrEmpty(value)) return (0, 0);
+            var bytes = System.Text.Encoding.UTF8.GetBytes(value);
+            int ptr = realloc.Allocate(align: 1, size: bytes.Length);
+            var mem = RequireDispatcherMemory();
+            new ReadOnlySpan<byte>(bytes).CopyTo(mem.AsSpan(ptr, bytes.Length));
+            return (ptr, bytes.Length);
+        }
+
+        private Wacs.Core.Runtime.Types.MemoryInstance RequireDispatcherMemory()
+        {
+            var dispatcher = RequireDispatcher();
+            return dispatcher.Memory
+                ?? throw new InvalidOperationException(
+                    "wasi:cli/environment: dispatcher.Memory must " +
+                    "be set before this import is invoked.");
+        }
+
+        private static void ValidateRetArea(
+            int retptr, int size, int align,
+            Wacs.Core.Runtime.Types.MemoryInstance memory)
+        {
+            int mask = align - 1;
+            if (retptr < 0 || (retptr & mask) != 0
+                || retptr + size > memory.Data.Length)
+                throw new InvalidOperationException(
+                    "wasi:cli/environment: retptr " +
+                    $"0x{retptr:X8} is misaligned (align={align}) " +
+                    $"or out of range (size={size}, " +
+                    $"memory={memory.Data.Length}).");
+        }
+
+        private static void WriteI32LE(
+            Wacs.Core.Runtime.Types.MemoryInstance memory,
+            int offset, int value)
+        {
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(memory.AsSpan(offset, 4), value);
+        }
+
         /// <summary>
         /// Invoke <c>wasi:clocks/system-clock.now</c>'s host-side
         /// delegate body. Writes the
@@ -5494,6 +5681,10 @@ namespace Wacs.WASI.Preview3
         public const string CliExitModuleName =
             "wasi:cli/exit@0.3.0-rc-2026-03-15";
 
+        /// <summary>Wire-level WASI module name for the CLI environment interface.</summary>
+        public const string CliEnvironmentModuleName =
+            "wasi:cli/environment@0.3.0-rc-2026-03-15";
+
         /// <summary>Wire-level WASI module name for the monotonic clock.</summary>
         public const string MonotonicClockModuleName =
             "wasi:clocks/monotonic-clock@0.3.0-rc-2026-03-15";
@@ -5569,6 +5760,7 @@ namespace Wacs.WASI.Preview3
         public IInsecure? InsecureRandom { get; set; }
         public IInsecureSeed? InsecureSeed { get; set; }
         public IExit? Exit { get; set; }
+        public IEnvironment? Environment { get; set; }
         public IPreopens? Preopens { get; set; }
         public IIpNameLookup? IpNameLookup { get; set; }
         public IClient? HttpClient { get; set; }

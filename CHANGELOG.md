@@ -1,5 +1,42 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.52 — cli-env acceptance (IEnvironment + canonical-ABI list/option/string)
+
+Closes the cli-env fixture acceptance. The guest reads env vars,
+program arguments, and initial cwd through three sync host
+imports and asserts exact value equality, exercising the
+canonical-ABI lowerings for `list<tuple<string,string>>`,
+`list<string>`, and `option<string>` end-to-end.
+
+### New public surface
+
+- `Wacs.WASI.Preview3.Cli.IEnvironment` — three methods:
+  `(string,string)[] GetEnvironment()`,
+  `string[] GetArguments()`,
+  `string? GetInitialCwd()`.
+- `Wacs.WASI.Preview3.Cli.EnvironmentHandler` — default impl
+  reading from `System.Environment`. Embedders that want
+  sandboxing substitute a custom `IEnvironment` (e.g. the
+  test fixture's fixed map).
+- `WasiPreview3HostBuilder.Environment` — opt-in override.
+
+### Canonical-ABI helpers
+
+`InvokeGetEnvironment`, `InvokeGetArguments`, `InvokeGetInitialCwd`
+allocate string payloads via cabi_realloc and write the outer
+list/option header at the canon-supplied retptr. Shared helpers
+(`AllocateUtf8`, `WriteI32LE`, `ValidateRetArea`,
+`RequireDispatcherMemory`) live in the host alongside the
+existing `WriteByteList` for the random get-*-bytes path —
+they're reused by the upcoming filesystem / sockets / http
+bindings that also lower lists and options.
+
+### Wire bindings
+
+- `wasi:cli/environment@0.3.0-rc-2026-03-15/get-environment`
+- `wasi:cli/environment@0.3.0-rc-2026-03-15/get-arguments`
+- `wasi:cli/environment@0.3.0-rc-2026-03-15/get-initial-cwd`
+
 ## WACS.WASI.Preview3 0.1.51 — cli-exit acceptance (IExit + ExitException)
 
 Closes the cli-exit fixture acceptance: a guest calling
