@@ -401,7 +401,7 @@ namespace Wacs.ComponentModel.Runtime
         /// waitable.join / backpressure / context / thread.yield).
         /// Used to decide whether to allocate an
         /// <see cref="Wacs.ComponentModel.Async.AsyncDispatcher"/>.</summary>
-        private static bool HasAnyCanonAsync(IReadOnlyList<CanonEntry> canons)
+        internal static bool HasAnyCanonAsync(IReadOnlyList<CanonEntry> canons)
         {
             foreach (var c in canons)
             {
