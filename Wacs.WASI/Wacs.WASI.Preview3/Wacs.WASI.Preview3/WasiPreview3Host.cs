@@ -2195,21 +2195,23 @@ namespace Wacs.WASI.Preview3
         // Shared bodies for the TCP simple-getter cluster. Each
         // method-shape gets its own retptr-sized helper:
         //
-        //   result<bool, error-code>: 12 bytes 4-aligned
-        //     (disc + 3 pad, then 8 bytes payload section.
-        //      ok: 1-byte bool at +4; err: 8-byte error-code
-        //      variant at +4)
-        //   result<u8,   error-code>: same 12-byte 4-aligned shape
-        //   result<u32,  error-code>: same 12-byte 4-aligned shape
-        //                             (u32 payload sits at +4)
-        //   result<u64,  error-code>: 24-byte 8-aligned (already
-        //                             implemented for buffer-size
-        //                             getters; reused here for
-        //                             keep-alive idle-time /
-        //                             interval which are also u64
-        //                             nanoseconds)
+        //   result<bool, error-code>: 20 bytes 4-aligned
+        //     align = max(disc=1, max(bool=1, error-code=4)) = 4
+        //     max_case = max(bool=1, error-code=16) = 16
+        //     size = align_to(align_to(1, 4) + 16, 4) = 20
+        //   result<u8,  error-code>: same 20-byte 4-aligned shape
+        //   result<u32, error-code>: same 20-byte 4-aligned shape
+        //     (u32 payload sits at +4)
+        //   result<u64, error-code>: 24-byte 8-aligned (u64 forces
+        //     align 8; implemented separately for buffer-size +
+        //     keep-alive idle-time / interval)
+        //
+        // (Slice MM fix: the prior 12-byte size truncated the
+        //  error-code variant's option<string> payload at the
+        //  Other arm — simple err arms still worked since their
+        //  payload is just the disc byte.)
 
-        private const int ResultSmallErrorCodeSize = 12;
+        private const int ResultSmallErrorCodeSize = 20;
 
         private static void ValidateResultSmallErrorCodeRetptr(
             int retptr,
@@ -2222,7 +2224,7 @@ namespace Wacs.WASI.Preview3
                     $"error-code> retptr 0x{retptr:X8} misaligned " +
                     $"or out of range (memory size = " +
                     $"{memory.Data.Length}). Caller must allocate " +
-                    "a 12-byte 4-aligned return area.");
+                    "a 20-byte 4-aligned return area.");
         }
 
         internal void InvokeTcpSocketGetterResultBool(
@@ -2246,7 +2248,7 @@ namespace Wacs.WASI.Preview3
             {
                 dest[0] = 1; // err disc
                 WriteSocketsErrorCodeBytes(
-                    dest.Slice(4, 8), caught, realloc, memory);
+                    dest.Slice(4, 16), caught, realloc, memory);
             }
         }
 
@@ -2271,7 +2273,7 @@ namespace Wacs.WASI.Preview3
             {
                 dest[0] = 1;
                 WriteSocketsErrorCodeBytes(
-                    dest.Slice(4, 8), caught, realloc, memory);
+                    dest.Slice(4, 16), caught, realloc, memory);
             }
         }
 
@@ -2297,7 +2299,7 @@ namespace Wacs.WASI.Preview3
             {
                 dest[0] = 1;
                 WriteSocketsErrorCodeBytes(
-                    dest.Slice(4, 8), caught, realloc, memory);
+                    dest.Slice(4, 16), caught, realloc, memory);
             }
         }
 
@@ -2655,16 +2657,20 @@ namespace Wacs.WASI.Preview3
                     "dispatcher.Memory must be set before this " +
                     "import is invoked.");
             // result<list<ip-address>, error-code>:
-            //   align = max(4, 4) = 4
-            //   max_case = max(8 (list), 12 (error-code)) = 12
-            //   size = align-up(1 + 12, 4) = 16
+            //   align = max(disc=1, max(list=4, error-code=4)) = 4
+            //   max_case = max(list=8, error-code=16) = 16
+            //   size = align_to(align_to(1, 4) + 16, 4) = 20
+            //
+            // (Slice MM fix: prior 16-byte size truncated the
+            //  error-code variant's option<string> payload at
+            //  the Other arm.)
             if (retptr < 0 || (retptr & 0x3) != 0
-                || retptr + 16 > memory.Data.Length)
+                || retptr + 20 > memory.Data.Length)
                 throw new InvalidOperationException(
                     "wasi:sockets/ip-name-lookup.resolve-addresses: " +
                     $"retptr 0x{retptr:X8} misaligned or out of range " +
                     $"(memory size = {memory.Data.Length}). " +
-                    "Caller must allocate a 16-byte 4-aligned " +
+                    "Caller must allocate a 20-byte 4-aligned " +
                     "return area.");
 
             // Read the hostname string.
@@ -2688,17 +2694,17 @@ namespace Wacs.WASI.Preview3
             }
             catch (SocketsException ex) { caught = ex; }
 
-            var dest = memory.AsSpan(retptr, 16);
+            var dest = memory.AsSpan(retptr, 20);
             dest.Clear();
             if (caught != null)
             {
                 dest[0] = 1; // result-disc = err
-                // Slice KK fix: this uses the
-                // ip-name-lookup.error-code variant (6 arms),
-                // not sockets/types.error-code. The disc map
-                // differs from the per-tcp/udp-method writers.
+                // Slice KK: ip-name-lookup.error-code variant.
+                // Slice MM: pass the full 16-byte variant span,
+                // not a truncated 12 (the Other arm needs all
+                // 16 bytes for its option<string> payload).
                 WriteIpNameLookupErrorCodeBytes(
-                    dest.Slice(4, 12), caught, realloc, memory);
+                    dest.Slice(4, 16), caught, realloc, memory);
                 return;
             }
 

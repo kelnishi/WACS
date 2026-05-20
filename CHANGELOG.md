@@ -1,5 +1,57 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.41 — small-payload result retptr size fix (Phase 5 Slice MM)
+
+Two more retptr-size errors caught by audit, same shape as
+Slice LL.
+
+### `result<bool|u8|u32, error-code>`: 12 → 20
+
+Slice X declared `ResultSmallErrorCodeSize = 12` but the
+spec-correct size is 20:
+
+```
+result<bool|u8|u32, error-code>:
+  variant_align = max(disc=1, max(payload=1|1|4, error-code=4)) = 4
+  max_case_size = max(payload, error-code=16) = 16
+  s = align_to(1, 4) + 16 = 20
+```
+
+The bug comment "8 bytes payload section" treated only the
+error-code variant's option<string> payload size (12) as the
+max_case, ignoring the variant's full size (16 = 1 disc + 3
+pad + 12 payload). Simple err arms still encoded correctly
+since they only write the disc byte; the Other(option<string>)
+arm got truncated.
+
+The three writer methods (Bool/U8/U32) now pass
+`dest.Slice(4, 16)` instead of `dest.Slice(4, 8)` to
+`WriteSocketsErrorCodeBytes`.
+
+### `result<list<ip-address>, error-code>`: 16 → 20
+
+Same arithmetic bug in `InvokeResolveAddresses`. Comment
+asserted "max(8 (list), 12 (error-code)) = 12" but error-code
+is 16 bytes. Fixed to 20 bytes. Err-write now passes
+`dest.Slice(4, 16)` to `WriteIpNameLookupErrorCodeBytes`.
+
+### Test coverage
+
+3 tests in `SmallResultRetptrSizeTests.cs`:
+- `ResultSmallErrorCode_other_arm_writes_full_option_string`
+  exercises the err path through `InvokeTcpSocketGetterResultBool`
+  with `SocketsException(Other, "the message body")` and reads
+  the option<string> at retptr+8..+20 — disc=1 at +8, str-ptr
+  at +12, str-len at +16. Under the old 12-byte size the str-len
+  bytes would have been clobbered or out of bounds.
+- `ResultSmallErrorCode_size_is_20_not_12` exercises the
+  validator: 65516 (page-end - 20) passes; 65520 (page-end - 16)
+  rejects.
+- `ResolveAddresses_other_arm_writes_full_option_string` is the
+  same shape for the ip-name-lookup variant (disc=5 for Other).
+
+388/388 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.40 — descriptor.stat retptr size fix + stat-at wire-up (Phase 5 Slice LL)
 
 Two related fixes on the `wasi:filesystem/types.descriptor`
