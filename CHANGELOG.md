@@ -1,5 +1,58 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.54 — filesystem-mkdir-rmdir staging ([async-lower] bindings + fs-tests.dir)
+
+Stages the filesystem fixture infrastructure: the
+`[async-lower]` host bindings for the three methods
+`filesystem-mkdir-rmdir` exercises, plus the testsuite's
+`fs-tests.dir` tree (a.txt + b.txt + parent→.. symlink) under
+the test project's `Fixtures/`.
+
+### New `[async-lower]` host bindings
+
+- `[async-lower][method]descriptor.create-directory-at` —
+  same flat-param shape `(self, pathPtr, pathLen, retptr)` as
+  the sync slot, returns `CanonAsyncStatusReturnedPacked = 2`.
+- `[async-lower][method]descriptor.unlink-file-at` — same.
+- `[async-lower][method]descriptor.remove-directory-at` — same.
+- `[async-lower][method]descriptor.open-at` — flat-params
+  overflow the inline calling convention so this one uses the
+  `(params_ptr, results_ptr) -> i32` shape. Layout (canonical-
+  ABI struct lowering with per-field alignment) at params_ptr:
+  ```
+  +0   self        i32  (own<descriptor>)
+  +4   path-flags  u8   (1-bit flags)
+  +8   path-ptr    i32  (3-byte pad to 4-align)
+  +12  path-len    i32
+  +16  open-flags  u8   (4-bit flags)
+  +17  desc-flags  u8   (6-bit flags)
+  total 20 bytes, 4-aligned tail pad
+  ```
+  results_ptr is the canon-ABI result slot the sync host body
+  already writes to.
+
+### Test infrastructure
+
+`Wacs.WASI.Preview3.Test/Fixtures/fs-tests.dir/` mirrors the
+testsuite layout (a.txt + b.txt + parent→.. symlink). The
+test stages a fresh copy per run under
+`%TEMP%/wacs-fs-tests-<guid>/` so each run starts with a known
+state. csproj `CopyToOutputDirectory` glob carries the tree to
+the test output dir.
+
+### `Run_completes_against_preopened_fs_tests_dir` — deferred
+
+The run-test is `[Fact(Skip = ...)]` until the shim-recognizer
+extension lands. The wit-component shim's funcref-table
+interleaves CanonLower (per-interface lower) entries with
+CanonAsync builtins; our `ShimModuleRecognizer.BindShimImports`
+currently only walks the CanonAsync subset, so the filesystem
+methods at slots 0–3 either receive the wrong delegates or
+none. The fix is to extend the recognizer to also bind
+CanonLower entries by resolving each entry's `FuncIdx` to its
+qualified import name and routing to the matching host
+binding — a self-contained but substantial follow-up.
+
 ## WACS.ComponentModel 0.8.28 — stream-read sync-blocking path (test shims retired)
 
 Stream-read now blocks the CLR thread inside the canon-lowered

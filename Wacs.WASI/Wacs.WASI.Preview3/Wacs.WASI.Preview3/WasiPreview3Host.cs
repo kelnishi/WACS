@@ -1000,6 +1000,23 @@ namespace Wacs.WASI.Preview3
                         InvokeDescriptorCreateDirectoryAt(
                             self, pathPtr, pathLen, retptr, realloc)));
 
+            // Canon-lowered async variant: wit-bindgen emits
+            // `[async-lower][method]<op>` for async-func calls.
+            // Same param shape as the sync slot — flat-params
+            // fit in the inline calling convention. Body runs
+            // synchronously and returns STATUS_RETURNED so the
+            // guest's WaitableOperation completes immediately.
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[async-lower][method]descriptor.create-directory-at"),
+                (Func<ExecContext, int, int, int, int, int>)(
+                    (_, self, pathPtr, pathLen, retptr) =>
+                    {
+                        InvokeDescriptorCreateDirectoryAt(
+                            self, pathPtr, pathLen, retptr, realloc);
+                        return CanonAsyncStatusReturnedPacked;
+                    }));
+
             runtime.BindHostFunction(
                 (FilesystemTypesModuleName,
                     "[method]descriptor.unlink-file-at"),
@@ -1010,11 +1027,33 @@ namespace Wacs.WASI.Preview3
 
             runtime.BindHostFunction(
                 (FilesystemTypesModuleName,
+                    "[async-lower][method]descriptor.unlink-file-at"),
+                (Func<ExecContext, int, int, int, int, int>)(
+                    (_, self, pathPtr, pathLen, retptr) =>
+                    {
+                        InvokeDescriptorUnlinkFileAt(
+                            self, pathPtr, pathLen, retptr, realloc);
+                        return CanonAsyncStatusReturnedPacked;
+                    }));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
                     "[method]descriptor.remove-directory-at"),
                 (Action<ExecContext, int, int, int, int>)(
                     (_, self, pathPtr, pathLen, retptr) =>
                         InvokeDescriptorRemoveDirectoryAt(
                             self, pathPtr, pathLen, retptr, realloc)));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[async-lower][method]descriptor.remove-directory-at"),
+                (Func<ExecContext, int, int, int, int, int>)(
+                    (_, self, pathPtr, pathLen, retptr) =>
+                    {
+                        InvokeDescriptorRemoveDirectoryAt(
+                            self, pathPtr, pathLen, retptr, realloc);
+                        return CanonAsyncStatusReturnedPacked;
+                    }));
 
             runtime.BindHostFunction(
                 (FilesystemTypesModuleName,
@@ -1039,6 +1078,45 @@ namespace Wacs.WASI.Preview3
                             unchecked((uint)openFlags),
                             unchecked((uint)flags),
                             retptr, realloc)));
+
+            // open-at canon-lowered async variant. The lowered
+            // signature is `(params_ptr, results_ptr) -> i32`:
+            // the 6-arg flat-params shape exceeds the inline
+            // calling convention, so wit-bindgen packs params
+            // into a guest-allocated struct at params_ptr and
+            // passes the result-area pointer separately. Struct
+            // layout (canonical-ABI, fields placed at next-
+            // aligned offset):
+            //   +0  self        i32  (own<descriptor>)
+            //   +4  path-flags  u8   (1-bit flags)
+            //   +8  path-ptr    i32  (4-aligned, 3-byte pad)
+            //   +12 path-len    i32
+            //   +16 open-flags  u8
+            //   +17 desc-flags  u8
+            //   total 20 bytes (4-aligned tail pad)
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[async-lower][method]descriptor.open-at"),
+                (Func<ExecContext, int, int, int>)(
+                    (_, paramsPtr, resultsPtr) =>
+                    {
+                        var mem = RequireDispatcherMemory();
+                        var pSpan = mem.AsSpan(paramsPtr, 20);
+                        int self = System.Buffers.Binary.BinaryPrimitives
+                            .ReadInt32LittleEndian(pSpan.Slice(0));
+                        uint pathFlags = pSpan[4];
+                        int pathPtr = System.Buffers.Binary.BinaryPrimitives
+                            .ReadInt32LittleEndian(pSpan.Slice(8));
+                        int pathLen = System.Buffers.Binary.BinaryPrimitives
+                            .ReadInt32LittleEndian(pSpan.Slice(12));
+                        uint openFlags = pSpan[16];
+                        uint descFlags = pSpan[17];
+                        InvokeDescriptorOpenAt(self,
+                            pathFlags, pathPtr, pathLen,
+                            openFlags, descFlags,
+                            resultsPtr, realloc);
+                        return CanonAsyncStatusReturnedPacked;
+                    }));
 
             runtime.BindHostFunction(
                 (FilesystemTypesModuleName,
