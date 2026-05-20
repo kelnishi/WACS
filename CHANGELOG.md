@@ -1,5 +1,95 @@
 # Changelog
 
+## WACS.ComponentModel 0.8.26 — wit-bindgen scaffolding binder
+
+Adds `WitBindgenScaffoldingBinder` for the per-imported-method
+canon-async helper imports that wit-bindgen-rt emits into
+guest core modules. These are distinct from the canon-async
+builtins the component declares in its canon section (those
+route through the wit-component:shim and are handled by the
+existing `CanonAsyncBinder` + `ShimModuleRecognizer`).
+
+### Naming convention recognized
+
+```
+("<iface>",            "[<canon-op>-N]<funcname>")
+("<iface>",            "[async-lower][<canon-op>-N]<funcname>")
+("[export]<iface>",    "[task-return]<funcname>")
+```
+
+Where `<canon-op>` is one of `stream-{new,read,write,
+cancel-read,cancel-write,drop-readable,drop-writable}`,
+`future-{...}`, `task-{return,cancel}`,
+`waitable-{set-{new,drop},join}`, etc. `-N` is the
+disambiguator (stream/future typeidx, context slot index).
+
+### Public API
+
+```csharp
+public static BindResult BindImports(
+    WasmRuntime runtime, Module coreModule, AsyncDispatcher dispatcher)
+
+public static ParsedScaffold? TryParseScaffoldingName(string name)
+```
+
+`BindResult` reports counts of `Bound` / `Skipped` (recognized
+but not yet supported, like `[async-lower][...]` wrappers) /
+`Unrecognized` (didn't match any wit-bindgen pattern).
+
+### Integration
+
+`ComponentInstance.Instantiate` calls the scaffolding binder
+after the canon-async-builtin binder in both the single-core
+and multi-core paths. Order: resource binder → canon-async-
+builtin binder → wit-bindgen scaffolding binder →
+configureImports → InstantiateModule.
+
+### Signature conventions
+
+wit-bindgen-rt's scaffolding ABI doesn't pass the async-flag
+that wasmtime's canon-binder expects on `*-cancel-*` ops.
+The binder passes `async=false` implicitly and binds delegates
+matching wit-bindgen's actual `(handle) → (i32)` /
+`(handle) → ()` shapes:
+
+| Op | Wasm sig | Routes to |
+|---|---|---|
+| `*-new` | `() → (i64)` | `dispatcher.{Stream,Future}New(typeIdx)` packed into both halves of i64 (placeholder for wit-bindgen-rt's dual-handle convention) |
+| `*-drop-{readable,writable}` | `(handle) → ()` | `dispatcher.{Stream,Future}Drop*` |
+| `*-cancel-{read,write}` | `(handle) → (i32)` | `dispatcher.{Stream,Future}Cancel*(h, async=false)` |
+| `task-cancel` | `() → ()` | `dispatcher.TaskCancel` |
+| `task-return` | `(disc) → ()` | `dispatcher.TaskReturn(null, null)` — no-payload form only |
+| `waitable-set-new` | `() → (i32)` | `dispatcher.WaitableSetNew` |
+| `waitable-set-drop` | `(handle) → ()` | `dispatcher.WaitableSetDrop` |
+| `waitable-join` | `(set, task) → ()` | `dispatcher.WaitableJoin` |
+
+`[async-lower][...]` wrappers and typed-payload `task-return`
+variants remain unbound — they need the outbound canon-async
+lift adapter, which is the next slice.
+
+### Effect on cli-hello
+
+The cli-hello fixture's permissive-stub count drops from 56 →
+30 with the binder enabled. The remaining 30 are unbracketed
+host-interface methods (covered by `WasiPreview3Host` for
+some, by the test driver's permissive stubber for the rest).
+
+### Test coverage
+
+9 tests in `WitBindgenScaffoldingBinderTests.cs` cover the
+parser:
+- stream-new with typeidx
+- future-cancel-write with typeidx
+- async-lower double-bracketed
+- task-return with funcname, no typeidx
+- task-cancel (no typeidx, no funcname)
+- context-get with slot
+- waitable-set-drop (no trailing -N)
+- non-bracketed returns null
+- malformed brackets return null
+
+639/639 ComponentModel + 417/418 Preview3 tests green.
+
 ## WACS.ComponentModel 0.8.25 — structural shim-slot resolution (component-model#654 follow-up)
 
 Acts on Luke Wagner's feedback in

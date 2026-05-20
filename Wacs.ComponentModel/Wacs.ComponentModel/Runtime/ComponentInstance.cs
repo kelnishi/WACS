@@ -230,6 +230,14 @@ namespace Wacs.ComponentModel.Runtime
                     };
                     Wacs.ComponentModel.Async.CanonAsyncBinder.BindImports(
                         runtime, component.Canons, asyncDispatcher);
+                    // wit-bindgen-rt emits per-imported-method
+                    // canon-async helper imports under
+                    // <iface>.[<canon-op>-N]<funcname>. Bind
+                    // them too — these aren't reached by the
+                    // canon-section walk because they're core-
+                    // module-local declarations.
+                    Wacs.ComponentModel.Async.WitBindgenScaffoldingBinder
+                        .BindImports(runtime, coreModule, asyncDispatcher);
                 }
 
                 configureImports?.Invoke(runtime);
@@ -505,6 +513,17 @@ namespace Wacs.ComponentModel.Runtime
                 // has registered its delegates.
                 using var coreMs = new MemoryStream(coreBinaries[primaryIdx]);
                 var coreModule = BinaryModuleParser.ParseWasm(coreMs);
+
+                // Bind wit-bindgen-rt-emitted per-method canon-
+                // async helper imports. These live on the
+                // primary core module (not in the shim) and
+                // are named (<iface>, "[<op>-N]<funcname>").
+                if (asyncDispatcher != null)
+                {
+                    Wacs.ComponentModel.Async.WitBindgenScaffoldingBinder
+                        .BindImports(runtime, coreModule, asyncDispatcher);
+                }
+
                 configureImports?.Invoke(runtime);
                 var coreInstance = runtime.InstantiateModule(coreModule,
                     new RuntimeOptions
