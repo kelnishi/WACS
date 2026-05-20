@@ -1,5 +1,82 @@
 # Changelog
 
+## WACS.ComponentModel 0.8.24 / WACS.WASI.Preview3 0.1.48 — cli-hello permissive-stub instantiation
+
+Pushed the cli-hello fixture all the way through
+`ComponentInstance.Instantiate` with permissive stubs covering
+all 56 wit-bindgen-emitted helper imports. Confirmed the
+async-lift core entry point
+`[async-lift]wasi:cli/run@0.3.0-rc-2026-03-15#run` is exported
+and resolvable.
+
+### Permissive-stub binder (in the Phase 4 test driver)
+
+Walks the cli-hello core modules' import lists, checks each
+function import against the runtime's existing bindings via
+`TryGetExportedFunction((module, name))`, and binds a
+zero-returning dynamic delegate (`Expression.Lambda` synthesizing
+`Func<ExecContext, P1..PN, R>` or `Action<ExecContext, P1..PN>`
+matching the WASM signature) for any that aren't covered.
+
+The `WasiPreview3Host` real bindings run first inside the
+configureImports callback; the stubber covers the remainder.
+Last-bind-wins semantics on the runtime mean stubs never
+clobber real handlers.
+
+### `ComponentInstance.CoreRuntime` accessor
+
+Adds a public `CoreRuntime` property on `ComponentInstance`
+exposing the underlying `WasmRuntime`. Embedders need this to
+reach core-module exports that the component-level
+`Invoke(exportName, args)` API doesn't surface (e.g.,
+wit-component-emitted `[async-lift]<iface>#<func>` entry
+points). Cleaner than reflection or a custom subclass.
+
+### Why the actual run() invocation is still skipped
+
+The permissive stubs return 0 for everything. wit-bindgen's
+`wit_stream::write_all` interprets a 0 return from
+`[async-lower][stream-write-N]` as "not ready, poll again" —
+so the wasm-side code spins forever, never seeing the
+"complete" signal. Confirmed in a one-off run that hung past
+60s with the test host consuming ~6GB.
+
+Closing the gap requires routing the wit-bindgen scaffolding
+helpers to the real `AsyncDispatcher` methods:
+
+```
+[stream-new-N]<funcname>            → dispatcher.StreamNew
+[stream-write-N]<funcname>          → dispatcher.StreamWrite*
+[stream-drop-writable-N]<funcname>  → dispatcher.StreamDropWritable
+[stream-drop-readable-N]<funcname>  → dispatcher.StreamDropReadable
+[future-new-N]<funcname>            → dispatcher.FutureNew
+[future-cancel-{read,write}-N]<…>   → dispatcher.FutureCancel*
+[future-drop-{writable,readable}-N] → dispatcher.FutureDrop*
+[async-lower][stream-write-N]<…>    → completion-aware write hook
+[task-return]<funcname>             → dispatcher.TaskReturn
+```
+
+That's the wit-bindgen scaffolding binder slice. With it +
+the canon-async lift adapter integration into Invoke, the
+[Skip]-marked `CliHello_writes_expected_stdout` test
+promotes.
+
+### Test coverage
+
+5 tests in `CliHelloEndToEndTests.cs`:
+- `Component_structure_smoke`: parse + export listing.
+- `Core_module_imports_inventory`: 57 imports across 3 cores
+  with per-module and per-prefix breakdowns.
+- `Instantiation_with_permissive_stubs`: confirms 56 stubs
+  get instantiation through to success.
+- `Async_lift_export_present_after_stubbed_instantiation`:
+  confirms `[async-lift]wasi:cli/run@0.3.0-rc-2026-03-15#run`
+  resolves to a `FuncAddr` after instantiation.
+- `CliHello_writes_expected_stdout` (Skip): the actual
+  acceptance assertion.
+
+418 tests total; 417 pass + 1 documented skip.
+
 ## WACS.WASI.Preview3 0.1.47 — cli-hello E2E diagnostic + import inventory
 
 Drives the cli-hello Phase 4 fixture through `ComponentInstance.

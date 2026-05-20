@@ -103,6 +103,17 @@ namespace Wacs.ComponentModel.Runtime
         /// canon entries.</summary>
         public Wacs.ComponentModel.Async.AsyncDispatcher? AsyncDispatcher { get; internal set; }
 
+        /// <summary>
+        /// The underlying core <see cref="WasmRuntime"/>. Exposed
+        /// so embedders can reach into the core module for
+        /// exports that aren't surfaced through the component-
+        /// level Invoke API (e.g., wit-component-emitted
+        /// <c>[async-lift]&lt;iface&gt;#&lt;func&gt;</c> entry
+        /// points, before the canon-async lift-adapter
+        /// integration completes).
+        /// </summary>
+        public WasmRuntime CoreRuntime => _runtime;
+
         private ComponentInstance(
             ComponentModule component,
             WasmRuntime runtime,
