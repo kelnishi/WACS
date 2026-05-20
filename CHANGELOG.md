@@ -1,5 +1,77 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.42 — StreamBufferBackedStream + body bridge (Phase 5 Slice NN)
+
+Closes Slice II's v0 caveat that `request.new` / `response.new`
+ignored the `option<stream<u8>>` contents arg. Now the contents
+stream-handle is bridged into a `System.IO.Stream` and passed
+as `Body` to the Request / Response impl — host backends
+(IClient, IHandler) that read `request.Body` see the bytes the
+wasm guest writes via canon `stream.write`.
+
+### `StreamBufferBackedStream`
+
+New `System.IO.Stream` adapter in `Wacs.WASI.Preview3.Http`:
+
+```csharp
+public sealed class StreamBufferBackedStream : Stream
+{
+    public StreamBufferBackedStream(StreamBuffer<byte> buffer)
+}
+```
+
+Read-only (CanWrite=false; Write throws NotSupported). The
+sync `Read` blocks on the first byte via `StreamBuffer.ReadAsync`
+then non-blocking-pulls until either the destination is full
+or the buffer is empty — same backpressure-aware semantics for
+the async overload. EOF on `ChannelClosedException` (i.e., the
+producer called `StreamBuffer.Complete`).
+
+### Body bridge in request.new / response.new
+
+```csharp
+private Stream? ResolveStreamFromHandle(
+    int optDisc, int streamHandle)
+{
+    if (optDisc == 0) return null;
+    var buffer = RequireDispatcher().GetByteStreamBuffer(streamHandle);
+    return buffer == null ? null : new StreamBufferBackedStream(buffer);
+}
+```
+
+`InvokeRequestNew` and `InvokeResponseNew` now call this
+helper for the contents option, passing the resulting Stream
+as the impl's Body. None-option keeps Body null. Unknown
+stream handle → null (rather than throw) since the
+dispatcher's GetByteStreamBuffer returns null for unallocated
+handles.
+
+### Trailers + completion-future bridging still deferred
+
+The trailers-future-handle arg is still accepted but not
+threaded into IRequest.Trailers — that requires resolving the
+future's eventual value (a `result<option<trailers>, error-code>`)
+into a IFields impl, which depends on the cooperative-yield
+work. Same for the completion future, which stays pending in
+this slice.
+
+### Test coverage
+
+8 tests in `StreamBufferBackedBodyTests.cs`:
+- Stream adapter: Read blocks-then-drains pre-filled buffer;
+  Read returns 0 on a completed buffer; ReadAsync drains then
+  signals EOF; Write throws NotSupported.
+- Body bridge: `request.new` with contents=some + a pre-filled
+  + completed stream → req.Body reads the bytes back through
+  the bridge.
+- `request.new` with contents=none → Body is null.
+- `response.new` with contents=some → resp.Body reads the
+  bytes back.
+- `request.new` with contents=some but an unknown stream
+  handle → Body is null (no throw).
+
+396/396 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.41 — small-payload result retptr size fix (Phase 5 Slice MM)
 
 Two more retptr-size errors caught by audit, same shape as

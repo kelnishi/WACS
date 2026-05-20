@@ -3936,11 +3936,12 @@ namespace Wacs.WASI.Preview3
         // ---- request.new / response.new (Slice II) -----------------
 
         /// <summary>Invoke <c>[static]request.new(headers,
-        /// contents, trailers, options)</c>. v0 ignores the
-        /// body-stream and trailers-future args (passes null
-        /// Body / Trailers to the impl); the wire layer
-        /// allocates the request handle and a fresh completion
-        /// future handle.
+        /// contents, trailers, options)</c>. Wraps the optional
+        /// contents stream-handle into a
+        /// <see cref="StreamBufferBackedStream"/> when the
+        /// option is some, then constructs the Request impl
+        /// with that Stream as its Body. Allocates the request
+        /// handle and a fresh completion-future handle.
         ///
         /// <para>Retptr layout (8 bytes 4-aligned):</para>
         /// <code>
@@ -3964,17 +3965,21 @@ namespace Wacs.WASI.Preview3
             if (optsOptDisc != 0)
                 opts = RequireRequestOptions(optsHandle);
 
-            // v0: body-stream and trailers-future are accepted
-            // but not bridged into the Request impl. Stream-
-            // bridging integration is a follow-up slice.
+            // Slice NN: wrap the contents stream-handle (when
+            // some) as a System.IO.Stream the impl can read.
+            // Trailers future-handle is retained for a later
+            // slice that resolves IFields trailers from the
+            // future's value.
+            Stream? body = ResolveStreamFromHandle(
+                contentsOptDisc, contentsStreamHandle);
+
             var request = new Request(fields,
-                body: null, trailers: null, options: opts);
+                body: body, trailers: null, options: opts);
             int requestHandle = RequestHandles.Allocate(request);
 
             // Allocate a fresh completion future. The future
-            // stays pending in v0; the eventual stream-bridge
-            // slice resolves it when the body+trailers have
-            // been fully sent.
+            // stays pending until the cooperative-yield slice
+            // resolves it on body+trailers completion.
             int completionFuture = RequireDispatcher()
                 .FutureNew(typeIdx: 0);
 
@@ -3986,9 +3991,10 @@ namespace Wacs.WASI.Preview3
         }
 
         /// <summary>Invoke <c>[static]response.new(headers,
-        /// contents, trailers)</c>. Same v0 contract as
-        /// request.new — wire-side handles allocated, body /
-        /// trailers / completion-future bridging deferred.</summary>
+        /// contents, trailers)</c>. Same Body-bridging behavior
+        /// as request.new — wraps the contents stream-handle
+        /// into a <see cref="StreamBufferBackedStream"/> for
+        /// the response impl's Body.</summary>
         internal void InvokeResponseNew(
             int headersHandle,
             int contentsOptDisc, int contentsStreamHandle,
@@ -4000,8 +4006,10 @@ namespace Wacs.WASI.Preview3
                 "wasi:http/types.response.new");
 
             var fields = RequireFields(headersHandle);
+            Stream? body = ResolveStreamFromHandle(
+                contentsOptDisc, contentsStreamHandle);
             var response = new Response(fields,
-                body: null, trailers: null);
+                body: body, trailers: null);
             int responseHandle = ResponseHandles.Allocate(response);
 
             int completionFuture = RequireDispatcher()
@@ -4012,6 +4020,21 @@ namespace Wacs.WASI.Preview3
                 .WriteInt32LittleEndian(dest.Slice(0), responseHandle);
             System.Buffers.Binary.BinaryPrimitives
                 .WriteInt32LittleEndian(dest.Slice(4), completionFuture);
+        }
+
+        /// <summary>Resolve a flat-lowered
+        /// <c>option&lt;stream&lt;u8&gt;&gt;</c> arg into a
+        /// host-side Stream — returns null on the none arm or
+        /// when the handle doesn't resolve to a byte stream
+        /// (the dispatcher returns null in that case).</summary>
+        private Stream? ResolveStreamFromHandle(
+            int optDisc, int streamHandle)
+        {
+            if (optDisc == 0) return null;
+            var buffer = RequireDispatcher()
+                .GetByteStreamBuffer(streamHandle);
+            if (buffer == null) return null;
+            return new StreamBufferBackedStream(buffer);
         }
 
         private static void ValidateRequestResponseNewRetptr(
