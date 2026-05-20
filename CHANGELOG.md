@@ -1,5 +1,49 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.38 — request/response.consume-body (Phase 5 Slice JJ)
+
+Wires `[static]request.consume-body` and
+`[static]response.consume-body`. Both take
+`(this: request|response, res: future<result<_, error-code>>)`
+and return
+`tuple<stream<u8>, future<result<option<trailers>, error-code>>>`.
+
+### Wire shape
+
+```
+4 params: this + res-future + retArea
+8-byte 4-aligned retptr:
+  +0..4: stream<u8> handle (i32)
+  +4..8: trailers future handle (i32)
+```
+
+### v0 caveat
+
+Same scope as Slice II: the wire is plumbed and handles are
+allocated via `dispatcher.StreamNew()` + `dispatcher.FutureNew()`,
+but the body data doesn't flow into the stream (the IRequest /
+IResponse impl's `Body` Stream isn't bridged into the stream
+buffer yet), and the trailers future stays pending. Both
+integrations land in the follow-up alongside the cooperative-
+yield refactor.
+
+The `this` arg is validated via RequireRequest / RequireResponse
+to surface InternalError if the handle is invalid. The `res`
+future arg is accepted but not consumed in v0.
+
+### Test coverage
+
+5 tests in `ConsumeBodyWireTests.cs`:
+- `BindToRuntime` registers both static factories.
+- `request.consume-body` allocates a stream handle (verified
+  via `dispatcher.GetByteStreamBuffer`) and a pending trailers
+  future.
+- `response.consume-body` mirrors the request version.
+- Invalid `this` handle throws `HttpException(InternalError)`.
+- Both factories throw on misaligned retptr.
+
+352/352 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.37 — request.new + response.new static factories (Phase 5 Slice II)
 
 Wires `[static]request.new` and `[static]response.new` — the

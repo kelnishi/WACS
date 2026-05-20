@@ -665,6 +665,42 @@ namespace Wacs.WASI.Preview3
                             trailersFutureH,
                             retptr)));
 
+            // ---- consume-body (Slice JJ) ---------------------------
+            //
+            // [static]request.consume-body(this: request,
+            //   res: future<result<_, error-code>>)
+            //   -> tuple<stream<u8>,
+            //            future<result<option<trailers>, error-code>>>
+            //
+            // 4 wire params: this + res-future + retArea. Return
+            // tuple is 2 i32 slots > 1 → 8-byte 4-aligned retArea.
+            //
+            // [static]response.consume-body has the identical
+            // wire signature with response in place of request.
+            //
+            // v0 caveat: the body data doesn't flow into the
+            // returned stream yet — the stream handle is allocated
+            // (empty / closed-by-spec), the trailers future is
+            // allocated and pending. Full stream-bridge integration
+            // ships in a follow-up alongside the cooperative-yield
+            // refactor.
+
+            runtime.BindHostFunction(
+                (HttpTypesModuleName,
+                    "[static]request.consume-body"),
+                (Action<ExecContext, int, int, int>)(
+                    (_, thisHandle, resFutureHandle, retptr) =>
+                        InvokeRequestConsumeBody(
+                            thisHandle, resFutureHandle, retptr)));
+
+            runtime.BindHostFunction(
+                (HttpTypesModuleName,
+                    "[static]response.consume-body"),
+                (Action<ExecContext, int, int, int>)(
+                    (_, thisHandle, resFutureHandle, retptr) =>
+                        InvokeResponseConsumeBody(
+                            thisHandle, resFutureHandle, retptr)));
+
             // ---- get-headers: own<fields> (Slice DD) ---------------
             //
             // Allocates a fresh fields handle pointing at the
@@ -3824,6 +3860,54 @@ namespace Wacs.WASI.Preview3
                 throw new InvalidOperationException(
                     $"{label}: retptr 0x{retptr:X8} misaligned " +
                     "or out of range (needs 8 bytes 4-aligned).");
+        }
+
+        // ---- consume-body (Slice JJ) --------------------------------
+
+        /// <summary>Invoke
+        /// <c>[static]request.consume-body(this, res)</c>.
+        /// Allocates a stream&lt;u8&gt; and a trailers future,
+        /// writes the tuple at retptr.</summary>
+        internal void InvokeRequestConsumeBody(
+            int thisHandle, int resFutureHandle, int retptr)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateRequestResponseNewRetptr(retptr, memory,
+                "wasi:http/types.request.consume-body");
+
+            // Validate the request handle is allocated; the
+            // `this` arg is consumed by the canon-ABI (owned
+            // borrow), but v0 doesn't drop it here since the
+            // resource-drop binding handles ownership.
+            _ = RequireRequest(thisHandle);
+            WriteConsumeBodyHandles(memory.AsSpan(retptr, 8));
+        }
+
+        /// <summary>Invoke
+        /// <c>[static]response.consume-body(this, res)</c>.
+        /// Same shape as request.consume-body.</summary>
+        internal void InvokeResponseConsumeBody(
+            int thisHandle, int resFutureHandle, int retptr)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateRequestResponseNewRetptr(retptr, memory,
+                "wasi:http/types.response.consume-body");
+
+            _ = RequireResponse(thisHandle);
+            WriteConsumeBodyHandles(memory.AsSpan(retptr, 8));
+        }
+
+        // Allocate the body stream + trailers future, write them
+        // as a tuple at offset 0 of `dest` (8 bytes).
+        private void WriteConsumeBodyHandles(Span<byte> dest)
+        {
+            var dispatcher = RequireDispatcher();
+            int streamHandle = dispatcher.StreamNew(typeIdx: 0);
+            int trailersFuture = dispatcher.FutureNew(typeIdx: 0);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(dest.Slice(0), streamHandle);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(dest.Slice(4), trailersFuture);
         }
 
         // ---- request.get-options (Slice EE) -------------------------
