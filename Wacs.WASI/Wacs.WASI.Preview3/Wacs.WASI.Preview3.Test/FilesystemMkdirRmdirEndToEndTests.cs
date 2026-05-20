@@ -52,16 +52,17 @@ namespace Wacs.WASI.Preview3.Test
                 $"Canons: {component.Canons.Count}");
         }
 
-        [Fact(Skip = "filesystem fixtures need shim-recognizer " +
-            "extension. The wit-component shim's funcref-table " +
-            "interleaves CanonLower (per-interface lower) entries " +
-            "with CanonAsync builtins, and our ShimModuleRecognizer " +
-            "currently only handles the CanonAsync subset — so the " +
-            "filesystem methods at slots 0–3 receive the wrong " +
-            "delegates (or none), and the body hangs at the first " +
-            "call. The host's [async-lower] bindings for create/" +
-            "remove-directory-at + open-at land in this commit; " +
-            "the recognizer extension is the next step.")]
+        [Fact(Skip = "filesystem fixtures need shim slot→name " +
+            "resolution from the component-level alias section. " +
+            "The wit-component shim's core module has no internal " +
+            "function-name section — the slot→qualified-import-name " +
+            "map only lives in the component-level core-func aliases " +
+            "(`(alias core export $shim-instance \"<N>\" (core func " +
+            "$indirect-MOD-METHOD))`). The host's [async-lower] " +
+            "bindings + fs-tests.dir staging land in this commit; " +
+            "resolving the slot map needs a component-alias walker " +
+            "(or instantiating the shim+fixup modules to let the " +
+            "funcref-table element segments do the wiring).")]
         public void Run_completes_against_preopened_fs_tests_dir()
         {
             var path = Wasip3FixtureHarness.FixturePath(

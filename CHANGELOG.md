@@ -42,16 +42,24 @@ the test output dir.
 
 ### `Run_completes_against_preopened_fs_tests_dir` — deferred
 
-The run-test is `[Fact(Skip = ...)]` until the shim-recognizer
-extension lands. The wit-component shim's funcref-table
-interleaves CanonLower (per-interface lower) entries with
-CanonAsync builtins; our `ShimModuleRecognizer.BindShimImports`
-currently only walks the CanonAsync subset, so the filesystem
-methods at slots 0–3 either receive the wrong delegates or
-none. The fix is to extend the recognizer to also bind
-CanonLower entries by resolving each entry's `FuncIdx` to its
-qualified import name and routing to the matching host
-binding — a self-contained but substantial follow-up.
+The run-test is `[Fact(Skip = ...)]` pending shim slot→name
+resolution. **The slot map is not in the shim's core
+function-name section** — wit-component only stamps the
+module-name subsection (`"wit-component:shim"`) on the core
+module. The qualified-import-name per slot only lives in the
+component-level core-func aliases (`(alias core export
+$shim-instance "<N>" (core func $indirect-MOD-METHOD))`),
+which the current recognizer doesn't walk.
+
+Two paths forward (memorized at
+`project_wit_component_shim_slot_map`):
+1. Add a component-level alias walker to build the
+   slot → (module, method) map directly.
+2. Properly instantiate the shim + fixup core modules so the
+   fixup's element segment fills the funcref table at runtime
+   — the multi-core path today only instantiates the primary,
+   which is why cli-hello works (it never exercises the shim
+   indirection) but filesystem fixtures don't.
 
 ## WACS.ComponentModel 0.8.28 — stream-read sync-blocking path (test shims retired)
 
