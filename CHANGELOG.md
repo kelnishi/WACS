@@ -1,5 +1,30 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.51 — cli-exit acceptance (IExit + ExitException)
+
+Closes the cli-exit fixture acceptance: a guest calling
+`exit(Err(()))` propagates through `InvokeCoreAsyncLift` as an
+`ExitException` carrying exit code 1.
+
+### New public surface
+
+- `Wacs.WASI.Preview3.Cli.IExit` — single-method interface
+  matching the wasip3-trimmed `exit: func(status: result);`
+  (Preview 2's `exit-with-code` variant was dropped from
+  wasip3).
+- `Wacs.WASI.Preview3.Cli.ExitHandler` — default impl that
+  throws `ExitException` so the dispatcher unwinds the wasm
+  stack cleanly. Embedders integrate native process termination
+  by substituting their own `IExit` impl.
+- `Wacs.WASI.Preview3.Cli.ExitException` — carries the i32 exit
+  code (Ok→0, Err→1).
+- `WasiPreview3HostBuilder.Exit` — opt-in override.
+
+### Wire binding
+
+- `wasi:cli/exit@0.3.0-rc-2026-03-15/exit`: maps the
+  result-discriminant i32 (0 = Ok, 1 = Err) into `IExit.Exit`.
+
 ## WACS.WASI.Preview3 0.1.50 — canon-lower-async function imports (monotonic-clock acceptance closes)
 
 Closes the monotonic-clock fixture acceptance. wit-component lowers

@@ -81,6 +81,7 @@ namespace Wacs.WASI.Preview3
         private IRandom? _random;
         private IInsecure? _insecure;
         private IInsecureSeed? _insecureSeed;
+        private IExit? _exit;
         private IPreopens? _preopens;
         private IIpNameLookup? _nameLookup;
         private IClient? _httpClient;
@@ -194,6 +195,16 @@ namespace Wacs.WASI.Preview3
 
         public IInsecureSeed InsecureSeed =>
             _insecureSeed ??= _config.InsecureSeed ?? new InsecureSeedSource();
+
+        /// <summary>
+        /// CLI exit handler. The default <see cref="ExitHandler"/>
+        /// throws <see cref="ExitException"/> carrying the exit
+        /// code; embedders that want native process termination
+        /// supply their own (e.g. one that calls
+        /// <c>System.Environment.Exit</c>).
+        /// </summary>
+        public IExit Exit =>
+            _exit ??= _config.Exit ?? new ExitHandler();
 
         /// <summary>
         /// Filesystem preopen set. Defaults to an empty list —
@@ -453,6 +464,18 @@ namespace Wacs.WASI.Preview3
                 (InsecureSeedModuleName, "get-insecure-seed"),
                 (Action<ExecContext, int>)((_, retptr) =>
                     InvokeGetInsecureSeed(InsecureSeed, retptr)));
+
+            // wasi:cli/exit@0.3.0-rc-2026-03-15
+            //   exit: func(status: result);
+            //
+            // The result<_, _> discriminant lowers to a single
+            // i32: 0 = Ok, 1 = Err. The default
+            // <see cref="ExitHandler"/> throws ExitException so
+            // the dispatcher unwinds the wasm stack cleanly.
+            runtime.BindHostFunction(
+                (CliExitModuleName, "exit"),
+                (Action<ExecContext, int>)((_, status) =>
+                    Exit.Exit(status == 0)));
 
             // wasi:http/types.fields — host-resource lifecycle +
             // representative method dispatch. Constructor allocates
@@ -5467,6 +5490,10 @@ namespace Wacs.WASI.Preview3
         public const string StdinModuleName =
             "wasi:cli/stdin@0.3.0-rc-2026-03-15";
 
+        /// <summary>Wire-level WASI module name for the CLI exit interface.</summary>
+        public const string CliExitModuleName =
+            "wasi:cli/exit@0.3.0-rc-2026-03-15";
+
         /// <summary>Wire-level WASI module name for the monotonic clock.</summary>
         public const string MonotonicClockModuleName =
             "wasi:clocks/monotonic-clock@0.3.0-rc-2026-03-15";
@@ -5541,6 +5568,7 @@ namespace Wacs.WASI.Preview3
         public IRandom? Random { get; set; }
         public IInsecure? InsecureRandom { get; set; }
         public IInsecureSeed? InsecureSeed { get; set; }
+        public IExit? Exit { get; set; }
         public IPreopens? Preopens { get; set; }
         public IIpNameLookup? IpNameLookup { get; set; }
         public IClient? HttpClient { get; set; }
