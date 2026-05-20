@@ -53,12 +53,7 @@ namespace Wacs.WASI.Preview3.Test
                 _output.WriteLine($"  export: {e.Name} ({e.Sort})");
         }
 
-        [Fact(Skip = "Phase 6: canon-async cooperative-yield not " +
-            "yet implemented. monotonic-clock's run() body awaits " +
-            "wait_for(MILLISECOND); the host's Task.Delay completes " +
-            "but the dispatcher has no Continuation/suspend/resume " +
-            "path to re-enter the guest after the await — Stack " +
-            "Switching (Phase 1) must land first.")]
+        [Fact]
         public void MonotonicClock_run_completes_without_trap()
         {
             var path = Wasip3FixtureHarness.FixturePath(

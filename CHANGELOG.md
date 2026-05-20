@@ -1,5 +1,57 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.50 — canon-lower-async function imports (monotonic-clock acceptance closes)
+
+Closes the monotonic-clock fixture acceptance. wit-component lowers
+`async func(p: u64)` imports as `(i64) -> i32` when the params fit
+in flat-args and the return is void — the u64 is passed directly,
+and the i32 return is a packed canonical-ABI status the guest
+decodes as `code = packed & 0xf, subtask = packed >> 4`. Status
+codes (per wit-bindgen rev 85d10eb's `subtask.rs`):
+
+```
+STATUS_STARTING            = 0
+STATUS_STARTED             = 1
+STATUS_RETURNED            = 2
+STATUS_STARTED_CANCELLED   = 3
+STATUS_RETURNED_CANCELLED  = 4
+```
+
+The permissive stub returned 0 (= STARTING) for the
+`[async-lower]wait-for/wait-until` slots, which made wit-bindgen-rt
+register a pending subtask and call `waitable.join` against a
+waitable-set that was never allocated.
+
+### Bindings
+
+- `wasi:clocks/monotonic-clock@0.3.0-rc-2026-03-15/[async-lower]wait-until`
+- `wasi:clocks/monotonic-clock@0.3.0-rc-2026-03-15/[async-lower]wait-for`
+
+Both sync-execute the existing host `WaitUntilAsync`/`WaitForAsync`
+via `GetAwaiter().GetResult()` and return
+`CanonAsyncStatusReturnedPacked = 2` (RETURNED with no subtask
+handle).
+
+### Note on encoding
+
+Earlier `wit-bindgen-rt` (e.g. 0.41 on crates.io) decoded the
+packed status as `result >> 30` (upper 2 bits). The current
+wit-bindgen (commit 85d10eb, used by all wasip3 testsuite
+fixtures) uses `& 0xf` for the code and `>> 4` for the subtask
+handle — same convention already in use for stream/future
+status returns. Verified directly against the cargo-checkout
+of `subtask.rs`.
+
+### `monotonic-clock` acceptance unskipped
+
+The `Fact(Skip = ...)` reason on
+`MonotonicClock_run_completes_without_trap` was previously
+"Phase 6 cooperative-yield" — that was a misattribution.
+Stack Switching itself is implemented in `Wacs.Core`
+(20/20 instruction tests pass). The actual gap was
+canon-lower-async function-import binding, which this commit
+closes.
+
 ## WACS.WASI.Preview3 0.1.49 — Phase 5 fixture acceptance opens (wall-clock, random)
 
 Extends WASIp3 vertical-slice acceptance beyond cli-hello to

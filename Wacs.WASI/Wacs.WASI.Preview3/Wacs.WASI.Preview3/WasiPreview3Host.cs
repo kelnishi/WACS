@@ -352,6 +352,35 @@ namespace Wacs.WASI.Preview3
                     MonotonicClock.WaitForAsync(
                         unchecked((ulong)howLong)).GetAwaiter().GetResult()));
 
+            // Canon-lower-async variants. wit-component lowers
+            // `async func(p: u64)` imports as `(i64) -> i32`
+            // when the params fit in flat-args and the return
+            // is void: u64 passed directly, packed status
+            // returned. Per the canonical-ABI ("await_result"
+            // in wit-bindgen-rt::async_support): status is
+            // upper 2 bits (>>30), call/subtask handle is
+            // lower 30 bits. STATUS_RETURNED = 2 signals the
+            // call completed synchronously with no pending
+            // subtask — the only state the guest accepts
+            // without further polling.
+            runtime.BindHostFunction(
+                (MonotonicClockModuleName, "[async-lower]wait-until"),
+                (Func<ExecContext, long, int>)((_, when) =>
+                {
+                    MonotonicClock.WaitUntilAsync(
+                        unchecked((ulong)when)).GetAwaiter().GetResult();
+                    return CanonAsyncStatusReturnedPacked;
+                }));
+
+            runtime.BindHostFunction(
+                (MonotonicClockModuleName, "[async-lower]wait-for"),
+                (Func<ExecContext, long, int>)((_, howLong) =>
+                {
+                    MonotonicClock.WaitForAsync(
+                        unchecked((ulong)howLong)).GetAwaiter().GetResult();
+                    return CanonAsyncStatusReturnedPacked;
+                }));
+
             // wasi:clocks/system-clock@0.3.0-rc-2026-03-15
             //   record instant { seconds: s64, nanoseconds: u32 }
             //   now: () -> instant
@@ -5403,6 +5432,28 @@ namespace Wacs.WASI.Preview3
                     "the host's stdio imports are invoked. Set it from " +
                     "ComponentInstance.AsyncDispatcher after instantiation.");
         }
+
+        // Canonical-ABI packed return for an [async-lower]<func>
+        // import that completed synchronously. Current
+        // wit-bindgen (commit 85d10eb, used by the wasip3
+        // fixtures) decodes `packed & 0xf` as the status code
+        // and `packed >> 4` as the subtask handle:
+        //
+        //   STATUS_STARTING            = 0
+        //   STATUS_STARTED             = 1
+        //   STATUS_RETURNED            = 2
+        //   STATUS_STARTED_CANCELLED   = 3
+        //   STATUS_RETURNED_CANCELLED  = 4
+        //
+        // For a sync-completed call with no in-flight subtask,
+        // the packed value is just `STATUS_RETURNED = 2`
+        // (upper 28 bits zero → no subtask handle).
+        //
+        // Note: earlier wit-bindgen-rt versions (e.g. 0.41 on
+        // crates.io) used `status >> 30` packing. The version
+        // shipping in the wasip3 fixture builds uses `& 0xf` —
+        // verified against `subtask.rs` at commit 85d10eb.
+        private const int CanonAsyncStatusReturnedPacked = 2;
 
         /// <summary>Wire-level WASI module name for stdout.</summary>
         public const string StdoutModuleName =
