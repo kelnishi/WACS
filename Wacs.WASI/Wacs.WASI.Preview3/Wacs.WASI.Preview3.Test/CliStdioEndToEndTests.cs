@@ -7,8 +7,6 @@
 
 using System;
 using System.IO;
-using System.Threading.Tasks;
-using Wacs.ComponentModel.Async;
 using Wacs.ComponentModel.Runtime;
 using Wacs.ComponentModel.Runtime.Parser;
 using Wacs.WASI.Preview3.Cli;
@@ -63,10 +61,10 @@ namespace Wacs.WASI.Preview3.Test
             using var stderr = new MemoryStream();
             var host = new WasiPreview3Host(new WasiPreview3HostBuilder
             {
-                // Empty stdin: the guest only drops the reader
-                // then awaits the completion future, which
-                // resolves Ok immediately.
-                Stdin = new EmptyStdin(),
+                // Empty stdin source: StreamBackedStdin's
+                // background drain hits EOF immediately, drops
+                // writable, fires the completion future Ok.
+                Stdin = new StreamBackedStdin(new MemoryStream(Array.Empty<byte>())),
                 Stdout = new StreamBackedSink(stdout),
                 Stderr = new StreamBackedSink(stderr),
             });
@@ -81,25 +79,6 @@ namespace Wacs.WASI.Preview3.Test
             // zero byte to stdout/stderr.
             Assert.Equal(new byte[] { 0 }, stdout.ToArray());
             Assert.Equal(new byte[] { 0 }, stderr.ToArray());
-        }
-
-        /// <summary>
-        /// Stdin that resolves the completion future Ok with no
-        /// bytes — for guests that drop the reader without
-        /// reading. The dispatcher gets an already-closed
-        /// stream and an already-resolved future.
-        /// </summary>
-        private sealed class EmptyStdin : IStdin
-        {
-            public (int streamHandle, int futureHandle, Task ReadCompletion)
-                ReadViaStream(AsyncDispatcher dispatcher)
-            {
-                var streamHandle = dispatcher.StreamNew(typeIdx: 0);
-                var futureHandle = dispatcher.FutureNew(typeIdx: 0);
-                dispatcher.StreamDropWritable(streamHandle);
-                dispatcher.FutureWrite(futureHandle, /* ok */ null);
-                return (streamHandle, futureHandle, Task.CompletedTask);
-            }
         }
     }
 }

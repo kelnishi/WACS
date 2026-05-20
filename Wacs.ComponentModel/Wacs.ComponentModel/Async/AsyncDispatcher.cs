@@ -562,6 +562,60 @@ namespace Wacs.ComponentModel.Async
             return read;
         }
 
+        /// <summary>
+        /// Blocking variant of <see cref="StreamReadToMemory"/>:
+        /// if no data is immediately available and the stream
+        /// hasn't been completed, block the calling CLR thread
+        /// on the buffer's channel-reader signal until either
+        /// at least one byte is available or the writer half is
+        /// dropped. Returns the number of bytes actually
+        /// transferred (0 only when the stream completed empty).
+        ///
+        /// <para>This is what the canon-lowered
+        /// <c>[async-lower][stream-read-N]&lt;fn&gt;</c> import
+        /// uses: wit-bindgen interprets <c>Completed(N)</c> as a
+        /// synchronous return, so the host blocking inside the
+        /// import call sidesteps the BLOCKED + waitable.join +
+        /// waitable-set.wait callback dance. Matches the model
+        /// the rest of the host already uses for sync-blocking
+        /// async-func imports (see clocks <c>wait-for</c>).</para>
+        /// </summary>
+        public int StreamReadToMemoryBlocking(
+            int streamHandle, MemoryInstance memory, uint ptr, int capacity)
+        {
+            if (capacity < 0)
+                throw new ArgumentOutOfRangeException(nameof(capacity));
+            if (capacity == 0) return 0;
+            var slot = GetStreamSlot(streamHandle, "stream.read");
+
+            // Fast path: already has buffered data.
+            int read = TryReadIntoMemory(slot, memory, ptr, capacity);
+            if (read > 0) return read;
+            if (slot.Buffer.IsCompleted) return 0;
+
+            // Slow path: block until data or completion.
+            var waitVT = slot.Buffer.Reader.WaitToReadAsync();
+            bool hasMore = waitVT.IsCompleted
+                ? waitVT.Result
+                : waitVT.AsTask().GetAwaiter().GetResult();
+            if (!hasMore) return 0;
+            return TryReadIntoMemory(slot, memory, ptr, capacity);
+        }
+
+        private static int TryReadIntoMemory(
+            StreamSlot slot, MemoryInstance memory, uint ptr, int capacity)
+        {
+            var dst = memory.AsSpan((int)ptr, capacity);
+            int read = 0;
+            for (int i = 0; i < capacity; i++)
+            {
+                if (!slot.Buffer.TryRead(out var b)) break;
+                dst[i] = b;
+                read++;
+            }
+            return read;
+        }
+
         /// <summary><c>canon stream.cancel-read t async?</c> —
         /// signals the stream that no further reads will arrive.
         /// The buffer keeps any unread items (writer may still call

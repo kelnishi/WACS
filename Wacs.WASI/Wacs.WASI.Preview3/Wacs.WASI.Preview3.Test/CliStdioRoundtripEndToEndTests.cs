@@ -62,18 +62,18 @@ namespace Wacs.WASI.Preview3.Test
 
             var payloadBytes = Encoding.UTF8.GetBytes(Payload);
             Assert.Equal(13, payloadBytes.Length);
+            var stdin = new MemoryStream(payloadBytes);
             using var stdout = new MemoryStream();
             using var stderr = new MemoryStream();
 
-            // Pre-buffer stdin synchronously so the guest's
-            // read sees all 13 bytes immediately. The default
-            // StreamBackedStdin drains on a background task,
-            // which races the guest's read and returns
-            // Completed(0) on the first call — wit-bindgen-rt
-            // then loops on `while Complete(_)`, hanging.
+            // StreamBackedStdin drains on a background task; the
+            // canon-lowered stream-read import blocks the CLR
+            // thread until at least one byte is buffered, so the
+            // background drain has a chance to push before the
+            // guest's read returns.
             var host = new WasiPreview3Host(new WasiPreview3HostBuilder
             {
-                Stdin = new BufferedStdin(payloadBytes),
+                Stdin = new StreamBackedStdin(stdin),
                 Stdout = new StreamBackedSink(stdout),
                 Stderr = new StreamBackedSink(stderr),
             });
@@ -86,33 +86,6 @@ namespace Wacs.WASI.Preview3.Test
 
             Assert.Equal(Payload, Encoding.UTF8.GetString(stdout.ToArray()));
             Assert.Equal(Payload, Encoding.UTF8.GetString(stderr.ToArray()));
-        }
-
-        /// <summary>
-        /// Synchronously-pre-filled stdin: pushes every byte
-        /// into the dispatcher's stream buffer before returning
-        /// the handles, then drops the writable end. The guest's
-        /// first read sees the full payload. Until the canon-
-        /// async BLOCKED + waitable-set-wait path is wired, this
-        /// is how a test feeds a fixed-size stdin without
-        /// racing the guest.
-        /// </summary>
-        private sealed class BufferedStdin : IStdin
-        {
-            private readonly byte[] _bytes;
-            public BufferedStdin(byte[] bytes) { _bytes = bytes; }
-
-            public (int streamHandle, int futureHandle, Task ReadCompletion)
-                ReadViaStream(AsyncDispatcher dispatcher)
-            {
-                var streamHandle = dispatcher.StreamNew(typeIdx: 0);
-                var futureHandle = dispatcher.FutureNew(typeIdx: 0);
-                for (int i = 0; i < _bytes.Length; i++)
-                    dispatcher.StreamTryWrite(streamHandle, _bytes[i]);
-                dispatcher.StreamDropWritable(streamHandle);
-                dispatcher.FutureWrite(futureHandle, /* ok */ null);
-                return (streamHandle, futureHandle, Task.CompletedTask);
-            }
         }
     }
 }

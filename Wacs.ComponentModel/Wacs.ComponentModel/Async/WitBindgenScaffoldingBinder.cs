@@ -380,6 +380,18 @@ namespace Wacs.ComponentModel.Async
 
             // [async-lower][stream-read-N]<funcname>(handle,
             //   ptr, cap) → (i32 status)
+            //
+            // Blocks the CLR thread when no data is buffered
+            // yet, matching the sync-completing convention the
+            // rest of the host already uses for async-func
+            // imports (clocks wait-for, etc). Returning
+            // Completed(0) on empty buffer would loop wit-
+            // bindgen-rt's `while StreamResult::Complete(_)`
+            // executor forever; the proper BLOCKED + callback-
+            // driven lift adapter is the correct refinement but
+            // also a much larger surface — sync-blocking is
+            // sound for the single-thread-per-component cases
+            // the wasip3 testsuite exercises.
             if (p.AsyncLower && p.CanonOp == "stream-read"
                 && p.TypeIdx != null)
             {
@@ -387,7 +399,7 @@ namespace Wacs.ComponentModel.Async
                     (ctx, handle, ptr, cap) =>
                     {
                         if (d.Memory == null) return 0;
-                        int read = d.StreamReadToMemory(
+                        int read = d.StreamReadToMemoryBlocking(
                             handle, d.Memory,
                             unchecked((uint)ptr), cap);
                         return PackStreamStatus(read, completed: true);

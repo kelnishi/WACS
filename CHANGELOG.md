@@ -1,5 +1,42 @@
 # Changelog
 
+## WACS.ComponentModel 0.8.28 — stream-read sync-blocking path (test shims retired)
+
+Stream-read now blocks the CLR thread inside the canon-lowered
+import when no data is immediately buffered, instead of
+returning `Completed(0)` and looping wit-bindgen-rt's executor
+forever. Removes the `BufferedStdin` / `EmptyStdin` shims
+cli-stdio-roundtrip and cli-stdio were using — both fixtures
+now pass against the production `StreamBackedStdin`.
+
+### `AsyncDispatcher.StreamReadToMemoryBlocking`
+
+New method. Fast-paths through `TryReadIntoMemory` (the
+existing non-blocking read), then on empty buffer with a still-
+open writer awaits `Buffer.Reader.WaitToReadAsync` and retries.
+Returns 0 only when the stream completed empty.
+
+### Why sync-blocking, not BLOCKED
+
+The canon-async spec's `BLOCKED` (`0xFFFFFFFF`) + `waitable.join`
++ `[callback][async-lift]` callback-driven export shape is the
+correct refinement and remains the long-term plan, but it's a
+substantial surface (callback-driven lift adapter, event
+encoding for STREAM_READ/STREAM_WRITE/FUTURE_*/SUBTASK, per-
+waitable TaskCompletionSource registries). Sync-blocking
+matches the model the rest of the host already uses for
+async-func imports (clocks `wait-for` via
+`Task.GetAwaiter().GetResult()`) and is sound for the
+single-thread-per-component cases the wasip3 testsuite
+exercises.
+
+### `WitBindgenScaffoldingBinder` change
+
+`[async-lower][stream-read-N]<fn>` routes to the blocking
+variant. Stream-write path is unchanged — `Completed(N)` for
+N <= remaining buffer capacity, no blocking needed for the
+buffer sizes the testsuite uses.
+
 ## WACS.WASI.Preview3 0.1.53 — remaining cli fixtures (run-with-err, cli-terminal, cli-stdio-roundtrip, cli-stdio)
 
 Closes the last four cli fixtures from the wasip3 testsuite —
