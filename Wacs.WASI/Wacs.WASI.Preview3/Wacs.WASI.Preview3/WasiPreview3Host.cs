@@ -604,6 +604,67 @@ namespace Wacs.WASI.Preview3
                 (Func<ExecContext, int, int>)((_, self) =>
                     RequireResponse(self).GetStatusCode()));
 
+            // ---- request.new / response.new (Slice II) ------------
+            //
+            // [static]request.new(
+            //   headers: headers,
+            //   contents: option<stream<u8>>,
+            //   trailers: future<result<option<trailers>, error-code>>,
+            //   options: option<request-options>
+            // ) -> tuple<request, future<result<_, error-code>>>
+            //
+            // Flat-lowered params: headers(1) + option<stream<u8>>(2)
+            //   + trailers-future(1) + option<options>(2) = 6, plus
+            //   retArea(1) = 7 wire params. Return tuple is 2 i32
+            //   slots > MAX_FLAT_RESULTS → retArea (8 bytes 4-aligned).
+            //
+            // v0 caveat: the impl ignores the body-stream and
+            // trailers-future args (passes null Body / Trailers
+            // to the Request constructor). The wire-side handles
+            // are accepted and the completion future is allocated;
+            // full stream-bridge integration (wiring the
+            // StreamBuffer<byte> to System.IO.Stream and resolving
+            // the completion future when the body finishes) lands
+            // in a follow-up slice.
+
+            runtime.BindHostFunction(
+                (HttpTypesModuleName, "[static]request.new"),
+                (Action<ExecContext,
+                    int, int, int, int, int, int, int>)(
+                    (_, headersH,
+                     contentsOptDisc, contentsStreamH,
+                     trailersFutureH,
+                     optsOptDisc, optsH,
+                     retptr) =>
+                        InvokeRequestNew(
+                            headersH,
+                            contentsOptDisc, contentsStreamH,
+                            trailersFutureH,
+                            optsOptDisc, optsH,
+                            retptr)));
+
+            // [static]response.new(
+            //   headers: headers,
+            //   contents: option<stream<u8>>,
+            //   trailers: future<result<option<trailers>, error-code>>
+            // ) -> tuple<response, future<result<_, error-code>>>
+            //
+            // 5 wire params: headers + option<stream>(2) +
+            //   trailers-future + retArea.
+            runtime.BindHostFunction(
+                (HttpTypesModuleName, "[static]response.new"),
+                (Action<ExecContext,
+                    int, int, int, int, int>)(
+                    (_, headersH,
+                     contentsOptDisc, contentsStreamH,
+                     trailersFutureH,
+                     retptr) =>
+                        InvokeResponseNew(
+                            headersH,
+                            contentsOptDisc, contentsStreamH,
+                            trailersFutureH,
+                            retptr)));
+
             // ---- get-headers: own<fields> (Slice DD) ---------------
             //
             // Allocates a fresh fields handle pointing at the
@@ -3670,6 +3731,99 @@ namespace Wacs.WASI.Preview3
                     $"wasi:http/types.request: handle {handle} " +
                     "is not allocated.");
             return req;
+        }
+
+        // ---- request.new / response.new (Slice II) -----------------
+
+        /// <summary>Invoke <c>[static]request.new(headers,
+        /// contents, trailers, options)</c>. v0 ignores the
+        /// body-stream and trailers-future args (passes null
+        /// Body / Trailers to the impl); the wire layer
+        /// allocates the request handle and a fresh completion
+        /// future handle.
+        ///
+        /// <para>Retptr layout (8 bytes 4-aligned):</para>
+        /// <code>
+        /// +0..4: request-handle (i32)
+        /// +4..8: completion-future-handle (i32)
+        /// </code>
+        /// </summary>
+        internal void InvokeRequestNew(
+            int headersHandle,
+            int contentsOptDisc, int contentsStreamHandle,
+            int trailersFutureHandle,
+            int optsOptDisc, int optsHandle,
+            int retptr)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateRequestResponseNewRetptr(retptr, memory,
+                "wasi:http/types.request.new");
+
+            var fields = RequireFields(headersHandle);
+            IRequestOptions? opts = null;
+            if (optsOptDisc != 0)
+                opts = RequireRequestOptions(optsHandle);
+
+            // v0: body-stream and trailers-future are accepted
+            // but not bridged into the Request impl. Stream-
+            // bridging integration is a follow-up slice.
+            var request = new Request(fields,
+                body: null, trailers: null, options: opts);
+            int requestHandle = RequestHandles.Allocate(request);
+
+            // Allocate a fresh completion future. The future
+            // stays pending in v0; the eventual stream-bridge
+            // slice resolves it when the body+trailers have
+            // been fully sent.
+            int completionFuture = RequireDispatcher()
+                .FutureNew(typeIdx: 0);
+
+            var dest = memory.AsSpan(retptr, 8);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(dest.Slice(0), requestHandle);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(dest.Slice(4), completionFuture);
+        }
+
+        /// <summary>Invoke <c>[static]response.new(headers,
+        /// contents, trailers)</c>. Same v0 contract as
+        /// request.new — wire-side handles allocated, body /
+        /// trailers / completion-future bridging deferred.</summary>
+        internal void InvokeResponseNew(
+            int headersHandle,
+            int contentsOptDisc, int contentsStreamHandle,
+            int trailersFutureHandle,
+            int retptr)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateRequestResponseNewRetptr(retptr, memory,
+                "wasi:http/types.response.new");
+
+            var fields = RequireFields(headersHandle);
+            var response = new Response(fields,
+                body: null, trailers: null);
+            int responseHandle = ResponseHandles.Allocate(response);
+
+            int completionFuture = RequireDispatcher()
+                .FutureNew(typeIdx: 0);
+
+            var dest = memory.AsSpan(retptr, 8);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(dest.Slice(0), responseHandle);
+            System.Buffers.Binary.BinaryPrimitives
+                .WriteInt32LittleEndian(dest.Slice(4), completionFuture);
+        }
+
+        private static void ValidateRequestResponseNewRetptr(
+            int retptr,
+            Wacs.Core.Runtime.Types.MemoryInstance memory,
+            string label)
+        {
+            if (retptr < 0 || (retptr & 0x3) != 0
+                || retptr + 8 > memory.Data.Length)
+                throw new InvalidOperationException(
+                    $"{label}: retptr 0x{retptr:X8} misaligned " +
+                    "or out of range (needs 8 bytes 4-aligned).");
         }
 
         // ---- request.get-options (Slice EE) -------------------------

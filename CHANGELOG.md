@@ -1,5 +1,66 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.37 — request.new + response.new static factories (Phase 5 Slice II)
+
+Wires `[static]request.new` and `[static]response.new` — the
+heavy multi-arg constructors that take headers + body stream +
+trailers future + (request) options, and return
+`tuple<request|response, future<result<_, error-code>>>`.
+
+### Wire shapes
+
+```
+[static]request.new(
+  headers: headers,
+  contents: option<stream<u8>>,
+  trailers: future<result<option<trailers>, error-code>>,
+  options: option<request-options>
+) -> tuple<request, future<result<_, error-code>>>
+
+  Args: 6 flat slots (headers + option<stream>(2) +
+        trailers-future + option<options>(2)) + retArea = 7
+  Return: tuple<i32 request-handle, i32 future-handle>
+          = 8 bytes 4-aligned retptr (>1 flat result → retArea)
+```
+
+`response.new` is identical minus the options arg (5 wire
+params).
+
+### v0 caveat
+
+The impl ignores the body-stream and trailers-future args
+(passes null Body / Trailers to the Request/Response
+constructor). The wire-side handles are accepted and the
+completion future is allocated through
+`dispatcher.FutureNew()`, but the future stays pending in
+v0 — full stream-bridge integration (wiring the
+StreamBuffer<byte> to System.IO.Stream and resolving the
+completion future when the body finishes) lands in a follow-up
+slice.
+
+This is enough to make spec-compliant wire shapes available to
+guests; the body/trailers data flow is left for the follow-up
+because it depends on the cooperative-yield refactor (so the
+completion future can resolve at the right moment in the
+canon-async lifecycle).
+
+### Test coverage
+
+6 tests in `RequestResponseNewWireTests.cs`:
+- `BindToRuntime` registers both static factories.
+- `request.new` allocates a request handle bound to the same
+  IFields impl from the input headers handle, with null Body
+  / Trailers / Options.
+- `request.new` with options threads the IRequestOptions impl
+  into the Request via the impl-sharing pattern.
+- `request.new` completion future is observably pending
+  (FutureReadAsync's task isn't completed).
+- `response.new` allocates a response handle with default
+  status code (200), same Fields impl, null Body/Trailers.
+- Both constructors throw on misaligned retptr.
+
+347/347 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.36 — result<response, error-code> 40-byte 8-aligned + typed payloads (Phase 5 Slice HH)
 
 Slice GG's 32-byte 4-aligned retptr layout was wrong: the
