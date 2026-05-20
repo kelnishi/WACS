@@ -67,9 +67,12 @@ namespace Wacs.WASI.Preview3.Test
 
             // Stream is allocated through the dispatcher.
             Assert.NotNull(dispatcher.GetByteStreamBuffer(streamHandle));
-            // Trailers future is pending.
+            // With null Body, Slice PP resolves the trailers
+            // future immediately (synchronously) with the impl's
+            // null trailers — the "none" arm.
             var task = dispatcher.FutureReadAsync(trailersFuture);
-            Assert.False(task.IsCompleted);
+            Assert.True(task.IsCompletedSuccessfully);
+            Assert.Null(task.Result);
         }
 
         [Fact]
@@ -92,8 +95,11 @@ namespace Wacs.WASI.Preview3.Test
             Assert.True(trailersFuture > 0);
 
             Assert.NotNull(dispatcher.GetByteStreamBuffer(streamHandle));
+            // Slice PP: null Body resolves the trailers future
+            // immediately with the impl's null trailers.
             var task = dispatcher.FutureReadAsync(trailersFuture);
-            Assert.False(task.IsCompleted);
+            Assert.True(task.IsCompletedSuccessfully);
+            Assert.Null(task.Result);
         }
 
         [Fact]

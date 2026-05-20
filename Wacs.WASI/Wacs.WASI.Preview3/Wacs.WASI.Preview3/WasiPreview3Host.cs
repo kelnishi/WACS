@@ -4057,7 +4057,9 @@ namespace Wacs.WASI.Preview3
         /// writes the tuple at retptr. When the request has a
         /// non-null Body Stream, spawns a background pump that
         /// reads from Body and writes into the new
-        /// StreamBuffer (closing it on EOF).</summary>
+        /// StreamBuffer (closing it on EOF). When the pump
+        /// finishes the trailers future is resolved with
+        /// <c>IRequest.Trailers</c> (or null for none).</summary>
         internal void InvokeRequestConsumeBody(
             int thisHandle, int resFutureHandle, int retptr)
         {
@@ -4071,14 +4073,16 @@ namespace Wacs.WASI.Preview3
             // resource-drop binding handles ownership.
             var req = RequireRequest(thisHandle);
             WriteConsumeBodyHandles(
-                memory.AsSpan(retptr, 8), req.Body);
+                memory.AsSpan(retptr, 8),
+                req.Body, req.Trailers);
         }
 
         /// <summary>Invoke
         /// <c>[static]response.consume-body(this, res)</c>.
         /// Same shape as request.consume-body — pumps the
         /// response's Body into the returned StreamBuffer when
-        /// non-null.</summary>
+        /// non-null and resolves the trailers future on
+        /// completion.</summary>
         internal void InvokeResponseConsumeBody(
             int thisHandle, int resFutureHandle, int retptr)
         {
@@ -4088,18 +4092,23 @@ namespace Wacs.WASI.Preview3
 
             var resp = RequireResponse(thisHandle);
             WriteConsumeBodyHandles(
-                memory.AsSpan(retptr, 8), resp.Body);
+                memory.AsSpan(retptr, 8),
+                resp.Body, resp.Trailers);
         }
 
         // Allocate the body stream + trailers future, write them
         // as a tuple at offset 0 of `dest` (8 bytes). When
         // `bodySource` is non-null, spawns a background pump
         // task that reads bytes from the Stream and writes them
-        // into the StreamBuffer until EOF, then completes it.
-        // The trailers future stays pending — IRequest.Trailers
-        // bridging is a separate slice.
+        // into the StreamBuffer until EOF, then completes it
+        // and resolves the trailers future with the impl's
+        // trailers IFields (or null for the none arm). On
+        // pump exception the trailers future faults — guest
+        // readers observe the error rather than a "got trailers
+        // = none" success.
         private void WriteConsumeBodyHandles(
-            Span<byte> dest, System.IO.Stream? bodySource)
+            Span<byte> dest, System.IO.Stream? bodySource,
+            IFields? trailers)
         {
             var dispatcher = RequireDispatcher();
             int streamHandle = dispatcher.StreamNew(typeIdx: 0);
@@ -4113,27 +4122,48 @@ namespace Wacs.WASI.Preview3
             {
                 var buffer = dispatcher.GetByteStreamBuffer(streamHandle);
                 if (buffer != null)
-                    _ = PumpBodyAsync(bodySource, buffer);
+                    _ = PumpBodyAndResolveTrailersAsync(
+                        bodySource, buffer,
+                        dispatcher, trailersFuture, trailers);
+                else
+                    // Stream slot vanished out from under us;
+                    // close the trailers future cleanly.
+                    dispatcher.FutureWrite(trailersFuture, trailers);
             }
             else
             {
                 // No body — close the buffer immediately so the
                 // guest reading the stream observes EOF on the
-                // first read.
+                // first read, and resolve the trailers future
+                // synchronously since there's no pump to wait
+                // for.
                 dispatcher.GetByteStreamBuffer(streamHandle)?.Complete();
+                dispatcher.FutureWrite(trailersFuture, trailers);
             }
         }
 
         /// <summary>Pump bytes from <paramref name="source"/>
         /// into <paramref name="dest"/> until source EOF, then
-        /// Complete() the buffer. Runs as a fire-and-forget
-        /// background task — the caller doesn't await it.
-        /// Exceptions during reading complete the buffer with
-        /// whatever bytes were already drained.</summary>
-        private static async System.Threading.Tasks.Task PumpBodyAsync(
-            System.IO.Stream source,
-            Wacs.ComponentModel.Async.StreamBuffer<byte> dest)
+        /// Complete() the buffer and resolve the trailers
+        /// future with <paramref name="trailers"/>. Runs as a
+        /// fire-and-forget background task — the caller
+        /// doesn't await it.
+        ///
+        /// <para>Exception handling: a body read failure leaves
+        /// already-drained bytes visible to the guest, completes
+        /// the buffer to signal EOF, and faults the trailers
+        /// future via TryCancel so a guest awaiting the trailers
+        /// observes the failure rather than a "none" trailers
+        /// arm.</para>
+        /// </summary>
+        private static async System.Threading.Tasks.Task
+            PumpBodyAndResolveTrailersAsync(
+                System.IO.Stream source,
+                Wacs.ComponentModel.Async.StreamBuffer<byte> dest,
+                Wacs.ComponentModel.Async.AsyncDispatcher dispatcher,
+                int trailersFuture, IFields? trailers)
         {
+            bool faulted = false;
             try
             {
                 byte[] buf = new byte[4096];
@@ -4149,13 +4179,27 @@ namespace Wacs.WASI.Preview3
             }
             catch
             {
-                // Swallow — we close the buffer below to signal
-                // EOF; partial body bytes already drained stay
-                // visible to the guest reader.
+                faulted = true;
             }
             finally
             {
                 dest.Complete();
+                if (faulted)
+                {
+                    // Cancel the future without dropping the
+                    // handle so a guest already awaiting it
+                    // observes the cancellation; FutureDropReadable
+                    // would remove the handle from the table and
+                    // turn subsequent reads into "handle not
+                    // allocated" instead of "future was cancelled".
+                    if (dispatcher.Futures.Get(trailersFuture) is
+                        Wacs.ComponentModel.Async.FutureCell<object?> cell)
+                        cell.TrySetCanceled();
+                }
+                else
+                {
+                    dispatcher.FutureWrite(trailersFuture, trailers);
+                }
             }
         }
 

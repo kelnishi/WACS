@@ -1,5 +1,51 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.44 — consume-body trailers future resolution (Phase 5 Slice PP)
+
+Closes the trailers-side caveat from Slice JJ. The trailers
+future returned by `consume-body` now resolves with the impl's
+`IRequest.Trailers` / `IResponse.Trailers` value (or null for
+the none arm) once the body pump finishes. Three resolution
+paths:
+
+```
+null Body                  → resolve synchronously with trailers
+                              at consume-body call time
+non-null Body, normal EOF  → pump resolves on Stream EOF
+non-null Body, pump throw  → pump cancels the future cell
+                              (TrySetCanceled) without dropping
+                              the handle, so guests already
+                              awaiting observe the cancellation
+```
+
+The cancel-without-drop path is important: `FutureDropReadable`
+both cancels AND removes the handle from the dispatcher's
+table, which turns subsequent `future.read` into "handle not
+allocated". Reaching into `dispatcher.Futures.Get(...)` as a
+`FutureCell<object?>` and calling `TrySetCanceled` directly
+keeps the handle alive so the cancellation surfaces as a
+`TaskCanceledException` on read.
+
+### Test coverage
+
+5 tests in `ConsumeBodyTrailersFutureTests.cs`:
+- Null Body → trailers future resolves immediately with null.
+- Body + IRequest.Trailers → future resolves with the same
+  IFields instance (`Assert.Same`) after body drain.
+- Body + null Trailers → future resolves with null after body
+  drain.
+- Synthetic body-read exception → future cancels (await
+  yields `TaskCanceledException`).
+- response.consume-body trailers round-trip mirrors the
+  request version.
+
+Two existing JJ tests in `ConsumeBodyWireTests.cs` updated:
+the null-Body cases were asserting `task.IsCompleted == false`
+(future stays pending), which is no longer true — they now
+assert `task.IsCompletedSuccessfully` with `Result == null`.
+
+405/405 Preview3 tests green.
+
 ## WACS.WASI.Preview3 0.1.43 — consume-body Body→StreamBuffer pump (Phase 5 Slice OO)
 
 Closes Slice JJ's "body data doesn't flow into the returned
