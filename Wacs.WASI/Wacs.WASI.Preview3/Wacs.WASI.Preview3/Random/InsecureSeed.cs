@@ -18,30 +18,44 @@ namespace Wacs.WASI.Preview3.Random
     /// nomenclature — the spec actually recommends seeding from
     /// the host's CSPRNG for unpredictability across guest
     /// restarts, which is what the default impl does.
+    ///
+    /// <para>Spec contract: "meant to be only called once. Any
+    /// subsequent calls should return the same value." Implementors
+    /// MUST memoize the first draw and return it on every
+    /// subsequent call within the same component instance.</para>
     /// </summary>
     public interface IInsecureSeed
     {
         /// <summary><c>get-insecure-seed: func() -> tuple&lt;u64,
-        /// u64&gt;</c>.</summary>
+        /// u64&gt;</c>. Idempotent per component-instance lifetime.
+        /// </summary>
         (ulong, ulong) GetInsecureSeed();
     }
 
     /// <summary>
     /// Default <see cref="IInsecureSeed"/> implementation backed
-    /// by <see cref="RandomNumberGenerator"/>. Class is named
-    /// <c>InsecureSeedSource</c> rather than <c>InsecureSeed</c>
-    /// to avoid the C# constructor-name clash with
-    /// <see cref="IInsecureSeed.GetInsecureSeed"/>.
+    /// by <see cref="RandomNumberGenerator"/>. The first call
+    /// draws 128 bits of CSPRNG entropy; subsequent calls return
+    /// the cached value per the spec's idempotency rule.
     /// </summary>
     public sealed class InsecureSeedSource : IInsecureSeed
     {
+        private (ulong, ulong)? _seed;
+        private readonly object _lock = new object();
+
         public (ulong, ulong) GetInsecureSeed()
         {
-            Span<byte> buf = stackalloc byte[16];
-            RandomNumberGenerator.Fill(buf);
-            return (
-                BitConverter.ToUInt64(buf.Slice(0, 8)),
-                BitConverter.ToUInt64(buf.Slice(8, 8)));
+            if (_seed is { } s) return s;
+            lock (_lock)
+            {
+                if (_seed is { } s2) return s2;
+                Span<byte> buf = stackalloc byte[16];
+                RandomNumberGenerator.Fill(buf);
+                _seed = (
+                    BitConverter.ToUInt64(buf.Slice(0, 8)),
+                    BitConverter.ToUInt64(buf.Slice(8, 8)));
+                return _seed.Value;
+            }
         }
     }
 }

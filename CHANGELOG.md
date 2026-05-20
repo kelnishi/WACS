@@ -1,5 +1,45 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.49 — Phase 5 fixture acceptance opens (wall-clock, random)
+
+Extends WASIp3 vertical-slice acceptance beyond cli-hello to
+two of the smallest async-run() fixtures from
+`Spec.Test/wasi/tests/rust/wasm32-wasip3/src/bin/`:
+
+- `wall-clock` — exercises `wasi:clocks/system-clock::now` +
+  `get-resolution`. No streams, no waits. 230 ms.
+- `random` — exercises all three `wasi:random/*` interfaces
+  (`random`, `insecure`, `insecure-seed`). All five host
+  imports cover the guest's run() body. 250 ms.
+
+### `InsecureSeedSource` memoization (spec-compliance fix)
+
+`wasi:random/insecure-seed::get-insecure-seed` is "meant to be
+only called once. Any subsequent calls should return the same
+value." Our default `InsecureSeedSource` was drawing fresh
+CSPRNG bytes on every call. The random fixture's
+`assert_eq!(seed, get_insecure_seed())` then panicked, and
+because our permissive stub for `wasi:cli/exit@0.2.0/exit`
+returns from a noreturn import, the guest's abort path
+spun forever instead of terminating. Fixed by memoizing the
+first draw per component-instance lifetime.
+
+### `Wasip3FixtureHarness` extract
+
+Pulls the cli-hello-style "instantiate-with-real-host-plus-
+permissive-stubs" driver into a shared static helper so new
+fixture-acceptance tests are ~30 LOC instead of ~150.
+
+### `monotonic-clock` deferred (Phase 6)
+
+The monotonic-clock fixture awaits
+`monotonic_clock::wait_for(1 * MILLISECOND)`; the host's
+`Task.Delay` completes but the dispatcher has no
+Continuation / suspend / resume path to re-enter the guest
+after the await — Stack Switching (Phase 1 of the plan) must
+land before the canon-async cooperative-yield path closes.
+Test is `[Fact(Skip = ...)]` with the gap-reason inlined.
+
 ## WACS.ComponentModel 0.8.27 — cli-hello acceptance closes
 
 Closes the WASIp3 Phase 4 vertical-slice acceptance:
