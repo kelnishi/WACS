@@ -132,10 +132,117 @@ namespace Wacs.ComponentModel.Async
                 var del = TryBuildDelegate(parsed.Value, dispatcher);
                 if (del == null) { skipped++; continue; }
 
+                if (TraceEnabled)
+                    del = WrapForTrace(del, parsed.Value.CanonOp,
+                        parsed.Value.AsyncLower);
                 runtime.BindHostFunction(id, del);
                 bound++;
             }
             return new BindResult(bound, skipped, unrecognized);
+        }
+
+        // Pack a sync-completion status for stream.read/.write
+        // per the canonical-ABI return convention. Layout (per
+        // component-model 0.3.0-rc): the low 4 bits carry the
+        // status code (0 = COMPLETED, 1 = DROPPED, 2 =
+        // CANCELLED, 3 = STARTED, etc.) and the upper 28 bits
+        // carry the count of items transferred. 0xFFFFFFFF is
+        // the BLOCKED sentinel (no transfer; will signal via
+        // task/waitable later).
+        private static int PackStreamStatus(int count, bool completed)
+        {
+            // STATUS_COMPLETED = 0; we OR in the count<<4.
+            return (count << 4) | 0;
+        }
+
+        // ----- Diagnostic call-trace --------------------------
+        // Optional per-op call counter, enabled by setting
+        // WACS_TRACE_SCAFFOLD=1. Lets the cli-hello diagnostic
+        // test surface which scaffolding helper a hung
+        // wit-bindgen-rt is spinning in.
+        private static readonly bool TraceEnabled =
+            Environment.GetEnvironmentVariable("WACS_TRACE_SCAFFOLD") == "1";
+
+        // Exposed for ShimModuleRecognizer to share the same
+        // counter map — a single trace covers both the
+        // wit-bindgen-rt scaffolding and the canon-async shim
+        // bindings.
+        internal static readonly bool TraceShims = TraceEnabled;
+
+        private static readonly Dictionary<string, int> _counts =
+            new Dictionary<string, int>();
+        private static readonly object _countsLock = new object();
+
+        public static IReadOnlyDictionary<string, int> SnapshotTrace()
+        {
+            lock (_countsLock)
+                return new Dictionary<string, int>(_counts);
+        }
+
+        public static void ResetTrace()
+        {
+            lock (_countsLock) _counts.Clear();
+        }
+
+        private static void Tick(string key)
+        {
+            lock (_countsLock)
+            {
+                _counts.TryGetValue(key, out var n);
+                _counts[key] = n + 1;
+            }
+        }
+
+        // Same wrap as WrapForTrace but for shim-bound
+        // canon-async delegates. Single shared counter map.
+        internal static Delegate WrapForShimTrace(
+            Delegate inner, string opName)
+        {
+            return WrapDelegate(inner, "shim:" + opName);
+        }
+
+        // Wrap an already-built delegate with a counter
+        // tick. Preserves the runtime's expected signature
+        // type by switching on the concrete Delegate shape.
+        private static Delegate WrapForTrace(
+            Delegate inner, string op, bool asyncLower)
+        {
+            var key = asyncLower ? "[async-lower]" + op : op;
+            return WrapDelegate(inner, key);
+        }
+
+        private static Delegate WrapDelegate(Delegate inner, string key)
+        {
+            switch (inner)
+            {
+                case Action<ExecContext> a0:
+                    return (Action<ExecContext>)(c =>
+                        { Tick(key); a0(c); });
+                case Action<ExecContext, int> a1:
+                    return (Action<ExecContext, int>)((c, x) =>
+                        { Tick(key); a1(c, x); });
+                case Action<ExecContext, int, int> a2:
+                    return (Action<ExecContext, int, int>)((c, x, y) =>
+                        { Tick(key); a2(c, x, y); });
+                case Func<ExecContext, int> f0:
+                    return (Func<ExecContext, int>)(c =>
+                        { Tick(key); return f0(c); });
+                case Func<ExecContext, long> fL0:
+                    return (Func<ExecContext, long>)(c =>
+                        { Tick(key); return fL0(c); });
+                case Func<ExecContext, int, int> f1:
+                    return (Func<ExecContext, int, int>)((c, x) =>
+                        { Tick(key); return f1(c, x); });
+                case Func<ExecContext, int, int, int> f2:
+                    return (Func<ExecContext, int, int, int>)((c, x, y) =>
+                        { Tick(key); return f2(c, x, y); });
+                case Func<ExecContext, int, int, int, int> f3:
+                    return (Func<ExecContext, int, int, int, int>)(
+                        (c, x, y, z) =>
+                        { Tick(key); return f3(c, x, y, z); });
+                default:
+                    return inner;
+            }
         }
 
         /// <summary>
@@ -240,27 +347,70 @@ namespace Wacs.ComponentModel.Async
 
         // Build the host-side delegate for a parsed scaffold
         // entry. Returns null when the shape isn't currently
-        // supported (the async-lower wrappers + typed-payload
-        // task-return entries land in follow-up slices).
+        // supported (the future-side async-lower wrappers
+        // need typed memory marshaling that lands in a
+        // follow-up slice).
         private static Delegate? TryBuildDelegate(
             ParsedScaffold p, AsyncDispatcher d)
         {
-            // The [async-lower][<op>] wrappers start a host
-            // async call and return a future-handle the
-            // guest polls. v0 doesn't have the canon-async
-            // lift adapter for outbound calls — skip and
-            // surface as Skipped.
+            // [async-lower][stream-write-N]<funcname>(handle,
+            //   ptr, len) → (i32 status)
+            //
+            // wit-bindgen-rt's start_write hook for an
+            // outbound stream write. Routes to the
+            // dispatcher's StreamWriteFromMemory which copies
+            // bytes from the wasm's linear memory into the
+            // stream's StreamBuffer<byte>. Return value: the
+            // bytes-written count (synchronous-complete in
+            // wit-bindgen-rt's protocol; high bit set would
+            // signal "blocked, poll").
+            if (p.AsyncLower && p.CanonOp == "stream-write"
+                && p.TypeIdx != null)
+            {
+                return (Func<ExecContext, int, int, int, int>)(
+                    (ctx, handle, ptr, len) =>
+                    {
+                        if (d.Memory == null) return 0;
+                        int written = d.StreamWriteFromMemory(
+                            handle, d.Memory,
+                            unchecked((uint)ptr), len);
+                        return PackStreamStatus(written, completed: true);
+                    });
+            }
+
+            // [async-lower][stream-read-N]<funcname>(handle,
+            //   ptr, cap) → (i32 status)
+            if (p.AsyncLower && p.CanonOp == "stream-read"
+                && p.TypeIdx != null)
+            {
+                return (Func<ExecContext, int, int, int, int>)(
+                    (ctx, handle, ptr, cap) =>
+                    {
+                        if (d.Memory == null) return 0;
+                        int read = d.StreamReadToMemory(
+                            handle, d.Memory,
+                            unchecked((uint)ptr), cap);
+                        return PackStreamStatus(read, completed: true);
+                    });
+            }
+
+            // The future-side async-lower wrappers need typed
+            // memory marshaling that we don't have yet — the
+            // future's element type drives how many bytes to
+            // read/write from the buffer at `ptr`. Land in a
+            // follow-up.
             if (p.AsyncLower) return null;
 
             switch (p.CanonOp)
             {
-                // task-return: bind the no-payload form
-                // (return-disc-only). Typed-payload variants
-                // come from the canon section, not the
-                // wit-bindgen scaffolding.
+                // task-return: forwards the wasm-side return
+                // value (a single i32 disc for cli-hello's
+                // result<_, _> return) into the dispatcher's
+                // current-task slot. The lift adapter surfaces
+                // it as the host's await result.
                 case "task-return":
-                    return (Action<ExecContext, int>)((_, _) =>
-                        d.TaskReturn(null!, null));
+                    return (Action<ExecContext, int>)((_, disc) =>
+                        d.TaskReturn(null!, disc));
                 case "task-cancel":
                     return (Action<ExecContext>)(_ =>
                         d.TaskCancel(null!));
@@ -330,6 +480,31 @@ namespace Wacs.ComponentModel.Async
                 case "waitable-join":
                     return (Action<ExecContext, int, int>)((_, w, t) =>
                         d.WaitableJoin(w, t));
+                // waitable-set-poll: (set, mem-ptr) → (i32
+                // event-id). Calls the dispatcher's sync poll
+                // — non-blocking check for any deliverable
+                // waitable. mem-ptr is where the spec wants
+                // the deliverable event written; we ignore it
+                // for v0 since the return value carries the
+                // member-handle directly.
+                case "waitable-set-poll":
+                    return (Func<ExecContext, int, int, int>)(
+                        (_, setHandle, _) =>
+                            d.WaitableSetPoll(null!, setHandle, 0, false));
+
+                // context-get/-set — typeIdx is the slot
+                // index. The dispatcher's signatures take a
+                // Value (struct); for the integer-slot pattern
+                // wit-bindgen-rt uses, we route through i32.
+                case "context-get":
+                    if (p.TypeIdx == null) return null;
+                    return (Func<ExecContext, int>)(_ =>
+                        d.ContextGet(p.TypeIdx.Value).Data.Int32);
+                case "context-set":
+                    if (p.TypeIdx == null) return null;
+                    return (Action<ExecContext, int>)((_, v) =>
+                        d.ContextSet(p.TypeIdx.Value,
+                            new Wacs.Core.Runtime.Value(v)));
 
                 default:
                     return null;

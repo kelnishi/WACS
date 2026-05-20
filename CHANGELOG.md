@@ -1,5 +1,55 @@
 # Changelog
 
+## WACS.ComponentModel 0.8.27 — cli-hello acceptance closes
+
+Closes the WASIp3 Phase 4 vertical-slice acceptance:
+`Wacs.WASI.Preview3.Test.CliHelloEndToEndTests.CliHello_writes_expected_stdout`
+runs `cli-hello.component.wasm`'s async `run()` end-to-end and
+captures the expected `"hello, wasip3\n"` stdout (110 ms).
+
+### `WitBindgenScaffoldingBinder` completions
+
+Adds the helpers the cli-hello flow exercises and that earlier
+landed as skipped/unknown:
+
+- `waitable-set-poll`: routes to `dispatcher.WaitableSetPoll`
+  (non-blocking; mem-ptr ignored at v0).
+- `context-get` / `context-set`: routes through `Value.Int32`
+  marshaling so the i32 wit-bindgen scaffolding shape matches
+  the dispatcher's `Value`-typed slots.
+- `task-return`: now forwards the i32 disc argument to the
+  dispatcher (was previously dropped on the floor).
+
+### Packed stream-status return convention
+
+`[async-lower][stream-{read,write}-N]` was returning the raw
+transferred-bytes count. wit-bindgen-rt interprets the return
+value as the canonical-ABI packed status — low 4 bits = code
+(0 = COMPLETED), upper 28 bits = count. A bare count made the
+guest's `wit_stream::write_all` re-poll forever, which is what
+caused the cli-hello hang. Status is now packed via the new
+`PackStreamStatus` helper.
+
+### Diagnostic tracing
+
+Optional `WACS_TRACE_SCAFFOLD=1` env hook tallies each
+scaffolding helper and shim-bound canon-async op as it's
+invoked. The cli-hello diagnostic test
+(`Invocation_attempt_via_async_lift`) dumps the counts when
+the invocation times out — the first concrete signal of which
+helper is hot. The trace also covers shim-bound canon ops via
+`ShimModuleRecognizer` so a single map covers both layers.
+
+### `ComponentInstance.InvokeCoreAsyncLift`
+
+New entry point that resolves the `[async-lift]<iface>#<fn>`
+core export, wraps the invocation in
+`AsyncLiftAdapter.InvokeAsync`, and surfaces the dispatcher's
+`task.return` value. Bridges the gap until canon-async lifts
+are reachable from the component-level `Invoke(...)` API
+(which expects `Sort=Func`, while async-lifted exports are
+`Sort=Instance`).
+
 ## WACS.ComponentModel 0.8.26 — wit-bindgen scaffolding binder
 
 Adds `WitBindgenScaffoldingBinder` for the per-imported-method

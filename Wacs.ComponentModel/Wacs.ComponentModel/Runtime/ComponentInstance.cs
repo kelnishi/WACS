@@ -114,6 +114,72 @@ namespace Wacs.ComponentModel.Runtime
         /// </summary>
         public WasmRuntime CoreRuntime => _runtime;
 
+        /// <summary>
+        /// Invoke a wit-component-emitted
+        /// <c>[async-lift]&lt;iface&gt;#&lt;func&gt;</c> core
+        /// export through the canon-async lift adapter.
+        /// Synchronously blocks on the resulting
+        /// <see cref="Task{TResult}"/> and returns the
+        /// dispatcher's <c>task.return</c> value (or
+        /// <c>null</c> if the body returned implicitly).
+        ///
+        /// <para>Component-level async-lifted exports are
+        /// wrapped in <c>Sort=Instance</c> by wit-component,
+        /// so the public <see cref="Invoke(string, object[])"/>
+        /// API doesn't reach them — that path expects
+        /// <c>Sort=Func</c>. This entry point fills the gap
+        /// until canon-async invoke integration into the
+        /// component-level surface lands.</para>
+        ///
+        /// <para>Args are passed to the core function as the
+        /// untyped invoker takes them. The wasm-side
+        /// async-lift body sets up canon-async machinery
+        /// (registers a task, runs the body, calls
+        /// <c>task.return</c> on completion); the lift
+        /// adapter unwraps that and surfaces the value.</para>
+        /// </summary>
+        public object? InvokeCoreAsyncLift(
+            string coreExportName, params object?[] args)
+        {
+            if (string.IsNullOrEmpty(coreExportName))
+                throw new ArgumentException(
+                    "Core export name must not be empty.",
+                    nameof(coreExportName));
+            if (AsyncDispatcher == null)
+                throw new InvalidOperationException(
+                    "Component has no AsyncDispatcher — the " +
+                    "canon section had no async entries. " +
+                    "InvokeCoreAsyncLift only applies to " +
+                    "components with async-lifted exports.");
+            if (!_runtime.TryGetExportedFunction(
+                    coreExportName, out var addr))
+                throw new ArgumentException(
+                    $"Core module has no export '{coreExportName}'.",
+                    nameof(coreExportName));
+
+            // Allocate a placeholder ContInstance. The lift
+            // adapter uses it to register a ComponentTask; the
+            // continuation itself isn't executed (the body
+            // runs synchronously on the CLR stack).
+            var contStore = new Wacs.Core.Runtime.Concurrency.ContinuationStore();
+            var continuation = contStore.Allocate(
+                (Wacs.Core.Types.TypeIdx)0,
+                (Delegate)(Func<int>)(() => 0));
+
+            var hostTask = Wacs.ComponentModel.Async.AsyncLiftAdapter
+                .InvokeAsync(AsyncDispatcher, continuation, () =>
+                {
+                    var invoker = _runtime.CreateInvoker(addr,
+                        new InvokerOptions());
+                    var rawArgs = args ?? Array.Empty<object?>();
+                    var boxedArgs = new object[rawArgs.Length];
+                    for (int i = 0; i < rawArgs.Length; i++)
+                        boxedArgs[i] = rawArgs[i] ?? 0;
+                    invoker(boxedArgs);
+                });
+            return hostTask.GetAwaiter().GetResult();
+        }
+
         private ComponentInstance(
             ComponentModule component,
             WasmRuntime runtime,

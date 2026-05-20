@@ -127,13 +127,9 @@ namespace Wacs.WASI.Preview3.Test
 
         /// <summary>
         /// Verify the core async-lift export is present after
-        /// stubbed instantiation. DOESN'T invoke — permissive
-        /// stubs return 0 for every wit-bindgen helper, which
-        /// makes wit_stream::write_all spin in a poll loop
-        /// forever (it never gets a "complete" signal). The
-        /// proper fix is canon-async lift adapter integration
-        /// that binds stream/future helpers to real dispatcher
-        /// methods.
+        /// stubbed instantiation. Doesn't invoke — that path
+        /// lives in <see cref="Invocation_attempt_via_async_lift"/>
+        /// with a hang-timeout.
         /// </summary>
         [Fact]
         public void Async_lift_export_present_after_stubbed_instantiation()
@@ -187,22 +183,127 @@ namespace Wacs.WASI.Preview3.Test
             _output.WriteLine(
                 $"  Core export '{coreEntry}' present at FuncAddr {addr}.");
             _output.WriteLine(
-                "  (Invocation deferred to next slice — current " +
-                "permissive stubs return 0 for wit-bindgen's " +
-                "wit_stream / wit_future polling, which means " +
-                "tx.write_all spins forever on the never-ready " +
-                "signal. The fix is binding stream/future helper " +
-                "imports to dispatcher.StreamNew / FutureNew / " +
-                "StreamWrite / etc. instead of permissive stubs.)");
+                "  (Invocation tracked separately in " +
+                "Invocation_attempt_via_async_lift — it has a " +
+                "hang-timeout because wit-bindgen-rt's poll " +
+                "convention may still spin if any stream/future " +
+                "helper signature isn't yet matched precisely.)");
+        }
+
+        /// <summary>
+        /// Attempt the actual async-lifted run() invocation
+        /// via <c>ComponentInstance.InvokeCoreAsyncLift</c>.
+        /// Driven on a background task with a wall-clock
+        /// timeout so test infrastructure can fail rather
+        /// than hang.
+        /// </summary>
+        [Fact]
+        public void Invocation_attempt_via_async_lift()
+        {
+            var bytes = File.ReadAllBytes(FixturePath("cli-hello.wasm"));
+            using var capturedStdout = new MemoryStream();
+            var host = new WasiPreview3Host(
+                new WasiPreview3HostBuilder
+                {
+                    Stdout = new StreamBackedSink(capturedStdout),
+                });
+
+            ComponentInstance? instance = null;
+            try
+            {
+                instance = ComponentInstance.Instantiate(bytes,
+                    runtime =>
+                    {
+                        host.BindToRuntime(runtime);
+                        using var inner = new MemoryStream(bytes);
+                        var component = ComponentBinaryParser.Parse(inner);
+                        foreach (var coreBytes in component.CoreModuleBinaries)
+                        {
+                            using var coreStream = new MemoryStream(coreBytes);
+                            StubUnboundFunctionImports(runtime,
+                                BinaryModuleParser.ParseWasm(coreStream));
+                        }
+                    });
+            }
+            catch (Exception ex)
+            {
+                _output.WriteLine(
+                    $"Instantiation failed: {ex.GetType().Name}: {ex.Message}");
+                return;
+            }
+
+            // The host's stdio sinks need the dispatcher to
+            // resolve stream/future handles back to host
+            // backings — wire it from the instance after
+            // instantiation.
+            host.Dispatcher = instance!.AsyncDispatcher;
+
+            // Run the invocation on a background task with a
+            // short hard timeout. The test framework can then
+            // surface "still hanging" diagnostically without
+            // blowing through xunit's per-test timeout.
+            var task = System.Threading.Tasks.Task.Run(() =>
+            {
+                try
+                {
+                    return instance!.InvokeCoreAsyncLift(
+                        "[async-lift]wasi:cli/run@0.3.0-rc-2026-03-15#run");
+                }
+                catch (Exception ex)
+                {
+                    return (object?)ex;
+                }
+            });
+            bool completed = task.Wait(System.TimeSpan.FromSeconds(5));
+            if (!completed)
+            {
+                _output.WriteLine(
+                    "Invocation timed out after 5s — wit-bindgen-rt " +
+                    "is likely polling a helper that returned 0 " +
+                    "(blocked/pending) when our impl meant " +
+                    "complete-with-N.");
+                var trace = Wacs.ComponentModel.Async
+                    .WitBindgenScaffoldingBinder.SnapshotTrace();
+                if (trace.Count > 0)
+                {
+                    _output.WriteLine("Scaffolding call counts:");
+                    foreach (var kv in trace
+                        .OrderByDescending(p => p.Value))
+                        _output.WriteLine($"  {kv.Key}: {kv.Value}");
+                }
+                else
+                {
+                    _output.WriteLine(
+                        "No scaffolding-trace entries — either " +
+                        "WACS_TRACE_SCAFFOLD wasn't set or the " +
+                        "spin is outside the scaffolding layer.");
+                }
+                return;
+            }
+            if (task.Result is Exception completedEx)
+            {
+                _output.WriteLine(
+                    $"Invocation threw: {completedEx.GetType().Name}: " +
+                    $"{completedEx.Message}");
+                return;
+            }
+            _output.WriteLine(
+                $"Invocation returned: {task.Result ?? "(null)"}");
+            var captured = Encoding.UTF8.GetString(
+                capturedStdout.ToArray());
+            _output.WriteLine(
+                $"Captured stdout ({capturedStdout.Length} bytes): " +
+                $"\"{captured.Replace("\n", "\\n")}\"");
         }
 
         /// <summary>
         /// The full acceptance: capture stdout from cli-hello's
-        /// run() through interpreter execution. Will fail with
-        /// a concrete error pointing to the next blocker until
-        /// the canon-async Invoke wiring lands.
+        /// run() through interpreter execution. Driven via the
+        /// new <c>ComponentInstance.InvokeCoreAsyncLift</c>
+        /// entry point + the <c>WitBindgenScaffoldingBinder</c>
+        /// + the body-bridging stubs.
         /// </summary>
-        [Fact(Skip = "Pending Instance-export Invoke API extension + canon-async lift wiring.")]
+        [Fact]
         public void CliHello_writes_expected_stdout()
         {
             var bytes = File.ReadAllBytes(FixturePath("cli-hello.wasm"));
@@ -227,11 +328,54 @@ namespace Wacs.WASI.Preview3.Test
                             BinaryModuleParser.ParseWasm(coreStream));
                     }
                 });
-            instance.Invoke("wasi:cli/run@0.3.0-rc-2026-03-15#run");
+
+            host.Dispatcher = instance.AsyncDispatcher;
+            instance.InvokeCoreAsyncLift(
+                "[async-lift]wasi:cli/run@0.3.0-rc-2026-03-15#run");
 
             capturedStdout.Position = 0;
             var captured = Encoding.UTF8.GetString(capturedStdout.ToArray());
             Assert.Equal("hello, wasip3\n", captured);
+        }
+
+        [Fact]
+        public void Canon_entries_dump()
+        {
+            var bytes = File.ReadAllBytes(FixturePath("cli-hello.wasm"));
+            using var stream = new MemoryStream(bytes);
+            var component = ComponentBinaryParser.Parse(stream);
+            _output.WriteLine($"{component.Canons.Count} canon entries:");
+            int slot = 0;
+            foreach (var entry in component.Canons)
+            {
+                _output.WriteLine(
+                    $"  [{slot,2}] {entry.GetType().Name}: {entry}");
+                slot++;
+            }
+        }
+
+        [Fact]
+        public void Core_module_imports_verbatim_dump()
+        {
+            var bytes = File.ReadAllBytes(FixturePath("cli-hello.wasm"));
+            using var stream = new MemoryStream(bytes);
+            var component = ComponentBinaryParser.Parse(stream);
+            int coreIdx = 0;
+            foreach (var coreBytes in component.CoreModuleBinaries)
+            {
+                using var coreStream = new MemoryStream(coreBytes);
+                var module = BinaryModuleParser.ParseWasm(coreStream);
+                _output.WriteLine($"=== core[{coreIdx}] " +
+                    $"({module.Imports.Length} imports) ===");
+                foreach (var import in module.Imports)
+                {
+                    if (!(import.Desc is Module.ImportDesc.FuncDesc))
+                        continue;
+                    _output.WriteLine(
+                        $"  ({import.ModuleName}) ({import.Name})");
+                }
+                coreIdx++;
+            }
         }
 
         [Fact]

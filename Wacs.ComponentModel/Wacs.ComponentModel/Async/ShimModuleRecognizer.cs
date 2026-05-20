@@ -414,6 +414,9 @@ namespace Wacs.ComponentModel.Async
                     continue;
                 }
 
+                if (WitBindgenScaffoldingBinder.TraceShims)
+                    del = WitBindgenScaffoldingBinder
+                        .WrapForShimTrace(del, QualifiedCanonOpName(entry));
                 runtime.BindHostFunction(
                     (string.Empty, slot.ToString()), del);
                 bound++;
