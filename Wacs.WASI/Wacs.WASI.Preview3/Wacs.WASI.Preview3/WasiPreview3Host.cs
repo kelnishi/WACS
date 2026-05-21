@@ -1449,6 +1449,134 @@ namespace Wacs.WASI.Preview3
                             newPathPtr, newPathLen,
                             retptr, realloc)));
 
+            // ---- [async-lower] (params_ptr, results_ptr) bindings ----
+            //
+            // For methods whose inline-flattened params exceed
+            // the canonical-ABI calling-convention limit (set-
+            // times, set-times-at, link-at, rename-at, symlink-
+            // at), the async-lower lowering packs all params
+            // into a struct at params_ptr and passes a separate
+            // results_ptr for the result-area. Each unpack
+            // helper reads the struct fields per the canonical-
+            // ABI layout (per-field alignment + padding) and
+            // delegates to the existing sync host body.
+            //
+            // new-timestamp variant layout (8-aligned, 24
+            // bytes): disc:u8 at +0, 7-byte pad, seconds:s64
+            // at +8, nanoseconds:u32 at +16, 4-byte tail pad.
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[async-lower][method]descriptor.set-times"),
+                (Func<ExecContext, int, int, int>)(
+                    (_, paramsPtr, resultsPtr) =>
+                    {
+                        var mem = RequireDispatcherMemory();
+                        var p = mem.AsSpan(paramsPtr, 56);
+                        int self = ReadI32(p, 0);
+                        var (aDisc, aSecs, aNanos) =
+                            ReadNewTimestamp(p, 8);
+                        var (mDisc, mSecs, mNanos) =
+                            ReadNewTimestamp(p, 32);
+                        InvokeDescriptorResultErrorCodeNoArgs(
+                            self, resultsPtr, realloc,
+                            desc => desc.SetTimesAsync(
+                                ReadNewTimestampFromSlots(
+                                    aDisc, aSecs, aNanos),
+                                ReadNewTimestampFromSlots(
+                                    mDisc, mSecs, mNanos))
+                                .GetAwaiter().GetResult());
+                        return CanonAsyncStatusReturnedPacked;
+                    }));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[async-lower][method]descriptor.set-times-at"),
+                (Func<ExecContext, int, int, int>)(
+                    (_, paramsPtr, resultsPtr) =>
+                    {
+                        var mem = RequireDispatcherMemory();
+                        var p = mem.AsSpan(paramsPtr, 64);
+                        int self = ReadI32(p, 0);
+                        uint pathFlags = p[4];
+                        int pathPtr = ReadI32(p, 8);
+                        int pathLen = ReadI32(p, 12);
+                        var (aDisc, aSecs, aNanos) =
+                            ReadNewTimestamp(p, 16);
+                        var (mDisc, mSecs, mNanos) =
+                            ReadNewTimestamp(p, 40);
+                        InvokeDescriptorSetTimesAt(
+                            self, pathFlags, pathPtr, pathLen,
+                            aDisc, aSecs, aNanos,
+                            mDisc, mSecs, mNanos,
+                            resultsPtr, realloc);
+                        return CanonAsyncStatusReturnedPacked;
+                    }));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[async-lower][method]descriptor.link-at"),
+                (Func<ExecContext, int, int, int>)(
+                    (_, paramsPtr, resultsPtr) =>
+                    {
+                        var mem = RequireDispatcherMemory();
+                        var p = mem.AsSpan(paramsPtr, 28);
+                        int self = ReadI32(p, 0);
+                        uint oldPathFlags = p[4];
+                        int oldPathPtr = ReadI32(p, 8);
+                        int oldPathLen = ReadI32(p, 12);
+                        int newDesc = ReadI32(p, 16);
+                        int newPathPtr = ReadI32(p, 20);
+                        int newPathLen = ReadI32(p, 24);
+                        InvokeDescriptorLinkAt(
+                            self, oldPathFlags,
+                            oldPathPtr, oldPathLen,
+                            newDesc, newPathPtr, newPathLen,
+                            resultsPtr, realloc);
+                        return CanonAsyncStatusReturnedPacked;
+                    }));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[async-lower][method]descriptor.rename-at"),
+                (Func<ExecContext, int, int, int>)(
+                    (_, paramsPtr, resultsPtr) =>
+                    {
+                        var mem = RequireDispatcherMemory();
+                        var p = mem.AsSpan(paramsPtr, 24);
+                        int self = ReadI32(p, 0);
+                        int oldPathPtr = ReadI32(p, 4);
+                        int oldPathLen = ReadI32(p, 8);
+                        int newDesc = ReadI32(p, 12);
+                        int newPathPtr = ReadI32(p, 16);
+                        int newPathLen = ReadI32(p, 20);
+                        InvokeDescriptorRenameAt(
+                            self, oldPathPtr, oldPathLen,
+                            newDesc, newPathPtr, newPathLen,
+                            resultsPtr, realloc);
+                        return CanonAsyncStatusReturnedPacked;
+                    }));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[async-lower][method]descriptor.symlink-at"),
+                (Func<ExecContext, int, int, int>)(
+                    (_, paramsPtr, resultsPtr) =>
+                    {
+                        var mem = RequireDispatcherMemory();
+                        var p = mem.AsSpan(paramsPtr, 20);
+                        int self = ReadI32(p, 0);
+                        int oldPathPtr = ReadI32(p, 4);
+                        int oldPathLen = ReadI32(p, 8);
+                        int newPathPtr = ReadI32(p, 12);
+                        int newPathLen = ReadI32(p, 16);
+                        InvokeDescriptorSymlinkAt(
+                            self, oldPathPtr, oldPathLen,
+                            newPathPtr, newPathLen,
+                            resultsPtr, realloc);
+                        return CanonAsyncStatusReturnedPacked;
+                    }));
+
             // wasi:sockets — resource drops + ip-name-lookup.
             // Full ITcpSocket/IUdpSocket method wire-ups + a
             // System.Net.Sockets-backed default impl ship in
@@ -5724,6 +5852,35 @@ namespace Wacs.WASI.Preview3
         {
             System.Buffers.Binary.BinaryPrimitives
                 .WriteInt32LittleEndian(memory.AsSpan(offset, 4), value);
+        }
+
+        // Span readers — for unpacking canonical-ABI param
+        // structs at params_ptr in async-lowered method
+        // bindings. Endianness is little-endian (wasm spec).
+        private static int ReadI32(System.ReadOnlySpan<byte> span, int offset) =>
+            System.Buffers.Binary.BinaryPrimitives
+                .ReadInt32LittleEndian(span.Slice(offset));
+
+        private static long ReadI64(System.ReadOnlySpan<byte> span, int offset) =>
+            System.Buffers.Binary.BinaryPrimitives
+                .ReadInt64LittleEndian(span.Slice(offset));
+
+        // new-timestamp variant (24 bytes, 8-aligned):
+        //   disc:u8 @ +0 (case: 0=no-change, 1=now, 2=timestamp)
+        //   7-byte pad
+        //   seconds:s64 @ +8  (used only for case 2)
+        //   nanoseconds:u32 @ +16  (used only for case 2)
+        //   4-byte tail pad
+        // Returns (disc, seconds, nanoseconds) — caller hands
+        // the trio to ReadNewTimestampFromSlots which the
+        // existing sync slot binding already uses.
+        private static (int Disc, long Seconds, int Nanoseconds)
+            ReadNewTimestamp(System.ReadOnlySpan<byte> span, int offset)
+        {
+            int disc = span[offset];
+            long seconds = ReadI64(span, offset + 8);
+            int nanos = ReadI32(span, offset + 16);
+            return (disc, seconds, nanos);
         }
 
         // Write canonical-ABI `option<resource>` = None at

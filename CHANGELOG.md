@@ -1,5 +1,60 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.57 — params-ptr async-lower bindings + filesystem-advise
+
+Adds the `(params_ptr, results_ptr) → status` async-lower
+bindings for the five filesystem methods whose inline-flat
+param count exceeds the canonical-ABI calling-convention
+limit: `set-times`, `set-times-at`, `link-at`, `rename-at`,
+`symlink-at`. Each unpack-helper reads the params struct from
+guest memory per the canonical-ABI struct layout
+(per-field alignment + padding) and delegates to the existing
+sync host body that already knows how to write the result at
+the result-area pointer.
+
+### Helpers
+
+- `ReadI32(span, offset)` / `ReadI64(span, offset)` — little-
+  endian struct field readers for the param-unpack path.
+- `ReadNewTimestamp(span, offset)` — pulls the 24-byte
+  `new-timestamp` variant (disc:u8 @ +0, 7-pad, seconds:s64 @
+  +8, nanoseconds:u32 @ +16, 4-byte tail pad) from a packed
+  params struct. Returns the (disc, secs, nanos) triple the
+  existing `ReadNewTimestampFromSlots` consumes.
+
+### `Descriptor.AdviseAsync` — BadDescriptor on directories
+
+The default impl previously returned `Task.CompletedTask`
+unconditionally. Spec: advise on a non-regular-file (directory,
+symlink) is `BadDescriptor`. Probed by `filesystem-advise`'s
+opening `assert_eq!(dir.advise(0, 0, Advice::Normal).await,
+Err(ErrorCode::BadDescriptor))`. Fix: throw
+`FilesystemException(BadDescriptor)` when `_isDirectory`.
+
+### Coverage
+
+`filesystem-advise` is the 4th filesystem fixture to pass
+(after mkdir-rmdir, unlink-errors, open-errors, dotdot). 15
+wasip3 fixtures across cli / clocks / random / filesystem
+now pass end-to-end. The remaining 9 filesystem fixtures
+still hang or fail on per-method Descriptor implementation
+gaps (each surfaces 1+ spec mismatches that need targeted
+fixes in `Descriptor.cs`):
+
+- stat / set-size / io / metadata-hash / rename /
+  hard-links / read-directory: need stat/size/link
+  implementation fidelity
+- flags-and-type / is-same-object: need result-writers for
+  the direct-value-returning async-lower variants
+  (`result<descriptor-flags, error-code>` /
+  `result<bool, error-code>`)
+
+The `(params_ptr, results_ptr)` plumbing is now in place
+across the FilesystemTypesModuleName surface — the remaining
+work is purely host-body / Descriptor implementation.
+
+Preview3 445/445, ComponentModel 639/639.
+
 ## WACS.WASI.Preview3 0.1.56 — three more filesystem fixtures (unlink-errors, open-errors, dotdot)
 
 Closes three additional wasip3 filesystem fixtures by binding

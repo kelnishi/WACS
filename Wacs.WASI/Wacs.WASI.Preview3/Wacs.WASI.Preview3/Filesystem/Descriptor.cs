@@ -371,9 +371,15 @@ namespace Wacs.WASI.Preview3.Filesystem
             FileSize offset, FileSize length, Advice advice,
             CancellationToken cancellationToken = default)
         {
-            // .NET doesn't expose posix_fadvise. The advice is
-            // a hint; ignoring it is spec-permitted ("not
-            // implemented" treats it as a no-op).
+            // Spec: advise on a non-regular-file (directory,
+            // symlink, etc.) returns BadDescriptor.
+            if (_isDirectory)
+                throw new FilesystemException(
+                    ErrorCode.BadDescriptor,
+                    "advise: not valid on a directory.");
+            // .NET doesn't expose posix_fadvise; the spec
+            // permits implementations to treat advice as a
+            // hint and ignore it.
             return Task.CompletedTask;
         }
 

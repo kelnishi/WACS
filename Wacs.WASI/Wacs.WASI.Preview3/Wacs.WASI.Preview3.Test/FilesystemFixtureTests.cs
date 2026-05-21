@@ -39,12 +39,10 @@ namespace Wacs.WASI.Preview3.Test
 
         public static System.Collections.Generic.IEnumerable<object[]> Fixtures()
         {
-            // Passing fixtures. Each one threads the wit-component
-            // shim+fixup funcref-table indirection through to the
-            // host's bindings.
             yield return new object[] { "filesystem-unlink-errors" };
             yield return new object[] { "filesystem-open-errors" };
             yield return new object[] { "filesystem-dotdot" };
+            yield return new object[] { "filesystem-advise" };
         }
 
         [Theory]
