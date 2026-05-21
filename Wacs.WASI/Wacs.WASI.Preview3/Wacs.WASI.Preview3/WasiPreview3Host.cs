@@ -1069,6 +1069,15 @@ namespace Wacs.WASI.Preview3
 
             runtime.BindHostFunction(
                 (FilesystemTypesModuleName,
+                    "[async-lower][method]descriptor.get-type"),
+                (Func<ExecContext, int, int, int>)((_, self, retptr) =>
+                {
+                    InvokeDescriptorGetType(self, retptr, realloc);
+                    return CanonAsyncStatusReturnedPacked;
+                }));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
                     "[method]descriptor.open-at"),
                 (Action<ExecContext, int, int, int, int, int, int, int>)(
                     (_, self, pathFlags, pathPtr, pathLen,
@@ -1126,6 +1135,15 @@ namespace Wacs.WASI.Preview3
 
             runtime.BindHostFunction(
                 (FilesystemTypesModuleName,
+                    "[async-lower][method]descriptor.stat"),
+                (Func<ExecContext, int, int, int>)((_, self, retptr) =>
+                {
+                    InvokeDescriptorStat(self, retptr, realloc);
+                    return CanonAsyncStatusReturnedPacked;
+                }));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
                     "[method]descriptor.stat-at"),
                 (Action<ExecContext, int, int, int, int, int>)(
                     (_, self, pathFlags, pathPtr, pathLen, retptr) =>
@@ -1134,6 +1152,20 @@ namespace Wacs.WASI.Preview3
                             unchecked((uint)pathFlags),
                             pathPtr, pathLen,
                             retptr, realloc)));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[async-lower][method]descriptor.stat-at"),
+                (Func<ExecContext, int, int, int, int, int, int>)(
+                    (_, self, pathFlags, pathPtr, pathLen, retptr) =>
+                    {
+                        InvokeDescriptorStatAt(
+                            self,
+                            unchecked((uint)pathFlags),
+                            pathPtr, pathLen,
+                            retptr, realloc);
+                        return CanonAsyncStatusReturnedPacked;
+                    }));
 
             // ---- Stream-shape descriptor methods --------------------
             // read-via-stream(offset) -> tuple<stream, future>:
@@ -1187,6 +1219,20 @@ namespace Wacs.WASI.Preview3
 
             runtime.BindHostFunction(
                 (FilesystemTypesModuleName,
+                    "[async-lower][method]descriptor.set-size"),
+                (Func<ExecContext, int, long, int, int>)(
+                    (_, self, size, retptr) =>
+                    {
+                        InvokeDescriptorResultErrorCodeNoArgs(
+                            self, retptr, realloc,
+                            desc => desc.SetSizeAsync(
+                                new FileSize(unchecked((ulong)size)))
+                                .GetAwaiter().GetResult());
+                        return CanonAsyncStatusReturnedPacked;
+                    }));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
                     "[method]descriptor.sync"),
                 (Action<ExecContext, int, int>)((_, self, retptr) =>
                     InvokeDescriptorResultErrorCodeNoArgs(
@@ -1196,12 +1242,36 @@ namespace Wacs.WASI.Preview3
 
             runtime.BindHostFunction(
                 (FilesystemTypesModuleName,
+                    "[async-lower][method]descriptor.sync"),
+                (Func<ExecContext, int, int, int>)((_, self, retptr) =>
+                {
+                    InvokeDescriptorResultErrorCodeNoArgs(
+                        self, retptr, realloc,
+                        desc => desc.SyncAsync()
+                            .GetAwaiter().GetResult());
+                    return CanonAsyncStatusReturnedPacked;
+                }));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
                     "[method]descriptor.sync-data"),
                 (Action<ExecContext, int, int>)((_, self, retptr) =>
                     InvokeDescriptorResultErrorCodeNoArgs(
                         self, retptr, realloc,
                         desc => desc.SyncDataAsync()
                             .GetAwaiter().GetResult())));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[async-lower][method]descriptor.sync-data"),
+                (Func<ExecContext, int, int, int>)((_, self, retptr) =>
+                {
+                    InvokeDescriptorResultErrorCodeNoArgs(
+                        self, retptr, realloc,
+                        desc => desc.SyncDataAsync()
+                            .GetAwaiter().GetResult());
+                    return CanonAsyncStatusReturnedPacked;
+                }));
 
             runtime.BindHostFunction(
                 (FilesystemTypesModuleName,
@@ -1216,6 +1286,22 @@ namespace Wacs.WASI.Preview3
                                 (Advice)advice)
                                 .GetAwaiter().GetResult())));
 
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[async-lower][method]descriptor.advise"),
+                (Func<ExecContext, int, long, long, int, int, int>)(
+                    (_, self, offset, length, advice, retptr) =>
+                    {
+                        InvokeDescriptorResultErrorCodeNoArgs(
+                            self, retptr, realloc,
+                            desc => desc.AdviseAsync(
+                                new FileSize(unchecked((ulong)offset)),
+                                new FileSize(unchecked((ulong)length)),
+                                (Advice)advice)
+                                .GetAwaiter().GetResult());
+                        return CanonAsyncStatusReturnedPacked;
+                    }));
+
             // ---- metadata-hash / metadata-hash-at ------------------
             runtime.BindHostFunction(
                 (FilesystemTypesModuleName,
@@ -1227,6 +1313,17 @@ namespace Wacs.WASI.Preview3
 
             runtime.BindHostFunction(
                 (FilesystemTypesModuleName,
+                    "[async-lower][method]descriptor.metadata-hash"),
+                (Func<ExecContext, int, int, int>)((_, self, retptr) =>
+                {
+                    InvokeDescriptorMetadataHash(
+                        self, retptr, realloc, atPath: null,
+                        pathFlags: 0);
+                    return CanonAsyncStatusReturnedPacked;
+                }));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
                     "[method]descriptor.metadata-hash-at"),
                 (Action<ExecContext, int, int, int, int, int>)(
                     (_, self, pathFlags, pathPtr, pathLen, retptr) =>
@@ -1234,6 +1331,19 @@ namespace Wacs.WASI.Preview3
                             self, retptr, realloc,
                             atPath: ReadGuestUtf8(pathPtr, pathLen),
                             pathFlags: unchecked((uint)pathFlags))));
+
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[async-lower][method]descriptor.metadata-hash-at"),
+                (Func<ExecContext, int, int, int, int, int, int>)(
+                    (_, self, pathFlags, pathPtr, pathLen, retptr) =>
+                    {
+                        InvokeDescriptorMetadataHash(
+                            self, retptr, realloc,
+                            atPath: ReadGuestUtf8(pathPtr, pathLen),
+                            pathFlags: unchecked((uint)pathFlags));
+                        return CanonAsyncStatusReturnedPacked;
+                    }));
 
             // ---- readlink-at ---------------------------------------
             runtime.BindHostFunction(

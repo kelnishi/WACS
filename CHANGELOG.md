@@ -1,5 +1,58 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.56 — three more filesystem fixtures (unlink-errors, open-errors, dotdot)
+
+Closes three additional wasip3 filesystem fixtures by binding
+the `[async-lower]` variants for methods whose sync slot's
+signature already matches the canonical-ABI shape:
+
+- `stat`, `stat-at` — flat `(self, retptr) → status` /
+  `(self, pathFlags, pathPtr, pathLen, retptr) → status`
+- `get-type` — flat `(self, retptr) → status`
+- `sync`, `sync-data` — flat `(self, retptr) → status`
+- `set-size` — `(self, size:i64, retptr) → status`
+- `advise` — `(self, offset, length, advice, retptr) → status`
+- `metadata-hash`, `metadata-hash-at` — flat shapes
+
+Each wrapper sync-executes the existing host body via
+`GetAwaiter().GetResult()` and returns
+`CanonAsyncStatusReturnedPacked`.
+
+### FilesystemFixtureTests
+
+New parameterized test harness (xUnit `[Theory]` /
+`[MemberData]`) that drives each fixture through the same
+staging + invocation shape: build a fresh `fs-tests.dir` per
+test via `BuildFsTestsDir`, instantiate with the preopen,
+invoke `run()` with a 15-second hang guard. Currently
+enumerates the 3 newly-passing fixtures. The remaining 10
+filesystem fixtures need:
+
+- `(params_ptr, results_ptr)` bindings for methods whose
+  inline-param count exceeds the flat-call limit: `set-times`,
+  `set-times-at`, `link-at`, `rename-at`, `symlink-at`.
+- Result-writers for `get-flags` / `is-same-object` whose
+  sync slot returns a value directly but whose async-lower
+  shape expects retptr-resident result.
+- Stream-based `read-directory` whose canon-async machinery
+  returns an entry stream rather than a flat list.
+
+### Coverage
+
+14 wasip3 testsuite fixtures now pass end-to-end across cli /
+clocks / random / filesystem:
+
+```
+cli-env             cli-exit            cli-hello
+cli-stdio           cli-stdio-roundtrip cli-terminal
+filesystem-dotdot   filesystem-mkdir-rmdir
+filesystem-open-errors filesystem-unlink-errors
+monotonic-clock     random              run-with-err
+wall-clock
+```
+
+Preview3 444/444, ComponentModel 639/639.
+
 ## WACS.WASI.Preview3 0.1.55 — filesystem-mkdir-rmdir acceptance (Descriptor path validation)
 
 Closes the filesystem-mkdir-rmdir fixture acceptance — the
