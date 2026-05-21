@@ -497,6 +497,7 @@ namespace Wacs.WASI.Preview3
             // pollable.block loop. Stubs at least let the
             // panic terminate cleanly.
             BindWasip2FacadeStubs(runtime);
+            BindExportTypedTaskReturns(runtime);
 
             // wasi:cli/environment@0.3.0-rc-2026-03-15
             //   get-environment: () -> list<tuple<string, string>>
@@ -2286,6 +2287,58 @@ namespace Wacs.WASI.Preview3
             runtime.BindHostFunction(
                 (MonoClock2, "subscribe-duration"),
                 (Func<ExecContext, long, int>)((_, _) => 1));
+        }
+
+        // Export-typed task-return bindings.
+        //
+        // wit-bindgen-rt emits a `[task-return]<name>` import
+        // for each async export's return-shape — and the
+        // generic scaffolding-binder picks them up with a
+        // single-i32 disc handler that works only when the
+        // export returns `result<_, _>` (cli/run's shape).
+        //
+        // Exports whose return type has a non-trivial flat
+        // form need their own typed handler. wasi:http/handler
+        // is the live case here: its `handle` export returns
+        // `result<own<response>, error-code>`, which flat-
+        // encodes to 8 slots — 1 disc + 7 payload (the
+        // payload union of own<response>'s 1 i32 plus the
+        // error-code variant's worst case, which includes
+        // HTTP-request-body-size's `option<u64>` and
+        // DNS-error's pair of `option<string>`s, yielding
+        // (i32, i32, i32, i64, i32, i32, i32)). Our v0
+        // handler just reads the disc and forwards to the
+        // dispatcher — the payload bytes are kept on the
+        // wire so the guest's task-return doesn't trap, but
+        // the host-observable task result is just the disc.
+        // Surface-typed payload extraction (returning a real
+        // IResponse vs a structured ErrorCode) lands when an
+        // embedder needs it.
+        private void BindExportTypedTaskReturns(WasmRuntime runtime)
+        {
+            const string HandlerExport =
+                "[export]wasi:http/handler@0.3.0-rc-2026-03-15";
+
+            // [task-return]handle for `result<own<response>,
+            //                          error-code>`.
+            // Lowered flat signature observed at the core
+            // module's import: (i32 i32 i32 i64 i32 i32 i32
+            //                   i32) → ().
+            // The i64 at slot 3 carries either error-code's
+            // HTTP-request-body-size option<u64> payload (Err
+            // case) or pads the union's i64 alignment (Ok
+            // case); we ignore the payload — only the disc
+            // at slot 0 matters for surface-level test
+            // completion.
+            runtime.BindHostFunction(
+                (HandlerExport, "[task-return]handle"),
+                (Action<ExecContext,
+                    int, int, int, long, int, int, int, int>)(
+                    (_, disc, _, _, _, _, _, _, _) =>
+                    {
+                        var d = RequireDispatcher();
+                        d.TaskReturn(null!, disc);
+                    }));
         }
 
         // ---- wasi:sockets udp-socket binding bodies (Slice P) -------

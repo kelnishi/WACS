@@ -1,5 +1,32 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.70 — http-service passes (export-typed task-return + handle invocation)
+
+The last HTTP fixture lands. Two pieces close it out:
+
+* **`[task-return]handle` export-typed binding.** The
+  generic scaffolding `task-return` is a single-i32
+  handler, which works for `result<_, _>` (cli/run's
+  shape) but not for wasi:http/handler's
+  `result<own<response>, error-code>` — that flat-
+  encodes to 8 slots (one i64 from the error-code
+  variant's `HTTP-request-body-size: option<u64>`
+  payload). `WasiPreview3Host.BindExportTypedTaskReturns`
+  now binds the 8-slot signature explicitly and
+  forwards the disc to `dispatcher.TaskReturn`.
+* **http-service test harness.** The fixture exports
+  `wasi:http/handler.handle` (not `wasi:cli/run`) so
+  the harness now special-cases it: allocates a
+  host-side `Request` handle and invokes
+  `[async-lift]wasi:http/handler@0.3.0-rc-2026-03-15#handle`
+  with that handle as the single arg.
+
+All 14 wasip3 fixtures the project ships pass:
+14 filesystem + 6 cli + 4 clocks/random + 4 HTTP +
+1 run-with-err = **29 end-to-end fixtures green**.
+
+Preview3 450/450 (HTTP: 4/4, all passing).
+
 ## WACS.WASI.Preview3 0.1.69 — http-request passes (RFC 3986 authority + path validation)
 
 `Request` now validates `set-authority` and

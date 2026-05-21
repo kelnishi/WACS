@@ -11,6 +11,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Wacs.ComponentModel.Async;
 using Wacs.Core.Runtime.Types;
+using Wacs.WASI.Preview3.Http;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -64,6 +65,7 @@ namespace Wacs.WASI.Preview3.Test
             yield return new object[] { "http-fields" };
             yield return new object[] { "http-response" };
             yield return new object[] { "http-request" };
+            yield return new object[] { "http-service" };
         }
 
         [Theory]
@@ -87,8 +89,27 @@ namespace Wacs.WASI.Preview3.Test
             {
                 try
                 {
-                    instance.InvokeCoreAsyncLift(
-                        "[async-lift]wasi:cli/run@0.3.0-rc-2026-03-15#run");
+                    if (fixtureName == "http-service")
+                    {
+                        // http-service exports wasi:http/handler#handle,
+                        // not wasi:cli/run. Build a host-side Request,
+                        // hand its handle to handle().
+                        var req = new Request(
+                            new Fields(),
+                            body: null,
+                            trailers: null);
+                        var reqHandle = host.RequestHandles
+                            .Allocate(req);
+                        instance.InvokeCoreAsyncLift(
+                            "[async-lift]wasi:http/handler@" +
+                            "0.3.0-rc-2026-03-15#handle",
+                            reqHandle);
+                    }
+                    else
+                    {
+                        instance.InvokeCoreAsyncLift(
+                            "[async-lift]wasi:cli/run@0.3.0-rc-2026-03-15#run");
+                    }
                     return (object?)null;
                 }
                 catch (Exception ex) { return ex; }
