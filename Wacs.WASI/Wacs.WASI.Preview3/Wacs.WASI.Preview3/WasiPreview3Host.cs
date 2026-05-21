@@ -953,7 +953,10 @@ namespace Wacs.WASI.Preview3
             runtime.BindHostFunction(
                 (FilesystemTypesModuleName, "[resource-drop]descriptor"),
                 (Action<ExecContext, int>)((_, handle) =>
-                    DescriptorHandles.Drop(handle)));
+                {
+                    var dropped = DescriptorHandles.Drop(handle);
+                    if (dropped is IDisposable d) d.Dispose();
+                }));
 
             runtime.BindHostFunction(
                 (FilesystemTypesModuleName, "[method]descriptor.get-flags"),
@@ -975,9 +978,13 @@ namespace Wacs.WASI.Preview3
                     try
                     {
                         var flags = RequireDescriptor(self).GetFlags();
+                        FsTrace($"async-lower get-flags(self={self}) → " +
+                            $"0x{(int)flags:x}");
                         dest.Clear();
                         dest[0] = 0; // Ok disc
-                        dest[1] = (byte)(uint)flags;
+                        // Payload at +4: result<flags, error-code>
+                        // is 4-aligned because error-code is.
+                        dest[4] = (byte)(uint)flags;
                     }
                     catch (FilesystemException ex)
                     {
@@ -3812,11 +3819,17 @@ namespace Wacs.WASI.Preview3
         }
 
         /// <summary>Invoke
-        /// <c>[method]descriptor.get-type() -&gt; descriptor-type</c>.
-        /// Writes the variant at retptr (16 bytes 4-aligned).
-        /// Unit cases: just write the tag at +0; the
-        /// <see cref="DescriptorType.Other"/> case may carry an
-        /// option&lt;string&gt; payload at +8.</summary>
+        /// <c>[method]descriptor.get-type() -&gt; result&lt;
+        /// descriptor-type, error-code&gt;</c>. Writes the
+        /// result-wrapped variant at retptr (20 bytes 4-aligned):
+        /// disc:u8 at +0 (0=Ok, 1=Err), then 16-byte payload at
+        /// +4 carrying the descriptor-type variant (or error-code
+        /// variant on err).
+        /// <para>For unit dtype cases we just write the variant
+        /// tag at +4; the <see cref="DescriptorType.Other"/>
+        /// case may also carry an option&lt;string&gt; payload
+        /// at +8 within the dt variant (= absolute +12).</para>
+        /// </summary>
         public void InvokeDescriptorGetType(
             int self, int retptr, ICabiRealloc realloc)
         {
@@ -3824,13 +3837,18 @@ namespace Wacs.WASI.Preview3
             ValidateDescriptorTypeRetptr(retptr, memory);
             var desc = RequireDescriptor(self);
             var dtype = desc.GetType_();
-            var dest = memory.AsSpan(retptr, 16);
+            FsTrace($"get-type(self={self}) → {dtype.Kind}");
+            var dest = memory.AsSpan(retptr, 20);
             dest.Clear();
-            dest[0] = (byte)dtype.Kind;
+            dest[0] = 0; // result disc = Ok
+            // dt variant at +4 (16 bytes wide). Disc byte goes at
+            // +4 (relative dt offset 0); payload at +8 (relative
+            // dt offset 4).
+            dest[4] = (byte)dtype.Kind;
             if (dtype.Kind == DescriptorType.Tag.Other
                 && dtype.OtherPayload != null)
             {
-                dest[4] = 1; // option-disc = some
+                dest[8] = 1; // option-disc = some
                 var bytes = System.Text.Encoding.UTF8
                     .GetBytes(dtype.OtherPayload);
                 int strPtr = bytes.Length > 0
@@ -3839,9 +3857,9 @@ namespace Wacs.WASI.Preview3
                     new ReadOnlySpan<byte>(bytes)
                         .CopyTo(memory.AsSpan(strPtr, bytes.Length));
                 System.Buffers.Binary.BinaryPrimitives
-                    .WriteInt32LittleEndian(dest.Slice(8), strPtr);
+                    .WriteInt32LittleEndian(dest.Slice(12), strPtr);
                 System.Buffers.Binary.BinaryPrimitives
-                    .WriteInt32LittleEndian(dest.Slice(12), bytes.Length);
+                    .WriteInt32LittleEndian(dest.Slice(16), bytes.Length);
             }
         }
 
@@ -3859,18 +3877,26 @@ namespace Wacs.WASI.Preview3
             ValidateResultErrorCodeRetptr(retptr, memory);
             FilesystemException? caught = null;
             int childHandle = 0;
+            string tracePath = "";
             try
             {
                 var parent = RequireDescriptor(self);
-                var path = ReadGuestUtf8(pathPtr, pathLen);
+                tracePath = ReadGuestUtf8(pathPtr, pathLen);
+                FsTrace($"open-at(self={self}, path=\"{tracePath}\", " +
+                    $"open=0x{openFlagsBits:x}, flags=0x{flagsBits:x})");
                 var child = parent.OpenAtAsync(
-                    (PathFlags)pathFlagsBits, path,
+                    (PathFlags)pathFlagsBits, tracePath,
                     (OpenFlags)openFlagsBits,
                     (DescriptorFlags)flagsBits)
                     .GetAwaiter().GetResult();
                 childHandle = DescriptorHandles.Allocate(child);
+                FsTrace($"  → Ok handle={childHandle}");
             }
-            catch (FilesystemException ex) { caught = ex; }
+            catch (FilesystemException ex)
+            {
+                FsTrace($"  → {ex.Code}");
+                caught = ex;
+            }
 
             var dest = memory.AsSpan(retptr, ResultErrorCodeSize);
             if (caught == null)
@@ -3905,8 +3931,15 @@ namespace Wacs.WASI.Preview3
             {
                 stat = RequireDescriptor(self).StatAsync()
                     .GetAwaiter().GetResult();
+                FsTrace($"stat(self={self}) → " +
+                    $"type={stat.Type.Kind}, " +
+                    $"size={stat.Size.Value}");
             }
-            catch (FilesystemException ex) { caught = ex; }
+            catch (FilesystemException ex)
+            {
+                FsTrace($"stat(self={self}) → {ex.Code}");
+                caught = ex;
+            }
 
             WriteResultDescriptorStat(
                 memory.AsSpan(retptr, ResultDescriptorStatSize),
@@ -4012,13 +4045,16 @@ namespace Wacs.WASI.Preview3
         private static void ValidateDescriptorTypeRetptr(
             int retptr, Wacs.Core.Runtime.Types.MemoryInstance memory)
         {
+            // get-type returns result<descriptor-type, error-code>
+            // which is 20 bytes 4-aligned (disc:u8 + 16-byte
+            // payload area).
             if (retptr < 0 || (retptr & 0x3) != 0
-                || retptr + 16 > memory.Data.Length)
+                || retptr + 20 > memory.Data.Length)
                 throw new InvalidOperationException(
                     "wasi:filesystem/types: descriptor-type retptr " +
                     $"0x{retptr:X8} misaligned or out of range " +
                     $"(memory size = {memory.Data.Length}). " +
-                    "Caller must allocate a 16-byte 4-aligned " +
+                    "Caller must allocate a 20-byte 4-aligned " +
                     "return area.");
         }
 

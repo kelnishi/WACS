@@ -43,7 +43,7 @@ namespace Wacs.WASI.Preview3.Filesystem
     /// other work — matches the spec's intent of
     /// non-blocking file I/O.</para>
     /// </summary>
-    public sealed class Descriptor : IDescriptor
+    public sealed class Descriptor : IDescriptor, IDisposable
     {
         private static readonly DateTime UnixEpoch =
             new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
@@ -52,6 +52,15 @@ namespace Wacs.WASI.Preview3.Filesystem
         private readonly string _rootPath;
         private readonly bool _isDirectory;
         private readonly DescriptorFlags _flags;
+        // For file descriptors we hold an OS file handle open
+        // for the descriptor's lifetime. Under Unix this gives
+        // us inode-survives-unlink semantics for free (stat /
+        // set-size etc. continue to work via the fd after the
+        // path is unlinked). FileShare.ReadWrite|Delete lets
+        // multiple sibling descriptors coexist and lets unlink
+        // proceed. null for directory descriptors.
+        private readonly FileStream? _fileStream;
+        private bool _disposed;
 
         /// <summary>Construct a descriptor rooted at
         /// <paramref name="absolutePath"/>. The
@@ -70,6 +79,27 @@ namespace Wacs.WASI.Preview3.Filesystem
             _rootPath = Path.GetFullPath(rootPath);
             _isDirectory = Directory.Exists(_absolutePath);
             _flags = flags;
+            if (!_isDirectory && File.Exists(_absolutePath))
+            {
+                FileAccess access =
+                    ((flags & DescriptorFlags.Read) != 0,
+                     (flags & DescriptorFlags.Write) != 0) switch
+                    {
+                        (true, true) => FileAccess.ReadWrite,
+                        (false, true) => FileAccess.Write,
+                        _ => FileAccess.Read,
+                    };
+                _fileStream = new FileStream(
+                    _absolutePath, FileMode.Open, access,
+                    FileShare.ReadWrite | FileShare.Delete);
+            }
+        }
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _fileStream?.Dispose();
         }
 
         /// <summary>Absolute host path this descriptor refers
@@ -101,6 +131,14 @@ namespace Wacs.WASI.Preview3.Filesystem
         // matches the testsuite's expectations.
         private string ResolveChild(string path)
         {
+            // All *-at methods are scoped to a directory descriptor.
+            // Resolving against a file descriptor surfaces as
+            // NotDirectory per the spec (filesystem-stat fixture
+            // probes this with `afd.stat_at(empty, "z.txt")`).
+            if (!_isDirectory)
+                throw new FilesystemException(
+                    ErrorCode.NotDirectory,
+                    "descriptor is not a directory.");
             if (path == null)
                 throw new FilesystemException(
                     ErrorCode.Invalid, "path is null");
@@ -229,7 +267,7 @@ namespace Wacs.WASI.Preview3.Filesystem
                 {
                     using var fs = new FileStream(
                         path, FileMode.Open, FileAccess.Read,
-                        FileShare.Read);
+                        FileShare.ReadWrite | FileShare.Delete);
                     if ((ulong)offset.Value > (ulong)fs.Length)
                         throw new FilesystemException(
                             ErrorCode.InvalidSeek,
@@ -283,7 +321,7 @@ namespace Wacs.WASI.Preview3.Filesystem
                 {
                     fs = new FileStream(
                         path, FileMode.OpenOrCreate, FileAccess.Write,
-                        FileShare.None);
+                        FileShare.ReadWrite | FileShare.Delete);
                     fs.Position = (long)ofs.Value;
                     var staging = new byte[4096];
                     while (await buffer.Reader
@@ -340,7 +378,7 @@ namespace Wacs.WASI.Preview3.Filesystem
                 {
                     fs = new FileStream(
                         path, FileMode.Append, FileAccess.Write,
-                        FileShare.None);
+                        FileShare.ReadWrite | FileShare.Delete);
                     var staging = new byte[4096];
                     while (await buffer.Reader
                         .WaitToReadAsync().ConfigureAwait(false))
@@ -418,10 +456,30 @@ namespace Wacs.WASI.Preview3.Filesystem
             {
                 try
                 {
-                    using var fs = new FileStream(
-                        _absolutePath, FileMode.Open, FileAccess.Write,
-                        FileShare.None);
-                    fs.SetLength((long)size.Value);
+                    if ((_flags & DescriptorFlags.Write) == 0)
+                        throw new FilesystemException(
+                            ErrorCode.Invalid,
+                            "set-size: descriptor opened without " +
+                            "the WRITE flag.");
+                    if (size.Value > long.MaxValue)
+                        throw new FilesystemException(
+                            ErrorCode.Invalid,
+                            $"set-size: size {size.Value} exceeds " +
+                            "host long range.");
+                    // Prefer the open fd so set-size survives
+                    // sibling unlinks; fall back to opening by
+                    // path when no fd is held (e.g. directory).
+                    if (_fileStream != null)
+                    {
+                        _fileStream.SetLength((long)size.Value);
+                    }
+                    else
+                    {
+                        using var fs = new FileStream(
+                            _absolutePath, FileMode.Open,
+                            FileAccess.Write, FileShare.None);
+                        fs.SetLength((long)size.Value);
+                    }
                 }
                 catch (Exception ex) { throw ToFilesystem(ex); }
             }, cancellationToken);
@@ -608,7 +666,35 @@ namespace Wacs.WASI.Preview3.Filesystem
 
         public Task<DescriptorStat> StatAsync(
             CancellationToken cancellationToken = default)
-            => Task.Run(() => StatPath(_absolutePath), cancellationToken);
+            => Task.Run(() =>
+            {
+                // For file descriptors with an open FileStream
+                // we stat via the open fd so the descriptor
+                // stays valid across a sibling unlink-file-at
+                // (Unix fd-survives-unlink semantics).
+                if (_fileStream != null)
+                {
+                    return new DescriptorStat
+                    {
+                        Type = DescriptorType.RegularFile,
+                        LinkCount = new LinkCount(1),
+                        Size = new FileSize((ulong)_fileStream.Length),
+                        DataAccessTimestamp = DateTimeToInstant(
+                            File.Exists(_absolutePath)
+                                ? File.GetLastAccessTimeUtc(_absolutePath)
+                                : UnixEpoch),
+                        DataModificationTimestamp = DateTimeToInstant(
+                            File.Exists(_absolutePath)
+                                ? File.GetLastWriteTimeUtc(_absolutePath)
+                                : UnixEpoch),
+                        StatusChangeTimestamp = DateTimeToInstant(
+                            File.Exists(_absolutePath)
+                                ? File.GetLastWriteTimeUtc(_absolutePath)
+                                : UnixEpoch),
+                    };
+                }
+                return StatPath(_absolutePath);
+            }, cancellationToken);
 
         public Task<DescriptorStat> StatAtAsync(
             PathFlags pathFlags, string path,
@@ -703,8 +789,14 @@ namespace Wacs.WASI.Preview3.Filesystem
                             ErrorCode.NotDirectory,
                             $"'{path}' is not a directory.");
 
+                    // EXCLUSIVE is only meaningful when CREATE is
+                    // also set — the wasip3 flags-and-type fixture
+                    // explicitly opens an existing file with
+                    // EXCLUSIVE-but-no-CREATE and expects success.
                     if ((openFlags & OpenFlags.Exclusive) != 0
-                        && File.Exists(resolved))
+                        && (openFlags & OpenFlags.Create) != 0
+                        && (File.Exists(resolved)
+                            || Directory.Exists(resolved)))
                         throw new FilesystemException(
                             ErrorCode.Exist,
                             $"'{path}' already exists.");
@@ -719,13 +811,41 @@ namespace Wacs.WASI.Preview3.Filesystem
                     if ((openFlags & OpenFlags.Truncate) != 0
                         && File.Exists(resolved))
                     {
-                        File.Create(resolved).Dispose();
+                        // Use FileShare.ReadWrite|Delete so we
+                        // don't trip over a sibling Descriptor
+                        // that's already holding the file open.
+                        using var trunc = new FileStream(
+                            resolved, FileMode.Open,
+                            FileAccess.Write,
+                            FileShare.ReadWrite | FileShare.Delete);
+                        trunc.SetLength(0);
                     }
 
                     if (!File.Exists(resolved) && !Directory.Exists(resolved))
                         throw new FilesystemException(
                             ErrorCode.NoEntry,
                             $"'{path}' does not exist.");
+
+                    bool isDirectory = Directory.Exists(resolved);
+
+                    // Spec normalization (per the wasip3 flags-
+                    // and-type fixture):
+                    //  - Opening a directory with the WRITE flag
+                    //    is invalid; directories use
+                    //    MUTATE_DIRECTORY instead.
+                    //  - Empty descriptor flags default to READ.
+                    //  - CREATE implies WRITE on the resulting
+                    //    descriptor even when not requested.
+                    if (isDirectory
+                        && (flags & DescriptorFlags.Write) != 0)
+                        throw new FilesystemException(
+                            ErrorCode.IsDirectory,
+                            $"'{path}' is a directory; cannot open " +
+                            "with WRITE flag.");
+                    if (flags == 0)
+                        flags = DescriptorFlags.Read;
+                    if ((openFlags & OpenFlags.Create) != 0)
+                        flags |= DescriptorFlags.Write;
 
                     return new Descriptor(resolved, _rootPath, flags);
                 }
@@ -961,9 +1081,13 @@ namespace Wacs.WASI.Preview3.Filesystem
             var list = new List<DescriptorPreopen>(pairs.Length);
             foreach (var (host, guest) in pairs)
             {
+                // Directories carry MUTATE_DIRECTORY rather
+                // than WRITE — WRITE is a file-only stream flag
+                // in the spec, MUTATE_DIRECTORY is the verb-
+                // permitter for mkdir/rename/unlink/etc.
                 var desc = new Descriptor(
                     host, host,
-                    DescriptorFlags.Read | DescriptorFlags.Write
+                    DescriptorFlags.Read
                         | DescriptorFlags.MutateDirectory);
                 list.Add(new DescriptorPreopen(desc, guest));
             }

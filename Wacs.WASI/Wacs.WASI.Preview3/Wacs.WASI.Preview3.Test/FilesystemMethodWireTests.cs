@@ -263,9 +263,14 @@ namespace Wacs.WASI.Preview3.Test
             host.InvokeDescriptorGetType(
                 handle, retptr, new StubRealloc(Array.Empty<int>()));
 
+            // result<descriptor-type, error-code>: disc:u8 at +0
+            // (Ok=0), payload (the dt variant) at +4.
+            Assert.Equal(
+                (byte)0,
+                dispatcher.Memory.AsSpan(retptr, 1)[0]);
             Assert.Equal(
                 (byte)DescriptorType.Tag.Directory,
-                dispatcher.Memory.AsSpan(retptr, 1)[0]);
+                dispatcher.Memory.AsSpan(retptr + 4, 1)[0]);
         }
 
         [Fact]
@@ -285,8 +290,11 @@ namespace Wacs.WASI.Preview3.Test
                 handle, retptr, new StubRealloc(Array.Empty<int>()));
 
             Assert.Equal(
-                (byte)DescriptorType.Tag.RegularFile,
+                (byte)0,
                 dispatcher.Memory.AsSpan(retptr, 1)[0]);
+            Assert.Equal(
+                (byte)DescriptorType.Tag.RegularFile,
+                dispatcher.Memory.AsSpan(retptr + 4, 1)[0]);
         }
 
         // ---- open-at -------------------------------------------------
@@ -383,17 +391,18 @@ namespace Wacs.WASI.Preview3.Test
         [Fact]
         public void Descriptor_stat_writes_err_for_missing_file()
         {
-            // The Descriptor was constructed against an existing dir
-            // root, but the underlying file gets deleted before stat.
+            // File never existed → the Descriptor opens with a
+            // null FileStream and falls back to a path stat, which
+            // surfaces NoEntry. (Existing-file descriptors hold an
+            // open fd that survives sibling unlink — that's
+            // covered by the wasip3 filesystem-set-size fixture.)
             var dispatcher = new AsyncDispatcher();
             dispatcher.Memory = MakeMemory();
             var host = new WasiPreview3Host { Dispatcher = dispatcher };
             var path = Path.Combine(_tempRoot, "transient.bin");
-            File.WriteAllText(path, "");
             var desc = new Descriptor(
                 path, _tempRoot, DescriptorFlags.Read);
             var handle = host.DescriptorHandles.Allocate(desc);
-            File.Delete(path);
 
             const int retptr = 64;
             host.InvokeDescriptorStat(

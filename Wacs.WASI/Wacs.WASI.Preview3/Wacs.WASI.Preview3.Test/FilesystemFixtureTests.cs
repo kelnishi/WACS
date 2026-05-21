@@ -43,6 +43,9 @@ namespace Wacs.WASI.Preview3.Test
             yield return new object[] { "filesystem-open-errors" };
             yield return new object[] { "filesystem-dotdot" };
             yield return new object[] { "filesystem-advise" };
+            yield return new object[] { "filesystem-set-size" };
+            yield return new object[] { "filesystem-flags-and-type" };
+            yield return new object[] { "filesystem-stat" };
         }
 
         [Theory]
@@ -69,6 +72,13 @@ namespace Wacs.WASI.Preview3.Test
                 var instance = Wasip3FixtureHarness.InstantiateWithHost(bytes, host);
                 host.Dispatcher = instance.AsyncDispatcher;
 
+                // Pipe stderr into the test output stream so
+                // FsTrace (WACS_TRACE_FS=1) and any other
+                // diagnostic chatter flows through xUnit when
+                // a fixture hangs / fails.
+                var stderrCapture = new System.IO.StringWriter();
+                var originalErr = System.Console.Error;
+                System.Console.SetError(stderrCapture);
                 var runTask = Task.Run(() =>
                 {
                     try
@@ -81,13 +91,21 @@ namespace Wacs.WASI.Preview3.Test
                 });
                 if (!runTask.Wait(TimeSpan.FromSeconds(15)))
                 {
+                    System.Console.SetError(originalErr);
                     var trace = WitBindgenScaffoldingBinder.SnapshotTrace();
                     _output.WriteLine(
                         $"Scaffolding trace ({trace.Count} entries):");
                     foreach (var kv in trace.OrderByDescending(p => p.Value))
                         _output.WriteLine($"  {kv.Value,6}  {kv.Key}");
+                    var captured = stderrCapture.ToString();
+                    if (!string.IsNullOrEmpty(captured))
+                        _output.WriteLine("--- captured stderr ---\n" + captured);
                     Assert.Fail($"{fixtureName}.run() hung past 15s.");
                 }
+                System.Console.SetError(originalErr);
+                var capturedOk = stderrCapture.ToString();
+                if (!string.IsNullOrEmpty(capturedOk))
+                    _output.WriteLine("--- captured stderr ---\n" + capturedOk);
                 if (runTask.Result is Exception ex2)
                 {
                     _output.WriteLine(

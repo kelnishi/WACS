@@ -1,5 +1,48 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.59 — file-descriptor fd-survives-unlink + flag/type/stat fidelity + path-resolve scoping
+
+Lands the layered fixes that unblock three more filesystem
+fixtures (set-size, flags-and-type, stat — running the suite
+to 9 of the 13 filesystem fixtures).
+
+* `Descriptor` now holds an OS `FileStream` open with
+  `FileShare.ReadWrite | FileShare.Delete` for file
+  descriptors. Under Unix this gives fd-survives-unlink
+  semantics for free — stat / set-size keep working after
+  a sibling unlinks the path. The descriptor becomes
+  `IDisposable` and the `[resource-drop]descriptor` host
+  binding now disposes the dropped value, closing the fd.
+  Sibling helpers (`WriteViaStream`, `AppendViaStream`,
+  `ReadViaStream`) now use the same FileShare so they
+  coexist with the long-lived fd.
+* `set-size` enforces the `WRITE` flag and rejects sizes
+  exceeding `long.MaxValue` up-front (predictable `Invalid`
+  rather than an ArgumentOutOfRange floor).
+* `open-at` normalizes flags per the spec: `EXCLUSIVE`
+  requires `CREATE`; empty `DescriptorFlags` default to
+  `READ`; `CREATE` implies `WRITE`; opening a directory
+  with `WRITE` surfaces as `IsDirectory`. Preopen
+  descriptors now carry `READ | MUTATE_DIRECTORY` (not
+  `READ | WRITE | MUTATE_DIRECTORY`) — `WRITE` is a file-
+  stream flag, `MUTATE_DIRECTORY` is the verb-permitter.
+* `get-type` now writes the spec-correct
+  `result<descriptor-type, error-code>` (20 bytes 4-aligned)
+  at retptr rather than the bare 16-byte variant — matching
+  what wit-bindgen expects. The wire validator updated to
+  match. `get-flags` async-lower writes the flag byte at
+  payload offset +4 (was +1).
+* `ResolveChild` rejects path-relative methods (`*-at`)
+  with `NotDirectory` when invoked on a file descriptor
+  (filesystem-stat probes this with `afd.stat_at(empty,
+  "z.txt")`).
+* Diagnostic trace coverage widened: `open-at`, `get-type`,
+  `stat`, async-lower `get-flags` all emit through
+  `FsTrace` when `WACS_TRACE_FS=1`. Test harness captures
+  stderr through `_output` when a fixture hangs / fails.
+
+Preview3 448/448, ComponentModel 639/639.
+
 ## WACS.WASI.Preview3 0.1.58 — async-lower result-writers for get-flags + is-same-object + opt-in fs trace
 
 Lands the `[async-lower]` result-writers for the two
