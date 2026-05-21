@@ -1,5 +1,28 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.58 — async-lower result-writers for get-flags + is-same-object + opt-in fs trace
+
+Lands the `[async-lower]` result-writers for the two
+filesystem methods whose sync slot returns a value directly
+(without a result-area pointer): `get-flags` (returns
+`result<descriptor-flags, error-code>` — writes Ok disc + u8
+payload at retptr) and `is-same-object` (returns bare `bool`
+— writes 1 byte at retptr).
+
+* The bindings unblock the FUNCREF-TABLE indirection for
+  filesystem-flags-and-type + filesystem-is-same-object —
+  but each fixture still hangs on per-method Descriptor body
+  fidelity (set-size doesn't honor the Write flag,
+  LinkAtAsync throws Unsupported instead of creating hard
+  links, etc.). The remaining 9 filesystem fixtures need
+  targeted per-method Descriptor work.
+* `WACS_TRACE_FS=1` env-var-gated trace through
+  `InvokeDescriptorResultErrorCode` for diagnostic dumping
+  of path-method calls. Disabled by default.
+
+Coverage unchanged at 15 wasip3 fixtures passing. Preview3
+445/445, ComponentModel 639/639.
+
 ## WACS.WASI.Preview3 0.1.57 — params-ptr async-lower bindings + filesystem-advise
 
 Adds the `(params_ptr, results_ptr) → status` async-lower

@@ -960,6 +960,33 @@ namespace Wacs.WASI.Preview3
                 (Func<ExecContext, int, int>)((_, self) =>
                     (int)RequireDescriptor(self).GetFlags()));
 
+            // get-flags async-lower returns result<descriptor-
+            // flags, error-code> at the result-area pointer
+            // (20 bytes, 4-aligned: disc:u8 at +0, payload u8
+            // flags at +1 on Ok, error-code variant on Err).
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[async-lower][method]descriptor.get-flags"),
+                (Func<ExecContext, int, int, int>)((_, self, retptr) =>
+                {
+                    var memory = RequireMemoryForHttp();
+                    ValidateResultErrorCodeRetptr(retptr, memory);
+                    var dest = memory.AsSpan(retptr, ResultErrorCodeSize);
+                    try
+                    {
+                        var flags = RequireDescriptor(self).GetFlags();
+                        dest.Clear();
+                        dest[0] = 0; // Ok disc
+                        dest[1] = (byte)(uint)flags;
+                    }
+                    catch (FilesystemException ex)
+                    {
+                        WriteErrorCodeResult(
+                            dest, ex, realloc, memory);
+                    }
+                    return CanonAsyncStatusReturnedPacked;
+                }));
+
             // wasi:filesystem/preopens.get-directories — the
             // landmark binding that lets guests discover the
             // host-configured preopen set. Returns
@@ -1060,6 +1087,24 @@ namespace Wacs.WASI.Preview3
                     "[method]descriptor.is-same-object"),
                 (Func<ExecContext, int, int, int>)((_, self, other) =>
                     InvokeDescriptorIsSameObject(self, other) ? 1 : 0));
+
+            // is-same-object async-lower writes the bool at the
+            // result-area pointer (1 byte) and returns
+            // RETURNED. Spec: returns bare bool (not
+            // result<bool, error-code>), so no error case.
+            runtime.BindHostFunction(
+                (FilesystemTypesModuleName,
+                    "[async-lower][method]descriptor.is-same-object"),
+                (Func<ExecContext, int, int, int, int>)(
+                    (_, self, other, retptr) =>
+                    {
+                        var memory = RequireMemoryForHttp();
+                        bool same = InvokeDescriptorIsSameObject(
+                            self, other);
+                        memory.AsSpan(retptr, 1)[0] =
+                            same ? (byte)1 : (byte)0;
+                        return CanonAsyncStatusReturnedPacked;
+                    }));
 
             runtime.BindHostFunction(
                 (FilesystemTypesModuleName,
@@ -3718,6 +3763,16 @@ namespace Wacs.WASI.Preview3
 
         // Shared invocation pattern for descriptor methods that
         // take a path arg and return result<_, error-code>.
+        private static readonly bool FsTraceEnabled =
+            System.Environment.GetEnvironmentVariable(
+                "WACS_TRACE_FS") == "1";
+
+        private static void FsTrace(string msg)
+        {
+            if (FsTraceEnabled)
+                System.Console.Error.WriteLine($"[fs] {msg}");
+        }
+
         private void InvokeDescriptorResultErrorCode(
             int self, int retptr, ICabiRealloc realloc,
             Action<IDescriptor, string> body,
@@ -3730,9 +3785,15 @@ namespace Wacs.WASI.Preview3
             {
                 var desc = RequireDescriptor(self);
                 var path = ReadGuestUtf8(pathPtr, pathLen);
+                FsTrace($"path-method(self={self}, path=\"{path}\")");
                 body(desc, path);
+                FsTrace($"  → Ok");
             }
-            catch (FilesystemException ex) { caught = ex; }
+            catch (FilesystemException ex)
+            {
+                FsTrace($"  → {ex.Code}");
+                caught = ex;
+            }
             WriteErrorCodeResult(
                 memory.AsSpan(retptr, ResultErrorCodeSize),
                 caught, realloc, memory);
