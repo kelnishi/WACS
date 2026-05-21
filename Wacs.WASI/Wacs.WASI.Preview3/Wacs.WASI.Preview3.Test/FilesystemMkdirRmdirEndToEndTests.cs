@@ -52,17 +52,18 @@ namespace Wacs.WASI.Preview3.Test
                 $"Canons: {component.Canons.Count}");
         }
 
-        [Fact(Skip = "filesystem fixtures need shim slot→name " +
-            "resolution from the component-level alias section. " +
-            "The wit-component shim's core module has no internal " +
-            "function-name section — the slot→qualified-import-name " +
-            "map only lives in the component-level core-func aliases " +
-            "(`(alias core export $shim-instance \"<N>\" (core func " +
-            "$indirect-MOD-METHOD))`). The host's [async-lower] " +
-            "bindings + fs-tests.dir staging land in this commit; " +
-            "resolving the slot map needs a component-alias walker " +
-            "(or instantiating the shim+fixup modules to let the " +
-            "funcref-table element segments do the wiring).")]
+        [Fact(Skip = "Shim+fixup wiring now works (verified end-to-" +
+            "end via [host] traces: get-directories returns 1 " +
+            "preopen, then create-directory-at(\"\") is invoked " +
+            "with self=1). Next layer surfaces here: Descriptor's " +
+            "CreateDirectoryAtAsync(\"\") returns Ok where the " +
+            "Rust test expects Err(NoEntry). The guest panics, " +
+            "the wasip2-facade permissive-stub for wasi:cli/exit " +
+            "swallows the abort, and the unwinder spins (same " +
+            "pattern as feedback_wasip3_permissive_stub_exit_spins). " +
+            "Fix path: tighten Descriptor's sandbox + path-" +
+            "validation to return the spec'd error codes — " +
+            "separate concern from the shim+fixup machinery.")]
         public void Run_completes_against_preopened_fs_tests_dir()
         {
             var path = Wasip3FixtureHarness.FixturePath(

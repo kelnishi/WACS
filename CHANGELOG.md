@@ -1,5 +1,84 @@
 # Changelog
 
+## WACS.ComponentModel 0.8.29 — ShimFixupWiring closes the funcref-table indirection
+
+Minimal extension to the multi-core path that instantiates
+the wit-component shim + fixup core modules and threads the
+host's bindings through the shim's funcref table. The
+`Descriptor.create_directory_at` call from the filesystem-
+mkdir-rmdir fixture now reaches the host body end-to-end:
+verified via `[host]` tracing that get-directories returns 1
+preopen and the first `create_directory_at("")` invocation
+enters our binding.
+
+### Why "minimal extension" not "full rewrite"
+
+An earlier iteration (`b48aa518` / `80c21161` / `8b743fd5`)
+built a full spec-following `MultiCoreInstantiator` that
+maintained parallel core spaces and instantiated every
+declared core module. It compiled and traced cleanly, but
+re-binding entities for `InstantiateCoreModule.args` clashed
+with the legacy path's canon-async / wit-bindgen-rt /
+configureImports bindings — placeholders for canon-async
+builtins silently shadowed the dispatcher's working delegates.
+The shorter answer keeps the legacy path's bindings intact
+and only adds what's strictly new: shim+fixup instantiation,
+shim table aliased at `("", "$imports")`, slot→(MOD, METHOD)
+binding for the funcref-table slots.
+
+### `ShimFixupWiring.Wire`
+
+New static helper called from `InstantiateMultiCore` between
+`configureImports` and primary instantiation:
+
+1. Identify shim + fixup binaries structurally (the shim
+   EXPORTS a funcref table named "$imports"; the fixup
+   IMPORTS one). wit-component 0.246+ doesn't emit the
+   shim's internal module-name section anymore — the
+   structural shape is the reliable signal.
+2. Walk component aliases + canon section in file order to
+   build coreFuncIdx → shim-slot map (from aliases targeting
+   the shim instance) + inline-instance → list of (slot,
+   methodName) pairs.
+3. Walk the primary's `InstantiateCoreModule.args` to
+   resolve slot → (MOD, METHOD).
+4. For each slot, bind `("", "<slot>")` to the runtime's
+   existing host binding at `(MOD, METHOD)` via
+   `BindHostFunction(IFunctionInstance)`.
+5. Instantiate the shim (defines the funcref table +
+   indirect-XXX wrappers).
+6. Expose the shim's table at `("", "$imports")` via the new
+   `WasmRuntime.BindExternal` API.
+7. Instantiate the fixup — element segment fills the
+   funcref table from the `("", "<slot>")` host functions.
+8. Primary instantiates afterwards (legacy path).
+
+For filesystem-mkdir-rmdir: 13/13 shim slots resolved to
+host bindings (get-directories, 3 descriptor methods,
+waitable-set.poll, poll, 3 output-stream methods,
+get-environment, 3 terminal-* getters).
+
+### `WasmRuntime.BindExternal`
+
+New public method on `WasmRuntime` for re-aliasing an already-
+allocated external (function, table, memory, global, tag)
+under a fresh `(module, entity)` name. Both keys point at
+the SAME address — element-segment writes to the table stay
+observable through both names, and memory growth stays
+coherent. Used by ShimFixupWiring to expose the shim's
+funcref table at `("", "$imports")`.
+
+### `filesystem-mkdir-rmdir` skip reason updated
+
+The shim+fixup wiring is no longer the blocker — verified
+end-to-end. The next layer surfaces: `Descriptor`'s default
+implementation returns `Ok` for path `""` where the Rust
+test expects `Err(NoEntry)`; the guest panics; the wasip2-
+facade permissive-stub for `wasi:cli/exit` swallows the
+abort; unwinder spins. Same pattern as
+`feedback_wasip3_permissive_stub_exit_spins`. Skip reason
+points at `Descriptor` path-validation as the next surface.
+
 ## WACS.WASI.Preview3 0.1.54 — filesystem-mkdir-rmdir staging ([async-lower] bindings + fs-tests.dir)
 
 Stages the filesystem fixture infrastructure: the
