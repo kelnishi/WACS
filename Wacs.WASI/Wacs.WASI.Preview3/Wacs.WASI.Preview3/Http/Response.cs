@@ -50,8 +50,21 @@ namespace Wacs.WASI.Preview3.Http
         }
 
         public ushort GetStatusCode() => _statusCode;
-        public void SetStatusCode(ushort statusCode) =>
+        public void SetStatusCode(ushort statusCode)
+        {
+            // RFC 9110 §15: status codes are 3-digit, 100-599
+            // inclusive. The wasip3 http-response fixture
+            // probes invalid codes (0, 42, 69, 600, 1000,
+            // 65535) and expects unwrap_err — translate any
+            // out-of-range value to a thrown exception so the
+            // binding can encode the result-disc=Err.
+            if (statusCode < 100 || statusCode > 599)
+                throw new System.ArgumentOutOfRangeException(
+                    nameof(statusCode),
+                    $"HTTP status code {statusCode} is outside " +
+                    "the valid range [100, 599].");
             _statusCode = statusCode;
+        }
 
         public IFields GetHeaders() => _headers;
         public Stream? Body { get; }

@@ -1,5 +1,42 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.67 — http-response passes + Method/Scheme normalization + status validation
+
+* `response.set-status-code` rejects out-of-range codes
+  (must be 100-599 per RFC 9110 §15) — the fixture's
+  invalid sweep (0, 42, 600, 1000, 65535) now surfaces
+  the expected `Err(())`. Host binding catches the
+  validation throw and encodes the result-disc=Err.
+* `response.get-headers` returns an immutable snapshot
+  (Fields cloned + frozen). The fixture asserts
+  `headers.append(...) → Err(Immutable)` directly after.
+  The trailing `test_headers_same` compare still succeeds
+  because the snapshot preserves the values.
+* `Method::Other(name)` and `Scheme::Other(name)` now
+  normalize standard names to the canonical variant
+  (wasi:http issue #194) and validate per RFC 9110/3986
+  token rules. `set-method(Other("GET"))` collapses to
+  `Method::Get`; `set-scheme(Other("https"))` to
+  `Scheme::Https`. Invalid tokens (empty, non-RFC
+  characters) surface `Err(())` from set-method /
+  set-scheme via a try/catch wrapper around the read-
+  from-slots helpers.
+
+http-request stays pinned (xfail) — bindings now pass
+every individual assertion the fixture hits, but the
+three 1024-codepoint char sweeps in test_method_names /
+test_path_with_query / test_authority drive ~5000 host
+calls; the per-call canon-async shim-fixup indirection
+adds enough overhead that the whole fixture exceeds the
+15s timeout. Perf gap, not correctness — re-enables once
+the canon-async dispatch path is profiled and the hot
+indirection is hoisted.
+
+http-service still needs the export-typed task-return
+generator (handle export's flat-8-slot return).
+
+Preview3 449/449 (HTTP: 2/4 enabled, 2/2 passing).
+
 ## WACS.WASI.Preview3 0.1.66 — http-fields fixture passes (Fields spec fixes)
 
 `Fields` impl now closes three spec gaps the upstream

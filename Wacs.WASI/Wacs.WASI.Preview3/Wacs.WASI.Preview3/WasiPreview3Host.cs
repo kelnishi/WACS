@@ -673,19 +673,30 @@ namespace Wacs.WASI.Preview3
             runtime.BindHostFunction(
                 (HttpTypesModuleName, "[method]request.get-method"),
                 (Action<ExecContext, int, int>)((_, self, retptr) =>
-                    InvokeRequestGetMethod(self, retptr, realloc)));
+                {
+                    FsTrace($"[req] get-method(self={self})");
+                    InvokeRequestGetMethod(self, retptr, realloc);
+                }));
 
             runtime.BindHostFunction(
                 (HttpTypesModuleName, "[method]request.set-method"),
                 (Func<ExecContext, int, int, int, int, int>)(
                     (_, self, disc, strPtr, strLen) =>
-                        InvokeRequestSetMethod(
-                            self, disc, strPtr, strLen)));
+                    {
+                        var r = InvokeRequestSetMethod(
+                            self, disc, strPtr, strLen);
+                        FsTrace($"[req] set-method(self={self}, disc={disc}, " +
+                            $"len={strLen}) → {r}");
+                        return r;
+                    }));
 
             runtime.BindHostFunction(
                 (HttpTypesModuleName, "[method]request.get-scheme"),
                 (Action<ExecContext, int, int>)((_, self, retptr) =>
-                    InvokeRequestGetScheme(self, retptr, realloc)));
+                {
+                    FsTrace($"[req] get-scheme(self={self})");
+                    InvokeRequestGetScheme(self, retptr, realloc);
+                }));
 
             runtime.BindHostFunction(
                 (HttpTypesModuleName, "[method]request.set-scheme"),
@@ -707,9 +718,12 @@ namespace Wacs.WASI.Preview3
                 (HttpTypesModuleName,
                     "[method]request.get-path-with-query"),
                 (Action<ExecContext, int, int>)((_, self, retptr) =>
+                {
+                    FsTrace($"[req] get-path-with-query(self={self})");
                     InvokeRequestGetOptionString(
                         self, retptr, realloc,
-                        r => r.GetPathWithQuery())));
+                        r => r.GetPathWithQuery());
+                }));
 
             runtime.BindHostFunction(
                 (HttpTypesModuleName,
@@ -724,9 +738,12 @@ namespace Wacs.WASI.Preview3
                 (HttpTypesModuleName,
                     "[method]request.get-authority"),
                 (Action<ExecContext, int, int>)((_, self, retptr) =>
+                {
+                    FsTrace($"[req] get-authority(self={self})");
                     InvokeRequestGetOptionString(
                         self, retptr, realloc,
-                        r => r.GetAuthority())));
+                        r => r.GetAuthority());
+                }));
 
             runtime.BindHostFunction(
                 (HttpTypesModuleName,
@@ -757,7 +774,11 @@ namespace Wacs.WASI.Preview3
             runtime.BindHostFunction(
                 (HttpTypesModuleName, "[method]response.get-status-code"),
                 (Func<ExecContext, int, int>)((_, self) =>
-                    RequireResponse(self).GetStatusCode()));
+                {
+                    var c = RequireResponse(self).GetStatusCode();
+                    FsTrace($"[resp] get-status-code(self={self}) → {c}");
+                    return c;
+                }));
 
             // ---- request.new / response.new (Slice II) ------------
             //
@@ -791,12 +812,19 @@ namespace Wacs.WASI.Preview3
                      trailersFutureH,
                      optsOptDisc, optsH,
                      retptr) =>
+                    {
+                        FsTrace($"[req] request.new(headers={headersH}, " +
+                            $"contents-disc={contentsOptDisc}, " +
+                            $"contents-stream={contentsStreamH}, " +
+                            $"trailers={trailersFutureH}, " +
+                            $"opts-disc={optsOptDisc}, opts={optsH})");
                         InvokeRequestNew(
                             headersH,
                             contentsOptDisc, contentsStreamH,
                             trailersFutureH,
                             optsOptDisc, optsH,
-                            retptr)));
+                            retptr);
+                    }));
 
             // [static]response.new(
             //   headers: headers,
@@ -814,11 +842,17 @@ namespace Wacs.WASI.Preview3
                      contentsOptDisc, contentsStreamH,
                      trailersFutureH,
                      retptr) =>
+                    {
+                        FsTrace($"[resp] response.new(headers={headersH}, " +
+                            $"contents-disc={contentsOptDisc}, " +
+                            $"contents-stream={contentsStreamH}, " +
+                            $"trailers={trailersFutureH})");
                         InvokeResponseNew(
                             headersH,
                             contentsOptDisc, contentsStreamH,
                             trailersFutureH,
-                            retptr)));
+                            retptr);
+                    }));
 
             // ---- consume-body (Slice JJ) ---------------------------
             //
@@ -877,8 +911,21 @@ namespace Wacs.WASI.Preview3
                 (HttpTypesModuleName,
                     "[method]response.get-headers"),
                 (Func<ExecContext, int, int>)((_, self) =>
-                    FieldsHandles.Allocate(
-                        RequireResponse(self).GetHeaders())));
+                {
+                    // Spec: response.get-headers returns an
+                    // immutable Fields handle. Snapshot + freeze
+                    // so mutations through the returned handle
+                    // surface as HeaderError::Immutable. The
+                    // http-response fixture asserts this with
+                    // `headers.append(...) → Err(Immutable)`.
+                    var src = RequireResponse(self).GetHeaders();
+                    var snapshot = (Fields)src.Clone();
+                    snapshot.Freeze();
+                    var h = FieldsHandles.Allocate(snapshot);
+                    FsTrace($"[resp] get-headers(self={self}) → " +
+                        $"handle={h} (frozen snapshot)");
+                    return h;
+                }));
 
             // Per the WIT signature, set-status-code returns
             // `result` (1 flat i32 slot, no payload). The impl
@@ -888,9 +935,17 @@ namespace Wacs.WASI.Preview3
                 (HttpTypesModuleName, "[method]response.set-status-code"),
                 (Func<ExecContext, int, int, int>)((_, self, code) =>
                 {
-                    RequireResponse(self).SetStatusCode(
-                        unchecked((ushort)code));
-                    return 0; // result disc = ok
+                    FsTrace($"[resp] set-status-code(self={self}, code={code})");
+                    try
+                    {
+                        RequireResponse(self).SetStatusCode(
+                            unchecked((ushort)code));
+                        return 0; // result disc = ok
+                    }
+                    catch (System.ArgumentOutOfRangeException)
+                    {
+                        return 1; // result disc = err
+                    }
                 }));
 
             // ---- request.get-options (Slice EE) ---------------------
@@ -908,7 +963,10 @@ namespace Wacs.WASI.Preview3
                 (HttpTypesModuleName,
                     "[method]request.get-options"),
                 (Action<ExecContext, int, int>)((_, self, retptr) =>
-                    InvokeRequestGetOptions(self, retptr)));
+                {
+                    FsTrace($"[req] get-options(self={self})");
+                    InvokeRequestGetOptions(self, retptr);
+                }));
 
             // wasi:http/client.send and wasi:http/handler.handle.
             // Both are async func in the WIT and lower as a
@@ -4890,9 +4948,16 @@ namespace Wacs.WASI.Preview3
         internal int InvokeRequestSetMethod(
             int self, int disc, int strPtr, int strLen)
         {
-            HttpMethod m = ReadMethodFromSlots(disc, strPtr, strLen);
-            RequireRequest(self).SetMethod(m);
-            return 0; // result = ok
+            try
+            {
+                HttpMethod m = ReadMethodFromSlots(disc, strPtr, strLen);
+                RequireRequest(self).SetMethod(m);
+                return 0; // result = ok
+            }
+            catch (HttpException)
+            {
+                return 1; // result = err
+            }
         }
 
         public HttpMethod ReadMethodFromSlots(
@@ -4909,14 +4974,62 @@ namespace Wacs.WASI.Preview3
                 case 6: return HttpMethod.Options_;
                 case 7: return HttpMethod.Trace;
                 case 8: return HttpMethod.Patch;
-                case 9: return HttpMethod.Other(
-                    ReadGuestUtf8(strPtr, strLen));
+                case 9:
+                    // Spec normalization (wasi:http issue #194):
+                    // an Other(name) whose case-sensitive UTF-8
+                    // matches a standard method collapses to the
+                    // enumerated variant. Also reject empty
+                    // names + invalid token chars — the
+                    // http-request fixture relies on
+                    // `set_method(Other(""))` to return Err and
+                    // sweeps invalid token chars likewise.
+                    var name = ReadGuestUtf8(strPtr, strLen);
+                    if (string.IsNullOrEmpty(name))
+                        throw new HttpException(
+                            HttpErrorCode.HttpRequestMethodInvalid,
+                            "method: Other case requires a non-" +
+                            "empty token.");
+                    if (!IsValidMethodToken(name))
+                        throw new HttpException(
+                            HttpErrorCode.HttpRequestMethodInvalid,
+                            $"method '{name}' contains invalid " +
+                            "token characters.");
+                    switch (name)
+                    {
+                        case "GET": return HttpMethod.Get;
+                        case "HEAD": return HttpMethod.Head;
+                        case "POST": return HttpMethod.Post;
+                        case "PUT": return HttpMethod.Put;
+                        case "DELETE": return HttpMethod.Delete;
+                        case "CONNECT": return HttpMethod.Connect;
+                        case "OPTIONS": return HttpMethod.Options_;
+                        case "TRACE": return HttpMethod.Trace;
+                        case "PATCH": return HttpMethod.Patch;
+                    }
+                    return HttpMethod.Other(name);
                 default:
                     throw new HttpException(
                         HttpErrorCode.HttpRequestMethodInvalid,
                         $"method: invalid discriminant {disc} " +
                         "(expected 0..9).");
             }
+        }
+
+        // Token chars per RFC 9110 §5.6.2 — the http-request
+        // fixture's compute_valid_method_chars() encodes
+        // exactly this set; reject anything else as
+        // InvalidSyntax.
+        private static bool IsValidMethodToken(string name)
+        {
+            foreach (var c in name)
+            {
+                bool ok = (c >= 'a' && c <= 'z')
+                    || (c >= 'A' && c <= 'Z')
+                    || (c >= '0' && c <= '9');
+                if (!ok) ok = "!#$%&'*+-.^_`|~".IndexOf(c) >= 0;
+                if (!ok) return false;
+            }
+            return true;
         }
 
         internal void InvokeRequestGetScheme(
@@ -4944,18 +5057,25 @@ namespace Wacs.WASI.Preview3
             int self, int optDisc,
             int schemeDisc, int strPtr, int strLen)
         {
-            HttpScheme? scheme;
-            if (optDisc == 0)
+            try
             {
-                scheme = null;
+                HttpScheme? scheme;
+                if (optDisc == 0)
+                {
+                    scheme = null;
+                }
+                else
+                {
+                    scheme = ReadSchemeFromSlots(
+                        schemeDisc, strPtr, strLen);
+                }
+                RequireRequest(self).SetScheme(scheme);
+                return 0;
             }
-            else
+            catch (HttpException)
             {
-                scheme = ReadSchemeFromSlots(
-                    schemeDisc, strPtr, strLen);
+                return 1;
             }
-            RequireRequest(self).SetScheme(scheme);
-            return 0;
         }
 
         /// <summary>Write a flat method variant into a 12-byte
@@ -5013,14 +5133,56 @@ namespace Wacs.WASI.Preview3
             {
                 case 0: return HttpScheme.Http;
                 case 1: return HttpScheme.Https;
-                case 2: return HttpScheme.Other(
-                    ReadGuestUtf8(strPtr, strLen));
+                case 2:
+                    // Spec normalization (wasi:http issue #194):
+                    // an Other("http") / Other("https") (case-
+                    // insensitive) collapses to the enumerated
+                    // variant. Other scheme names must validate
+                    // as URI schemes per RFC 3986 §3.1
+                    // (ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ))
+                    // — invalid chars surface as InvalidSyntax so
+                    // the http-request fixture's scheme sweep
+                    // reaches its expected Err on bad chars.
+                    var name = ReadGuestUtf8(strPtr, strLen);
+                    if (string.Equals(name, "http",
+                            System.StringComparison.OrdinalIgnoreCase))
+                        return HttpScheme.Http;
+                    if (string.Equals(name, "https",
+                            System.StringComparison.OrdinalIgnoreCase))
+                        return HttpScheme.Https;
+                    if (!IsValidUriScheme(name))
+                        throw new HttpException(
+                            HttpErrorCode.InternalError,
+                            $"scheme '{name}' is not a valid URI " +
+                            "scheme per RFC 3986 §3.1.");
+                    return HttpScheme.Other(name);
                 default:
                     throw new HttpException(
                         HttpErrorCode.InternalError,
                         $"scheme: invalid discriminant {disc} " +
                         "(expected 0/1/2 for HTTP/HTTPS/other).");
             }
+        }
+
+        private static bool IsValidUriScheme(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return false;
+            // First char must be ALPHA.
+            char first = name[0];
+            if (!((first >= 'a' && first <= 'z')
+                  || (first >= 'A' && first <= 'Z')))
+                return false;
+            // Subsequent: ALPHA / DIGIT / + / - / .
+            for (int i = 1; i < name.Length; i++)
+            {
+                var c = name[i];
+                bool ok = (c >= 'a' && c <= 'z')
+                    || (c >= 'A' && c <= 'Z')
+                    || (c >= '0' && c <= '9')
+                    || c == '+' || c == '-' || c == '.';
+                if (!ok) return false;
+            }
+            return true;
         }
 
         private static void ValidateMethodOrSchemeRetptr(
