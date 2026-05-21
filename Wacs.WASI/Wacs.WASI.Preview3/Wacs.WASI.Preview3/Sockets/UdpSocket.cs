@@ -82,6 +82,7 @@ namespace Wacs.WASI.Preview3.Sockets
         public void Bind(IpSocketAddress localAddress)
         {
             EnsureState(State.Unbound, "bind");
+            TcpEndpointHelper.ValidateBindAddress(_family, localAddress);
             try
             {
                 var ep = TcpEndpointHelper.ToIpEndPoint(localAddress);
@@ -95,22 +96,60 @@ namespace Wacs.WASI.Preview3.Sockets
             }
         }
 
+        // UDP is connectionless. The Connect call is purely a
+        // host-side convenience that pins a default destination
+        // for unaddressed sends and filters received datagrams
+        // by source. We track the connected endpoint manually
+        // (rather than relying on .NET's Socket.Connect /
+        // Disconnect lifecycle, which forbids same-endpoint
+        // re-connects after a prior disconnect).
+        private System.Net.IPEndPoint? _connectedRemote;
+
         public void Connect(IpSocketAddress remoteAddress)
         {
+            // Spec: connect rejects family-mismatch, the unspec
+            // address, port=0, and ipv4-mapped-ipv6 (dual-stack).
+            TcpEndpointHelper.ValidateConnectAddress(_family, remoteAddress);
+            // Implicit bind on connect from Unbound. Bind to the
+            // same address as the connect target (port 0 for an
+            // ephemeral port) so get_local_address resolves to a
+            // routable IP — wildcard-bind leaves macOS's
+            // getsockname returning 0.0.0.0 even after connect,
+            // which the spec doesn't allow.
+            if (_state == State.Unbound)
+            {
+                try
+                {
+                    var targetEp =
+                        TcpEndpointHelper.ToIpEndPoint(remoteAddress);
+                    var implicitLocal = new System.Net.IPEndPoint(
+                        targetEp.Address, 0);
+                    if (_family == IpAddressFamily.Ipv6)
+                    {
+                        try
+                        {
+                            _socket.SetSocketOption(
+                                SocketOptionLevel.IPv6,
+                                SocketOptionName.IPv6Only, 1);
+                        }
+                        catch (SocketException) { }
+                    }
+                    _socket.Bind(implicitLocal);
+                    _state = State.Bound;
+                }
+                catch (SocketException sx)
+                {
+                    _state = State.Closed;
+                    throw TcpEndpointHelper.MapSocketException(sx);
+                }
+            }
             if (_state != State.Bound && _state != State.Connected)
                 throw new SocketsException(
                     ErrorCode.InvalidState,
                     "udp-socket.connect: socket must be bound first.");
-            try
-            {
-                var ep = TcpEndpointHelper.ToIpEndPoint(remoteAddress);
-                _socket.Connect(ep);
-                _state = State.Connected;
-            }
-            catch (SocketException sx)
-            {
-                throw TcpEndpointHelper.MapSocketException(sx);
-            }
+            _connectedRemote =
+                TcpEndpointHelper.ToIpEndPoint(remoteAddress);
+            _state = State.Connected;
         }
 
         public void Disconnect()
@@ -119,15 +158,8 @@ namespace Wacs.WASI.Preview3.Sockets
                 throw new SocketsException(
                     ErrorCode.InvalidState,
                     "udp-socket.disconnect: socket is not connected.");
-            try
-            {
-                _socket.Disconnect(reuseSocket: true);
-                _state = State.Bound;
-            }
-            catch (SocketException sx)
-            {
-                throw TcpEndpointHelper.MapSocketException(sx);
-            }
+            _connectedRemote = null;
+            _state = State.Bound;
         }
 
         public Task SendAsync(
@@ -165,68 +197,86 @@ namespace Wacs.WASI.Preview3.Sockets
 
         public IpSocketAddress GetRemoteAddress()
         {
-            if (_state != State.Connected)
+            if (_state != State.Connected || _connectedRemote == null)
                 throw new SocketsException(
                     ErrorCode.InvalidState,
                     "udp-socket.get-remote-address: socket is not " +
                     "connected.");
-            if (_socket.RemoteEndPoint is not System.Net.IPEndPoint ep)
-                throw new SocketsException(
-                    ErrorCode.InvalidState,
-                    "udp-socket.get-remote-address: no remote endpoint.");
-            return TcpEndpointHelper.FromIpEndPoint(ep);
+            return TcpEndpointHelper.FromIpEndPoint(_connectedRemote);
         }
 
+        // Same shadow-storage pattern as TcpSocket: the WASI
+        // spec wants guest-requested values round-tripped
+        // verbatim, while the OS layer may clamp them. We
+        // best-effort apply to the socket and shadow.
+        private byte _unicastHopLimit = 64;
+        private ulong _receiveBufferSize = 65536;
+        private ulong _sendBufferSize = 65536;
         public byte GetUnicastHopLimit()
         {
             EnsureNotClosed();
-            var level = _family == IpAddressFamily.Ipv4
-                ? SocketOptionLevel.IP : SocketOptionLevel.IPv6;
-            var option = _family == IpAddressFamily.Ipv4
-                ? SocketOptionName.IpTimeToLive
-                : SocketOptionName.HopLimit;
-            return (byte)(int)(_socket.GetSocketOption(level, option) ?? 0);
+            return _unicastHopLimit;
         }
         public void SetUnicastHopLimit(byte value)
         {
             EnsureNotClosed();
+            if (value == 0)
+                throw new SocketsException(
+                    ErrorCode.InvalidArgument,
+                    "set-unicast-hop-limit: value must be > 0.");
             var level = _family == IpAddressFamily.Ipv4
                 ? SocketOptionLevel.IP : SocketOptionLevel.IPv6;
             var option = _family == IpAddressFamily.Ipv4
                 ? SocketOptionName.IpTimeToLive
                 : SocketOptionName.HopLimit;
-            _socket.SetSocketOption(level, option, (int)value);
+            try { _socket.SetSocketOption(level, option, (int)value); }
+            catch (SocketException) { /* best-effort */ }
+            _unicastHopLimit = value;
         }
 
         public ulong GetReceiveBufferSize()
         {
             EnsureNotClosed();
-            return (ulong)(int)(_socket.GetSocketOption(
-                SocketOptionLevel.Socket,
-                SocketOptionName.ReceiveBuffer) ?? 0);
+            return _receiveBufferSize;
         }
         public void SetReceiveBufferSize(ulong value)
         {
             EnsureNotClosed();
-            _socket.SetSocketOption(
-                SocketOptionLevel.Socket,
-                SocketOptionName.ReceiveBuffer,
-                (int)Math.Min(value, int.MaxValue));
+            if (value == 0)
+                throw new SocketsException(
+                    ErrorCode.InvalidArgument,
+                    "set-receive-buffer-size: value must be > 0.");
+            try
+            {
+                _socket.SetSocketOption(
+                    SocketOptionLevel.Socket,
+                    SocketOptionName.ReceiveBuffer,
+                    (int)Math.Min(value, int.MaxValue));
+            }
+            catch (SocketException) { /* best-effort */ }
+            _receiveBufferSize = value;
         }
         public ulong GetSendBufferSize()
         {
             EnsureNotClosed();
-            return (ulong)(int)(_socket.GetSocketOption(
-                SocketOptionLevel.Socket,
-                SocketOptionName.SendBuffer) ?? 0);
+            return _sendBufferSize;
         }
         public void SetSendBufferSize(ulong value)
         {
             EnsureNotClosed();
-            _socket.SetSocketOption(
-                SocketOptionLevel.Socket,
-                SocketOptionName.SendBuffer,
-                (int)Math.Min(value, int.MaxValue));
+            if (value == 0)
+                throw new SocketsException(
+                    ErrorCode.InvalidArgument,
+                    "set-send-buffer-size: value must be > 0.");
+            try
+            {
+                _socket.SetSocketOption(
+                    SocketOptionLevel.Socket,
+                    SocketOptionName.SendBuffer,
+                    (int)Math.Min(value, int.MaxValue));
+            }
+            catch (SocketException) { /* best-effort */ }
+            _sendBufferSize = value;
         }
 
         private void EnsureState(State required, string op)
@@ -303,6 +353,114 @@ namespace Wacs.WASI.Preview3.Sockets
                     ReadU16BE(0), ReadU16BE(2), ReadU16BE(4), ReadU16BE(6),
                     ReadU16BE(8), ReadU16BE(10), ReadU16BE(12), ReadU16BE(14)),
                 scopeId: (uint)ep.Address.ScopeId));
+        }
+
+        /// <summary>
+        /// Spec-level address validation applied before handing
+        /// the address to the OS:
+        ///
+        /// 1. <b>Family match.</b> An ipv4-socket can't bind /
+        ///    connect to an ipv6 address (and vice versa).
+        /// 2. <b>Unicast only.</b> WASIp3 bans multicast and
+        ///    broadcast addresses at the socket boundary —
+        ///    `ip-address-validation.md` in the wasi-sockets
+        ///    proposal.
+        /// 3. <b>No dual-stack.</b> WASIp3 disallows binding an
+        ///    ipv6 socket to an ipv6-mapped-ipv4 address
+        ///    (`::ffff:0.0.0.0/96`) — IPV6_V6ONLY is implicitly
+        ///    on.
+        /// </summary>
+        public static void ValidateBindAddress(
+            IpAddressFamily sockFamily, IpSocketAddress addr)
+        {
+            if (addr.Family != sockFamily)
+                throw new SocketsException(
+                    ErrorCode.InvalidArgument,
+                    "bind: address family does not match socket family.");
+            ValidateAddressIsUnicast(addr);
+            ValidateNoDualStack(sockFamily, addr);
+        }
+
+        /// <summary>
+        /// Connect-time variant of address validation. Adds two
+        /// rules on top of bind validation:
+        ///
+        /// 1. <b>Port must be non-zero.</b> A remote endpoint
+        ///    needs a real port — connect to :0 is meaningless.
+        /// 2. <b>Address must be specified.</b> Rejects
+        ///    <c>0.0.0.0</c> / <c>::</c>.
+        /// </summary>
+        public static void ValidateConnectAddress(
+            IpAddressFamily sockFamily, IpSocketAddress addr)
+        {
+            if (addr.Family != sockFamily)
+                throw new SocketsException(
+                    ErrorCode.InvalidArgument,
+                    "connect: address family does not match socket family.");
+            ValidateAddressIsUnicast(addr);
+            ValidateNoDualStack(sockFamily, addr);
+            ushort port = addr.Family == IpAddressFamily.Ipv4
+                ? addr.V4.Port : addr.V6.Port;
+            if (port == 0)
+                throw new SocketsException(
+                    ErrorCode.InvalidArgument,
+                    "connect: remote port must be non-zero.");
+            if (IsUnspecified(addr))
+                throw new SocketsException(
+                    ErrorCode.InvalidArgument,
+                    "connect: remote address must be specified.");
+        }
+
+        private static bool IsUnspecified(IpSocketAddress addr)
+        {
+            if (addr.Family == IpAddressFamily.Ipv4)
+            {
+                var a = addr.V4.Address;
+                return a.A == 0 && a.B == 0 && a.C == 0 && a.D == 0;
+            }
+            var v6 = addr.V6.Address;
+            return v6.G0 == 0 && v6.G1 == 0 && v6.G2 == 0 && v6.G3 == 0
+                && v6.G4 == 0 && v6.G5 == 0 && v6.G6 == 0 && v6.G7 == 0;
+        }
+
+        private static void ValidateAddressIsUnicast(IpSocketAddress addr)
+        {
+            if (addr.Family == IpAddressFamily.Ipv4)
+            {
+                var a = addr.V4.Address.A;
+                // 224.0.0.0/4 multicast, 255.255.255.255 broadcast.
+                if (a >= 224 && a <= 239)
+                    throw new SocketsException(
+                        ErrorCode.InvalidArgument,
+                        "bind: ipv4 multicast addresses are not bindable.");
+                if (addr.V4.Address.A == 255 && addr.V4.Address.B == 255
+                    && addr.V4.Address.C == 255 && addr.V4.Address.D == 255)
+                    throw new SocketsException(
+                        ErrorCode.InvalidArgument,
+                        "bind: ipv4 limited broadcast address is not bindable.");
+            }
+            else
+            {
+                // ff00::/8 is the ipv6 multicast prefix.
+                if ((addr.V6.Address.G0 & 0xFF00) == 0xFF00)
+                    throw new SocketsException(
+                        ErrorCode.InvalidArgument,
+                        "bind: ipv6 multicast addresses are not bindable.");
+            }
+        }
+
+        private static void ValidateNoDualStack(
+            IpAddressFamily sockFamily, IpSocketAddress addr)
+        {
+            if (sockFamily != IpAddressFamily.Ipv6) return;
+            // ipv6-mapped-ipv4 form: ::ffff:a.b.c.d — top 80 bits
+            // zero, next 16 bits 0xFFFF.
+            var v6 = addr.V6.Address;
+            if (v6.G0 == 0 && v6.G1 == 0 && v6.G2 == 0
+                && v6.G3 == 0 && v6.G4 == 0 && v6.G5 == 0xFFFF)
+                throw new SocketsException(
+                    ErrorCode.InvalidArgument,
+                    "bind: dual-stack (ipv6-mapped-ipv4) is not allowed.");
         }
 
         public static SocketsException MapSocketException(SocketException sx) =>

@@ -1,5 +1,83 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.71 — sockets fixture pass, slice 1 (sync validation + small bugs)
+
+First socket-fixture pass. 4/12 fixtures green
+(`sockets-tcp-properties`, `sockets-udp-properties`,
+`sockets-udp-bind`, `sockets-udp-connect`); the remaining
+8 fail in the canon-async data plane (subtask handle
+packing on `[async-lower]connect`, stream wiring for
+accept loop + send/receive). This slice fixes the
+sync-validation gaps the failing fixtures revealed once
+the panic message could escape:
+
+* **wasip2 stdout/stderr stream stubs now route writes
+  to the host console.** `output-stream.write` and
+  `blocking-write-and-flush` check `self == 1/2` and
+  forward bytes to `Console.Out` / `Console.Error`.
+  Without this, guest panics were silently swallowed —
+  every socket fixture fast-trapped with bare
+  "unreachable" and no error message.
+* **`get-local-address` ipv6 lowering.** The
+  `tuple<u16 × 8>` ipv6-address was being written
+  big-endian to the canon-ABI retptr; the spec lowers
+  every integer little-endian. Manifested as
+  `::1` round-tripping back as `(0,0,0,0,0,0,0,256)`.
+* **Setter validation.** `tcp-socket` and `udp-socket`
+  setters for `listen-backlog-size`, `keep-alive-{idle-
+  time,interval,count}`, `hop-limit`,
+  `receive-buffer-size`, `send-buffer-size`,
+  `unicast-hop-limit` reject `0` with
+  `Err(InvalidArgument)`.
+* **Keep-alive timing + buffer-size + hop-limit shadow
+  storage.** TCP's `TCP_KEEPIDLE/INTVL/CNT` aren't
+  exposed by the managed `Socket` API; the spec wants
+  round-trip equality so we accept-and-store. Same
+  treatment for hop-limit and buffer sizes since the
+  OS may clamp (Linux doubles `SO_RCVBUF`) and the
+  spec wants the requested value back.
+* **`Bind` address validation.** Family-mismatch
+  (ipv4-socket bound to ipv6-addr), multicast (224/4
+  for v4, ff00::/8 for v6), limited broadcast
+  (255.255.255.255), and dual-stack (ipv6 socket bound
+  to ipv6-mapped-ipv4) all reject up-front with
+  `InvalidArgument`. ipv6 sockets also set `IPV6_V6ONLY`
+  so the OS layer doesn't bypass our dual-stack guard.
+* **`Connect` address validation.** Adds rejection of
+  port `0` and the unspecified address (`0.0.0.0` / `::`).
+* **Removed unconditional `SO_REUSEADDR`** on TCP bind.
+  Without it, macOS correctly fails the second bind to
+  a listening port with `EADDRINUSE` so
+  `test_bind_addrinuse` passes. `test_reuseaddr`'s
+  TIME_WAIT rebind expectation is deferred until the
+  full streams path lands (it depends on async
+  send/receive that isn't wired yet anyway).
+* **Listen implicit-bind.** `tcp-socket.listen` from
+  `Unbound` now implicitly binds to an ephemeral
+  wildcard endpoint (mirrors `connect`'s implicit-bind
+  and the spec text).
+* **UDP connect/disconnect state machine.** .NET's
+  `Socket.Disconnect` + `Connect`-to-same-endpoint
+  throws `InvalidOperationException`; UDP is
+  connectionless so we now track the connected remote
+  endpoint manually. Implicit-bind on `connect` uses
+  the target's address (not wildcard) so macOS's
+  `getsockname` returns a routable IP after connect.
+* **`[async-lower][method]tcp-socket.connect` host
+  binding.** wit-bindgen-rt emits the async-lower
+  lowering for the WIT `async func` decl with
+  `(params_ptr, results_ptr)` and packs the
+  `(self, ip-socket-address)` struct in memory. Adds
+  `ReadConnectParamsSelf` /
+  `ReadIpSocketAddressFromMemory` helpers, runs the
+  sync host body, returns `CanonAsyncStatusReturnedPacked`
+  so the guest's `WaitableOperation` resolves
+  immediately. Closes the "subtask.rs:217 unwrap on
+  None" panic that every async-connect socket fixture
+  hit; `sockets-tcp-connect` now reaches
+  `test_connection_refused` (line 115) — its prior 8
+  sync-shaped tests pass.
+
 ## WACS.WASI.Preview3 0.1.70 — http-service passes (export-typed task-return + handle invocation)
 
 The last HTTP fixture lands. Two pieces close it out:

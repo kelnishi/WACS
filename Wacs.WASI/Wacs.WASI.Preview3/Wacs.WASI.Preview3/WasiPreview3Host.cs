@@ -1849,6 +1849,29 @@ namespace Wacs.WASI.Preview3
                                 disc, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11),
                             retptr, realloc)));
 
+            // tcp-socket.connect is `async func` in the WIT and
+            // its flattened params (self + 12 variant slots = 13
+            // i32) exceed the canon-async inline limit, so the
+            // `[async-lower]` lowering takes (params_ptr,
+            // results_ptr) and packs the args into linear memory.
+            // We unpack the (self, ip-socket-address) struct,
+            // run the host body synchronously, and return the
+            // canon-async RETURNED status.
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[async-lower][method]tcp-socket.connect"),
+                (Func<ExecContext, int, int, int>)(
+                    (_, paramsPtr, resultsPtr) =>
+                    {
+                        var mem = RequireMemoryForHttp();
+                        var self = ReadConnectParamsSelf(mem, paramsPtr);
+                        var addr = ReadIpSocketAddressFromMemory(
+                            mem, paramsPtr + 4);
+                        InvokeTcpSocketConnect(
+                            self, addr, resultsPtr, realloc);
+                        return CanonAsyncStatusReturnedPacked;
+                    }));
+
             runtime.BindHostFunction(
                 (SocketsTypesModuleName, "[method]udp-socket.bind"),
                 (Action<ExecContext, int, int, int, int, int, int, int,
@@ -2218,9 +2241,10 @@ namespace Wacs.WASI.Preview3
             runtime.BindHostFunction(
                 (Streams2, "[method]output-stream.write"),
                 (Action<ExecContext, int, int, int, int>)(
-                    (_, _, _, _, retptr) =>
+                    (_, self, bufPtr, bufLen, retptr) =>
                     {
                         var mem = RequireMemoryForHttp();
+                        Wasip2RouteStreamWrite(mem, self, bufPtr, bufLen);
                         var dest = mem.AsSpan(retptr, 16);
                         dest.Clear();
                     }));
@@ -2235,9 +2259,10 @@ namespace Wacs.WASI.Preview3
             runtime.BindHostFunction(
                 (Streams2, "[method]output-stream.blocking-write-and-flush"),
                 (Action<ExecContext, int, int, int, int>)(
-                    (_, _, _, _, retptr) =>
+                    (_, self, bufPtr, bufLen, retptr) =>
                     {
                         var mem = RequireMemoryForHttp();
+                        Wasip2RouteStreamWrite(mem, self, bufPtr, bufLen);
                         var dest = mem.AsSpan(retptr, 16);
                         dest.Clear();
                     }));
@@ -2287,6 +2312,24 @@ namespace Wacs.WASI.Preview3
             runtime.BindHostFunction(
                 (MonoClock2, "subscribe-duration"),
                 (Func<ExecContext, long, int>)((_, _) => 1));
+        }
+
+        // wasip2 stdout/stderr stream ops route writes to the
+        // host console so guest panics surface during fixture
+        // bring-up. The handles returned by get-stdout (1) /
+        // get-stderr (2) are sentinels; everything else is
+        // swallowed (stdin etc. don't run through these paths).
+        private void Wasip2RouteStreamWrite(
+            Wacs.Core.Runtime.Types.MemoryInstance memory,
+            int self, int bufPtr, int bufLen)
+        {
+            if (bufLen <= 0) return;
+            if (self != 1 && self != 2) return;
+            var slice = memory.AsSpan(bufPtr, bufLen);
+            var writer = self == 2
+                ? System.Console.Error : System.Console.Out;
+            writer.Write(
+                System.Text.Encoding.UTF8.GetString(slice));
         }
 
         // Export-typed task-return bindings.
@@ -2856,6 +2899,73 @@ namespace Wacs.WASI.Preview3
         ///     s3..s10=address u16 groups, s11=scope-id.</item>
         /// </list>
         /// </summary>
+        // Read the leading i32 of an async-lower params struct.
+        // Convenience for the sockets bindings; the underlying
+        // memory must contain at least 4 bytes at paramsPtr.
+        private static int ReadConnectParamsSelf(
+            Wacs.Core.Runtime.Types.MemoryInstance memory, int paramsPtr)
+        {
+            var span = memory.AsSpan(paramsPtr, 4);
+            return System.Buffers.Binary.BinaryPrimitives
+                .ReadInt32LittleEndian(span);
+        }
+
+        // Read an ip-socket-address from a canon-ABI memory
+        // layout starting at <paramref name="offset"/>:
+        // <list type="bullet">
+        //   <item>+0: disc:u8 (0=ipv4, 1=ipv6) + 3-byte pad.</item>
+        //   <item>+4..+6: port (u16 LE).</item>
+        //   <item>ipv4 case: +6..+10 — 4 octets.</item>
+        //   <item>ipv6 case: +6..+8 pad, +8..+12 flow-info,
+        //         +12..+28 8×u16 LE address, +28..+32
+        //         scope-id.</item>
+        // </list>
+        // Total struct size: 32 bytes 4-aligned.
+        private static IpSocketAddress ReadIpSocketAddressFromMemory(
+            Wacs.Core.Runtime.Types.MemoryInstance memory, int offset)
+        {
+            var span = memory.AsSpan(offset, 32);
+            int disc = span[0];
+            ushort port = System.Buffers.Binary.BinaryPrimitives
+                .ReadUInt16LittleEndian(span.Slice(4));
+            if (disc == 0)
+            {
+                return IpSocketAddress.Ipv4(new Ipv4SocketAddress(
+                    port,
+                    new Ipv4Address(span[6], span[7], span[8], span[9])));
+            }
+            if (disc == 1)
+            {
+                uint flowInfo = System.Buffers.Binary.BinaryPrimitives
+                    .ReadUInt32LittleEndian(span.Slice(8));
+                ushort g0 = System.Buffers.Binary.BinaryPrimitives
+                    .ReadUInt16LittleEndian(span.Slice(12));
+                ushort g1 = System.Buffers.Binary.BinaryPrimitives
+                    .ReadUInt16LittleEndian(span.Slice(14));
+                ushort g2 = System.Buffers.Binary.BinaryPrimitives
+                    .ReadUInt16LittleEndian(span.Slice(16));
+                ushort g3 = System.Buffers.Binary.BinaryPrimitives
+                    .ReadUInt16LittleEndian(span.Slice(18));
+                ushort g4 = System.Buffers.Binary.BinaryPrimitives
+                    .ReadUInt16LittleEndian(span.Slice(20));
+                ushort g5 = System.Buffers.Binary.BinaryPrimitives
+                    .ReadUInt16LittleEndian(span.Slice(22));
+                ushort g6 = System.Buffers.Binary.BinaryPrimitives
+                    .ReadUInt16LittleEndian(span.Slice(24));
+                ushort g7 = System.Buffers.Binary.BinaryPrimitives
+                    .ReadUInt16LittleEndian(span.Slice(26));
+                uint scopeId = System.Buffers.Binary.BinaryPrimitives
+                    .ReadUInt32LittleEndian(span.Slice(28));
+                return IpSocketAddress.Ipv6(new Ipv6SocketAddress(
+                    port, flowInfo,
+                    new Ipv6Address(g0, g1, g2, g3, g4, g5, g6, g7),
+                    scopeId));
+            }
+            throw new SocketsException(
+                Sockets.ErrorCode.InvalidArgument,
+                $"ip-socket-address: invalid discriminant {disc}.");
+        }
+
         public static IpSocketAddress ReadIpSocketAddressFromSlots(
             int disc,
             int s1, int s2, int s3, int s4, int s5, int s6,
@@ -3269,12 +3379,16 @@ namespace Wacs.WASI.Preview3
                     v6.G0, v6.G1, v6.G2, v6.G3,
                     v6.G4, v6.G5, v6.G6, v6.G7,
                 };
+                // Canon-ABI lowers every integer little-endian
+                // regardless of the on-wire-protocol byte order
+                // it represents. The address is a tuple<u16 × 8>
+                // and each element gets the LE-u16 treatment.
                 for (int slot = 0; slot < 8; slot++)
                 {
-                    dest[16 + slot * 2 + 0] =
-                        (byte)((groups[slot] >> 8) & 0xFF);
-                    dest[16 + slot * 2 + 1] =
-                        (byte)(groups[slot] & 0xFF);
+                    System.Buffers.Binary.BinaryPrimitives
+                        .WriteUInt16LittleEndian(
+                            dest.Slice(16 + slot * 2, 2),
+                            groups[slot]);
                 }
                 System.Buffers.Binary.BinaryPrimitives
                     .WriteUInt32LittleEndian(
