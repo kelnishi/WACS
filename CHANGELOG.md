@@ -1,5 +1,19 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.63 — StreamTryWrite honors sync write sink
+
+`StreamTryWrite` now mirrors the canon-async stream-write
+scaffolding: when a stream slot has a registered
+`SyncWriteSink`, bytes flow through the sink (host file
+write + flush) rather than the channel buffer. Required by
+the unit tests that drive `WriteViaStream` /
+`AppendViaStream` via `StreamTryWrite` + `StreamDropWritable`
+directly — without this, the bytes were buffered into a
+channel nothing was draining and `File.ReadAllBytes`
+returned empty.
+
+Preview3 446/446.
+
 ## WACS.WASI.Preview3 0.1.62 — canon-async stream data plane (future-read + sync write sink + DROPPED status)
 
 Lands the canon-async stream/future data-plane pieces that

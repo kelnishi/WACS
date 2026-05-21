@@ -496,6 +496,19 @@ namespace Wacs.ComponentModel.Async
         public bool StreamTryWrite(int streamHandle, byte value)
         {
             var slot = GetStreamSlot(streamHandle, "stream.write");
+            if (slot.SyncWriteSink != null)
+            {
+                // Mirror the canon-async stream-write
+                // scaffolding: when a sync sink is bound, the
+                // bytes go straight through it (no channel
+                // buffering). Host-side test paths that drive
+                // the stream via StreamTryWrite/StreamDropWritable
+                // need to see the same behavior as the wit-
+                // bindgen-rt-emitted [async-lower] path.
+                slot.SyncWriteSink(new ReadOnlyMemory<byte>(
+                    new[] { value }));
+                return true;
+            }
             return slot.Buffer.TryWrite(value);
         }
 
