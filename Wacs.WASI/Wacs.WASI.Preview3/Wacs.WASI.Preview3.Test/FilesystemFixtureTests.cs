@@ -47,6 +47,9 @@ namespace Wacs.WASI.Preview3.Test
             yield return new object[] { "filesystem-flags-and-type" };
             yield return new object[] { "filesystem-stat" };
             yield return new object[] { "filesystem-rename" };
+            yield return new object[] { "filesystem-is-same-object" };
+            yield return new object[] { "filesystem-hard-links" };
+            yield return new object[] { "filesystem-metadata-hash" };
         }
 
         [Theory]

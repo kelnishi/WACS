@@ -194,16 +194,18 @@ namespace Wacs.WASI.Preview3.Test
         // ---- link-at -----------------------------------------------
 
         [Fact]
-        public void InvokeDescriptorLinkAt_default_impl_unsupported()
+        public void InvokeDescriptorLinkAt_creates_hard_link_under_sandbox()
         {
-            File.WriteAllText(Path.Combine(_tempRoot, "src.txt"), "");
+            File.WriteAllText(Path.Combine(_tempRoot, "src.txt"), "payload");
             var dispatcher = new AsyncDispatcher();
             dispatcher.Memory = MakeMemory();
             var host = new WasiPreview3Host { Dispatcher = dispatcher };
             var src = new Descriptor(
-                _tempRoot, _tempRoot, DescriptorFlags.Read);
+                _tempRoot, _tempRoot,
+                DescriptorFlags.Read | DescriptorFlags.MutateDirectory);
             var dst = new Descriptor(
-                _tempRoot, _tempRoot, DescriptorFlags.Write);
+                _tempRoot, _tempRoot,
+                DescriptorFlags.Read | DescriptorFlags.MutateDirectory);
             int srcHandle = host.DescriptorHandles.Allocate(src);
             int dstHandle = host.DescriptorHandles.Allocate(dst);
             var realloc = new SequentialRealloc(1024);
@@ -226,9 +228,12 @@ namespace Wacs.WASI.Preview3.Test
                 newPathPtr: newPathPtr, newPathLen: newBytes.Length,
                 retptr: retptr, realloc: realloc);
 
-            Assert.Equal(1, dispatcher.Memory.AsSpan(retptr, 1)[0]);
-            Assert.Equal((byte)Filesystem.ErrorCode.Unsupported,
-                dispatcher.Memory.AsSpan(retptr + 4, 1)[0]);
+            // Ok result + hard link visible on the filesystem.
+            Assert.Equal(0, dispatcher.Memory.AsSpan(retptr, 1)[0]);
+            Assert.True(File.Exists(Path.Combine(_tempRoot, "dst.txt")));
+            Assert.Equal("payload",
+                File.ReadAllText(Path.Combine(_tempRoot, "dst.txt")));
+            File.Delete(Path.Combine(_tempRoot, "dst.txt"));
         }
 
         // ---- rename-at ---------------------------------------------

@@ -796,14 +796,34 @@ namespace Wacs.WASI.Preview3.Filesystem
             PathFlags oldPathFlags, string oldPath,
             IDescriptor newDescriptor, string newPath,
             CancellationToken cancellationToken = default)
-        {
-            // Hard links via System.IO are platform-limited;
-            // surface as unsupported for now.
-            throw new FilesystemException(
-                ErrorCode.Unsupported,
-                "link-at: hard-link creation not implemented " +
-                "in the default backend.");
-        }
+            => Task.Run(() =>
+            {
+                try
+                {
+                    var oldResolved = ResolveChild(oldPath);
+                    if (newDescriptor is not Descriptor newDesc)
+                        throw new FilesystemException(
+                            ErrorCode.Invalid,
+                            "link-at: target descriptor not a " +
+                            "System.IO-backed Descriptor.");
+                    var newResolved = newDesc.ResolveChild(newPath);
+                    if (Directory.Exists(oldResolved))
+                        throw new FilesystemException(
+                            ErrorCode.NotPermitted,
+                            "link-at: cannot hard-link a directory.");
+                    if (!File.Exists(oldResolved))
+                        throw new FilesystemException(
+                            ErrorCode.NoEntry,
+                            $"'{oldPath}' does not exist.");
+                    if (File.Exists(newResolved)
+                        || Directory.Exists(newResolved))
+                        throw new FilesystemException(
+                            ErrorCode.Exist,
+                            $"'{newPath}' already exists.");
+                    NativeLink.CreateHardLink(oldResolved, newResolved);
+                }
+                catch (Exception ex) { throw ToFilesystem(ex); }
+            }, cancellationToken);
 
         public Task<IDescriptor> OpenAtAsync(
             PathFlags pathFlags, string path,
@@ -1034,10 +1054,25 @@ namespace Wacs.WASI.Preview3.Filesystem
         public Task<bool> IsSameObjectAsync(
             IDescriptor other,
             CancellationToken cancellationToken = default)
-            => Task.FromResult(
-                other is Descriptor d &&
-                string.Equals(d._absolutePath, _absolutePath,
-                    StringComparison.Ordinal));
+            => Task.FromResult(IsSameObject(other));
+
+        private bool IsSameObject(IDescriptor other)
+        {
+            if (other is not Descriptor d) return false;
+            // Fast path: same wrapper instance / same path.
+            if (string.Equals(d._absolutePath, _absolutePath,
+                    StringComparison.Ordinal))
+                return true;
+            // Hard-link case: two distinct paths backed by the
+            // same inode (filesystem-is-same-object exercises
+            // this). NativeLink.TryGetInode falls back to false
+            // on Windows / when stat() fails; in that case we
+            // already returned the path-equality answer above.
+            if (NativeLink.TryGetInode(_absolutePath, out var selfIno)
+                && NativeLink.TryGetInode(d._absolutePath, out var otherIno))
+                return selfIno == otherIno;
+            return false;
+        }
 
         public Task<MetadataHashValue> MetadataHashAsync(
             CancellationToken cancellationToken = default)

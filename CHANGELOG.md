@@ -1,5 +1,27 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.61 — hard-link P/Invoke + inode-aware is-same-object
+
+Closes filesystem-hard-links, filesystem-is-same-object,
+and filesystem-metadata-hash (13 of 13 filesystem fixtures
+pass — full coverage modulo io / read-directory).
+
+* `NativeLink` (new) — minimal P/Invoke surface for
+  `link(2)` (macOS / Linux) + `CreateHardLinkW` (Windows)
+  plus a `TryGetInode` helper backed by `stat(2)` on
+  Unix-likes. P/Invoke is statically-bound and stays AOT-
+  safe.
+* `link-at` now creates the hard link with the right
+  pre-checks (source exists, destination doesn't, source
+  isn't a directory).
+* `is-same-object` consults inodes when both descriptors
+  point at Unix-like paths — two distinct paths backed
+  by the same inode (i.e. hard links) now correctly
+  report as same-object. Falls back to path-equality on
+  Windows or when stat fails.
+
+Preview3 452/452.
+
 ## WACS.WASI.Preview3 0.1.60 — rename-at POSIX overwrite + symlink-at create + sandbox-aware final-symlink rule
 
 Lands the filesystem-rename fixture (10 of 13 filesystem
