@@ -1,5 +1,39 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.69 — http-request passes (RFC 3986 authority + path validation)
+
+`Request` now validates `set-authority` and
+`set-path-with-query` per RFC 3986:
+
+* **`set-authority`** (§3.2): parses
+  `[userinfo "@"] host [":" port]`, enforcing per-
+  segment grammars — userinfo allows unreserved + pct-
+  encoded + sub-delims + `:`; host is `reg-name`
+  (unreserved + pct + sub-delims, no `:`/`@`/`[`); port
+  is `*DIGIT`. Multiple `@`, empty host, non-digit
+  port, and bare specials (`#`, ` `, `[`) all surface
+  as `Err(())`.
+* **`set-path-with-query`** (§3.3): `pchar / "/" / "?"`
+  where `pchar = unreserved / pct-encoded / sub-delims
+  / ":" / "@"`. The wasip3 fixture's
+  `is_valid_path_char` also accepts raw UTF-8 (`>=
+  0x80`); we mirror that. Empty path normalizes to
+  `"/"`.
+* **`request.get-headers`** snapshots + freezes like
+  the sibling `response.get-headers` — append-on-
+  returned-handle surfaces `HeaderError::Immutable`.
+* Host-binding wrapper catches `ArgumentException` from
+  these setters and encodes the bare `result` disc as
+  Err.
+
+http-request now passes (~700ms). All 3 enabled HTTP
+fixtures green. **http-service** is the only remaining
+xfail — needs the export-typed task-return generator
+for the 8-flat-slot `result<own<response>, error-code>`
+return.
+
+Preview3 450/450 (HTTP: 3/4 enabled, 3/3 passing).
+
 ## WACS.WASI.Preview3 0.1.68 — wasip2 facade stubs + per-host-binding profiler
 
 Profiled the http-request perf gap and found the real

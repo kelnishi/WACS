@@ -176,24 +176,19 @@ namespace Wacs.WASI.Preview3.Test
         }
 
         [Fact]
-        public void SetAuthority_empty_string_round_trips_as_some_empty()
+        public void SetAuthority_empty_string_returns_err()
         {
-            var (host, req, handle, disp) = MakeRequestHost();
-            var realloc = new SequentialRealloc(1024);
+            // RFC 3986 §3.2 requires non-empty host; empty
+            // authority surfaces Err. The wasip3 http-request
+            // fixture asserts this explicitly via
+            // `set_authority(Some("")).expect_err`.
+            var (host, req, handle, _) = MakeRequestHost();
 
             int disc = host.InvokeRequestSetOptionString(
                 handle, optDisc: 1, strPtr: 0, strLen: 0,
                 (r, v) => r.SetAuthority(v));
-            Assert.Equal(0, disc);
-            // some(empty-string) is distinct from none.
-            Assert.Equal(string.Empty, req.GetAuthority());
-
-            const int retptr = 64;
-            host.InvokeRequestGetOptionString(
-                handle, retptr, realloc, r => r.GetAuthority());
-            Assert.Equal(1, disp.Memory.AsSpan(retptr, 1)[0]);
-            Assert.Equal(0, BinaryPrimitives.ReadInt32LittleEndian(
-                disp.Memory.AsSpan(retptr + 8, 4)));
+            Assert.Equal(1, disc);
+            Assert.Null(req.GetAuthority());
         }
 
         [Fact]

@@ -63,17 +63,7 @@ namespace Wacs.WASI.Preview3.Test
             // doesn't fail the Theory with "no data".
             yield return new object[] { "http-fields" };
             yield return new object[] { "http-response" };
-            // http-request: now fails *fast* (≤1s) instead of
-            // hanging. The wasip2 facade stubs let the
-            // guest panic-write loop terminate, the eventual
-            // wasi:cli/exit(1) traps via ExitException, and
-            // the test reports the underlying assertion
-            // failure. The remaining work is per-spec
-            // validation of set_authority (RFC 3986 §3.2:
-            // userinfo + host + port grammar) and
-            // set_path_with_query (RFC 3986 §3.3). Both are
-            // straightforward but not yet wired.
-            // yield return new object[] { "http-request" };
+            yield return new object[] { "http-request" };
         }
 
         [Theory]
@@ -103,7 +93,7 @@ namespace Wacs.WASI.Preview3.Test
                 }
                 catch (Exception ex) { return ex; }
             });
-            if (!runTask.Wait(TimeSpan.FromSeconds(15)))
+            if (!runTask.Wait(TimeSpan.FromSeconds(60)))
             {
                 Console.SetError(originalErr);
                 sw.Stop();

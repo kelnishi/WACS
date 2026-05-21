@@ -914,8 +914,18 @@ namespace Wacs.WASI.Preview3
                 (HttpTypesModuleName,
                     "[method]request.get-headers"),
                 (Func<ExecContext, int, int>)((_, self) =>
-                    FieldsHandles.Allocate(
-                        RequireRequest(self).GetHeaders())));
+                {
+                    // Spec: request.get-headers returns an
+                    // immutable Fields handle. Snapshot +
+                    // freeze so mutations through the
+                    // returned handle surface as
+                    // HeaderError::Immutable — same as the
+                    // sibling response.get-headers shape.
+                    var src = RequireRequest(self).GetHeaders();
+                    var snapshot = (Http.Fields)src.Clone();
+                    snapshot.Freeze();
+                    return FieldsHandles.Allocate(snapshot);
+                }));
 
             runtime.BindHostFunction(
                 (HttpTypesModuleName,
@@ -5427,8 +5437,19 @@ namespace Wacs.WASI.Preview3
             string? value;
             if (optDisc == 0) value = null;
             else value = ReadGuestUtf8(strPtr, strLen);
-            setter(RequireRequest(self), value);
-            return 0; // result disc = ok
+            try
+            {
+                setter(RequireRequest(self), value);
+                return 0; // result disc = ok
+            }
+            catch (System.ArgumentException)
+            {
+                // SetAuthority / SetPathWithQuery throw
+                // ArgumentException on invalid input per
+                // RFC 3986 §§3.2-3.3. The wire-result is
+                // a bare disc — no payload type. Encode Err.
+                return 1;
+            }
         }
 
         // Helper that registers the get/set pair for an
