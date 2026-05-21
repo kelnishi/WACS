@@ -12,6 +12,7 @@ using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
 using Wacs.Core.Types.Defs;
+using Wacs.WASI.Preview3.CanonicalAbi;
 using Wacs.WASI.Preview3.Http;
 using Wacs.WASI.Preview3.Resources;
 using Xunit;
@@ -30,6 +31,18 @@ namespace Wacs.WASI.Preview3.Test
         {
             var memType = new MemoryType(new Limits(AddrType.I32, 1, 1));
             return new MemoryInstance(memType);
+        }
+
+        private sealed class SequentialRealloc : ICabiRealloc
+        {
+            private int _next;
+            public SequentialRealloc(int baseAddr) { _next = baseAddr; }
+            public int Allocate(int align, int size)
+            {
+                if (align > 1)
+                    _next = (_next + align - 1) & ~(align - 1);
+                int p = _next; _next += size; return p;
+            }
         }
 
         // ---- HostResourceTable<T> behavior ---------------------------
@@ -175,11 +188,14 @@ namespace Wacs.WASI.Preview3.Test
             name.CopyTo(dispatcher.Memory.AsSpan(namePtr, name.Length));
             value.CopyTo(dispatcher.Memory.AsSpan(valuePtr, value.Length));
 
+            const int retptr = 192;
             host.InvokeFieldsAppend(
                 handle, namePtr, name.Length,
-                valuePtr, value.Length);
+                valuePtr, value.Length,
+                retptr, new SequentialRealloc(512));
 
-            // Recovery: read via the IFields API directly.
+            // Ok result + recovery via the IFields API.
+            Assert.Equal(0, dispatcher.Memory.AsSpan(retptr, 1)[0]);
             var got = fields.Get("Content-Length");
             Assert.Single(got);
             Assert.Equal("1234", Encoding.UTF8.GetString(got[0]));
@@ -233,12 +249,18 @@ namespace Wacs.WASI.Preview3.Test
             var host = new WasiPreview3Host { Dispatcher = dispatcher };
             var handle = host.FieldsHandles.Allocate(new Fields());
 
-            // Empty name → InvalidSyntax via the impl's
-            // validation path.
-            var ex = Assert.Throws<HeaderException>(
-                () => host.InvokeFieldsAppend(
-                    handle, 0, 0, 0, 0));
-            Assert.Equal(HeaderError.InvalidSyntax, ex.Code);
+            // Empty name → InvalidSyntax encoded into the
+            // result<_, header-error> retptr.
+            dispatcher.Memory = MakeMemory();
+            const int retptr = 64;
+            host.InvokeFieldsAppend(
+                handle, 0, 0, 0, 0,
+                retptr, new SequentialRealloc(512));
+            // result-disc = 1 (Err); err-disc at +4 carries the
+            // HeaderError variant tag.
+            Assert.Equal(1, dispatcher.Memory.AsSpan(retptr, 1)[0]);
+            Assert.Equal((byte)HeaderError.InvalidSyntax,
+                dispatcher.Memory.AsSpan(retptr + 4, 1)[0]);
         }
     }
 }

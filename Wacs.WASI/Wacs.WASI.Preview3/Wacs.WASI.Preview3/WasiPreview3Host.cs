@@ -562,10 +562,10 @@ namespace Wacs.WASI.Preview3
 
             runtime.BindHostFunction(
                 (HttpTypesModuleName, "[method]fields.append"),
-                (Action<ExecContext, int, int, int, int, int>)(
-                    (_, self, namePtr, nameLen, valuePtr, valueLen) =>
+                (Action<ExecContext, int, int, int, int, int, int>)(
+                    (_, self, namePtr, nameLen, valuePtr, valueLen, retptr) =>
                         InvokeFieldsAppend(self, namePtr, nameLen,
-                            valuePtr, valueLen)));
+                            valuePtr, valueLen, retptr, realloc)));
 
             runtime.BindHostFunction(
                 (HttpTypesModuleName, "[method]fields.set"),
@@ -5230,15 +5230,25 @@ namespace Wacs.WASI.Preview3
         /// (<see cref="HeaderException"/> from the impl).</summary>
         public void InvokeFieldsAppend(
             int self, int namePtr, int nameLen,
-            int valuePtr, int valueLen)
+            int valuePtr, int valueLen,
+            int retptr, ICabiRealloc realloc)
         {
-            var fields = RequireFields(self);
-            var name = ReadGuestUtf8(namePtr, nameLen);
             var memory = RequireMemoryForHttp();
-            var value = new byte[valueLen];
-            if (valueLen > 0)
-                memory.AsSpan(valuePtr, valueLen).CopyTo(value);
-            fields.Append(name, value);
+            ValidateResultHeaderErrorRetptr(retptr, memory);
+            HeaderException? caught = null;
+            try
+            {
+                var fields = RequireFields(self);
+                var name = ReadGuestUtf8(namePtr, nameLen);
+                var value = new byte[valueLen];
+                if (valueLen > 0)
+                    memory.AsSpan(valuePtr, valueLen).CopyTo(value);
+                fields.Append(name, value);
+            }
+            catch (HeaderException ex) { caught = ex; }
+            WriteHeaderErrorResult(
+                memory.AsSpan(retptr, ResultHeaderErrorSize),
+                caught, realloc, memory);
         }
 
         /// <summary>Invoke

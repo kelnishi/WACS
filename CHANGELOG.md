@@ -1,5 +1,40 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.65 — http fixtures vendored + fields.append retptr fix
+
+Drops the four upstream wasip3 http fixtures (`http-fields`,
+`http-request`, `http-response`, `http-service`) into the
+test tree with a parameterized `HttpFixtureTests` harness
+(empty fixture list pending the wiring work below).
+
+**Bug fix:** `[method]fields.append` host binding was wired
+as 5 args (self, name-ptr, name-len, value-ptr, value-len)
+but the lowered import expects 6 (result<_, header-error>
+returns at a retptr — the 6th slot). Now writes the result
+through `WriteHeaderErrorResult` like sibling `fields.set` /
+`fields.delete`. The two existing
+`InvokeFieldsAppend_*` unit tests updated to feed the new
+retptr/realloc args and assert the encoded result variant.
+
+**HTTP fixture status** (all four currently xfail — see
+`HttpFixtureTests.Fixtures()` for the per-fixture pin):
+* `http-fields` / `http-request` / `http-response`: now
+  instantiate cleanly with the append fix but hang during
+  `run()`. Next pass: audit method-by-method binding
+  signatures + the wit-bindgen-rt assertion-driven panic
+  pattern, same shape as filesystem-read-directory's
+  earlier hang.
+* `http-service`: fails to instantiate — the
+  `[task-return]handle` import lowers to 8 flat slots
+  (i32 i32 i32 i64 i32 i32 i32 i32) because the export
+  returns `result<response, error-code>`; our scaffolding's
+  generic `task-return` handler takes a single i32 disc.
+  Needs the export-typed task-return generator the
+  source-gen registry was scoped for.
+
+Preview3 447/447 (HTTP fixtures collection empty, no test
+runs).
+
 ## WACS.WASI.Preview3 0.1.64 — typed-stream item-count semantics (closes filesystem-read-directory)
 
 The canon-async `stream.read` and `stream.write` calls
