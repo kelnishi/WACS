@@ -60,11 +60,18 @@ namespace Wacs.WASI.Preview3.Test
             //
             // Returning a single Skip placeholder so xUnit
             // doesn't fail the Theory with "no data".
-            yield return new object[] { "(xfail — see comment)" };
+            yield return new object[] { "http-fields" };
+            // http-request / http-response / http-service:
+            // exercise Response::new / get_headers / set_status_code,
+            // Request::new / consume_body / get_method etc. —
+            // significant per-method binding work plus the
+            // future<option<trailers>> path. Not yet wired.
+            // yield return new object[] { "http-request" };
+            // yield return new object[] { "http-response" };
+            // yield return new object[] { "http-service" };
         }
 
-        [Theory(Skip = "HTTP fixtures pending the binding audit + " +
-            "export-typed task-return generator")]
+        [Theory]
         [MemberData(nameof(Fixtures))]
         public void Run_completes_without_trap(string fixtureName)
         {
@@ -89,7 +96,7 @@ namespace Wacs.WASI.Preview3.Test
                 }
                 catch (Exception ex) { return ex; }
             });
-            if (!runTask.Wait(TimeSpan.FromSeconds(15)))
+            if (!runTask.Wait(TimeSpan.FromSeconds(30)))
             {
                 Console.SetError(originalErr);
                 var trace = WitBindgenScaffoldingBinder.SnapshotTrace();

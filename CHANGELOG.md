@@ -1,5 +1,35 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.66 — http-fields fixture passes (Fields spec fixes)
+
+`Fields` impl now closes three spec gaps the upstream
+`http-fields` fixture exercises directly:
+
+* `Set(name, [])` with an empty value list removes the
+  entry (spec: empty `list<list<u8>>` is semantically
+  delete). Without this, the fixture's
+  `assert!(!fields.has("foo"))` after
+  `fields.set("foo", &[])` panicked.
+* `Delete(name)` and `GetAndDelete(name)` now validate
+  the name (invalid → `HeaderError::InvalidSyntax`).
+  Previously delete returned Ok for any name including
+  `""`, breaking the fixture's `test_invalid_field_name`
+  cases.
+* `Set` / `Append` / `FromList` validate the value bytes
+  per RFC 9110 §5.6.4 (HTAB, SP, VCHAR 0x21-0x7E,
+  obs-text 0x80-0xFF). `\0`, `\n`, `\r` and other
+  control bytes now surface as
+  `HeaderError::InvalidSyntax`.
+
+The remaining http fixtures (`http-request`,
+`http-response`, `http-service`) stay pinned as xfail —
+`Response::new` / `Request::new` / `get_headers` (with
+immutable returned Fields) / `consume_body` plus the
+`future<option<trailers>>` plumbing need their own
+per-method binding pass.
+
+Preview3 448/448 (HTTP: 1/4 enabled, 1/1 passing).
+
 ## WACS.WASI.Preview3 0.1.65 — http fixtures vendored + fields.append retptr fix
 
 Drops the four upstream wasip3 http fixtures (`http-fields`,

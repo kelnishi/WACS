@@ -72,6 +72,7 @@ namespace Wacs.WASI.Preview3.Http
             foreach (var (name, value) in entries)
             {
                 ValidateName(name);
+                ValidateValue(value);
                 if (!fields._entries.TryGetValue(name, out var list))
                 {
                     list = new List<byte[]>();
@@ -100,19 +101,31 @@ namespace Wacs.WASI.Preview3.Http
             if (value == null)
                 throw new HeaderException(
                     HeaderError.InvalidSyntax, "value is null");
+            // Validate every value byte BEFORE committing.
+            foreach (var v in value) ValidateValue(v);
+            // Spec: setting a field with an empty value list
+            // removes it — the http-fields fixture asserts
+            // `!fields.has("foo")` directly after
+            // `fields.set("foo", &[])`.
+            if (value.Count == 0)
+            {
+                _entries.Remove(name);
+                return;
+            }
             _entries[name] = new List<byte[]>(value);
         }
 
         public void Delete(string name)
         {
             EnsureMutable();
-            if (name != null) _entries.Remove(name);
+            ValidateName(name);
+            _entries.Remove(name);
         }
 
         public IReadOnlyList<byte[]> GetAndDelete(string name)
         {
             EnsureMutable();
-            if (name == null) return Array.Empty<byte[]>();
+            ValidateName(name);
             if (_entries.TryGetValue(name, out var list))
             {
                 _entries.Remove(name);
@@ -125,6 +138,7 @@ namespace Wacs.WASI.Preview3.Http
         {
             EnsureMutable();
             ValidateName(name);
+            ValidateValue(value);
             if (!_entries.TryGetValue(name, out var list))
             {
                 list = new List<byte[]>();
@@ -179,6 +193,23 @@ namespace Wacs.WASI.Preview3.Http
                     throw new HeaderException(
                         HeaderError.InvalidSyntax,
                         $"field name '{name}' contains invalid character.");
+        }
+
+        // Field-value bytes per RFC 9110 §5.6.4 — VCHAR (0x21-0x7E)
+        // / obs-text (0x80-0xFF) / SP / HTAB. The http-fields
+        // fixture's compute_valid_field_value_bytes() encodes
+        // exactly this set; rejecting anything outside surfaces
+        // as HeaderError::InvalidSyntax. Empty values are valid.
+        private static void ValidateValue(byte[] value)
+        {
+            if (value == null) return;
+            foreach (var b in value)
+                if (!(b == 0x20 || b == 0x09
+                    || (b >= 0x21 && b <= 0x7E)
+                    || b >= 0x80))
+                    throw new HeaderException(
+                        HeaderError.InvalidSyntax,
+                        $"field value contains invalid byte 0x{b:X2}");
         }
     }
 }
