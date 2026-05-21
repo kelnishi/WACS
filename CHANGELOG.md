@@ -1,5 +1,29 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.60 — rename-at POSIX overwrite + symlink-at create + sandbox-aware final-symlink rule
+
+Lands the filesystem-rename fixture (10 of 13 filesystem
+fixtures total).
+
+* `rename-at` overwrites an existing destination (POSIX
+  semantics: delete-then-move), short-circuits same-path
+  no-op renames, and rejects renaming the preopen root
+  with `Invalid` (the fixture accepts `Busy | Invalid |
+  Access`).
+* `symlink-at` creates a symbolic link via
+  `File.CreateSymbolicLink` (.NET 6+). The symlink target
+  is stored verbatim (relative or absolute); only the
+  destination path is sandbox-scoped.
+* `ResolveChild` refines the symlink-traversal rule:
+  intermediate-component symlinks still reject as
+  before, but final-component symlinks only reject when
+  their literal target resolves outside the sandbox.
+  This lets `rename-at` / `unlink-file-at` operate on a
+  symlink whose target stays inside the sandbox without
+  having to special-case the path-flags surface.
+
+Preview3 449/449, ComponentModel 639/639.
+
 ## WACS.WASI.Preview3 0.1.59 — file-descriptor fd-survives-unlink + flag/type/stat fidelity + path-resolve scoping
 
 Lands the layered fixes that unblock three more filesystem

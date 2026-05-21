@@ -183,40 +183,72 @@ namespace Wacs.WASI.Preview3.Filesystem
         }
 
         // Walk each component of <paramref name="path"/> from
-        // this descriptor's directory and return true iff any
-        // existing intermediate component is a symbolic link.
-        // Final-component symlinks are also detected. Missing
-        // components (e.g., the leaf of a not-yet-created
-        // directory in mkdir) just stop the walk — we can't
-        // inspect what doesn't exist yet.
+        // this descriptor's directory and decide whether the
+        // walk crosses a sandbox-escaping symlink:
+        //  - Intermediate symlinks: always reject (we can't
+        //    cheaply prove the followed path stays in the
+        //    sandbox, and forcing a follow violates the spec
+        //    when path-flags doesn't request it).
+        //  - Final-component symlink: resolve its literal
+        //    target relative to the parent directory and
+        //    reject only if the resolved location escapes the
+        //    sandbox. Operations like rename / unlink / etc.
+        //    legitimately need to overwrite or remove a
+        //    symlink whose target stays within the sandbox.
+        //  - Missing components: just stop the walk — we
+        //    can't inspect what doesn't exist yet.
         private bool TraversesSymlinkComponent(string path)
         {
+            var parts = path.Split('/', '\\');
             var current = _absolutePath;
-            foreach (var part in path.Split('/', '\\'))
+            for (int i = 0; i < parts.Length; i++)
             {
+                var part = parts[i];
                 if (string.IsNullOrEmpty(part) || part == ".") continue;
                 current = Path.Combine(current, part);
-                // Check the LITERAL path's link status, not what
-                // it resolves to. DirectoryInfo / FileInfo for a
-                // symlink to a directory still has its own
-                // LinkTarget property — that's our signal.
+                bool isFinalComponent = i == parts.Length - 1;
 #if NET6_0_OR_GREATER
                 FileSystemInfo? info = null;
                 if (Directory.Exists(current))
                     info = new DirectoryInfo(current);
                 else if (File.Exists(current))
                     info = new FileInfo(current);
-                if (info?.LinkTarget != null) return true;
+                if (info?.LinkTarget != null)
+                {
+                    if (!isFinalComponent) return true;
+                    if (FinalSymlinkEscapesSandbox(current, info.LinkTarget))
+                        return true;
+                }
                 if (info == null) return false;
 #else
-                // netstandard2.1 has no LinkTarget API — best
-                // we can do is detect missing components.
                 if (!Directory.Exists(current)
                     && !File.Exists(current))
                     return false;
 #endif
             }
             return false;
+        }
+
+        // Resolve a final-component symlink's literal target
+        // (which may be relative or absolute) against the
+        // parent directory of the symlink, then test whether
+        // the resolved location is still inside the sandbox
+        // root. Returns true ONLY when the symlink would
+        // escape; that's the case where we surface
+        // NotPermitted.
+        private bool FinalSymlinkEscapesSandbox(
+            string linkPath, string linkTarget)
+        {
+            var parent = Path.GetDirectoryName(linkPath) ?? _rootPath;
+            string resolved = Path.IsPathRooted(linkTarget)
+                ? Path.GetFullPath(linkTarget)
+                : Path.GetFullPath(Path.Combine(parent, linkTarget));
+            var rootSep = _rootPath.EndsWith(
+                Path.DirectorySeparatorChar.ToString())
+                ? _rootPath
+                : _rootPath + Path.DirectorySeparatorChar;
+            return resolved != _rootPath
+                && !resolved.StartsWith(rootSep, StringComparison.Ordinal);
         }
 
         // Wrap a thrown CLR exception into a FilesystemException
@@ -909,27 +941,75 @@ namespace Wacs.WASI.Preview3.Filesystem
                             "rename-at: target descriptor not a " +
                             "System.IO-backed Descriptor.");
                     var newResolved = newDesc.ResolveChild(newPath);
-                    if (File.Exists(oldResolved))
-                        File.Move(oldResolved, newResolved);
-                    else if (Directory.Exists(oldResolved))
-                        Directory.Move(oldResolved, newResolved);
-                    else
+                    // Renaming the root (".") is invalid per spec
+                    // — the fixture accepts Busy / Invalid /
+                    // Access. We surface Invalid since neither
+                    // the source nor destination is misused on a
+                    // resource-busy basis.
+                    if (oldResolved == _rootPath
+                        || oldResolved == _absolutePath)
+                        throw new FilesystemException(
+                            ErrorCode.Invalid,
+                            $"cannot rename preopen root '{oldPath}'.");
+                    if (!File.Exists(oldResolved)
+                        && !Directory.Exists(oldResolved))
                         throw new FilesystemException(
                             ErrorCode.NoEntry,
                             $"'{oldPath}' does not exist.");
+                    // mv(self, self) on an existing path is a
+                    // no-op per spec (rename to current name).
+                    if (oldResolved == newResolved) return;
+                    // POSIX rename overwrites; .NET File.Move
+                    // throws when destination exists. Delete
+                    // first to match POSIX semantics. (Symlinks
+                    // are deleted by File.Delete — even though
+                    // File.Exists may report false for a
+                    // broken symlink, the delete still removes
+                    // the link entry.)
+                    if (File.Exists(newResolved))
+                        File.Delete(newResolved);
+                    else if (Directory.Exists(newResolved))
+                        Directory.Delete(newResolved);
+                    if (File.Exists(oldResolved)
+                        || IsSymbolicLink(oldResolved))
+                        File.Move(oldResolved, newResolved);
+                    else
+                        Directory.Move(oldResolved, newResolved);
                 }
                 catch (Exception ex) { throw ToFilesystem(ex); }
             }, cancellationToken);
 
+        private static bool IsSymbolicLink(string path)
+        {
+            try
+            {
+                var fi = new FileInfo(path);
+                return fi.Exists
+                    && (fi.Attributes & FileAttributes.ReparsePoint) != 0;
+            }
+            catch { return false; }
+        }
+
         public Task SymlinkAtAsync(
             string oldPath, string newPath,
             CancellationToken cancellationToken = default)
-        {
-            throw new FilesystemException(
-                ErrorCode.Unsupported,
-                "symlink-at: symbolic-link creation not implemented " +
-                "in the default backend.");
-        }
+            => Task.Run(() =>
+            {
+                try
+                {
+                    // newPath is sandbox-scoped; oldPath is the
+                    // symlink target as stored in the link (NOT
+                    // resolved — it can be any string).
+                    var newResolved = ResolveChild(newPath);
+                    if (File.Exists(newResolved)
+                        || Directory.Exists(newResolved))
+                        throw new FilesystemException(
+                            ErrorCode.Exist,
+                            $"'{newPath}' already exists.");
+                    File.CreateSymbolicLink(newResolved, oldPath);
+                }
+                catch (Exception ex) { throw ToFilesystem(ex); }
+            }, cancellationToken);
 
         public Task UnlinkFileAtAsync(
             string path, CancellationToken cancellationToken = default)

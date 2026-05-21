@@ -312,20 +312,20 @@ namespace Wacs.WASI.Preview3.Test
         // ---- symlink-at --------------------------------------------
 
         [Fact]
-        public void InvokeDescriptorSymlinkAt_default_impl_unsupported()
+        public void InvokeDescriptorSymlinkAt_creates_link_under_sandbox()
         {
             var dispatcher = new AsyncDispatcher();
             dispatcher.Memory = MakeMemory();
             var host = new WasiPreview3Host { Dispatcher = dispatcher };
             var desc = new Descriptor(
-                _tempRoot, _tempRoot, DescriptorFlags.Write);
+                _tempRoot, _tempRoot, DescriptorFlags.MutateDirectory);
             int handle = host.DescriptorHandles.Allocate(desc);
             var realloc = new SequentialRealloc(1024);
 
             const int oldPathPtr = 64;
             const int newPathPtr = 96;
             const int retptr = 128;
-            byte[] oldBytes = Encoding.UTF8.GetBytes("/abs/target");
+            byte[] oldBytes = Encoding.UTF8.GetBytes("a.txt");
             byte[] newBytes = Encoding.UTF8.GetBytes("link");
             oldBytes.CopyTo(
                 dispatcher.Memory.AsSpan(oldPathPtr, oldBytes.Length));
@@ -338,9 +338,12 @@ namespace Wacs.WASI.Preview3.Test
                 newPathPtr: newPathPtr, newPathLen: newBytes.Length,
                 retptr: retptr, realloc: realloc);
 
-            Assert.Equal(1, dispatcher.Memory.AsSpan(retptr, 1)[0]);
-            Assert.Equal((byte)Filesystem.ErrorCode.Unsupported,
-                dispatcher.Memory.AsSpan(retptr + 4, 1)[0]);
+            // Ok result (disc=0); the link is on the filesystem.
+            Assert.Equal(0, dispatcher.Memory.AsSpan(retptr, 1)[0]);
+            Assert.True(System.IO.File.Exists(
+                System.IO.Path.Combine(_tempRoot, "link")));
+            System.IO.File.Delete(
+                System.IO.Path.Combine(_tempRoot, "link"));
         }
     }
 }

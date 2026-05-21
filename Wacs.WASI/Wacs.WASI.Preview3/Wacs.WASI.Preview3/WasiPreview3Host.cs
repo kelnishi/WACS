@@ -3655,13 +3655,29 @@ namespace Wacs.WASI.Preview3
             int newDescHandle, int newPathPtr, int newPathLen,
             int retptr, ICabiRealloc realloc)
         {
-            InvokeDescriptorResultErrorCodeNoArgs(
-                self, retptr, realloc,
-                desc => desc.RenameAtAsync(
-                    ReadGuestUtf8(oldPathPtr, oldPathLen),
-                    RequireDescriptor(newDescHandle),
-                    ReadGuestUtf8(newPathPtr, newPathLen))
-                    .GetAwaiter().GetResult());
+            var memory = RequireMemoryForHttp();
+            ValidateResultErrorCodeRetptr(retptr, memory);
+            FilesystemException? caught = null;
+            try
+            {
+                var desc = RequireDescriptor(self);
+                var newDesc = RequireDescriptor(newDescHandle);
+                var oldPath = ReadGuestUtf8(oldPathPtr, oldPathLen);
+                var newPath = ReadGuestUtf8(newPathPtr, newPathLen);
+                FsTrace($"rename-at(self={self}, old=\"{oldPath}\", " +
+                    $"newDesc={newDescHandle}, new=\"{newPath}\")");
+                desc.RenameAtAsync(oldPath, newDesc, newPath)
+                    .GetAwaiter().GetResult();
+                FsTrace($"  → Ok");
+            }
+            catch (FilesystemException ex)
+            {
+                FsTrace($"  → {ex.Code}");
+                caught = ex;
+            }
+            WriteErrorCodeResult(
+                memory.AsSpan(retptr, ResultErrorCodeSize),
+                caught, realloc, memory);
         }
 
         /// <summary>Invoke

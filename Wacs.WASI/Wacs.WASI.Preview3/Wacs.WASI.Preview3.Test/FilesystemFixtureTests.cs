@@ -46,6 +46,7 @@ namespace Wacs.WASI.Preview3.Test
             yield return new object[] { "filesystem-set-size" };
             yield return new object[] { "filesystem-flags-and-type" };
             yield return new object[] { "filesystem-stat" };
+            yield return new object[] { "filesystem-rename" };
         }
 
         [Theory]
