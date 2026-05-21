@@ -646,12 +646,50 @@ namespace Wacs.Core.Runtime
             if (tableType.ElementType != val.Type)
                 throw new ArgumentException(
                     $"Table {tableType.ElementType} must be defined with matching element type value {val}");
-            
+
             Store.OpenTransaction();
             var tableAddr = AllocateTable(Store, tableType, val);
             _entityBindings[id] = tableAddr;
             Store.CommitTransaction();
             return Store[tableAddr];
+        }
+
+        /// <summary>
+        /// Re-bind an already-allocated external (function /
+        /// table / memory / global / tag) under a fresh
+        /// <c>(module, entity)</c> name. Used by the
+        /// component-model multi-core instantiator when aliasing
+        /// a source core-instance's exports under a target
+        /// import-module name — both sides reference the SAME
+        /// address; the runtime's entity-binding table just
+        /// gains a second key pointing at the existing item.
+        ///
+        /// <para>For functions, prefer the existing
+        /// <see cref="BindHostFunction((string, string), IFunctionInstance)"/>
+        /// overload — it round-trips through Store.AddFunction
+        /// which allocates a fresh FuncAddr (cheap but distinct).
+        /// This method shares the original address verbatim,
+        /// which matters for tables (so element-segment writes
+        /// stay observable through both names) and memories
+        /// (so growth + linear-memory bytes stay coherent).</para>
+        /// </summary>
+        public void BindExternal((string module, string entity) id,
+            Wacs.Core.Runtime.Types.ExternalValue val)
+        {
+            if (_directLinkProvidedEntities.Contains(id)
+                && _entityBindings.ContainsKey(id))
+                return;
+            _entityBindings[id] = val switch
+            {
+                Wacs.Core.Runtime.Types.ExternalValue.Function f => f.Address,
+                Wacs.Core.Runtime.Types.ExternalValue.Table t => t.Address,
+                Wacs.Core.Runtime.Types.ExternalValue.Memory m => m.Address,
+                Wacs.Core.Runtime.Types.ExternalValue.Global g => g.Address,
+                Wacs.Core.Runtime.Types.ExternalValue.Tag tag => tag.Address,
+                _ => throw new ArgumentException(
+                    $"BindExternal: unsupported ExternalValue {val.GetType().Name}",
+                    nameof(val)),
+            };
         }
     }
 }

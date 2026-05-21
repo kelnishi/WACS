@@ -618,6 +618,53 @@ namespace Wacs.ComponentModel.Runtime
             }
         }
 
+        /// <summary>
+        /// Spec-following multi-core instantiation. Walks the
+        /// component's CoreInstance / Alias / Canon sections in
+        /// file order, building the parallel core spaces and
+        /// instantiating each declared core-module with the
+        /// imports its CoreInstance entry's args specify. Lets
+        /// the wit-component shim + fixup dance run end-to-end:
+        /// shim defines the funcref table, fixup's element
+        /// segment fills it, primary calls through.
+        ///
+        /// <para>Routed via the <c>WACS_PROPER_MULTI_CORE=1</c>
+        /// env var while being validated against the fixture
+        /// suite. Will become the default once cli-hello +
+        /// filesystem-mkdir-rmdir are both green through this
+        /// path.</para>
+        /// </summary>
+        private static ComponentInstance InstantiateMultiCoreProper(
+            ComponentModule component,
+            List<byte[]> coreBinaries,
+            Action<WasmRuntime>? configureImports)
+        {
+            var runtime = new WasmRuntime();
+            var inst = new MultiCoreInstantiator(
+                component, coreBinaries, runtime, configureImports);
+            inst.Run();
+
+            if (inst.PrimaryInstance == null)
+                throw new InvalidOperationException(
+                    "MultiCoreInstantiator produced no primary core " +
+                    "instance — the component's CoreInstance section " +
+                    "didn't instantiate the module identified by " +
+                    "FindPrimaryCoreModuleIdx.");
+
+            if (inst.Dispatcher != null)
+            {
+                runtime.TryGetExportedMemory("memory", out var mem);
+                inst.Dispatcher.Memory = mem;
+                inst.Dispatcher.StringEncoding =
+                    FindCanonLiftStringEncoding(component);
+            }
+
+            return new ComponentInstance(component, runtime, inst.PrimaryInstance)
+            {
+                AsyncDispatcher = inst.Dispatcher,
+            };
+        }
+
         /// <summary>Build a composer-mode instance: recursively
         /// instantiate each nested component, then resolve the
         /// outer's instance + alias sections to map outer
