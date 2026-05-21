@@ -488,6 +488,16 @@ namespace Wacs.WASI.Preview3
                 (Action<ExecContext, int>)((_, status) =>
                     Exit.Exit(status == 0)));
 
+            // wasip2 facade bindings — wasm-component-ld
+            // auto-injects 0.2.0 facade modules for cli/io/
+            // poll/clocks interfaces; without these bindings,
+            // a guest panic that calls the wasip2 cli/exit
+            // (or writes a stack trace to stderr) spins
+            // forever in wit-bindgen-rt's check-write +
+            // pollable.block loop. Stubs at least let the
+            // panic terminate cleanly.
+            BindWasip2FacadeStubs(runtime);
+
             // wasi:cli/environment@0.3.0-rc-2026-03-15
             //   get-environment: () -> list<tuple<string, string>>
             //   get-arguments:   () -> list<string>
@@ -2106,6 +2116,166 @@ namespace Wacs.WASI.Preview3
                     InvokeUdpSocketSetterErrorCode(
                         self, retptr, realloc,
                         s => s.Disconnect())));
+        }
+
+        // wasip2 facade stubs (0.2.0). Just enough to keep a
+        // guest panic-write loop from spinning forever. Real
+        // I/O lives in WACS.WASI.Preview2 — these are for
+        // wasm-component-ld-injected facade modules that
+        // sneak into Preview3 components when their wit-
+        // bindgen builds target wasm32-wasip2.
+        //
+        // Each stub returns a "success / lots-of-room" shape
+        // so wit-bindgen-rt's check-write + pollable.block
+        // poll loop terminates, the panic stack-trace write
+        // is observed as complete, and the wasi:cli/exit(1)
+        // call that follows actually traps via ExitException.
+        private void BindWasip2FacadeStubs(WasmRuntime runtime)
+        {
+            const string Streams2 = "wasi:io/streams@0.2.0";
+            const string Poll2 = "wasi:io/poll@0.2.0";
+            const string Exit2 = "wasi:cli/exit@0.2.0";
+            const string Stdout2 = "wasi:cli/stdout@0.2.0";
+            const string Stderr2 = "wasi:cli/stderr@0.2.0";
+            const string Stdin2 = "wasi:cli/stdin@0.2.0";
+            const string MonoClock2 = "wasi:clocks/monotonic-clock@0.2.0";
+
+            // wasi:cli/exit@0.2.0 — `exit(status: result)`.
+            // Panic handler calls this with disc=1 (err) to
+            // signal a fatal exit. We propagate as
+            // ExitException so the dispatcher unwinds.
+            runtime.BindHostFunction(
+                (Exit2, "exit"),
+                (Action<ExecContext, int>)((_, status) =>
+                    Exit.Exit(status == 0)));
+
+            // wasi:io/poll@0.2.0 `pollable` resource ops.
+            //   [method]pollable.block(self) → ()
+            //   [method]pollable.ready(self) → bool
+            //   poll(list<pollable>) → list<u32>  // ready indices
+            //   [resource-drop]pollable(self) → ()
+            runtime.BindHostFunction(
+                (Poll2, "[method]pollable.block"),
+                (Action<ExecContext, int>)((_, _) => { }));
+            runtime.BindHostFunction(
+                (Poll2, "[method]pollable.ready"),
+                (Func<ExecContext, int, int>)((_, _) => 1));
+            runtime.BindHostFunction(
+                (Poll2, "[resource-drop]pollable"),
+                (Action<ExecContext, int>)((_, _) => { }));
+            // poll(list-ptr, list-len, retptr) — writes a
+            // list<u32> of ready indices at retptr (4 bytes:
+            // ptr + 4 bytes: len). Stub: return an empty list
+            // so the canon-async runtime sees "nothing ready"
+            // and moves on. Wit-bindgen-rt's poll usually
+            // calls .block on a single pollable instead.
+            runtime.BindHostFunction(
+                (Poll2, "poll"),
+                (Action<ExecContext, int, int, int>)(
+                    (_, _, _, retptr) =>
+                    {
+                        var mem = RequireMemoryForHttp();
+                        var dest = mem.AsSpan(retptr, 8);
+                        dest.Clear();
+                    }));
+
+            // wasi:io/streams@0.2.0 — output-stream ops.
+            //   [method]output-stream.check-write(self, retptr) — writes
+            //     result<u64, stream-error> (16 bytes 8-aligned).
+            //     Stub: report u64::MAX bytes of room.
+            //   [method]output-stream.write(self, buf-ptr, buf-len,
+            //     retptr) — writes result<_, stream-error> (16 bytes).
+            //     Stub: Ok.
+            //   [method]output-stream.blocking-flush(self, retptr) →
+            //     result<_, stream-error>. Stub: Ok.
+            //   [method]output-stream.blocking-write-and-flush(self,
+            //     buf-ptr, buf-len, retptr). Stub: Ok.
+            //   [method]output-stream.subscribe(self) → own<pollable>.
+            //     Stub: return any handle.
+            //   [resource-drop]output-stream / input-stream — no-op.
+            runtime.BindHostFunction(
+                (Streams2, "[method]output-stream.check-write"),
+                (Action<ExecContext, int, int>)((_, _, retptr) =>
+                {
+                    var mem = RequireMemoryForHttp();
+                    var dest = mem.AsSpan(retptr, 16);
+                    dest.Clear();
+                    System.Buffers.Binary.BinaryPrimitives
+                        .WriteUInt64LittleEndian(
+                            dest.Slice(8), ulong.MaxValue);
+                }));
+            runtime.BindHostFunction(
+                (Streams2, "[method]output-stream.write"),
+                (Action<ExecContext, int, int, int, int>)(
+                    (_, _, _, _, retptr) =>
+                    {
+                        var mem = RequireMemoryForHttp();
+                        var dest = mem.AsSpan(retptr, 16);
+                        dest.Clear();
+                    }));
+            runtime.BindHostFunction(
+                (Streams2, "[method]output-stream.blocking-flush"),
+                (Action<ExecContext, int, int>)((_, _, retptr) =>
+                {
+                    var mem = RequireMemoryForHttp();
+                    var dest = mem.AsSpan(retptr, 16);
+                    dest.Clear();
+                }));
+            runtime.BindHostFunction(
+                (Streams2, "[method]output-stream.blocking-write-and-flush"),
+                (Action<ExecContext, int, int, int, int>)(
+                    (_, _, _, _, retptr) =>
+                    {
+                        var mem = RequireMemoryForHttp();
+                        var dest = mem.AsSpan(retptr, 16);
+                        dest.Clear();
+                    }));
+            runtime.BindHostFunction(
+                (Streams2, "[method]output-stream.subscribe"),
+                (Func<ExecContext, int, int>)((_, _) => 1));
+            runtime.BindHostFunction(
+                (Streams2, "[resource-drop]output-stream"),
+                (Action<ExecContext, int>)((_, _) => { }));
+            runtime.BindHostFunction(
+                (Streams2, "[resource-drop]input-stream"),
+                (Action<ExecContext, int>)((_, _) => { }));
+
+            // wasi:cli/stdout/stderr/stdin@0.2.0 — get-XXX
+            // returns the standard stream handle. Stubs:
+            // return handle = 1, 2, 0 respectively. The
+            // returned handles aren't actually backed; the
+            // output-stream stubs above ignore self and just
+            // succeed.
+            runtime.BindHostFunction(
+                (Stdout2, "get-stdout"),
+                (Func<ExecContext, int>)(_ => 1));
+            runtime.BindHostFunction(
+                (Stderr2, "get-stderr"),
+                (Func<ExecContext, int>)(_ => 2));
+            runtime.BindHostFunction(
+                (Stdin2, "get-stdin"),
+                (Func<ExecContext, int>)(_ => 0));
+
+            // wasi:clocks/monotonic-clock@0.2.0
+            //   now: func() → instant  (i64)
+            //   resolution: func() → duration  (i64)
+            //   subscribe-instant(when: instant) → own<pollable>
+            //   subscribe-duration(when: duration) → own<pollable>
+            runtime.BindHostFunction(
+                (MonoClock2, "now"),
+                (Func<ExecContext, long>)(_ =>
+                    System.Diagnostics.Stopwatch.GetTimestamp()));
+            runtime.BindHostFunction(
+                (MonoClock2, "resolution"),
+                (Func<ExecContext, long>)(_ =>
+                    1_000_000_000L /
+                    System.Diagnostics.Stopwatch.Frequency));
+            runtime.BindHostFunction(
+                (MonoClock2, "subscribe-instant"),
+                (Func<ExecContext, long, int>)((_, _) => 1));
+            runtime.BindHostFunction(
+                (MonoClock2, "subscribe-duration"),
+                (Func<ExecContext, long, int>)((_, _) => 1));
         }
 
         // ---- wasi:sockets udp-socket binding bodies (Slice P) -------

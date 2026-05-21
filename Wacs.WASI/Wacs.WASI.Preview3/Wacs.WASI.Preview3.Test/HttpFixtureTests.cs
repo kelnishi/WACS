@@ -10,6 +10,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Wacs.ComponentModel.Async;
+using Wacs.Core.Runtime.Types;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -62,19 +63,16 @@ namespace Wacs.WASI.Preview3.Test
             // doesn't fail the Theory with "no data".
             yield return new object[] { "http-fields" };
             yield return new object[] { "http-response" };
-            // http-request: bindings audited (set-scheme +
-            // set-method validate per RFC 9110/3986; Other
-            // case normalizes "GET"/"HTTP"/etc. to the
-            // canonical variants). All assertions pass when
-            // the test reaches them, but the 1024-codepoint
-            // char loops in test_method_names /
-            // test_path_with_query / test_authority drive
-            // ~5000 host calls; the per-call canon-async
-            // shim-fixup indirection adds enough overhead
-            // that the whole fixture exceeds 2 minutes. The
-            // hang is a perf gap, not a correctness one.
-            // Re-enable after the canon-async dispatch path
-            // is profiled + the hot indirection is hoisted.
+            // http-request: now fails *fast* (≤1s) instead of
+            // hanging. The wasip2 facade stubs let the
+            // guest panic-write loop terminate, the eventual
+            // wasi:cli/exit(1) traps via ExitException, and
+            // the test reports the underlying assertion
+            // failure. The remaining work is per-spec
+            // validation of set_authority (RFC 3986 §3.2:
+            // userinfo + host + port grammar) and
+            // set_path_with_query (RFC 3986 §3.3). Both are
+            // straightforward but not yet wired.
             // yield return new object[] { "http-request" };
         }
 
@@ -93,6 +91,8 @@ namespace Wacs.WASI.Preview3.Test
             var stderrCapture = new StringWriter();
             var originalErr = Console.Error;
             Console.SetError(stderrCapture);
+            HostFunction.ResetProfile();
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             var runTask = Task.Run(() =>
             {
                 try
@@ -106,6 +106,7 @@ namespace Wacs.WASI.Preview3.Test
             if (!runTask.Wait(TimeSpan.FromSeconds(15)))
             {
                 Console.SetError(originalErr);
+                sw.Stop();
                 var trace = WitBindgenScaffoldingBinder.SnapshotTrace();
                 _output.WriteLine(
                     $"Scaffolding trace ({trace.Count} entries):");
@@ -114,17 +115,43 @@ namespace Wacs.WASI.Preview3.Test
                 var captured = stderrCapture.ToString();
                 if (!string.IsNullOrEmpty(captured))
                     _output.WriteLine("--- captured stderr ---\n" + captured);
-                Assert.Fail($"{fixtureName}.run() hung past 15s.");
+                DumpHostProfile(sw.Elapsed);
+                Assert.Fail($"{fixtureName}.run() hung past 300s.");
             }
             Console.SetError(originalErr);
+            sw.Stop();
             var capturedOk = stderrCapture.ToString();
             if (!string.IsNullOrEmpty(capturedOk))
                 _output.WriteLine("--- captured stderr ---\n" + capturedOk);
+            DumpHostProfile(sw.Elapsed);
             if (runTask.Result is Exception ex2)
             {
                 _output.WriteLine(
                     $"Invocation threw: {ex2.GetType().Name}: {ex2.Message}");
                 throw ex2;
+            }
+        }
+
+        private void DumpHostProfile(TimeSpan totalElapsed)
+        {
+            var prof = HostFunction.SnapshotProfile();
+            if (prof.Count == 0) return;
+            long totalCalls = 0;
+            long totalTicks = 0;
+            foreach (var (_, v) in prof) { totalCalls += v.Calls; totalTicks += v.Ticks; }
+            _output.WriteLine($"=== Host profile (total elapsed " +
+                $"{totalElapsed.TotalSeconds:F2}s, host invokes " +
+                $"{totalCalls} calls / {totalTicks * 1000.0 / System.Diagnostics.Stopwatch.Frequency:F1}ms) ===");
+            _output.WriteLine($"{"calls",10} {"total ms",12} " +
+                $"{"avg us",10}  {"name"}");
+            foreach (var kv in prof.OrderByDescending(p => p.Value.Ticks).Take(20))
+            {
+                double ms = kv.Value.Ticks * 1000.0
+                    / System.Diagnostics.Stopwatch.Frequency;
+                double us = kv.Value.Calls > 0
+                    ? ms * 1000.0 / kv.Value.Calls : 0;
+                _output.WriteLine($"{kv.Value.Calls,10} " +
+                    $"{ms,12:F2} {us,10:F2}  {kv.Key}");
             }
         }
     }

@@ -248,6 +248,25 @@ namespace Wacs.Core.Runtime.Types
             throw new ArgumentException($"Runtime cannot automatically convert host value to wasm type {hostType}");
         }
 
+        // Optional per-binding aggregate timing. Gated on
+        // WACS_PROFILE_HOST=1 (off by default) — each Invoke
+        // records its call count and cumulative ticks; dump
+        // via the static SnapshotProfile() helper.
+        private static readonly bool ProfileEnabled =
+            System.Environment.GetEnvironmentVariable(
+                "WACS_PROFILE_HOST") == "1";
+        private static readonly System.Collections.Concurrent
+            .ConcurrentDictionary<string, (long Calls, long Ticks)>
+            _profile = new System.Collections.Concurrent
+                .ConcurrentDictionary<string, (long, long)>();
+
+        public static System.Collections.Generic.IReadOnlyDictionary<
+            string, (long Calls, long Ticks)> SnapshotProfile() =>
+            new System.Collections.Generic.Dictionary<string, (long, long)>(
+                _profile);
+
+        public static void ResetProfile() => _profile.Clear();
+
         /// <summary>
         /// Invokes the host function with the given arguments.
         /// Pushes any results onto the passed OpStack.
@@ -259,9 +278,9 @@ namespace Wacs.Core.Runtime.Types
 
             //Fetch the parameters
             context.OpStack.PopScalars(Type.ParameterTypes, ParameterBuffer, PassExecContext?1:0);
-            if (PassExecContext) 
+            if (PassExecContext)
                 ParameterBuffer[0] = context;
-            
+
             for (int i = 0; i < _parameterConversions.Length; ++i)
             {
                 ParameterBuffer[i] = _parameterConversions[i]?.Invoke(ParameterBuffer[i]) ?? ParameterBuffer[i];
@@ -271,7 +290,17 @@ namespace Wacs.Core.Runtime.Types
                 throw new WasmRuntimeException("Cannot synchronously execute Async Function");
             try
             {
+                long t0 = ProfileEnabled
+                    ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
                 var returnValue = _invoker.Invoke(_hostFunction, ParameterBuffer);
+                if (ProfileEnabled)
+                {
+                    long elapsed = System.Diagnostics.Stopwatch.GetTimestamp() - t0;
+                    var key = $"{ModuleName}::{Name}";
+                    _profile.AddOrUpdate(key,
+                        (1, elapsed),
+                        (_, prev) => (prev.Calls + 1, prev.Ticks + elapsed));
+                }
                 int outArgs = Type.ResultType.Types.Length;
                 int j = 0;
                 if (_captureReturn)

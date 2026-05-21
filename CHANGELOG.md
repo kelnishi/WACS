@@ -1,5 +1,46 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.68 — wasip2 facade stubs + per-host-binding profiler
+
+Profiled the http-request perf gap and found the real
+cost was **98 million** spurious calls to
+`wasi:io/streams@0.2.0::output-stream.check-write` /
+`pollable.block` — wit-bindgen-rt's panic-on-stderr write
+loop spinning because our auto-stubs for the wasip2
+facade interfaces (auto-injected by wasm-component-ld)
+all returned default values that kept the loop alive.
+
+* New `BindWasip2FacadeStubs` block in
+  `WasiPreview3Host.BindToRuntime` covers the
+  `wasi:io/streams@0.2.0`, `wasi:io/poll@0.2.0`,
+  `wasi:cli/{exit,stdout,stderr,stdin}@0.2.0`, and
+  `wasi:clocks/monotonic-clock@0.2.0` interfaces with
+  just enough behavior to let a panic terminate:
+  - `output-stream.check-write` reports `u64::MAX` bytes
+    of room
+  - `write` / `blocking-flush` /
+    `blocking-write-and-flush` succeed
+  - `pollable.block` returns immediately
+  - `cli/exit` propagates as `ExitException` (same as
+    the wasip3 cli/exit)
+  - clocks return real timestamps from
+    `Stopwatch.GetTimestamp()`
+* `HostFunction.Invoke` now records per-binding call
+  counts + cumulative ticks when `WACS_PROFILE_HOST=1`.
+  `HostFunction.SnapshotProfile()` dumps the table.
+  `HttpFixtureTests` writes the top-20 to xUnit output
+  on every fixture run (success or hang) for ongoing
+  perf visibility.
+
+http-request **now fails fast** (≤1s) instead of
+hanging — the underlying assertion failure is now
+diagnosable. Remaining work for the fixture to pass:
+per-RFC-3986 validation of `set_authority` (§3.2:
+userinfo + host + port grammar) and
+`set_path_with_query` (§3.3).
+
+Preview3 449/449 (HTTP: 2/4 enabled, 2/2 passing).
+
 ## WACS.WASI.Preview3 0.1.67 — http-response passes + Method/Scheme normalization + status validation
 
 * `response.set-status-code` rejects out-of-range codes
