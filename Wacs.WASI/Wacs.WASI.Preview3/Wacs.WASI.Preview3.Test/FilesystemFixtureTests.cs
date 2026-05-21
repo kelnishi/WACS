@@ -50,15 +50,17 @@ namespace Wacs.WASI.Preview3.Test
             yield return new object[] { "filesystem-is-same-object" };
             yield return new object[] { "filesystem-hard-links" };
             yield return new object[] { "filesystem-metadata-hash" };
-            // filesystem-io and filesystem-read-directory both
-            // depend on the stream<u8> read-side dispatcher
-            // wiring across canon-async — the host-side
-            // ReadViaStream allocates a stream/future handle pair
-            // but the byte data never reaches the guest's
-            // `stream-read` poll. Tackling this requires a
-            // dedicated pass on the canon-async stream data plane;
-            // leaving these two as XFAIL until that lands.
-            // yield return new object[] { "filesystem-io" };
+            yield return new object[] { "filesystem-io" };
+            // filesystem-read-directory: byte-stream wire-up and
+            // type-encoding for the 3 entries (a.txt, b.txt,
+            // parent) is fully correct — wit-bindgen-rt's
+            // collect() reads all 72 bytes + sees the DROPPED
+            // status + the success future resolves Ok. The
+            // fixture still hangs past the resulting assert_eq!,
+            // which suggests a residue mismatch we haven't been
+            // able to pin down without a guest-side panic
+            // surface. Tracked as xfail until the canon-async
+            // panic-trap path replaces the permissive exit stub.
             // yield return new object[] { "filesystem-read-directory" };
         }
 

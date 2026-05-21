@@ -3391,6 +3391,7 @@ namespace Wacs.WASI.Preview3
         public void InvokeDescriptorReadViaStream(
             int self, ulong offset, int retptr)
         {
+            FsTrace($"read-via-stream(self={self}, offset={offset})");
             var dispatcher = RequireDispatcher();
             var memory = dispatcher.Memory
                 ?? throw new InvalidOperationException(
@@ -3423,6 +3424,8 @@ namespace Wacs.WASI.Preview3
         public int InvokeDescriptorWriteViaStream(
             int self, int streamHandle, ulong offset)
         {
+            FsTrace($"write-via-stream(self={self}, stream={streamHandle}, " +
+                $"offset={offset})");
             var dispatcher = RequireDispatcher();
             var desc = RequireDescriptor(self);
             var (futureHandle, _) = desc.WriteViaStream(
@@ -3435,6 +3438,7 @@ namespace Wacs.WASI.Preview3
         public int InvokeDescriptorAppendViaStream(
             int self, int streamHandle)
         {
+            FsTrace($"append-via-stream(self={self}, stream={streamHandle})");
             var dispatcher = RequireDispatcher();
             var desc = RequireDescriptor(self);
             var (futureHandle, _) = desc.AppendViaStream(

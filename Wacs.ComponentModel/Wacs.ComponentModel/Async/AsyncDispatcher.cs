@@ -105,6 +105,19 @@ namespace Wacs.ComponentModel.Async
             public StreamBuffer<byte> Buffer = null!;
             public bool WriterDropped;
             public bool ReaderDropped;
+            // Optional synchronous write sink. When set, the
+            // canon-async stream-write scaffolding bypasses the
+            // buffered channel and writes guest bytes directly
+            // through this Action. Used by host bridges that
+            // need write-then-stat synchrony (e.g. the wasip3
+            // filesystem write-via-stream / append-via-stream
+            // paths — the pappend fixture asserts file size
+            // immediately after each tx.write).
+            public Action<ReadOnlyMemory<byte>>? SyncWriteSink;
+            // Fired after the writer half drops with all bytes
+            // delivered. Lets the host bridge resolve the
+            // completion future synchronously.
+            public Action? SyncWriteSinkClose;
         }
 
         /// <summary>Typed facade for the <see cref="WaitableKind.Future"/>
@@ -526,6 +539,20 @@ namespace Wacs.ComponentModel.Async
             if (length == 0) return 0;
             var slot = GetStreamSlot(streamHandle, "stream.write");
             var src = memory.AsSpan((int)ptr, length);
+            // If a synchronous write sink is registered (e.g.
+            // host file-write bridge), bypass the buffered
+            // channel — the bridge writes + flushes during this
+            // call so that follow-up stats see the updated
+            // file size immediately. This is what wasip3's
+            // pappend / pwrite fixture relies on between
+            // tx.write completions and fd.stat() calls.
+            if (slot.SyncWriteSink != null)
+            {
+                var copy = new byte[length];
+                src.CopyTo(copy);
+                slot.SyncWriteSink(copy);
+                return length;
+            }
             int written = 0;
             for (int i = 0; i < length; i++)
             {
@@ -580,6 +607,18 @@ namespace Wacs.ComponentModel.Async
         /// the rest of the host already uses for sync-blocking
         /// async-func imports (see clocks <c>wait-for</c>).</para>
         /// </summary>
+        /// <summary>Returns true when the stream's writer side
+        /// has been dropped (no more data will arrive). The
+        /// canon-async stream-read scaffolding surfaces this as
+        /// the DROPPED status code so wit-bindgen-rt's read loop
+        /// can exit instead of spinning on Complete(0).</summary>
+        public bool IsStreamCompleted(int streamHandle)
+        {
+            if (Streams.Get(streamHandle) is not StreamSlot slot)
+                return true;
+            return slot.Buffer.IsCompleted;
+        }
+
         public int StreamReadToMemoryBlocking(
             int streamHandle, MemoryInstance memory, uint ptr, int capacity)
         {
@@ -666,8 +705,28 @@ namespace Wacs.ComponentModel.Async
                 return false;
             slot.Buffer.Complete();
             slot.WriterDropped = true;
+            // Synchronous sink close — runs the host bridge's
+            // completion handler (e.g. close-and-flush the
+            // FileStream + resolve the bound future).
+            slot.SyncWriteSinkClose?.Invoke();
             if (slot.ReaderDropped) Streams.Drop(streamHandle);
             return true;
+        }
+
+        /// <summary>Bind a synchronous write sink to a stream's
+        /// writer side. Used by host bridges that need
+        /// write-then-stat synchrony.</summary>
+        public void BindStreamSyncWriteSink(
+            int streamHandle,
+            Action<ReadOnlyMemory<byte>> onWrite,
+            Action onClose)
+        {
+            if (Streams.Get(streamHandle) is not StreamSlot slot)
+                throw new InvalidOperationException(
+                    $"BindStreamSyncWriteSink: handle {streamHandle} " +
+                    "is not allocated.");
+            slot.SyncWriteSink = onWrite;
+            slot.SyncWriteSinkClose = onClose;
         }
 
         // ---- Future ------------------------------------------------------
@@ -703,6 +762,50 @@ namespace Wacs.ComponentModel.Async
                     $"future.read: handle {futureHandle} is not allocated.");
             return cell.Task;
         }
+
+        /// <summary>Blocking variant of
+        /// <see cref="FutureReadAsync"/>: synchronously wait for
+        /// the future to resolve, then copy its byte payload (if
+        /// any) to <paramref name="memory"/> at
+        /// <paramref name="ptr"/>. Used by the canon-async
+        /// <c>[async-lower][future-read-N]</c> scaffolding
+        /// import — wit-bindgen-rt interprets a synchronous
+        /// COMPLETED return as "value already in the buffer", so
+        /// blocking inside the import call sidesteps the
+        /// BLOCKED + waitable.join dance (matching the existing
+        /// pattern for <see cref="StreamReadToMemoryBlocking"/>).
+        ///
+        /// <para>Convention: the future's resolved value is a
+        /// pre-encoded <c>byte[]</c> when the producer wants to
+        /// surface a typed payload (e.g.
+        /// <c>result&lt;_, error-code&gt;</c>). A <c>null</c>
+        /// value writes nothing — used when the future's
+        /// element type is unit and the guest only needs the
+        /// completion signal.</para>
+        /// </summary>
+        public int FutureReadToMemoryBlocking(
+            int futureHandle, MemoryInstance memory, uint ptr)
+        {
+            if (Futures.Get(futureHandle) is not FutureCell<object?> cell)
+                return 0;
+            object? value;
+            try { value = cell.Task.GetAwaiter().GetResult(); }
+            catch (TaskCanceledException) { value = null; }
+            if (FutureReadTraceEnabled)
+                System.Console.Error.WriteLine(
+                    $"[future-read] handle={futureHandle} " +
+                    $"value={(value == null ? "null" : value.GetType().Name)} " +
+                    $"ptr=0x{ptr:X8}");
+            if (value is byte[] bytes && bytes.Length > 0)
+            {
+                var dest = memory.AsSpan((int)ptr, bytes.Length);
+                new ReadOnlySpan<byte>(bytes).CopyTo(dest);
+            }
+            return 0;
+        }
+
+        private static readonly bool FutureReadTraceEnabled =
+            Environment.GetEnvironmentVariable("WACS_TRACE_FUTURE") == "1";
 
         /// <summary><c>canon future.cancel-read t async?</c> —
         /// abandon the reader side. Pending read is cancelled.</summary>

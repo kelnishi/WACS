@@ -251,6 +251,26 @@ namespace Wacs.WASI.Preview3.Filesystem
                 && !resolved.StartsWith(rootSep, StringComparison.Ordinal);
         }
 
+        // Encode a `result<_, error-code>` value as the 20-byte
+        // canonical-ABI payload for the canon-async future-read
+        // scaffolding to memcpy into guest memory. Layout:
+        //   +0:    result-disc:u8 (0=Ok, 1=Err) + 3-byte pad
+        //   +4..20: error-code variant (16 bytes — disc:u8 +
+        //           option<string> at +4..12; the option-string
+        //           "other" payload would need a realloc, which
+        //           we skip; the spec accepts the Other case
+        //           with no detail string).
+        // Ok: returns 20 bytes of zeros.
+        private static readonly byte[] _resultErrCodeOkPayload =
+            new byte[20];
+        private static byte[] EncodeResultErrCodeErr(FilesystemException ex)
+        {
+            var bytes = new byte[20];
+            bytes[0] = 1;
+            bytes[4] = (byte)ex.Code;
+            return bytes;
+        }
+
         // Wrap a thrown CLR exception into a FilesystemException
         // with the closest matching error code. Exception →
         // error-code mapping is best-effort; uncategorized
@@ -300,11 +320,16 @@ namespace Wacs.WASI.Preview3.Filesystem
                     using var fs = new FileStream(
                         path, FileMode.Open, FileAccess.Read,
                         FileShare.ReadWrite | FileShare.Delete);
-                    if ((ulong)offset.Value > (ulong)fs.Length)
+                    // u64::MAX → -1 in long is the spec's
+                    // "Invalid" sentinel; the in-range case
+                    // where offset > length is allowed (POSIX
+                    // pread semantics) and naturally returns 0
+                    // bytes at the first ReadAsync.
+                    if (offset.Value > long.MaxValue)
                         throw new FilesystemException(
-                            ErrorCode.InvalidSeek,
-                            $"offset {offset.Value} past EOF " +
-                            $"(length {fs.Length}).");
+                            ErrorCode.Invalid,
+                            $"offset {offset.Value} exceeds host " +
+                            "long range.");
                     fs.Position = (long)offset.Value;
                     var buffer = new byte[4096];
                     while (true)
@@ -316,12 +341,13 @@ namespace Wacs.WASI.Preview3.Filesystem
                             dispatcher.StreamTryWrite(streamHandle, buffer[i]);
                     }
                     dispatcher.StreamDropWritable(streamHandle);
-                    dispatcher.FutureWrite(futureHandle, null);
+                    dispatcher.FutureWrite(futureHandle, _resultErrCodeOkPayload);
                 }
                 catch (Exception ex)
                 {
                     dispatcher.StreamDropWritable(streamHandle);
-                    dispatcher.FutureWrite(futureHandle, ToFilesystem(ex));
+                    dispatcher.FutureWrite(futureHandle,
+                        EncodeResultErrCodeErr(ToFilesystem(ex)));
                 }
             });
             return (streamHandle, futureHandle, completion);
@@ -329,112 +355,74 @@ namespace Wacs.WASI.Preview3.Filesystem
 
         public (int futureHandle, Task WriteCompletion) WriteViaStream(
             AsyncDispatcher dispatcher, int streamHandle, FileSize offset)
-        {
-            if (dispatcher == null)
-                throw new ArgumentNullException(nameof(dispatcher));
-            var futureHandle = dispatcher.FutureNew(typeIdx: 0);
-
-            var buffer = dispatcher.GetByteStreamBuffer(streamHandle);
-            if (buffer == null)
-            {
-                dispatcher.FutureWrite(futureHandle,
-                    new FilesystemException(ErrorCode.BadDescriptor,
-                        $"stream handle {streamHandle} not allocated"));
-                return (futureHandle, Task.CompletedTask);
-            }
-
-            var path = _absolutePath;
-            var ofs = offset;
-            var completion = Task.Run(async () =>
-            {
-                FileStream? fs = null;
-                Exception? err = null;
-                try
+            => SetupSyncWriteSink(dispatcher, streamHandle,
+                openFs: () =>
                 {
-                    fs = new FileStream(
-                        path, FileMode.OpenOrCreate, FileAccess.Write,
+                    var fs = new FileStream(
+                        _absolutePath, FileMode.OpenOrCreate,
+                        FileAccess.Write,
                         FileShare.ReadWrite | FileShare.Delete);
-                    fs.Position = (long)ofs.Value;
-                    var staging = new byte[4096];
-                    while (await buffer.Reader
-                        .WaitToReadAsync().ConfigureAwait(false))
-                    {
-                        int n = 0;
-                        while (n < staging.Length
-                            && buffer.Reader.TryRead(out var b))
-                        {
-                            staging[n++] = b;
-                        }
-                        if (n > 0)
-                            await fs.WriteAsync(staging, 0, n)
-                                .ConfigureAwait(false);
-                    }
-                    await fs.FlushAsync().ConfigureAwait(false);
-                }
-                catch (Exception ex) { err = ex; }
-                // Close the FileStream BEFORE writing to the
-                // future — embedders that observe future
-                // completion then immediately read the file
-                // race with dispose otherwise.
-                fs?.Dispose();
-                if (err == null)
-                    dispatcher.FutureWrite(futureHandle, null);
-                else
-                    dispatcher.FutureWrite(futureHandle, ToFilesystem(err));
-            });
-            return (futureHandle, completion);
-        }
+                    fs.Position = (long)offset.Value;
+                    return fs;
+                });
 
         public (int futureHandle, Task AppendCompletion) AppendViaStream(
             AsyncDispatcher dispatcher, int streamHandle)
+            => SetupSyncWriteSink(dispatcher, streamHandle,
+                openFs: () => new FileStream(
+                    _absolutePath, FileMode.Append,
+                    FileAccess.Write,
+                    FileShare.ReadWrite | FileShare.Delete));
+
+        // Common write-via-stream / append-via-stream plumbing:
+        // bind a synchronous file-write sink to the stream
+        // handle so that each guest `tx.write(chunk).await`
+        // immediately writes to the file and flushes, then
+        // stat() reflects the new size before the next guest
+        // continuation step. The completion future resolves
+        // when the writer-side drops.
+        private (int futureHandle, Task Completion) SetupSyncWriteSink(
+            AsyncDispatcher dispatcher, int streamHandle,
+            Func<FileStream> openFs)
         {
             if (dispatcher == null)
                 throw new ArgumentNullException(nameof(dispatcher));
             var futureHandle = dispatcher.FutureNew(typeIdx: 0);
-
-            var buffer = dispatcher.GetByteStreamBuffer(streamHandle);
-            if (buffer == null)
+            FileStream? fs;
+            try { fs = openFs(); }
+            catch (Exception ex)
             {
                 dispatcher.FutureWrite(futureHandle,
-                    new FilesystemException(ErrorCode.BadDescriptor,
-                        $"stream handle {streamHandle} not allocated"));
+                    EncodeResultErrCodeErr(ToFilesystem(ex)));
                 return (futureHandle, Task.CompletedTask);
             }
-
-            var path = _absolutePath;
-            var completion = Task.Run(async () =>
-            {
-                FileStream? fs = null;
-                Exception? err = null;
-                try
+            FilesystemException? err = null;
+            dispatcher.BindStreamSyncWriteSink(streamHandle,
+                onWrite: bytes =>
                 {
-                    fs = new FileStream(
-                        path, FileMode.Append, FileAccess.Write,
-                        FileShare.ReadWrite | FileShare.Delete);
-                    var staging = new byte[4096];
-                    while (await buffer.Reader
-                        .WaitToReadAsync().ConfigureAwait(false))
+                    if (err != null) return;
+                    try
                     {
-                        int n = 0;
-                        while (n < staging.Length
-                            && buffer.Reader.TryRead(out var b))
-                        {
-                            staging[n++] = b;
-                        }
-                        if (n > 0)
-                            await fs.WriteAsync(staging, 0, n)
-                                .ConfigureAwait(false);
+                        var arr = bytes.ToArray();
+                        fs.Write(arr, 0, arr.Length);
+                        fs.Flush();
                     }
-                    await fs.FlushAsync().ConfigureAwait(false);
-                }
-                catch (Exception ex) { err = ex; }
-                fs?.Dispose();
-                if (err == null)
-                    dispatcher.FutureWrite(futureHandle, null);
-                else
-                    dispatcher.FutureWrite(futureHandle, ToFilesystem(err));
-            });
-            return (futureHandle, completion);
+                    catch (Exception ex) { err = ToFilesystem(ex); }
+                },
+                onClose: () =>
+                {
+                    try { fs.Dispose(); }
+                    catch (Exception ex)
+                    { err ??= ToFilesystem(ex); }
+                    if (err == null)
+                        dispatcher.FutureWrite(
+                            futureHandle, _resultErrCodeOkPayload);
+                    else
+                        dispatcher.FutureWrite(
+                            futureHandle,
+                            EncodeResultErrCodeErr(err));
+                });
+            return (futureHandle, Task.CompletedTask);
         }
 
         public Task AdviseAsync(
@@ -594,12 +582,13 @@ namespace Wacs.WASI.Preview3.Filesystem
                         dispatcher, streamHandle, realloc, entry);
                 }
                 dispatcher.StreamDropWritable(streamHandle);
-                dispatcher.FutureWrite(futureHandle, /* ok */ null);
+                dispatcher.FutureWrite(futureHandle, _resultErrCodeOkPayload);
             }
             catch (Exception ex)
             {
                 dispatcher.StreamDropWritable(streamHandle);
-                dispatcher.FutureWrite(futureHandle, ToFilesystem(ex));
+                dispatcher.FutureWrite(futureHandle,
+                    EncodeResultErrCodeErr(ToFilesystem(ex)));
             }
             return (streamHandle, futureHandle, Task.CompletedTask);
         }
@@ -616,21 +605,40 @@ namespace Wacs.WASI.Preview3.Filesystem
             AsyncDispatcher dispatcher, int streamHandle,
             ICabiRealloc realloc, string entryPath)
         {
-            // Determine type.
+            // Determine type. Check LinkTarget FIRST so a
+            // symlink that points to a directory doesn't get
+            // mistakenly labeled Directory by the Directory.Exists
+            // fast path. FileSystemInfo.LinkTarget is the
+            // cross-platform "is this entry a symlink?" probe
+            // on .NET 6+ — works without inspecting
+            // platform-specific attribute bits.
             DescriptorType type;
+#if NET6_0_OR_GREATER
+            FileSystemInfo? probe = null;
+            try
+            {
+                if (Directory.Exists(entryPath))
+                    probe = new DirectoryInfo(entryPath);
+                else if (File.Exists(entryPath))
+                    probe = new FileInfo(entryPath);
+            }
+            catch { /* fall through */ }
+            if (probe != null && probe.LinkTarget != null)
+                type = DescriptorType.SymbolicLink;
+            else if (Directory.Exists(entryPath))
+                type = DescriptorType.Directory;
+            else if (File.Exists(entryPath))
+                type = DescriptorType.RegularFile;
+            else
+                type = DescriptorType.Other(null);
+#else
             if (Directory.Exists(entryPath))
                 type = DescriptorType.Directory;
             else if (File.Exists(entryPath))
-            {
-                var attr = File.GetAttributes(entryPath);
-                type = (attr & FileAttributes.ReparsePoint) != 0
-                    ? DescriptorType.SymbolicLink
-                    : DescriptorType.RegularFile;
-            }
+                type = DescriptorType.RegularFile;
             else
-            {
                 type = DescriptorType.Other(null);
-            }
+#endif
 
             // Allocate + write the name UTF-8 in guest memory.
             var name = Path.GetFileName(entryPath);
@@ -646,6 +654,13 @@ namespace Wacs.WASI.Preview3.Filesystem
                         .AsSpan(namePtr, nameBytes.Length));
             }
 
+#if NET6_0_OR_GREATER
+            if (Environment.GetEnvironmentVariable("WACS_TRACE_FS") == "1")
+                Console.Error.WriteLine(
+                    $"[fs] dir-entry path=\"{Path.GetFileName(entryPath)}\" " +
+                    $"type={type.Kind} name=\"{name}\" namePtr=0x{namePtr:X} " +
+                    $"nameLen={nameBytes.Length}");
+#endif
             // Serialize the 24-byte entry into the byte stream
             // one byte at a time (the byte-channel doesn't have
             // a bulk-write primitive). Performance isn't a

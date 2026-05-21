@@ -1,5 +1,57 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.62 — canon-async stream data plane (future-read + sync write sink + DROPPED status)
+
+Lands the canon-async stream/future data-plane pieces that
+unblock `filesystem-io`. Three coordinated changes:
+
+* **`[async-lower][future-read-N]` scaffolding handler.**
+  Blocks the CLR thread on the future's resolution (matching
+  the existing `StreamReadToMemoryBlocking` pattern) and
+  memcpys the resolved `byte[]` payload to the guest's
+  result buffer. Hosts now pre-encode `result<_, error-code>`
+  bytes as `byte[20]` and stash them via `FutureWrite` —
+  the Wacs.ComponentModel layer stays type-agnostic.
+* **`StreamSlot.SyncWriteSink` for host file targets.**
+  `write-via-stream` / `append-via-stream` now register a
+  synchronous write sink on the stream handle; the
+  canon-async `stream-write` scaffolding writes + flushes
+  directly through that sink during each
+  `tx.write(chunk).await`. Required for the wasip3 pappend
+  fixture's `fd.stat()` assertion between writes — without
+  it, the file-size update lagged the guest's continuation
+  by an async-thread boundary.
+* **`stream-read` returns DROPPED when the writer-side has
+  closed.** Previously we always packed `STATUS_COMPLETED`
+  with count 0, which trapped wit-bindgen-rt's
+  read-until-Dropped loop in an infinite Complete(0)
+  cycle. The scaffolding now consults
+  `AsyncDispatcher.IsStreamCompleted` and surfaces DROPPED
+  when the buffer is empty + writer-dropped.
+
+Plus filesystem-side fidelity:
+
+* `read-via-stream` no longer pre-checks `offset > length`
+  as `InvalidSeek` — POSIX pread allows past-EOF offsets
+  and naturally returns 0 bytes. Only `offset > long.MaxValue`
+  surfaces `Invalid` (the wasip3 `u64::MAX` sentinel).
+* `WriteDirectoryEntry` detects symlinks via
+  `FileSystemInfo.LinkTarget` (.NET 6+) before falling
+  through to the `Directory.Exists` / `File.Exists` fast
+  path — `parent → ..` no longer mis-classified as
+  `Directory`.
+
+filesystem-io: 14 of 14 wasip3 cli + clocks/random + fs
+fixtures pass when read-directory is xfail'd. The
+read-directory fixture's stream + future round-trip is
+fully correct (72 bytes streamed, DROPPED, future Ok), but
+something downstream of `assert_eq!` still hangs — pinned
+until the permissive `exit(1)` stub is replaced with a
+proper canon-async trap surface so guest-side panics
+become observable.
+
+Preview3 452/452.
+
 ## WACS.WASI.Preview3 0.1.61 — hard-link P/Invoke + inode-aware is-same-object
 
 Closes filesystem-hard-links, filesystem-is-same-object,

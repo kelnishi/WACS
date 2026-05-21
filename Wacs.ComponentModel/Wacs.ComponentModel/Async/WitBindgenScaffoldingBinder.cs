@@ -144,16 +144,18 @@ namespace Wacs.ComponentModel.Async
         // Pack a sync-completion status for stream.read/.write
         // per the canonical-ABI return convention. Layout (per
         // component-model 0.3.0-rc): the low 4 bits carry the
-        // status code (0 = COMPLETED, 1 = DROPPED, 2 =
-        // CANCELLED, 3 = STARTED, etc.) and the upper 28 bits
-        // carry the count of items transferred. 0xFFFFFFFF is
-        // the BLOCKED sentinel (no transfer; will signal via
-        // task/waitable later).
+        // status code and the upper 28 bits carry the count of
+        // items transferred. 0xFFFFFFFF is the BLOCKED sentinel
+        // (no transfer; will signal via task/waitable later).
+        private const int StatusCompleted = 0;
+        private const int StatusDropped = 1;
+        private const int StatusCancelled = 2;
+
         private static int PackStreamStatus(int count, bool completed)
-        {
-            // STATUS_COMPLETED = 0; we OR in the count<<4.
-            return (count << 4) | 0;
-        }
+            => (count << 4) | (completed ? StatusCompleted : StatusDropped);
+
+        private static readonly bool StreamReadTraceEnabled =
+            Environment.GetEnvironmentVariable("WACS_TRACE_FUTURE") == "1";
 
         // ----- Diagnostic call-trace --------------------------
         // Optional per-op call counter, enabled by setting
@@ -402,15 +404,62 @@ namespace Wacs.ComponentModel.Async
                         int read = d.StreamReadToMemoryBlocking(
                             handle, d.Memory,
                             unchecked((uint)ptr), cap);
-                        return PackStreamStatus(read, completed: true);
+                        // wit-bindgen-rt's read loop spins on
+                        // Complete(0) until it sees Dropped —
+                        // when 0 bytes came back and the writer
+                        // has dropped its half, surface DROPPED
+                        // so the loop exits.
+                        int status;
+                        if (read == 0 && d.IsStreamCompleted(handle))
+                            status = (0 << 4) | StatusDropped;
+                        else
+                            status = PackStreamStatus(read, completed: true);
+                        if (StreamReadTraceEnabled)
+                            System.Console.Error.WriteLine(
+                                $"[stream-read] handle={handle} cap={cap} " +
+                                $"read={read} status=0x{status:x}");
+                        return status;
                     });
             }
 
-            // The future-side async-lower wrappers need typed
-            // memory marshaling that we don't have yet — the
-            // future's element type drives how many bytes to
-            // read/write from the buffer at `ptr`. Land in a
-            // follow-up.
+            // [async-lower][future-read-N]<funcname>(handle,
+            //   ptr) → (i32 status)
+            //
+            // wit-bindgen-rt's start_read hook for the
+            // single-shot future on the read-side. Blocks the
+            // CLR thread until the producer resolves the future
+            // (matching the StreamReadToMemoryBlocking pattern).
+            // The future's resolved value is a pre-encoded
+            // byte[] when the producer wants to surface a typed
+            // payload; null leaves the buffer untouched.
+            if (p.AsyncLower && p.CanonOp == "future-read"
+                && p.TypeIdx != null)
+            {
+                return (Func<ExecContext, int, int, int>)(
+                    (ctx, handle, ptr) =>
+                    {
+                        if (d.Memory == null) return 0;
+                        d.FutureReadToMemoryBlocking(
+                            handle, d.Memory, unchecked((uint)ptr));
+                        // future-read: 0 = COMPLETED (single
+                        // value transferred — count is implicit
+                        // since a future holds at most one
+                        // value).
+                        return StatusCompleted;
+                    });
+            }
+
+            // [async-lower][future-write-N]<funcname>(handle,
+            //   ptr) → (i32 status)
+            //
+            // Symmetric to future-read for the write side. Not
+            // exercised by the wasip3 fixtures currently (all
+            // futures are host-produced); land when needed.
+            if (p.AsyncLower && p.CanonOp == "future-write"
+                && p.TypeIdx != null)
+                return null;
+
+            // Other [async-lower] shapes we don't recognize yet.
             if (p.AsyncLower) return null;
 
             switch (p.CanonOp)
