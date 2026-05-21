@@ -83,14 +83,44 @@ namespace Wacs.WASI.Preview3.Filesystem
         public string RootPath => _rootPath;
 
         // Resolve a guest-supplied path against this
-        // descriptor's directory (if this is a directory) and
-        // confirm the result is within the sandbox root.
-        // Throws FilesystemException(NotPermitted) on escape.
+        // descriptor's directory and confirm the result stays
+        // within the sandbox root. Throws:
+        //   - NoEntry        when the path is empty
+        //   - NotPermitted   when the path is absolute, contains
+        //                    `..` segments, crosses a symlink, or
+        //                    resolves outside the sandbox root
+        //   - Invalid        when the path is null
+        //
+        // Symlink-aware: any existing path component that's a
+        // symbolic link causes a NotPermitted reject — the
+        // wasip3 testsuite fixtures use `parent → ..` to probe
+        // sandbox escape, and even when the symlink target
+        // happens to land inside the sandbox literally, allowing
+        // the traversal violates the spec's containment intent.
+        // Stricter than necessary for non-escaping symlinks but
+        // matches the testsuite's expectations.
         private string ResolveChild(string path)
         {
             if (path == null)
                 throw new FilesystemException(
                     ErrorCode.Invalid, "path is null");
+            if (path.Length == 0)
+                throw new FilesystemException(
+                    ErrorCode.NoEntry, "empty path");
+            if (Path.IsPathRooted(path)
+                || path.StartsWith("/", StringComparison.Ordinal)
+                || path.StartsWith("\\", StringComparison.Ordinal))
+                throw new FilesystemException(
+                    ErrorCode.NotPermitted,
+                    $"absolute path '{path}' not permitted.");
+            foreach (var seg in path.Split('/', '\\'))
+            {
+                if (seg == "..")
+                    throw new FilesystemException(
+                        ErrorCode.NotPermitted,
+                        $"path '{path}' contains '..' segment.");
+            }
+
             var combined = Path.GetFullPath(Path.Combine(_absolutePath, path));
             var rootSep = _rootPath.EndsWith(
                 Path.DirectorySeparatorChar.ToString())
@@ -105,7 +135,50 @@ namespace Wacs.WASI.Preview3.Filesystem
                     ErrorCode.NotPermitted,
                     $"path '{path}' resolves outside sandbox root " +
                     $"'{_rootPath}'.");
+
+            if (TraversesSymlinkComponent(path))
+                throw new FilesystemException(
+                    ErrorCode.NotPermitted,
+                    $"path '{path}' crosses a symbolic link.");
+
             return combined;
+        }
+
+        // Walk each component of <paramref name="path"/> from
+        // this descriptor's directory and return true iff any
+        // existing intermediate component is a symbolic link.
+        // Final-component symlinks are also detected. Missing
+        // components (e.g., the leaf of a not-yet-created
+        // directory in mkdir) just stop the walk — we can't
+        // inspect what doesn't exist yet.
+        private bool TraversesSymlinkComponent(string path)
+        {
+            var current = _absolutePath;
+            foreach (var part in path.Split('/', '\\'))
+            {
+                if (string.IsNullOrEmpty(part) || part == ".") continue;
+                current = Path.Combine(current, part);
+                // Check the LITERAL path's link status, not what
+                // it resolves to. DirectoryInfo / FileInfo for a
+                // symlink to a directory still has its own
+                // LinkTarget property — that's our signal.
+#if NET6_0_OR_GREATER
+                FileSystemInfo? info = null;
+                if (Directory.Exists(current))
+                    info = new DirectoryInfo(current);
+                else if (File.Exists(current))
+                    info = new FileInfo(current);
+                if (info?.LinkTarget != null) return true;
+                if (info == null) return false;
+#else
+                // netstandard2.1 has no LinkTarget API — best
+                // we can do is detect missing components.
+                if (!Directory.Exists(current)
+                    && !File.Exists(current))
+                    return false;
+#endif
+            }
+            return false;
         }
 
         // Wrap a thrown CLR exception into a FilesystemException
@@ -509,7 +582,20 @@ namespace Wacs.WASI.Preview3.Filesystem
             {
                 try
                 {
-                    Directory.CreateDirectory(ResolveChild(path));
+                    var resolved = ResolveChild(path);
+                    // Spec: create-directory-at on a path that
+                    // already exists (as file or directory)
+                    // surfaces as Exist. .NET's
+                    // Directory.CreateDirectory is a no-op on an
+                    // existing dir (no error), which would
+                    // wrongly succeed for cases the spec wants
+                    // rejected.
+                    if (Directory.Exists(resolved)
+                        || File.Exists(resolved))
+                        throw new FilesystemException(
+                            ErrorCode.Exist,
+                            $"'{path}' already exists.");
+                    Directory.CreateDirectory(resolved);
                 }
                 catch (Exception ex) { throw ToFilesystem(ex); }
             }, cancellationToken);
@@ -660,10 +746,24 @@ namespace Wacs.WASI.Preview3.Filesystem
                 try
                 {
                     var resolved = ResolveChild(path);
+                    // Removing the sandbox root itself (path == "."
+                    // or a trailing-slash variant that normalizes
+                    // back to root) is Invalid per the spec.
+                    if (resolved == _rootPath
+                        || resolved == _absolutePath)
+                        throw new FilesystemException(
+                            ErrorCode.Invalid,
+                            $"cannot remove preopen root '{path}'.");
+                    // Regular file at the path: not a directory.
+                    if (File.Exists(resolved)
+                        && !Directory.Exists(resolved))
+                        throw new FilesystemException(
+                            ErrorCode.NotDirectory,
+                            $"'{path}' is a file, not a directory.");
                     if (!Directory.Exists(resolved))
                         throw new FilesystemException(
                             ErrorCode.NoEntry,
-                            $"'{path}' is not a directory.");
+                            $"'{path}' does not exist.");
                     Directory.Delete(resolved, recursive: false);
                 }
                 catch (Exception ex) { throw ToFilesystem(ex); }

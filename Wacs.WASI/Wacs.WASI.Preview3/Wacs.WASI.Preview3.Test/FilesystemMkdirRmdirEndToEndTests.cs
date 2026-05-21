@@ -52,18 +52,7 @@ namespace Wacs.WASI.Preview3.Test
                 $"Canons: {component.Canons.Count}");
         }
 
-        [Fact(Skip = "Shim+fixup wiring now works (verified end-to-" +
-            "end via [host] traces: get-directories returns 1 " +
-            "preopen, then create-directory-at(\"\") is invoked " +
-            "with self=1). Next layer surfaces here: Descriptor's " +
-            "CreateDirectoryAtAsync(\"\") returns Ok where the " +
-            "Rust test expects Err(NoEntry). The guest panics, " +
-            "the wasip2-facade permissive-stub for wasi:cli/exit " +
-            "swallows the abort, and the unwinder spins (same " +
-            "pattern as feedback_wasip3_permissive_stub_exit_spins). " +
-            "Fix path: tighten Descriptor's sandbox + path-" +
-            "validation to return the spec'd error codes — " +
-            "separate concern from the shim+fixup machinery.")]
+        [Fact]
         public void Run_completes_against_preopened_fs_tests_dir()
         {
             var path = Wasip3FixtureHarness.FixturePath(
@@ -75,16 +64,20 @@ namespace Wacs.WASI.Preview3.Test
             // mkdir-rmdir creates/removes child.cleanup,
             // sibling.cleanup, q.cleanup etc and we want each
             // test run to start from a known state.
-            var fixtureDir = Wasip3FixtureHarness.FixturePath(
-                typeof(FilesystemMkdirRmdirEndToEndTests),
-                "fs-tests.dir");
+            //
+            // We BUILD the staging tree from scratch rather than
+            // copy from Fixtures/fs-tests.dir/ in the test
+            // output because MSBuild's <None Update="**/*">
+            // glob doesn't carry the `parent → ..` symlink
+            // through to bin/Debug/.../Fixtures/. Reconstructing
+            // here keeps the source structure intact.
             var stagingRoot = Path.Combine(
                 Path.GetTempPath(),
                 $"wacs-fs-tests-{Guid.NewGuid():N}");
             var staged = Path.Combine(stagingRoot, "fs-tests.dir");
             try
             {
-                CopyDirectoryWithSymlinks(fixtureDir, staged);
+                BuildFsTestsDir(staged);
 
                 var host = new WasiPreview3Host(new WasiPreview3HostBuilder
                 {
@@ -129,26 +122,25 @@ namespace Wacs.WASI.Preview3.Test
             }
         }
 
-        private static void CopyDirectoryWithSymlinks(
-            string source, string target)
+        // Build the testsuite's fs-tests.dir structure at
+        // <paramref name="root"/>. Mirrors the upstream layout:
+        //
+        //   fs-tests.dir/
+        //   ├── a.txt       (contents: "test-a\n")
+        //   ├── b.txt       (contents: "test-b\n")
+        //   └── parent → .. (symlink, sandbox-escape probe)
+        //
+        // The symlink target is relative; resolved against the
+        // symlink's directory it lands at <stagingRoot>, OUTSIDE
+        // the fs-tests.dir preopen. Many fixture path-validation
+        // subtests probe whether the host catches this.
+        private static void BuildFsTestsDir(string root)
         {
-            Directory.CreateDirectory(target);
-            foreach (var entry in new DirectoryInfo(source).EnumerateFileSystemInfos())
-            {
-                var destPath = Path.Combine(target, entry.Name);
-                if (entry.LinkTarget != null)
-                {
-                    File.CreateSymbolicLink(destPath, entry.LinkTarget);
-                }
-                else if (entry is DirectoryInfo)
-                {
-                    CopyDirectoryWithSymlinks(entry.FullName, destPath);
-                }
-                else
-                {
-                    File.Copy(entry.FullName, destPath, overwrite: true);
-                }
-            }
+            Directory.CreateDirectory(root);
+            File.WriteAllText(Path.Combine(root, "a.txt"), "test-a\n");
+            File.WriteAllText(Path.Combine(root, "b.txt"), "test-b\n");
+            File.CreateSymbolicLink(
+                Path.Combine(root, "parent"), "..");
         }
 
         private static void TryRemoveDir(string path)

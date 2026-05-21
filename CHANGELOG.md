@@ -1,5 +1,61 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.55 — filesystem-mkdir-rmdir acceptance (Descriptor path validation)
+
+Closes the filesystem-mkdir-rmdir fixture acceptance — the
+first wasip3 testsuite fixture exercising real filesystem
+methods through the wit-component shim+fixup indirection.
+**441/441** Preview3 tests pass with no skips.
+
+### `Descriptor.ResolveChild` tightening
+
+The default `Descriptor` implementation now rejects:
+
+- **Empty path** → `NoEntry` (was: silently resolved to root)
+- **Absolute path** (`/`, `\\`, drive-rooted) → `NotPermitted`
+- **`..` segments** anywhere in the path → `NotPermitted`
+- **Symlink components** (existing path component that's
+  itself a symbolic link) → `NotPermitted` via the new
+  `TraversesSymlinkComponent` walk.
+
+The symlink check uses `FileSystemInfo.LinkTarget` (.NET 6+)
+on the LITERAL path of each component — not what the symlink
+resolves to. The fs-tests.dir fixture's `parent → ..` symlink
+is the canonical probe; any traversal through it is rejected
+even when the target happens to land back inside the sandbox.
+Stricter than the spec's pure-containment rule but matches
+wasmtime's behavior on the testsuite fixtures.
+
+### Per-method existence checks
+
+- `CreateDirectoryAtAsync`: existence-check before
+  `Directory.CreateDirectory` so `mkdir(".")` and
+  `mkdir("a.txt")` (where `a.txt` is a file) surface as
+  `Exist` instead of silently succeeding.
+- `RemoveDirectoryAtAsync`: file-at-path returns
+  `NotDirectory`; removing the preopen root returns
+  `Invalid` (per spec, the root can't be removed via
+  itself).
+
+### Test infrastructure
+
+`FilesystemMkdirRmdirEndToEndTests` now builds the
+`fs-tests.dir` staging from scratch (`BuildFsTestsDir`) per
+run rather than copying from the test project's `Fixtures/`
+output. MSBuild's `CopyToOutputDirectory` glob doesn't carry
+symlinks through to `bin/Debug/.../Fixtures/`, so the
+`parent → ..` symlink was missing from the staged copy and
+the symlink-escape probes went unobserved.
+
+### Coverage summary
+
+10 of the wasip3 testsuite fixtures now pass end-to-end:
+cli-hello, cli-env, cli-exit, cli-stdio, cli-stdio-roundtrip,
+cli-terminal, monotonic-clock, random, run-with-err,
+wall-clock — plus **filesystem-mkdir-rmdir**, the first
+filesystem fixture and the first to drive the shim+fixup
+funcref-table dance end-to-end.
+
 ## WACS.ComponentModel 0.8.29 — ShimFixupWiring closes the funcref-table indirection
 
 Minimal extension to the multi-core path that instantiates
