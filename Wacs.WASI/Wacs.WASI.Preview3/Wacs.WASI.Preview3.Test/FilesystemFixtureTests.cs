@@ -50,6 +50,16 @@ namespace Wacs.WASI.Preview3.Test
             yield return new object[] { "filesystem-is-same-object" };
             yield return new object[] { "filesystem-hard-links" };
             yield return new object[] { "filesystem-metadata-hash" };
+            // filesystem-io and filesystem-read-directory both
+            // depend on the stream<u8> read-side dispatcher
+            // wiring across canon-async — the host-side
+            // ReadViaStream allocates a stream/future handle pair
+            // but the byte data never reaches the guest's
+            // `stream-read` poll. Tackling this requires a
+            // dedicated pass on the canon-async stream data plane;
+            // leaving these two as XFAIL until that lands.
+            // yield return new object[] { "filesystem-io" };
+            // yield return new object[] { "filesystem-read-directory" };
         }
 
         [Theory]
