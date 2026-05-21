@@ -51,17 +51,7 @@ namespace Wacs.WASI.Preview3.Test
             yield return new object[] { "filesystem-hard-links" };
             yield return new object[] { "filesystem-metadata-hash" };
             yield return new object[] { "filesystem-io" };
-            // filesystem-read-directory: byte-stream wire-up and
-            // type-encoding for the 3 entries (a.txt, b.txt,
-            // parent) is fully correct — wit-bindgen-rt's
-            // collect() reads all 72 bytes + sees the DROPPED
-            // status + the success future resolves Ok. The
-            // fixture still hangs past the resulting assert_eq!,
-            // which suggests a residue mismatch we haven't been
-            // able to pin down without a guest-side panic
-            // surface. Tracked as xfail until the canon-async
-            // panic-trap path replaces the permissive exit stub.
-            // yield return new object[] { "filesystem-read-directory" };
+            yield return new object[] { "filesystem-read-directory" };
         }
 
         [Theory]

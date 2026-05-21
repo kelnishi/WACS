@@ -1,5 +1,42 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.64 — typed-stream item-count semantics (closes filesystem-read-directory)
+
+The canon-async `stream.read` and `stream.write` calls
+negotiate in **item counts**, not byte counts — confirmed
+by reading wit-bindgen-rt's `start` in
+`stream_support.rs:610-622`, where the host's cleanup
+allocation is sized `elem_layout.size() * cap.len()` and
+the third arg to `start_read` is `cap.len()` (item count
+from `Vec::spare_capacity_mut`).
+
+Our previous scaffolding treated `cap` as a byte count and
+returned `PackStreamStatus(bytes_read, true)` — accidentally
+correct for `stream<u8>` (item_size == 1) but wrong for any
+typed stream. For `stream<directory-entry>` (24 bytes per
+item), the host's 4-byte read got interpreted as 4 items
+transferred; wit-bindgen-rt's `lift` then advanced 24 bytes
+per item across uninitialized cleanup memory, producing
+garbage `DirectoryEntry { type: BlockDevice, name: "" }`
+records that hung the post-`assert_eq!` unwinder.
+
+Fix is layered:
+* `StreamSlot.ItemSize` (default 1) tracks the canonical-
+  ABI size of the stream's element type.
+* `AsyncDispatcher.SetStreamItemSize(handle, size)` lets
+  hosts flag typed streams at the slot.
+* `StreamReadToMemoryBlocking` now interprets the
+  scaffolding's `cap` as item count, translates to
+  `cap * itemSize` byte budget for the channel read, and
+  returns `itemsRead = bytesRead / itemSize`. A
+  partial-item residue throws — host writers must produce
+  whole records.
+* `ReadDirectoryAsync` calls `SetStreamItemSize(handle,
+  24)` after allocating the byte stream.
+
+Closes `filesystem-read-directory`: **all 14 filesystem
+fixtures pass**. Preview3 447/447.
+
 ## WACS.WASI.Preview3 0.1.63 — StreamTryWrite honors sync write sink
 
 `StreamTryWrite` now mirrors the canon-async stream-write

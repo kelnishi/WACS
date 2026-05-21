@@ -566,12 +566,19 @@ namespace Wacs.WASI.Preview3.Filesystem
             catch (FilesystemException) { throw; }
             catch (Exception ex) { throw ToFilesystem(ex); }
 
-            // 24 bytes per entry; +24 headroom for any final
-            // pad/flush. Minimum 64 to avoid pathological tiny
-            // capacities.
-            int capacity = System.Math.Max(64, entries.Length * 24 + 24);
+            // 24 bytes per directory-entry record (canonical-ABI
+            // size). The stream is typed — the canon-async
+            // stream-read scaffolding negotiates in item counts
+            // not byte counts, so flag the slot's item size up
+            // front. +24 headroom for any final pad/flush;
+            // minimum 64 to avoid pathological tiny capacities.
+            const int DirectoryEntryItemSize = 24;
+            int capacity = System.Math.Max(
+                64, entries.Length * DirectoryEntryItemSize + 24);
             var streamHandle = dispatcher.StreamNew(
                 typeIdx: 0, capacity: capacity);
+            dispatcher.SetStreamItemSize(
+                streamHandle, DirectoryEntryItemSize);
             var futureHandle = dispatcher.FutureNew(typeIdx: 0);
 
             try

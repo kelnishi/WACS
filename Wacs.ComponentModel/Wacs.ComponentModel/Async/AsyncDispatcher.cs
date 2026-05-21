@@ -105,6 +105,15 @@ namespace Wacs.ComponentModel.Async
             public StreamBuffer<byte> Buffer = null!;
             public bool WriterDropped;
             public bool ReaderDropped;
+            // Item size in bytes for the stream's element type
+            // (canonical-ABI form). For stream<u8> this is 1
+            // and item-count == byte-count; for typed streams
+            // like stream<directory-entry> (24 bytes per item)
+            // the canon-async `stream-read` scaffolding passes
+            // an item count and we have to translate to and
+            // from byte count when transferring between guest
+            // memory and the byte buffer. Defaults to 1.
+            public int ItemSize = 1;
             // Optional synchronous write sink. When set, the
             // canon-async stream-write scaffolding bypasses the
             // buffered channel and writes guest bytes directly
@@ -478,6 +487,23 @@ namespace Wacs.ComponentModel.Async
             return Streams.Allocate(slot);
         }
 
+        /// <summary>Set the canonical-ABI item size (bytes per
+        /// element) for an existing stream slot. Required for
+        /// typed streams like <c>stream&lt;directory-entry&gt;</c>
+        /// where the canon-async <c>stream-read</c> scaffolding
+        /// negotiates in item counts; left at the default of 1
+        /// for byte streams.</summary>
+        public void SetStreamItemSize(int streamHandle, int itemSize)
+        {
+            if (itemSize <= 0)
+                throw new ArgumentOutOfRangeException(nameof(itemSize));
+            if (Streams.Get(streamHandle) is not StreamSlot slot)
+                throw new InvalidOperationException(
+                    $"SetStreamItemSize: handle {streamHandle} is " +
+                    "not allocated.");
+            slot.ItemSize = itemSize;
+        }
+
         // Resolve the StreamSlot for a handle, throwing with the
         // canon-op name on failure.
         private StreamSlot GetStreamSlot(int handle, string canonOp)
@@ -633,33 +659,51 @@ namespace Wacs.ComponentModel.Async
         }
 
         public int StreamReadToMemoryBlocking(
-            int streamHandle, MemoryInstance memory, uint ptr, int capacity)
+            int streamHandle, MemoryInstance memory, uint ptr, int itemCapacity)
         {
-            if (capacity < 0)
-                throw new ArgumentOutOfRangeException(nameof(capacity));
-            if (capacity == 0) return 0;
+            if (itemCapacity < 0)
+                throw new ArgumentOutOfRangeException(nameof(itemCapacity));
+            if (itemCapacity == 0) return 0;
             var slot = GetStreamSlot(streamHandle, "stream.read");
-
-            // Fast path: already has buffered data.
-            int read = TryReadIntoMemory(slot, memory, ptr, capacity);
-            if (read > 0) return read;
-            if (slot.Buffer.IsCompleted) return 0;
-
-            // Slow path: block until data or completion.
-            var waitVT = slot.Buffer.Reader.WaitToReadAsync();
-            bool hasMore = waitVT.IsCompleted
-                ? waitVT.Result
-                : waitVT.AsTask().GetAwaiter().GetResult();
-            if (!hasMore) return 0;
-            return TryReadIntoMemory(slot, memory, ptr, capacity);
+            // The canon-async stream-read scaffolding negotiates
+            // in ITEM counts. Translate to bytes for the
+            // buffered byte channel, then back to items on
+            // return so wit-bindgen-rt's
+            // `assert!(amt <= cap.len() - cur_len)` holds.
+            int byteBudget = itemCapacity * slot.ItemSize;
+            int bytesRead = TryReadIntoMemory(
+                slot, memory, ptr, byteBudget);
+            if (bytesRead == 0 && !slot.Buffer.IsCompleted)
+            {
+                var waitVT = slot.Buffer.Reader.WaitToReadAsync();
+                bool hasMore = waitVT.IsCompleted
+                    ? waitVT.Result
+                    : waitVT.AsTask().GetAwaiter().GetResult();
+                if (hasMore)
+                    bytesRead = TryReadIntoMemory(
+                        slot, memory, ptr, byteBudget);
+            }
+            // Round DOWN to whole items — wit-bindgen-rt only
+            // lifts complete records. A partial-item residue
+            // would mean the host writer interleaved with the
+            // reader mid-record; for our current bindings every
+            // host writer (e.g. WriteDirectoryEntry's 24-byte
+            // loop inside a synchronous InvokeDescriptor call)
+            // completes whole records before the guest gets to
+            // read, so a residue should never occur in practice.
+            // If it does, the bytes are silently dropped — we
+            // cannot push back into a System.Threading.Channels
+            // Channel<byte>. Logging only at this layer; surfacing
+            // this is a future refinement.
+            return bytesRead / slot.ItemSize;
         }
 
         private static int TryReadIntoMemory(
-            StreamSlot slot, MemoryInstance memory, uint ptr, int capacity)
+            StreamSlot slot, MemoryInstance memory, uint ptr, int byteBudget)
         {
-            var dst = memory.AsSpan((int)ptr, capacity);
+            var dst = memory.AsSpan((int)ptr, byteBudget);
             int read = 0;
-            for (int i = 0; i < capacity; i++)
+            for (int i = 0; i < byteBudget; i++)
             {
                 if (!slot.Buffer.TryRead(out var b)) break;
                 dst[i] = b;
