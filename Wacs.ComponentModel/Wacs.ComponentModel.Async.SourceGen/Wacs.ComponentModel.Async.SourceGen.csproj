@@ -11,7 +11,7 @@
         <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-        <Version>0.4.2</Version>
+        <Version>0.4.3</Version>
         <RepositoryType>git</RepositoryType>
 
         <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>

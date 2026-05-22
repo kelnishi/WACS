@@ -246,6 +246,184 @@ namespace Wacs.ComponentModel.Async.SourceGen
         private static bool IsNullablePrimitive(string fqType) =>
             NullablePrimitiveTypes.Contains(fqType);
 
+        // Canon-ABI result<TOk, TErr> — variant with two arms.
+        // C# rep: Wacs.ComponentModel.Harness.WitResult<TOk, TErr>.
+        // Either arm can be System.ValueTuple (the elided
+        // unit case) for `result`/`result<T>`/`result<_, E>`
+        // WIT shapes. Both arms must be primitive or unit
+        // for the MVP — aggregate-in-result lands in the
+        // next pass.
+        private const string WitResultPrefixUnglobal =
+            "Wacs.ComponentModel.Harness.WitResult<";
+        private const string WitResultPrefixGlobal =
+            "global::Wacs.ComponentModel.Harness.WitResult<";
+        private const string ValueTupleType =
+            "System.ValueTuple";
+        private const string ValueTupleTypeGlobal =
+            "global::System.ValueTuple";
+
+        // Roslyn's FullyQualifiedFormat prepends `global::` to
+        // every namespace-qualified name. Accept both.
+        private static bool IsWitResult(string fqType)
+        {
+            if (!fqType.EndsWith(">",
+                StringComparison.Ordinal))
+                return false;
+            return fqType.StartsWith(WitResultPrefixUnglobal,
+                    StringComparison.Ordinal)
+                || fqType.StartsWith(WitResultPrefixGlobal,
+                    StringComparison.Ordinal);
+        }
+
+        // Strip the `global::` prefix the Roslyn FullyQualifiedFormat
+        // emits, so the rest of the codegen can pattern-match
+        // primitive names without two-form awareness.
+        private static string StripGlobal(string fqType) =>
+            fqType.StartsWith("global::",
+                StringComparison.Ordinal)
+                ? fqType.Substring("global::".Length)
+                : fqType;
+
+        // Extract the (TOk, TErr) type-arg pair from a
+        // WitResult<TOk, TErr> string. Handles nested
+        // generics correctly via angle-bracket depth
+        // tracking so `WitResult<List<int>, string>` parses
+        // as `(List<int>, string)`.
+        private static (string Ok, string Err)
+            WitResultArgs(string fqType)
+        {
+            int start = fqType.StartsWith(WitResultPrefixGlobal,
+                StringComparison.Ordinal)
+                ? WitResultPrefixGlobal.Length
+                : WitResultPrefixUnglobal.Length;
+            int end = fqType.Length - 1;
+            int depth = 0;
+            int comma = -1;
+            for (int i = start; i < end; i++)
+            {
+                char c = fqType[i];
+                if (c == '<') depth++;
+                else if (c == '>') depth--;
+                else if (c == ',' && depth == 0)
+                {
+                    comma = i;
+                    break;
+                }
+            }
+            if (comma < 0) return (fqType, "");
+            // Normalize the `global::` prefix off the type
+            // args so downstream switch tables can match
+            // unqualified primitive names.
+            string ok = StripGlobal(fqType.Substring(
+                start, comma - start).Trim());
+            string err = StripGlobal(fqType.Substring(
+                comma + 1, end - comma - 1).Trim());
+            return (ok, err);
+        }
+
+        // Result arms supported by the MVP: primitives plus
+        // the elided-unit System.ValueTuple sentinel.
+        private static bool IsResultArm(string fqType) =>
+            IsPrimitive(fqType) || fqType == ValueTupleType;
+
+        private static bool IsSupportedResult(string fqType)
+        {
+            if (!IsWitResult(fqType)) return false;
+            var (ok, err) = WitResultArgs(fqType);
+            return IsResultArm(ok) && IsResultArm(err)
+                && ResultJoinedPayload(ok, err) != "MIXED";
+        }
+
+        // Canon-ABI primitive size + alignment.
+        private static int PrimitiveSize(string fqType)
+        {
+            switch (fqType)
+            {
+                case "byte": case "sbyte": case "bool":
+                case "System.Byte": case "System.SByte":
+                case "System.Boolean":
+                    return 1;
+                case "short": case "ushort":
+                case "System.Int16": case "System.UInt16":
+                    return 2;
+                case "int": case "uint": case "float":
+                case "System.Int32": case "System.UInt32":
+                case "System.Single":
+                    return 4;
+                case "long": case "ulong": case "double":
+                case "System.Int64": case "System.UInt64":
+                case "System.Double":
+                    return 8;
+                case ValueTupleType: return 0;
+                default: return 4;
+            }
+        }
+
+        private static int PrimitiveAlign(string fqType)
+        {
+            switch (fqType)
+            {
+                case "byte": case "sbyte": case "bool":
+                case "System.Byte": case "System.SByte":
+                case "System.Boolean":
+                    return 1;
+                case "short": case "ushort":
+                case "System.Int16": case "System.UInt16":
+                    return 2;
+                case "int": case "uint": case "float":
+                case "System.Int32": case "System.UInt32":
+                case "System.Single":
+                    return 4;
+                case "long": case "ulong": case "double":
+                case "System.Int64": case "System.UInt64":
+                case "System.Double":
+                    return 8;
+                case ValueTupleType: return 1;
+                default: return 4;
+            }
+        }
+
+        private static int AlignTo(int offset, int alignment)
+        {
+            int rem = offset % alignment;
+            return rem == 0 ? offset : offset + (alignment - rem);
+        }
+
+        /// <summary>
+        /// Compute the C# type of the canon-ABI joined payload
+        /// slot for a <c>result&lt;TOk, TErr&gt;</c>. Returns:
+        /// <list type="bullet">
+        ///   <item><c>null</c> — both arms are unit; flat
+        ///     lowering has no payload slot (just the disc).</item>
+        ///   <item>the primitive's type — one arm is unit, the
+        ///     other is the named primitive.</item>
+        ///   <item>the primitive's type — both arms are the
+        ///     same primitive type.</item>
+        ///   <item><c>"MIXED"</c> — different-kind / different-
+        ///     width primitives need the canon-ABI join rule
+        ///     which we don't emit for the MVP.</item>
+        /// </list>
+        /// </summary>
+        private static string? ResultJoinedPayload(
+            string ok, string err)
+        {
+            bool okUnit = ok == ValueTupleType;
+            bool errUnit = err == ValueTupleType;
+            if (okUnit && errUnit) return null;
+            if (okUnit) return err;
+            if (errUnit) return ok;
+            if (ok == err) return ok;
+            return "MIXED";
+        }
+
+        private static int ResultPayloadOffset(
+            string ok, string err)
+        {
+            int armAlign = System.Math.Max(
+                PrimitiveAlign(ok), PrimitiveAlign(err));
+            return AlignTo(1, armAlign);
+        }
+
         // Strip the trailing '?' from `T?` to get the inner T
         // for codegen of the payload slot type.
         private static string InnerOfNullable(string fqType) =>
@@ -257,14 +435,16 @@ namespace Wacs.ComponentModel.Async.SourceGen
             IsPrimitive(fqType)
             || IsString(fqType)
             || IsByteArray(fqType)
-            || IsNullablePrimitive(fqType);
+            || IsNullablePrimitive(fqType)
+            || IsSupportedResult(fqType);
 
         private static bool IsSupportedReturn(string? fqType) =>
             fqType == null
             || IsPrimitive(fqType)
             || IsString(fqType)
             || IsByteArray(fqType)
-            || IsNullablePrimitive(fqType);
+            || IsNullablePrimitive(fqType)
+            || IsSupportedResult(fqType);
 
         private static ScanResult CollectAndDiagnose(
             Compilation compilation)
@@ -538,6 +718,13 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 {
                     needsMemory = true;
                 }
+                if (ex.ReturnType != null
+                    && IsWitResult(ex.ReturnType))
+                {
+                    var (ok, err) = WitResultArgs(ex.ReturnType);
+                    if (ResultJoinedPayload(ok, err) != null)
+                        needsMemory = true;
+                }
             }
             if (needsMemory)
             {
@@ -736,14 +923,18 @@ namespace Wacs.ComponentModel.Async.SourceGen
             {
                 EmitSyncEnsureMemoryAndRealloc(sb);
             }
-            // option<T> return goes through a retArea — we
-            // need memory but no realloc (the callee owns
-            // the retArea and we never free it for primitives
-            // — bare flat reads).
-            bool needsMemoryForOptionReturn =
+            // option<T> + result<T,E> returns go through a
+            // retArea — need memory but no realloc (callee
+            // owns the retArea; no caller-side free).
+            bool needsMemoryForRetArea =
                 ex.ReturnType != null
-                && IsNullablePrimitive(ex.ReturnType);
-            if (needsMemoryForOptionReturn && !needsMemory)
+                && (IsNullablePrimitive(ex.ReturnType)
+                    || (IsWitResult(ex.ReturnType)
+                        && ResultJoinedPayload(
+                            WitResultArgs(ex.ReturnType).Ok,
+                            WitResultArgs(ex.ReturnType).Err)
+                        != null));
+            if (needsMemoryForRetArea && !needsMemory)
             {
                 EmitSyncEnsureMemoryOnly(sb);
             }
@@ -858,6 +1049,38 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     sb.Append(p.Name);
                     sb.AppendLine(".GetValueOrDefault();");
                 }
+                else if (IsWitResult(p.Type))
+                {
+                    // result<TOk, TErr> param lowering:
+                    // (disc, joined-payload). disc 0=ok 1=err.
+                    // payload picks the right arm; the wrong
+                    // arm contributes default(T) on the wire.
+                    var (ok, err) = WitResultArgs(p.Type);
+                    var joined = ResultJoinedPayload(ok, err);
+                    sb.Append("            int __");
+                    sb.Append(p.Name);
+                    sb.Append("_disc = ");
+                    sb.Append(p.Name);
+                    sb.AppendLine(".IsOk ? 0 : 1;");
+                    if (joined != null)
+                    {
+                        sb.Append("            ");
+                        sb.Append(joined);
+                        sb.Append(" __");
+                        sb.Append(p.Name);
+                        sb.Append("_payload = ");
+                        sb.Append(p.Name);
+                        sb.Append(".IsOk ? ");
+                        sb.Append(ok == ValueTupleType
+                            ? "default(" + joined + ")"
+                            : p.Name + ".OkValue");
+                        sb.Append(" : ");
+                        sb.Append(err == ValueTupleType
+                            ? "default(" + joined + ")"
+                            : p.Name + ".ErrValue");
+                        sb.AppendLine(";");
+                    }
+                }
             }
 
             // Call the underlying invoker with the flattened
@@ -886,9 +1109,88 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     EmitSyncByteArrayReturnLift(sb, ex);
                 else if (IsNullablePrimitive(ex.ReturnType))
                     EmitSyncOptionReturnLift(sb, ex);
+                else if (IsWitResult(ex.ReturnType))
+                    EmitSyncResultReturnLift(sb, ex);
                 else
                     sb.AppendLine("            return __raw;");
             }
+        }
+
+        // result<TOk, TErr> return lift. Two cases:
+        //   * Both arms unit — flat is just the disc i32,
+        //     returned directly. Build WitResult.Ok or .Err
+        //     from default values.
+        //   * At least one arm carries a payload — flat is a
+        //     retArea i32 pointing at (disc:u8 + pad + payload).
+        //     Read disc + payload, build WitResult.Ok or .Err
+        //     with the right value.
+        private static void EmitSyncResultReturnLift(
+            StringBuilder sb, ExportMethod ex)
+        {
+            var (ok, err) = WitResultArgs(ex.ReturnType!);
+            var joined = ResultJoinedPayload(ok, err);
+            string resultType = ex.ReturnType!;
+
+            if (joined == null)
+            {
+                // result<(), ()> — disc-only.
+                sb.Append("            return __raw == 0 ? ");
+                sb.Append(resultType);
+                sb.Append(".Ok(default) : ");
+                sb.Append(resultType);
+                sb.AppendLine(".Err(default);");
+                return;
+            }
+
+            // Non-trivial arm. __raw is the retArea pointer.
+            int payloadOff = ResultPayloadOffset(ok, err);
+            sb.AppendLine(
+                "            byte __resDisc = global::Wacs" +
+                ".ComponentModel.Harness.MemoryHelpers" +
+                ".ReadU8(_memory!, __raw);");
+            sb.AppendLine("            if (__resDisc == 0)");
+            sb.AppendLine("            {");
+            EmitResultArmReturn(sb,
+                resultType, "Ok", ok, joined, payloadOff);
+            sb.AppendLine("            }");
+            sb.AppendLine("            else");
+            sb.AppendLine("            {");
+            EmitResultArmReturn(sb,
+                resultType, "Err", err, joined, payloadOff);
+            sb.AppendLine("            }");
+        }
+
+        // Emit `return WitResult<...>.Ok(value)` or .Err(value)
+        // where value is read from memory at the payload
+        // offset, or default(T) for unit arms.
+        private static void EmitResultArmReturn(
+            StringBuilder sb,
+            string resultType, string factory,
+            string armType, string joined, int payloadOff)
+        {
+            sb.Append("                return ");
+            sb.Append(resultType);
+            sb.Append('.');
+            sb.Append(factory);
+            sb.Append('(');
+            if (armType == ValueTupleType)
+            {
+                sb.Append("default");
+            }
+            else
+            {
+                // Read the payload at the canon-ABI offset.
+                // For arms where the C# arm-type matches the
+                // joined type exactly the read returns it
+                // directly; cross-arm widening (e.g., reading
+                // an i32 arm out of an i64 joined slot) isn't
+                // emitted because IsSupportedResult rejects
+                // mixed widths up front.
+                sb.Append(ReadMemoryExprForType(
+                    armType, "_memory!",
+                    "__raw + " + payloadOff));
+            }
+            sb.AppendLine(");");
         }
 
         // option<T> return lift: __raw is the retArea pointer
@@ -1154,6 +1456,20 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     sb.Append(p.Name);
                     sb.Append("_payload");
                 }
+                else if (IsWitResult(p.Type))
+                {
+                    var (ok, err) = WitResultArgs(p.Type);
+                    var joined = ResultJoinedPayload(ok, err);
+                    sb.Append("__");
+                    sb.Append(p.Name);
+                    sb.Append("_disc");
+                    if (joined != null)
+                    {
+                        sb.Append(", __");
+                        sb.Append(p.Name);
+                        sb.Append("_payload");
+                    }
+                }
                 else
                 {
                     sb.Append(p.Name);
@@ -1202,6 +1518,19 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     sb.Append(InnerOfNullable(p.Type));
                     first = false;
                 }
+                else if (IsWitResult(p.Type))
+                {
+                    var (ok, err) = WitResultArgs(p.Type);
+                    var joined = ResultJoinedPayload(ok, err);
+                    if (!first) sb.Append(", ");
+                    sb.Append("int");
+                    if (joined != null)
+                    {
+                        sb.Append(", ");
+                        sb.Append(joined);
+                    }
+                    first = false;
+                }
                 else
                 {
                     if (!first) sb.Append(", ");
@@ -1214,6 +1543,14 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 if (!first) sb.Append(", ");
                 if (UsesRetArea(ex.ReturnType!))
                     sb.Append("int");
+                else if (IsWitResult(ex.ReturnType!))
+                {
+                    // result<(), ()> flat is just the disc
+                    // i32 (returned directly when both arms
+                    // are unit). The retArea path already
+                    // handled above for non-trivial arms.
+                    sb.Append("int");
+                }
                 else
                     sb.Append(ex.ReturnType);
             }
@@ -1228,18 +1565,34 @@ namespace Wacs.ComponentModel.Async.SourceGen
             {
                 if (IsPtrLenAggregate(p.Type)) slots += 2;
                 else if (IsNullablePrimitive(p.Type)) slots += 2;
+                else if (IsWitResult(p.Type))
+                {
+                    var (ok, err) = WitResultArgs(p.Type);
+                    var joined = ResultJoinedPayload(ok, err);
+                    slots += joined == null ? 1 : 2;
+                }
                 else slots += 1;
             }
             return slots;
         }
 
-        // Multi-slot return types (string, byte[], option<T>)
-        // flatten to a single i32 retArea pointer at the wasm
-        // calling-convention level — the callee writes the
+        // Multi-slot return types (string, byte[], option<T>,
+        // result<TOk,TErr> with a payload arm) flatten to a
+        // single i32 retArea pointer — the callee writes the
         // tuple into linear memory and returns the address.
-        private static bool UsesRetArea(string fqType) =>
-            IsPtrLenAggregate(fqType)
-            || IsNullablePrimitive(fqType);
+        // result<(), ()> is the exception: flat is just (disc)
+        // which is returned directly as an i32.
+        private static bool UsesRetArea(string fqType)
+        {
+            if (IsPtrLenAggregate(fqType)) return true;
+            if (IsNullablePrimitive(fqType)) return true;
+            if (IsWitResult(fqType))
+            {
+                var (ok, err) = WitResultArgs(fqType);
+                return ResultJoinedPayload(ok, err) != null;
+            }
+            return false;
+        }
 
 
         // Field type matching the FLAT (canon-ABI lowered)
@@ -1270,6 +1623,8 @@ namespace Wacs.ComponentModel.Async.SourceGen
             }
             if (UsesRetArea(ex.ReturnType!))
                 sb.Append("int");
+            else if (IsWitResult(ex.ReturnType!))
+                sb.Append("int"); // unit/unit result → disc
             else
                 sb.Append(ex.ReturnType);
             sb.Append(">?");
@@ -1296,6 +1651,23 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     if (!first) sb.Append(", ");
                     sb.Append("int, ");
                     sb.Append(InnerOfNullable(p.Type));
+                    first = false;
+                }
+                else if (IsWitResult(p.Type))
+                {
+                    // result<TOk, TErr> flat lowering:
+                    // (i32 disc, joined-payload). joined-
+                    // payload is null when both arms are
+                    // unit (no payload slot).
+                    var (ok, err) = WitResultArgs(p.Type);
+                    var joined = ResultJoinedPayload(ok, err);
+                    if (!first) sb.Append(", ");
+                    sb.Append("int");
+                    if (joined != null)
+                    {
+                        sb.Append(", ");
+                        sb.Append(joined);
+                    }
                     first = false;
                 }
                 else

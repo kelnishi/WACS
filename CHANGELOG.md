@@ -1,5 +1,57 @@
 # Changelog
 
+## WACS.ComponentModel.Async.SourceGen 0.4.3 — `WitResult<TOk, TErr>` (result<primitive, primitive>) marshaling
+
+Adds canon-ABI `result<TOk, TErr>` codegen for sync
+exports — the second variant shape after option. Together
+with the existing aggregates, the generator now covers
+the four most-common WIT shapes: void / primitive /
+string / byte[] / option<primitive> / result<…>.
+
+* **C# representation: `Wacs.ComponentModel.Harness.WitResult<TOk, TErr>`.**
+  Arms can be canon-ABI primitives or `System.ValueTuple`
+  (the elided unit case for `result`, `result<T>`,
+  `result<_, E>` WIT shapes).
+* **Layout-aware codegen.** `PrimitiveSize` +
+  `PrimitiveAlign` + `AlignTo` compute canon-ABI offsets
+  per spec. `ResultJoinedPayload` produces the C# type of
+  the flat payload slot (null = both arms unit;
+  primitive's type = one or both arms carry that
+  primitive; `"MIXED"` = different-kind primitives,
+  rejected up front via `IsSupportedResult`).
+* **Four canonical flat shapes handled:**
+  * `result<(), ()>` → `Func<int>` (disc returned
+    directly, no retArea).
+  * `result<T, ()>` / `result<(), T>` → `(disc, T payload)`
+    on the wire; retArea for return.
+  * `result<T, T>` → same as above; retArea for return.
+* **Param lower.** `(WitResult<TOk, TErr> r)` flattens to
+  `(int __r_disc, joinedPayload __r_payload)`. `__r_disc`
+  is `r.IsOk ? 0 : 1`; `__r_payload` picks the
+  appropriate arm's value or `default(joined)` for unit
+  arms. Wasm-side ignores the wrong-arm slot per canon-ABI.
+* **Return lift.** Reads `disc:u8` via `ReadU8`, branches
+  by case, reads the payload at
+  `align_to(1, max(alignof(Ok), alignof(Err)))` if
+  present, builds `WitResult.Ok(value)` or
+  `WitResult.Err(value)`.
+* `Generator_emits_result_export_signatures` test
+  verifies all four flat-sig shapes — `Func<int>`
+  (Noop), `Func<int, int>` (TryParse), `Func<int, int, int>`
+  (Divide). 10/10 generator integration tests.
+* **Roslyn FQN handling.** `FullyQualifiedFormat`
+  prepends `global::` to namespace-qualified names.
+  `IsWitResult` accepts both forms; `StripGlobal` cleans
+  inner type-arg tokens so downstream primitive
+  matching works against either.
+
+**Still punted:** mixed-width result arms
+(`result<long, int>` — canon-ABI join across primitive
+kinds), aggregate arms (`result<string, ErrCode>`),
+records, variants, tuples. The two-arm disc-pattern this
+slice landed extends directly to the general variant case
+— next slice.
+
 ## WACS.ComponentModel.Async.SourceGen 0.4.2 — `Option<T>` (option<primitive>) marshaling
 
 First true variant codegen: generator now handles

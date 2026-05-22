@@ -8,6 +8,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using Wacs.ComponentModel.Async;
+using Wacs.ComponentModel.Harness;
 using Xunit;
 
 namespace Wacs.ComponentModel.Test
@@ -85,6 +86,31 @@ namespace Wacs.ComponentModel.Test
 
         [SyncExport("flag")]
         internal partial bool? Flag(bool? input);
+    }
+
+    /// <summary>Sync exports with <c>WitResult&lt;TOk,
+    /// TErr&gt;</c> (canon-ABI <c>result&lt;TOk, TErr&gt;</c>).
+    /// Covers the four canonical shapes:
+    /// <c>result&lt;(), ()&gt;</c> (disc-only),
+    /// <c>result&lt;(), Int32&gt;</c> /
+    /// <c>result&lt;Int32, ()&gt;</c> (one trivial arm),
+    /// <c>result&lt;Int32, Int32&gt;</c> (both
+    /// primitive). Mixed-width arms remain unsupported.
+    /// </summary>
+    [AsyncComponentHarness]
+    internal partial class ResultHarnessFixture
+    {
+        [SyncExport("noop")]
+        internal partial WitResult<ValueTuple, ValueTuple>
+            Noop();
+
+        [SyncExport("try_parse")]
+        internal partial WitResult<int, ValueTuple>
+            TryParse(int input);
+
+        [SyncExport("divide")]
+        internal partial WitResult<int, int>
+            Divide(int a, int b);
     }
 
     /// <summary>
@@ -183,6 +209,63 @@ namespace Wacs.ComponentModel.Test
             var ascii = System.Text.Encoding.UTF8.GetString(bytes);
             Assert.Contains(
                 "is not a canon-ABI primitive", ascii);
+        }
+
+        [Fact]
+        public void Generator_emits_result_export_signatures()
+        {
+            // result<(), ()> — disc-only. Flat invoker:
+            // Func<int> (just the disc i32 returned directly).
+            var noop = typeof(ResultHarnessFixture).GetMethod(
+                "Noop",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.NotNull(noop);
+            Assert.Equal(
+                typeof(WitResult<ValueTuple, ValueTuple>),
+                noop!.ReturnType);
+            Assert.Empty(noop.GetParameters());
+            var noopInv = typeof(ResultHarnessFixture)
+                .GetField("_invoker_Noop",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(noopInv);
+            Assert.Equal(typeof(Func<int>),
+                noopInv!.FieldType);
+
+            // result<int, ()> — Ok carries int, Err is unit.
+            // Joined payload type is int.
+            // Flat: (int param, int retArea) = Func<int, int>.
+            var tp = typeof(ResultHarnessFixture).GetMethod(
+                "TryParse",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.NotNull(tp);
+            Assert.Equal(
+                typeof(WitResult<int, ValueTuple>),
+                tp!.ReturnType);
+            var tpInv = typeof(ResultHarnessFixture)
+                .GetField("_invoker_TryParse",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(tpInv);
+            Assert.Equal(typeof(Func<int, int>),
+                tpInv!.FieldType);
+
+            // result<int, int> — both arms carry int. Joined
+            // payload is int. Flat: (a, b, retArea) =
+            // Func<int, int, int>.
+            var div = typeof(ResultHarnessFixture).GetMethod(
+                "Divide",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.NotNull(div);
+            Assert.Equal(typeof(WitResult<int, int>),
+                div!.ReturnType);
+            var divInv = typeof(ResultHarnessFixture)
+                .GetField("_invoker_Divide",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(divInv);
+            Assert.Equal(typeof(Func<int, int, int>),
+                divInv!.FieldType);
         }
 
         [Fact]
