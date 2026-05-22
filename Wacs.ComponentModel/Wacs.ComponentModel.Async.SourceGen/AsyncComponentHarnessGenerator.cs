@@ -223,16 +223,48 @@ namespace Wacs.ComponentModel.Async.SourceGen
         private static bool IsPtrLenAggregate(string fqType) =>
             IsString(fqType) || IsByteArray(fqType);
 
+        // Canon-ABI option<T> for primitive T. C# representation
+        // is Nullable<T> — `int?`, `bool?`, `long?`, etc.
+        // Flat lowering: (i32 disc, payloadSlot...). For
+        // primitive T the payload is a single slot matching T's
+        // canon-ABI slot kind (i32 for i8/i16/i32, i64 for i64,
+        // f32/f64 for floats).
+        private static readonly HashSet<string> NullablePrimitiveTypes =
+            new HashSet<string>(StringComparer.Ordinal)
+            {
+                "int?", "uint?", "long?", "ulong?",
+                "byte?", "sbyte?", "short?", "ushort?",
+                "bool?", "float?", "double?",
+                "System.Int32?", "System.UInt32?",
+                "System.Int64?", "System.UInt64?",
+                "System.Byte?", "System.SByte?",
+                "System.Int16?", "System.UInt16?",
+                "System.Boolean?", "System.Single?",
+                "System.Double?",
+            };
+
+        private static bool IsNullablePrimitive(string fqType) =>
+            NullablePrimitiveTypes.Contains(fqType);
+
+        // Strip the trailing '?' from `T?` to get the inner T
+        // for codegen of the payload slot type.
+        private static string InnerOfNullable(string fqType) =>
+            fqType.EndsWith("?", StringComparison.Ordinal)
+                ? fqType.Substring(0, fqType.Length - 1)
+                : fqType;
+
         private static bool IsSupportedParam(string fqType) =>
             IsPrimitive(fqType)
             || IsString(fqType)
-            || IsByteArray(fqType);
+            || IsByteArray(fqType)
+            || IsNullablePrimitive(fqType);
 
         private static bool IsSupportedReturn(string? fqType) =>
             fqType == null
             || IsPrimitive(fqType)
             || IsString(fqType)
-            || IsByteArray(fqType);
+            || IsByteArray(fqType)
+            || IsNullablePrimitive(fqType);
 
         private static ScanResult CollectAndDiagnose(
             Compilation compilation)
@@ -479,40 +511,56 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 sb.AppendLine(";");
             }
 
-            // Aggregate (string / byte[]) marshaling state —
-            // memory + cabi_realloc invoker + per-method
-            // cabi_post invokers. Only emitted when at least
-            // one sync export references an aggregate param
-            // or return.
-            bool anyAggregate = false;
+            // Class-scope marshaling state for aggregate
+            // (string / byte[] / option<T>) — memory +
+            // optionally cabi_realloc invoker + per-method
+            // cabi_post invokers.
+            //
+            // Splitting needs:
+            //   * _memory — any aggregate (ptr/len OR
+            //     option<T> with retArea-style return).
+            //   * _reallocInvoke — only ptr/len aggregates
+            //     (string / byte[]) need wasm-side allocation.
+            //   * _post_<MethodName> — only string / byte[]
+            //     returns need the post-return free hook.
+            bool needsMemory = false;
+            bool needsRealloc = false;
             foreach (var ex in cls.Exports)
             {
-                if (ex.Kind == ExportKind.Sync
-                    && AnyPtrLenAggregate(ex))
+                if (ex.Kind != ExportKind.Sync) continue;
+                if (AnyPtrLenAggregate(ex))
                 {
-                    anyAggregate = true;
-                    break;
+                    needsMemory = true;
+                    needsRealloc = true;
+                }
+                if (ex.ReturnType != null
+                    && IsNullablePrimitive(ex.ReturnType))
+                {
+                    needsMemory = true;
                 }
             }
-            if (anyAggregate)
+            if (needsMemory)
             {
                 sb.AppendLine(
                     "        private global::Wacs.Core.Runtime.Types" +
                     ".MemoryInstance? _memory;");
+            }
+            if (needsRealloc)
+            {
                 sb.AppendLine(
                     "        private System.Func<int, int, int, int, int>? " +
                     "_reallocInvoke;");
-                foreach (var ex in cls.Exports)
-                {
-                    if (ex.Kind != ExportKind.Sync) continue;
-                    if (ex.ReturnType == null
-                        || !IsPtrLenAggregate(ex.ReturnType))
-                        continue;
-                    sb.Append(
-                        "        private System.Action<int>? _post_");
-                    sb.Append(ex.MethodName);
-                    sb.AppendLine(";");
-                }
+            }
+            foreach (var ex in cls.Exports)
+            {
+                if (ex.Kind != ExportKind.Sync) continue;
+                if (ex.ReturnType == null
+                    || !IsPtrLenAggregate(ex.ReturnType))
+                    continue;
+                sb.Append(
+                    "        private System.Action<int>? _post_");
+                sb.Append(ex.MethodName);
+                sb.AppendLine(";");
             }
 
             foreach (var ex in cls.Exports)
@@ -678,10 +726,26 @@ namespace Wacs.ComponentModel.Async.SourceGen
         private static void EmitSyncExportBody(
             StringBuilder sb, ExportMethod ex)
         {
-            bool hasAggregate = AnyPtrLenAggregate(ex);
-            if (hasAggregate)
+            // Memory + cabi_realloc state are needed for any
+            // aggregate that lowers via memory (string,
+            // byte[]). Option<T> for primitive T uses pure
+            // value-flat lowering — no memory access needed
+            // for params or return.
+            bool needsMemory = AnyPtrLenAggregate(ex);
+            if (needsMemory)
             {
                 EmitSyncEnsureMemoryAndRealloc(sb);
+            }
+            // option<T> return goes through a retArea — we
+            // need memory but no realloc (the callee owns
+            // the retArea and we never free it for primitives
+            // — bare flat reads).
+            bool needsMemoryForOptionReturn =
+                ex.ReturnType != null
+                && IsNullablePrimitive(ex.ReturnType);
+            if (needsMemoryForOptionReturn && !needsMemory)
+            {
+                EmitSyncEnsureMemoryOnly(sb);
             }
 
             string field = "_invoker_" + ex.MethodName;
@@ -774,13 +838,31 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     sb.Append(p.Name);
                     sb.AppendLine("_len);");
                 }
+                else if (IsNullablePrimitive(p.Type))
+                {
+                    // option<T> param lowering: (disc, payload).
+                    // payload uses default(T) when value is
+                    // absent — wasm-side ignores the slot per
+                    // canon-ABI when disc=0.
+                    string innerT = InnerOfNullable(p.Type);
+                    sb.Append("            int __");
+                    sb.Append(p.Name);
+                    sb.Append("_disc = ");
+                    sb.Append(p.Name);
+                    sb.AppendLine(".HasValue ? 1 : 0;");
+                    sb.Append("            ");
+                    sb.Append(innerT);
+                    sb.Append(" __");
+                    sb.Append(p.Name);
+                    sb.Append("_payload = ");
+                    sb.Append(p.Name);
+                    sb.AppendLine(".GetValueOrDefault();");
+                }
             }
 
             // Call the underlying invoker with the flattened
-            // args. String / byte[] args expand to (ptr, len);
-            // primitives pass straight through.
-            bool returnsAggregate = ex.ReturnType != null
-                && IsPtrLenAggregate(ex.ReturnType);
+            // args. ptr/len aggregates + option<T> expand
+            // multi-slot; primitives pass straight through.
             sb.Append("            ");
             if (ex.ReturnType != null)
                 sb.Append("var __raw = ");
@@ -790,22 +872,121 @@ namespace Wacs.ComponentModel.Async.SourceGen
             sb.AppendLine(");");
 
             // If the export returned a primitive, just cast +
-            // return. If it returned an aggregate, read the
-            // (ptr, len) tuple out of the retArea, lift, and
-            // call cabi_post_<exportName> to release the
-            // retArea.
-            if (returnsAggregate)
+            // return. If it returned a multi-slot aggregate
+            // (string / byte[] / option), read the tuple out
+            // of the retArea, lift, and call cabi_post_<exp>
+            // to release the retArea (only for ptr/len ags;
+            // option<T> for primitive T uses inline retArea
+            // — no allocation, no post-return needed).
+            if (ex.ReturnType != null)
             {
-                if (IsString(ex.ReturnType!))
+                if (IsString(ex.ReturnType))
                     EmitSyncStringReturnLift(sb, ex);
-                else
+                else if (IsByteArray(ex.ReturnType))
                     EmitSyncByteArrayReturnLift(sb, ex);
+                else if (IsNullablePrimitive(ex.ReturnType))
+                    EmitSyncOptionReturnLift(sb, ex);
+                else
+                    sb.AppendLine("            return __raw;");
             }
-            else if (ex.ReturnType != null)
+        }
+
+        // option<T> return lift: __raw is the retArea pointer
+        // produced by the callee. Read disc + payload at
+        // canon-ABI offsets, return Nullable<T>.
+        // Layout: disc:u8 at +0, padding to T's alignment,
+        // payload at +align(1, sizeof(T)).
+        private static void EmitSyncOptionReturnLift(
+            StringBuilder sb, ExportMethod ex)
+        {
+            string innerT = InnerOfNullable(ex.ReturnType!);
+            int payloadOff = NullablePayloadOffset(innerT);
+            string readPayload = ReadMemoryExprForType(
+                innerT, "_memory!", "__raw + " + payloadOff);
+            sb.Append(
+                "            byte __optDisc = global::Wacs" +
+                ".ComponentModel.Harness.MemoryHelpers" +
+                ".ReadU8(_memory!, __raw);");
+            sb.AppendLine();
+            sb.AppendLine("            if (__optDisc == 0) return null;");
+            sb.Append("            return ");
+            sb.Append(readPayload);
+            sb.AppendLine(";");
+        }
+
+        // Canon-ABI alignment for primitives. Option<T>'s
+        // discriminator sits at offset 0; payload starts at
+        // align_to(1, alignof(T)).
+        private static int NullablePayloadOffset(string innerT)
+        {
+            switch (innerT)
             {
-                sb.Append("            return __raw;");
-                sb.AppendLine();
+                case "byte": case "sbyte": case "bool":
+                case "System.Byte": case "System.SByte":
+                case "System.Boolean":
+                    return 1;
+                case "short": case "ushort":
+                case "System.Int16": case "System.UInt16":
+                    return 2;
+                case "int": case "uint": case "float":
+                case "System.Int32": case "System.UInt32":
+                case "System.Single":
+                    return 4;
+                case "long": case "ulong": case "double":
+                case "System.Int64": case "System.UInt64":
+                case "System.Double":
+                    return 8;
+                default:
+                    return 4;
             }
+        }
+
+        // Generate the memory-read expression for a primitive
+        // payload at a given offset.
+        private static string ReadMemoryExprForType(
+            string fqType, string memArg, string offArg)
+        {
+            string call;
+            switch (fqType)
+            {
+                case "byte": case "System.Byte":
+                    call = "ReadU8"; break;
+                case "sbyte": case "System.SByte":
+                    return "(sbyte)global::Wacs.ComponentModel" +
+                        ".Harness.MemoryHelpers.ReadU8(" +
+                        memArg + ", " + offArg + ")";
+                case "bool": case "System.Boolean":
+                    return "(global::Wacs.ComponentModel" +
+                        ".Harness.MemoryHelpers.ReadU8(" +
+                        memArg + ", " + offArg + ") != 0)";
+                case "short": case "System.Int16":
+                    call = "ReadI16LE"; break;
+                case "ushort": case "System.UInt16":
+                    return "(ushort)global::Wacs.ComponentModel" +
+                        ".Harness.MemoryHelpers.ReadI16LE(" +
+                        memArg + ", " + offArg + ")";
+                case "int": case "System.Int32":
+                    call = "ReadI32LE"; break;
+                case "uint": case "System.UInt32":
+                    return "(uint)global::Wacs.ComponentModel" +
+                        ".Harness.MemoryHelpers.ReadI32LE(" +
+                        memArg + ", " + offArg + ")";
+                case "long": case "System.Int64":
+                    call = "ReadI64LE"; break;
+                case "ulong": case "System.UInt64":
+                    return "(ulong)global::Wacs.ComponentModel" +
+                        ".Harness.MemoryHelpers.ReadI64LE(" +
+                        memArg + ", " + offArg + ")";
+                case "float": case "System.Single":
+                    call = "ReadF32LE"; break;
+                case "double": case "System.Double":
+                    call = "ReadF64LE"; break;
+                default:
+                    return "default(" + fqType + ")";
+            }
+            return "global::Wacs.ComponentModel.Harness" +
+                ".MemoryHelpers." + call + "(" + memArg +
+                ", " + offArg + ")";
         }
 
         // byte[] return lift: read (ptr, len) from retArea,
@@ -850,6 +1031,27 @@ namespace Wacs.ComponentModel.Async.SourceGen
             sb.Append(postField);
             sb.AppendLine("?.Invoke(__raw);");
             sb.AppendLine("            return __result;");
+        }
+
+        // Memory-only ensure for option<T> returns. Same
+        // lazy-resolve pattern as the full memory+realloc
+        // helper, just without the realloc lookup (option<T>
+        // for primitive T doesn't allocate — the callee
+        // writes its retArea result inline).
+        private static void EmitSyncEnsureMemoryOnly(
+            StringBuilder sb)
+        {
+            sb.AppendLine("            if (_memory == null)");
+            sb.AppendLine("            {");
+            sb.AppendLine("                if (!_instance.CoreRuntime" +
+                ".TryGetExportedMemory(\"memory\", out var __mem))");
+            sb.AppendLine("                    throw new System" +
+                ".InvalidOperationException(");
+            sb.AppendLine(
+                "                        \"Aggregate return " +
+                "requires an exported memory named 'memory'.\");");
+            sb.AppendLine("                _memory = __mem;");
+            sb.AppendLine("            }");
         }
 
         // String params + return all need access to the wasm
@@ -944,6 +1146,14 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     sb.Append(p.Name);
                     sb.Append("_len");
                 }
+                else if (IsNullablePrimitive(p.Type))
+                {
+                    sb.Append("__");
+                    sb.Append(p.Name);
+                    sb.Append("_disc, __");
+                    sb.Append(p.Name);
+                    sb.Append("_payload");
+                }
                 else
                 {
                     sb.Append(p.Name);
@@ -963,14 +1173,14 @@ namespace Wacs.ComponentModel.Async.SourceGen
 
         // Flat (canon-ABI lowered) generic args for
         // CreateInvokerFunc<...> / CreateInvokerAction<...>.
-        // Each string expands to two ints; primitives stay; a
-        // string return flattens to a single int retArea.
+        // Each ptr/len aggregate expands to two ints; each
+        // option<T> expands to (disc:i32, T-slot); a
+        // multi-slot return (string, byte[], option<T>) becomes
+        // a single i32 retArea.
         private static string BuildFlatInvokerTypeArgs(
             ExportMethod ex)
         {
-            int paramSlots = 0;
-            foreach (var p in ex.Parameters)
-                paramSlots += IsPtrLenAggregate(p.Type) ? 2 : 1;
+            int paramSlots = CountFlatSlots(ex);
             bool hasReturn = ex.ReturnType != null;
             if (paramSlots == 0 && !hasReturn) return "";
 
@@ -982,8 +1192,14 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 if (IsPtrLenAggregate(p.Type))
                 {
                     if (!first) sb.Append(", ");
-                    sb.Append("int");
-                    sb.Append(", int");
+                    sb.Append("int, int");
+                    first = false;
+                }
+                else if (IsNullablePrimitive(p.Type))
+                {
+                    if (!first) sb.Append(", ");
+                    sb.Append("int, ");
+                    sb.Append(InnerOfNullable(p.Type));
                     first = false;
                 }
                 else
@@ -996,7 +1212,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
             if (hasReturn)
             {
                 if (!first) sb.Append(", ");
-                if (IsPtrLenAggregate(ex.ReturnType!))
+                if (UsesRetArea(ex.ReturnType!))
                     sb.Append("int");
                 else
                     sb.Append(ex.ReturnType);
@@ -1004,6 +1220,26 @@ namespace Wacs.ComponentModel.Async.SourceGen
             sb.Append('>');
             return sb.ToString();
         }
+
+        private static int CountFlatSlots(ExportMethod ex)
+        {
+            int slots = 0;
+            foreach (var p in ex.Parameters)
+            {
+                if (IsPtrLenAggregate(p.Type)) slots += 2;
+                else if (IsNullablePrimitive(p.Type)) slots += 2;
+                else slots += 1;
+            }
+            return slots;
+        }
+
+        // Multi-slot return types (string, byte[], option<T>)
+        // flatten to a single i32 retArea pointer at the wasm
+        // calling-convention level — the callee writes the
+        // tuple into linear memory and returns the address.
+        private static bool UsesRetArea(string fqType) =>
+            IsPtrLenAggregate(fqType)
+            || IsNullablePrimitive(fqType);
 
 
         // Field type matching the FLAT (canon-ABI lowered)
@@ -1013,9 +1249,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
         private static string BuildInvokerDelegateType(
             ExportMethod ex)
         {
-            int paramSlots = 0;
-            foreach (var p in ex.Parameters)
-                paramSlots += IsPtrLenAggregate(p.Type) ? 2 : 1;
+            int paramSlots = CountFlatSlots(ex);
             bool hasReturn = ex.ReturnType != null;
 
             var sb = new StringBuilder();
@@ -1034,7 +1268,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 AppendFlatParamTypes(sb, ex);
                 sb.Append(", ");
             }
-            if (IsPtrLenAggregate(ex.ReturnType!))
+            if (UsesRetArea(ex.ReturnType!))
                 sb.Append("int");
             else
                 sb.Append(ex.ReturnType);
@@ -1052,6 +1286,16 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 {
                     if (!first) sb.Append(", ");
                     sb.Append("int, int");
+                    first = false;
+                }
+                else if (IsNullablePrimitive(p.Type))
+                {
+                    // option<T> flat lowering: (i32 disc,
+                    // payloadSlot). payloadSlot matches the
+                    // inner T's natural canon-ABI flat type.
+                    if (!first) sb.Append(", ");
+                    sb.Append("int, ");
+                    sb.Append(InnerOfNullable(p.Type));
                     first = false;
                 }
                 else

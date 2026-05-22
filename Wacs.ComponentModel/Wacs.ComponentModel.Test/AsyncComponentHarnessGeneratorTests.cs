@@ -71,6 +71,22 @@ namespace Wacs.ComponentModel.Test
         internal partial byte[] Transform(byte[] data);
     }
 
+    /// <summary>Sync exports with <c>Option&lt;T&gt;</c>
+    /// (canon-ABI <c>option&lt;T&gt;</c>) for primitive T.
+    /// C# representation is <c>T?</c> (Nullable&lt;T&gt;).
+    /// Flat lowering: (disc:i32, payload:T-slot); option
+    /// return uses an inline retArea written by the callee.
+    /// </summary>
+    [AsyncComponentHarness]
+    internal partial class OptionHarnessFixture
+    {
+        [SyncExport("maybe_double")]
+        internal partial int? MaybeDouble(int? input);
+
+        [SyncExport("flag")]
+        internal partial bool? Flag(bool? input);
+    }
+
     /// <summary>
     /// Generator integration tests. The Wacs.ComponentModel.Test
     /// csproj wires
@@ -167,6 +183,65 @@ namespace Wacs.ComponentModel.Test
             var ascii = System.Text.Encoding.UTF8.GetString(bytes);
             Assert.Contains(
                 "is not a canon-ABI primitive", ascii);
+        }
+
+        [Fact]
+        public void Generator_emits_option_export_signature()
+        {
+            // int? MaybeDouble(int? input) — canon-ABI
+            // option<u32>. Flat shape: param (disc:i32,
+            // payload:i32) and return i32 (retArea ptr).
+            // Combined: Func<int, int, int>.
+            var m = typeof(OptionHarnessFixture).GetMethod(
+                "MaybeDouble",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.NotNull(m);
+            Assert.Equal(typeof(int?), m!.ReturnType);
+            Assert.Single(m.GetParameters());
+            Assert.Equal(typeof(int?),
+                m.GetParameters()[0].ParameterType);
+            Assert.NotNull(m.GetMethodBody());
+
+            var invField = typeof(OptionHarnessFixture)
+                .GetField("_invoker_MaybeDouble",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(invField);
+            Assert.True(invField!.FieldType.IsGenericType);
+            var args = invField.FieldType.GetGenericArguments();
+            // (int disc, int payload, int retArea) = 3 ints
+            Assert.Equal(3, args.Length);
+            Assert.All(args,
+                t => Assert.Equal(typeof(int), t));
+
+            // _memory is needed for the option<T> return lift
+            // (read disc + payload at retArea offsets). No
+            // realloc needed for option<primitive>.
+            Assert.NotNull(typeof(OptionHarnessFixture)
+                .GetField("_memory",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+
+            // bool? Flag(bool?) — option<bool>. Flat param
+            // (disc:i32, payload:bool). Return retArea (i32).
+            var flag = typeof(OptionHarnessFixture).GetMethod(
+                "Flag",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.NotNull(flag);
+            Assert.Equal(typeof(bool?), flag!.ReturnType);
+            Assert.Equal(typeof(bool?),
+                flag.GetParameters()[0].ParameterType);
+            var flagInv = typeof(OptionHarnessFixture)
+                .GetField("_invoker_Flag",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(flagInv);
+            var fa = flagInv!.FieldType.GetGenericArguments();
+            // (disc:int, payload:bool, retArea:int)
+            Assert.Equal(3, fa.Length);
+            Assert.Equal(typeof(int), fa[0]);
+            Assert.Equal(typeof(bool), fa[1]);
+            Assert.Equal(typeof(int), fa[2]);
         }
 
         [Fact]

@@ -1,5 +1,63 @@
 # Changelog
 
+## WACS.ComponentModel.Async.SourceGen 0.4.2 — `Option<T>` (option<primitive>) marshaling
+
+First true variant codegen: generator now handles
+`Nullable<T>` (`int?`, `bool?`, etc.) param + return on
+`[SyncExport]` partial methods, mapping to canon-ABI
+`option<T>` for primitive T.
+
+* **C# representation: `T?`.** `IsNullablePrimitive`
+  recognizes the trailing-`?` form of any primitive type
+  in the existing whitelist (int / uint / long / ulong /
+  short / ushort / byte / sbyte / bool / float / double).
+* **Param flat lowering.** Each `T? x` parameter
+  expands to `(int __x_disc, T __x_payload)` —
+  `x.HasValue ? 1 : 0` for disc, `x.GetValueOrDefault()`
+  for payload. Wasm-side ignores the payload slot when
+  disc=0 per canon-ABI.
+* **Return retArea lift.** `T?` return uses the
+  retArea-style sync convention: the callee writes
+  `(disc:u8, payload:T)` into linear memory and returns
+  the address. Generator reads `MemoryHelpers.ReadU8`
+  for the disc; if zero, returns `null`; otherwise
+  reads the payload at the canon-ABI offset
+  (`align_to(1, alignof(T))`) using the matching
+  `ReadI32LE` / `ReadI64LE` / `ReadF32LE` / `ReadF64LE`
+  / `ReadU8` helper.
+* **No realloc / no cabi_post.** Unlike strings /
+  byte[], `option<primitive>` writes inline into the
+  callee's own retArea without external allocation; the
+  generator skips the cabi_realloc + cabi_post_X
+  resolution for option-only methods. `_memory` is
+  still needed (for the retArea read).
+* **Mixed-shape arg lists work transparently.**
+  `void Foo(string s, int? n)` flat-lowers to four ints
+  — (ptr, len, disc, payload). Existing
+  `CountFlatSlots` + `BuildFlatInvokerTypeArgs`
+  generalize from string + byte[] to handle the new
+  shape.
+
+`Generator_emits_option_export_signature` test verifies:
+* `int? MaybeDouble(int? input)` keeps its source
+  signature, with the flat invoker field collapsing to
+  `Func<int, int, int>` (disc + payload + retArea ptr).
+* `bool? Flag(bool? input)` similar, flat field is
+  `Func<int, bool, int>` (the bool payload stays a bool
+  in the flat sig since canon-ABI treats it as a
+  byte-flat type the runtime auto-marshals).
+* `_memory` field emitted for option-return methods
+  even when no other ptr/len aggregates exist.
+
+9/9 generator integration tests.
+
+**Still punted:** `option<string>`, `option<byte[]>`,
+`option<aggregate>` — these require the payload to also
+allocate via realloc when the inner type isn't inline.
+`Result<T,E>`, records, variants, tuples — next slices
+that build on the disc + per-arm-payload pattern this
+option codegen established.
+
 ## WACS.ComponentModel.Async.SourceGen 0.4.1 — `byte[]` (list<u8>) marshaling for sync exports
 
 Generator now handles `byte[]` params + return types
