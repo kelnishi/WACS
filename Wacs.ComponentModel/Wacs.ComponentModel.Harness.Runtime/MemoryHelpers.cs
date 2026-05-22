@@ -107,5 +107,19 @@ namespace Wacs.ComponentModel.Harness
         {
             WriteI64LE(memory, offset, System.BitConverter.DoubleToInt64Bits(value));
         }
+
+        /// <summary>Lift a canon-ABI list&lt;u8&gt; from a
+        /// (ptr, len) pair into a fresh <c>byte[]</c>. Used
+        /// by the sourcegen for byte[] return + ptr/len
+        /// arms of option / result.</summary>
+        public static byte[] LiftBytes(
+            MemoryInstance memory, int ptr, int len)
+        {
+            var arr = new byte[len];
+            if (len > 0)
+                System.Buffer.BlockCopy(
+                    memory.Data, ptr, arr, 0, len);
+            return arr;
+        }
     }
 }

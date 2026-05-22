@@ -368,7 +368,9 @@ namespace Wacs.ComponentModel.Async.SourceGen
         // Result arms supported by the MVP: primitives plus
         // the elided-unit System.ValueTuple sentinel.
         private static bool IsResultArm(string fqType) =>
-            IsPrimitive(fqType) || fqType == ValueTupleType;
+            IsPrimitive(fqType)
+            || IsPtrLenAggregate(fqType)
+            || fqType == ValueTupleType;
 
         private static bool IsSupportedResult(string fqType)
         {
@@ -590,7 +592,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 var joined = ResultJoinedPayload(ok, err);
                 if (joined == null) return 1;
                 return ResultPayloadOffset(ok, err)
-                    + PrimitiveSize(joined);
+                    + FieldSize(joined);
             }
             if (TryLookupRecord(fqType, out var rec))
                 return RecordSize(rec);
@@ -610,7 +612,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
             {
                 var (ok, err) = WitResultArgs(fqType);
                 int armAlign = System.Math.Max(
-                    PrimitiveAlign(ok), PrimitiveAlign(err));
+                    FieldAlign(ok), FieldAlign(err));
                 return System.Math.Max(1, armAlign);
             }
             if (TryLookupRecord(fqType, out var rec))
@@ -630,8 +632,12 @@ namespace Wacs.ComponentModel.Async.SourceGen
             if (IsWitResult(fqType))
             {
                 var (ok, err) = WitResultArgs(fqType);
-                return ResultJoinedPayload(ok, err) == null
-                    ? 1 : 2;
+                var joined = ResultJoinedPayload(ok, err);
+                if (joined == null) return 1;
+                // disc + payload slots. Ptr/len payload
+                // contributes 2 slots (ptr, len); primitive
+                // payload contributes 1.
+                return 1 + (IsPtrLenAggregate(joined) ? 2 : 1);
             }
             if (TryLookupRecord(fqType, out var rec))
                 return TotalFlatSlotsForRecord(rec);
@@ -697,8 +703,32 @@ namespace Wacs.ComponentModel.Async.SourceGen
             string ok, string err)
         {
             int armAlign = System.Math.Max(
-                PrimitiveAlign(ok), PrimitiveAlign(err));
+                FieldAlign(ok), FieldAlign(err));
             return AlignTo(1, armAlign);
+        }
+
+        // True iff the result type has at least one ptr/len
+        // arm (string / byte[]). Used to drive
+        // cabi_post emission + memory/realloc requirements.
+        private static bool ResultHasPtrLenArm(string fqType)
+        {
+            if (!IsWitResult(fqType)) return false;
+            var (ok, err) = WitResultArgs(fqType);
+            return IsPtrLenAggregate(ok)
+                || IsPtrLenAggregate(err);
+        }
+
+        // True iff any param is a result<...> with a ptr/len
+        // arm — drives EmitSyncEnsureMemoryAndRealloc since
+        // the active arm lowers via realloc.
+        private static bool AnyResultParamWithPtrLenArm(
+            ExportMethod ex)
+        {
+            foreach (var p in ex.Parameters)
+                if (IsWitResult(p.Type)
+                    && ResultHasPtrLenArm(p.Type))
+                    return true;
+            return false;
         }
 
         // Strip the trailing '?' from `T?` to get the inner T
@@ -1122,6 +1152,18 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     needsMemory = true;
                     needsRealloc = true;
                 }
+                // Any result<...> param with a ptr/len arm
+                // needs realloc to lower the arm value into
+                // wasm memory; memory follows automatically.
+                foreach (var p in ex.Parameters)
+                {
+                    if (IsWitResult(p.Type)
+                        && ResultHasPtrLenArm(p.Type))
+                    {
+                        needsMemory = true;
+                        needsRealloc = true;
+                    }
+                }
                 // Aggregate fields nested inside tuple/record
                 // params require both memory and cabi_realloc
                 // (each field lowers like a top-level string /
@@ -1183,7 +1225,9 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     || ((IsTuple(ex.ReturnType)
                             || TryLookupRecord(ex.ReturnType,
                                 out _))
-                        && AggregateContainsPtrLen(ex.ReturnType));
+                        && AggregateContainsPtrLen(ex.ReturnType))
+                    || (IsWitResult(ex.ReturnType)
+                        && ResultHasPtrLenArm(ex.ReturnType));
                 if (!needsPost) continue;
                 sb.Append(
                     "        private System.Action<int>? _post_");
@@ -1357,9 +1401,12 @@ namespace Wacs.ComponentModel.Async.SourceGen
             // Memory + cabi_realloc state are needed for any
             // aggregate that lowers via memory (string,
             // byte[]) — at the top level OR nested inside a
-            // tuple/record param.
+            // tuple/record param. Also: a result param with
+            // a ptr/len arm lowers via realloc inside one of
+            // its branches.
             bool needsMemory = AnyPtrLenAggregate(ex)
-                || AnyAggregateFieldInTupleOrRecord(ex);
+                || AnyAggregateFieldInTupleOrRecord(ex)
+                || AnyResultParamWithPtrLenArm(ex);
             if (needsMemory)
             {
                 EmitSyncEnsureMemoryAndRealloc(sb);
@@ -1498,35 +1545,13 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 }
                 else if (IsWitResult(p.Type))
                 {
-                    // result<TOk, TErr> param lowering:
-                    // (disc, joined-payload). disc 0=ok 1=err.
-                    // payload picks the right arm; the wrong
-                    // arm contributes default(T) on the wire.
-                    var (ok, err) = WitResultArgs(p.Type);
-                    var joined = ResultJoinedPayload(ok, err);
-                    sb.Append("            int __");
-                    sb.Append(p.Name);
-                    sb.Append("_disc = ");
-                    sb.Append(p.Name);
-                    sb.AppendLine(".IsOk ? 0 : 1;");
-                    if (joined != null)
-                    {
-                        sb.Append("            ");
-                        sb.Append(joined);
-                        sb.Append(" __");
-                        sb.Append(p.Name);
-                        sb.Append("_payload = ");
-                        sb.Append(p.Name);
-                        sb.Append(".IsOk ? ");
-                        sb.Append(ok == ValueTupleType
-                            ? "default(" + joined + ")"
-                            : p.Name + ".OkValue");
-                        sb.Append(" : ");
-                        sb.Append(err == ValueTupleType
-                            ? "default(" + joined + ")"
-                            : p.Name + ".ErrValue");
-                        sb.AppendLine(";");
-                    }
+                    // result<TOk, TErr> param lowering routes
+                    // through the shared helper so primitive
+                    // + ptr/len + unit arm combinations all
+                    // produce the right (disc, payload) /
+                    // (disc, ptr, len) local triple.
+                    EmitResultArgLower(sb, p.Type,
+                        "__" + p.Name, p.Name);
                 }
                 else if (IsTuple(p.Type))
                 {
@@ -1793,6 +1818,68 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 "__raw + ");
             sb.Append(offset);
             sb.AppendLine(");");
+
+            if (joined != null && IsPtrLenAggregate(joined))
+            {
+                // ptr/len joined arms: bind (ptr, len) locals
+                // once, then branch on disc to build .Ok /
+                // .Err with the appropriate lift expression
+                // per arm type.
+                int payloadOff = ResultPayloadOffset(ok, err);
+                sb.Append("            int ");
+                sb.Append(localName);
+                sb.Append("_ptr = global::Wacs.ComponentModel" +
+                    ".Harness.MemoryHelpers.ReadI32LE(" +
+                    "_memory!, __raw + ");
+                sb.Append(offset + payloadOff);
+                sb.AppendLine(");");
+                sb.Append("            int ");
+                sb.Append(localName);
+                sb.Append("_len = global::Wacs.ComponentModel" +
+                    ".Harness.MemoryHelpers.ReadI32LE(" +
+                    "_memory!, __raw + ");
+                sb.Append(offset + payloadOff + 4);
+                sb.AppendLine(");");
+                sb.Append("            ");
+                sb.Append(fieldType);
+                sb.Append(' ');
+                sb.Append(localName);
+                sb.AppendLine(";");
+                sb.Append("            if (");
+                sb.Append(localName);
+                sb.AppendLine("_disc == 0)");
+                sb.AppendLine("            {");
+                sb.Append("                ");
+                sb.Append(localName);
+                sb.Append(" = ");
+                sb.Append(fieldType);
+                sb.Append(".Ok(");
+                if (ok == ValueTupleType)
+                    sb.Append("default");
+                else
+                    sb.Append(PtrLenLiftExpression(ok,
+                        localName + "_ptr",
+                        localName + "_len"));
+                sb.AppendLine(");");
+                sb.AppendLine("            }");
+                sb.AppendLine("            else");
+                sb.AppendLine("            {");
+                sb.Append("                ");
+                sb.Append(localName);
+                sb.Append(" = ");
+                sb.Append(fieldType);
+                sb.Append(".Err(");
+                if (err == ValueTupleType)
+                    sb.Append("default");
+                else
+                    sb.Append(PtrLenLiftExpression(err,
+                        localName + "_ptr",
+                        localName + "_len"));
+                sb.AppendLine(");");
+                sb.AppendLine("            }");
+                return;
+            }
+
             sb.Append("            ");
             sb.Append(fieldType);
             sb.Append(' ');
@@ -2007,26 +2094,101 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 "            byte __resDisc = global::Wacs" +
                 ".ComponentModel.Harness.MemoryHelpers" +
                 ".ReadU8(_memory!, __raw);");
-            sb.AppendLine("            if (__resDisc == 0)");
-            sb.AppendLine("            {");
-            EmitResultArmReturn(sb,
-                resultType, "Ok", ok, joined, payloadOff);
-            sb.AppendLine("            }");
-            sb.AppendLine("            else");
-            sb.AppendLine("            {");
-            EmitResultArmReturn(sb,
-                resultType, "Err", err, joined, payloadOff);
-            sb.AppendLine("            }");
+            bool ptrLenJoined = IsPtrLenAggregate(joined);
+            if (ptrLenJoined)
+            {
+                // Read the shared (ptr, len) once — both arms
+                // see the same slots, the C# arm-type
+                // determines whether we LiftUtf8 or LiftBytes
+                // on it.
+                sb.Append("            int __resPtr = global" +
+                    "::Wacs.ComponentModel.Harness.MemoryHelpers" +
+                    ".ReadI32LE(_memory!, __raw + ");
+                sb.Append(payloadOff);
+                sb.AppendLine(");");
+                sb.Append("            int __resLen = global" +
+                    "::Wacs.ComponentModel.Harness.MemoryHelpers" +
+                    ".ReadI32LE(_memory!, __raw + ");
+                sb.Append(payloadOff + 4);
+                sb.AppendLine(");");
+            }
+            // For ptr/len joined we need the lifted values
+            // before calling cabi_post (which may invalidate
+            // the retArea + the underlying heap allocation).
+            // Bind a single C# variable per branch, then
+            // post + return.
+            if (ptrLenJoined)
+            {
+                sb.Append("            ");
+                sb.Append(resultType);
+                sb.AppendLine(" __resResult;");
+                sb.AppendLine("            if (__resDisc == 0)");
+                sb.AppendLine("            {");
+                EmitResultArmAssignLifted(sb, resultType,
+                    "Ok", ok);
+                sb.AppendLine("            }");
+                sb.AppendLine("            else");
+                sb.AppendLine("            {");
+                EmitResultArmAssignLifted(sb, resultType,
+                    "Err", err);
+                sb.AppendLine("            }");
+                EmitCabiPostInvoke(sb, ex);
+                sb.AppendLine("            return __resResult;");
+            }
+            else
+            {
+                sb.AppendLine("            if (__resDisc == 0)");
+                sb.AppendLine("            {");
+                EmitResultArmReturn(sb,
+                    resultType, "Ok", ok, joined,
+                    payloadOff);
+                sb.AppendLine("            }");
+                sb.AppendLine("            else");
+                sb.AppendLine("            {");
+                EmitResultArmReturn(sb,
+                    resultType, "Err", err, joined,
+                    payloadOff);
+                sb.AppendLine("            }");
+            }
+        }
+
+        // Assign __resResult = WitResult<...>.Ok(value) /
+        // .Err(value) where value is lifted from already-
+        // bound __resPtr / __resLen locals, or default for
+        // unit arms.
+        private static void EmitResultArmAssignLifted(
+            StringBuilder sb, string resultType,
+            string factory, string armType)
+        {
+            sb.Append("                __resResult = ");
+            sb.Append(resultType);
+            sb.Append('.');
+            sb.Append(factory);
+            sb.Append('(');
+            if (armType == ValueTupleType)
+                sb.Append("default");
+            else
+                sb.Append(PtrLenLiftExpression(armType,
+                    "__resPtr", "__resLen"));
+            sb.AppendLine(");");
         }
 
         // Emit `return WitResult<...>.Ok(value)` or .Err(value)
         // where value is read from memory at the payload
-        // offset, or default(T) for unit arms.
+        // offset, or default(T) for unit arms. For ptr/len
+        // arms reads the (ptr, len) pair and lifts via
+        // StringCoding / MemoryHelpers — the (ptr, len) locals
+        // are bound in the caller (EmitSyncResultReturnLift).
         private static void EmitResultArmReturn(
             StringBuilder sb,
             string resultType, string factory,
             string armType, string joined, int payloadOff)
         {
+            // For ptr/len joined results, prepend the
+            // cabi_post invoke before each return path. The
+            // retArea contents (especially the heap-allocated
+            // string / byte[] body) need releasing after we
+            // copy them out.
             sb.Append("                return ");
             sb.Append(resultType);
             sb.Append('.');
@@ -2036,15 +2198,13 @@ namespace Wacs.ComponentModel.Async.SourceGen
             {
                 sb.Append("default");
             }
+            else if (IsPtrLenAggregate(armType))
+            {
+                sb.Append(PtrLenLiftExpression(armType,
+                    "__resPtr", "__resLen"));
+            }
             else
             {
-                // Read the payload at the canon-ABI offset.
-                // For arms where the C# arm-type matches the
-                // joined type exactly the read returns it
-                // directly; cross-arm widening (e.g., reading
-                // an i32 arm out of an i64 joined slot) isn't
-                // emitted because IsSupportedResult rejects
-                // mixed widths up front.
                 sb.Append(ReadMemoryExprForType(
                     armType, "_memory!",
                     "__raw + " + payloadOff));
@@ -2369,35 +2529,12 @@ namespace Wacs.ComponentModel.Async.SourceGen
             }
             else if (IsWitResult(fieldType))
             {
-                // result<TOk, TErr> field: (disc, joined-payload)
-                // locals. disc 0=ok, 1=err. payload picks the
-                // right arm; the wrong arm contributes default
-                // on the wire. Both-unit case emits disc only.
-                var (ok, err) = WitResultArgs(fieldType);
-                var joined = ResultJoinedPayload(ok, err);
-                sb.Append("            int ");
-                sb.Append(baseName);
-                sb.Append("_disc = ");
-                sb.Append(sourceExpr);
-                sb.AppendLine(".IsOk ? 0 : 1;");
-                if (joined != null)
-                {
-                    sb.Append("            ");
-                    sb.Append(joined);
-                    sb.Append(' ');
-                    sb.Append(baseName);
-                    sb.Append("_payload = ");
-                    sb.Append(sourceExpr);
-                    sb.Append(".IsOk ? ");
-                    sb.Append(ok == ValueTupleType
-                        ? "default(" + joined + ")"
-                        : sourceExpr + ".OkValue");
-                    sb.Append(" : ");
-                    sb.Append(err == ValueTupleType
-                        ? "default(" + joined + ")"
-                        : sourceExpr + ".ErrValue");
-                    sb.AppendLine(";");
-                }
+                // result<TOk, TErr> field — shared helper
+                // handles disc + payload locals across all
+                // payload shapes (primitive, ptr/len, both
+                // arms unit).
+                EmitResultArgLower(sb, fieldType,
+                    baseName, sourceExpr);
             }
             else if (TryLookupRecord(fieldType, out var subRec))
             {
@@ -2456,9 +2593,21 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     sb.Append("_disc");
                     if (joined != null)
                     {
-                        sb.Append(", __");
-                        sb.Append(p.Name);
-                        sb.Append("_payload");
+                        sb.Append(", ");
+                        if (IsPtrLenAggregate(joined))
+                        {
+                            sb.Append("__");
+                            sb.Append(p.Name);
+                            sb.Append("_ptr, __");
+                            sb.Append(p.Name);
+                            sb.Append("_len");
+                        }
+                        else
+                        {
+                            sb.Append("__");
+                            sb.Append(p.Name);
+                            sb.Append("_payload");
+                        }
                     }
                 }
                 else if (IsTuple(p.Type))
@@ -2495,6 +2644,143 @@ namespace Wacs.ComponentModel.Async.SourceGen
             }
         }
 
+        // Emit statements that lower a string / byte[] value
+        // into existing ptr / len locals. `out` style for
+        // string (LowerUtf8 supports `out` to existing
+        // locals); plain assignments for byte[]. `indent` is
+        // the leading whitespace for each emitted line.
+        private static void EmitPtrLenAssignInto(
+            StringBuilder sb, string type, string sourceExpr,
+            string ptrLocal, string lenLocal, string indent)
+        {
+            if (IsString(type))
+            {
+                sb.Append(indent);
+                sb.Append("global::Wacs.ComponentModel" +
+                    ".Harness.StringCoding.LowerUtf8(_memory!, ");
+                sb.Append(sourceExpr);
+                sb.Append(", _reallocInvoke!, out ");
+                sb.Append(ptrLocal);
+                sb.Append(", out ");
+                sb.Append(lenLocal);
+                sb.AppendLine(");");
+            }
+            else // byte[]
+            {
+                sb.Append(indent);
+                sb.Append(lenLocal);
+                sb.Append(" = ");
+                sb.Append(sourceExpr);
+                sb.AppendLine(".Length;");
+                sb.Append(indent);
+                sb.Append(ptrLocal);
+                sb.Append(" = ");
+                sb.Append(lenLocal);
+                sb.Append(" == 0 ? 0 : _reallocInvoke!(0, 0, 1, ");
+                sb.Append(lenLocal);
+                sb.AppendLine(");");
+                sb.Append(indent);
+                sb.Append("if (");
+                sb.Append(lenLocal);
+                sb.Append(" > 0) System.Buffer.BlockCopy(");
+                sb.Append(sourceExpr);
+                sb.Append(", 0, _memory!.Data, ");
+                sb.Append(ptrLocal);
+                sb.Append(", ");
+                sb.Append(lenLocal);
+                sb.AppendLine(");");
+            }
+        }
+
+        // C# expression that lifts a string / byte[] from
+        // existing ptr / len locals. Single expression form
+        // — string uses StringCoding.LiftUtf8, byte[] uses
+        // MemoryHelpers.LiftBytes (added 0.4.9 alongside
+        // this work to keep array-construction off the
+        // emitted source).
+        private static string PtrLenLiftExpression(
+            string type, string ptrLocal, string lenLocal)
+        {
+            if (IsString(type))
+                return "global::Wacs.ComponentModel.Harness" +
+                    ".StringCoding.LiftUtf8(_memory!, "
+                    + ptrLocal + ", " + lenLocal + ")";
+            // byte[]
+            return "global::Wacs.ComponentModel.Harness" +
+                ".MemoryHelpers.LiftBytes(_memory!, "
+                + ptrLocal + ", " + lenLocal + ")";
+        }
+
+        // Emit shared result-lower statements: disc + payload
+        // locals. Handles all four payload shapes:
+        //   * joined == null (both arms unit) → disc only
+        //   * joined primitive  → disc + payload
+        //   * joined ptr/len arms (string / byte[]) → disc +
+        //     (ptr, len) declared 0, assigned per arm via
+        //     EmitPtrLenAssignInto. Unit arms leave (0, 0).
+        // Used by both top-level result params and result
+        // fields nested inside tuples / records.
+        private static void EmitResultArgLower(
+            StringBuilder sb, string fieldType,
+            string baseName, string sourceExpr)
+        {
+            var (ok, err) = WitResultArgs(fieldType);
+            var joined = ResultJoinedPayload(ok, err);
+            sb.Append("            int ");
+            sb.Append(baseName);
+            sb.Append("_disc = ");
+            sb.Append(sourceExpr);
+            sb.AppendLine(".IsOk ? 0 : 1;");
+            if (joined == null) return;
+            if (IsPtrLenAggregate(joined))
+            {
+                sb.Append("            int ");
+                sb.Append(baseName);
+                sb.AppendLine("_ptr = 0;");
+                sb.Append("            int ");
+                sb.Append(baseName);
+                sb.AppendLine("_len = 0;");
+                sb.Append("            if (");
+                sb.Append(sourceExpr);
+                sb.AppendLine(".IsOk)");
+                sb.AppendLine("            {");
+                if (ok != ValueTupleType)
+                    EmitPtrLenAssignInto(sb, ok,
+                        sourceExpr + ".OkValue",
+                        baseName + "_ptr",
+                        baseName + "_len",
+                        "                ");
+                sb.AppendLine("            }");
+                sb.AppendLine("            else");
+                sb.AppendLine("            {");
+                if (err != ValueTupleType)
+                    EmitPtrLenAssignInto(sb, err,
+                        sourceExpr + ".ErrValue",
+                        baseName + "_ptr",
+                        baseName + "_len",
+                        "                ");
+                sb.AppendLine("            }");
+            }
+            else
+            {
+                sb.Append("            ");
+                sb.Append(joined);
+                sb.Append(' ');
+                sb.Append(baseName);
+                sb.Append("_payload = ");
+                sb.Append(sourceExpr);
+                sb.Append(".IsOk ? ");
+                sb.Append(ok == ValueTupleType
+                    ? "default(" + joined + ")"
+                    : sourceExpr + ".OkValue");
+                sb.Append(" : ");
+                sb.Append(err == ValueTupleType
+                    ? "default(" + joined + ")"
+                    : sourceExpr + ".ErrValue");
+                sb.AppendLine(";");
+            }
+        }
+
         // Emit the flat-arg slots for one tuple-element /
         // record-field, given the locals bound by
         // EmitAggregateFieldLower. ptr/len aggregates expand
@@ -2528,8 +2814,18 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 if (joined != null)
                 {
                     sb.Append(", ");
-                    sb.Append(baseName);
-                    sb.Append("_payload");
+                    if (IsPtrLenAggregate(joined))
+                    {
+                        sb.Append(baseName);
+                        sb.Append("_ptr, ");
+                        sb.Append(baseName);
+                        sb.Append("_len");
+                    }
+                    else
+                    {
+                        sb.Append(baseName);
+                        sb.Append("_payload");
+                    }
                 }
             }
             else if (TryLookupRecord(fieldType, out var subRec))
@@ -2591,12 +2887,13 @@ namespace Wacs.ComponentModel.Async.SourceGen
         }
 
         // A field (or tuple element) contains a ptr/len when
-        // it IS one, or recursively when nested records /
-        // tuples contain one. option / result fields can't
-        // (yet) hold ptr/len arms — that's a separate punt.
+        // it IS one, recursively when nested records / tuples
+        // contain one, or when a result arm is ptr/len.
         private static bool FieldContainsPtrLen(string fqType)
         {
             if (IsPtrLenAggregate(fqType)) return true;
+            if (IsWitResult(fqType))
+                return ResultHasPtrLenArm(fqType);
             if (TryLookupRecord(fqType, out _)
                 || IsTuple(fqType))
                 return AggregateContainsPtrLen(fqType);
@@ -2643,7 +2940,10 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     if (joined != null)
                     {
                         sb.Append(", ");
-                        sb.Append(joined);
+                        if (IsPtrLenAggregate(joined))
+                            sb.Append("int, int");
+                        else
+                            sb.Append(joined);
                     }
                     first = false;
                 }
@@ -2941,7 +3241,10 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 if (joined != null)
                 {
                     sb.Append(", ");
-                    sb.Append(joined);
+                    if (IsPtrLenAggregate(joined))
+                        sb.Append("int, int");
+                    else
+                        sb.Append(joined);
                 }
             }
             else if (TryLookupRecord(fieldType, out var subRec))

@@ -1,5 +1,80 @@
 # Changelog
 
+## WACS.ComponentModel.Async.SourceGen 0.4.9, Harness.Runtime 0.7.1 — ptr/len arms inside result<TOk, TErr>
+
+`WitResult<TOk, TErr>` now accepts ptr/len arms — `string`
+and `byte[]` — including the unit-and-string forms
+(`result<string, ()>`, `result<(), string>`), the same-type
+forms (`result<string, string>`, `result<byte[], byte[]>`),
+and same for `byte[]`. Mixed ptr/len arms (e.g.
+`result<string, byte[]>`) stay rejected via the joined-
+payload `"MIXED"` sentinel.
+
+* **Type acceptance.** `IsResultArm` now accepts ptr/len
+  aggregates alongside primitives and unit. Joined-
+  payload computation already returned the arm type for
+  same-type or unit-and-X cases — the gate just needed to
+  let those types through.
+* **Size / align.** `FieldSize` / `FieldAlign` /
+  `ResultPayloadOffset` switched from `PrimitiveSize` /
+  `PrimitiveAlign` to `FieldSize` / `FieldAlign` so
+  ptr/len arms report size 8 align 4 instead of falling
+  through to the default-4 path. Result-with-ptr/len
+  memory layout: disc:u8 at 0; pad to 4; ptr at 4; len
+  at 8. Total 12 bytes, align 4.
+* **Slot count.** `FieldSlotCount` for result now returns
+  `1 + (IsPtrLenAggregate(joined) ? 2 : 1)` — ptr/len
+  joined contributes 2 payload slots (ptr, len).
+* **Param lower.** Shared `EmitResultArgLower` helper
+  emits `<base>_disc` + payload locals. Primitive joined:
+  one typed local picked by `.IsOk`. Ptr/len joined:
+  declares `<base>_ptr = 0; <base>_len = 0;` then branches
+  on `.IsOk` and lowers the active arm's value via
+  `EmitPtrLenAssignInto`, which knows the `out`-into-
+  existing-locals form of `StringCoding.LowerUtf8` and
+  the byte[] assignment dance. Unit arms leave the locals
+  at 0.
+* **Param flat sig.** `AppendFlatFieldTypes` /
+  `AppendFlatParamTypes` / `BuildFlatInvokerTypeArgs` /
+  `EmitFlatArgsForField` / top-level `EmitFlatArgsList`
+  result branch all expand ptr/len-armed result into
+  `int, int, int` (disc, ptr, len).
+* **Return lift.** `EmitSyncResultReturnLift` reads ptr/len
+  once outside the disc branch, then sets a single
+  `<resultType> __resResult;` variable per arm. After both
+  branches assign, `cabi_post` is invoked, then
+  `__resResult` is returned. `EmitResultFieldLiftLocal`
+  mirrors this for ptr/len-armed result FIELDS inside
+  records / tuples, building the bound local for the
+  outer aggregate's property-initializer.
+* **cabi_post + memory + realloc gating.** `needsPost`
+  picks up ptr/len-armed result returns via a new
+  `ResultHasPtrLenArm` helper. The per-method `needsMemory`
+  picks up ptr/len-armed result PARAMS via
+  `AnyResultParamWithPtrLenArm`. `FieldContainsPtrLen`
+  recurses into result arms so cabi_post correctly fires
+  when a record/tuple field is a ptr/len-armed result.
+* **Harness.Runtime 0.7.1**: new `MemoryHelpers.LiftBytes`
+  helper — single-expression form for lifting a canon-ABI
+  `list<u8>` from (ptr, len) into a fresh `byte[]`. Used
+  by the new ptr/len-armed result lift code paths and
+  available for any future per-field byte[] consumer.
+* New generator test:
+  `Generator_emits_result_ptrlen_export_signatures` pins
+  three shapes — `WitResult<string, ValueTuple> TryDecode(byte[])`,
+  `WitResult<byte[], ValueTuple> Encode(string)`, and
+  `WitResult<string, string> Pick(bool, string, string)`
+  — exercising single-ptr/len-arm, byte[]-arm, and
+  same-type both-arms. 18/18 generator integration tests,
+  657/657 across Wacs.ComponentModel.Test. Hello-spike
+  passes unchanged.
+
+**Still punted:** `option<string>` / `option<byte[]>` —
+nullable reference types need parser-side annotation
+capture (`NullableAnnotation`), tracked for 0.4.10. Mixed-
+type ptr/len result arms (`result<string, byte[]>`).
+Lists of records; `list<T>` for `T ≠ u8`.
+
 ## WACS.ComponentModel.Async.SourceGen 0.4.8 — nested records (record-in-record / record-in-tuple)
 
 `[WitRecord]` types may now hold other `[WitRecord]`-typed

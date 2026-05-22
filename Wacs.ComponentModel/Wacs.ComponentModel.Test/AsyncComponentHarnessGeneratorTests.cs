@@ -233,6 +233,26 @@ namespace Wacs.ComponentModel.Test
         internal partial Contact Read(int id);
     }
 
+    /// <summary>Result types whose arms are ptr/len
+    /// aggregates (string / byte[]). Joined payload is the
+    /// arm type; flat lower / lift route through realloc +
+    /// LiftUtf8 / LiftBytes.</summary>
+    [AsyncComponentHarness]
+    internal partial class ResultPtrLenHarnessFixture
+    {
+        [SyncExport("try_decode")]
+        internal partial WitResult<string, ValueTuple>
+            TryDecode(byte[] data);
+
+        [SyncExport("encode")]
+        internal partial WitResult<byte[], ValueTuple>
+            Encode(string text);
+
+        [SyncExport("pick")]
+        internal partial WitResult<string, string>
+            Pick(bool which, string a, string b);
+    }
+
     /// <summary>Sync exports with <c>WitResult&lt;TOk,
     /// TErr&gt;</c> (canon-ABI <c>result&lt;TOk, TErr&gt;</c>).
     /// Covers the four canonical shapes:
@@ -748,6 +768,93 @@ namespace Wacs.ComponentModel.Test
                     | BindingFlags.Instance));
             Assert.NotNull(typeof(NestedRecordHarnessFixture)
                 .GetField("_post_Read",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+        }
+
+        [Fact]
+        public void Generator_emits_result_ptrlen_export_signatures()
+        {
+            // WitResult<string, ValueTuple> TryDecode(byte[])
+            // - Param byte[] flat: (ptr, len) = 2 ints
+            // - Return retArea (3 slots: disc, ptr, len) → 1 int
+            // - Func<int, int, int> (param_ptr, param_len, retArea_ptr)
+            var td = typeof(ResultPtrLenHarnessFixture)
+                .GetMethod("TryDecode",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(td);
+            Assert.Equal(
+                typeof(WitResult<string, ValueTuple>),
+                td!.ReturnType);
+            var tdInv = typeof(ResultPtrLenHarnessFixture)
+                .GetField("_invoker_TryDecode",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(tdInv);
+            Assert.Equal(typeof(Func<int, int, int>),
+                tdInv!.FieldType);
+
+            // WitResult<byte[], ValueTuple> Encode(string)
+            // - Param string flat: (ptr, len) = 2 ints
+            // - Return retArea = 1 int
+            // - Func<int, int, int>
+            var encode = typeof(ResultPtrLenHarnessFixture)
+                .GetMethod("Encode",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(encode);
+            Assert.Equal(typeof(WitResult<byte[], ValueTuple>),
+                encode!.ReturnType);
+            var encodeInv = typeof(ResultPtrLenHarnessFixture)
+                .GetField("_invoker_Encode",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(encodeInv);
+            Assert.Equal(typeof(Func<int, int, int>),
+                encodeInv!.FieldType);
+
+            // WitResult<string, string> Pick(bool, string, string)
+            // - bool param = 1 slot, 2x string = 4 slots
+            // - Return retArea = 1 slot
+            // - Func<bool, int, int, int, int, int> = 5 params + 1 ret
+            var pick = typeof(ResultPtrLenHarnessFixture)
+                .GetMethod("Pick",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(pick);
+            Assert.Equal(typeof(WitResult<string, string>),
+                pick!.ReturnType);
+            var pickInv = typeof(ResultPtrLenHarnessFixture)
+                .GetField("_invoker_Pick",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(pickInv);
+            Assert.Equal(
+                typeof(Func<bool, int, int, int, int, int>),
+                pickInv!.FieldType);
+
+            // Class-scope: memory + realloc + post (all
+            // returns are ptr/len-armed → need post; all
+            // params + returns transit memory).
+            Assert.NotNull(typeof(ResultPtrLenHarnessFixture)
+                .GetField("_memory",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+            Assert.NotNull(typeof(ResultPtrLenHarnessFixture)
+                .GetField("_reallocInvoke",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+            Assert.NotNull(typeof(ResultPtrLenHarnessFixture)
+                .GetField("_post_TryDecode",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+            Assert.NotNull(typeof(ResultPtrLenHarnessFixture)
+                .GetField("_post_Encode",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+            Assert.NotNull(typeof(ResultPtrLenHarnessFixture)
+                .GetField("_post_Pick",
                     BindingFlags.NonPublic
                     | BindingFlags.Instance));
         }
