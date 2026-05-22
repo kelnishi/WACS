@@ -5,25 +5,33 @@
 
 using System;
 using System.IO;
-using Wacs.ComponentModel.Runtime;
+using Wacs.ComponentModel.Async;
 using Wacs.WASI.Preview3;
 
 namespace Wacs.WASI.Preview3.AotSpike
 {
     /// <summary>
-    /// WASIp3 NativeAOT spike. Loads <c>run-with-err.wasm</c>
-    /// (the minimal async-lifted wasip3 fixture — single-poll
-    /// body returning <c>Err(())</c>), wires the standard
-    /// WASIp3 host, drives the lift's <c>[callback]</c> loop,
-    /// and exits with the body's task-return code.
-    ///
-    /// <para>The point of this spike is to prove the canon-
-    /// async dispatcher path (host subtasks, BLOCKED-aware
-    /// stream/future scaffolding, callback driver loop) is
-    /// genuinely reachable from AOT-safe consumer code — i.e.
-    /// that <see cref="ComponentInstance.InstantiateAot"/> +
-    /// the dispatcher surface don't transitively pull in the
-    /// reflective typed-bridge.</para>
+    /// Generated-harness consumer. The
+    /// <see cref="AsyncComponentHarnessGenerator"/> emits
+    /// the constructor + <see cref="Run"/> body for
+    /// <see cref="RunWithErrHarness"/>. No
+    /// hand-written <c>InstantiateAot</c> /
+    /// <c>InvokeCoreAsyncLift</c> wiring in this file —
+    /// that's the source-gen value.
+    /// </summary>
+    [AsyncComponentHarness]
+    public partial class RunWithErrHarness
+    {
+        [AsyncExport(
+            "[async-lift]wasi:cli/run@0.3.0-rc-2026-03-15#run")]
+        public partial void Run();
+    }
+
+    /// <summary>
+    /// WASIp3 NativeAOT spike. Loads
+    /// <c>run-with-err.wasm</c> through the generator-
+    /// emitted harness, drives the [callback]-lift loop,
+    /// exits.
     /// </summary>
     internal static class Program
     {
@@ -36,24 +44,16 @@ namespace Wacs.WASI.Preview3.AotSpike
 
                 var host = new WasiPreview3Host(
                     new WasiPreview3HostBuilder());
-                var instance = ComponentInstance.InstantiateAot(
-                    bytes, runtime => host.BindToRuntime(runtime));
-                host.Dispatcher = instance.AsyncDispatcher;
+                var harness = new RunWithErrHarness(bytes,
+                    runtime => host.BindToRuntime(runtime));
+                host.Dispatcher =
+                    harness.Instance.AsyncDispatcher;
+                harness.Run();
 
-                // Drives the [callback]-style async lift loop
-                // to completion. run-with-err returns Err(())
-                // on the first poll, so we expect the dispatcher
-                // to transition through one Yield→Exit cycle.
-                instance.InvokeCoreAsyncLift(
-                    "[async-lift]wasi:cli/run@0.3.0-rc-2026-03-15#run");
-
-                // Spike success criterion: instance completed
-                // without trapping. The actual Err(()) result is
-                // captured via the cli/exit binding (set by the
-                // wasi-bindgen panic handler) — for run-with-err
-                // it returns 1.
-                Console.WriteLine("AOT-spike: WASIp3 component " +
-                    "ran through dispatcher without trap.");
+                Console.WriteLine(
+                    "AOT-spike (generated harness): WASIp3 " +
+                    "component ran through dispatcher " +
+                    "without trap.");
                 return 0;
             }
             catch (Exception ex)
@@ -67,7 +67,8 @@ namespace Wacs.WASI.Preview3.AotSpike
 
         private static string ResolveFixturePath()
         {
-            var sideBySide = Path.Combine(AppContext.BaseDirectory,
+            var sideBySide = Path.Combine(
+                AppContext.BaseDirectory,
                 "run-with-err.wasm");
             if (File.Exists(sideBySide)) return sideBySide;
             throw new FileNotFoundException(

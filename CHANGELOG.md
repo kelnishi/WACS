@@ -1,5 +1,67 @@
 # Changelog
 
+## WACS.ComponentModel 0.10.0, WACS.ComponentModel.Async.SourceGen 0.3.0 — `[AsyncComponentHarness]` generator + per-export wiring emission
+
+Closes the source-gen gap. Consumers no longer have to
+hand-write the AOT-safe wiring template; a Roslyn
+generator emits it from a small marker-attribute shape.
+
+* **`[AsyncComponentHarness]`** (class-level) +
+  **`[AsyncExport("export-name")]`** (method-level)
+  attributes ship in
+  `Wacs.ComponentModel.Async` under the existing assembly.
+* **`AsyncComponentHarnessGenerator`** scans the consumer's
+  compilation for `[AsyncComponentHarness]`-decorated
+  partial classes and emits a partial class body per match:
+  * Constructor
+    `(byte[] componentBytes, Action<WasmRuntime>? configureImports)`
+    calling `ComponentInstance.InstantiateAot`.
+  * `Instance` property exposing the underlying
+    `ComponentInstance` so consumers can reach the
+    dispatcher / host directly.
+  * Each `[AsyncExport]`-marked partial method's body —
+    invokes the named core export through
+    `InvokeCoreAsyncLift`.
+
+  Output files land under
+  `obj/Generated/.../AsyncComponentHarnessGenerator/<class>.Harness.g.cs`
+  when `EmitCompilerGeneratedFiles=true`; otherwise the
+  emitted source lives in-memory.
+* **AOT spike now uses the generator.** The consumer's
+  Program.cs has zero hand-written `InstantiateAot` /
+  `InvokeCoreAsyncLift` calls — the partial class declares
+  the shape and the generator fills in the body:
+
+  ```csharp
+  [AsyncComponentHarness]
+  public partial class RunWithErrHarness {
+      [AsyncExport("[async-lift]wasi:cli/run@0.3.0-rc-2026-03-15#run")]
+      public partial void Run();
+  }
+  ```
+
+  Generated harness publishes as a 14 MB NativeAOT ARM64
+  binary and runs `run-with-err.wasm` through the full
+  canon-async dispatcher path. Exit 0.
+
+**MVP scope of the generator:** void / no-arg exports
+only. Typed exports (string params, return values, etc.)
+require canon-ABI marshaling code that's the next
+substantive slice. The infrastructure is in place — the
+generator already discovers partial methods, threads
+through their accessibility, and emits per-method bodies;
+adding param/return handling is incremental.
+
+* `Wacs.ComponentModel` minor → 0.10.0 (new public
+  attribute surface).
+* `WACS.ComponentModel.Async.SourceGen` minor → 0.3.0
+  (new emission target alongside the existing
+  CanonOpRegistry + ComponentLifter generators).
+* Verification: AotSpike (generator-driven) publishes
+  clean + runs; AotAcceptanceTests unchanged; sockets
+  10/10 + HTTP 4/4 unchanged; `Wacs.ComponentModel.Test`
+  639/639 unchanged.
+
 ## WACS.WASI.Preview3 0.2.2, WACS.ComponentModel 0.9.2 — end-to-end NativeAOT for the WASIp3 dispatcher path
 
 Closes the gap surfaced when reviewing AOT coverage: the

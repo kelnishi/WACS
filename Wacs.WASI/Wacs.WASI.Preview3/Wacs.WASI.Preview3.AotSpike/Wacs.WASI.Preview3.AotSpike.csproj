@@ -41,6 +41,13 @@
         <ProjectReference Include="..\Wacs.WASI.Preview3\Wacs.WASI.Preview3.csproj"
                           SetTargetFramework="TargetFramework=net8.0"
                           UndefineProperties="PublishAot;PublishTrimmed;PublishReadyToRun;SelfContained;RuntimeIdentifier" />
+
+        <!-- Roslyn source generator. Emits the
+             [AsyncComponentHarness] partial class bodies. -->
+        <ProjectReference Include="..\..\..\Wacs.ComponentModel\Wacs.ComponentModel.Async.SourceGen\Wacs.ComponentModel.Async.SourceGen.csproj"
+                          SetTargetFramework="TargetFramework=netstandard2.0"
+                          OutputItemType="Analyzer"
+                          ReferenceOutputAssembly="false" />
     </ItemGroup>
 
 </Project>
