@@ -1,5 +1,42 @@
 # Changelog
 
+## WACS.ComponentModel.Async.SourceGen 0.4.11 — mixed-type ptr/len arms inside result<TOk, TErr>
+
+`WitResult<string, byte[]>` (and any other distinct-type
+pair where both arms are ptr/len aggregates) is now
+accepted. Same-shape mixed arms join into a shared
+`(ptr, len)` payload slot pair; per-arm lift/lower
+dispatches on the C# arm type rather than the joined
+value, so `LiftUtf8` runs on `Ok` while `LiftBytes` runs
+on `Err`.
+
+* **`ResultJoinedPayload`** got one extra branch: if both
+  arms are `IsPtrLenAggregate` but distinct, return the
+  Ok-arm type as the "ptr/len signal". Existing call
+  sites already used `IsPtrLenAggregate(joined)` purely
+  as a kind discriminator, not as the lift/lower value
+  type — those used the arm types directly via
+  `PtrLenLiftExpression(arm, ...)` and
+  `EmitPtrLenAssignInto(arm, ...)`. Net effect: only the
+  acceptance gate needed to move.
+* **Mixed primitive vs ptr/len arms remain rejected.**
+  `result<int, string>` requires canon-ABI's index-by-
+  index flat-slot join with widest type, which we don't
+  emit yet.
+* Test extension: `Generator_emits_result_ptrlen_export_signatures`
+  picks up a new `WitResult<string, byte[]> BlobOrText(int)`
+  case alongside the existing same-type pairs. Flat
+  invoker shape and the `_post_BlobOrText` field are
+  pinned. 19/19 generator integration tests, 658/658
+  across Wacs.ComponentModel.Test. Hello-spike passes
+  unchanged.
+
+**Still punted:** mixed primitive vs ptr/len arms in
+result (`result<int, string>`); lists of records;
+`list<T>` for `T ≠ u8`; cyclic record references;
+deeply-nested aggregates beyond what the per-field
+recursion already handles.
+
 ## WACS.ComponentModel.Async.SourceGen 0.4.10 — option<string> / option<byte[]>
 
 Nullable reference types — `string?` and `byte[]?` — are

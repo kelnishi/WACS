@@ -744,6 +744,14 @@ namespace Wacs.ComponentModel.Async.SourceGen
             if (okUnit) return err;
             if (errUnit) return ok;
             if (ok == err) return ok;
+            // Different ptr/len arms (e.g., string + byte[])
+            // share the SAME (ptr, len) memory slots — the
+            // per-arm lift/lower dispatches on the arm's C#
+            // type rather than the joined value, so we can
+            // pick either arm here as the "ptr/len signal".
+            if (IsPtrLenAggregate(ok)
+                && IsPtrLenAggregate(err))
+                return ok;
             return "MIXED";
         }
 

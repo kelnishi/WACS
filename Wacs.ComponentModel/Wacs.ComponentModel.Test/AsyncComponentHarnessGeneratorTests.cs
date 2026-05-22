@@ -268,6 +268,14 @@ namespace Wacs.ComponentModel.Test
         [SyncExport("pick")]
         internal partial WitResult<string, string>
             Pick(bool which, string a, string b);
+
+        // Mixed ptr/len arms: string vs byte[]. Joined
+        // payload is a shared (ptr, len) pair — per-arm
+        // lift/lower dispatches on the C# arm type
+        // (LiftUtf8 vs LiftBytes).
+        [SyncExport("blob_or_text")]
+        internal partial WitResult<string, byte[]>
+            BlobOrText(int kind);
     }
 
     /// <summary>Sync exports with <c>WitResult&lt;TOk,
@@ -932,6 +940,31 @@ namespace Wacs.ComponentModel.Test
                     | BindingFlags.Instance));
             Assert.NotNull(typeof(ResultPtrLenHarnessFixture)
                 .GetField("_post_Pick",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+
+            // WitResult<string, byte[]> BlobOrText(int)
+            // Mixed ptr/len arms: same flat shape as same-
+            // type ptr/len arms (disc + ptr + len in the
+            // retArea), but per-arm lift dispatches on the
+            // C# arm type. Flat invoker: Func<int, int>
+            // (kind, retArea_ptr).
+            var blob = typeof(ResultPtrLenHarnessFixture)
+                .GetMethod("BlobOrText",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(blob);
+            Assert.Equal(typeof(WitResult<string, byte[]>),
+                blob!.ReturnType);
+            var blobInv = typeof(ResultPtrLenHarnessFixture)
+                .GetField("_invoker_BlobOrText",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(blobInv);
+            Assert.Equal(typeof(Func<int, int>),
+                blobInv!.FieldType);
+            Assert.NotNull(typeof(ResultPtrLenHarnessFixture)
+                .GetField("_post_BlobOrText",
                     BindingFlags.NonPublic
                     | BindingFlags.Instance));
         }
