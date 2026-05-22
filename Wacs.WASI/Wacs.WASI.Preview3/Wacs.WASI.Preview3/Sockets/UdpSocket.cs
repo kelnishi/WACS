@@ -162,23 +162,167 @@ namespace Wacs.WASI.Preview3.Sockets
             _state = State.Bound;
         }
 
-        public Task SendAsync(
+        // Maximum UDP payload per the IP spec: 65,535 minus the
+        // 8-byte UDP header and 20/40-byte IP header. We use the
+        // simpler conservative cap of 65,507 (v4) — anything
+        // larger than that yields ErrorCode.DatagramTooLarge.
+        private const int MaxUdpPayloadIpv4 = 65507;
+        private const int MaxUdpPayloadIpv6 = 65527;
+
+        public async Task SendAsync(
             byte[] data, IpSocketAddress? remoteAddress = null,
             CancellationToken cancellationToken = default)
         {
-            throw new SocketsException(
-                ErrorCode.NotSupported,
-                "udp-socket.send: pending canon-async list-arg + " +
-                "option<ip-socket-address> wire-up.");
+            EnsureNotClosed();
+            int maxPayload = _family == IpAddressFamily.Ipv4
+                ? MaxUdpPayloadIpv4 : MaxUdpPayloadIpv6;
+            if (data.Length > maxPayload)
+                throw new SocketsException(
+                    ErrorCode.DatagramTooLarge,
+                    $"send: datagram is {data.Length} bytes, " +
+                    $"exceeds {_family} max of {maxPayload}.");
+            System.Net.IPEndPoint? destination;
+            if (remoteAddress.HasValue)
+            {
+                var addr = remoteAddress.Value;
+                if (addr.Family != _family)
+                    throw new SocketsException(
+                        ErrorCode.InvalidArgument,
+                        "send: remote-address family does not " +
+                        "match socket family.");
+                ushort port = addr.Family == IpAddressFamily.Ipv4
+                    ? addr.V4.Port : addr.V6.Port;
+                if (port == 0)
+                    throw new SocketsException(
+                        ErrorCode.AddressNotBindable,
+                        "send: remote port must be non-zero.");
+                if (IsUnspecifiedAddress(addr))
+                    throw new SocketsException(
+                        ErrorCode.InvalidArgument,
+                        "send: remote address must be specified.");
+                // Dual-stack: ipv6 socket sending to ipv6-mapped-ipv4
+                if (_family == IpAddressFamily.Ipv6
+                    && IsIpv4MappedIpv6(addr))
+                    throw new SocketsException(
+                        ErrorCode.InvalidArgument,
+                        "send: dual-stack (ipv6-mapped-ipv4) is " +
+                        "not allowed.");
+                destination =
+                    TcpEndpointHelper.ToIpEndPoint(addr);
+                // If connected, the explicit destination must
+                // match the connected peer.
+                if (_state == State.Connected
+                    && _connectedRemote != null
+                    && !destination.Equals(_connectedRemote))
+                    throw new SocketsException(
+                        ErrorCode.InvalidArgument,
+                        "send: connected socket cannot send to a " +
+                        "different remote address.");
+            }
+            else
+            {
+                if (_state != State.Connected
+                    || _connectedRemote == null)
+                    throw new SocketsException(
+                        ErrorCode.InvalidArgument,
+                        "send: non-connected socket requires a " +
+                        "remote address.");
+                destination = _connectedRemote;
+            }
+            if (_state == State.Unbound)
+            {
+                // Implicit bind to a wildcard ephemeral port —
+                // matches Connect's same-family handling.
+                try
+                {
+                    var implicitLocal = _family == IpAddressFamily.Ipv4
+                        ? new System.Net.IPEndPoint(
+                            System.Net.IPAddress.Any, 0)
+                        : new System.Net.IPEndPoint(
+                            System.Net.IPAddress.IPv6Any, 0);
+                    _socket.Bind(implicitLocal);
+                    _state = State.Bound;
+                }
+                catch (SocketException sx)
+                {
+                    throw TcpEndpointHelper.MapSocketException(sx);
+                }
+            }
+            try
+            {
+                await _socket.SendToAsync(
+                    new System.ArraySegment<byte>(data),
+                    SocketFlags.None, destination!)
+                    .ConfigureAwait(false);
+            }
+            catch (SocketException sx)
+            {
+                throw TcpEndpointHelper.MapSocketException(sx);
+            }
         }
 
-        public Task<(byte[] data, IpSocketAddress remoteAddress)>
+        private static bool IsUnspecifiedAddress(IpSocketAddress addr)
+        {
+            if (addr.Family == IpAddressFamily.Ipv4)
+            {
+                var a = addr.V4.Address;
+                return a.A == 0 && a.B == 0 && a.C == 0 && a.D == 0;
+            }
+            var v6 = addr.V6.Address;
+            return v6.G0 == 0 && v6.G1 == 0 && v6.G2 == 0 && v6.G3 == 0
+                && v6.G4 == 0 && v6.G5 == 0 && v6.G6 == 0 && v6.G7 == 0;
+        }
+
+        private static bool IsIpv4MappedIpv6(IpSocketAddress addr)
+        {
+            if (addr.Family != IpAddressFamily.Ipv6) return false;
+            var v6 = addr.V6.Address;
+            return v6.G0 == 0 && v6.G1 == 0 && v6.G2 == 0
+                && v6.G3 == 0 && v6.G4 == 0 && v6.G5 == 0xFFFF;
+        }
+
+        private void EnsureNotClosed()
+        {
+            if (_state == State.Closed)
+                throw new SocketsException(
+                    ErrorCode.InvalidState,
+                    "udp-socket: socket is closed.");
+        }
+
+        public async Task<(byte[] data, IpSocketAddress remoteAddress)>
             ReceiveAsync(CancellationToken cancellationToken = default)
         {
-            throw new SocketsException(
-                ErrorCode.NotSupported,
-                "udp-socket.receive: pending canon-async " +
-                "tuple<list<u8>, ip-socket-address> return wire-up.");
+            EnsureNotClosed();
+            if (_state == State.Unbound)
+                throw new SocketsException(
+                    ErrorCode.InvalidState,
+                    "udp-socket.receive: socket must be bound " +
+                    "before it can receive.");
+            int maxPayload = _family == IpAddressFamily.Ipv4
+                ? MaxUdpPayloadIpv4 : MaxUdpPayloadIpv6;
+            var buffer = new byte[maxPayload];
+            var anyRemote = _family == IpAddressFamily.Ipv4
+                ? (System.Net.EndPoint)new System.Net.IPEndPoint(
+                    System.Net.IPAddress.Any, 0)
+                : new System.Net.IPEndPoint(
+                    System.Net.IPAddress.IPv6Any, 0);
+            try
+            {
+                var result = await _socket.ReceiveFromAsync(
+                    new System.ArraySegment<byte>(buffer),
+                    SocketFlags.None, anyRemote)
+                    .ConfigureAwait(false);
+                var actual = new byte[result.ReceivedBytes];
+                System.Buffer.BlockCopy(
+                    buffer, 0, actual, 0, result.ReceivedBytes);
+                var ep = (System.Net.IPEndPoint)result.RemoteEndPoint;
+                return (actual,
+                    TcpEndpointHelper.FromIpEndPoint(ep));
+            }
+            catch (SocketException sx)
+            {
+                throw TcpEndpointHelper.MapSocketException(sx);
+            }
         }
 
         public IpSocketAddress GetLocalAddress()
@@ -288,13 +432,6 @@ namespace Wacs.WASI.Preview3.Sockets
                     $"expected {required}.");
         }
 
-        private void EnsureNotClosed()
-        {
-            if (_state == State.Closed)
-                throw new SocketsException(
-                    ErrorCode.InvalidState,
-                    "udp-socket: socket is closed.");
-        }
     }
 
     /// <summary>

@@ -1716,12 +1716,18 @@ namespace Wacs.WASI.Preview3
             runtime.BindHostFunction(
                 (SocketsTypesModuleName, "[resource-drop]tcp-socket"),
                 (Action<ExecContext, int>)((_, handle) =>
-                    TcpSocketHandles.Drop(handle)));
+                {
+                    var s = TcpSocketHandles.Drop(handle);
+                    (s as IDisposable)?.Dispose();
+                }));
 
             runtime.BindHostFunction(
                 (SocketsTypesModuleName, "[resource-drop]udp-socket"),
                 (Action<ExecContext, int>)((_, handle) =>
-                    UdpSocketHandles.Drop(handle)));
+                {
+                    var s = UdpSocketHandles.Drop(handle);
+                    (s as IDisposable)?.Dispose();
+                }));
 
             // wasi:sockets/ip-name-lookup.resolve-addresses
             //   async func(name: string) -> result<list<ip-address>, error-code>
@@ -2019,6 +2025,42 @@ namespace Wacs.WASI.Preview3
                             s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11,
                             retptr, realloc)));
 
+            // udp-socket.send is `async func` in the WIT so
+            // wit-bindgen-rt emits the indirect (params_ptr,
+            // results_ptr) lowering. Params struct layout:
+            //   +0: self (i32)
+            //   +4: data-ptr (i32)
+            //   +8: data-len (i32)
+            //   +12: option-disc (u8), pad to +16
+            //   +16: ip-socket-address (32 bytes)
+            // Total 48 bytes 4-aligned.
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[async-lower][method]udp-socket.send"),
+                (Func<ExecContext, int, int, int>)(
+                    (_, paramsPtr, resultsPtr) =>
+                    {
+                        var mem = RequireMemoryForHttp();
+                        var p = mem.AsSpan(paramsPtr, 48);
+                        int self = System.Buffers.Binary
+                            .BinaryPrimitives.ReadInt32LittleEndian(p);
+                        int dataPtr = System.Buffers.Binary
+                            .BinaryPrimitives.ReadInt32LittleEndian(
+                                p.Slice(4));
+                        int dataLen = System.Buffers.Binary
+                            .BinaryPrimitives.ReadInt32LittleEndian(
+                                p.Slice(8));
+                        int optDisc = p[12];
+                        IpSocketAddress? remote = null;
+                        if (optDisc != 0)
+                            remote = ReadIpSocketAddressFromMemory(
+                                mem, paramsPtr + 16);
+                        InvokeUdpSocketSendIndirect(
+                            self, dataPtr, dataLen, remote,
+                            resultsPtr, realloc);
+                        return CanonAsyncStatusReturnedPacked;
+                    }));
+
             // ---- UDP receive (Slice Y) -----------------------------
             //
             // udp-socket.receive: () -> result<tuple<list<u8>,
@@ -2031,6 +2073,21 @@ namespace Wacs.WASI.Preview3
                     "[method]udp-socket.receive"),
                 (Action<ExecContext, int, int>)((_, self, retptr) =>
                     InvokeUdpSocketReceive(self, retptr, realloc)));
+
+            // Async-lower flat-params form: self fits in 1 flat
+            // i32 so the lowering passes (self, results_ptr)
+            // directly instead of using a params_ptr struct.
+            // results_ptr is the standard 44-byte receive retptr.
+            runtime.BindHostFunction(
+                (SocketsTypesModuleName,
+                    "[async-lower][method]udp-socket.receive"),
+                (Func<ExecContext, int, int, int>)(
+                    (_, self, resultsPtr) =>
+                    {
+                        InvokeUdpSocketReceive(
+                            self, resultsPtr, realloc);
+                        return CanonAsyncStatusReturnedPacked;
+                    }));
 
             // ---- TCP simple getter/setter cluster (Slice X) -------
             //
@@ -2526,6 +2583,36 @@ namespace Wacs.WASI.Preview3
         /// decodes the option&lt;ip-socket-address&gt; arg from
         /// its 13 flat slots, sync-blocks SendAsync, writes the
         /// standard 20-byte sockets-error-code retptr.</summary>
+        // Async-lower variant: option<addr> is decoded from the
+        // packed params struct by the caller, so we just call
+        // SendAsync. Same wire-result encoding as the sync form.
+        internal void InvokeUdpSocketSendIndirect(
+            int self, int dataPtr, int dataLen,
+            IpSocketAddress? remote,
+            int retptr, ICabiRealloc realloc)
+        {
+            var memory = RequireMemoryForHttp();
+            ValidateResultSocketsErrorCodeRetptr(retptr, memory);
+            SocketsException? caught = null;
+            try
+            {
+                byte[] data = dataLen > 0
+                    ? memory.AsSpan(dataPtr, dataLen).ToArray()
+                    : Array.Empty<byte>();
+                RequireUdpSocket(self).SendAsync(data, remote)
+                    .GetAwaiter().GetResult();
+            }
+            catch (SocketsException ex) { caught = ex; }
+            catch (System.Net.Sockets.SocketException sx)
+            {
+                caught = Wacs.WASI.Preview3.Sockets
+                    .TcpEndpointHelper.MapSocketException(sx);
+            }
+            WriteSocketsErrorCodeResult(
+                memory.AsSpan(retptr, ResultSocketsErrorCodeSize),
+                caught, realloc, memory);
+        }
+
         public void InvokeUdpSocketSend(
             int self,
             int dataPtr, int dataLen,
@@ -3029,6 +3116,14 @@ namespace Wacs.WASI.Preview3
                     .GetAwaiter().GetResult();
             }
             catch (SocketsException ex) { caught = ex; }
+            catch (System.Net.Sockets.SocketException sx)
+            {
+                // .NET sometimes surfaces the inner SocketException
+                // directly when await is unwrapped via GetResult;
+                // map it the same way the impl would.
+                caught = Wacs.WASI.Preview3.Sockets
+                    .TcpEndpointHelper.MapSocketException(sx);
+            }
             WriteSocketsErrorCodeResult(
                 memory.AsSpan(retptr, ResultSocketsErrorCodeSize),
                 caught, realloc, memory);
@@ -3443,6 +3538,25 @@ namespace Wacs.WASI.Preview3
         // (NameUnresolvable/etc.) — those throw at wire-time
         // since they're not representable in the types
         // variant.
+        // Encode `result<_, error-code>` as a 20-byte payload
+        // for `FutureWrite`. The convention there is that
+        // `byte[]` values are copied verbatim into the guest's
+        // future-read buffer; non-byte[] values become "no
+        // bytes written" which the guest reads as a zero-filled
+        // OK result. Use this helper for the err arm so the
+        // disc/payload bytes actually reach the guest.
+        internal static byte[] EncodeSocketsResultErrBytes(
+            SocketsException ex)
+        {
+            var bytes = new byte[20];
+            bytes[0] = 1; // result-disc = err
+            bytes[4] = MapSocketsTypesErrorCodeDisc(ex.Code);
+            // Other(option<string>) requires realloc + memory to
+            // emit the inner string; the future-read path doesn't
+            // surface those, so we drop the payload string here.
+            return bytes;
+        }
+
         private static void WriteSocketsErrorCodeBytes(
             Span<byte> dest, SocketsException ex,
             ICabiRealloc realloc,

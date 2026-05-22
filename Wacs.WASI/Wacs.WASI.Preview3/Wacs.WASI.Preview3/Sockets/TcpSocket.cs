@@ -241,8 +241,14 @@ namespace Wacs.WASI.Preview3.Sockets
 
             // Allocate a perpetual stream — the spec calls out
             // that listen's stream is closed only on fatal
-            // errors, not on individual accept failures.
+            // errors, not on individual accept failures. The
+            // element type is `own<tcp-socket>` which lowers to
+            // a 4-byte handle, so item-size is 4: wit-bindgen-rt
+            // reads/writes the stream in 4-byte units and the
+            // dispatcher needs to know the unit size to translate
+            // between byte and item counts at read/write time.
             var streamHandle = dispatcher.StreamNew(typeIdx: 0);
+            dispatcher.SetStreamItemSize(streamHandle, 4);
 
             var listener = _socket;
             var family = _family;
@@ -337,19 +343,25 @@ namespace Wacs.WASI.Preview3.Sockets
         {
             if (dispatcher == null)
                 throw new ArgumentNullException(nameof(dispatcher));
-            if (_state != State.Connected)
-                throw new SocketsException(
-                    ErrorCode.InvalidState,
-                    "tcp-socket.send: socket is not in the " +
-                    $"connected state (state = {_state}).");
             var futureHandle = dispatcher.FutureNew(typeIdx: 0);
+            if (_state != State.Connected)
+            {
+                dispatcher.FutureWrite(futureHandle,
+                    WasiPreview3Host.EncodeSocketsResultErrBytes(
+                        new SocketsException(
+                            ErrorCode.InvalidState,
+                            "tcp-socket.send: socket is not in the " +
+                            $"connected state (state = {_state}).")));
+                return (futureHandle, Task.CompletedTask);
+            }
             var buffer = dispatcher.GetByteStreamBuffer(streamHandle);
             if (buffer == null)
             {
                 dispatcher.FutureWrite(futureHandle,
-                    new SocketsException(
-                        ErrorCode.InvalidArgument,
-                        $"stream handle {streamHandle} not allocated"));
+                    WasiPreview3Host.EncodeSocketsResultErrBytes(
+                        new SocketsException(
+                            ErrorCode.InvalidArgument,
+                            $"stream handle {streamHandle} not allocated")));
                 return (futureHandle, Task.CompletedTask);
             }
 
@@ -405,13 +417,24 @@ namespace Wacs.WASI.Preview3.Sockets
         {
             if (dispatcher == null)
                 throw new ArgumentNullException(nameof(dispatcher));
-            if (_state != State.Connected)
-                throw new SocketsException(
-                    ErrorCode.InvalidState,
-                    "tcp-socket.receive: socket is not in the " +
-                    $"connected state (state = {_state}).");
+            // Per spec, receive() always returns valid (stream,
+            // future) handles. Operational errors (including
+            // not-connected state) surface through the future,
+            // not through receive() itself.
             var streamHandle = dispatcher.StreamNew(typeIdx: 0);
             var futureHandle = dispatcher.FutureNew(typeIdx: 0);
+            if (_state != State.Connected)
+            {
+                dispatcher.StreamDropWritable(streamHandle);
+                dispatcher.FutureWrite(futureHandle,
+                    WasiPreview3Host.EncodeSocketsResultErrBytes(
+                        new SocketsException(
+                            ErrorCode.InvalidState,
+                            "tcp-socket.receive: socket is not in " +
+                            $"the connected state (state = {_state}).")));
+                return (streamHandle, futureHandle,
+                    Task.CompletedTask);
+            }
 
             var socket = _socket;
             var completion = Task.Run(async () =>

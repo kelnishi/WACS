@@ -1,5 +1,63 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.1.72 — sockets fixture pass, slice 2 (resource lifetime + async-lower UDP)
+
+Two more fixtures pass (`sockets-tcp-connect`,
+`sockets-udp-send`), bringing the sockets count to 6/12.
+
+* **`[resource-drop]tcp-socket` / `udp-socket` now `Dispose()`
+  the backing socket.** Previously the handle table just
+  released the slot; the underlying `System.Net.Sockets.Socket`
+  was leaked, leaving its port BOUND-but-not-LISTEN. macOS
+  silently dropped SYN packets to that port, so
+  `test_connection_refused` timed out instead of returning
+  `ECONNREFUSED`. With Dispose wired into the drop binding the
+  port is fully released and `sockets-tcp-connect` passes.
+* **`[async-lower][method]udp-socket.send` indirect host
+  binding** with the full 48-byte (self, data-ptr, data-len,
+  option<addr>) params struct unpacked into a real
+  `IpSocketAddress?`. `UdpSocket.SendAsync` now actually
+  performs the OS-level `SendToAsync`, validates the
+  destination (family-match, port=0,
+  unspec, dual-stack ipv4-mapped-ipv6, connected-with-other-
+  addr), enforces the per-family datagram cap, and
+  implicit-binds to a wildcard ephemeral on first send.
+  `sockets-udp-send` passes (all 8 sub-tests across the v4/v6
+  matrix).
+* **`[async-lower][method]udp-socket.receive` flat host
+  binding** with `UdpSocket.ReceiveAsync` doing `ReceiveFromAsync`.
+  The flat form takes `(self, results_ptr)` directly — self
+  fits in one i32 so wit-bindgen-rt doesn't go indirect.
+  `test_not_bound` now returns `InvalidState`; the
+  `test_receive_data` async path still hangs in `futures::join!`
+  (deep canon-async dispatcher work).
+* **Listen-stream item-size = 4.** `TcpSocket.ListenInternal`
+  declares the stream element size so wit-bindgen-rt's read
+  reports item counts, not byte counts (same pattern as the
+  read-directory fix in 0.1.64). The stream payload is
+  `own<tcp-socket>` which lowers to a 4-byte handle.
+* **`TcpSocket.Receive` / `Send` no longer throw for
+  not-connected.** Both now return valid stream + future
+  handles and write the `Err(InvalidState)` result into the
+  future via the new `EncodeSocketsResultErrBytes` helper.
+  This matches the spec (operational errors surface through
+  the returned future, not the call itself) and lands the
+  first sync-flavored sub-tests of `sockets-tcp-receive`
+  (`test_connected_state`) and `sockets-tcp-send`.
+* **`FutureWrite(handle, byte[])` encoding for `result<_,
+  error-code>`.** The existing convention silently dropped
+  non-`byte[]` future values, so previous code passing a
+  `SocketsException` directly was a no-op. The new helper
+  encodes the 20-byte canon-ABI result variant the guest
+  reads on `future.await`.
+
+Remaining 6 fixtures (echo, tcp-bind, tcp-listen, tcp-receive
+test_multiple_receive+, tcp-send test_drop_write_half+,
+udp-receive test_receive_data) all hang in `futures::join!`
+where the host's `GetResult()` blocks the dispatcher so the
+guest's other half can't make progress. Requires real
+canon-async subtask scheduling — next slice.
+
 ## WACS.WASI.Preview3 0.1.71 — sockets fixture pass, slice 1 (sync validation + small bugs)
 
 First socket-fixture pass. 4/12 fixtures green
