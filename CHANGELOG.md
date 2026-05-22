@@ -1,5 +1,36 @@
 # Changelog
 
+## WACS.ComponentModel.Async.SourceGen 0.3.1 — primitive arg + return marshaling + generator tests
+
+Extends `AsyncComponentHarnessGenerator` from void-only
+MVP to support canon-ABI primitive parameters and return
+types. Adds Roslyn integration tests.
+
+* `EmitExportMethod` now reads the partial method's
+  `IMethodSymbol.Parameters` + `ReturnType` and emits a
+  body that boxes args into an `object?[]` and casts the
+  `InvokeCoreAsyncLift` return back to the declared
+  primitive (i32-family, i64-family, f32, f64, bool).
+* Unsupported parameter / return types emit a `#error`
+  directive identifying the offending method + type, so
+  the consumer fails at compile time with an actionable
+  message instead of getting a stub.
+* `AsyncComponentHarnessGeneratorTests` (new) — 5 tests
+  verifying the emitted constructor signature, `Instance`
+  property shape, void partial method body, primitive
+  signature emission, and the `#error` guard sentinel.
+* `Wacs.ComponentModel.Test` 643/643 (+5 generator
+  integration tests).
+
+**Still punted:** string / list / aggregate
+(record / variant / option / result) types. These need
+canon-ABI lift-lower codegen — substantially larger slice
+because each shape has its own marshaling pattern (cabi-
+realloc + UTF-8 for strings, item-loop for lists,
+disc + payload for variants). The infrastructure for
+discovering parameter shapes and emitting per-shape
+helpers is now in place; adding each shape is incremental.
+
 ## WACS.ComponentModel 0.10.0, WACS.ComponentModel.Async.SourceGen 0.3.0 — `[AsyncComponentHarness]` generator + per-export wiring emission
 
 Closes the source-gen gap. Consumers no longer have to

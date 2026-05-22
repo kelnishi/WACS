@@ -104,15 +104,53 @@ namespace Wacs.ComponentModel.Async.SourceGen
             public string MethodName { get; }
             public string ExportName { get; }
             public string Accessibility { get; }
+            public ImmutableArray<ExportParam> Parameters { get; }
+            public string? ReturnType { get; }
             public ExportMethod(
                 string methodName, string exportName,
-                string accessibility)
+                string accessibility,
+                ImmutableArray<ExportParam> parameters,
+                string? returnType)
             {
                 MethodName = methodName;
                 ExportName = exportName;
                 Accessibility = accessibility;
+                Parameters = parameters;
+                ReturnType = returnType;
             }
         }
+
+        private readonly struct ExportParam
+        {
+            public string Name { get; }
+            public string Type { get; }
+            public ExportParam(string name, string type)
+            {
+                Name = name; Type = type;
+            }
+        }
+
+        // Primitive (canon-ABI flat) types the MVP marshals
+        // directly through InvokeCoreAsyncLift. Aggregates
+        // (string / list / record / variant / option / result)
+        // need cabi-realloc + per-shape lift/lower — punted to
+        // a follow-up slice.
+        private static readonly HashSet<string> PrimitiveTypes =
+            new HashSet<string>(StringComparer.Ordinal)
+            {
+                "int", "uint", "long", "ulong",
+                "byte", "sbyte", "short", "ushort",
+                "bool", "float", "double",
+                "System.Int32", "System.UInt32",
+                "System.Int64", "System.UInt64",
+                "System.Byte", "System.SByte",
+                "System.Int16", "System.UInt16",
+                "System.Boolean", "System.Single",
+                "System.Double",
+            };
+
+        private static bool IsPrimitive(string fqType) =>
+            PrimitiveTypes.Contains(fqType);
 
         private static ImmutableArray<HarnessClass> CollectHarnessClasses(
             Compilation compilation)
@@ -145,9 +183,22 @@ namespace Wacs.ComponentModel.Async.SourceGen
                                 is not string exportName
                             || string.IsNullOrEmpty(exportName))
                             continue;
+
+                        var parameters = method.Parameters
+                            .Select(p => new ExportParam(
+                                p.Name,
+                                p.Type.ToDisplayString(
+                                    SymbolDisplayFormat.FullyQualifiedFormat)))
+                            .ToImmutableArray();
+                        string? returnType = method.ReturnsVoid
+                            ? null
+                            : method.ReturnType.ToDisplayString(
+                                SymbolDisplayFormat.FullyQualifiedFormat);
+
                         exports.Add(new ExportMethod(
                             method.Name, exportName,
-                            AccessibilityKeyword(method.DeclaredAccessibility)));
+                            AccessibilityKeyword(method.DeclaredAccessibility),
+                            parameters, returnType));
                         break;
                     }
                 }
@@ -270,22 +321,121 @@ namespace Wacs.ComponentModel.Async.SourceGen
             foreach (var ex in cls.Exports)
             {
                 sb.AppendLine();
-                sb.Append("        ");
-                sb.Append(ex.Accessibility);
-                sb.Append(" partial void ");
-                sb.Append(ex.MethodName);
-                sb.AppendLine("()");
-                sb.AppendLine("        {");
-                sb.Append(
-                    "            _instance.InvokeCoreAsyncLift(\"");
-                sb.Append(EscapeStringLiteral(ex.ExportName));
-                sb.AppendLine("\");");
-                sb.AppendLine("        }");
+                EmitExportMethod(sb, ex);
             }
 
             sb.AppendLine("    }");
             if (hasNs) sb.AppendLine("}");
             return sb.ToString();
+        }
+
+        // Emit one partial method body. Supports void return
+        // and primitive (canon-ABI flat) return types; primitive
+        // (canon-ABI flat) parameter types are boxed and passed
+        // verbatim to InvokeCoreAsyncLift. Non-primitive types
+        // emit a `#error` directive that fires at consumer
+        // compile time — points at the partial method that
+        // needs hand-marshaling until the typed lift/lower
+        // codegen extension lands.
+        private static void EmitExportMethod(
+            StringBuilder sb, ExportMethod ex)
+        {
+            // Validate types up front so the error message
+            // identifies the offending parameter / return type.
+            foreach (var p in ex.Parameters)
+            {
+                if (!IsPrimitive(p.Type))
+                {
+                    sb.Append("        #error ");
+                    sb.Append(
+                        $"[AsyncExport] parameter '{p.Name}' on " +
+                        $"{ex.MethodName} has unsupported type " +
+                        $"'{p.Type}'. The MVP generator marshals " +
+                        "only canon-ABI primitive (int/uint/long/" +
+                        "ulong/short/ushort/byte/sbyte/bool/float/" +
+                        "double) param + return types. Hand-write " +
+                        "this method until the string/list/" +
+                        "aggregate lift-lower codegen ships.");
+                    sb.AppendLine();
+                    return;
+                }
+            }
+            if (ex.ReturnType != null && !IsPrimitive(ex.ReturnType))
+            {
+                sb.Append("        #error ");
+                sb.Append(
+                    $"[AsyncExport] return type '{ex.ReturnType}' " +
+                    $"on {ex.MethodName} is not a canon-ABI " +
+                    "primitive. Hand-write this method until the " +
+                    "string/list/aggregate lift-lower codegen " +
+                    "ships.");
+                sb.AppendLine();
+                return;
+            }
+
+            sb.Append("        ");
+            sb.Append(ex.Accessibility);
+            sb.Append(" partial ");
+            sb.Append(ex.ReturnType ?? "void");
+            sb.Append(' ');
+            sb.Append(ex.MethodName);
+            sb.Append('(');
+            for (int i = 0; i < ex.Parameters.Length; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(ex.Parameters[i].Type);
+                sb.Append(' ');
+                sb.Append(ex.Parameters[i].Name);
+            }
+            sb.AppendLine(")");
+            sb.AppendLine("        {");
+
+            // The args array dance: InvokeCoreAsyncLift takes
+            // `params object?[]`. Primitive args box. For zero
+            // args we pass Array.Empty<object?>() to avoid an
+            // allocation on every call.
+            string argsExpr;
+            if (ex.Parameters.Length == 0)
+            {
+                argsExpr = "System.Array.Empty<object?>()";
+            }
+            else
+            {
+                var argsBuilder = new StringBuilder();
+                argsBuilder.Append("new object?[] { ");
+                for (int i = 0; i < ex.Parameters.Length; i++)
+                {
+                    if (i > 0) argsBuilder.Append(", ");
+                    argsBuilder.Append(ex.Parameters[i].Name);
+                }
+                argsBuilder.Append(" }");
+                argsExpr = argsBuilder.ToString();
+            }
+
+            if (ex.ReturnType == null)
+            {
+                sb.Append("            _instance.InvokeCoreAsyncLift(\"");
+                sb.Append(EscapeStringLiteral(ex.ExportName));
+                sb.Append("\", ");
+                sb.Append(argsExpr);
+                sb.AppendLine(");");
+            }
+            else
+            {
+                sb.Append("            var __result = ");
+                sb.Append("_instance.InvokeCoreAsyncLift(\"");
+                sb.Append(EscapeStringLiteral(ex.ExportName));
+                sb.Append("\", ");
+                sb.Append(argsExpr);
+                sb.AppendLine(");");
+                // task.return delivers the boxed primitive; the
+                // canon-async dispatcher's TaskCompletionSource<object?>
+                // stores it as-is so a direct cast is sound.
+                sb.Append("            return (");
+                sb.Append(ex.ReturnType);
+                sb.AppendLine(")__result!;");
+            }
+            sb.AppendLine("        }");
         }
 
         private static string EscapeStringLiteral(string value)
