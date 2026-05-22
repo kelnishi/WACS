@@ -233,6 +233,30 @@ namespace Wacs.ComponentModel.Test
         internal partial Contact Read(int id);
     }
 
+    /// <summary>Heterogeneous-element lists: list&lt;string&gt;
+    /// (`string[]`) and list&lt;record&gt; (`Point[]` where
+    /// `Point` is a [WitRecord] of primitives only). Same
+    /// flat (ptr, len) shape as a primitive array, but
+    /// lower / lift run per-element loops because each
+    /// element body is a separate allocation (string) or
+    /// laid out at the record's canon-ABI offsets
+    /// (record).</summary>
+    [AsyncComponentHarness]
+    internal partial class ListShapeHarnessFixture
+    {
+        [SyncExport("join_strings")]
+        internal partial string JoinStrings(string[] parts);
+
+        [SyncExport("split_string")]
+        internal partial string[] SplitString(string text);
+
+        [SyncExport("send_points")]
+        internal partial int SendPoints(Point[] points);
+
+        [SyncExport("get_points")]
+        internal partial Point[] GetPoints(int count);
+    }
+
     /// <summary>Primitive arrays beyond byte[] — canon-ABI
     /// list&lt;T&gt; for T ∈ {i32, i64, f32, f64, u16, bool}.
     /// Same flat (ptr, len) shape as byte[]; lower/lift
@@ -816,6 +840,111 @@ namespace Wacs.ComponentModel.Test
                     | BindingFlags.Instance));
             Assert.NotNull(typeof(NestedRecordHarnessFixture)
                 .GetField("_post_Read",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+        }
+
+        [Fact]
+        public void Generator_emits_list_shape_export_signatures()
+        {
+            // string JoinStrings(string[] parts)
+            // - Param flat: (ptr, len) = 2 ints
+            // - Return: string (retArea ptr) = 1 int
+            // - Func<int, int, int>
+            var join = typeof(ListShapeHarnessFixture)
+                .GetMethod("JoinStrings",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(join);
+            Assert.Equal(typeof(string[]),
+                join!.GetParameters()[0].ParameterType);
+            Assert.Equal(typeof(string), join.ReturnType);
+            var joinInv = typeof(ListShapeHarnessFixture)
+                .GetField("_invoker_JoinStrings",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(joinInv);
+            Assert.Equal(typeof(Func<int, int, int>),
+                joinInv!.FieldType);
+
+            // string[] SplitString(string text)
+            // - Param string flat: (ptr, len) = 2 ints
+            // - Return list retArea = 1 int
+            // - Func<int, int, int>
+            var split = typeof(ListShapeHarnessFixture)
+                .GetMethod("SplitString",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(split);
+            Assert.Equal(typeof(string[]), split!.ReturnType);
+            var splitInv = typeof(ListShapeHarnessFixture)
+                .GetField("_invoker_SplitString",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(splitInv);
+            Assert.Equal(typeof(Func<int, int, int>),
+                splitInv!.FieldType);
+
+            // int SendPoints(Point[] points)
+            // - Param Point[] flat: (ptr, len) = 2 ints
+            // - Return int = 1 int
+            // - Func<int, int, int>
+            var sp = typeof(ListShapeHarnessFixture)
+                .GetMethod("SendPoints",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(sp);
+            Assert.Equal(typeof(Point[]),
+                sp!.GetParameters()[0].ParameterType);
+            Assert.Equal(typeof(int), sp.ReturnType);
+            var spInv = typeof(ListShapeHarnessFixture)
+                .GetField("_invoker_SendPoints",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(spInv);
+            Assert.Equal(typeof(Func<int, int, int>),
+                spInv!.FieldType);
+
+            // Point[] GetPoints(int count)
+            // - Param int = 1 slot
+            // - Return retArea (ptr, len) = 1 int
+            // - Func<int, int>
+            var gp = typeof(ListShapeHarnessFixture)
+                .GetMethod("GetPoints",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(gp);
+            Assert.Equal(typeof(Point[]), gp!.ReturnType);
+            var gpInv = typeof(ListShapeHarnessFixture)
+                .GetField("_invoker_GetPoints",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(gpInv);
+            Assert.Equal(typeof(Func<int, int>),
+                gpInv!.FieldType);
+
+            // memory + realloc both needed. post for the
+            // three returns that carry heap content
+            // (JoinStrings returns string; SplitString
+            // returns string[]; GetPoints returns Point[]).
+            Assert.NotNull(typeof(ListShapeHarnessFixture)
+                .GetField("_memory",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+            Assert.NotNull(typeof(ListShapeHarnessFixture)
+                .GetField("_reallocInvoke",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+            Assert.NotNull(typeof(ListShapeHarnessFixture)
+                .GetField("_post_JoinStrings",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+            Assert.NotNull(typeof(ListShapeHarnessFixture)
+                .GetField("_post_SplitString",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+            Assert.NotNull(typeof(ListShapeHarnessFixture)
+                .GetField("_post_GetPoints",
                     BindingFlags.NonPublic
                     | BindingFlags.Instance));
         }

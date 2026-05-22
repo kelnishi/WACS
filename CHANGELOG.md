@@ -1,5 +1,88 @@
 # Changelog
 
+## WACS.ComponentModel.Async.SourceGen 0.4.13 — list<string> and list<record>
+
+Canon-ABI `list<string>` (`string[]`) and `list<record>`
+(`R[]` where R is a primitive-only `[WitRecord]`) are now
+supported on params, returns, and as fields of records /
+tuples. Same flat (ptr, len) shape as a primitive array,
+but lower / lift run per-element loops:
+* list<string>: each element body is a separate
+  cabi_realloc allocation lowered via
+  StringCoding.LowerUtf8 / lifted via LiftUtf8.
+* list<record>: each element occupies
+  `RecordSize(rec)` bytes at `i * RecordSize(rec)` from
+  the outer ptr; fields written/read per the record's
+  canon-ABI offsets.
+
+* **Type predicates.** New `IsListType(fqType)` matches
+  `string[]` and `R[]` for primitive-only `[WitRecord]` R
+  (and explicitly excludes `IsPrimitiveArray` to keep the
+  two paths cleanly split). New `IsRecordOfPrimitives`
+  helper gates the record-list shape; lists of records
+  with strings / aggregates / nested records still land
+  later.
+* **Size / align / slot.** `FieldSize`, `FieldAlign`,
+  `FieldSlotCount` recognize `IsListType` and report the
+  same 8 / 4 / 2 as `IsPtrLenAggregate`. The element-
+  memory size is `FieldSize(elem)`, used by the lower /
+  lift loops to compute per-element offsets.
+* **Param lower.** New `EmitListLower` emits the outer
+  `cabi_realloc(0, 0, elemAlign, len * elemSize)` and a
+  `for (int __i...)` loop. `EmitListElementLower`
+  dispatches per element type — string element uses
+  `StringCoding.LowerUtf8` + two `WriteI32LE` for the
+  (ptr, len) slot; record element walks
+  `rec.Fields` and emits a `WriteI32LE` / `WriteI64LE` /
+  etc. for each field via the new
+  `EmitWriteMemoryStatement` helper.
+* **Return lift.** New `EmitSyncListReturnLift` reads
+  (ptr, len) from the retArea, runs
+  `EmitListLiftStatements` into a `__result` local, then
+  invokes cabi_post. `EmitListFieldLiftLocal` mirrors
+  the pattern for list-typed FIELDS of records / tuples
+  — binds `<localName>` to the lifted array for the
+  outer aggregate's property-initializer.
+  `EmitListElementLift` dispatches: string element →
+  read (ptr, len) + `StringCoding.LiftUtf8`; record
+  element → property-initializer of each field via
+  `ReadMemoryExprForType`.
+* **Dispatch.** The top-level param lower /
+  return-lift dispatch, `EmitAggregateFieldLower`,
+  `EmitFieldLiftLocalsIfNeeded`, `FieldLiftExpression`,
+  `EmitFlatArgsForField`, `AppendFlatFieldTypes`,
+  `AppendFlatParamTypes`, `BuildFlatInvokerTypeArgs`,
+  `CountFlatSlots`, `UsesRetArea`,
+  `FieldContainsPtrLen`, `AnyPtrLenAggregate`, and
+  `needsPost` gating all pick up `IsListType` alongside
+  the existing `IsPtrLenAggregate` branches.
+* **`IsPtrLenAggregate` stays narrow** (string +
+  primitive array only) so option<list<...>> /
+  result<list<...>, ...> remain rejected — those arms
+  need a single-expression lift, which a list can't
+  provide.
+* New `EmitWriteMemoryStatement` helper covers the
+  primitive-write side (`WriteU8`, `WriteI16LE`,
+  `WriteI32LE`, `WriteI64LE`, `WriteF32LE`,
+  `WriteF64LE`) with `(byte)`, `(short)`, `(int)`,
+  `(long)` casts for unsigned variants. Used by
+  `list<record>` lower.
+* New generator test:
+  `Generator_emits_list_shape_export_signatures` pins
+  `string JoinStrings(string[])`, `string[] SplitString(string)`,
+  `int SendPoints(Point[])`, `Point[] GetPoints(int)` —
+  all `Func<int, int, int>` or `Func<int, int>` flat
+  signatures with memory + realloc + per-method
+  cabi_post fields. 21/21 generator integration tests,
+  660/660 across Wacs.ComponentModel.Test. Hello-spike
+  passes unchanged.
+
+**Still punted:** mixed primitive vs ptr/len result
+arms; list<record> where the record carries strings /
+nested aggregates / nested records; list<list<X>> for
+arbitrary X; option<list<...>>; result<list<...>, ...>;
+cyclic record refs.
+
 ## WACS.ComponentModel.Async.SourceGen 0.4.12, Harness.Runtime 0.7.2 — list<T> for non-u8 element types
 
 Canon-ABI `list<T>` is now supported for any C# primitive

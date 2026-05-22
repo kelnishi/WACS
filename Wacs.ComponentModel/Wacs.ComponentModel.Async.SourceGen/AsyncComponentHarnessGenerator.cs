@@ -296,8 +296,45 @@ namespace Wacs.ComponentModel.Async.SourceGen
         // different encodings. Treating them uniformly in the
         // flat-signature computation simplifies the
         // generic-args build.
+        //
+        // NOTE: Heterogeneous-element lists (list<string>,
+        // list<record>) are NOT in this predicate — those
+        // have the same flat shape but their lift is
+        // multi-statement (a per-element loop) so they can't
+        // ride the option / result single-expression arm lift
+        // paths. They go through `IsListType` instead.
         private static bool IsPtrLenAggregate(string fqType) =>
             IsString(fqType) || IsPrimitiveArray(fqType);
+
+        // Canon-ABI list<T> where T's lift is multi-statement
+        // — list<string> (`string[]`) and list<record>
+        // (`R[]` for a primitive-only [WitRecord] R).
+        // Same flat (ptr, len) handle as IsPtrLenAggregate
+        // shapes; codegen branches on the element type.
+        private static bool IsListType(string fqType)
+        {
+            if (!fqType.EndsWith("[]",
+                    StringComparison.Ordinal))
+                return false;
+            if (IsPrimitiveArray(fqType)) return false;
+            string elem = ArrayElementType(fqType);
+            if (IsString(elem)) return true;
+            if (TryLookupRecord(elem, out var rec))
+                return IsRecordOfPrimitives(rec);
+            return false;
+        }
+
+        // True iff every field of `rec` is a canon-ABI
+        // primitive. Limits list<record> support to the
+        // simplest record shape; lists of records carrying
+        // strings / nested aggregates land later.
+        private static bool IsRecordOfPrimitives(
+            RecordLayout rec)
+        {
+            foreach (var f in rec.Fields)
+                if (!IsPrimitive(f.Type)) return false;
+            return true;
+        }
 
         // Canon-ABI option<T> for primitive T. C# representation
         // is Nullable<T> — `int?`, `bool?`, `long?`, etc.
@@ -566,6 +603,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
         private static bool IsSupportedFieldType(string fqType)
             => IsPrimitive(fqType)
                 || IsPtrLenAggregate(fqType)
+                || IsListType(fqType)
                 || IsOption(fqType)
                 || IsSupportedResult(fqType)
                 || IsRecord(fqType);
@@ -653,7 +691,8 @@ namespace Wacs.ComponentModel.Async.SourceGen
         // result<TOk, TErr>: align_to(1, maxAlign) + maxSize.
         private static int FieldSize(string fqType)
         {
-            if (IsPtrLenAggregate(fqType)) return 8;
+            if (IsPtrLenAggregate(fqType)
+                || IsListType(fqType)) return 8;
             if (IsOption(fqType))
             {
                 string innerT = InnerOfNullable(fqType);
@@ -675,7 +714,8 @@ namespace Wacs.ComponentModel.Async.SourceGen
 
         private static int FieldAlign(string fqType)
         {
-            if (IsPtrLenAggregate(fqType)) return 4;
+            if (IsPtrLenAggregate(fqType)
+                || IsListType(fqType)) return 4;
             if (IsOption(fqType))
             {
                 string innerT = InnerOfNullable(fqType);
@@ -701,7 +741,8 @@ namespace Wacs.ComponentModel.Async.SourceGen
         // nested record is the sum of its fields' slots.
         private static int FieldSlotCount(string fqType)
         {
-            if (IsPtrLenAggregate(fqType)) return 2;
+            if (IsPtrLenAggregate(fqType)
+                || IsListType(fqType)) return 2;
             if (IsOption(fqType))
             {
                 // option<T> flat: disc + inner-flat-slots.
@@ -848,6 +889,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
             IsPrimitive(fqType)
             || IsString(fqType)
             || IsPrimitiveArray(fqType)
+            || IsListType(fqType)
             || IsOption(fqType)
             || IsSupportedResult(fqType)
             || IsSupportedTuple(fqType)
@@ -858,6 +900,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
             || IsPrimitive(fqType)
             || IsString(fqType)
             || IsPrimitiveArray(fqType)
+            || IsListType(fqType)
             || IsOption(fqType)
             || IsSupportedResult(fqType)
             || IsSupportedTuple(fqType)
@@ -1329,6 +1372,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 if (ex.ReturnType == null) continue;
                 bool needsPost =
                     IsPtrLenAggregate(ex.ReturnType)
+                    || IsListType(ex.ReturnType)
                     || ((IsTuple(ex.ReturnType)
                             || TryLookupRecord(ex.ReturnType,
                                 out _))
@@ -1601,6 +1645,13 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     EmitPrimitiveArrayLower(sb, p.Type,
                         "__" + p.Name, p.Name);
                 }
+                else if (IsListType(p.Type))
+                {
+                    // list<string> / list<record>: outer
+                    // alloc then per-element write loop.
+                    EmitListLower(sb, p.Type,
+                        "__" + p.Name, p.Name);
+                }
                 else if (IsOption(p.Type))
                 {
                     // option<T> param lowering: shared helper
@@ -1675,6 +1726,8 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     EmitSyncStringReturnLift(sb, ex);
                 else if (IsPrimitiveArray(ex.ReturnType))
                     EmitSyncPrimitiveArrayReturnLift(sb, ex);
+                else if (IsListType(ex.ReturnType))
+                    EmitSyncListReturnLift(sb, ex);
                 else if (IsOption(ex.ReturnType))
                     EmitSyncOptionReturnLift(sb, ex);
                 else if (IsWitResult(ex.ReturnType))
@@ -1775,6 +1828,9 @@ namespace Wacs.ComponentModel.Async.SourceGen
             if (IsPtrLenAggregate(fieldType))
                 EmitAggregateFieldLiftLocal(sb, fieldType,
                     localName, offset);
+            else if (IsListType(fieldType))
+                EmitListFieldLiftLocal(sb, fieldType,
+                    localName, offset);
             else if (IsOption(fieldType))
                 EmitOptionFieldLiftLocal(sb, fieldType,
                     localName, offset);
@@ -1786,6 +1842,33 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     localName, offset);
         }
 
+        // Lift a list<string> / list<record> field at the
+        // given retArea offset into a `<fieldType> localName`
+        // C# local. Reads (ptr, len) from `__raw + offset`,
+        // then runs the per-element loop via
+        // EmitListLiftStatements.
+        private static void EmitListFieldLiftLocal(
+            StringBuilder sb, string fieldType,
+            string localName, int offset)
+        {
+            sb.Append("            int ");
+            sb.Append(localName);
+            sb.Append("_ptr = global::Wacs.ComponentModel" +
+                ".Harness.MemoryHelpers.ReadI32LE(_memory!, " +
+                "__raw + ");
+            sb.Append(offset);
+            sb.AppendLine(");");
+            sb.Append("            int ");
+            sb.Append(localName);
+            sb.Append("_len = global::Wacs.ComponentModel" +
+                ".Harness.MemoryHelpers.ReadI32LE(_memory!, " +
+                "__raw + ");
+            sb.Append(offset + 4);
+            sb.AppendLine(");");
+            EmitListLiftStatements(sb, fieldType, localName,
+                localName + "_ptr", localName + "_len");
+        }
+
         // Build the C# expression that lifts a field of
         // `fieldType` at `offset` within the current retArea.
         // Primitives are read inline; other shapes refer to a
@@ -1794,6 +1877,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
             string fieldType, string localName, int offset)
         {
             if (IsPtrLenAggregate(fieldType)
+                || IsListType(fieldType)
                 || IsOption(fieldType)
                 || IsWitResult(fieldType)
                 || TryLookupRecord(fieldType, out _))
@@ -2456,6 +2540,77 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 ", " + offArg + ")";
         }
 
+        // Emit a `MemoryHelpers.Write*(memArg, offArg,
+        // <valueExpr cast as needed>);` statement at the
+        // current indentation. Handles the same primitive
+        // type set as `ReadMemoryExprForType` — used by
+        // list<record> lower to write each field of each
+        // element at its canon-ABI memory offset.
+        private static void EmitWriteMemoryStatement(
+            StringBuilder sb, string fqType,
+            string memArg, string offArg, string valueExpr,
+            string indent)
+        {
+            string call;
+            string cast = "";
+            switch (fqType)
+            {
+                case "byte": case "System.Byte":
+                    call = "WriteU8"; break;
+                case "sbyte": case "System.SByte":
+                    call = "WriteU8"; cast = "(byte)"; break;
+                case "bool": case "System.Boolean":
+                    // Encode bool as 0/1 byte.
+                    sb.Append(indent);
+                    sb.Append("global::Wacs.ComponentModel" +
+                        ".Harness.MemoryHelpers.WriteU8(");
+                    sb.Append(memArg);
+                    sb.Append(", ");
+                    sb.Append(offArg);
+                    sb.Append(", (byte)((");
+                    sb.Append(valueExpr);
+                    sb.AppendLine(") ? 1 : 0));");
+                    return;
+                case "short": case "System.Int16":
+                    call = "WriteI16LE"; break;
+                case "ushort": case "System.UInt16":
+                    call = "WriteI16LE"; cast = "(short)"; break;
+                case "int": case "System.Int32":
+                    call = "WriteI32LE"; break;
+                case "uint": case "System.UInt32":
+                    call = "WriteI32LE"; cast = "(int)"; break;
+                case "long": case "System.Int64":
+                    call = "WriteI64LE"; break;
+                case "ulong": case "System.UInt64":
+                    call = "WriteI64LE"; cast = "(long)"; break;
+                case "float": case "System.Single":
+                    call = "WriteF32LE"; break;
+                case "double": case "System.Double":
+                    call = "WriteF64LE"; break;
+                default:
+                    // Unsupported primitive — emit a no-op so
+                    // builds still compile rather than crash
+                    // the generator.
+                    sb.Append(indent);
+                    sb.Append("/* unsupported write: ");
+                    sb.Append(fqType);
+                    sb.AppendLine(" */");
+                    return;
+            }
+            sb.Append(indent);
+            sb.Append("global::Wacs.ComponentModel.Harness" +
+                ".MemoryHelpers.");
+            sb.Append(call);
+            sb.Append('(');
+            sb.Append(memArg);
+            sb.Append(", ");
+            sb.Append(offArg);
+            sb.Append(", ");
+            sb.Append(cast);
+            sb.Append(valueExpr);
+            sb.AppendLine(");");
+        }
+
         // byte[] return lift: read (ptr, len) from retArea,
         // copy memory bytes into a fresh byte[], call
         // cabi_post_X to release.
@@ -2488,6 +2643,26 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 sb.Append(elemSize);
             }
             sb.AppendLine(");");
+            EmitCabiPostInvoke(sb, ex);
+            sb.AppendLine("            return __result;");
+        }
+
+        // list<string> / list<record> top-level return lift.
+        // Read (ptr, len) from retArea, run the per-element
+        // loop into a `__result` local, then cabi_post.
+        private static void EmitSyncListReturnLift(
+            StringBuilder sb, ExportMethod ex)
+        {
+            sb.AppendLine(
+                "            int __outPtr = global::Wacs" +
+                ".ComponentModel.Harness.MemoryHelpers" +
+                ".ReadI32LE(_memory!, __raw);");
+            sb.AppendLine(
+                "            int __outLen = global::Wacs" +
+                ".ComponentModel.Harness.MemoryHelpers" +
+                ".ReadI32LE(_memory!, __raw + 4);");
+            EmitListLiftStatements(sb, ex.ReturnType!,
+                "__result", "__outPtr", "__outLen");
             EmitCabiPostInvoke(sb, ex);
             sb.AppendLine("            return __result;");
         }
@@ -2616,6 +2791,11 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 EmitPrimitiveArrayLower(sb, fieldType,
                     baseName, sourceExpr);
             }
+            else if (IsListType(fieldType))
+            {
+                EmitListLower(sb, fieldType,
+                    baseName, sourceExpr);
+            }
             else if (IsOption(fieldType))
             {
                 // option<T> field — shared helper handles
@@ -2664,7 +2844,8 @@ namespace Wacs.ComponentModel.Async.SourceGen
             {
                 if (!first) sb.Append(", ");
                 first = false;
-                if (IsPtrLenAggregate(p.Type))
+                if (IsPtrLenAggregate(p.Type)
+                    || IsListType(p.Type))
                 {
                     sb.Append("__");
                     sb.Append(p.Name);
@@ -2885,6 +3066,183 @@ namespace Wacs.ComponentModel.Async.SourceGen
             sb.AppendLine(");");
         }
 
+        // list<string> / list<record> lower: allocate the
+        // outer array, then per-element write the element
+        // body into wasm memory at the element's canon-ABI
+        // memory offset (i * FieldSize(elem)).
+        //
+        // Naming convention: the outer (ptr, len) locals are
+        // `<baseName>_ptr` / `<baseName>_len`. Per-element
+        // locals (offset, element-ptr/len, etc.) are scoped
+        // inside the for-loop block — safe to reuse short
+        // names across multiple list lowerings.
+        private static void EmitListLower(
+            StringBuilder sb, string listType,
+            string baseName, string sourceExpr)
+        {
+            string elem = ArrayElementType(listType);
+            int elemSize = FieldSize(elem);
+            int elemAlign = FieldAlign(elem);
+            sb.Append("            int ");
+            sb.Append(baseName);
+            sb.Append("_len = ");
+            sb.Append(sourceExpr);
+            sb.AppendLine(".Length;");
+            sb.Append("            int ");
+            sb.Append(baseName);
+            sb.Append("_ptr = ");
+            sb.Append(baseName);
+            sb.Append("_len == 0 ? 0 : _reallocInvoke!(0, 0, ");
+            sb.Append(elemAlign);
+            sb.Append(", ");
+            sb.Append(baseName);
+            sb.Append("_len * ");
+            sb.Append(elemSize);
+            sb.AppendLine(");");
+            sb.Append("            for (int __i = 0; __i < ");
+            sb.Append(baseName);
+            sb.AppendLine("_len; __i++)");
+            sb.AppendLine("            {");
+            sb.Append("                int __elemOff = ");
+            sb.Append(baseName);
+            sb.Append("_ptr + __i * ");
+            sb.Append(elemSize);
+            sb.AppendLine(";");
+            EmitListElementLower(sb, elem,
+                sourceExpr + "[__i]", "__elemOff");
+            sb.AppendLine("            }");
+        }
+
+        // Write one list element at the given memory offset.
+        // - string element: lower via StringCoding.LowerUtf8
+        //   into local (ptr, len) and write at +0 / +4.
+        // - record element (primitive-only fields): write
+        //   each field at its canon-ABI offset within the
+        //   element using EmitWriteMemoryStatement.
+        private static void EmitListElementLower(
+            StringBuilder sb, string elemType,
+            string valueExpr, string offsetExpr)
+        {
+            if (IsString(elemType))
+            {
+                sb.Append("                global::Wacs" +
+                    ".ComponentModel.Harness.StringCoding" +
+                    ".LowerUtf8(_memory!, ");
+                sb.Append(valueExpr);
+                sb.AppendLine(", _reallocInvoke!, " +
+                    "out int __elemPtr, " +
+                    "out int __elemLen);");
+                sb.Append("                global::Wacs" +
+                    ".ComponentModel.Harness.MemoryHelpers" +
+                    ".WriteI32LE(_memory!, ");
+                sb.Append(offsetExpr);
+                sb.AppendLine(", __elemPtr);");
+                sb.Append("                global::Wacs" +
+                    ".ComponentModel.Harness.MemoryHelpers" +
+                    ".WriteI32LE(_memory!, ");
+                sb.Append(offsetExpr);
+                sb.AppendLine(" + 4, __elemLen);");
+                return;
+            }
+            if (TryLookupRecord(elemType, out var rec))
+            {
+                foreach (var f in rec.Fields)
+                {
+                    EmitWriteMemoryStatement(sb, f.Type,
+                        "_memory!",
+                        offsetExpr + " + " + f.Offset,
+                        valueExpr + "." + f.Name,
+                        "                ");
+                }
+            }
+        }
+
+        // list<string> / list<record> lift: read each element
+        // at i * FieldSize(elem), decode, store into a
+        // freshly-allocated C# array. Binds a local of name
+        // `<resultLocal>` holding the lifted array. Caller
+        // is responsible for the cabi_post call.
+        private static void EmitListLiftStatements(
+            StringBuilder sb, string listType,
+            string resultLocal,
+            string ptrLocal, string lenLocal)
+        {
+            string elem = ArrayElementType(listType);
+            int elemSize = FieldSize(elem);
+            sb.Append("            ");
+            sb.Append(elem);
+            sb.Append("[] ");
+            sb.Append(resultLocal);
+            sb.Append(" = new ");
+            sb.Append(elem);
+            sb.Append('[');
+            sb.Append(lenLocal);
+            sb.AppendLine("];");
+            sb.Append("            for (int __i = 0; __i < ");
+            sb.Append(lenLocal);
+            sb.AppendLine("; __i++)");
+            sb.AppendLine("            {");
+            sb.Append("                int __elemOff = ");
+            sb.Append(ptrLocal);
+            sb.Append(" + __i * ");
+            sb.Append(elemSize);
+            sb.AppendLine(";");
+            EmitListElementLift(sb, elem,
+                resultLocal + "[__i]", "__elemOff");
+            sb.AppendLine("            }");
+        }
+
+        // Read one list element at the given memory offset
+        // and assign into `targetExpr`.
+        // - string element: read (ptr, len), LiftUtf8.
+        // - record element (primitive-only fields): read
+        //   each field and construct via property
+        //   initializer.
+        private static void EmitListElementLift(
+            StringBuilder sb, string elemType,
+            string targetExpr, string offsetExpr)
+        {
+            if (IsString(elemType))
+            {
+                sb.Append("                int __elemPtr = " +
+                    "global::Wacs.ComponentModel.Harness" +
+                    ".MemoryHelpers.ReadI32LE(_memory!, ");
+                sb.Append(offsetExpr);
+                sb.AppendLine(");");
+                sb.Append("                int __elemLen = " +
+                    "global::Wacs.ComponentModel.Harness" +
+                    ".MemoryHelpers.ReadI32LE(_memory!, ");
+                sb.Append(offsetExpr);
+                sb.AppendLine(" + 4);");
+                sb.Append("                ");
+                sb.Append(targetExpr);
+                sb.AppendLine(" = global::Wacs.ComponentModel" +
+                    ".Harness.StringCoding.LiftUtf8(_memory!, " +
+                    "__elemPtr, __elemLen);");
+                return;
+            }
+            if (TryLookupRecord(elemType, out var rec))
+            {
+                sb.Append("                ");
+                sb.Append(targetExpr);
+                sb.Append(" = new ");
+                sb.Append(elemType);
+                sb.Append(" { ");
+                bool first = true;
+                foreach (var f in rec.Fields)
+                {
+                    if (!first) sb.Append(", ");
+                    sb.Append(f.Name);
+                    sb.Append(" = ");
+                    sb.Append(ReadMemoryExprForType(f.Type,
+                        "_memory!",
+                        offsetExpr + " + " + f.Offset));
+                    first = false;
+                }
+                sb.AppendLine(" };");
+            }
+        }
+
         // C# expression that lifts a string / primitive
         // array from existing ptr / len locals. Single
         // expression form — string uses
@@ -3045,7 +3403,8 @@ namespace Wacs.ComponentModel.Async.SourceGen
         private static void EmitFlatArgsForField(
             StringBuilder sb, string fieldType, string baseName)
         {
-            if (IsPtrLenAggregate(fieldType))
+            if (IsPtrLenAggregate(fieldType)
+                || IsListType(fieldType))
             {
                 sb.Append(baseName);
                 sb.Append("_ptr, ");
@@ -3115,10 +3474,12 @@ namespace Wacs.ComponentModel.Async.SourceGen
         private static bool AnyPtrLenAggregate(ExportMethod ex)
         {
             if (ex.ReturnType != null
-                && IsPtrLenAggregate(ex.ReturnType))
+                && (IsPtrLenAggregate(ex.ReturnType)
+                    || IsListType(ex.ReturnType)))
                 return true;
             foreach (var p in ex.Parameters)
-                if (IsPtrLenAggregate(p.Type)) return true;
+                if (IsPtrLenAggregate(p.Type)
+                    || IsListType(p.Type)) return true;
             return false;
         }
 
@@ -3155,11 +3516,15 @@ namespace Wacs.ComponentModel.Async.SourceGen
 
         // A field (or tuple element) contains a ptr/len when
         // it IS one, recursively when nested records / tuples
-        // contain one, when a result arm is ptr/len, or when
-        // an option's inner is ptr/len.
+        // contain one, when a result arm is ptr/len, when
+        // an option's inner is ptr/len, or when the field is
+        // a list (the outer ptr is heap-allocated and the
+        // inner element bodies — for list<string>,
+        // list<byte[]> — are too).
         private static bool FieldContainsPtrLen(string fqType)
         {
             if (IsPtrLenAggregate(fqType)) return true;
+            if (IsListType(fqType)) return true;
             if (IsOption(fqType))
                 return IsPtrLenAggregate(
                     InnerOfNullable(fqType));
@@ -3189,7 +3554,8 @@ namespace Wacs.ComponentModel.Async.SourceGen
             bool first = true;
             foreach (var p in ex.Parameters)
             {
-                if (IsPtrLenAggregate(p.Type))
+                if (IsPtrLenAggregate(p.Type)
+                    || IsListType(p.Type))
                 {
                     if (!first) sb.Append(", ");
                     sb.Append("int, int");
@@ -3292,6 +3658,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
             foreach (var p in ex.Parameters)
             {
                 if (IsPtrLenAggregate(p.Type)) slots += 2;
+                else if (IsListType(p.Type)) slots += 2;
                 else if (IsOption(p.Type))
                 {
                     string innerT = InnerOfNullable(p.Type);
@@ -3338,6 +3705,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
         private static bool UsesRetArea(string fqType)
         {
             if (IsPtrLenAggregate(fqType)) return true;
+            if (IsListType(fqType)) return true;
             if (IsOption(fqType)) return true;
             if (IsWitResult(fqType))
             {
@@ -3436,7 +3804,8 @@ namespace Wacs.ComponentModel.Async.SourceGen
             bool first = true;
             foreach (var p in ex.Parameters)
             {
-                if (IsPtrLenAggregate(p.Type))
+                if (IsPtrLenAggregate(p.Type)
+                    || IsListType(p.Type))
                 {
                     if (!first) sb.Append(", ");
                     sb.Append("int, int");
@@ -3514,7 +3883,8 @@ namespace Wacs.ComponentModel.Async.SourceGen
         private static void AppendFlatFieldTypes(
             StringBuilder sb, string fieldType)
         {
-            if (IsPtrLenAggregate(fieldType))
+            if (IsPtrLenAggregate(fieldType)
+                || IsListType(fieldType))
             {
                 sb.Append("int, int");
             }
