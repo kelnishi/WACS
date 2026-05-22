@@ -45,6 +45,8 @@ namespace Wacs.ComponentModel.Async.SourceGen
             "Wacs.ComponentModel.Async.AsyncComponentHarnessAttribute";
         private const string ExportAttributeFqn =
             "Wacs.ComponentModel.Async.AsyncExportAttribute";
+        private const string SyncExportAttributeFqn =
+            "Wacs.ComponentModel.Async.SyncExportAttribute";
         private const string ComponentInstanceFqn =
             "Wacs.ComponentModel.Runtime.ComponentInstance";
 
@@ -143,6 +145,8 @@ namespace Wacs.ComponentModel.Async.SourceGen
             }
         }
 
+        private enum ExportKind { Async, Sync }
+
         private readonly struct ExportMethod
         {
             public string MethodName { get; }
@@ -150,17 +154,20 @@ namespace Wacs.ComponentModel.Async.SourceGen
             public string Accessibility { get; }
             public ImmutableArray<ExportParam> Parameters { get; }
             public string? ReturnType { get; }
+            public ExportKind Kind { get; }
             public ExportMethod(
                 string methodName, string exportName,
                 string accessibility,
                 ImmutableArray<ExportParam> parameters,
-                string? returnType)
+                string? returnType,
+                ExportKind kind)
             {
                 MethodName = methodName;
                 ExportName = exportName;
                 Accessibility = accessibility;
                 Parameters = parameters;
                 ReturnType = returnType;
+                Kind = kind;
             }
         }
 
@@ -203,6 +210,9 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 HarnessAttributeFqn);
             var exportAttr = compilation.GetTypeByMetadataName(
                 ExportAttributeFqn);
+            var syncExportAttr =
+                compilation.GetTypeByMetadataName(
+                    SyncExportAttributeFqn);
             if (harnessAttr == null || exportAttr == null)
                 return new ScanResult(
                     ImmutableArray<HarnessClass>.Empty,
@@ -246,14 +256,20 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 foreach (var member in type.GetMembers())
                 {
                     if (member is not IMethodSymbol method) continue;
-                    bool hasExportAttr = false;
+                    ExportKind kind = ExportKind.Async;
                     string? exportName = null;
+                    bool found = false;
                     foreach (var attr in method.GetAttributes())
                     {
-                        if (!SymbolEqualityComparer.Default.Equals(
-                                attr.AttributeClass, exportAttr))
-                            continue;
-                        hasExportAttr = true;
+                        bool isAsync = SymbolEqualityComparer.Default
+                            .Equals(attr.AttributeClass, exportAttr);
+                        bool isSync = syncExportAttr != null
+                            && SymbolEqualityComparer.Default.Equals(
+                                attr.AttributeClass, syncExportAttr);
+                        if (!isAsync && !isSync) continue;
+                        found = true;
+                        kind = isSync
+                            ? ExportKind.Sync : ExportKind.Async;
                         if (attr.ConstructorArguments.Length > 0
                             && attr.ConstructorArguments[0].Value
                                 is string en
@@ -263,7 +279,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
                         }
                         break;
                     }
-                    if (!hasExportAttr) continue;
+                    if (!found) continue;
                     if (exportName == null) continue;
 
                     // Diagnostic: method must be a partial
@@ -296,7 +312,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     exports.Add(new ExportMethod(
                         method.Name, exportName,
                         AccessibilityKeyword(method.DeclaredAccessibility),
-                        parameters, returnType));
+                        parameters, returnType, kind));
                 }
 
                 string ns = type.ContainingNamespace.IsGlobalNamespace
@@ -418,6 +434,20 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 + ".InstantiateAot(componentBytes, configureImports);");
             sb.AppendLine("        }");
 
+            // Memoized invoker fields for sync exports — one
+            // per method, lazily resolved on first invocation.
+            // Class-scope so they live as long as the harness
+            // instance.
+            foreach (var ex in cls.Exports)
+            {
+                if (ex.Kind != ExportKind.Sync) continue;
+                sb.Append("        private ");
+                sb.Append(BuildInvokerDelegateType(ex));
+                sb.Append(" _invoker_");
+                sb.Append(ex.MethodName);
+                sb.AppendLine(";");
+            }
+
             foreach (var ex in cls.Exports)
             {
                 sb.AppendLine();
@@ -512,6 +542,20 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 argsExpr = argsBuilder.ToString();
             }
 
+            if (ex.Kind == ExportKind.Async)
+            {
+                EmitAsyncExportBody(sb, ex, argsExpr);
+            }
+            else
+            {
+                EmitSyncExportBody(sb, ex);
+            }
+            sb.AppendLine("        }");
+        }
+
+        private static void EmitAsyncExportBody(
+            StringBuilder sb, ExportMethod ex, string argsExpr)
+        {
             if (ex.ReturnType == null)
             {
                 sb.Append("            _instance.InvokeCoreAsyncLift(\"");
@@ -528,14 +572,120 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 sb.Append("\", ");
                 sb.Append(argsExpr);
                 sb.AppendLine(");");
-                // task.return delivers the boxed primitive; the
-                // canon-async dispatcher's TaskCompletionSource<object?>
-                // stores it as-is so a direct cast is sound.
                 sb.Append("            return (");
                 sb.Append(ex.ReturnType);
                 sb.AppendLine(")__result!;");
             }
-            sb.AppendLine("        }");
+        }
+
+        // Sync exports route through
+        // <c>WasmRuntime.CreateInvokerFunc&lt;...&gt;</c> /
+        // <c>CreateInvokerAction&lt;...&gt;</c> with statically
+        // generic type args derived from the partial method's
+        // declared signature. No canon-async dispatcher
+        // involvement. The invoker is memoized per-instance in
+        // a field named <c>_invoker_&lt;MethodName&gt;</c>.
+        private static void EmitSyncExportBody(
+            StringBuilder sb, ExportMethod ex)
+        {
+            string field = "_invoker_" + ex.MethodName;
+            string invokerType = BuildInvokerDelegateType(ex);
+            string createMethod = ex.ReturnType == null
+                ? "CreateInvokerAction"
+                : "CreateInvokerFunc";
+
+            // Lazy resolve + invoke.
+            sb.Append("            if (");
+            sb.Append(field);
+            sb.AppendLine(" == null)");
+            sb.AppendLine("            {");
+            sb.Append("                if (!_instance.CoreRuntime" +
+                ".TryGetExportedFunction(\"");
+            sb.Append(EscapeStringLiteral(ex.ExportName));
+            sb.AppendLine("\", out var __addr))");
+            sb.AppendLine("                    throw new System" +
+                ".InvalidOperationException(");
+            sb.Append("                        \"Missing export '");
+            sb.Append(EscapeStringLiteral(ex.ExportName));
+            sb.AppendLine("'.\");");
+            sb.Append("                ");
+            sb.Append(field);
+            sb.Append(" = _instance.CoreRuntime.");
+            sb.Append(createMethod);
+            sb.Append(BuildInvokerTypeArgs(ex));
+            sb.AppendLine("(__addr);");
+            sb.AppendLine("            }");
+
+            // Invoke + return.
+            sb.Append("            ");
+            if (ex.ReturnType != null)
+                sb.Append("return ");
+            sb.Append(field);
+            sb.Append('(');
+            for (int i = 0; i < ex.Parameters.Length; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(ex.Parameters[i].Name);
+            }
+            sb.AppendLine(");");
+        }
+
+        // Build the field type: Action / Action<T1,...> /
+        // Func<T1,...,TReturn>.
+        private static string BuildInvokerDelegateType(
+            ExportMethod ex)
+        {
+            var sb = new StringBuilder();
+            if (ex.ReturnType == null)
+            {
+                if (ex.Parameters.Length == 0)
+                {
+                    sb.Append("System.Action?");
+                    return sb.ToString();
+                }
+                sb.Append("System.Action<");
+                AppendParamTypes(sb, ex);
+                sb.Append(">?");
+                return sb.ToString();
+            }
+            sb.Append("System.Func<");
+            if (ex.Parameters.Length > 0)
+            {
+                AppendParamTypes(sb, ex);
+                sb.Append(", ");
+            }
+            sb.Append(ex.ReturnType);
+            sb.Append(">?");
+            return sb.ToString();
+        }
+
+        // Build the <T1,...> chunk for the CreateInvokerFunc /
+        // CreateInvokerAction generic args.
+        private static string BuildInvokerTypeArgs(
+            ExportMethod ex)
+        {
+            if (ex.Parameters.Length == 0 && ex.ReturnType == null)
+                return "";
+            var sb = new StringBuilder();
+            sb.Append('<');
+            if (ex.Parameters.Length > 0)
+            {
+                AppendParamTypes(sb, ex);
+                if (ex.ReturnType != null) sb.Append(", ");
+            }
+            if (ex.ReturnType != null) sb.Append(ex.ReturnType);
+            sb.Append('>');
+            return sb.ToString();
+        }
+
+        private static void AppendParamTypes(
+            StringBuilder sb, ExportMethod ex)
+        {
+            for (int i = 0; i < ex.Parameters.Length; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(ex.Parameters[i].Type);
+            }
         }
 
         private static string EscapeStringLiteral(string value)

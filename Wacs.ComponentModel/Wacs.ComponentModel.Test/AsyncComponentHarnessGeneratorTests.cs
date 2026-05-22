@@ -35,6 +35,20 @@ namespace Wacs.ComponentModel.Test
         internal partial bool Check(int input);
     }
 
+    /// <summary>Sync (non-async-lifted) exports. Generator
+    /// emits CreateInvokerFunc / CreateInvokerAction bodies
+    /// with statically-known type args — fully AOT-safe, no
+    /// canon-async dispatcher involvement.</summary>
+    [AsyncComponentHarness]
+    internal partial class SyncHarnessFixture
+    {
+        [SyncExport("greet")]
+        internal partial int Greet(int namePtr, int nameLen);
+
+        [SyncExport("cabi_post_greet")]
+        internal partial void PostGreet(int retArea);
+    }
+
     /// <summary>
     /// Generator integration tests. The Wacs.ComponentModel.Test
     /// csproj wires
@@ -131,6 +145,48 @@ namespace Wacs.ComponentModel.Test
             var ascii = System.Text.Encoding.UTF8.GetString(bytes);
             Assert.Contains(
                 "is not a canon-ABI primitive", ascii);
+        }
+
+        [Fact]
+        public void Generator_emits_sync_export_signatures()
+        {
+            var greet = typeof(SyncHarnessFixture).GetMethod(
+                "Greet",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.NotNull(greet);
+            Assert.Equal(typeof(int), greet!.ReturnType);
+            Assert.Equal(2, greet.GetParameters().Length);
+
+            var post = typeof(SyncHarnessFixture).GetMethod(
+                "PostGreet",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.NotNull(post);
+            Assert.Equal(typeof(void), post!.ReturnType);
+            Assert.Single(post.GetParameters());
+            Assert.NotNull(post.GetMethodBody());
+
+            // Verify the memoized invoker fields exist —
+            // they're emitted at class scope so the lazy
+            // initialization can stash the resolved delegate.
+            var invokerField = typeof(SyncHarnessFixture)
+                .GetField("_invoker_Greet",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(invokerField);
+            // Field type is Func<int,int,int>? (Func<int,int,int>
+            // since the nullability flow is erased at runtime).
+            Assert.True(invokerField!.FieldType.IsGenericType);
+            Assert.Equal(typeof(Func<,,>),
+                invokerField.FieldType.GetGenericTypeDefinition());
+
+            var actionField = typeof(SyncHarnessFixture)
+                .GetField("_invoker_PostGreet",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(actionField);
+            Assert.True(actionField!.FieldType.IsGenericType);
+            Assert.Equal(typeof(Action<>),
+                actionField.FieldType.GetGenericTypeDefinition());
         }
 
         [Fact]

@@ -1,5 +1,36 @@
 # Changelog
 
+## WACS.ComponentModel 0.10.1, WACS.ComponentModel.Async.SourceGen 0.3.3 — `[SyncExport]` support
+
+Generator now handles sync (non-async-lifted) exports
+alongside the existing async-lift surface.
+
+* **`[SyncExport("export-name")]`** method-level marker
+  in `Wacs.ComponentModel.Async`. Routes through
+  `WasmRuntime.CreateInvokerFunc<...>` /
+  `CreateInvokerAction<...>` with statically-known type
+  args derived from the partial method's declared
+  signature — fully AOT-safe, no `InvokeCoreAsyncLift`
+  involvement.
+* Emit shape per sync export:
+  * A class-scope `_invoker_<MethodName>` field of type
+    `Func<...>?` / `Action<...>?` matching the partial
+    method's signature.
+  * Lazy resolution on first call:
+    `TryGetExportedFunction("export-name", out var __addr)`
+    + `CreateInvokerFunc<T1,…,TReturn>(__addr)`.
+  * Subsequent calls reuse the memoized delegate.
+* `Generator_emits_sync_export_signatures` test verifies
+  the emitted field types + method signatures. Reflects
+  on the runtime metadata.
+* Generator integration tests: 6/6 (up from 5).
+
+**Use case:** the hello-spike's `greet(name: string) ->
+string` will become a one-line `[SyncExport("greet")]`
+declaration once string lift/lower codegen lands. Today
+the attribute already handles all-primitive sync exports
+— canonical hello-world calc-style components.
+
 ## WACS.ComponentModel.Async.SourceGen 0.3.2 — diagnostics for non-partial misuse
 
 Adds two diagnostic descriptors so users see actionable

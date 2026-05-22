@@ -72,4 +72,34 @@ namespace Wacs.ComponentModel.Async
             ExportName = exportName;
         }
     }
+
+    /// <summary>
+    /// Per-method marker for SYNC exports — wit-component's
+    /// plain canonical lifts that don't go through the
+    /// canon-async dispatcher. The generated method body
+    /// resolves the export's <c>FuncAddr</c> lazily on first
+    /// call, then invokes it via
+    /// <c>WasmRuntime.CreateInvokerFunc&lt;...&gt;</c> /
+    /// <c>CreateInvokerAction&lt;...&gt;</c> with statically-
+    /// known type args — fully AOT-safe, no
+    /// <c>InvokeCoreAsyncLift</c> involvement.
+    ///
+    /// <para>Use this when the component export is sync
+    /// (no <c>async func</c> in the WIT) and the export
+    /// signature is primitives only. The hello-spike's
+    /// <c>greet(name: string) -&gt; string</c> would be a
+    /// <c>[SyncExport]</c> once string lift/lower codegen
+    /// ships; for now sync primitives are supported.</para>
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Method, AllowMultiple = false)]
+    public sealed class SyncExportAttribute : Attribute
+    {
+        /// <summary>Name of the wasm core export to invoke.</summary>
+        public string ExportName { get; }
+
+        public SyncExportAttribute(string exportName)
+        {
+            ExportName = exportName;
+        }
+    }
 }
