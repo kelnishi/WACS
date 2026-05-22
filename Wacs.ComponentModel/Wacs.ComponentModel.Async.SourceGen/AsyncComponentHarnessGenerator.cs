@@ -290,6 +290,26 @@ namespace Wacs.ComponentModel.Async.SourceGen
         private static bool IsNullablePrimitive(string fqType) =>
             NullablePrimitiveTypes.Contains(fqType);
 
+        // option<T> where the inner T is a ptr/len aggregate
+        // (string or byte[]). Detection relies on the
+        // nullable-annotation `?` having been appended by
+        // TypeDisplayWithNullability during the parse pass —
+        // C#'s FullyQualifiedFormat does NOT include the `?`
+        // for reference-type nullables on its own.
+        private static bool IsOptionRef(string fqType)
+        {
+            if (!fqType.EndsWith("?", StringComparison.Ordinal))
+                return false;
+            return IsPtrLenAggregate(
+                InnerOfNullable(fqType));
+        }
+
+        // Either flavor of canon-ABI option<T>:
+        // primitive (T?) or ptr/len (string? / byte[]?).
+        private static bool IsOption(string fqType)
+            => IsNullablePrimitive(fqType)
+                || IsOptionRef(fqType);
+
         // Canon-ABI result<TOk, TErr> — variant with two arms.
         // C# rep: Wacs.ComponentModel.Harness.WitResult<TOk, TErr>.
         // Either arm can be System.ValueTuple (the elided
@@ -317,6 +337,28 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     StringComparison.Ordinal)
                 || fqType.StartsWith(WitResultPrefixGlobal,
                     StringComparison.Ordinal);
+        }
+
+        // Display a type name with nullable-reference
+        // annotations preserved. Roslyn's FullyQualifiedFormat
+        // includes `?` for Nullable<T> value types but NOT for
+        // nullable reference types — for those it just shows
+        // the underlying type. We need both forms to be
+        // distinguishable for canon-ABI option<T>.
+        private static string TypeDisplayWithNullability(
+            ITypeSymbol type)
+        {
+            string s = type.ToDisplayString(
+                SymbolDisplayFormat.FullyQualifiedFormat);
+            if (type.NullableAnnotation
+                    == NullableAnnotation.Annotated
+                && type.IsReferenceType
+                && !s.EndsWith("?",
+                    StringComparison.Ordinal))
+            {
+                s += "?";
+            }
+            return s;
         }
 
         // Strip the `global::` prefix the Roslyn FullyQualifiedFormat
@@ -492,7 +534,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
         private static bool IsSupportedFieldType(string fqType)
             => IsPrimitive(fqType)
                 || IsPtrLenAggregate(fqType)
-                || IsNullablePrimitive(fqType)
+                || IsOption(fqType)
                 || IsSupportedResult(fqType)
                 || IsRecord(fqType);
 
@@ -580,11 +622,11 @@ namespace Wacs.ComponentModel.Async.SourceGen
         private static int FieldSize(string fqType)
         {
             if (IsPtrLenAggregate(fqType)) return 8;
-            if (IsNullablePrimitive(fqType))
+            if (IsOption(fqType))
             {
                 string innerT = InnerOfNullable(fqType);
                 return NullablePayloadOffset(innerT)
-                    + PrimitiveSize(innerT);
+                    + FieldSize(innerT);
             }
             if (IsWitResult(fqType))
             {
@@ -602,11 +644,11 @@ namespace Wacs.ComponentModel.Async.SourceGen
         private static int FieldAlign(string fqType)
         {
             if (IsPtrLenAggregate(fqType)) return 4;
-            if (IsNullablePrimitive(fqType))
+            if (IsOption(fqType))
             {
                 string innerT = InnerOfNullable(fqType);
                 return System.Math.Max(1,
-                    PrimitiveAlign(innerT));
+                    FieldAlign(innerT));
             }
             if (IsWitResult(fqType))
             {
@@ -628,7 +670,13 @@ namespace Wacs.ComponentModel.Async.SourceGen
         private static int FieldSlotCount(string fqType)
         {
             if (IsPtrLenAggregate(fqType)) return 2;
-            if (IsNullablePrimitive(fqType)) return 2;
+            if (IsOption(fqType))
+            {
+                // option<T> flat: disc + inner-flat-slots.
+                // Primitive inner = 1 slot; ptr/len inner = 2.
+                string innerT = InnerOfNullable(fqType);
+                return 1 + FieldSlotCount(innerT);
+            }
             if (IsWitResult(fqType))
             {
                 var (ok, err) = WitResultArgs(fqType);
@@ -731,6 +779,24 @@ namespace Wacs.ComponentModel.Async.SourceGen
             return false;
         }
 
+        // True iff `fqType` is option<T> where T is ptr/len
+        // (string / byte[]).
+        private static bool IsOptionOfPtrLen(string fqType)
+            => IsOption(fqType)
+                && IsPtrLenAggregate(
+                    InnerOfNullable(fqType));
+
+        // True iff any param is option<string> / option<byte[]>
+        // — drives memory + realloc allocation just like a
+        // top-level ptr/len param.
+        private static bool AnyOptionParamWithPtrLenInner(
+            ExportMethod ex)
+        {
+            foreach (var p in ex.Parameters)
+                if (IsOptionOfPtrLen(p.Type)) return true;
+            return false;
+        }
+
         // Strip the trailing '?' from `T?` to get the inner T
         // for codegen of the payload slot type.
         private static string InnerOfNullable(string fqType) =>
@@ -742,7 +808,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
             IsPrimitive(fqType)
             || IsString(fqType)
             || IsByteArray(fqType)
-            || IsNullablePrimitive(fqType)
+            || IsOption(fqType)
             || IsSupportedResult(fqType)
             || IsSupportedTuple(fqType)
             || IsRecord(fqType);
@@ -752,7 +818,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
             || IsPrimitive(fqType)
             || IsString(fqType)
             || IsByteArray(fqType)
-            || IsNullablePrimitive(fqType)
+            || IsOption(fqType)
             || IsSupportedResult(fqType)
             || IsSupportedTuple(fqType)
             || IsRecord(fqType);
@@ -902,13 +968,12 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     var parameters = method.Parameters
                         .Select(p => new ExportParam(
                             p.Name,
-                            p.Type.ToDisplayString(
-                                SymbolDisplayFormat.FullyQualifiedFormat)))
+                            TypeDisplayWithNullability(p.Type)))
                         .ToImmutableArray();
                     string? returnType = method.ReturnsVoid
                         ? null
-                        : method.ReturnType.ToDisplayString(
-                            SymbolDisplayFormat.FullyQualifiedFormat);
+                        : TypeDisplayWithNullability(
+                            method.ReturnType);
 
                     exports.Add(new ExportMethod(
                         method.Name, exportName,
@@ -967,8 +1032,8 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     if (field.IsStatic) continue;
                     if (field.IsImplicitlyDeclared) continue;
                     string ft = StripGlobal(
-                        field.Type.ToDisplayString(
-                            SymbolDisplayFormat.FullyQualifiedFormat));
+                        TypeDisplayWithNullability(
+                            field.Type));
                     // Recursively build the sub-record's layout
                     // first so FieldAlign / FieldSize can read
                     // it when laying this field out.
@@ -1152,13 +1217,15 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     needsMemory = true;
                     needsRealloc = true;
                 }
-                // Any result<...> param with a ptr/len arm
-                // needs realloc to lower the arm value into
-                // wasm memory; memory follows automatically.
+                // Any result<...> param with a ptr/len arm or
+                // option<string|byte[]> param needs realloc
+                // to lower the active value into wasm memory;
+                // memory follows automatically.
                 foreach (var p in ex.Parameters)
                 {
-                    if (IsWitResult(p.Type)
-                        && ResultHasPtrLenArm(p.Type))
+                    if ((IsWitResult(p.Type)
+                            && ResultHasPtrLenArm(p.Type))
+                        || IsOptionOfPtrLen(p.Type))
                     {
                         needsMemory = true;
                         needsRealloc = true;
@@ -1179,7 +1246,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     // retArea) but do need memory.
                 }
                 if (ex.ReturnType != null
-                    && IsNullablePrimitive(ex.ReturnType))
+                    && IsOption(ex.ReturnType))
                 {
                     needsMemory = true;
                 }
@@ -1227,7 +1294,8 @@ namespace Wacs.ComponentModel.Async.SourceGen
                                 out _))
                         && AggregateContainsPtrLen(ex.ReturnType))
                     || (IsWitResult(ex.ReturnType)
-                        && ResultHasPtrLenArm(ex.ReturnType));
+                        && ResultHasPtrLenArm(ex.ReturnType))
+                    || IsOptionOfPtrLen(ex.ReturnType);
                 if (!needsPost) continue;
                 sb.Append(
                     "        private System.Action<int>? _post_");
@@ -1406,7 +1474,8 @@ namespace Wacs.ComponentModel.Async.SourceGen
             // its branches.
             bool needsMemory = AnyPtrLenAggregate(ex)
                 || AnyAggregateFieldInTupleOrRecord(ex)
-                || AnyResultParamWithPtrLenArm(ex);
+                || AnyResultParamWithPtrLenArm(ex)
+                || AnyOptionParamWithPtrLenInner(ex);
             if (needsMemory)
             {
                 EmitSyncEnsureMemoryAndRealloc(sb);
@@ -1416,7 +1485,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
             // owns the retArea; no caller-side free).
             bool needsMemoryForRetArea =
                 ex.ReturnType != null
-                && (IsNullablePrimitive(ex.ReturnType)
+                && (IsOption(ex.ReturnType)
                     || (IsWitResult(ex.ReturnType)
                         && ResultJoinedPayload(
                             WitResultArgs(ex.ReturnType).Ok,
@@ -1523,25 +1592,13 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     sb.Append(p.Name);
                     sb.AppendLine("_len);");
                 }
-                else if (IsNullablePrimitive(p.Type))
+                else if (IsOption(p.Type))
                 {
-                    // option<T> param lowering: (disc, payload).
-                    // payload uses default(T) when value is
-                    // absent — wasm-side ignores the slot per
-                    // canon-ABI when disc=0.
-                    string innerT = InnerOfNullable(p.Type);
-                    sb.Append("            int __");
-                    sb.Append(p.Name);
-                    sb.Append("_disc = ");
-                    sb.Append(p.Name);
-                    sb.AppendLine(".HasValue ? 1 : 0;");
-                    sb.Append("            ");
-                    sb.Append(innerT);
-                    sb.Append(" __");
-                    sb.Append(p.Name);
-                    sb.Append("_payload = ");
-                    sb.Append(p.Name);
-                    sb.AppendLine(".GetValueOrDefault();");
+                    // option<T> param lowering: shared helper
+                    // emits (disc, payload) for primitive T or
+                    // (disc, ptr, len) for ptr/len T.
+                    EmitOptionArgLower(sb, p.Type,
+                        "__" + p.Name, p.Name);
                 }
                 else if (IsWitResult(p.Type))
                 {
@@ -1609,7 +1666,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     EmitSyncStringReturnLift(sb, ex);
                 else if (IsByteArray(ex.ReturnType))
                     EmitSyncByteArrayReturnLift(sb, ex);
-                else if (IsNullablePrimitive(ex.ReturnType))
+                else if (IsOption(ex.ReturnType))
                     EmitSyncOptionReturnLift(sb, ex);
                 else if (IsWitResult(ex.ReturnType))
                     EmitSyncResultReturnLift(sb, ex);
@@ -1709,7 +1766,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
             if (IsPtrLenAggregate(fieldType))
                 EmitAggregateFieldLiftLocal(sb, fieldType,
                     localName, offset);
-            else if (IsNullablePrimitive(fieldType))
+            else if (IsOption(fieldType))
                 EmitOptionFieldLiftLocal(sb, fieldType,
                     localName, offset);
             else if (IsWitResult(fieldType))
@@ -1728,7 +1785,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
             string fieldType, string localName, int offset)
         {
             if (IsPtrLenAggregate(fieldType)
-                || IsNullablePrimitive(fieldType)
+                || IsOption(fieldType)
                 || IsWitResult(fieldType)
                 || TryLookupRecord(fieldType, out _))
                 return localName;
@@ -1771,8 +1828,11 @@ namespace Wacs.ComponentModel.Async.SourceGen
         }
 
         // Lift an option<T> field at the given retArea offset
-        // into a Nullable<T> local. Layout: disc:u8 at offset,
-        // payload at offset + NullablePayloadOffset(T).
+        // into a Nullable<T> (T?) or nullable ref (string? /
+        // byte[]?) local. Layout: disc:u8 at offset, payload
+        // at offset + NullablePayloadOffset(T). For ptr/len
+        // inner, payload is (ptr, len) → lift via
+        // StringCoding / LiftBytes when disc != 0.
         private static void EmitOptionFieldLiftLocal(
             StringBuilder sb, string fieldType,
             string localName, int offset)
@@ -1786,6 +1846,37 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 "__raw + ");
             sb.Append(offset);
             sb.AppendLine(");");
+
+            if (IsPtrLenAggregate(innerT))
+            {
+                sb.Append("            int ");
+                sb.Append(localName);
+                sb.Append("_ptr = global::Wacs.ComponentModel" +
+                    ".Harness.MemoryHelpers.ReadI32LE(" +
+                    "_memory!, __raw + ");
+                sb.Append(offset + payloadOff);
+                sb.AppendLine(");");
+                sb.Append("            int ");
+                sb.Append(localName);
+                sb.Append("_len = global::Wacs.ComponentModel" +
+                    ".Harness.MemoryHelpers.ReadI32LE(" +
+                    "_memory!, __raw + ");
+                sb.Append(offset + payloadOff + 4);
+                sb.AppendLine(");");
+                sb.Append("            ");
+                sb.Append(fieldType);
+                sb.Append(' ');
+                sb.Append(localName);
+                sb.Append(" = ");
+                sb.Append(localName);
+                sb.Append("_disc == 0 ? null : ");
+                sb.Append(PtrLenLiftExpression(innerT,
+                    localName + "_ptr",
+                    localName + "_len"));
+                sb.AppendLine(";");
+                return;
+            }
+
             sb.Append("            ");
             sb.Append(fieldType);
             sb.Append(' ');
@@ -2214,32 +2305,63 @@ namespace Wacs.ComponentModel.Async.SourceGen
 
         // option<T> return lift: __raw is the retArea pointer
         // produced by the callee. Read disc + payload at
-        // canon-ABI offsets, return Nullable<T>.
-        // Layout: disc:u8 at +0, padding to T's alignment,
-        // payload at +align(1, sizeof(T)).
+        // canon-ABI offsets and return Nullable<T> (primitive
+        // inner) or T? (string?/byte[]?). For ptr/len inner
+        // the payload is (ptr, len) — lift via StringCoding
+        // / LiftBytes and then invoke cabi_post.
         private static void EmitSyncOptionReturnLift(
             StringBuilder sb, ExportMethod ex)
         {
             string innerT = InnerOfNullable(ex.ReturnType!);
             int payloadOff = NullablePayloadOffset(innerT);
-            string readPayload = ReadMemoryExprForType(
-                innerT, "_memory!", "__raw + " + payloadOff);
             sb.Append(
                 "            byte __optDisc = global::Wacs" +
                 ".ComponentModel.Harness.MemoryHelpers" +
                 ".ReadU8(_memory!, __raw);");
             sb.AppendLine();
+
+            if (IsPtrLenAggregate(innerT))
+            {
+                sb.AppendLine("            if (__optDisc == 0)");
+                sb.AppendLine("            {");
+                EmitCabiPostInvoke(sb, ex);
+                sb.AppendLine("                return null;");
+                sb.AppendLine("            }");
+                sb.Append("            int __optPtr = global" +
+                    "::Wacs.ComponentModel.Harness.MemoryHelpers" +
+                    ".ReadI32LE(_memory!, __raw + ");
+                sb.Append(payloadOff);
+                sb.AppendLine(");");
+                sb.Append("            int __optLen = global" +
+                    "::Wacs.ComponentModel.Harness.MemoryHelpers" +
+                    ".ReadI32LE(_memory!, __raw + ");
+                sb.Append(payloadOff + 4);
+                sb.AppendLine(");");
+                sb.Append("            var __optResult = ");
+                sb.Append(PtrLenLiftExpression(innerT,
+                    "__optPtr", "__optLen"));
+                sb.AppendLine(";");
+                EmitCabiPostInvoke(sb, ex);
+                sb.AppendLine("            return __optResult;");
+                return;
+            }
+
             sb.AppendLine("            if (__optDisc == 0) return null;");
             sb.Append("            return ");
-            sb.Append(readPayload);
+            sb.Append(ReadMemoryExprForType(innerT, "_memory!",
+                "__raw + " + payloadOff));
             sb.AppendLine(";");
         }
 
         // Canon-ABI alignment for primitives. Option<T>'s
         // discriminator sits at offset 0; payload starts at
-        // align_to(1, alignof(T)).
+        // align_to(1, alignof(T)). Now covers ptr/len inners
+        // (string / byte[]) via FieldAlign which reports 4
+        // for those.
         private static int NullablePayloadOffset(string innerT)
         {
+            if (IsPtrLenAggregate(innerT))
+                return AlignTo(1, FieldAlign(innerT));
             switch (innerT)
             {
                 case "byte": case "sbyte": case "bool":
@@ -2508,24 +2630,12 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 sb.Append(baseName);
                 sb.AppendLine("_len);");
             }
-            else if (IsNullablePrimitive(fieldType))
+            else if (IsOption(fieldType))
             {
-                // option<T> field: (disc, payload) locals.
-                // payload uses default(T) when value is absent
-                // — wasm-side ignores the slot when disc==0.
-                string innerT = InnerOfNullable(fieldType);
-                sb.Append("            int ");
-                sb.Append(baseName);
-                sb.Append("_disc = ");
-                sb.Append(sourceExpr);
-                sb.AppendLine(".HasValue ? 1 : 0;");
-                sb.Append("            ");
-                sb.Append(innerT);
-                sb.Append(' ');
-                sb.Append(baseName);
-                sb.Append("_payload = ");
-                sb.Append(sourceExpr);
-                sb.AppendLine(".GetValueOrDefault();");
+                // option<T> field — shared helper handles
+                // primitive + ptr/len inner forms.
+                EmitOptionArgLower(sb, fieldType,
+                    baseName, sourceExpr);
             }
             else if (IsWitResult(fieldType))
             {
@@ -2576,13 +2686,27 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     sb.Append(p.Name);
                     sb.Append("_len");
                 }
-                else if (IsNullablePrimitive(p.Type))
+                else if (IsOption(p.Type))
                 {
-                    sb.Append("__");
-                    sb.Append(p.Name);
-                    sb.Append("_disc, __");
-                    sb.Append(p.Name);
-                    sb.Append("_payload");
+                    string innerT = InnerOfNullable(p.Type);
+                    if (IsPtrLenAggregate(innerT))
+                    {
+                        sb.Append("__");
+                        sb.Append(p.Name);
+                        sb.Append("_disc, __");
+                        sb.Append(p.Name);
+                        sb.Append("_ptr, __");
+                        sb.Append(p.Name);
+                        sb.Append("_len");
+                    }
+                    else
+                    {
+                        sb.Append("__");
+                        sb.Append(p.Name);
+                        sb.Append("_disc, __");
+                        sb.Append(p.Name);
+                        sb.Append("_payload");
+                    }
                 }
                 else if (IsWitResult(p.Type))
                 {
@@ -2711,6 +2835,59 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 + ptrLocal + ", " + lenLocal + ")";
         }
 
+        // Emit shared option-lower statements: disc + payload
+        // locals. Handles both flavors:
+        //   * primitive inner (T?) — Nullable<T> with
+        //     .HasValue / .GetValueOrDefault().
+        //   * ptr/len inner (string? / byte[]?) — nullable
+        //     ref type with == null check + conditional
+        //     lower of the value into ptr/len locals.
+        private static void EmitOptionArgLower(
+            StringBuilder sb, string fieldType,
+            string baseName, string sourceExpr)
+        {
+            string innerT = InnerOfNullable(fieldType);
+            if (IsPtrLenAggregate(innerT))
+            {
+                sb.Append("            int ");
+                sb.Append(baseName);
+                sb.Append("_disc = ");
+                sb.Append(sourceExpr);
+                sb.AppendLine(" == null ? 0 : 1;");
+                sb.Append("            int ");
+                sb.Append(baseName);
+                sb.AppendLine("_ptr = 0;");
+                sb.Append("            int ");
+                sb.Append(baseName);
+                sb.AppendLine("_len = 0;");
+                sb.Append("            if (");
+                sb.Append(sourceExpr);
+                sb.AppendLine(" != null)");
+                sb.AppendLine("            {");
+                EmitPtrLenAssignInto(sb, innerT,
+                    sourceExpr,
+                    baseName + "_ptr",
+                    baseName + "_len",
+                    "                ");
+                sb.AppendLine("            }");
+            }
+            else
+            {
+                sb.Append("            int ");
+                sb.Append(baseName);
+                sb.Append("_disc = ");
+                sb.Append(sourceExpr);
+                sb.AppendLine(".HasValue ? 1 : 0;");
+                sb.Append("            ");
+                sb.Append(innerT);
+                sb.Append(' ');
+                sb.Append(baseName);
+                sb.Append("_payload = ");
+                sb.Append(sourceExpr);
+                sb.AppendLine(".GetValueOrDefault();");
+            }
+        }
+
         // Emit shared result-lower statements: disc + payload
         // locals. Handles all four payload shapes:
         //   * joined == null (both arms unit) → disc only
@@ -2798,12 +2975,25 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 sb.Append(baseName);
                 sb.Append("_len");
             }
-            else if (IsNullablePrimitive(fieldType))
+            else if (IsOption(fieldType))
             {
-                sb.Append(baseName);
-                sb.Append("_disc, ");
-                sb.Append(baseName);
-                sb.Append("_payload");
+                string innerT = InnerOfNullable(fieldType);
+                if (IsPtrLenAggregate(innerT))
+                {
+                    sb.Append(baseName);
+                    sb.Append("_disc, ");
+                    sb.Append(baseName);
+                    sb.Append("_ptr, ");
+                    sb.Append(baseName);
+                    sb.Append("_len");
+                }
+                else
+                {
+                    sb.Append(baseName);
+                    sb.Append("_disc, ");
+                    sb.Append(baseName);
+                    sb.Append("_payload");
+                }
             }
             else if (IsWitResult(fieldType))
             {
@@ -2888,10 +3078,14 @@ namespace Wacs.ComponentModel.Async.SourceGen
 
         // A field (or tuple element) contains a ptr/len when
         // it IS one, recursively when nested records / tuples
-        // contain one, or when a result arm is ptr/len.
+        // contain one, when a result arm is ptr/len, or when
+        // an option's inner is ptr/len.
         private static bool FieldContainsPtrLen(string fqType)
         {
             if (IsPtrLenAggregate(fqType)) return true;
+            if (IsOption(fqType))
+                return IsPtrLenAggregate(
+                    InnerOfNullable(fqType));
             if (IsWitResult(fqType))
                 return ResultHasPtrLenArm(fqType);
             if (TryLookupRecord(fqType, out _)
@@ -2924,11 +3118,17 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     sb.Append("int, int");
                     first = false;
                 }
-                else if (IsNullablePrimitive(p.Type))
+                else if (IsOption(p.Type))
                 {
                     if (!first) sb.Append(", ");
-                    sb.Append("int, ");
-                    sb.Append(InnerOfNullable(p.Type));
+                    string innerT = InnerOfNullable(p.Type);
+                    if (IsPtrLenAggregate(innerT))
+                        sb.Append("int, int, int");
+                    else
+                    {
+                        sb.Append("int, ");
+                        sb.Append(innerT);
+                    }
                     first = false;
                 }
                 else if (IsWitResult(p.Type))
@@ -3015,12 +3215,19 @@ namespace Wacs.ComponentModel.Async.SourceGen
             foreach (var p in ex.Parameters)
             {
                 if (IsPtrLenAggregate(p.Type)) slots += 2;
-                else if (IsNullablePrimitive(p.Type)) slots += 2;
+                else if (IsOption(p.Type))
+                {
+                    string innerT = InnerOfNullable(p.Type);
+                    slots += 1 + (IsPtrLenAggregate(innerT)
+                        ? 2 : 1);
+                }
                 else if (IsWitResult(p.Type))
                 {
                     var (ok, err) = WitResultArgs(p.Type);
                     var joined = ResultJoinedPayload(ok, err);
-                    slots += joined == null ? 1 : 2;
+                    if (joined == null) slots += 1;
+                    else slots += 1
+                        + (IsPtrLenAggregate(joined) ? 2 : 1);
                 }
                 else if (IsTuple(p.Type))
                 {
@@ -3054,7 +3261,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
         private static bool UsesRetArea(string fqType)
         {
             if (IsPtrLenAggregate(fqType)) return true;
-            if (IsNullablePrimitive(fqType)) return true;
+            if (IsOption(fqType)) return true;
             if (IsWitResult(fqType))
             {
                 var (ok, err) = WitResultArgs(fqType);
@@ -3158,14 +3365,20 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     sb.Append("int, int");
                     first = false;
                 }
-                else if (IsNullablePrimitive(p.Type))
+                else if (IsOption(p.Type))
                 {
                     // option<T> flat lowering: (i32 disc,
-                    // payloadSlot). payloadSlot matches the
-                    // inner T's natural canon-ABI flat type.
+                    // payload-slots). primitive T = 1 slot,
+                    // ptr/len T (string/byte[]) = 2 slots.
                     if (!first) sb.Append(", ");
-                    sb.Append("int, ");
-                    sb.Append(InnerOfNullable(p.Type));
+                    string innerT = InnerOfNullable(p.Type);
+                    if (IsPtrLenAggregate(innerT))
+                        sb.Append("int, int, int");
+                    else
+                    {
+                        sb.Append("int, ");
+                        sb.Append(innerT);
+                    }
                     first = false;
                 }
                 else if (IsWitResult(p.Type))
@@ -3228,10 +3441,16 @@ namespace Wacs.ComponentModel.Async.SourceGen
             {
                 sb.Append("int, int");
             }
-            else if (IsNullablePrimitive(fieldType))
+            else if (IsOption(fieldType))
             {
-                sb.Append("int, ");
-                sb.Append(InnerOfNullable(fieldType));
+                string innerT = InnerOfNullable(fieldType);
+                if (IsPtrLenAggregate(innerT))
+                    sb.Append("int, int, int");
+                else
+                {
+                    sb.Append("int, ");
+                    sb.Append(innerT);
+                }
             }
             else if (IsWitResult(fieldType))
             {

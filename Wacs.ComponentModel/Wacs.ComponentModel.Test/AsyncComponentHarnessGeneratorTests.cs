@@ -233,6 +233,23 @@ namespace Wacs.ComponentModel.Test
         internal partial Contact Read(int id);
     }
 
+    /// <summary>Option types whose inner is a ptr/len
+    /// aggregate (string / byte[]). Nullable reference
+    /// annotation distinguishes string? from string —
+    /// captured at parse time via NullableAnnotation +
+    /// IsReferenceType. Flat lower / lift route through
+    /// realloc + LiftUtf8 / LiftBytes with a disc check.
+    /// </summary>
+    [AsyncComponentHarness]
+    internal partial class OptionPtrLenHarnessFixture
+    {
+        [SyncExport("normalize")]
+        internal partial string? Normalize(string? input);
+
+        [SyncExport("maybe_bytes")]
+        internal partial byte[]? MaybeBytes(byte[]? input);
+    }
+
     /// <summary>Result types whose arms are ptr/len
     /// aggregates (string / byte[]). Joined payload is the
     /// arm type; flat lower / lift route through realloc +
@@ -768,6 +785,66 @@ namespace Wacs.ComponentModel.Test
                     | BindingFlags.Instance));
             Assert.NotNull(typeof(NestedRecordHarnessFixture)
                 .GetField("_post_Read",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+        }
+
+        [Fact]
+        public void Generator_emits_option_ptrlen_export_signatures()
+        {
+            // string? Normalize(string? input)
+            // - Param string? flat: (disc, ptr, len) = 3 ints
+            // - Return retArea = 1 int
+            // - Func<int, int, int, int>
+            var norm = typeof(OptionPtrLenHarnessFixture)
+                .GetMethod("Normalize",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(norm);
+            Assert.Equal(typeof(string), norm!.ReturnType);
+            Assert.Equal(typeof(string),
+                norm.GetParameters()[0].ParameterType);
+            var normInv = typeof(OptionPtrLenHarnessFixture)
+                .GetField("_invoker_Normalize",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(normInv);
+            Assert.Equal(typeof(Func<int, int, int, int>),
+                normInv!.FieldType);
+
+            // byte[]? MaybeBytes(byte[]?)
+            // - Param byte[]? flat: (disc, ptr, len) = 3 ints
+            // - Return retArea = 1 int
+            // - Func<int, int, int, int>
+            var mb = typeof(OptionPtrLenHarnessFixture)
+                .GetMethod("MaybeBytes",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(mb);
+            Assert.Equal(typeof(byte[]), mb!.ReturnType);
+            var mbInv = typeof(OptionPtrLenHarnessFixture)
+                .GetField("_invoker_MaybeBytes",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(mbInv);
+            Assert.Equal(typeof(Func<int, int, int, int>),
+                mbInv!.FieldType);
+
+            // Class-scope: memory + realloc + post for both.
+            Assert.NotNull(typeof(OptionPtrLenHarnessFixture)
+                .GetField("_memory",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+            Assert.NotNull(typeof(OptionPtrLenHarnessFixture)
+                .GetField("_reallocInvoke",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+            Assert.NotNull(typeof(OptionPtrLenHarnessFixture)
+                .GetField("_post_Normalize",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+            Assert.NotNull(typeof(OptionPtrLenHarnessFixture)
+                .GetField("_post_MaybeBytes",
                     BindingFlags.NonPublic
                     | BindingFlags.Instance));
         }

@@ -1,5 +1,67 @@
 # Changelog
 
+## WACS.ComponentModel.Async.SourceGen 0.4.10 — option<string> / option<byte[]>
+
+Nullable reference types — `string?` and `byte[]?` — are
+now recognized as canon-ABI `option<T>` shapes. Disc-
+plus-(ptr, len) layout matches the existing ptr/len-armed
+result encoding from 0.4.9.
+
+* **Annotation capture.** New `TypeDisplayWithNullability`
+  helper checks `ITypeSymbol.NullableAnnotation == Annotated
+  && IsReferenceType` and appends `?` to the type string —
+  Roslyn's `FullyQualifiedFormat` only emits `?` for
+  Nullable<T> value types. Used at every parse site
+  (param types, return type, record-field types).
+* **New predicates.** `IsOptionRef(fqType)` matches
+  `string?` / `byte[]?`; `IsOption(fqType)` =
+  `IsNullablePrimitive || IsOptionRef`. Codegen sites that
+  asked "is this an option<T>?" switched to `IsOption`.
+* **Layout math.** `FieldSize` / `FieldAlign` switched the
+  option branch to use `FieldSize` / `FieldAlign`
+  recursively on the inner type — ptr/len inner gives 12
+  bytes (disc + pad + ptr + len), align 4.
+  `NullablePayloadOffset` returns `align_to(1, 4) = 4` for
+  ptr/len inners. `FieldSlotCount` for option returns
+  `1 + FieldSlotCount(inner)` — 3 for ptr/len inner.
+* **Param lower.** New shared `EmitOptionArgLower` helper
+  replaces the inline option-param lowering at the top
+  level and inside `EmitAggregateFieldLower`. Primitive
+  inner: `<base>_disc` + `<base>_payload` via `.HasValue`
+  / `.GetValueOrDefault()`. Ptr/len inner: `<base>_disc`
+  via `== null`, then `<base>_ptr = 0; <base>_len = 0;`
+  with conditional `EmitPtrLenAssignInto` for the
+  non-null branch.
+* **Flat sig & args.** `AppendFlatFieldTypes`,
+  `AppendFlatParamTypes`, `BuildFlatInvokerTypeArgs`,
+  `EmitFlatArgsForField`, top-level `EmitFlatArgsList`,
+  and `CountFlatSlots` each expand `option<ptr/len>` to
+  `int, int, int` (disc, ptr, len) and emit
+  `<base>_disc, <base>_ptr, <base>_len` for the args.
+* **Return lift.** `EmitSyncOptionReturnLift` branches on
+  disc; for ptr/len inner reads (ptr, len) at the payload
+  offset and lifts via `StringCoding.LiftUtf8` /
+  `MemoryHelpers.LiftBytes`, then invokes `cabi_post`.
+  `EmitOptionFieldLiftLocal` mirrors the pattern for
+  option fields nested inside records / tuples.
+* **Gating helpers.** New `IsOptionOfPtrLen` and
+  `AnyOptionParamWithPtrLenInner` drive the per-method
+  `needsMemory`, class-scope `needsMemory` / `needsRealloc`
+  / `needsPost`, and `FieldContainsPtrLen` recursion.
+  `UsesRetArea` switched to `IsOption` so any option<T>
+  routes through retArea.
+* New generator test:
+  `Generator_emits_option_ptrlen_export_signatures` pins
+  `string? Normalize(string?)` and `byte[]? MaybeBytes(byte[]?)`
+  — both flat `Func<int, int, int, int>` (3 param ints +
+  retArea), both gated for memory + realloc + cabi_post.
+  19/19 generator integration tests, 658/658 across
+  Wacs.ComponentModel.Test. Hello-spike passes unchanged.
+
+**Still punted:** mixed-type ptr/len result arms
+(`result<string, byte[]>`); lists of records; `list<T>`
+for `T ≠ u8`; cyclic record references.
+
 ## WACS.ComponentModel.Async.SourceGen 0.4.9, Harness.Runtime 0.7.1 — ptr/len arms inside result<TOk, TErr>
 
 `WitResult<TOk, TErr>` now accepts ptr/len arms — `string`
