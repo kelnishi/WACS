@@ -48,34 +48,78 @@ namespace Wacs.ComponentModel.Async.SourceGen
         private const string ComponentInstanceFqn =
             "Wacs.ComponentModel.Runtime.ComponentInstance";
 
+        // Diagnostic descriptors. Surface generator-level
+        // misuse to the consumer at build time with clear,
+        // actionable messages — the alternative (the generator
+        // silently skipping or emitting code that fails to
+        // compile downstream) is hostile to users debugging
+        // attribute placement.
+        private static readonly DiagnosticDescriptor
+            HarnessClassMustBePartial = new(
+                id: "WACSCM001",
+                title: "AsyncComponentHarness class must be partial",
+                messageFormat:
+                    "[AsyncComponentHarness] is applied to " +
+                    "'{0}' but the class isn't declared partial. " +
+                    "Add the 'partial' keyword so the generator " +
+                    "can emit the constructor + InvokeCoreAsyncLift " +
+                    "wiring as a partial-class body.",
+                category: "Wacs.ComponentModel.Async.SourceGen",
+                defaultSeverity: DiagnosticSeverity.Error,
+                isEnabledByDefault: true);
+
+        private static readonly DiagnosticDescriptor
+            ExportMethodMustBePartial = new(
+                id: "WACSCM002",
+                title: "AsyncExport method must be a partial definition",
+                messageFormat:
+                    "[AsyncExport] is applied to '{0}' on '{1}' " +
+                    "but the method isn't a partial definition. " +
+                    "Declare it as `partial` so the generator can " +
+                    "emit the body.",
+                category: "Wacs.ComponentModel.Async.SourceGen",
+                defaultSeverity: DiagnosticSeverity.Error,
+                isEnabledByDefault: true);
+
         public void Initialize(
             IncrementalGeneratorInitializationContext context)
         {
-            var harnessClasses = context.CompilationProvider.Select(
+            var scanResults = context.CompilationProvider.Select(
                 static (compilation, _) =>
                 {
-                    // Skip emission when the consumer doesn't
-                    // reference Wacs.ComponentModel (the
-                    // attribute / target class wouldn't be
-                    // resolvable). This makes the generator
-                    // safe to ship in every consumer assembly.
                     var attr = compilation.GetTypeByMetadataName(
                         HarnessAttributeFqn);
                     if (attr == null)
-                        return default(
-                            ImmutableArray<HarnessClass>);
-                    return CollectHarnessClasses(compilation);
+                        return default(ScanResult);
+                    return CollectAndDiagnose(compilation);
                 });
 
-            context.RegisterSourceOutput(harnessClasses,
-                static (spc, classes) =>
+            context.RegisterSourceOutput(scanResults,
+                static (spc, scan) =>
                 {
-                    if (classes.IsDefault) return;
-                    foreach (var cls in classes)
+                    if (scan.IsDefault) return;
+                    foreach (var diag in scan.Diagnostics)
+                        spc.ReportDiagnostic(diag);
+                    foreach (var cls in scan.Classes)
                         spc.AddSource(
                             cls.GeneratedFileName,
                             EmitHarness(cls));
                 });
+        }
+
+        private readonly struct ScanResult
+        {
+            public ImmutableArray<HarnessClass> Classes { get; }
+            public ImmutableArray<Diagnostic> Diagnostics { get; }
+            public bool IsDefault =>
+                Classes.IsDefault && Diagnostics.IsDefault;
+            public ScanResult(
+                ImmutableArray<HarnessClass> classes,
+                ImmutableArray<Diagnostic> diagnostics)
+            {
+                Classes = classes;
+                Diagnostics = diagnostics;
+            }
         }
 
         private readonly struct HarnessClass
@@ -152,7 +196,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
         private static bool IsPrimitive(string fqType) =>
             PrimitiveTypes.Contains(fqType);
 
-        private static ImmutableArray<HarnessClass> CollectHarnessClasses(
+        private static ScanResult CollectAndDiagnose(
             Compilation compilation)
         {
             var harnessAttr = compilation.GetTypeByMetadataName(
@@ -160,47 +204,99 @@ namespace Wacs.ComponentModel.Async.SourceGen
             var exportAttr = compilation.GetTypeByMetadataName(
                 ExportAttributeFqn);
             if (harnessAttr == null || exportAttr == null)
-                return ImmutableArray<HarnessClass>.Empty;
+                return new ScanResult(
+                    ImmutableArray<HarnessClass>.Empty,
+                    ImmutableArray<Diagnostic>.Empty);
 
             var entries = ImmutableArray.CreateBuilder<HarnessClass>();
+            var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
+
             foreach (var type in EnumerateAllTypes(
                 compilation.Assembly.GlobalNamespace))
             {
                 if (!HasAttribute(type, harnessAttr)) continue;
 
+                // Diagnostic: class must be declared `partial`
+                // so the emitted body can compile alongside the
+                // user's declaration. Roslyn surfaces this via
+                // each declaration's syntax — if any declaration
+                // is missing `partial` we error.
+                bool anyNonPartial = false;
+                foreach (var declRef in type.DeclaringSyntaxReferences)
+                {
+                    var node = declRef.GetSyntax();
+                    if (node is Microsoft.CodeAnalysis.CSharp.Syntax
+                        .ClassDeclarationSyntax cls)
+                    {
+                        if (!cls.Modifiers.Any(m =>
+                            m.IsKind(Microsoft.CodeAnalysis.CSharp
+                                .SyntaxKind.PartialKeyword)))
+                        {
+                            anyNonPartial = true;
+                            diagnostics.Add(Diagnostic.Create(
+                                HarnessClassMustBePartial,
+                                cls.Identifier.GetLocation(),
+                                type.ToDisplayString()));
+                        }
+                    }
+                }
+                if (anyNonPartial) continue;
+
                 var exports = ImmutableArray.CreateBuilder<ExportMethod>();
                 foreach (var member in type.GetMembers())
                 {
                     if (member is not IMethodSymbol method) continue;
-                    if (!method.IsPartialDefinition) continue;
+                    bool hasExportAttr = false;
+                    string? exportName = null;
                     foreach (var attr in method.GetAttributes())
                     {
                         if (!SymbolEqualityComparer.Default.Equals(
                                 attr.AttributeClass, exportAttr))
                             continue;
-                        if (attr.ConstructorArguments.Length == 0) continue;
-                        if (attr.ConstructorArguments[0].Value
-                                is not string exportName
-                            || string.IsNullOrEmpty(exportName))
-                            continue;
-
-                        var parameters = method.Parameters
-                            .Select(p => new ExportParam(
-                                p.Name,
-                                p.Type.ToDisplayString(
-                                    SymbolDisplayFormat.FullyQualifiedFormat)))
-                            .ToImmutableArray();
-                        string? returnType = method.ReturnsVoid
-                            ? null
-                            : method.ReturnType.ToDisplayString(
-                                SymbolDisplayFormat.FullyQualifiedFormat);
-
-                        exports.Add(new ExportMethod(
-                            method.Name, exportName,
-                            AccessibilityKeyword(method.DeclaredAccessibility),
-                            parameters, returnType));
+                        hasExportAttr = true;
+                        if (attr.ConstructorArguments.Length > 0
+                            && attr.ConstructorArguments[0].Value
+                                is string en
+                            && !string.IsNullOrEmpty(en))
+                        {
+                            exportName = en;
+                        }
                         break;
                     }
+                    if (!hasExportAttr) continue;
+                    if (exportName == null) continue;
+
+                    // Diagnostic: method must be a partial
+                    // definition so the generator can emit the
+                    // body. Non-partial methods already have a
+                    // user-provided body that the generator
+                    // would conflict with.
+                    if (!method.IsPartialDefinition)
+                    {
+                        var loc = method.Locations.Length > 0
+                            ? method.Locations[0] : Location.None;
+                        diagnostics.Add(Diagnostic.Create(
+                            ExportMethodMustBePartial, loc,
+                            method.Name,
+                            type.ToDisplayString()));
+                        continue;
+                    }
+
+                    var parameters = method.Parameters
+                        .Select(p => new ExportParam(
+                            p.Name,
+                            p.Type.ToDisplayString(
+                                SymbolDisplayFormat.FullyQualifiedFormat)))
+                        .ToImmutableArray();
+                    string? returnType = method.ReturnsVoid
+                        ? null
+                        : method.ReturnType.ToDisplayString(
+                            SymbolDisplayFormat.FullyQualifiedFormat);
+
+                    exports.Add(new ExportMethod(
+                        method.Name, exportName,
+                        AccessibilityKeyword(method.DeclaredAccessibility),
+                        parameters, returnType));
                 }
 
                 string ns = type.ContainingNamespace.IsGlobalNamespace
@@ -211,9 +307,13 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     AccessibilityKeyword(type.DeclaredAccessibility),
                     exports.ToImmutable()));
             }
-            return entries
-                .OrderBy(e => e.GeneratedFileName, StringComparer.Ordinal)
-                .ToImmutableArray();
+
+            return new ScanResult(
+                entries
+                    .OrderBy(e => e.GeneratedFileName,
+                        StringComparer.Ordinal)
+                    .ToImmutableArray(),
+                diagnostics.ToImmutable());
         }
 
         private static bool HasAttribute(

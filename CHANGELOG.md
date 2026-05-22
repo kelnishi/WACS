@@ -1,5 +1,28 @@
 # Changelog
 
+## WACS.ComponentModel.Async.SourceGen 0.3.2 — diagnostics for non-partial misuse
+
+Adds two diagnostic descriptors so users see actionable
+errors at compile time when they misapply the harness
+attributes:
+
+* **WACSCM001 — `AsyncComponentHarness class must be
+  partial`.** Fired when `[AsyncComponentHarness]` is on a
+  class declaration that's missing the `partial` keyword.
+  Otherwise the emitted partial body collides with the
+  user's class with a confusing `CS0260` / `CS0101` chain;
+  this diagnostic points directly at the offending
+  identifier with the fix.
+* **WACSCM002 — `AsyncExport method must be a partial
+  definition`.** Fired when `[AsyncExport]` is on a
+  method that isn't a partial definition. Previously the
+  generator silently skipped these.
+
+Generator pipeline restructured around a single
+`ScanResult { Classes, Diagnostics }` so both source emit
+and diagnostic emit ride the same incremental output —
+edits to the user's source re-run both consistently.
+
 ## WACS.ComponentModel.Async.SourceGen 0.3.1 — primitive arg + return marshaling + generator tests
 
 Extends `AsyncComponentHarnessGenerator` from void-only
