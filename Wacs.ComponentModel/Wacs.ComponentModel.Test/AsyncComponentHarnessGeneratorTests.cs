@@ -233,6 +233,29 @@ namespace Wacs.ComponentModel.Test
         internal partial Contact Read(int id);
     }
 
+    /// <summary>Primitive arrays beyond byte[] — canon-ABI
+    /// list&lt;T&gt; for T ∈ {i32, i64, f32, f64, u16, bool}.
+    /// Same flat (ptr, len) shape as byte[]; lower/lift
+    /// scale by sizeof(T).</summary>
+    [AsyncComponentHarness]
+    internal partial class PrimitiveArrayHarnessFixture
+    {
+        [SyncExport("sum_i32")]
+        internal partial int SumI32(int[] xs);
+
+        [SyncExport("sum_i64")]
+        internal partial long SumI64(long[] xs);
+
+        [SyncExport("scale_f64")]
+        internal partial double[] ScaleF64(double[] xs);
+
+        [SyncExport("histogram_u16")]
+        internal partial ushort[] HistogramU16(ushort[] xs);
+
+        [SyncExport("filter_bools")]
+        internal partial bool[] FilterBools(bool[] xs);
+    }
+
     /// <summary>Option types whose inner is a ptr/len
     /// aggregate (string / byte[]). Nullable reference
     /// annotation distinguishes string? from string —
@@ -793,6 +816,120 @@ namespace Wacs.ComponentModel.Test
                     | BindingFlags.Instance));
             Assert.NotNull(typeof(NestedRecordHarnessFixture)
                 .GetField("_post_Read",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+        }
+
+        [Fact]
+        public void Generator_emits_primitive_array_export_signatures()
+        {
+            // int SumI32(int[]) — param flat (ptr, len) = 2
+            // ints; return is one int. Func<int, int, int>.
+            var s32 = typeof(PrimitiveArrayHarnessFixture)
+                .GetMethod("SumI32",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(s32);
+            Assert.Equal(typeof(int[]),
+                s32!.GetParameters()[0].ParameterType);
+            Assert.Equal(typeof(int), s32.ReturnType);
+            var s32Inv = typeof(PrimitiveArrayHarnessFixture)
+                .GetField("_invoker_SumI32",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(s32Inv);
+            Assert.Equal(typeof(Func<int, int, int>),
+                s32Inv!.FieldType);
+
+            // long SumI64(long[]) — same flat shape; return
+            // long. Func<int, int, long>.
+            var s64 = typeof(PrimitiveArrayHarnessFixture)
+                .GetMethod("SumI64",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(s64);
+            Assert.Equal(typeof(long[]),
+                s64!.GetParameters()[0].ParameterType);
+            Assert.Equal(typeof(long), s64.ReturnType);
+            var s64Inv = typeof(PrimitiveArrayHarnessFixture)
+                .GetField("_invoker_SumI64",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(s64Inv);
+            Assert.Equal(typeof(Func<int, int, long>),
+                s64Inv!.FieldType);
+
+            // double[] ScaleF64(double[]) — param (ptr, len);
+            // return retArea ptr. Func<int, int, int>.
+            var sf = typeof(PrimitiveArrayHarnessFixture)
+                .GetMethod("ScaleF64",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(sf);
+            Assert.Equal(typeof(double[]),
+                sf!.GetParameters()[0].ParameterType);
+            Assert.Equal(typeof(double[]), sf.ReturnType);
+            var sfInv = typeof(PrimitiveArrayHarnessFixture)
+                .GetField("_invoker_ScaleF64",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(sfInv);
+            Assert.Equal(typeof(Func<int, int, int>),
+                sfInv!.FieldType);
+
+            // ushort[] HistogramU16(ushort[]) — same shape;
+            // align 2 element size 2 (verified by generated
+            // code via PrimitiveSize). Func<int, int, int>.
+            var hu = typeof(PrimitiveArrayHarnessFixture)
+                .GetMethod("HistogramU16",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(hu);
+            Assert.Equal(typeof(ushort[]), hu!.ReturnType);
+            var huInv = typeof(PrimitiveArrayHarnessFixture)
+                .GetField("_invoker_HistogramU16",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(huInv);
+            Assert.Equal(typeof(Func<int, int, int>),
+                huInv!.FieldType);
+
+            // bool[] FilterBools(bool[]) — element size 1
+            // (bool is one byte in canon-ABI). Same flat shape.
+            var fb = typeof(PrimitiveArrayHarnessFixture)
+                .GetMethod("FilterBools",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(fb);
+            Assert.Equal(typeof(bool[]), fb!.ReturnType);
+            var fbInv = typeof(PrimitiveArrayHarnessFixture)
+                .GetField("_invoker_FilterBools",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(fbInv);
+            Assert.Equal(typeof(Func<int, int, int>),
+                fbInv!.FieldType);
+
+            // Class-scope: memory + realloc + per-method post
+            // (returns containing list<T> need cabi_post).
+            Assert.NotNull(typeof(PrimitiveArrayHarnessFixture)
+                .GetField("_memory",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+            Assert.NotNull(typeof(PrimitiveArrayHarnessFixture)
+                .GetField("_reallocInvoke",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+            Assert.NotNull(typeof(PrimitiveArrayHarnessFixture)
+                .GetField("_post_ScaleF64",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+            Assert.NotNull(typeof(PrimitiveArrayHarnessFixture)
+                .GetField("_post_HistogramU16",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+            Assert.NotNull(typeof(PrimitiveArrayHarnessFixture)
+                .GetField("_post_FilterBools",
                     BindingFlags.NonPublic
                     | BindingFlags.Instance));
         }

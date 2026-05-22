@@ -121,5 +121,27 @@ namespace Wacs.ComponentModel.Harness
                     memory.Data, ptr, arr, 0, len);
             return arr;
         }
+
+        /// <summary>Lift a canon-ABI list&lt;T&gt; (where T
+        /// is a primitive numeric / boolean type) from a
+        /// (ptr, len) pair into a fresh <c>T[]</c>.
+        /// <para><paramref name="elementSize"/> is the byte
+        /// width of T (passed by the sourcegen so the helper
+        /// stays AOT-friendly — no reflection-based size
+        /// lookup). Buffer.BlockCopy is documented to handle
+        /// any primitive array as source and destination, so
+        /// the bulk-memmove is safe across the supported
+        /// element types.</para></summary>
+        public static T[] LiftPrimitiveArray<T>(
+            MemoryInstance memory, int ptr, int len,
+            int elementSize)
+        {
+            var arr = new T[len];
+            if (len > 0)
+                System.Buffer.BlockCopy(
+                    memory.Data, ptr, arr, 0,
+                    len * elementSize);
+            return arr;
+        }
     }
 }

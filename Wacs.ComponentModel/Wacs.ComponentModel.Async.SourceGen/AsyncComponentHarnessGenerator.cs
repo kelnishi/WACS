@@ -260,12 +260,44 @@ namespace Wacs.ComponentModel.Async.SourceGen
         private static bool IsByteArray(string fqType) =>
             fqType == ByteArrayType || fqType == ByteArrayTypeFq;
 
-        // String + byte[] both flatten to (i32 ptr, i32 len)
-        // — same canon-ABI shape with different encoding.
-        // Treating them uniformly in the flat-signature
-        // computation simplifies the generic-args build.
+        // Primitive arrays representing canon-ABI list<T>.
+        // Memory layout: contiguous `N * sizeof(T)` bytes,
+        // aligned to alignof(T). Bulk copy via
+        // Buffer.BlockCopy with scaled byte count.
+        private static readonly System.Collections.Generic
+            .HashSet<string> PrimitiveArrayTypes =
+            new System.Collections.Generic.HashSet<string>(
+                StringComparer.Ordinal)
+            {
+                "byte[]", "sbyte[]", "ushort[]", "short[]",
+                "uint[]", "int[]", "ulong[]", "long[]",
+                "float[]", "double[]", "bool[]",
+                "System.Byte[]", "System.SByte[]",
+                "System.UInt16[]", "System.Int16[]",
+                "System.UInt32[]", "System.Int32[]",
+                "System.UInt64[]", "System.Int64[]",
+                "System.Single[]", "System.Double[]",
+                "System.Boolean[]",
+            };
+
+        private static bool IsPrimitiveArray(string fqType) =>
+            PrimitiveArrayTypes.Contains(fqType);
+
+        // Strip the trailing `[]` to get the element type
+        // for sizeof/alignof and the C# generic-arg form.
+        private static string ArrayElementType(string fqType)
+            => fqType.EndsWith("[]",
+                    StringComparison.Ordinal)
+                ? fqType.Substring(0, fqType.Length - 2)
+                : fqType;
+
+        // String + primitive arrays (list<T>) both flatten to
+        // (i32 ptr, i32 len) — same canon-ABI shape with
+        // different encodings. Treating them uniformly in the
+        // flat-signature computation simplifies the
+        // generic-args build.
         private static bool IsPtrLenAggregate(string fqType) =>
-            IsString(fqType) || IsByteArray(fqType);
+            IsString(fqType) || IsPrimitiveArray(fqType);
 
         // Canon-ABI option<T> for primitive T. C# representation
         // is Nullable<T> — `int?`, `bool?`, `long?`, etc.
@@ -815,7 +847,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
         private static bool IsSupportedParam(string fqType) =>
             IsPrimitive(fqType)
             || IsString(fqType)
-            || IsByteArray(fqType)
+            || IsPrimitiveArray(fqType)
             || IsOption(fqType)
             || IsSupportedResult(fqType)
             || IsSupportedTuple(fqType)
@@ -825,7 +857,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
             fqType == null
             || IsPrimitive(fqType)
             || IsString(fqType)
-            || IsByteArray(fqType)
+            || IsPrimitiveArray(fqType)
             || IsOption(fqType)
             || IsSupportedResult(fqType)
             || IsSupportedTuple(fqType)
@@ -1561,44 +1593,13 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     sb.Append(p.Name);
                     sb.AppendLine("_len);");
                 }
-                else if (IsByteArray(p.Type))
+                else if (IsPrimitiveArray(p.Type))
                 {
-                    // canon-ABI list<u8>: align 1, element
-                    // size 1. cabi_realloc(0, 0, 1, len) → ptr;
-                    // raw byte-copy in.
-                    sb.Append("            int __");
-                    sb.Append(p.Name);
-                    sb.Append("_len = ");
-                    sb.Append(p.Name);
-                    sb.AppendLine(".Length;");
-                    sb.Append("            int __");
-                    sb.Append(p.Name);
-                    sb.Append("_ptr = __");
-                    sb.Append(p.Name);
-                    sb.Append("_len == 0 ? 0 : _reallocInvoke!" +
-                        "(0, 0, 1, __");
-                    sb.Append(p.Name);
-                    sb.AppendLine("_len);");
-                    sb.Append("            if (__");
-                    sb.Append(p.Name);
-                    sb.Append("_ptr == 0 && __");
-                    sb.Append(p.Name);
-                    sb.AppendLine("_len != 0)");
-                    sb.AppendLine("                throw new " +
-                        "System.OutOfMemoryException(");
-                    sb.Append("                    \"cabi_realloc " +
-                        "returned 0 when lowering byte[] param '");
-                    sb.Append(p.Name);
-                    sb.AppendLine("'.\");");
-                    sb.Append("            if (__");
-                    sb.Append(p.Name);
-                    sb.Append("_len > 0) System.Buffer.BlockCopy(");
-                    sb.Append(p.Name);
-                    sb.Append(", 0, _memory!.Data, __");
-                    sb.Append(p.Name);
-                    sb.Append("_ptr, __");
-                    sb.Append(p.Name);
-                    sb.AppendLine("_len);");
+                    // canon-ABI list<T>: align = alignof(T),
+                    // element size = sizeof(T). realloc size
+                    // = len * sizeof(T); BlockCopy bytes too.
+                    EmitPrimitiveArrayLower(sb, p.Type,
+                        "__" + p.Name, p.Name);
                 }
                 else if (IsOption(p.Type))
                 {
@@ -1672,8 +1673,8 @@ namespace Wacs.ComponentModel.Async.SourceGen
             {
                 if (IsString(ex.ReturnType))
                     EmitSyncStringReturnLift(sb, ex);
-                else if (IsByteArray(ex.ReturnType))
-                    EmitSyncByteArrayReturnLift(sb, ex);
+                else if (IsPrimitiveArray(ex.ReturnType))
+                    EmitSyncPrimitiveArrayReturnLift(sb, ex);
                 else if (IsOption(ex.ReturnType))
                     EmitSyncOptionReturnLift(sb, ex);
                 else if (IsWitResult(ex.ReturnType))
@@ -2113,11 +2114,17 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 sb.Append(localName);
                 sb.AppendLine("_len);");
             }
-            else // byte[]
+            else // primitive array
             {
-                sb.Append("            byte[] ");
+                string elem = ArrayElementType(fieldType);
+                int elemSize = PrimitiveSize(elem);
+                sb.Append("            ");
+                sb.Append(elem);
+                sb.Append("[] ");
                 sb.Append(localName);
-                sb.Append(" = new byte[");
+                sb.Append(" = new ");
+                sb.Append(elem);
+                sb.Append('[');
                 sb.Append(localName);
                 sb.AppendLine("_len];");
                 sb.Append("            if (");
@@ -2130,7 +2137,16 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 sb.Append(localName);
                 sb.Append(", 0, ");
                 sb.Append(localName);
-                sb.AppendLine("_len);");
+                if (elemSize != 1)
+                {
+                    sb.Append("_len * ");
+                    sb.Append(elemSize);
+                }
+                else
+                {
+                    sb.Append("_len");
+                }
+                sb.AppendLine(");");
             }
         }
 
@@ -2443,11 +2459,11 @@ namespace Wacs.ComponentModel.Async.SourceGen
         // byte[] return lift: read (ptr, len) from retArea,
         // copy memory bytes into a fresh byte[], call
         // cabi_post_X to release.
-        private static void EmitSyncByteArrayReturnLift(
+        private static void EmitSyncPrimitiveArrayReturnLift(
             StringBuilder sb, ExportMethod ex)
         {
-            string postExport = "cabi_post_" + ex.ExportName;
-            string postField = "_post_" + ex.MethodName;
+            string elem = ArrayElementType(ex.ReturnType!);
+            int elemSize = PrimitiveSize(elem);
             sb.AppendLine(
                 "            int __outPtr = global::Wacs" +
                 ".ComponentModel.Harness.MemoryHelpers" +
@@ -2456,31 +2472,23 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 "            int __outLen = global::Wacs" +
                 ".ComponentModel.Harness.MemoryHelpers" +
                 ".ReadI32LE(_memory!, __raw + 4);");
-            sb.AppendLine(
-                "            byte[] __result = new byte[__outLen];");
+            sb.Append("            ");
+            sb.Append(elem);
+            sb.Append("[] __result = new ");
+            sb.Append(elem);
+            sb.AppendLine("[__outLen];");
             sb.AppendLine(
                 "            if (__outLen > 0)");
-            sb.AppendLine(
-                "                System.Buffer.BlockCopy(" +
-                "_memory!.Data, __outPtr, __result, 0, __outLen);");
-            // cabi_post lookup (same shape as string return).
-            sb.Append("            if (");
-            sb.Append(postField);
-            sb.AppendLine(" == null)");
-            sb.AppendLine("            {");
             sb.Append(
-                "                if (_instance.CoreRuntime" +
-                ".TryGetExportedFunction(\"");
-            sb.Append(EscapeStringLiteral(postExport));
-            sb.AppendLine("\", out var __postAddr))");
-            sb.Append("                    ");
-            sb.Append(postField);
-            sb.AppendLine(" = _instance.CoreRuntime" +
-                ".CreateInvokerAction<int>(__postAddr);");
-            sb.AppendLine("            }");
-            sb.Append("            ");
-            sb.Append(postField);
-            sb.AppendLine("?.Invoke(__raw);");
+                "                System.Buffer.BlockCopy(" +
+                "_memory!.Data, __outPtr, __result, 0, __outLen");
+            if (elemSize != 1)
+            {
+                sb.Append(" * ");
+                sb.Append(elemSize);
+            }
+            sb.AppendLine(");");
+            EmitCabiPostInvoke(sb, ex);
             sb.AppendLine("            return __result;");
         }
 
@@ -2603,40 +2611,10 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 sb.Append(baseName);
                 sb.AppendLine("_len);");
             }
-            else if (IsByteArray(fieldType))
+            else if (IsPrimitiveArray(fieldType))
             {
-                sb.Append("            int ");
-                sb.Append(baseName);
-                sb.Append("_len = ");
-                sb.Append(sourceExpr);
-                sb.AppendLine(".Length;");
-                sb.Append("            int ");
-                sb.Append(baseName);
-                sb.Append("_ptr = ");
-                sb.Append(baseName);
-                sb.Append("_len == 0 ? 0 : _reallocInvoke!" +
-                    "(0, 0, 1, ");
-                sb.Append(baseName);
-                sb.AppendLine("_len);");
-                sb.Append("            if (");
-                sb.Append(baseName);
-                sb.Append("_ptr == 0 && ");
-                sb.Append(baseName);
-                sb.AppendLine("_len != 0)");
-                sb.AppendLine("                throw new " +
-                    "System.OutOfMemoryException(");
-                sb.AppendLine("                    \"cabi_realloc " +
-                    "returned 0 lowering a non-empty byte[] " +
-                    "field.\");");
-                sb.Append("            if (");
-                sb.Append(baseName);
-                sb.Append("_len > 0) System.Buffer.BlockCopy(");
-                sb.Append(sourceExpr);
-                sb.Append(", 0, _memory!.Data, ");
-                sb.Append(baseName);
-                sb.Append("_ptr, ");
-                sb.Append(baseName);
-                sb.AppendLine("_len);");
+                EmitPrimitiveArrayLower(sb, fieldType,
+                    baseName, sourceExpr);
             }
             else if (IsOption(fieldType))
             {
@@ -2776,11 +2754,12 @@ namespace Wacs.ComponentModel.Async.SourceGen
             }
         }
 
-        // Emit statements that lower a string / byte[] value
-        // into existing ptr / len locals. `out` style for
-        // string (LowerUtf8 supports `out` to existing
-        // locals); plain assignments for byte[]. `indent` is
-        // the leading whitespace for each emitted line.
+        // Emit statements that lower a string / primitive
+        // array value into existing ptr / len locals. `out`
+        // style for string (LowerUtf8 supports `out` to
+        // existing locals); plain assignments for arrays.
+        // `indent` is the leading whitespace for each
+        // emitted line.
         private static void EmitPtrLenAssignInto(
             StringBuilder sb, string type, string sourceExpr,
             string ptrLocal, string lenLocal, string indent)
@@ -2796,40 +2775,123 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 sb.Append(", out ");
                 sb.Append(lenLocal);
                 sb.AppendLine(");");
+                return;
             }
-            else // byte[]
+            // Primitive array: scale realloc size + BlockCopy
+            // count by sizeof(element). For byte[] the scale
+            // is 1 so the generated source matches the old
+            // byte[]-specific path byte-for-byte.
+            string elem = ArrayElementType(type);
+            int elemSize = PrimitiveSize(elem);
+            int elemAlign = PrimitiveAlign(elem);
+            sb.Append(indent);
+            sb.Append(lenLocal);
+            sb.Append(" = ");
+            sb.Append(sourceExpr);
+            sb.AppendLine(".Length;");
+            sb.Append(indent);
+            sb.Append(ptrLocal);
+            sb.Append(" = ");
+            sb.Append(lenLocal);
+            sb.Append(" == 0 ? 0 : _reallocInvoke!(0, 0, ");
+            sb.Append(elemAlign);
+            sb.Append(", ");
+            sb.Append(lenLocal);
+            if (elemSize != 1)
             {
-                sb.Append(indent);
-                sb.Append(lenLocal);
-                sb.Append(" = ");
-                sb.Append(sourceExpr);
-                sb.AppendLine(".Length;");
-                sb.Append(indent);
-                sb.Append(ptrLocal);
-                sb.Append(" = ");
-                sb.Append(lenLocal);
-                sb.Append(" == 0 ? 0 : _reallocInvoke!(0, 0, 1, ");
-                sb.Append(lenLocal);
-                sb.AppendLine(");");
-                sb.Append(indent);
-                sb.Append("if (");
-                sb.Append(lenLocal);
-                sb.Append(" > 0) System.Buffer.BlockCopy(");
-                sb.Append(sourceExpr);
-                sb.Append(", 0, _memory!.Data, ");
-                sb.Append(ptrLocal);
-                sb.Append(", ");
-                sb.Append(lenLocal);
-                sb.AppendLine(");");
+                sb.Append(" * ");
+                sb.Append(elemSize);
             }
+            sb.AppendLine(");");
+            sb.Append(indent);
+            sb.Append("if (");
+            sb.Append(lenLocal);
+            sb.Append(" > 0) System.Buffer.BlockCopy(");
+            sb.Append(sourceExpr);
+            sb.Append(", 0, _memory!.Data, ");
+            sb.Append(ptrLocal);
+            sb.Append(", ");
+            sb.Append(lenLocal);
+            if (elemSize != 1)
+            {
+                sb.Append(" * ");
+                sb.Append(elemSize);
+            }
+            sb.AppendLine(");");
         }
 
-        // C# expression that lifts a string / byte[] from
-        // existing ptr / len locals. Single expression form
-        // — string uses StringCoding.LiftUtf8, byte[] uses
-        // MemoryHelpers.LiftBytes (added 0.4.9 alongside
-        // this work to keep array-construction off the
-        // emitted source).
+        // Top-level primitive-array param lower. Wraps
+        // EmitPtrLenAssignInto with the inline-int-declaration
+        // form for ptr/len locals + the "realloc returned 0"
+        // safety check.
+        private static void EmitPrimitiveArrayLower(
+            StringBuilder sb, string type,
+            string baseName, string sourceExpr)
+        {
+            string elem = ArrayElementType(type);
+            int elemSize = PrimitiveSize(elem);
+            int elemAlign = PrimitiveAlign(elem);
+            sb.Append("            int ");
+            sb.Append(baseName);
+            sb.Append("_len = ");
+            sb.Append(sourceExpr);
+            sb.AppendLine(".Length;");
+            sb.Append("            int ");
+            sb.Append(baseName);
+            sb.Append("_ptr = ");
+            sb.Append(baseName);
+            sb.Append("_len == 0 ? 0 : _reallocInvoke!(0, 0, ");
+            sb.Append(elemAlign);
+            sb.Append(", ");
+            sb.Append(baseName);
+            if (elemSize != 1)
+            {
+                sb.Append("_len * ");
+                sb.Append(elemSize);
+            }
+            else
+            {
+                sb.Append("_len");
+            }
+            sb.AppendLine(");");
+            sb.Append("            if (");
+            sb.Append(baseName);
+            sb.Append("_ptr == 0 && ");
+            sb.Append(baseName);
+            sb.AppendLine("_len != 0)");
+            sb.AppendLine("                throw new " +
+                "System.OutOfMemoryException(");
+            sb.Append("                    \"cabi_realloc " +
+                "returned 0 when lowering ");
+            sb.Append(type);
+            sb.AppendLine(" param.\");");
+            sb.Append("            if (");
+            sb.Append(baseName);
+            sb.Append("_len > 0) System.Buffer.BlockCopy(");
+            sb.Append(sourceExpr);
+            sb.Append(", 0, _memory!.Data, ");
+            sb.Append(baseName);
+            sb.Append("_ptr, ");
+            sb.Append(baseName);
+            if (elemSize != 1)
+            {
+                sb.Append("_len * ");
+                sb.Append(elemSize);
+            }
+            else
+            {
+                sb.Append("_len");
+            }
+            sb.AppendLine(");");
+        }
+
+        // C# expression that lifts a string / primitive
+        // array from existing ptr / len locals. Single
+        // expression form — string uses
+        // StringCoding.LiftUtf8, byte[] uses
+        // MemoryHelpers.LiftBytes (kept for backward
+        // compat), other primitive arrays use the generic
+        // MemoryHelpers.LiftPrimitiveArray<T> overload.
         private static string PtrLenLiftExpression(
             string type, string ptrLocal, string lenLocal)
         {
@@ -2837,10 +2899,17 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 return "global::Wacs.ComponentModel.Harness" +
                     ".StringCoding.LiftUtf8(_memory!, "
                     + ptrLocal + ", " + lenLocal + ")";
-            // byte[]
+            if (IsByteArray(type))
+                return "global::Wacs.ComponentModel.Harness" +
+                    ".MemoryHelpers.LiftBytes(_memory!, "
+                    + ptrLocal + ", " + lenLocal + ")";
+            string elem = ArrayElementType(type);
+            int elemSize = PrimitiveSize(elem);
             return "global::Wacs.ComponentModel.Harness" +
-                ".MemoryHelpers.LiftBytes(_memory!, "
-                + ptrLocal + ", " + lenLocal + ")";
+                ".MemoryHelpers.LiftPrimitiveArray<"
+                + elem + ">(_memory!, "
+                + ptrLocal + ", " + lenLocal + ", "
+                + elemSize + ")";
         }
 
         // Emit shared option-lower statements: disc + payload

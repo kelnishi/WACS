@@ -1,5 +1,57 @@
 # Changelog
 
+## WACS.ComponentModel.Async.SourceGen 0.4.12, Harness.Runtime 0.7.2 — list<T> for non-u8 element types
+
+Canon-ABI `list<T>` is now supported for any C# primitive
+array — `int[]`, `long[]`, `uint[]`, `ushort[]`, `short[]`,
+`ulong[]`, `sbyte[]`, `float[]`, `double[]`, `bool[]`, and
+of course `byte[]`. Lower scales the `cabi_realloc` size +
+`Buffer.BlockCopy` byte-count by `sizeof(element)`, lift
+does the reverse via a new generic
+`MemoryHelpers.LiftPrimitiveArray<T>` helper.
+
+* **Detection.** New `PrimitiveArrayTypes` set covers the
+  full primitive-array surface. `IsPrimitiveArray` /
+  `ArrayElementType` helpers replace the byte[]-specific
+  predicates at the type-acceptance layer.
+  `IsPtrLenAggregate` now returns true for any primitive
+  array; downstream codegen that branched on
+  `IsPtrLenAggregate` automatically picks up the new
+  shapes.
+* **Param lower.** Top-level array params route through a
+  new `EmitPrimitiveArrayLower` helper that generalizes
+  the existing byte[] inline. `EmitPtrLenAssignInto` (used
+  by option / result branches when lowering an arm value)
+  scales the realloc + BlockCopy by element size; byte[]
+  emits identically to before (size factor elided when
+  it's 1).
+* **Return lift.** Top-level array returns use a new
+  `EmitSyncPrimitiveArrayReturnLift` that allocates a
+  fresh `T[]`, BlockCopies the bytes, invokes
+  `cabi_post`. `EmitAggregateFieldLiftLocal` byte[] branch
+  generalized to any primitive array; for ptr/len arm
+  returns, `PtrLenLiftExpression` falls back to
+  `MemoryHelpers.LiftPrimitiveArray<T>(...)` when the type
+  isn't byte[].
+* **Harness.Runtime 0.7.2**: new
+  `MemoryHelpers.LiftPrimitiveArray<T>(memory, ptr, len, elementSize)`
+  generic helper. `elementSize` is passed by the generator
+  to keep the helper AOT-friendly (no reflection-based
+  sizeof lookup). Buffer.BlockCopy handles the bulk
+  memmove for any primitive element type.
+* New generator test:
+  `Generator_emits_primitive_array_export_signatures`
+  pins `int[] / long[] / double[] / ushort[] / bool[]`
+  param + return shapes and the matching memory + realloc
+  + per-method post fields. 20/20 generator integration
+  tests, 659/659 across Wacs.ComponentModel.Test.
+  Hello-spike passes unchanged.
+
+**Still punted:** mixed primitive vs ptr/len result arms;
+`list<string>` / `list<record>` (heterogeneous-pointer
+lists); deeply-nested list-of-list-of-X; cyclic record
+references.
+
 ## WACS.ComponentModel.Async.SourceGen 0.4.11 — mixed-type ptr/len arms inside result<TOk, TErr>
 
 `WitResult<string, byte[]>` (and any other distinct-type
