@@ -130,6 +130,42 @@ namespace Wacs.ComponentModel.Test
         internal partial (int, long, bool) Triple();
     }
 
+    /// <summary><c>[WitRecord]</c> with mixed primitive +
+    /// ptr/len aggregate fields. Exercises the
+    /// aggregate-in-record marshaling path: each string /
+    /// byte[] field flat-lowers as (ptr:i32, len:i32) at the
+    /// canon-ABI field offset, and the record return goes
+    /// through a retArea with per-field reads.</summary>
+    [WitRecord]
+    internal struct Person
+    {
+        public string Name;
+        public int Age;
+    }
+
+    [AsyncComponentHarness]
+    internal partial class AggregateRecordHarnessFixture
+    {
+        [SyncExport("greet")]
+        internal partial string Greet(Person who);
+
+        [SyncExport("describe")]
+        internal partial Person Describe(int id);
+    }
+
+    /// <summary>Tuples carrying a ptr/len aggregate element
+    /// (string + int). Mirrors the aggregate-in-record path
+    /// for tuples.</summary>
+    [AsyncComponentHarness]
+    internal partial class AggregateTupleHarnessFixture
+    {
+        [SyncExport("label")]
+        internal partial int Label((string, int) named);
+
+        [SyncExport("named_count")]
+        internal partial (string, int) NamedCount(int seed);
+    }
+
     /// <summary>Sync exports with <c>WitResult&lt;TOk,
     /// TErr&gt;</c> (canon-ABI <c>result&lt;TOk, TErr&gt;</c>).
     /// Covers the four canonical shapes:
@@ -346,6 +382,125 @@ namespace Wacs.ComponentModel.Test
             Assert.NotNull(tripleInv);
             Assert.Equal(typeof(Func<int>),
                 tripleInv!.FieldType);
+        }
+
+        [Fact]
+        public void Generator_emits_aggregate_in_record_export_signatures()
+        {
+            // string Greet(Person who) — Person { string Name;
+            // int Age; }. Flat lower: Name → (ptr, len); Age
+            // → int. Method returns string → retArea ptr.
+            // Invoker: Func<int, int, int, int>
+            // (name_ptr, name_len, age, retArea_ptr).
+            var greet = typeof(AggregateRecordHarnessFixture)
+                .GetMethod("Greet",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(greet);
+            Assert.Equal(typeof(string), greet!.ReturnType);
+            Assert.Equal(typeof(Person),
+                greet.GetParameters()[0].ParameterType);
+            var greetInv = typeof(AggregateRecordHarnessFixture)
+                .GetField("_invoker_Greet",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(greetInv);
+            Assert.Equal(typeof(Func<int, int, int, int>),
+                greetInv!.FieldType);
+
+            // Person Describe(int id) — return uses retArea
+            // (multi-field record). Invoker: Func<int, int>
+            // (id, retArea_ptr).
+            var describe = typeof(AggregateRecordHarnessFixture)
+                .GetMethod("Describe",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(describe);
+            Assert.Equal(typeof(Person),
+                describe!.ReturnType);
+            var describeInv = typeof(AggregateRecordHarnessFixture)
+                .GetField("_invoker_Describe",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(describeInv);
+            Assert.Equal(typeof(Func<int, int>),
+                describeInv!.FieldType);
+
+            // Both methods need memory + realloc (param lowering
+            // for string field, return lift for the record's
+            // string field at retArea offset 0).
+            Assert.NotNull(typeof(AggregateRecordHarnessFixture)
+                .GetField("_memory",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+            Assert.NotNull(typeof(AggregateRecordHarnessFixture)
+                .GetField("_reallocInvoke",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+            // cabi_post is needed for: Greet (string return)
+            // and Describe (record-with-string return).
+            Assert.NotNull(typeof(AggregateRecordHarnessFixture)
+                .GetField("_post_Greet",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+            Assert.NotNull(typeof(AggregateRecordHarnessFixture)
+                .GetField("_post_Describe",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+        }
+
+        [Fact]
+        public void Generator_emits_aggregate_in_tuple_export_signatures()
+        {
+            // int Label((string, int) named) — tuple param
+            // flat: (name_ptr, name_len, count). Return int.
+            // Invoker: Func<int, int, int, int>.
+            var label = typeof(AggregateTupleHarnessFixture)
+                .GetMethod("Label",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(label);
+            Assert.Equal(typeof(int), label!.ReturnType);
+            Assert.Equal(typeof(ValueTuple<string, int>),
+                label.GetParameters()[0].ParameterType);
+            var labelInv = typeof(AggregateTupleHarnessFixture)
+                .GetField("_invoker_Label",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(labelInv);
+            Assert.Equal(typeof(Func<int, int, int, int>),
+                labelInv!.FieldType);
+
+            // (string, int) NamedCount(int) — multi-element
+            // return with aggregate uses retArea. Invoker:
+            // Func<int, int> (seed, retArea_ptr).
+            var nc = typeof(AggregateTupleHarnessFixture)
+                .GetMethod("NamedCount",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(nc);
+            Assert.Equal(typeof(ValueTuple<string, int>),
+                nc!.ReturnType);
+            var ncInv = typeof(AggregateTupleHarnessFixture)
+                .GetField("_invoker_NamedCount",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(ncInv);
+            Assert.Equal(typeof(Func<int, int>),
+                ncInv!.FieldType);
+
+            Assert.NotNull(typeof(AggregateTupleHarnessFixture)
+                .GetField("_memory",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+            Assert.NotNull(typeof(AggregateTupleHarnessFixture)
+                .GetField("_reallocInvoke",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+            Assert.NotNull(typeof(AggregateTupleHarnessFixture)
+                .GetField("_post_NamedCount",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
         }
 
         [Fact]

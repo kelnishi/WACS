@@ -1,5 +1,58 @@
 # Changelog
 
+## WACS.ComponentModel.Async.SourceGen 0.4.6 — aggregate-in-aggregate marshaling (string / byte[] inside tuples & records)
+
+Closes the punt from 0.4.5: ptr/len aggregate fields
+(string, `byte[]`) are now allowed inside tuples and
+`[WitRecord]` types on both the param and return sides
+of sync exports.
+
+* **Type detection.** `IsSupportedTuple` and
+  `BuildRecordLayout` now accept ptr/len aggregate
+  element/field types in addition to primitives. New
+  helpers `FieldSize` / `FieldAlign` / `FieldSlotCount`
+  centralize the size/align math — primitives report
+  their natural width, ptr/len aggregates report 8 / 4 /
+  2.
+* **Flat signature.** `CountFlatSlots`,
+  `AppendFlatParamTypes`, and `BuildFlatInvokerTypeArgs`
+  expand each aggregate field to `(int, int)` — e.g.
+  `(string, int) Label((string, int))` flat-lowers to
+  `Func<int, int, int, int>` (name_ptr, name_len, count,
+  retArea_ptr).
+* **Param lower.** A new `EmitAggregateFieldLower`
+  helper emits `StringCoding.LowerUtf8` for string
+  fields and `cabi_realloc` + `Buffer.BlockCopy` for
+  `byte[]` fields, binding `__<param>_<field>_ptr` /
+  `__<param>_<field>_len` locals that the call site
+  hands to the flat invoker.
+* **Return lift.** Tuple + record returns containing an
+  aggregate go through a retArea (single-aggregate-field
+  shape no longer inlines). New
+  `EmitAggregateFieldLiftLocal` reads (ptr:i32, len:i32)
+  at the canon-ABI field offset and lifts to `string` /
+  `byte[]` via `StringCoding.LiftUtf8` /
+  `Buffer.BlockCopy`. Aggregate-bearing returns invoke
+  `cabi_post_<export>` after lifting; offsets are
+  computed via `FieldAlign` / `FieldSize` so primitive +
+  aggregate fields interleave correctly.
+* **Class-scope state.** `needsMemory` /
+  `needsRealloc` / `_post_<MethodName>` field emission
+  now picks up tuple- and record-with-aggregate-field
+  shapes alongside the top-level ptr/len cases.
+* New generator tests:
+  `Generator_emits_aggregate_in_record_export_signatures`
+  and `Generator_emits_aggregate_in_tuple_export_signatures`
+  pin the flat signatures + class-scope fields for
+  `Person { string Name; int Age; }` (greet + describe)
+  and `(string, int)` tuple params + returns. 14/14
+  generator integration tests, 653/653 across
+  Wacs.ComponentModel.Test.
+
+**Still punted:** nested aggregates (option<string>
+inside a record, list<string> anywhere, tuple-in-tuple
+of strings), variants beyond `result`, lists of records.
+
 ## WACS.ComponentModel 0.10.2, WACS.ComponentModel.Async.SourceGen 0.4.5 — `[WitRecord]` user-record marshaling
 
 User-defined record types are now supported on sync

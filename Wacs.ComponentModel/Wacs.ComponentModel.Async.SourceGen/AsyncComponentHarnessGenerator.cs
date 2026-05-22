@@ -466,14 +466,20 @@ namespace Wacs.ComponentModel.Async.SourceGen
             result.Add(StripGlobal(element));
         }
 
-        // All-primitive tuple — MVP support level. Mixed
-        // primitive + aggregate elements aren't yet supported.
+        // Tuple of primitives and / or ptr/len aggregates
+        // (string, byte[]). Nested tuples, options, results
+        // and records inside tuples are still out of scope —
+        // the per-element walking treats fields uniformly via
+        // FieldSize / FieldAlign, but the lower/lift codegen
+        // only knows how to emit primitive + string + byte[]
+        // glue.
         private static bool IsSupportedTuple(string fqType)
         {
             if (!IsTuple(fqType)) return false;
             var elems = TupleElementTypes(fqType);
             foreach (var e in elems)
-                if (!IsPrimitive(e)) return false;
+                if (!IsPrimitive(e) && !IsPtrLenAggregate(e))
+                    return false;
             return elems.Count > 0;
         }
 
@@ -549,6 +555,30 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 case ValueTupleType: return 1;
                 default: return 4;
             }
+        }
+
+        // Canon-ABI field size/align including aggregate
+        // shapes — strings and byte[] (list<u8>) lay out as
+        // a (ptr:i32, len:i32) pair: 8 bytes, align 4.
+        // Used for tuple-element + record-field layout.
+        private static int FieldSize(string fqType)
+        {
+            if (IsPtrLenAggregate(fqType)) return 8;
+            return PrimitiveSize(fqType);
+        }
+
+        private static int FieldAlign(string fqType)
+        {
+            if (IsPtrLenAggregate(fqType)) return 4;
+            return PrimitiveAlign(fqType);
+        }
+
+        // Flat-slot count for a field type. Primitives are 1
+        // slot; string / byte[] are 2 (ptr + len).
+        private static int FieldSlotCount(string fqType)
+        {
+            if (IsPtrLenAggregate(fqType)) return 2;
+            return 1;
         }
 
         private static int AlignTo(int offset, int alignment)
@@ -803,12 +833,14 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 if (field.IsImplicitlyDeclared) continue;
                 string ft = StripGlobal(field.Type.ToDisplayString(
                     SymbolDisplayFormat.FullyQualifiedFormat));
-                if (!IsPrimitive(ft))
+                bool primitive = IsPrimitive(ft);
+                bool aggregate = IsPtrLenAggregate(ft);
+                if (!primitive && !aggregate)
                     return null; // unsupported field type
-                offset = AlignTo(offset, PrimitiveAlign(ft));
+                offset = AlignTo(offset, FieldAlign(ft));
                 fields.Add(new RecordField(
                     field.Name, ft, offset));
-                offset += PrimitiveSize(ft);
+                offset += FieldSize(ft);
             }
             if (fields.Count == 0) return null;
             return new RecordLayout(fqn, fields.ToImmutable());
@@ -965,6 +997,20 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     needsMemory = true;
                     needsRealloc = true;
                 }
+                // Aggregate fields nested inside tuple/record
+                // params require both memory and cabi_realloc
+                // (each field lowers like a top-level string /
+                // byte[] param).
+                if (AnyAggregateFieldInTupleOrRecord(ex))
+                {
+                    needsMemory = true;
+                    foreach (var p in ex.Parameters)
+                        if (AggregateContainsPtrLen(p.Type))
+                            needsRealloc = true;
+                    // Returns that contain aggregates don't
+                    // need cabi_realloc (callee owns the
+                    // retArea) but do need memory.
+                }
                 if (ex.ReturnType != null
                     && IsNullablePrimitive(ex.ReturnType))
                 {
@@ -1006,9 +1052,14 @@ namespace Wacs.ComponentModel.Async.SourceGen
             foreach (var ex in cls.Exports)
             {
                 if (ex.Kind != ExportKind.Sync) continue;
-                if (ex.ReturnType == null
-                    || !IsPtrLenAggregate(ex.ReturnType))
-                    continue;
+                if (ex.ReturnType == null) continue;
+                bool needsPost =
+                    IsPtrLenAggregate(ex.ReturnType)
+                    || ((IsTuple(ex.ReturnType)
+                            || TryLookupRecord(ex.ReturnType,
+                                out _))
+                        && AggregateContainsPtrLen(ex.ReturnType));
+                if (!needsPost) continue;
                 sb.Append(
                     "        private System.Action<int>? _post_");
                 sb.Append(ex.MethodName);
@@ -1180,10 +1231,10 @@ namespace Wacs.ComponentModel.Async.SourceGen
         {
             // Memory + cabi_realloc state are needed for any
             // aggregate that lowers via memory (string,
-            // byte[]). Option<T> for primitive T uses pure
-            // value-flat lowering — no memory access needed
-            // for params or return.
-            bool needsMemory = AnyPtrLenAggregate(ex);
+            // byte[]) — at the top level OR nested inside a
+            // tuple/record param.
+            bool needsMemory = AnyPtrLenAggregate(ex)
+                || AnyAggregateFieldInTupleOrRecord(ex);
             if (needsMemory)
             {
                 EmitSyncEnsureMemoryAndRealloc(sb);
@@ -1200,10 +1251,12 @@ namespace Wacs.ComponentModel.Async.SourceGen
                             WitResultArgs(ex.ReturnType).Err)
                         != null)
                     || (IsTuple(ex.ReturnType)
-                        && TupleElementTypes(ex.ReturnType).Count > 1)
+                        && (TupleElementTypes(ex.ReturnType).Count > 1
+                            || AggregateContainsPtrLen(ex.ReturnType)))
                     || (TryLookupRecord(ex.ReturnType,
                             out var recExN)
-                        && recExN.Fields.Length > 1));
+                        && (recExN.Fields.Length > 1
+                            || AggregateContainsPtrLen(ex.ReturnType))));
             if (needsMemoryForRetArea && !needsMemory)
             {
                 EmitSyncEnsureMemoryOnly(sb);
@@ -1355,42 +1408,30 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 {
                     // tuple<T1, T2, ...> param lowering:
                     // extract each Item via the ValueTuple's
-                    // 1-indexed accessors. Each becomes a
-                    // separate flat slot.
+                    // 1-indexed accessors. Primitive elements
+                    // become a typed local; ptr/len aggregate
+                    // elements (string, byte[]) lower via
+                    // realloc + StringCoding/byte-copy and
+                    // bind (ptr, len) locals.
                     var elems = TupleElementTypes(p.Type);
                     for (int i = 0; i < elems.Count; i++)
                     {
-                        sb.Append("            ");
-                        sb.Append(elems[i]);
-                        sb.Append(" __");
-                        sb.Append(p.Name);
-                        sb.Append("_item");
-                        sb.Append(i + 1);
-                        sb.Append(" = ");
-                        sb.Append(p.Name);
-                        sb.Append(".Item");
-                        sb.Append(i + 1);
-                        sb.AppendLine(";");
+                        EmitAggregateFieldLower(sb,
+                            elems[i],
+                            "__" + p.Name + "_item" + (i + 1),
+                            p.Name + ".Item" + (i + 1));
                     }
                 }
                 else if (TryLookupRecord(p.Type, out var rec))
                 {
                     // record param lowering: access each
-                    // field by its declared name. One local
-                    // per field, all passed as flat args.
+                    // field by its declared name.
                     foreach (var f in rec.Fields)
                     {
-                        sb.Append("            ");
-                        sb.Append(f.Type);
-                        sb.Append(" __");
-                        sb.Append(p.Name);
-                        sb.Append('_');
-                        sb.Append(f.Name);
-                        sb.Append(" = ");
-                        sb.Append(p.Name);
-                        sb.Append('.');
-                        sb.Append(f.Name);
-                        sb.AppendLine(";");
+                        EmitAggregateFieldLower(sb,
+                            f.Type,
+                            "__" + p.Name + "_" + f.Name,
+                            p.Name + "." + f.Name);
                     }
                 }
             }
@@ -1443,8 +1484,16 @@ namespace Wacs.ComponentModel.Async.SourceGen
             StringBuilder sb, ExportMethod ex,
             RecordLayout rec)
         {
-            if (rec.Fields.Length == 1)
+            bool hasAggregateField = false;
+            foreach (var f in rec.Fields)
+                if (IsPtrLenAggregate(f.Type))
+                    hasAggregateField = true;
+
+            if (rec.Fields.Length == 1
+                && !IsPtrLenAggregate(rec.Fields[0].Type))
             {
+                // Single primitive field: flat return is the
+                // field value carried directly in __raw.
                 sb.Append("            return new ");
                 sb.Append(ex.ReturnType);
                 sb.Append(" { ");
@@ -1452,7 +1501,19 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 sb.AppendLine(" = __raw };");
                 return;
             }
-            sb.Append("            return new ");
+
+            // Multi-field OR single ptr/len aggregate field —
+            // both go through a retArea pointed at by __raw.
+            // Read each field at its canon-ABI offset; for
+            // aggregate fields read (ptr, len) and lift via
+            // StringCoding.LiftUtf8 or BlockCopy.
+            foreach (var f in rec.Fields)
+            {
+                if (IsPtrLenAggregate(f.Type))
+                    EmitAggregateFieldLiftLocal(sb, f.Type,
+                        "__rec_" + f.Name, f.Offset);
+            }
+            sb.Append("            var __recResult = new ");
             sb.Append(ex.ReturnType);
             sb.Append(" { ");
             bool first = true;
@@ -1461,12 +1522,23 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 if (!first) sb.Append(", ");
                 sb.Append(f.Name);
                 sb.Append(" = ");
-                sb.Append(ReadMemoryExprForType(
-                    f.Type, "_memory!",
-                    "__raw + " + f.Offset));
+                if (IsPtrLenAggregate(f.Type))
+                {
+                    sb.Append("__rec_");
+                    sb.Append(f.Name);
+                }
+                else
+                {
+                    sb.Append(ReadMemoryExprForType(
+                        f.Type, "_memory!",
+                        "__raw + " + f.Offset));
+                }
                 first = false;
             }
             sb.AppendLine(" };");
+            if (hasAggregateField)
+                EmitCabiPostInvoke(sb, ex);
+            sb.AppendLine("            return __recResult;");
         }
 
         // tuple<T1, T2, ...> return lift. Two cases:
@@ -1480,30 +1552,133 @@ namespace Wacs.ComponentModel.Async.SourceGen
             StringBuilder sb, ExportMethod ex)
         {
             var elems = TupleElementTypes(ex.ReturnType!);
-            if (elems.Count == 1)
+            bool hasAggregate = false;
+            foreach (var e in elems)
+                if (IsPtrLenAggregate(e)) hasAggregate = true;
+
+            if (elems.Count == 1 && !hasAggregate)
             {
                 sb.AppendLine("            return (__raw);");
                 return;
             }
-            // Compute canon-ABI offsets for each field.
+            // Compute canon-ABI offsets for each field using
+            // FieldAlign / FieldSize so ptr/len aggregates
+            // contribute 8 bytes / 4 align like a (i32, i32).
             int[] offsets = new int[elems.Count];
             int offset = 0;
             for (int i = 0; i < elems.Count; i++)
             {
-                offset = AlignTo(offset,
-                    PrimitiveAlign(elems[i]));
+                offset = AlignTo(offset, FieldAlign(elems[i]));
                 offsets[i] = offset;
-                offset += PrimitiveSize(elems[i]);
+                offset += FieldSize(elems[i]);
             }
-            sb.Append("            return (");
+            for (int i = 0; i < elems.Count; i++)
+            {
+                if (IsPtrLenAggregate(elems[i]))
+                    EmitAggregateFieldLiftLocal(sb, elems[i],
+                        "__tup_item" + (i + 1), offsets[i]);
+            }
+            sb.Append("            var __tupResult = (");
             for (int i = 0; i < elems.Count; i++)
             {
                 if (i > 0) sb.Append(", ");
-                sb.Append(ReadMemoryExprForType(
-                    elems[i], "_memory!",
-                    "__raw + " + offsets[i]));
+                if (IsPtrLenAggregate(elems[i]))
+                {
+                    sb.Append("__tup_item");
+                    sb.Append(i + 1);
+                }
+                else
+                {
+                    sb.Append(ReadMemoryExprForType(
+                        elems[i], "_memory!",
+                        "__raw + " + offsets[i]));
+                }
             }
             sb.AppendLine(");");
+            if (hasAggregate)
+                EmitCabiPostInvoke(sb, ex);
+            sb.AppendLine("            return __tupResult;");
+        }
+
+        // Lift a ptr/len aggregate field from a retArea offset
+        // into a local. For strings → StringCoding.LiftUtf8;
+        // for byte[] → BlockCopy into a fresh array. Reads
+        // (ptr:i32, len:i32) at `__raw + offset`.
+        private static void EmitAggregateFieldLiftLocal(
+            StringBuilder sb, string fieldType,
+            string localName, int offset)
+        {
+            sb.Append("            int ");
+            sb.Append(localName);
+            sb.Append("_ptr = global::Wacs.ComponentModel" +
+                ".Harness.MemoryHelpers.ReadI32LE(_memory!, " +
+                "__raw + ");
+            sb.Append(offset);
+            sb.AppendLine(");");
+            sb.Append("            int ");
+            sb.Append(localName);
+            sb.Append("_len = global::Wacs.ComponentModel" +
+                ".Harness.MemoryHelpers.ReadI32LE(_memory!, " +
+                "__raw + ");
+            sb.Append(offset + 4);
+            sb.AppendLine(");");
+            if (IsString(fieldType))
+            {
+                sb.Append("            string ");
+                sb.Append(localName);
+                sb.Append(" = global::Wacs.ComponentModel" +
+                    ".Harness.StringCoding.LiftUtf8(_memory!, ");
+                sb.Append(localName);
+                sb.Append("_ptr, ");
+                sb.Append(localName);
+                sb.AppendLine("_len);");
+            }
+            else // byte[]
+            {
+                sb.Append("            byte[] ");
+                sb.Append(localName);
+                sb.Append(" = new byte[");
+                sb.Append(localName);
+                sb.AppendLine("_len];");
+                sb.Append("            if (");
+                sb.Append(localName);
+                sb.AppendLine("_len > 0)");
+                sb.Append("                System.Buffer.BlockCopy" +
+                    "(_memory!.Data, ");
+                sb.Append(localName);
+                sb.Append("_ptr, ");
+                sb.Append(localName);
+                sb.Append(", 0, ");
+                sb.Append(localName);
+                sb.AppendLine("_len);");
+            }
+        }
+
+        // Lazy-resolve and invoke cabi_post_<export> on __raw.
+        // Some components don't emit cabi_post; absence is
+        // tolerated (small per-call leak, matches wasmtime).
+        private static void EmitCabiPostInvoke(
+            StringBuilder sb, ExportMethod ex)
+        {
+            string postExport = "cabi_post_" + ex.ExportName;
+            string postField = "_post_" + ex.MethodName;
+            sb.Append("            if (");
+            sb.Append(postField);
+            sb.AppendLine(" == null)");
+            sb.AppendLine("            {");
+            sb.Append(
+                "                if (_instance.CoreRuntime" +
+                ".TryGetExportedFunction(\"");
+            sb.Append(EscapeStringLiteral(postExport));
+            sb.AppendLine("\", out var __postAddr))");
+            sb.Append("                    ");
+            sb.Append(postField);
+            sb.AppendLine(" = _instance.CoreRuntime" +
+                ".CreateInvokerAction<int>(__postAddr);");
+            sb.AppendLine("            }");
+            sb.Append("            ");
+            sb.Append(postField);
+            sb.AppendLine("?.Invoke(__raw);");
         }
 
         // result<TOk, TErr> return lift. Two cases:
@@ -1822,6 +1997,76 @@ namespace Wacs.ComponentModel.Async.SourceGen
             sb.AppendLine("            return __result;");
         }
 
+        // Lower a single tuple-element or record-field value
+        // into the flat slot locals the call site will pass.
+        // For primitives: one local of the declared type.
+        // For ptr/len aggregates: lower via the matching
+        // helper and bind two locals — `<base>_ptr` and
+        // `<base>_len`.
+        private static void EmitAggregateFieldLower(
+            StringBuilder sb, string fieldType,
+            string baseName, string sourceExpr)
+        {
+            if (IsString(fieldType))
+            {
+                sb.Append("            global::Wacs" +
+                    ".ComponentModel.Harness.StringCoding" +
+                    ".LowerUtf8(_memory!, ");
+                sb.Append(sourceExpr);
+                sb.Append(", _reallocInvoke!, out int ");
+                sb.Append(baseName);
+                sb.Append("_ptr, out int ");
+                sb.Append(baseName);
+                sb.AppendLine("_len);");
+            }
+            else if (IsByteArray(fieldType))
+            {
+                sb.Append("            int ");
+                sb.Append(baseName);
+                sb.Append("_len = ");
+                sb.Append(sourceExpr);
+                sb.AppendLine(".Length;");
+                sb.Append("            int ");
+                sb.Append(baseName);
+                sb.Append("_ptr = ");
+                sb.Append(baseName);
+                sb.Append("_len == 0 ? 0 : _reallocInvoke!" +
+                    "(0, 0, 1, ");
+                sb.Append(baseName);
+                sb.AppendLine("_len);");
+                sb.Append("            if (");
+                sb.Append(baseName);
+                sb.Append("_ptr == 0 && ");
+                sb.Append(baseName);
+                sb.AppendLine("_len != 0)");
+                sb.AppendLine("                throw new " +
+                    "System.OutOfMemoryException(");
+                sb.AppendLine("                    \"cabi_realloc " +
+                    "returned 0 lowering a non-empty byte[] " +
+                    "field.\");");
+                sb.Append("            if (");
+                sb.Append(baseName);
+                sb.Append("_len > 0) System.Buffer.BlockCopy(");
+                sb.Append(sourceExpr);
+                sb.Append(", 0, _memory!.Data, ");
+                sb.Append(baseName);
+                sb.Append("_ptr, ");
+                sb.Append(baseName);
+                sb.AppendLine("_len);");
+            }
+            else
+            {
+                // Primitive: single typed local.
+                sb.Append("            ");
+                sb.Append(fieldType);
+                sb.Append(' ');
+                sb.Append(baseName);
+                sb.Append(" = ");
+                sb.Append(sourceExpr);
+                sb.AppendLine(";");
+            }
+        }
+
         private static void EmitFlatArgsList(
             StringBuilder sb, ExportMethod ex)
         {
@@ -1863,26 +2108,48 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 else if (IsTuple(p.Type))
                 {
                     var elems = TupleElementTypes(p.Type);
+                    bool firstSlot = true;
                     for (int i = 0; i < elems.Count; i++)
                     {
-                        if (i > 0) sb.Append(", ");
-                        sb.Append("__");
-                        sb.Append(p.Name);
-                        sb.Append("_item");
-                        sb.Append(i + 1);
+                        string baseName = "__" + p.Name
+                            + "_item" + (i + 1);
+                        if (IsPtrLenAggregate(elems[i]))
+                        {
+                            if (!firstSlot) sb.Append(", ");
+                            sb.Append(baseName);
+                            sb.Append("_ptr, ");
+                            sb.Append(baseName);
+                            sb.Append("_len");
+                        }
+                        else
+                        {
+                            if (!firstSlot) sb.Append(", ");
+                            sb.Append(baseName);
+                        }
+                        firstSlot = false;
                     }
                 }
                 else if (TryLookupRecord(p.Type, out var rec))
                 {
-                    int k = 0;
+                    bool firstSlot = true;
                     foreach (var f in rec.Fields)
                     {
-                        if (k > 0) sb.Append(", ");
-                        sb.Append("__");
-                        sb.Append(p.Name);
-                        sb.Append('_');
-                        sb.Append(f.Name);
-                        k++;
+                        string baseName = "__" + p.Name
+                            + "_" + f.Name;
+                        if (IsPtrLenAggregate(f.Type))
+                        {
+                            if (!firstSlot) sb.Append(", ");
+                            sb.Append(baseName);
+                            sb.Append("_ptr, ");
+                            sb.Append(baseName);
+                            sb.Append("_len");
+                        }
+                        else
+                        {
+                            if (!firstSlot) sb.Append(", ");
+                            sb.Append(baseName);
+                        }
+                        firstSlot = false;
                     }
                 }
                 else
@@ -1899,6 +2166,37 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 return true;
             foreach (var p in ex.Parameters)
                 if (IsPtrLenAggregate(p.Type)) return true;
+            return false;
+        }
+
+        // True iff any tuple or record-typed param or return
+        // contains a ptr/len aggregate field. Needed to mark
+        // the method as memory + realloc-using even when no
+        // top-level string/byte[] is present.
+        private static bool AnyAggregateFieldInTupleOrRecord(
+            ExportMethod ex)
+        {
+            if (ex.ReturnType != null
+                && AggregateContainsPtrLen(ex.ReturnType))
+                return true;
+            foreach (var p in ex.Parameters)
+                if (AggregateContainsPtrLen(p.Type))
+                    return true;
+            return false;
+        }
+
+        private static bool AggregateContainsPtrLen(string fqType)
+        {
+            if (IsTuple(fqType))
+            {
+                foreach (var e in TupleElementTypes(fqType))
+                    if (IsPtrLenAggregate(e)) return true;
+            }
+            if (TryLookupRecord(fqType, out var rec))
+            {
+                foreach (var f in rec.Fields)
+                    if (IsPtrLenAggregate(f.Type)) return true;
+            }
             return false;
         }
 
@@ -1952,7 +2250,10 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     for (int i = 0; i < elems.Count; i++)
                     {
                         if (!first) sb.Append(", ");
-                        sb.Append(elems[i]);
+                        if (IsPtrLenAggregate(elems[i]))
+                            sb.Append("int, int");
+                        else
+                            sb.Append(elems[i]);
                         first = false;
                     }
                 }
@@ -1961,7 +2262,10 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     foreach (var f in rec.Fields)
                     {
                         if (!first) sb.Append(", ");
-                        sb.Append(f.Type);
+                        if (IsPtrLenAggregate(f.Type))
+                            sb.Append("int, int");
+                        else
+                            sb.Append(f.Type);
                         first = false;
                     }
                 }
@@ -2026,18 +2330,20 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 else if (IsTuple(p.Type))
                 {
                     // tuple<T1, T2, ...> param flat-lowers to
-                    // its fields. For all-primitive tuples
-                    // each element is 1 slot.
-                    slots += TupleElementTypes(p.Type).Count;
+                    // its fields. Primitives are 1 slot;
+                    // ptr/len aggregates (string, byte[]) are
+                    // 2 slots.
+                    foreach (var e in TupleElementTypes(p.Type))
+                        slots += FieldSlotCount(e);
                 }
                 else if (TryLookupRecord(p.Type,
                     out var recLayout))
                 {
                     // record param flat-lowers to its fields
                     // in declaration order. Same slot count
-                    // as a tuple with the same arity (all-
-                    // primitive MVP).
-                    slots += recLayout.Fields.Length;
+                    // rule as tuples.
+                    foreach (var f in recLayout.Fields)
+                        slots += FieldSlotCount(f.Type);
                 }
                 else slots += 1;
             }
@@ -2165,13 +2471,17 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 else if (IsTuple(p.Type))
                 {
                     // tuple<T1, T2, ...> param flattens to
-                    // its fields. Each field contributes its
-                    // own slot type.
+                    // its fields. ptr/len aggregates contribute
+                    // (int, int); primitives contribute their
+                    // type.
                     var elems = TupleElementTypes(p.Type);
                     for (int i = 0; i < elems.Count; i++)
                     {
                         if (!first) sb.Append(", ");
-                        sb.Append(elems[i]);
+                        if (IsPtrLenAggregate(elems[i]))
+                            sb.Append("int, int");
+                        else
+                            sb.Append(elems[i]);
                         first = false;
                     }
                 }
@@ -2180,7 +2490,10 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     foreach (var f in rec.Fields)
                     {
                         if (!first) sb.Append(", ");
-                        sb.Append(f.Type);
+                        if (IsPtrLenAggregate(f.Type))
+                            sb.Append("int, int");
+                        else
+                            sb.Append(f.Type);
                         first = false;
                     }
                 }
