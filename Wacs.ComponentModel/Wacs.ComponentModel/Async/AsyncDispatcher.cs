@@ -1271,12 +1271,64 @@ namespace Wacs.ComponentModel.Async
             int member = WaitableSetWaitAsync(
                 ctx, waitableSetHandle, 0,
                 cancellable, default).GetAwaiter().GetResult();
-            var ev = BuildAndWriteWaitableEvent(
+            return BuildAndWriteWaitableEvent(
                 member, memory, payloadPtr);
-            System.Console.Error.WriteLine(
-                $"[waitable-set-wait] set={waitableSetHandle} " +
-                $"member={member} event={ev}");
-            return ev;
+        }
+
+        /// <summary>Async sibling for the <c>(callback)</c>-
+        /// style lift driver: waits on the set, materializes the
+        /// (eventType, event1, event2) triple that wit-bindgen-rt
+        /// passes to the callback function. Yields the CLR
+        /// thread while parked so host CLR Tasks (e.g. background
+        /// socket reads) can run.</summary>
+        public async Task<(int eventType, int event1, int event2)>
+            WaitableSetWaitAsyncForCallback(int waitableSetHandle)
+        {
+            int member = await WaitableSetWaitAsync(
+                null!, waitableSetHandle, 0,
+                cancellable: false).ConfigureAwait(false);
+            var (et, e1, e2) = BuildWaitableEventValues(member);
+            return (et, e1, e2);
+        }
+
+        // Per-kind event dispatch identical to
+        // <see cref="BuildAndWriteWaitableEvent"/> but doesn't
+        // touch guest memory — callback-style lifts pass the
+        // event by register, not memory.
+        private (int eventType, int event1, int event2)
+            BuildWaitableEventValues(int member)
+        {
+            var kind = HandleKindInternal(member);
+            int eventType, code;
+            switch (kind)
+            {
+                case WaitableKind.Subtask:
+                    eventType = EventSubtask;
+                    var sub = Subtasks.Get(member);
+                    code = (sub?.Child.Completion.Task.IsCanceled ?? false)
+                        ? 4 // STATUS_RETURNED_CANCELLED
+                        : 2; // STATUS_RETURNED
+                    break;
+                case WaitableKind.Stream:
+                    eventType = EventStreamRead;
+                    var sc = DrainPendingStreamRead(member, Memory!);
+                    code = sc ?? 0;
+                    break;
+                case WaitableKind.Future:
+                    eventType = EventFutureRead;
+                    var fc = DrainPendingFutureRead(member, Memory!);
+                    code = fc ?? 0;
+                    break;
+                case WaitableKind.Task:
+                    eventType = EventSubtask;
+                    code = 2;
+                    break;
+                default:
+                    eventType = EventNone;
+                    code = 0;
+                    break;
+            }
+            return (eventType, member, code);
         }
 
         /// <summary>Non-blocking sibling of

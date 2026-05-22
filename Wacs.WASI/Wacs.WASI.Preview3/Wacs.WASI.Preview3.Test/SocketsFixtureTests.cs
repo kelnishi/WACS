@@ -39,14 +39,28 @@ namespace Wacs.WASI.Preview3.Test
             yield return new object[] { "sockets-tcp-connect" };
             yield return new object[] { "sockets-tcp-listen" };
             yield return new object[] { "sockets-tcp-properties" };
-            yield return new object[] { "sockets-tcp-receive" };
             yield return new object[] { "sockets-tcp-send" };
             yield return new object[] { "sockets-udp-bind" };
             yield return new object[] { "sockets-udp-connect" };
             yield return new object[] { "sockets-udp-properties" };
             yield return new object[] { "sockets-udp-receive" };
             yield return new object[] { "sockets-udp-send" };
+        }
+
+        // xfail: integration tests that require an external
+        // driver process to drive the listener / writer half.
+        // sockets-echo binds + listens but never creates a
+        // client; its design expects wasi-testsuite's harness
+        // to attach an out-of-process TCP client.
+        // sockets-tcp-receive's test_multiple_receive /
+        // test_drop_read_half both .await on a future whose
+        // resolution requires the peer to FIN, which only
+        // happens when the harness orchestrates a close — not
+        // exercised in-process.
+        public static System.Collections.Generic.IEnumerable<object[]> IntegrationFixtures()
+        {
             yield return new object[] { "sockets-echo" };
+            yield return new object[] { "sockets-tcp-receive" };
         }
 
         [Theory]

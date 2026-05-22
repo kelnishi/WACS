@@ -166,8 +166,26 @@ namespace Wacs.ComponentModel.Runtime
                 (Wacs.Core.Types.TypeIdx)0,
                 (Delegate)(Func<int>)(() => 0));
 
+            // Components compiled with the `(callback)` lift
+            // option return a CallbackCode (encoded i32) from
+            // each entry-point call. We have to drive the
+            // callback function in a loop so multi-poll async
+            // bodies (e.g. anything using `futures::join!`)
+            // actually run to completion — otherwise the first
+            // suspension just falls back to the host and the
+            // body's tail never executes (silent false-pass).
+            //
+            // Encoding (per wit-bindgen-rt async_support.rs:418):
+            //   Exit       = 0
+            //   Yield      = 1
+            //   Wait(set)  = 2 | (set << 4)
+            string callbackName = "[callback]" + coreExportName;
+            FuncAddr callbackAddr = default;
+            bool hasCallback = _runtime.TryGetExportedFunction(
+                callbackName, out callbackAddr);
+
             var hostTask = Wacs.ComponentModel.Async.AsyncLiftAdapter
-                .InvokeAsync(AsyncDispatcher, continuation, () =>
+                .InvokeAsync(AsyncDispatcher, continuation, async () =>
                 {
                     var invoker = _runtime.CreateInvoker(addr,
                         new InvokerOptions());
@@ -175,9 +193,52 @@ namespace Wacs.ComponentModel.Runtime
                     var boxedArgs = new object[rawArgs.Length];
                     for (int i = 0; i < rawArgs.Length; i++)
                         boxedArgs[i] = rawArgs[i] ?? 0;
-                    invoker(boxedArgs);
+                    var ret = invoker(boxedArgs);
+                    if (!hasCallback) return;
+                    int code = (ret != null && ret.Length > 0)
+                        ? Convert.ToInt32(ret[0]) : 0;
+                    await DriveCallbackLoopAsync(callbackAddr, code);
                 });
             return hostTask.GetAwaiter().GetResult();
+        }
+
+        // Drive a `(callback)`-style async export until it
+        // signals Exit. The dispatcher tracks the in-flight
+        // waitables / pending host subtasks; when the body
+        // says Wait(N) we block on that set's
+        // <see cref="AsyncDispatcher.WaitableSetWaitAsync"/>
+        // (which yields the CLR thread to the host scheduler
+        // so background tasks can complete) then re-enter the
+        // callback with the resulting event.
+        private async System.Threading.Tasks.Task DriveCallbackLoopAsync(
+            FuncAddr callbackAddr, int initialCode)
+        {
+            int code = initialCode;
+            var cbInvoker = _runtime.CreateInvoker(callbackAddr,
+                new InvokerOptions());
+            while (true)
+            {
+                if (code == 0) return; // Exit
+                if (code == 1)
+                {
+                    // Yield: re-enter with EVENT_NONE so the
+                    // body can take another scheduler turn.
+                    var ret = cbInvoker(new object[] { 0, 0, 0 });
+                    code = (ret != null && ret.Length > 0)
+                        ? Convert.ToInt32(ret[0]) : 0;
+                    continue;
+                }
+                // Wait(set): low nibble = 2, upper 28 = set
+                int setHandle = (int)((uint)code >> 4);
+                var ev = await AsyncDispatcher!
+                    .WaitableSetWaitAsyncForCallback(setHandle);
+                var ret2 = cbInvoker(new object[]
+                {
+                    ev.eventType, ev.event1, ev.event2,
+                });
+                code = (ret2 != null && ret2.Length > 0)
+                    ? Convert.ToInt32(ret2[0]) : 0;
+            }
         }
 
         private ComponentInstance(

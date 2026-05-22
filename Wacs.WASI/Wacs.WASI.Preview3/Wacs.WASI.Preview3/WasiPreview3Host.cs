@@ -3649,9 +3649,9 @@ namespace Wacs.WASI.Preview3
         // for `FutureWrite`. The convention there is that
         // `byte[]` values are copied verbatim into the guest's
         // future-read buffer; non-byte[] values become "no
-        // bytes written" which the guest reads as a zero-filled
-        // OK result. Use this helper for the err arm so the
-        // disc/payload bytes actually reach the guest.
+        // bytes written" — but that's only safe when the guest
+        // happens to zero-init the buffer, so use these helpers
+        // for both arms.
         internal static byte[] EncodeSocketsResultErrBytes(
             SocketsException ex)
         {
@@ -3663,6 +3663,18 @@ namespace Wacs.WASI.Preview3
             // surface those, so we drop the payload string here.
             return bytes;
         }
+
+        /// <summary>20-byte all-zero buffer representing the OK
+        /// arm of <c>result&lt;_, error-code&gt;</c>: result-disc
+        /// 0 (ok), the rest unused. Pass this to
+        /// <see cref="AsyncDispatcher.FutureWrite"/> on the
+        /// happy path so the guest's future-read buffer is
+        /// explicitly zeroed — relying on guest-side zero-init
+        /// caused intermittent <c>Err(AccessDenied)</c>
+        /// misreads when the stack-allocated buffer had non-zero
+        /// remnants.</summary>
+        internal static byte[] EncodeSocketsResultOkBytes() =>
+            new byte[20];
 
         private static void WriteSocketsErrorCodeBytes(
             Span<byte> dest, SocketsException ex,

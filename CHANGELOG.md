@@ -1,5 +1,60 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.2.1, WACS.ComponentModel 0.9.1 — callback-driven lift loop + sockets xfail honesty
+
+Closes the false-pass loophole: `InvokeCoreAsyncLift` was
+returning as soon as the first poll of the body suspended,
+treating any non-Exit status as "task done". Components
+compiled with the `(callback)` lift option (every wasip3
+async export wit-bindgen emits) need the host to *drive*
+the callback function in a loop — Yield → re-enter with
+EVENT_NONE; Wait(set) → wait on the set then re-enter with
+the event triple — until the callback returns Exit.
+
+* **`ComponentInstance.DriveCallbackLoopAsync`** does the
+  loop. Lifts that don't have a `[callback]` export keep
+  the previous behavior (single-shot invocation).
+* **`AsyncDispatcher.WaitableSetWaitAsyncForCallback`**
+  parks on the set asynchronously (yields the CLR thread
+  so background subtasks finish), then materializes the
+  `(eventType, event1, event2)` triple that wit-bindgen-rt
+  feeds to the callback function. Drains
+  pending-stream/future reads at event time so the in-
+  progress callback sees the actual transfer count.
+* **`EncodeSocketsResultOkBytes`** — 20 bytes of zeros for
+  the `result<_, error-code>` OK arm. `FutureWrite(handle,
+  null)` was relying on the guest having zero-init'd the
+  future-read buffer; when wit-bindgen-rt's stack-allocated
+  buffer had non-zero remnants (test_reuseaddr's
+  send-future buffer was a notable case), the OK case was
+  misread as `Err(AccessDenied)`. All `TcpSocket.Send` /
+  `Receive` future writes now go through the explicit-zero
+  helper on the OK path and the err-encoding helper on the
+  failure paths.
+* **`sockets-tcp-bind` now genuinely passes** once the
+  callback loop runs the body to completion AND the OK
+  encoding doesn't leak garbage into the future-read
+  buffer. `tcp-listen`, `tcp-send`, `udp-receive`,
+  `tcp-connect` were already correct but were also dependent
+  on the callback loop landing; they pass for real now.
+* **xfailed two integration-test fixtures.** Removed from
+  the harness:
+  * `sockets-echo` — binds + listens but never creates a
+    client; designed for wasi-testsuite's out-of-process
+    harness to attach a TCP client.
+  * `sockets-tcp-receive` — `test_multiple_receive` /
+    `test_drop_read_half` both await a future that only
+    resolves on peer FIN, which an external harness drives.
+
+  Both moved to an `IntegrationFixtures()` data source
+  with a clear xfail comment so future work can pick them
+  up when the test harness gains a side-channel client.
+
+**Honest sockets coverage: 10/10 in-process fixtures
+green.** No regressions: HTTP 4/4, filesystem
+read-directory/io pass, CLI/clock/random 28/28,
+Wacs.ComponentModel.Test 639/639.
+
 ## WACS.WASI.Preview3 0.2.0, WACS.ComponentModel 0.9.0 — sockets 12/12 + canon-async waitable plumbing
 
 All 12 wasip3 sockets fixtures now pass (was 6/12). The

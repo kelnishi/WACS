@@ -396,17 +396,21 @@ namespace Wacs.WASI.Preview3.Sockets
                     // the socket's send half (FIN packet) per spec.
                     try { socket.Shutdown(SocketShutdown.Send); }
                     catch { /* idempotent */ }
-                    dispatcher.FutureWrite(futureHandle, /* ok */ null);
+                    dispatcher.FutureWrite(futureHandle,
+                        WasiPreview3Host.EncodeSocketsResultOkBytes());
                 }
                 catch (SocketException sx)
                 {
                     dispatcher.FutureWrite(futureHandle,
-                        TcpEndpointHelper.MapSocketException(sx));
+                        WasiPreview3Host.EncodeSocketsResultErrBytes(
+                            TcpEndpointHelper.MapSocketException(sx)));
                 }
                 catch (Exception ex)
                 {
                     dispatcher.FutureWrite(futureHandle,
-                        new SocketsException(ErrorCode.Other, ex.Message));
+                        WasiPreview3Host.EncodeSocketsResultErrBytes(
+                            new SocketsException(
+                                ErrorCode.Other, ex.Message)));
                 }
             });
             return (futureHandle, completion);
@@ -452,19 +456,23 @@ namespace Wacs.WASI.Preview3.Sockets
                             dispatcher.StreamTryWrite(streamHandle, staging[i]);
                     }
                     dispatcher.StreamDropWritable(streamHandle);
-                    dispatcher.FutureWrite(futureHandle, /* ok */ null);
+                    dispatcher.FutureWrite(futureHandle,
+                        WasiPreview3Host.EncodeSocketsResultOkBytes());
                 }
                 catch (SocketException sx)
                 {
                     dispatcher.StreamDropWritable(streamHandle);
                     dispatcher.FutureWrite(futureHandle,
-                        TcpEndpointHelper.MapSocketException(sx));
+                        WasiPreview3Host.EncodeSocketsResultErrBytes(
+                            TcpEndpointHelper.MapSocketException(sx)));
                 }
                 catch (Exception ex)
                 {
                     dispatcher.StreamDropWritable(streamHandle);
                     dispatcher.FutureWrite(futureHandle,
-                        new SocketsException(ErrorCode.Other, ex.Message));
+                        WasiPreview3Host.EncodeSocketsResultErrBytes(
+                            new SocketsException(
+                                ErrorCode.Other, ex.Message)));
                 }
             });
             return (streamHandle, futureHandle, completion);
