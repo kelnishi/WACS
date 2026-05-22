@@ -1,5 +1,67 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.2.2, WACS.ComponentModel 0.9.2 — end-to-end NativeAOT for the WASIp3 dispatcher path
+
+Closes the gap surfaced when reviewing AOT coverage: the
+WASIp3 sockets/HTTP work landed entirely in
+`Wacs.ComponentModel` (the reflective layer), which carried
+a blanket `[RequiresDynamicCode]` annotation on
+`Instantiate()`. Audit of the entry point's body shows it's
+purely primitive (parse + import-bind + dispatcher-wire-up);
+the reflective bits are downstream in the typed
+`Invoke(string, params object?[])` surface — which AOT
+consumers never call.
+
+* **`ComponentInstance.InstantiateAot(byte[], Action<WasmRuntime>?)`**
+  exposes the AOT-safe entry point with `[UnconditionalSuppressMessage]`
+  carrying the audit rationale. Consumers staying on the
+  primitive surface (`InvokeCoreAsyncLift`, direct
+  `WasmRuntime.CreateInvoker<...>`, `AsyncDispatcher` API)
+  get no IL2026 / IL3050 warnings at their call site. The
+  reflective `Invoke()` keeps its own per-method warnings —
+  load-bearing distinction.
+* **`InstantiateComposer` suppresses the recursive
+  `Instantiate(component)` warning** with the same
+  primitive-body justification so nested-component code
+  paths don't leak warnings into the consumer's publish.
+* **`BindWasip2FacadeStubs` extended** with the remaining
+  wasi:io/error, wasi:cli/environment, terminal-input /
+  -output / -stdin / -stdout / -stderr stubs. None are
+  load-bearing for WASIp3 semantics (the wasip2 facade is
+  the wit-bindgen-rt panic-handler fallback) but they need
+  to be bindable so a real wasip3 component instantiates
+  end-to-end.
+* **`Wacs.WASI.Preview3.AotSpike` — new project.** Publishes
+  a NativeAOT ARM64 binary (~14 MB) that loads
+  `run-with-err.wasm`, runs it through the full canon-async
+  dispatcher (host subtask, BLOCKED-aware scaffolding,
+  callback driver loop), and exits cleanly. Proves
+  end-to-end AOT for CM works for the async-lifted wasip3
+  surface — the harness pattern that previously covered
+  only sync exports (hello-spike) now covers async too.
+
+Verification:
+* `WACS_AOT_TEST=1 dotnet test ... AotAcceptance` still
+  passes (1 documented baseline warning at
+  `WasmRuntimeExecution.cs(459)`, no new entries).
+* `dotnet publish -c Release` on `Wacs.WASI.Preview3.AotSpike`
+  succeeds; the only IL warnings are pre-existing entries
+  in `Wacs.Core/Runtime/WasmRuntimeBinding.cs`,
+  `HostFunction.cs`, and `System.Net.Quic` — none in any
+  new code I added this session.
+* Sockets fixtures 10/10 + HTTP 4/4 unchanged.
+
+**What this doesn't yet land** (the path the user originally
+asked about, deferred): a source generator that emits
+per-WIT-world typed harness classes (`[AsyncComponentHarness("wit-world-name")]`)
+so embedders don't hand-write the per-component wiring. The
+infrastructure for that exists (`Wacs.ComponentModel.Async.SourceGen`
+already emits the canon-op registry); the WIT-world
+emitter is the substantive next slice. With this commit
+the dispatcher is reachable AOT — the generator's job
+becomes "emit boilerplate around a known-working
+template", which is a tractable next pass.
+
 ## WACS.WASI.Preview3 0.2.1, WACS.ComponentModel 0.9.1 — callback-driven lift loop + sockets xfail honesty
 
 Closes the false-pass loophole: `InvokeCoreAsyncLift` was

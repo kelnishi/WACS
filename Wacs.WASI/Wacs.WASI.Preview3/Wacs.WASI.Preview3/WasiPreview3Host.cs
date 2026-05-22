@@ -2375,6 +2375,69 @@ namespace Wacs.WASI.Preview3
             runtime.BindHostFunction(
                 (MonoClock2, "subscribe-duration"),
                 (Func<ExecContext, long, int>)((_, _) => 1));
+
+            // wasi:io/error@0.2.0 — [resource-drop]error (i32).
+            // The error resource carries a debug-only string; we
+            // never produce one (no stream errors are surfaced
+            // through the wasip2 facade path).
+            runtime.BindHostFunction(
+                ("wasi:io/error@0.2.0", "[resource-drop]error"),
+                (Action<ExecContext, int>)((_, _) => { }));
+
+            // wasi:cli/environment@0.2.0 — get-environment writes
+            // a list<tuple<string,string>> at retptr. Stub: zero-
+            // length list (retptr+0 = ptr, retptr+4 = len = 0).
+            runtime.BindHostFunction(
+                ("wasi:cli/environment@0.2.0", "get-environment"),
+                (Action<ExecContext, int>)((_, retptr) =>
+                {
+                    var mem = RequireMemoryForHttp();
+                    var dest = mem.AsSpan(retptr, 8);
+                    dest.Clear();
+                }));
+
+            // wasi:cli/terminal-{input,output,stdin,stdout,stderr}
+            // @0.2.0. `terminal-{input,output}` are resources;
+            // `get-terminal-{stdin,stdout,stderr}` return
+            // option<own<terminal-input|output>>. Stub: returns
+            // None (option-disc 0 written at retptr).
+            BindWasip2TerminalStub(runtime,
+                "wasi:cli/terminal-input@0.2.0",
+                "[resource-drop]terminal-input");
+            BindWasip2TerminalStub(runtime,
+                "wasi:cli/terminal-output@0.2.0",
+                "[resource-drop]terminal-output");
+            runtime.BindHostFunction(
+                ("wasi:cli/terminal-stdin@0.2.0", "get-terminal-stdin"),
+                (Action<ExecContext, int>)((_, retptr) =>
+                    WriteOptionNone(retptr)));
+            runtime.BindHostFunction(
+                ("wasi:cli/terminal-stdout@0.2.0", "get-terminal-stdout"),
+                (Action<ExecContext, int>)((_, retptr) =>
+                    WriteOptionNone(retptr)));
+            runtime.BindHostFunction(
+                ("wasi:cli/terminal-stderr@0.2.0", "get-terminal-stderr"),
+                (Action<ExecContext, int>)((_, retptr) =>
+                    WriteOptionNone(retptr)));
+        }
+
+        private void BindWasip2TerminalStub(
+            WasmRuntime runtime,
+            string moduleName, string entryName)
+        {
+            runtime.BindHostFunction(
+                (moduleName, entryName),
+                (Action<ExecContext, int>)((_, _) => { }));
+        }
+
+        private void WriteOptionNone(int retptr)
+        {
+            // option<T> layout: disc byte at +0, payload at +align(1, T.align).
+            // For an option<own<T>> where own<T> is i32: disc + 3 pad
+            // + i32 handle slot = 8 bytes. None = disc 0 + zero payload.
+            var mem = RequireMemoryForHttp();
+            var dest = mem.AsSpan(retptr, 8);
+            dest.Clear();
         }
 
         // wasip2 stdout/stderr stream ops route writes to the

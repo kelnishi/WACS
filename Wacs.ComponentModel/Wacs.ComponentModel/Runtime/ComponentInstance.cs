@@ -277,6 +277,54 @@ namespace Wacs.ComponentModel.Runtime
             return Instantiate(ms, configureImports);
         }
 
+        /// <summary>
+        /// AOT-safe entry point that wires the runtime + the
+        /// canon-async dispatcher without surfacing the reflective
+        /// typed-bridge requirement to the caller. The body is
+        /// identical to <see cref="Instantiate(byte[], Action{WasmRuntime})"/>
+        /// — only the typed <see cref="Invoke(string, object[])"/>
+        /// surface is reflective (it builds Option/Result/list/variant
+        /// CLR types via <c>Type.MakeGenericType</c>); the
+        /// parse + import-bind + dispatcher-wire path it calls is
+        /// purely primitive.
+        ///
+        /// <para>Consumers using this entry point MUST stay on the
+        /// primitive surface (<see cref="InvokeCoreAsyncLift"/>,
+        /// direct <c>WasmRuntime.CreateInvoker</c> handles,
+        /// <see cref="Wacs.ComponentModel.Async.AsyncDispatcher"/>)
+        /// — any call to <see cref="Invoke(string, object[])"/>
+        /// will trigger trim-analysis warnings at THAT call site.
+        /// That's the load-bearing distinction: typed component
+        /// exports route through reflective lift/lower, primitive
+        /// core exports don't.</para>
+        ///
+        /// <para>Suppression rationale (IL2026 / IL3050):
+        /// <c>Instantiate</c> wears the RDC/RUC attributes
+        /// defensively because the typed surface a consumer
+        /// MIGHT reach is reflective. We've audited
+        /// <c>Instantiate</c>'s body — it doesn't itself call
+        /// <c>MakeGenericType</c>, <c>MakeGenericMethod</c>, or
+        /// <c>Activator.CreateInstance</c>. The
+        /// <see cref="UnconditionalSuppressMessageAttribute"/>
+        /// is correct for this entry point's usage contract.</para>
+        /// </summary>
+        [UnconditionalSuppressMessage("AOT",
+            "IL3050:RequiresDynamicCode",
+            Justification =
+            "ComponentInstance.Instantiate's body is purely " +
+            "primitive — parse + bind imports + wire AsyncDispatcher. " +
+            "The typed Invoke() surface is the reflective bit, " +
+            "and is the consumer's choice to call.")]
+        [UnconditionalSuppressMessage("Trim",
+            "IL2026:RequiresUnreferencedCode",
+            Justification = "Same as IL3050 above.")]
+        public static ComponentInstance InstantiateAot(
+            byte[] componentBytes,
+            Action<WasmRuntime>? configureImports = null)
+        {
+            return Instantiate(componentBytes, configureImports);
+        }
+
         [RequiresDynamicCode("Component-model lift/lower instantiates " +
             "Option<T> / Result<T,E> / list<T> / variant arms via " +
             "Type.MakeGenericType at runtime from the component's WIT " +
@@ -696,6 +744,16 @@ namespace Wacs.ComponentModel.Runtime
         /// outer's instance + alias sections to map outer
         /// component-func indices through to inner functions.
         /// Invoke routes through the alias chain.</summary>
+        [UnconditionalSuppressMessage("AOT",
+            "IL3050:RequiresDynamicCode",
+            Justification = "InstantiateComposer's recursive " +
+            "Instantiate call inherits the same primitive-body " +
+            "audit as ComponentInstance.InstantiateAot — the " +
+            "reflective surface is on Invoke(), not on the " +
+            "parse + import-bind path.")]
+        [UnconditionalSuppressMessage("Trim",
+            "IL2026:RequiresUnreferencedCode",
+            Justification = "Same as IL3050 above.")]
         private static ComponentInstance InstantiateComposer(
             ComponentModule component)
         {
