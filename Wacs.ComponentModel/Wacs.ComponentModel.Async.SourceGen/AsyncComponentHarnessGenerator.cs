@@ -334,6 +334,105 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 && ResultJoinedPayload(ok, err) != "MIXED";
         }
 
+        // Canon-ABI tuple<T1, T2, ...> — C# represents it as
+        // either `(T1, T2)` (anonymous) or `(T1 name1, T2 name2)`
+        // (named). Roslyn's FullyQualifiedFormat uses these
+        // syntaxes verbatim. The MVP supports tuples whose
+        // every element is a primitive; aggregate-in-tuple
+        // (string / option / nested tuple) is the next slice.
+        private static bool IsTuple(string fqType)
+        {
+            if (fqType.Length < 5) return false;
+            if (fqType[0] != '(') return false;
+            if (fqType[fqType.Length - 1] != ')') return false;
+            // Must have at least one top-level comma to
+            // qualify as a tuple rather than a parenthesized
+            // expression.
+            int depth = 0;
+            for (int i = 1; i < fqType.Length - 1; i++)
+            {
+                char c = fqType[i];
+                if (c == '(' || c == '<') depth++;
+                else if (c == ')' || c == '>') depth--;
+                else if (c == ',' && depth == 0) return true;
+            }
+            return false;
+        }
+
+        // Parse a Roslyn-formatted tuple type into its element
+        // types. Strips any trailing element-name tokens.
+        // Doesn't normalize `global::` prefixes — caller
+        // applies StripGlobal where it matters.
+        private static System.Collections.Generic.List<string>
+            TupleElementTypes(string fqType)
+        {
+            var result = new System.Collections.Generic.List<string>();
+            int start = 1;
+            int depth = 0;
+            for (int i = 1; i < fqType.Length; i++)
+            {
+                char c = fqType[i];
+                if (c == '(' || c == '<') depth++;
+                else if (c == ')' || c == '>')
+                {
+                    depth--;
+                    if (depth < 0)
+                    {
+                        AddElement(result, fqType, start, i);
+                        break;
+                    }
+                }
+                else if (c == ',' && depth == 0)
+                {
+                    AddElement(result, fqType, start, i);
+                    start = i + 1;
+                }
+            }
+            return result;
+        }
+
+        private static void AddElement(
+            System.Collections.Generic.List<string> result,
+            string source, int start, int end)
+        {
+            string element = source.Substring(start, end - start)
+                .Trim();
+            // Drop a trailing identifier (the named-tuple
+            // element name) if present. Identifier starts
+            // after the last whitespace.
+            int lastSpace = element.LastIndexOf(' ');
+            if (lastSpace > 0)
+            {
+                // Heuristic: the part after the last space is
+                // the element name iff it doesn't contain any
+                // type-construction chars (<, >, comma, [).
+                string tail = element.Substring(lastSpace + 1);
+                bool tailIsIdent = tail.Length > 0;
+                foreach (var c in tail)
+                {
+                    if (!(char.IsLetterOrDigit(c) || c == '_'))
+                    {
+                        tailIsIdent = false;
+                        break;
+                    }
+                }
+                if (tailIsIdent)
+                    element = element.Substring(0, lastSpace).Trim();
+            }
+            result.Add(StripGlobal(element));
+        }
+
+        // All-primitive tuple — MVP support level. Mixed
+        // primitive + aggregate elements aren't yet supported.
+        private static bool IsSupportedTuple(string fqType)
+        {
+            if (!IsTuple(fqType)) return false;
+            var elems = TupleElementTypes(fqType);
+            foreach (var e in elems)
+                if (!IsPrimitive(e)) return false;
+            return elems.Count > 0;
+        }
+
         // Canon-ABI primitive size + alignment.
         private static int PrimitiveSize(string fqType)
         {
@@ -436,7 +535,8 @@ namespace Wacs.ComponentModel.Async.SourceGen
             || IsString(fqType)
             || IsByteArray(fqType)
             || IsNullablePrimitive(fqType)
-            || IsSupportedResult(fqType);
+            || IsSupportedResult(fqType)
+            || IsSupportedTuple(fqType);
 
         private static bool IsSupportedReturn(string? fqType) =>
             fqType == null
@@ -444,7 +544,8 @@ namespace Wacs.ComponentModel.Async.SourceGen
             || IsString(fqType)
             || IsByteArray(fqType)
             || IsNullablePrimitive(fqType)
-            || IsSupportedResult(fqType);
+            || IsSupportedResult(fqType)
+            || IsSupportedTuple(fqType);
 
         private static ScanResult CollectAndDiagnose(
             Compilation compilation)
@@ -725,6 +826,12 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     if (ResultJoinedPayload(ok, err) != null)
                         needsMemory = true;
                 }
+                if (ex.ReturnType != null
+                    && IsTuple(ex.ReturnType)
+                    && TupleElementTypes(ex.ReturnType).Count > 1)
+                {
+                    needsMemory = true;
+                }
             }
             if (needsMemory)
             {
@@ -933,7 +1040,9 @@ namespace Wacs.ComponentModel.Async.SourceGen
                         && ResultJoinedPayload(
                             WitResultArgs(ex.ReturnType).Ok,
                             WitResultArgs(ex.ReturnType).Err)
-                        != null));
+                        != null)
+                    || (IsTuple(ex.ReturnType)
+                        && TupleElementTypes(ex.ReturnType).Count > 1));
             if (needsMemoryForRetArea && !needsMemory)
             {
                 EmitSyncEnsureMemoryOnly(sb);
@@ -1081,6 +1190,28 @@ namespace Wacs.ComponentModel.Async.SourceGen
                         sb.AppendLine(";");
                     }
                 }
+                else if (IsTuple(p.Type))
+                {
+                    // tuple<T1, T2, ...> param lowering:
+                    // extract each Item via the ValueTuple's
+                    // 1-indexed accessors. Each becomes a
+                    // separate flat slot.
+                    var elems = TupleElementTypes(p.Type);
+                    for (int i = 0; i < elems.Count; i++)
+                    {
+                        sb.Append("            ");
+                        sb.Append(elems[i]);
+                        sb.Append(" __");
+                        sb.Append(p.Name);
+                        sb.Append("_item");
+                        sb.Append(i + 1);
+                        sb.Append(" = ");
+                        sb.Append(p.Name);
+                        sb.Append(".Item");
+                        sb.Append(i + 1);
+                        sb.AppendLine(";");
+                    }
+                }
             }
 
             // Call the underlying invoker with the flattened
@@ -1111,9 +1242,48 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     EmitSyncOptionReturnLift(sb, ex);
                 else if (IsWitResult(ex.ReturnType))
                     EmitSyncResultReturnLift(sb, ex);
+                else if (IsTuple(ex.ReturnType))
+                    EmitSyncTupleReturnLift(sb, ex);
                 else
                     sb.AppendLine("            return __raw;");
             }
+        }
+
+        // tuple<T1, T2, ...> return lift. Two cases:
+        //   * Single-element tuple — flat is just the
+        //     element's slot, returned directly. Wrap in
+        //     ValueTuple<T>.
+        //   * Multi-element — __raw is the retArea pointer.
+        //     Read each field at its canon-ABI offset and
+        //     build the tuple.
+        private static void EmitSyncTupleReturnLift(
+            StringBuilder sb, ExportMethod ex)
+        {
+            var elems = TupleElementTypes(ex.ReturnType!);
+            if (elems.Count == 1)
+            {
+                sb.AppendLine("            return (__raw);");
+                return;
+            }
+            // Compute canon-ABI offsets for each field.
+            int[] offsets = new int[elems.Count];
+            int offset = 0;
+            for (int i = 0; i < elems.Count; i++)
+            {
+                offset = AlignTo(offset,
+                    PrimitiveAlign(elems[i]));
+                offsets[i] = offset;
+                offset += PrimitiveSize(elems[i]);
+            }
+            sb.Append("            return (");
+            for (int i = 0; i < elems.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(ReadMemoryExprForType(
+                    elems[i], "_memory!",
+                    "__raw + " + offsets[i]));
+            }
+            sb.AppendLine(");");
         }
 
         // result<TOk, TErr> return lift. Two cases:
@@ -1470,6 +1640,18 @@ namespace Wacs.ComponentModel.Async.SourceGen
                         sb.Append("_payload");
                     }
                 }
+                else if (IsTuple(p.Type))
+                {
+                    var elems = TupleElementTypes(p.Type);
+                    for (int i = 0; i < elems.Count; i++)
+                    {
+                        if (i > 0) sb.Append(", ");
+                        sb.Append("__");
+                        sb.Append(p.Name);
+                        sb.Append("_item");
+                        sb.Append(i + 1);
+                    }
+                }
                 else
                 {
                     sb.Append(p.Name);
@@ -1531,6 +1713,16 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     }
                     first = false;
                 }
+                else if (IsTuple(p.Type))
+                {
+                    var elems = TupleElementTypes(p.Type);
+                    for (int i = 0; i < elems.Count; i++)
+                    {
+                        if (!first) sb.Append(", ");
+                        sb.Append(elems[i]);
+                        first = false;
+                    }
+                }
                 else
                 {
                     if (!first) sb.Append(", ");
@@ -1550,6 +1742,15 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     // are unit). The retArea path already
                     // handled above for non-trivial arms.
                     sb.Append("int");
+                }
+                else if (IsTuple(ex.ReturnType!))
+                {
+                    // Single-element tuple returns its inner
+                    // type directly; multi-element uses
+                    // retArea (handled by UsesRetArea above).
+                    var elems = TupleElementTypes(ex.ReturnType!);
+                    sb.Append(elems.Count == 1
+                        ? elems[0] : "int");
                 }
                 else
                     sb.Append(ex.ReturnType);
@@ -1571,6 +1772,13 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     var joined = ResultJoinedPayload(ok, err);
                     slots += joined == null ? 1 : 2;
                 }
+                else if (IsTuple(p.Type))
+                {
+                    // tuple<T1, T2, ...> param flat-lowers to
+                    // its fields. For all-primitive tuples
+                    // each element is 1 slot.
+                    slots += TupleElementTypes(p.Type).Count;
+                }
                 else slots += 1;
             }
             return slots;
@@ -1591,6 +1799,13 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 var (ok, err) = WitResultArgs(fqType);
                 return ResultJoinedPayload(ok, err) != null;
             }
+            // Any tuple — even a single-element one —
+            // flattens to >0 slots; tuples of 2+ slots use
+            // retArea on return. (A single-element tuple is
+            // technically just the underlying type for canon-
+            // ABI but we treat it as retArea for consistency.)
+            if (IsTuple(fqType))
+                return TupleElementTypes(fqType).Count > 1;
             return false;
         }
 
@@ -1625,6 +1840,11 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 sb.Append("int");
             else if (IsWitResult(ex.ReturnType!))
                 sb.Append("int"); // unit/unit result → disc
+            else if (IsTuple(ex.ReturnType!))
+            {
+                var elems = TupleElementTypes(ex.ReturnType!);
+                sb.Append(elems.Count == 1 ? elems[0] : "int");
+            }
             else
                 sb.Append(ex.ReturnType);
             sb.Append(">?");
@@ -1669,6 +1889,19 @@ namespace Wacs.ComponentModel.Async.SourceGen
                         sb.Append(joined);
                     }
                     first = false;
+                }
+                else if (IsTuple(p.Type))
+                {
+                    // tuple<T1, T2, ...> param flattens to
+                    // its fields. Each field contributes its
+                    // own slot type.
+                    var elems = TupleElementTypes(p.Type);
+                    for (int i = 0; i < elems.Count; i++)
+                    {
+                        if (!first) sb.Append(", ");
+                        sb.Append(elems[i]);
+                        first = false;
+                    }
                 }
                 else
                 {

@@ -1,5 +1,57 @@
 # Changelog
 
+## WACS.ComponentModel.Async.SourceGen 0.4.4 — tuple marshaling for sync exports
+
+Adds canon-ABI `tuple<T1, T2, ...>` codegen for sync
+exports. Tuples are the first ordered-aggregate shape —
+each field flat-lowers separately on params, multi-
+element returns use a retArea with per-field offsets
+computed at build time.
+
+* **C# representation: `(T1, T2, ...)`.** Roslyn's
+  `FullyQualifiedFormat` emits this syntax verbatim
+  (or `(T1 n1, T2 n2)` for named tuples; element names
+  are stripped at parse time).
+* **Detection.** `IsTuple` matches any `(...)`-bracketed
+  string with at least one top-level comma. `IsSupportedTuple`
+  requires every element to be a primitive (aggregate-in-
+  tuple lands in a later slice).
+* **Element parser.** `TupleElementTypes` walks the
+  string with paren + angle-bracket depth tracking so
+  nested generics (`(int, List<int>)`) split correctly.
+  Element-name suffixes (`(int a, int b)` → `int, int`)
+  are stripped via the trailing-identifier heuristic.
+* **Param lower.** `(T1, T2) pair` extracts via
+  `pair.Item1`, `pair.Item2`, ... — one local per
+  element passed as flat args.
+* **Return lift.** Multi-element tuple returns use
+  retArea: generator computes per-element offsets via
+  `PrimitiveSize` + `PrimitiveAlign` + `AlignTo`, then
+  reads each field at its offset via the matching
+  `MemoryHelpers.ReadXXX`. Constructs `(item1, item2, ...)`
+  literal. Single-element tuple is special-cased — the
+  inner type returns directly without retArea.
+* `Generator_emits_tuple_export_signatures` test
+  verifies three shapes:
+  * `(int, int) Split(int)` → `Func<int, int>` (input
+    + retArea).
+  * `int Combine((int, int) pair)` →
+    `Func<int, int, int>` (item1 + item2 + ret).
+  * `(int, long, bool) Triple()` → `Func<int>`
+    (retArea), with offsets 0/8/16 verified through the
+    generated source.
+
+11/11 generator integration tests, hello-spike still
+prints `Hello, World!` from both harnesses,
+`Wacs.ComponentModel.Test` 650/650.
+
+**Still punted:** aggregate-in-tuple (`(string, int)`
+needs ptr/len lower in the middle of an arg list — tractable
+extension), records (user struct/class with named
+fields — requires Roslyn symbol inspection instead of
+string parsing), variants beyond result, lists of
+non-byte primitives.
+
 ## WACS.ComponentModel.Async.SourceGen 0.4.3 — `WitResult<TOk, TErr>` (result<primitive, primitive>) marshaling
 
 Adds canon-ABI `result<TOk, TErr>` codegen for sync

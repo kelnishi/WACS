@@ -88,6 +88,24 @@ namespace Wacs.ComponentModel.Test
         internal partial bool? Flag(bool? input);
     }
 
+    /// <summary>Sync exports with C# tuple types
+    /// (canon-ABI <c>tuple&lt;T1, T2, ...&gt;</c>) for
+    /// primitive element types. Tuples flat-lower
+    /// per-element on params; multi-element returns use a
+    /// retArea, single-element returns inline.</summary>
+    [AsyncComponentHarness]
+    internal partial class TupleHarnessFixture
+    {
+        [SyncExport("split")]
+        internal partial (int, int) Split(int input);
+
+        [SyncExport("combine")]
+        internal partial int Combine((int, int) pair);
+
+        [SyncExport("triple")]
+        internal partial (int, long, bool) Triple();
+    }
+
     /// <summary>Sync exports with <c>WitResult&lt;TOk,
     /// TErr&gt;</c> (canon-ABI <c>result&lt;TOk, TErr&gt;</c>).
     /// Covers the four canonical shapes:
@@ -209,6 +227,62 @@ namespace Wacs.ComponentModel.Test
             var ascii = System.Text.Encoding.UTF8.GetString(bytes);
             Assert.Contains(
                 "is not a canon-ABI primitive", ascii);
+        }
+
+        [Fact]
+        public void Generator_emits_tuple_export_signatures()
+        {
+            // (int, int) Split(int) — flat invoker:
+            // (input:int, retArea:int) → Func<int, int>.
+            var split = typeof(TupleHarnessFixture).GetMethod(
+                "Split",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.NotNull(split);
+            Assert.Equal(typeof(ValueTuple<int, int>),
+                split!.ReturnType);
+            var splitInv = typeof(TupleHarnessFixture)
+                .GetField("_invoker_Split",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(splitInv);
+            Assert.Equal(typeof(Func<int, int>),
+                splitInv!.FieldType);
+
+            // int Combine((int, int) pair) — tuple param
+            // flattens to 2 ints. Flat invoker: (item1, item2,
+            // ret) = Func<int, int, int>.
+            var combine = typeof(TupleHarnessFixture).GetMethod(
+                "Combine",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.NotNull(combine);
+            Assert.Equal(typeof(int), combine!.ReturnType);
+            Assert.Single(combine.GetParameters());
+            Assert.Equal(typeof(ValueTuple<int, int>),
+                combine.GetParameters()[0].ParameterType);
+            var combineInv = typeof(TupleHarnessFixture)
+                .GetField("_invoker_Combine",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(combineInv);
+            Assert.Equal(typeof(Func<int, int, int>),
+                combineInv!.FieldType);
+
+            // (int, long, bool) Triple() — three-element
+            // tuple return uses retArea. Flat invoker:
+            // Func<int>.
+            var triple = typeof(TupleHarnessFixture).GetMethod(
+                "Triple",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.NotNull(triple);
+            Assert.Equal(typeof(ValueTuple<int, long, bool>),
+                triple!.ReturnType);
+            var tripleInv = typeof(TupleHarnessFixture)
+                .GetField("_invoker_Triple",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(tripleInv);
+            Assert.Equal(typeof(Func<int>),
+                tripleInv!.FieldType);
         }
 
         [Fact]
