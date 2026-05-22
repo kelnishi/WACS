@@ -74,6 +74,30 @@ namespace Wacs.ComponentModel.Async
     }
 
     /// <summary>
+    /// Marker on a user-defined struct (or sealed class)
+    /// that participates in canon-ABI marshaling as a
+    /// <c>record</c>. The
+    /// <c>AsyncComponentHarnessGenerator</c> enumerates the
+    /// type's instance fields in declaration order, treats
+    /// them as the record's canon-ABI fields, and emits
+    /// per-field lift/lower in any
+    /// <c>[SyncExport]</c>-marked partial method that
+    /// takes or returns the type.
+    ///
+    /// <para>The MVP supports only records with
+    /// canon-ABI-primitive fields (int / uint / long /
+    /// ulong / short / ushort / byte / sbyte / bool / float /
+    /// double). Records-of-aggregates and nested records
+    /// land in a follow-up slice.</para>
+    /// </summary>
+    [AttributeUsage(
+        AttributeTargets.Struct | AttributeTargets.Class,
+        AllowMultiple = false)]
+    public sealed class WitRecordAttribute : Attribute
+    {
+    }
+
+    /// <summary>
     /// Per-method marker for SYNC exports — wit-component's
     /// plain canonical lifts that don't go through the
     /// canon-async dispatcher. The generated method body

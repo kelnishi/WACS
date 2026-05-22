@@ -88,6 +88,30 @@ namespace Wacs.ComponentModel.Test
         internal partial bool? Flag(bool? input);
     }
 
+    /// <summary>User-defined <c>[WitRecord]</c> struct
+    /// referenced by sync exports. The generator enumerates
+    /// instance fields in declaration order and emits
+    /// per-field lift/lower at the canon-ABI field offsets.
+    /// </summary>
+    [WitRecord]
+    internal struct Point
+    {
+        public int X;
+        public int Y;
+    }
+
+    /// <summary>Sync exports with <c>[WitRecord]</c>
+    /// params + return.</summary>
+    [AsyncComponentHarness]
+    internal partial class RecordHarnessFixture
+    {
+        [SyncExport("origin")]
+        internal partial Point Origin();
+
+        [SyncExport("manhattan")]
+        internal partial int Manhattan(Point p);
+    }
+
     /// <summary>Sync exports with C# tuple types
     /// (canon-ABI <c>tuple&lt;T1, T2, ...&gt;</c>) for
     /// primitive element types. Tuples flat-lower
@@ -227,6 +251,45 @@ namespace Wacs.ComponentModel.Test
             var ascii = System.Text.Encoding.UTF8.GetString(bytes);
             Assert.Contains(
                 "is not a canon-ABI primitive", ascii);
+        }
+
+        [Fact]
+        public void Generator_emits_record_export_signatures()
+        {
+            // Point Origin() — multi-field record return uses
+            // retArea; flat invoker: Func<int>.
+            var origin = typeof(RecordHarnessFixture).GetMethod(
+                "Origin",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.NotNull(origin);
+            Assert.Equal(typeof(Point), origin!.ReturnType);
+            Assert.Empty(origin.GetParameters());
+            var originInv = typeof(RecordHarnessFixture)
+                .GetField("_invoker_Origin",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(originInv);
+            Assert.Equal(typeof(Func<int>),
+                originInv!.FieldType);
+
+            // int Manhattan(Point p) — record param flattens
+            // to 2 ints. Flat invoker: Func<int, int, int>.
+            var manhattan = typeof(RecordHarnessFixture)
+                .GetMethod("Manhattan",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(manhattan);
+            Assert.Equal(typeof(int), manhattan!.ReturnType);
+            Assert.Single(manhattan.GetParameters());
+            Assert.Equal(typeof(Point),
+                manhattan.GetParameters()[0].ParameterType);
+            var manInv = typeof(RecordHarnessFixture)
+                .GetField("_invoker_Manhattan",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(manInv);
+            Assert.Equal(typeof(Func<int, int, int>),
+                manInv!.FieldType);
         }
 
         [Fact]

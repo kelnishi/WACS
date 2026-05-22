@@ -1,5 +1,53 @@
 # Changelog
 
+## WACS.ComponentModel 0.10.2, WACS.ComponentModel.Async.SourceGen 0.4.5 — `[WitRecord]` user-record marshaling
+
+User-defined record types are now supported on sync
+exports via an explicit `[WitRecord]` opt-in. The
+generator scans the compilation for marked types,
+computes their canon-ABI layout from instance fields in
+declaration order, and stores the result in a side table
+the emit phase consults when handling record-typed
+params and returns.
+
+* **`[WitRecord]`** ships in `Wacs.ComponentModel.Async`
+  (struct + class targets). MVP supports records with
+  all-primitive instance fields only.
+* **Generator pipeline.** `CollectAndDiagnose` now walks
+  `[WitRecord]` types in the consumer assembly and
+  builds a `RecordLayout { TypeFqn, Fields }` per match.
+  `RecordField { Name, Type, Offset }` carries the
+  canon-ABI layout — offset = `align_to(prev_end,
+  alignof(field))`. Records flow into `HarnessClass`
+  alongside the harness export list.
+* **Thread-static record lookup.** Helper predicates
+  (`IsSupportedParam` / `UsesRetArea` / `BuildFlatInvokerTypeArgs`
+  / etc.) consult an
+  `[ThreadStatic]` `_activeRecords` dictionary that
+  `EmitHarness` + `CollectAndDiagnose` set/clear. Keeps
+  the existing string-typed pipeline intact without
+  refactoring every helper signature.
+* **Param lower.** `(Point p)` flattens to its fields:
+  `int __p_X = p.X; int __p_Y = p.Y;` — one local per
+  field, passed positionally as flat args.
+* **Return lift.** Multi-field record returns use
+  retArea: generator reads each field at its stored
+  offset and constructs `new Point { X = …, Y = … }`
+  via a property initializer block. Single-field
+  records inline the slot (no retArea).
+* `Generator_emits_record_export_signatures` test
+  verifies `Point Origin()` → `Func<int>` (retArea
+  return) and `int Manhattan(Point)` → `Func<int, int, int>`
+  (record param flattens to 2 ints). 12/12 generator
+  integration tests.
+
+**Still punted:** records with aggregate fields
+(string / list / option / result inside the record),
+nested records, records as fields of tuples/results
+(now-tractable via the record-layout map; needs the
+layout-aware lower/lift paths to plumb in), variants
+beyond `result`.
+
 ## WACS.ComponentModel.Async.SourceGen 0.4.4 — tuple marshaling for sync exports
 
 Adds canon-ABI `tuple<T1, T2, ...>` codegen for sync

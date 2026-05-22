@@ -47,6 +47,8 @@ namespace Wacs.ComponentModel.Async.SourceGen
             "Wacs.ComponentModel.Async.AsyncExportAttribute";
         private const string SyncExportAttributeFqn =
             "Wacs.ComponentModel.Async.SyncExportAttribute";
+        private const string WitRecordAttributeFqn =
+            "Wacs.ComponentModel.Async.WitRecordAttribute";
         private const string ComponentInstanceFqn =
             "Wacs.ComponentModel.Runtime.ComponentInstance";
 
@@ -113,14 +115,51 @@ namespace Wacs.ComponentModel.Async.SourceGen
         {
             public ImmutableArray<HarnessClass> Classes { get; }
             public ImmutableArray<Diagnostic> Diagnostics { get; }
+            // Record layouts discovered from [WitRecord]-
+            // marked types in the compilation. Keyed by the
+            // record's fully-qualified type name (the same
+            // string that shows up in parameter types).
+            public System.Collections.Immutable.ImmutableDictionary<
+                string, RecordLayout> Records { get; }
             public bool IsDefault =>
                 Classes.IsDefault && Diagnostics.IsDefault;
             public ScanResult(
                 ImmutableArray<HarnessClass> classes,
-                ImmutableArray<Diagnostic> diagnostics)
+                ImmutableArray<Diagnostic> diagnostics,
+                System.Collections.Immutable.ImmutableDictionary<
+                    string, RecordLayout> records)
             {
                 Classes = classes;
                 Diagnostics = diagnostics;
+                Records = records;
+            }
+        }
+
+        // Layout of a [WitRecord]-marked type. Field order
+        // follows declaration; offsets are canon-ABI primitive
+        // layout — `align_to(prev_end, alignof(field))`.
+        private readonly struct RecordLayout
+        {
+            public string TypeFqn { get; }
+            public System.Collections.Immutable.ImmutableArray<
+                RecordField> Fields { get; }
+            public RecordLayout(string typeFqn,
+                System.Collections.Immutable.ImmutableArray<
+                    RecordField> fields)
+            {
+                TypeFqn = typeFqn;
+                Fields = fields;
+            }
+        }
+
+        private readonly struct RecordField
+        {
+            public string Name { get; }
+            public string Type { get; }
+            public int Offset { get; }
+            public RecordField(string name, string type, int offset)
+            {
+                Name = name; Type = type; Offset = offset;
             }
         }
 
@@ -130,15 +169,20 @@ namespace Wacs.ComponentModel.Async.SourceGen
             public string ClassName { get; }
             public string Accessibility { get; }
             public ImmutableArray<ExportMethod> Exports { get; }
+            public System.Collections.Immutable
+                .ImmutableDictionary<string, RecordLayout> Records { get; }
             public string GeneratedFileName { get; }
             public HarnessClass(
                 string ns, string className, string accessibility,
-                ImmutableArray<ExportMethod> exports)
+                ImmutableArray<ExportMethod> exports,
+                System.Collections.Immutable.ImmutableDictionary<
+                    string, RecordLayout> records)
             {
                 Namespace = ns;
                 ClassName = className;
                 Accessibility = accessibility;
                 Exports = exports;
+                Records = records;
                 GeneratedFileName =
                     (string.IsNullOrEmpty(ns) ? "" : ns + ".")
                     + className + ".Harness.g.cs";
@@ -433,6 +477,31 @@ namespace Wacs.ComponentModel.Async.SourceGen
             return elems.Count > 0;
         }
 
+        // Per-emission record-layout lookup. Set at the start
+        // of each EmitHarness call, cleared after. ThreadStatic
+        // because Roslyn generators may run concurrently across
+        // compilations.
+        [System.ThreadStatic]
+        private static System.Collections.Immutable
+            .ImmutableDictionary<string, RecordLayout>? _activeRecords;
+
+        private static bool TryLookupRecord(
+            string fqType, out RecordLayout layout)
+        {
+            var key = StripGlobal(fqType);
+            if (_activeRecords != null
+                && _activeRecords.TryGetValue(key, out var v))
+            {
+                layout = v;
+                return true;
+            }
+            layout = default;
+            return false;
+        }
+
+        private static bool IsRecord(string fqType) =>
+            TryLookupRecord(fqType, out _);
+
         // Canon-ABI primitive size + alignment.
         private static int PrimitiveSize(string fqType)
         {
@@ -536,7 +605,8 @@ namespace Wacs.ComponentModel.Async.SourceGen
             || IsByteArray(fqType)
             || IsNullablePrimitive(fqType)
             || IsSupportedResult(fqType)
-            || IsSupportedTuple(fqType);
+            || IsSupportedTuple(fqType)
+            || IsRecord(fqType);
 
         private static bool IsSupportedReturn(string? fqType) =>
             fqType == null
@@ -545,7 +615,8 @@ namespace Wacs.ComponentModel.Async.SourceGen
             || IsByteArray(fqType)
             || IsNullablePrimitive(fqType)
             || IsSupportedResult(fqType)
-            || IsSupportedTuple(fqType);
+            || IsSupportedTuple(fqType)
+            || IsRecord(fqType);
 
         private static ScanResult CollectAndDiagnose(
             Compilation compilation)
@@ -557,10 +628,39 @@ namespace Wacs.ComponentModel.Async.SourceGen
             var syncExportAttr =
                 compilation.GetTypeByMetadataName(
                     SyncExportAttributeFqn);
+            var witRecordAttr =
+                compilation.GetTypeByMetadataName(
+                    WitRecordAttributeFqn);
             if (harnessAttr == null || exportAttr == null)
                 return new ScanResult(
                     ImmutableArray<HarnessClass>.Empty,
-                    ImmutableArray<Diagnostic>.Empty);
+                    ImmutableArray<Diagnostic>.Empty,
+                    System.Collections.Immutable.ImmutableDictionary<
+                        string, RecordLayout>.Empty);
+
+            // Discover [WitRecord]-marked types and compute
+            // their canon-ABI layouts.
+            var records = System.Collections.Immutable
+                .ImmutableDictionary.CreateBuilder<
+                    string, RecordLayout>();
+            if (witRecordAttr != null)
+            {
+                foreach (var type in EnumerateAllTypes(
+                    compilation.Assembly.GlobalNamespace))
+                {
+                    if (!HasAttribute(type, witRecordAttr))
+                        continue;
+                    var layout = BuildRecordLayout(type);
+                    if (layout != null)
+                        records[layout.Value.TypeFqn] =
+                            layout.Value;
+                }
+            }
+            var recordMap = records.ToImmutable();
+            // Make records visible to IsSupportedParam /
+            // IsSupportedReturn / EmitExportMethod during
+            // the harness-class scan below.
+            _activeRecords = recordMap;
 
             var entries = ImmutableArray.CreateBuilder<HarnessClass>();
             var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
@@ -665,7 +765,8 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 entries.Add(new HarnessClass(
                     ns, type.Name,
                     AccessibilityKeyword(type.DeclaredAccessibility),
-                    exports.ToImmutable()));
+                    exports.ToImmutable(),
+                    recordMap));
             }
 
             return new ScanResult(
@@ -673,7 +774,44 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     .OrderBy(e => e.GeneratedFileName,
                         StringComparer.Ordinal)
                     .ToImmutableArray(),
-                diagnostics.ToImmutable());
+                diagnostics.ToImmutable(),
+                recordMap);
+        }
+
+        // Compute the canon-ABI record layout for a
+        // [WitRecord]-marked type. Walks the type's instance
+        // fields in declaration order, computes offsets via
+        // align_to. Returns null when any field is not a
+        // primitive (the MVP doesn't yet handle aggregate
+        // fields in records).
+        private static RecordLayout? BuildRecordLayout(
+            INamedTypeSymbol type)
+        {
+            string fqn = type.ToDisplayString(
+                SymbolDisplayFormat.FullyQualifiedFormat);
+            // Strip the global:: prefix to match the form
+            // we get from method-parameter type strings
+            // after StripGlobal().
+            fqn = StripGlobal(fqn);
+            var fields = System.Collections.Immutable
+                .ImmutableArray.CreateBuilder<RecordField>();
+            int offset = 0;
+            foreach (var member in type.GetMembers())
+            {
+                if (member is not IFieldSymbol field) continue;
+                if (field.IsStatic) continue;
+                if (field.IsImplicitlyDeclared) continue;
+                string ft = StripGlobal(field.Type.ToDisplayString(
+                    SymbolDisplayFormat.FullyQualifiedFormat));
+                if (!IsPrimitive(ft))
+                    return null; // unsupported field type
+                offset = AlignTo(offset, PrimitiveAlign(ft));
+                fields.Add(new RecordField(
+                    field.Name, ft, offset));
+                offset += PrimitiveSize(ft);
+            }
+            if (fields.Count == 0) return null;
+            return new RecordLayout(fqn, fields.ToImmutable());
         }
 
         private static bool HasAttribute(
@@ -726,6 +864,19 @@ namespace Wacs.ComponentModel.Async.SourceGen
         }
 
         private static string EmitHarness(HarnessClass cls)
+        {
+            _activeRecords = cls.Records;
+            try
+            {
+                return EmitHarnessInner(cls);
+            }
+            finally
+            {
+                _activeRecords = null;
+            }
+        }
+
+        private static string EmitHarnessInner(HarnessClass cls)
         {
             var sb = new StringBuilder();
             sb.AppendLine("// <auto-generated>");
@@ -829,6 +980,13 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 if (ex.ReturnType != null
                     && IsTuple(ex.ReturnType)
                     && TupleElementTypes(ex.ReturnType).Count > 1)
+                {
+                    needsMemory = true;
+                }
+                if (ex.ReturnType != null
+                    && TryLookupRecord(ex.ReturnType,
+                        out var recM)
+                    && recM.Fields.Length > 1)
                 {
                     needsMemory = true;
                 }
@@ -1042,7 +1200,10 @@ namespace Wacs.ComponentModel.Async.SourceGen
                             WitResultArgs(ex.ReturnType).Err)
                         != null)
                     || (IsTuple(ex.ReturnType)
-                        && TupleElementTypes(ex.ReturnType).Count > 1));
+                        && TupleElementTypes(ex.ReturnType).Count > 1)
+                    || (TryLookupRecord(ex.ReturnType,
+                            out var recExN)
+                        && recExN.Fields.Length > 1));
             if (needsMemoryForRetArea && !needsMemory)
             {
                 EmitSyncEnsureMemoryOnly(sb);
@@ -1212,6 +1373,26 @@ namespace Wacs.ComponentModel.Async.SourceGen
                         sb.AppendLine(";");
                     }
                 }
+                else if (TryLookupRecord(p.Type, out var rec))
+                {
+                    // record param lowering: access each
+                    // field by its declared name. One local
+                    // per field, all passed as flat args.
+                    foreach (var f in rec.Fields)
+                    {
+                        sb.Append("            ");
+                        sb.Append(f.Type);
+                        sb.Append(" __");
+                        sb.Append(p.Name);
+                        sb.Append('_');
+                        sb.Append(f.Name);
+                        sb.Append(" = ");
+                        sb.Append(p.Name);
+                        sb.Append('.');
+                        sb.Append(f.Name);
+                        sb.AppendLine(";");
+                    }
+                }
             }
 
             // Call the underlying invoker with the flattened
@@ -1244,9 +1425,48 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     EmitSyncResultReturnLift(sb, ex);
                 else if (IsTuple(ex.ReturnType))
                     EmitSyncTupleReturnLift(sb, ex);
+                else if (TryLookupRecord(ex.ReturnType,
+                    out var recRet))
+                    EmitSyncRecordReturnLift(
+                        sb, ex, recRet);
                 else
                     sb.AppendLine("            return __raw;");
             }
+        }
+
+        // record return lift. Multi-field records use the
+        // retArea pointer (`__raw`); single-field records
+        // return the field's slot value directly via __raw.
+        // Build the record via a property-initializer block
+        // — keeps the generated source readable.
+        private static void EmitSyncRecordReturnLift(
+            StringBuilder sb, ExportMethod ex,
+            RecordLayout rec)
+        {
+            if (rec.Fields.Length == 1)
+            {
+                sb.Append("            return new ");
+                sb.Append(ex.ReturnType);
+                sb.Append(" { ");
+                sb.Append(rec.Fields[0].Name);
+                sb.AppendLine(" = __raw };");
+                return;
+            }
+            sb.Append("            return new ");
+            sb.Append(ex.ReturnType);
+            sb.Append(" { ");
+            bool first = true;
+            foreach (var f in rec.Fields)
+            {
+                if (!first) sb.Append(", ");
+                sb.Append(f.Name);
+                sb.Append(" = ");
+                sb.Append(ReadMemoryExprForType(
+                    f.Type, "_memory!",
+                    "__raw + " + f.Offset));
+                first = false;
+            }
+            sb.AppendLine(" };");
         }
 
         // tuple<T1, T2, ...> return lift. Two cases:
@@ -1652,6 +1872,19 @@ namespace Wacs.ComponentModel.Async.SourceGen
                         sb.Append(i + 1);
                     }
                 }
+                else if (TryLookupRecord(p.Type, out var rec))
+                {
+                    int k = 0;
+                    foreach (var f in rec.Fields)
+                    {
+                        if (k > 0) sb.Append(", ");
+                        sb.Append("__");
+                        sb.Append(p.Name);
+                        sb.Append('_');
+                        sb.Append(f.Name);
+                        k++;
+                    }
+                }
                 else
                 {
                     sb.Append(p.Name);
@@ -1723,6 +1956,15 @@ namespace Wacs.ComponentModel.Async.SourceGen
                         first = false;
                     }
                 }
+                else if (TryLookupRecord(p.Type, out var rec))
+                {
+                    foreach (var f in rec.Fields)
+                    {
+                        if (!first) sb.Append(", ");
+                        sb.Append(f.Type);
+                        first = false;
+                    }
+                }
                 else
                 {
                     if (!first) sb.Append(", ");
@@ -1752,6 +1994,15 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     sb.Append(elems.Count == 1
                         ? elems[0] : "int");
                 }
+                else if (TryLookupRecord(ex.ReturnType!,
+                    out var recRet))
+                {
+                    // Single-field record returns its field's
+                    // slot type directly; multi-field record
+                    // uses retArea (handled above).
+                    sb.Append(recRet.Fields.Length == 1
+                        ? recRet.Fields[0].Type : "int");
+                }
                 else
                     sb.Append(ex.ReturnType);
             }
@@ -1778,6 +2029,15 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     // its fields. For all-primitive tuples
                     // each element is 1 slot.
                     slots += TupleElementTypes(p.Type).Count;
+                }
+                else if (TryLookupRecord(p.Type,
+                    out var recLayout))
+                {
+                    // record param flat-lowers to its fields
+                    // in declaration order. Same slot count
+                    // as a tuple with the same arity (all-
+                    // primitive MVP).
+                    slots += recLayout.Fields.Length;
                 }
                 else slots += 1;
             }
@@ -1806,6 +2066,12 @@ namespace Wacs.ComponentModel.Async.SourceGen
             // ABI but we treat it as retArea for consistency.)
             if (IsTuple(fqType))
                 return TupleElementTypes(fqType).Count > 1;
+            // Records always flatten to >=1 slots; >1 fields
+            // → retArea (we don't unbox single-field records
+            // to a primitive return; record-with-1-field is
+            // still a record, returning via retArea).
+            if (TryLookupRecord(fqType, out var rec))
+                return rec.Fields.Length > 1;
             return false;
         }
 
@@ -1844,6 +2110,12 @@ namespace Wacs.ComponentModel.Async.SourceGen
             {
                 var elems = TupleElementTypes(ex.ReturnType!);
                 sb.Append(elems.Count == 1 ? elems[0] : "int");
+            }
+            else if (TryLookupRecord(ex.ReturnType!,
+                out var recT))
+            {
+                sb.Append(recT.Fields.Length == 1
+                    ? recT.Fields[0].Type : "int");
             }
             else
                 sb.Append(ex.ReturnType);
@@ -1900,6 +2172,15 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     {
                         if (!first) sb.Append(", ");
                         sb.Append(elems[i]);
+                        first = false;
+                    }
+                }
+                else if (TryLookupRecord(p.Type, out var rec))
+                {
+                    foreach (var f in rec.Fields)
+                    {
+                        if (!first) sb.Append(", ");
+                        sb.Append(f.Type);
                         first = false;
                     }
                 }
