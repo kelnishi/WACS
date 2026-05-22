@@ -1,5 +1,60 @@
 # Changelog
 
+## WACS.ComponentModel.Async.SourceGen 0.4.7 — option / result fields inside tuples & records
+
+Extends the field-aware marshaling from 0.4.6: `option<T>`
+(C# `T?`) and `WitResult<TOk, TErr>` are now allowed as
+fields of `[WitRecord]` types and as tuple elements.
+
+* **Size / align / slot count.** `FieldSize`, `FieldAlign`,
+  and `FieldSlotCount` now recognize option<T> and
+  WitResult<TOk, TErr>. Memory size matches canon-ABI's
+  `align_to(1, alignof(payload)) + sizeof(payload)`; slot
+  count is 2 for option, 1 (or 2) for result depending on
+  joined-payload.
+* **Field-type acceptance.** `IsSupportedTuple` /
+  `BuildRecordLayout` accept option + result fields via a
+  new shared `IsSupportedFieldType` predicate.
+* **Param lower.** `EmitAggregateFieldLower` gained option /
+  result branches that bind `<base>_disc` / `<base>_payload`
+  locals the same way the top-level paths do — but per-field
+  inside the parent tuple / record value.
+* **Flat signature.** A new shared `AppendFlatFieldTypes`
+  helper centralizes per-field flat-type emission across
+  `AppendFlatParamTypes` and `BuildFlatInvokerTypeArgs`.
+  Both branches now expand option fields to (int, T) and
+  result fields to (int) or (int, joined).
+* **Return lift.** Tuple / record return lift now dispatches
+  per field. `EmitFieldLiftLocalsIfNeeded` +
+  `FieldLiftExpression` route primitives → inline reads,
+  ptr/len aggregates → existing helper, option →
+  `EmitOptionFieldLiftLocal`, result →
+  `EmitResultFieldLiftLocal`. The new helpers read the disc
+  byte at the field's retArea offset and emit a
+  conditional construction of `Nullable<T>` /
+  `WitResult<TOk, TErr>` from disc + payload.
+* **retArea decision unified on slot count.** `UsesRetArea`,
+  `needsMemoryForRetArea`, and class-scope `needsMemory`
+  now switch on `TotalFlatSlotsForTuple` /
+  `TotalFlatSlotsForRecord > 1`, so a single-field record
+  whose only field is option / result-with-joined correctly
+  routes through retArea. The single-slot direct-return
+  path keeps working for primitives + result<(), ()>.
+* New generator tests:
+  `Generator_emits_option_result_in_record_export_signatures`
+  pins `Account { int Id; int? Balance; WitResult<int, int>
+  Status; }`. Submit param flattens to 5 ints; Lookup
+  returns via retArea with no `_post_*` needed (option /
+  result don't allocate).
+  `Generator_emits_option_result_in_tuple_export_signatures`
+  pins the matching tuple shape. 16/16 generator tests,
+  655/655 across Wacs.ComponentModel.Test. Hello-spike
+  passes unchanged.
+
+**Still punted:** ptr/len aggregates inside option / result
+arms (`option<string>`, `result<list<u8>, ()>`); nested
+records; lists of records.
+
 ## WACS.ComponentModel.Async.SourceGen 0.4.6 — aggregate-in-aggregate marshaling (string / byte[] inside tuples & records)
 
 Closes the punt from 0.4.5: ptr/len aggregate fields

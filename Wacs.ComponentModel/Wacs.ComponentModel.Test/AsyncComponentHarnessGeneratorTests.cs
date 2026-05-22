@@ -166,6 +166,42 @@ namespace Wacs.ComponentModel.Test
         internal partial (string, int) NamedCount(int seed);
     }
 
+    /// <summary><c>[WitRecord]</c> with option / result
+    /// fields. Exercises the option/result-in-record path:
+    /// each field's disc + payload flat-lower as separate
+    /// slots and the record return reads them at the
+    /// canon-ABI field offset within the retArea.</summary>
+    [WitRecord]
+    internal struct Account
+    {
+        public int Id;
+        public int? Balance;
+        public WitResult<int, int> Status;
+    }
+
+    [AsyncComponentHarness]
+    internal partial class OptionResultRecordHarnessFixture
+    {
+        [SyncExport("lookup")]
+        internal partial Account Lookup(int id);
+
+        [SyncExport("submit")]
+        internal partial int Submit(Account a);
+    }
+
+    /// <summary>Tuple carrying option + result elements.</summary>
+    [AsyncComponentHarness]
+    internal partial class OptionResultTupleHarnessFixture
+    {
+        [SyncExport("evaluate")]
+        internal partial (int?, WitResult<int, int>)
+            Evaluate(int seed);
+
+        [SyncExport("apply")]
+        internal partial int Apply(
+            (int?, WitResult<int, int>) input);
+    }
+
     /// <summary>Sync exports with <c>WitResult&lt;TOk,
     /// TErr&gt;</c> (canon-ABI <c>result&lt;TOk, TErr&gt;</c>).
     /// Covers the four canonical shapes:
@@ -499,6 +535,126 @@ namespace Wacs.ComponentModel.Test
                     | BindingFlags.Instance));
             Assert.NotNull(typeof(AggregateTupleHarnessFixture)
                 .GetField("_post_NamedCount",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+        }
+
+        [Fact]
+        public void Generator_emits_option_result_in_record_export_signatures()
+        {
+            // Account { int Id; int? Balance; WitResult<int, int> Status; }
+            // Field flat-slot counts: 1 + 2 + 2 = 5.
+            // Account Lookup(int id) — return via retArea.
+            // Flat invoker convention: retArea is the FLAT
+            // RETURN slot (not a param), so signature is
+            // Func<int (id), int (retArea_ptr)>.
+            var lookup = typeof(OptionResultRecordHarnessFixture)
+                .GetMethod("Lookup",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(lookup);
+            Assert.Equal(typeof(Account), lookup!.ReturnType);
+            var lookupInv = typeof(OptionResultRecordHarnessFixture)
+                .GetField("_invoker_Lookup",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(lookupInv);
+            Assert.Equal(typeof(Func<int, int>),
+                lookupInv!.FieldType);
+
+            // int Submit(Account a) — record param flattens to
+            // 5 slots: id, balance_disc, balance_payload,
+            // status_disc, status_payload (joined int).
+            // Flat invoker: Func<int, int, int, int, int, int>
+            // (5 param ints + return int).
+            var submit = typeof(OptionResultRecordHarnessFixture)
+                .GetMethod("Submit",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(submit);
+            Assert.Equal(typeof(int), submit!.ReturnType);
+            Assert.Equal(typeof(Account),
+                submit.GetParameters()[0].ParameterType);
+            var submitInv = typeof(OptionResultRecordHarnessFixture)
+                .GetField("_invoker_Submit",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(submitInv);
+            Assert.Equal(
+                typeof(Func<int, int, int, int, int, int>),
+                submitInv!.FieldType);
+
+            // _memory needed for retArea reads + record param
+            // is no-op for memory (option/result don't allocate).
+            // No _reallocInvoke required (no ptr/len fields).
+            Assert.NotNull(typeof(OptionResultRecordHarnessFixture)
+                .GetField("_memory",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+            Assert.Null(typeof(OptionResultRecordHarnessFixture)
+                .GetField("_reallocInvoke",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+            // No cabi_post: nothing in the return needs the
+            // post-return free (no heap allocations).
+            Assert.Null(typeof(OptionResultRecordHarnessFixture)
+                .GetField("_post_Lookup",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+        }
+
+        [Fact]
+        public void Generator_emits_option_result_in_tuple_export_signatures()
+        {
+            // (int?, WitResult<int, int>) Evaluate(int seed)
+            // — return via retArea (total slots = 4).
+            // Flat invoker: Func<int (seed), int (retArea_ptr)>.
+            var evalM = typeof(OptionResultTupleHarnessFixture)
+                .GetMethod("Evaluate",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(evalM);
+            Assert.Equal(
+                typeof(ValueTuple<int?, WitResult<int, int>>),
+                evalM!.ReturnType);
+            var evalInv = typeof(OptionResultTupleHarnessFixture)
+                .GetField("_invoker_Evaluate",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(evalInv);
+            Assert.Equal(typeof(Func<int, int>),
+                evalInv!.FieldType);
+
+            // int Apply((int?, WitResult<int, int>)) — tuple
+            // param flattens to 4 slots: disc, payload, disc,
+            // payload. Flat invoker:
+            // Func<int, int, int, int, int>
+            // (4 param ints + return int).
+            var apply = typeof(OptionResultTupleHarnessFixture)
+                .GetMethod("Apply",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(apply);
+            Assert.Equal(typeof(int), apply!.ReturnType);
+            var applyInv = typeof(OptionResultTupleHarnessFixture)
+                .GetField("_invoker_Apply",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(applyInv);
+            Assert.Equal(
+                typeof(Func<int, int, int, int, int>),
+                applyInv!.FieldType);
+
+            Assert.NotNull(typeof(OptionResultTupleHarnessFixture)
+                .GetField("_memory",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+            Assert.Null(typeof(OptionResultTupleHarnessFixture)
+                .GetField("_reallocInvoke",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+            Assert.Null(typeof(OptionResultTupleHarnessFixture)
+                .GetField("_post_Evaluate",
                     BindingFlags.NonPublic
                     | BindingFlags.Instance));
         }
