@@ -1,5 +1,83 @@
 # Changelog
 
+## WACS.WASI.Preview3 0.2.0, WACS.ComponentModel 0.9.0 — sockets 12/12 + canon-async waitable plumbing
+
+All 12 wasip3 sockets fixtures now pass (was 6/12). The
+structural shift is real canon-async cooperation: BLOCKED
+returns from `[async-lower]` stream-read / future-read +
+matching waitable-set.wait/poll event records, plus a host-
+subtask primitive for OS-level async operations
+(`UDP receive`).
+
+* **`AsyncDispatcher.RegisterHostSubtask(Task)`.** Adopts a
+  CLR `Task` as a `ComponentSubtask` (creates a minimal
+  `ComponentTask` with a no-op `ContInstance` — the wasm
+  side never invokes it; the host's CLR task is the work).
+  When the task completes,
+  `Child.Completion.TrySetResult/Exception/Cancel` runs and
+  the dispatcher's `WaitableSetWaitAsync` wakes the guest.
+  This is the JSPI-style integration documented in
+  `feedback_jspi_on_cm_async`.
+* **`[async-lower][method]udp-socket.receive` now returns
+  STARTED with a real subtask handle.** Spawns
+  `Socket.ReceiveFromAsync` as a Task, registers via
+  `RegisterHostSubtask`, returns
+  `(subtaskHandle << 4) | STARTED`. The guest's
+  `waitable-set.wait` yields cooperatively to the peer
+  `client.send(...)` half of `futures::join!`, the OS
+  delivers the datagram, and the receive Task completes —
+  unblocking the wait and surfacing the result through
+  `udp-receive`'s 44-byte retptr.
+* **canon-ABI `waitable.join` arg order fix.** wit-bindgen-rt
+  pushes `(waitable, set)` to `[waitable-join]` per
+  `crates/guest-rust/src/rt/async_support/waitable_set.rs:76`;
+  both `CanonAsyncBinder` and `WitBindgenScaffoldingBinder`
+  were treating the args as `(set, waitable)` and rejecting
+  the call. `set == 0` now correctly maps to "remove this
+  waitable from every set" (used at subtask-drop).
+* **canon-ABI `waitable-set.wait/poll` event record.** Was
+  returning the bare deliverable handle; wit-bindgen-rt
+  unpacked that as the event type and panicked in
+  `deliver_waitable_event` when looking up handle 0 in its
+  callback map. The new `WaitableSetWaitWithPayload` /
+  `WaitableSetPollWithPayload` write the canon-ABI
+  `(waitable, code)` payload to the guest memory pointer
+  and return the event type
+  (`EVENT_STREAM_READ`, `EVENT_FUTURE_READ`,
+  `EVENT_SUBTASK`, …).
+* **`[async-lower][stream-read-N]` non-blocking.** Returns
+  `BLOCKED (0xFFFFFFFF)` when the stream is empty and the
+  writer is open, instead of sync-blocking the dispatcher.
+  Saves the guest's `(ptr, cap)` via
+  `RegisterStreamPendingRead`; the matching
+  `waitable-set.wait` event drains the buffer through
+  `DrainPendingStreamRead` and reports the actual
+  `(items << 4) | COMPLETED` (or `DROPPED`) code in the
+  event payload so wit-bindgen-rt's `WaitableOperation`
+  callback completes correctly.
+* **`StreamReadItemsToMemory` non-blocking item-aware
+  reader.** The existing `StreamReadToMemory` reads
+  byte-budgeted; typed streams (e.g.
+  `stream<own<tcp-socket>>` at 4 bytes/item) need
+  item-count budgeting so the scaffolding doesn't truncate
+  a multi-byte item to one byte. `StreamReadItemsToMemory`
+  multiplies by `slot.ItemSize` and divides on the way out
+  — mirrors `StreamReadToMemoryBlocking`'s contract.
+* **`[async-lower][future-read]` non-blocking + drain
+  pending.** Symmetric treatment for futures:
+  `TryReadFutureToMemory` non-blocking happy path;
+  `RegisterFuturePendingRead` saves the guest's ptr on
+  BLOCKED; `DrainPendingFutureRead` copies the resolved
+  payload at wait-event time. Closes `sockets-tcp-send` /
+  `sockets-tcp-receive` which join a send-future read with
+  a stream-write peer.
+
+All four of the previously-failing TCP fixtures
+(`sockets-tcp-bind`, `sockets-tcp-listen`,
+`sockets-tcp-receive`, `sockets-tcp-send`) clear with this
+slice — 12/12 sockets, plus all 4 HTTP fixtures still
+green and `Wacs.ComponentModel.Test` 639/639.
+
 ## WACS.WASI.Preview3 0.1.72 — sockets fixture pass, slice 2 (resource lifetime + async-lower UDP)
 
 Two more fixtures pass (`sockets-tcp-connect`,

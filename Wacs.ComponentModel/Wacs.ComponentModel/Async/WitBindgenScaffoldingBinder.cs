@@ -383,37 +383,44 @@ namespace Wacs.ComponentModel.Async
             // [async-lower][stream-read-N]<funcname>(handle,
             //   ptr, cap) → (i32 status)
             //
-            // Blocks the CLR thread when no data is buffered
-            // yet, matching the sync-completing convention the
-            // rest of the host already uses for async-func
-            // imports (clocks wait-for, etc). Returning
-            // Completed(0) on empty buffer would loop wit-
-            // bindgen-rt's `while StreamResult::Complete(_)`
-            // executor forever; the proper BLOCKED + callback-
-            // driven lift adapter is the correct refinement but
-            // also a much larger surface — sync-blocking is
-            // sound for the single-thread-per-component cases
-            // the wasip3 testsuite exercises.
+            // Non-blocking. Returns one of:
+            //   * BLOCKED (0xFFFFFFFF) — no data and writer half
+            //     is still open. wit-bindgen-rt adds the handle
+            //     to a waitable-set and yields, letting peer
+            //     futures in a `join!` produce the data.
+            //   * COMPLETED((amt<<4)|0) — `amt` items copied.
+            //   * DROPPED((amt<<4)|1) — `amt` items copied AND
+            //     the writer side has closed; reader should
+            //     unwind its loop.
             if (p.AsyncLower && p.CanonOp == "stream-read"
                 && p.TypeIdx != null)
             {
                 return (Func<ExecContext, int, int, int, int>)(
                     (ctx, handle, ptr, cap) =>
                     {
-                        if (d.Memory == null) return 0;
-                        int read = d.StreamReadToMemoryBlocking(
+                        if (d.Memory == null) return unchecked((int)0xFFFFFFFF);
+                        int read = d.StreamReadItemsToMemory(
                             handle, d.Memory,
                             unchecked((uint)ptr), cap);
-                        // wit-bindgen-rt's read loop spins on
-                        // Complete(0) until it sees Dropped —
-                        // when 0 bytes came back and the writer
-                        // has dropped its half, surface DROPPED
-                        // so the loop exits.
                         int status;
-                        if (read == 0 && d.IsStreamCompleted(handle))
-                            status = (0 << 4) | StatusDropped;
+                        bool dropped = d.IsStreamCompleted(handle);
+                        if (read == 0 && !dropped)
+                        {
+                            // Save the buffer so the matching
+                            // waitable-set.wait/poll can drain
+                            // the stream into it when data
+                            // arrives, then return the actual
+                            // (items<<4)|status code as the
+                            // wit-bindgen-rt callback expects.
+                            d.RegisterStreamPendingRead(
+                                handle, d.Memory,
+                                unchecked((uint)ptr), cap);
+                            status = unchecked((int)0xFFFFFFFF); // BLOCKED
+                        }
+                        else if (dropped)
+                            status = (read << 4) | StatusDropped;
                         else
-                            status = PackStreamStatus(read, completed: true);
+                            status = (read << 4) | StatusCompleted;
                         if (StreamReadTraceEnabled)
                             System.Console.Error.WriteLine(
                                 $"[stream-read] handle={handle} cap={cap} " +
@@ -425,13 +432,11 @@ namespace Wacs.ComponentModel.Async
             // [async-lower][future-read-N]<funcname>(handle,
             //   ptr) → (i32 status)
             //
-            // wit-bindgen-rt's start_read hook for the
-            // single-shot future on the read-side. Blocks the
-            // CLR thread until the producer resolves the future
-            // (matching the StreamReadToMemoryBlocking pattern).
-            // The future's resolved value is a pre-encoded
-            // byte[] when the producer wants to surface a typed
-            // payload; null leaves the buffer untouched.
+            // Non-blocking. Returns BLOCKED (0xFFFFFFFF) when
+            // the future hasn't resolved yet so the guest's
+            // waitable-set.wait can yield to peer futures in a
+            // `join!`. On resolution, the saved ptr is filled in
+            // by `DrainPendingFutureRead` from the wait helper.
             if (p.AsyncLower && p.CanonOp == "future-read"
                 && p.TypeIdx != null)
             {
@@ -439,13 +444,13 @@ namespace Wacs.ComponentModel.Async
                     (ctx, handle, ptr) =>
                     {
                         if (d.Memory == null) return 0;
-                        d.FutureReadToMemoryBlocking(
-                            handle, d.Memory, unchecked((uint)ptr));
-                        // future-read: 0 = COMPLETED (single
-                        // value transferred — count is implicit
-                        // since a future holds at most one
-                        // value).
-                        return StatusCompleted;
+                        if (d.TryReadFutureToMemory(
+                                handle, d.Memory,
+                                unchecked((uint)ptr)))
+                            return StatusCompleted;
+                        d.RegisterFuturePendingRead(
+                            handle, unchecked((uint)ptr));
+                        return unchecked((int)0xFFFFFFFF); // BLOCKED
                     });
             }
 
@@ -539,19 +544,37 @@ namespace Wacs.ComponentModel.Async
                     return (Action<ExecContext, int>)((_, h) =>
                         d.WaitableSetDrop(h));
                 case "waitable-join":
-                    return (Action<ExecContext, int, int>)((_, w, t) =>
-                        d.WaitableJoin(w, t));
-                // waitable-set-poll: (set, mem-ptr) → (i32
-                // event-id). Calls the dispatcher's sync poll
-                // — non-blocking check for any deliverable
-                // waitable. mem-ptr is where the spec wants
-                // the deliverable event written; we ignore it
-                // for v0 since the return value carries the
-                // member-handle directly.
+                    // wit-bindgen-rt pushes (waitable, set) — see
+                    // crates/guest-rust/src/rt/async_support/
+                    // waitable_set.rs line 76. Dispatcher's
+                    // WaitableJoin takes (set, waitable), so swap.
+                    return (Action<ExecContext, int, int>)((_, waitable, set) =>
+                        d.WaitableJoin(set, waitable));
+                // waitable-set-poll: (set, payload-ptr) → (i32
+                // event-type). Writes (waitable, code) to memory
+                // at payload-ptr per the canon-ABI event record.
                 case "waitable-set-poll":
                     return (Func<ExecContext, int, int, int>)(
-                        (_, setHandle, _) =>
-                            d.WaitableSetPoll(null!, setHandle, 0, false));
+                        (_, setHandle, payloadPtr) =>
+                        {
+                            if (d.Memory == null) return 0;
+                            return d.WaitableSetPollWithPayload(
+                                null!, setHandle, d.Memory,
+                                payloadPtr, cancellable: false);
+                        });
+
+                // waitable-set-wait: (set, payload-ptr) → (i32
+                // event-type). Blocks until any member becomes
+                // deliverable; same payload shape as poll.
+                case "waitable-set-wait":
+                    return (Func<ExecContext, int, int, int>)(
+                        (_, setHandle, payloadPtr) =>
+                        {
+                            if (d.Memory == null) return 0;
+                            return d.WaitableSetWaitWithPayload(
+                                null!, setHandle, d.Memory,
+                                payloadPtr, cancellable: false);
+                        });
 
                 // context-get/-set — typeIdx is the slot
                 // index. The dispatcher's signatures take a

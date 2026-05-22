@@ -348,31 +348,49 @@ namespace Wacs.ComponentModel.Async
                     del = (Func<ExecContext, int, int>)((_, h) =>
                         d.WaitableSetDrop(h) ? 1 : 0);
                     return true;
-                // (i32, i32) -> i32   (waitable-set.wait set memidx)
-                //   blocks until a member becomes deliverable; returns
-                //   the deliverable handle (0 for empty set).
+                // (i32, i32) -> i32   (waitable-set.wait set payload-ptr)
+                //   blocks until a member becomes deliverable; writes
+                //   the (waitable, code) event record to memory at
+                //   payload-ptr and returns the event type (e.g.
+                //   EVENT_STREAM_READ = 2). The second i32 is the
+                //   memory pointer per the canon-ABI lowering.
                 case CanonWaitableSetOp { Op: CanonWaitableSetOp.Kind.Wait } wsw:
                     {
                         bool cancellable = wsw.Cancellable ?? false;
-                        del = (Func<ExecContext, int, int, int>)((_, set, mem) =>
-                            d.WaitableSetWait(null!, set, mem, cancellable));
+                        del = (Func<ExecContext, int, int, int>)((_, set, payloadPtr) =>
+                        {
+                            if (d.Memory == null) return 0;
+                            return d.WaitableSetWaitWithPayload(
+                                null!, set, d.Memory,
+                                payloadPtr, cancellable);
+                        });
                         return true;
                     }
-                // (i32, i32) -> i32   (waitable-set.poll set memidx)
-                //   non-blocking; returns 0 (canon null) when no
+                // (i32, i32) -> i32   (waitable-set.poll set payload-ptr)
+                //   non-blocking; returns EVENT_NONE (0) when no
                 //   member is deliverable.
                 case CanonWaitableSetOp { Op: CanonWaitableSetOp.Kind.Poll } wsp:
                     {
                         bool cancellable = wsp.Cancellable ?? false;
-                        del = (Func<ExecContext, int, int, int>)((_, set, mem) =>
-                            d.WaitableSetPoll(null!, set, mem, cancellable));
+                        del = (Func<ExecContext, int, int, int>)((_, set, payloadPtr) =>
+                        {
+                            if (d.Memory == null) return 0;
+                            return d.WaitableSetPollWithPayload(
+                                null!, set, d.Memory,
+                                payloadPtr, cancellable);
+                        });
                         return true;
                     }
 
-                // (i32, i32) -> ()    (waitable.join: set, member)
+                // (i32, i32) -> ()    (waitable.join: waitable, set)
+                // The canon-ABI lowering pushes (waitable, set)
+                // — verified against wit-bindgen-rt
+                // crates/guest-rust/src/rt/async_support/waitable_set.rs
+                // line 76: `fn join(waitable: u32, set: u32)`.
+                // A `set` of 0 means "remove from all sets".
                 case CanonWaitableJoin _:
-                    del = (Action<ExecContext, int, int>)((_, set, member) =>
-                        d.WaitableJoin(set, member));
+                    del = (Action<ExecContext, int, int>)((_, waitable, set) =>
+                        d.WaitableJoin(set, waitable));
                     return true;
 
                 // () -> ()  (thread.yield — synchronous no-op today)

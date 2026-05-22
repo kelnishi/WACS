@@ -2078,16 +2078,22 @@ namespace Wacs.WASI.Preview3
             // i32 so the lowering passes (self, results_ptr)
             // directly instead of using a params_ptr struct.
             // results_ptr is the standard 44-byte receive retptr.
+            //
+            // ReceiveFromAsync genuinely blocks until a datagram
+            // arrives, so we can't sync-block the dispatcher —
+            // the typical caller is
+            // `join!(server.receive(), client.send(...))` and
+            // sync-blocking starves the send half. Spawn the
+            // OS call as a Task, surface it as a host subtask,
+            // return STARTED so the guest's `waitable-set.wait`
+            // can yield and let the send make progress.
             runtime.BindHostFunction(
                 (SocketsTypesModuleName,
                     "[async-lower][method]udp-socket.receive"),
                 (Func<ExecContext, int, int, int>)(
                     (_, self, resultsPtr) =>
-                    {
-                        InvokeUdpSocketReceive(
-                            self, resultsPtr, realloc);
-                        return CanonAsyncStatusReturnedPacked;
-                    }));
+                        StartUdpReceiveSubtask(
+                            self, resultsPtr, realloc)));
 
             // ---- TCP simple getter/setter cluster (Slice X) -------
             //
@@ -2681,15 +2687,7 @@ namespace Wacs.WASI.Preview3
             int self, int retptr, ICabiRealloc realloc)
         {
             var memory = RequireMemoryForHttp();
-            if (retptr < 0 || (retptr & 0x3) != 0
-                || retptr + 44 > memory.Data.Length)
-                throw new InvalidOperationException(
-                    "udp-socket.receive: retptr " +
-                    $"0x{retptr:X8} misaligned or out of range " +
-                    $"(memory size = {memory.Data.Length}). " +
-                    "Caller must allocate a 44-byte 4-aligned " +
-                    "return area.");
-
+            ValidateUdpReceiveRetptr(retptr, memory);
             SocketsException? caught = null;
             byte[] data = Array.Empty<byte>();
             IpSocketAddress source = default;
@@ -2700,19 +2698,134 @@ namespace Wacs.WASI.Preview3
                     .GetAwaiter().GetResult();
             }
             catch (SocketsException ex) { caught = ex; }
+            WriteUdpReceiveResult(
+                memory, retptr, realloc,
+                caught, data, source);
+        }
 
+        /// <summary>Spawn the OS-level receive as a host
+        /// subtask and return the packed STARTED status so the
+        /// guest's <c>waitable-set.wait</c> can yield to the
+        /// concurrent send/connect half of a
+        /// <c>futures::join!</c>.</summary>
+        private int StartUdpReceiveSubtask(
+            int self, int resultsPtr, ICabiRealloc realloc)
+        {
+            var dispatcher = RequireDispatcher();
+            var memory = RequireMemoryForHttp();
+            ValidateUdpReceiveRetptr(resultsPtr, memory);
+            // Spec validation that must happen before we spawn
+            // the background work (Unbound is the test_not_bound
+            // path; surface as RETURNED with err so the guest
+            // doesn't pay the waitable-set round-trip on a
+            // synchronous error).
+            IUdpSocket sock;
+            try { sock = RequireUdpSocket(self); }
+            catch (SocketsException ex)
+            {
+                WriteUdpReceiveResult(
+                    memory, resultsPtr, realloc,
+                    ex, Array.Empty<byte>(), default);
+                return CanonAsyncStatusReturnedPacked;
+            }
+            // Pre-flight: if receive will fail synchronously
+            // (e.g. socket not bound), write the result + return
+            // RETURNED instead of registering a subtask we'll
+            // immediately complete.
+            if (!UdpSocketCanReceive(sock, out var preflightErr))
+            {
+                WriteUdpReceiveResult(
+                    memory, resultsPtr, realloc,
+                    preflightErr, Array.Empty<byte>(), default);
+                return CanonAsyncStatusReturnedPacked;
+            }
+            var task = System.Threading.Tasks.Task.Run(async () =>
+            {
+                SocketsException? caught = null;
+                byte[] data = Array.Empty<byte>();
+                IpSocketAddress source = default;
+                try
+                {
+                    (data, source) = await sock.ReceiveAsync()
+                        .ConfigureAwait(false);
+                }
+                catch (SocketsException ex) { caught = ex; }
+                catch (System.Net.Sockets.SocketException sx)
+                {
+                    caught = Wacs.WASI.Preview3.Sockets
+                        .TcpEndpointHelper.MapSocketException(sx);
+                }
+                WriteUdpReceiveResult(
+                    memory, resultsPtr, realloc,
+                    caught, data, source);
+            });
+            int subtaskHandle =
+                dispatcher.RegisterHostSubtask(task);
+            return (subtaskHandle << 4)
+                | CanonAsyncStatusStarted;
+        }
+
+        private static bool UdpSocketCanReceive(
+            IUdpSocket sock,
+            out SocketsException? err)
+        {
+            err = null;
+            // Best-effort pre-check: only `IUdpSocket` interfaces
+            // a state-aware concrete `UdpSocket` need this
+            // guard; other impls just attempt the receive.
+            if (sock is Wacs.WASI.Preview3.Sockets.UdpSocket u
+                && u.CurrentState
+                    == Wacs.WASI.Preview3.Sockets.UdpSocket.State
+                        .Unbound)
+            {
+                err = new SocketsException(
+                    Sockets.ErrorCode.InvalidState,
+                    "udp-socket.receive: socket must be bound " +
+                    "before it can receive.");
+                return false;
+            }
+            return true;
+        }
+
+        private static void ValidateUdpReceiveRetptr(
+            int retptr,
+            Wacs.Core.Runtime.Types.MemoryInstance memory)
+        {
+            if (retptr < 0 || (retptr & 0x3) != 0
+                || retptr + 44 > memory.Data.Length)
+                throw new InvalidOperationException(
+                    "udp-socket.receive: retptr " +
+                    $"0x{retptr:X8} misaligned or out of range " +
+                    $"(memory size = {memory.Data.Length}). " +
+                    "Caller must allocate a 44-byte 4-aligned " +
+                    "return area.");
+        }
+
+        // Shared 44-byte retptr encoder. Called from both the
+        // sync entry (InvokeUdpSocketReceive) and the host
+        // subtask's continuation. Per the canon-ABI, every
+        // integer is little-endian — including the ipv6
+        // tuple<u16×8> groups.
+        private static void WriteUdpReceiveResult(
+            Wacs.Core.Runtime.Types.MemoryInstance memory,
+            int retptr, ICabiRealloc realloc,
+            SocketsException? err,
+            byte[] data, IpSocketAddress source)
+        {
             var dest = memory.AsSpan(retptr, 44);
             dest.Clear();
-            if (caught != null)
+            if (err != null)
             {
                 dest[0] = 1;
-                WriteSocketsErrorCodeBytes(
-                    dest.Slice(4, 12), caught, realloc, memory);
+                // The retptr is 44 bytes; the err variant fits
+                // in the first 16-byte slot after disc+pad.
+                // WriteSocketsErrorCodeBytes wants 16 bytes; we
+                // give it the full payload window.
+                Span<byte> errPayload = dest.Slice(4, 12);
+                errPayload[0] = MapSocketsTypesErrorCodeDisc(err.Code);
                 return;
             }
-
-            dest[0] = 0; // ok disc
-            // list<u8>: allocate via cabi_realloc and copy.
+            dest[0] = 0;
             int listPtr = data.Length > 0
                 ? realloc.Allocate(1, data.Length) : 0;
             if (data.Length > 0)
@@ -2722,11 +2835,6 @@ namespace Wacs.WASI.Preview3
                 .WriteInt32LittleEndian(dest.Slice(4), listPtr);
             System.Buffers.Binary.BinaryPrimitives
                 .WriteInt32LittleEndian(dest.Slice(8), data.Length);
-
-            // ip-socket-address variant at +12..44.
-            //   +12: variant disc (u8) + 3 pad
-            //   +16..: payload (28 bytes max for ipv6; ipv4 fits
-            //          in +16..22 only)
             dest[12] = (byte)(source.Family == IpAddressFamily.Ipv4
                 ? 0 : 1);
             if (source.Family == IpAddressFamily.Ipv4)
@@ -2742,7 +2850,6 @@ namespace Wacs.WASI.Preview3
             {
                 dest[16] = (byte)(source.V6.Port & 0xFF);
                 dest[17] = (byte)((source.V6.Port >> 8) & 0xFF);
-                // +18..20 pad (to align-4 for flow-info at +20)
                 System.Buffers.Binary.BinaryPrimitives
                     .WriteUInt32LittleEndian(
                         dest.Slice(20, 4), source.V6.FlowInfo);
@@ -2754,10 +2861,10 @@ namespace Wacs.WASI.Preview3
                 };
                 for (int slot = 0; slot < 8; slot++)
                 {
-                    dest[24 + slot * 2 + 0] =
-                        (byte)((groups[slot] >> 8) & 0xFF);
-                    dest[24 + slot * 2 + 1] =
-                        (byte)(groups[slot] & 0xFF);
+                    System.Buffers.Binary.BinaryPrimitives
+                        .WriteUInt16LittleEndian(
+                            dest.Slice(24 + slot * 2, 2),
+                            groups[slot]);
                 }
                 System.Buffers.Binary.BinaryPrimitives
                     .WriteUInt32LittleEndian(
@@ -6803,6 +6910,11 @@ namespace Wacs.WASI.Preview3
         // shipping in the wasip3 fixture builds uses `& 0xf` —
         // verified against `subtask.rs` at commit 85d10eb.
         private const int CanonAsyncStatusReturnedPacked = 2;
+        // Status code for `[async-lower]`: STARTING=0,
+        // STARTED=1, RETURNED=2, RETURNED_CANCELLED=3. We pack
+        // STARTED with the subtask handle in the upper 28 bits
+        // when handing off to a host subtask.
+        private const int CanonAsyncStatusStarted = 1;
 
         /// <summary>Wire-level WASI module name for stdout.</summary>
         public const string StdoutModuleName =
