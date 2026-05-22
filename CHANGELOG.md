@@ -1,5 +1,33 @@
 # Changelog
 
+## WACS.ComponentModel.Async.SourceGen 0.4.1 — `byte[]` (list<u8>) marshaling for sync exports
+
+Generator now handles `byte[]` params + return types
+alongside `string`. Same flat shape — (ptr, len) — but
+no UTF-8 encoding; raw `Buffer.BlockCopy` in/out via
+`MemoryInstance.Data`.
+
+* `IsPtrLenAggregate` predicate unifies the
+  string + byte[] path in the flat-signature
+  computation. Each `(string s, byte[] b)` mixed-shape
+  argument list flattens identically (4 ints).
+* Lowering `byte[]`: `cabi_realloc(0, 0, 1, len)` → ptr,
+  `Buffer.BlockCopy(arg, 0, _memory.Data, ptr, len)`. No
+  helper-library dependency for the byte path — inline
+  in the generated code.
+* Lifting `byte[]`: reads (ptr, len) from retArea via
+  `MemoryHelpers.ReadI32LE`, allocates a fresh `byte[]`,
+  `Buffer.BlockCopy` out, calls `cabi_post_X`.
+* The aggregate class-scope state (`_memory`,
+  `_reallocInvoke`, `_post_<MethodName>`) is shared
+  between string-bearing and byte-bearing methods —
+  declared once when ANY aggregate-typed export exists.
+
+`Generator_emits_byte_array_export_signature` test
+verifies the declared `byte[] Transform(byte[])` keeps
+its source shape while the flat-invoker field collapses
+to `Func<int, int, int>`. 8/8 generator integration tests.
+
 ## WACS.ComponentModel.Async.SourceGen 0.4.0 — string marshaling for sync exports
 
 Generator now emits canon-ABI string lift/lower glue for

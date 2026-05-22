@@ -60,6 +60,17 @@ namespace Wacs.ComponentModel.Test
         internal partial string Greet(string name);
     }
 
+    /// <summary>Sync exports with `byte[]` params + return
+    /// (canon-ABI <c>list&lt;u8&gt;</c>). Same flat shape as
+    /// strings — (ptr, len) pair — but no UTF-8 encoding,
+    /// just raw byte copy via Buffer.BlockCopy.</summary>
+    [AsyncComponentHarness]
+    internal partial class BytesHarnessFixture
+    {
+        [SyncExport("transform")]
+        internal partial byte[] Transform(byte[] data);
+    }
+
     /// <summary>
     /// Generator integration tests. The Wacs.ComponentModel.Test
     /// csproj wires
@@ -156,6 +167,55 @@ namespace Wacs.ComponentModel.Test
             var ascii = System.Text.Encoding.UTF8.GetString(bytes);
             Assert.Contains(
                 "is not a canon-ABI primitive", ascii);
+        }
+
+        [Fact]
+        public void Generator_emits_byte_array_export_signature()
+        {
+            // byte[] Transform(byte[] data) — canonical
+            // list<u8> shape. Flattens identically to a
+            // string (ptr, len) but lowers as a raw byte
+            // copy. Verify the declared method signature
+            // is unchanged from the source declaration and
+            // the flat-invoker field is Func<int,int,int>.
+            var m = typeof(BytesHarnessFixture).GetMethod(
+                "Transform",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.NotNull(m);
+            Assert.Equal(typeof(byte[]), m!.ReturnType);
+            Assert.Single(m.GetParameters());
+            Assert.Equal(typeof(byte[]),
+                m.GetParameters()[0].ParameterType);
+            Assert.NotNull(m.GetMethodBody());
+
+            // Flat invoker is Func<int, int, int>
+            // (input ptr/len → output retArea).
+            var invField = typeof(BytesHarnessFixture)
+                .GetField("_invoker_Transform",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(invField);
+            Assert.True(invField!.FieldType.IsGenericType);
+            var args = invField.FieldType.GetGenericArguments();
+            Assert.Equal(3, args.Length);
+            Assert.All(args,
+                t => Assert.Equal(typeof(int), t));
+
+            // Same aggregate-state fields as the string
+            // harness — strings + byte[] share the
+            // ptr/len marshaling pattern.
+            Assert.NotNull(typeof(BytesHarnessFixture)
+                .GetField("_memory",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+            Assert.NotNull(typeof(BytesHarnessFixture)
+                .GetField("_reallocInvoke",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+            Assert.NotNull(typeof(BytesHarnessFixture)
+                .GetField("_post_Transform",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
         }
 
         [Fact]

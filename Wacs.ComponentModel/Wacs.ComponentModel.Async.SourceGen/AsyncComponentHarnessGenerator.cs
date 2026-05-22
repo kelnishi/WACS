@@ -200,9 +200,12 @@ namespace Wacs.ComponentModel.Async.SourceGen
 
         // Aggregate types we know how to marshal at the
         // generated-code layer via Wacs.ComponentModel.Harness
-        // helpers (StringCoding + MemoryHelpers).
+        // helpers (StringCoding + MemoryHelpers) and inline
+        // byte-copy code.
         private const string StringType = "string";
         private const string StringTypeFq = "System.String";
+        private const string ByteArrayType = "byte[]";
+        private const string ByteArrayTypeFq = "System.Byte[]";
 
         private static bool IsPrimitive(string fqType) =>
             PrimitiveTypes.Contains(fqType);
@@ -210,12 +213,26 @@ namespace Wacs.ComponentModel.Async.SourceGen
         private static bool IsString(string fqType) =>
             fqType == StringType || fqType == StringTypeFq;
 
+        private static bool IsByteArray(string fqType) =>
+            fqType == ByteArrayType || fqType == ByteArrayTypeFq;
+
+        // String + byte[] both flatten to (i32 ptr, i32 len)
+        // — same canon-ABI shape with different encoding.
+        // Treating them uniformly in the flat-signature
+        // computation simplifies the generic-args build.
+        private static bool IsPtrLenAggregate(string fqType) =>
+            IsString(fqType) || IsByteArray(fqType);
+
         private static bool IsSupportedParam(string fqType) =>
-            IsPrimitive(fqType) || IsString(fqType);
+            IsPrimitive(fqType)
+            || IsString(fqType)
+            || IsByteArray(fqType);
 
         private static bool IsSupportedReturn(string? fqType) =>
             fqType == null
-            || IsPrimitive(fqType) || IsString(fqType);
+            || IsPrimitive(fqType)
+            || IsString(fqType)
+            || IsByteArray(fqType);
 
         private static ScanResult CollectAndDiagnose(
             Compilation compilation)
@@ -462,21 +479,22 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 sb.AppendLine(";");
             }
 
-            // String marshaling state — memory + cabi_realloc
-            // invoker + per-method cabi_post invokers. Only
-            // emitted when at least one sync export references
-            // a string param or return; otherwise these would
-            // be dead-fielding.
-            bool anyString = false;
+            // Aggregate (string / byte[]) marshaling state —
+            // memory + cabi_realloc invoker + per-method
+            // cabi_post invokers. Only emitted when at least
+            // one sync export references an aggregate param
+            // or return.
+            bool anyAggregate = false;
             foreach (var ex in cls.Exports)
             {
-                if (ex.Kind == ExportKind.Sync && AnyString(ex))
+                if (ex.Kind == ExportKind.Sync
+                    && AnyPtrLenAggregate(ex))
                 {
-                    anyString = true;
+                    anyAggregate = true;
                     break;
                 }
             }
-            if (anyString)
+            if (anyAggregate)
             {
                 sb.AppendLine(
                     "        private global::Wacs.Core.Runtime.Types" +
@@ -488,7 +506,8 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 {
                     if (ex.Kind != ExportKind.Sync) continue;
                     if (ex.ReturnType == null
-                        || !IsString(ex.ReturnType)) continue;
+                        || !IsPtrLenAggregate(ex.ReturnType))
+                        continue;
                     sb.Append(
                         "        private System.Action<int>? _post_");
                     sb.Append(ex.MethodName);
@@ -659,8 +678,8 @@ namespace Wacs.ComponentModel.Async.SourceGen
         private static void EmitSyncExportBody(
             StringBuilder sb, ExportMethod ex)
         {
-            bool hasString = AnyString(ex);
-            if (hasString)
+            bool hasAggregate = AnyPtrLenAggregate(ex);
+            if (hasAggregate)
             {
                 EmitSyncEnsureMemoryAndRealloc(sb);
             }
@@ -697,8 +716,9 @@ namespace Wacs.ComponentModel.Async.SourceGen
             sb.AppendLine("(__addr);");
             sb.AppendLine("            }");
 
-            // Lower string params into wasm memory before the
-            // call. Each `(string foo)` becomes
+            // Lower aggregate (string / byte[]) params into
+            // wasm memory before the call. Each
+            // `(string foo)` / `(byte[] foo)` becomes
             // `(int __foo_ptr, int __foo_len)`.
             foreach (var p in ex.Parameters)
             {
@@ -715,13 +735,52 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     sb.Append(p.Name);
                     sb.AppendLine("_len);");
                 }
+                else if (IsByteArray(p.Type))
+                {
+                    // canon-ABI list<u8>: align 1, element
+                    // size 1. cabi_realloc(0, 0, 1, len) → ptr;
+                    // raw byte-copy in.
+                    sb.Append("            int __");
+                    sb.Append(p.Name);
+                    sb.Append("_len = ");
+                    sb.Append(p.Name);
+                    sb.AppendLine(".Length;");
+                    sb.Append("            int __");
+                    sb.Append(p.Name);
+                    sb.Append("_ptr = __");
+                    sb.Append(p.Name);
+                    sb.Append("_len == 0 ? 0 : _reallocInvoke!" +
+                        "(0, 0, 1, __");
+                    sb.Append(p.Name);
+                    sb.AppendLine("_len);");
+                    sb.Append("            if (__");
+                    sb.Append(p.Name);
+                    sb.Append("_ptr == 0 && __");
+                    sb.Append(p.Name);
+                    sb.AppendLine("_len != 0)");
+                    sb.AppendLine("                throw new " +
+                        "System.OutOfMemoryException(");
+                    sb.Append("                    \"cabi_realloc " +
+                        "returned 0 when lowering byte[] param '");
+                    sb.Append(p.Name);
+                    sb.AppendLine("'.\");");
+                    sb.Append("            if (__");
+                    sb.Append(p.Name);
+                    sb.Append("_len > 0) System.Buffer.BlockCopy(");
+                    sb.Append(p.Name);
+                    sb.Append(", 0, _memory!.Data, __");
+                    sb.Append(p.Name);
+                    sb.Append("_ptr, __");
+                    sb.Append(p.Name);
+                    sb.AppendLine("_len);");
+                }
             }
 
             // Call the underlying invoker with the flattened
-            // args. String args expand to (ptr, len); primitives
-            // pass straight through.
-            bool returnsString = ex.ReturnType != null
-                && IsString(ex.ReturnType);
+            // args. String / byte[] args expand to (ptr, len);
+            // primitives pass straight through.
+            bool returnsAggregate = ex.ReturnType != null
+                && IsPtrLenAggregate(ex.ReturnType);
             sb.Append("            ");
             if (ex.ReturnType != null)
                 sb.Append("var __raw = ");
@@ -731,18 +790,66 @@ namespace Wacs.ComponentModel.Async.SourceGen
             sb.AppendLine(");");
 
             // If the export returned a primitive, just cast +
-            // return. If it returned a string, read the (ptr,
-            // len) tuple out of the retArea, lift, and call
-            // cabi_post_<exportName> to release the retArea.
-            if (returnsString)
+            // return. If it returned an aggregate, read the
+            // (ptr, len) tuple out of the retArea, lift, and
+            // call cabi_post_<exportName> to release the
+            // retArea.
+            if (returnsAggregate)
             {
-                EmitSyncStringReturnLift(sb, ex);
+                if (IsString(ex.ReturnType!))
+                    EmitSyncStringReturnLift(sb, ex);
+                else
+                    EmitSyncByteArrayReturnLift(sb, ex);
             }
             else if (ex.ReturnType != null)
             {
                 sb.Append("            return __raw;");
                 sb.AppendLine();
             }
+        }
+
+        // byte[] return lift: read (ptr, len) from retArea,
+        // copy memory bytes into a fresh byte[], call
+        // cabi_post_X to release.
+        private static void EmitSyncByteArrayReturnLift(
+            StringBuilder sb, ExportMethod ex)
+        {
+            string postExport = "cabi_post_" + ex.ExportName;
+            string postField = "_post_" + ex.MethodName;
+            sb.AppendLine(
+                "            int __outPtr = global::Wacs" +
+                ".ComponentModel.Harness.MemoryHelpers" +
+                ".ReadI32LE(_memory!, __raw);");
+            sb.AppendLine(
+                "            int __outLen = global::Wacs" +
+                ".ComponentModel.Harness.MemoryHelpers" +
+                ".ReadI32LE(_memory!, __raw + 4);");
+            sb.AppendLine(
+                "            byte[] __result = new byte[__outLen];");
+            sb.AppendLine(
+                "            if (__outLen > 0)");
+            sb.AppendLine(
+                "                System.Buffer.BlockCopy(" +
+                "_memory!.Data, __outPtr, __result, 0, __outLen);");
+            // cabi_post lookup (same shape as string return).
+            sb.Append("            if (");
+            sb.Append(postField);
+            sb.AppendLine(" == null)");
+            sb.AppendLine("            {");
+            sb.Append(
+                "                if (_instance.CoreRuntime" +
+                ".TryGetExportedFunction(\"");
+            sb.Append(EscapeStringLiteral(postExport));
+            sb.AppendLine("\", out var __postAddr))");
+            sb.Append("                    ");
+            sb.Append(postField);
+            sb.AppendLine(" = _instance.CoreRuntime" +
+                ".CreateInvokerAction<int>(__postAddr);");
+            sb.AppendLine("            }");
+            sb.Append("            ");
+            sb.Append(postField);
+            sb.AppendLine("?.Invoke(__raw);");
+            sb.AppendLine("            return __result;");
         }
 
         // String params + return all need access to the wasm
@@ -829,7 +936,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
             {
                 if (!first) sb.Append(", ");
                 first = false;
-                if (IsString(p.Type))
+                if (IsPtrLenAggregate(p.Type))
                 {
                     sb.Append("__");
                     sb.Append(p.Name);
@@ -844,6 +951,16 @@ namespace Wacs.ComponentModel.Async.SourceGen
             }
         }
 
+        private static bool AnyPtrLenAggregate(ExportMethod ex)
+        {
+            if (ex.ReturnType != null
+                && IsPtrLenAggregate(ex.ReturnType))
+                return true;
+            foreach (var p in ex.Parameters)
+                if (IsPtrLenAggregate(p.Type)) return true;
+            return false;
+        }
+
         // Flat (canon-ABI lowered) generic args for
         // CreateInvokerFunc<...> / CreateInvokerAction<...>.
         // Each string expands to two ints; primitives stay; a
@@ -853,7 +970,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
         {
             int paramSlots = 0;
             foreach (var p in ex.Parameters)
-                paramSlots += IsString(p.Type) ? 2 : 1;
+                paramSlots += IsPtrLenAggregate(p.Type) ? 2 : 1;
             bool hasReturn = ex.ReturnType != null;
             if (paramSlots == 0 && !hasReturn) return "";
 
@@ -862,7 +979,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
             bool first = true;
             foreach (var p in ex.Parameters)
             {
-                if (IsString(p.Type))
+                if (IsPtrLenAggregate(p.Type))
                 {
                     if (!first) sb.Append(", ");
                     sb.Append("int");
@@ -879,7 +996,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
             if (hasReturn)
             {
                 if (!first) sb.Append(", ");
-                if (IsString(ex.ReturnType!))
+                if (IsPtrLenAggregate(ex.ReturnType!))
                     sb.Append("int");
                 else
                     sb.Append(ex.ReturnType);
@@ -888,14 +1005,6 @@ namespace Wacs.ComponentModel.Async.SourceGen
             return sb.ToString();
         }
 
-        private static bool AnyString(ExportMethod ex)
-        {
-            if (ex.ReturnType != null && IsString(ex.ReturnType))
-                return true;
-            foreach (var p in ex.Parameters)
-                if (IsString(p.Type)) return true;
-            return false;
-        }
 
         // Field type matching the FLAT (canon-ABI lowered)
         // signature — string → int, int; string return →
@@ -906,7 +1015,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
         {
             int paramSlots = 0;
             foreach (var p in ex.Parameters)
-                paramSlots += IsString(p.Type) ? 2 : 1;
+                paramSlots += IsPtrLenAggregate(p.Type) ? 2 : 1;
             bool hasReturn = ex.ReturnType != null;
 
             var sb = new StringBuilder();
@@ -925,8 +1034,10 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 AppendFlatParamTypes(sb, ex);
                 sb.Append(", ");
             }
-            if (IsString(ex.ReturnType!)) sb.Append("int");
-            else sb.Append(ex.ReturnType);
+            if (IsPtrLenAggregate(ex.ReturnType!))
+                sb.Append("int");
+            else
+                sb.Append(ex.ReturnType);
             sb.Append(">?");
             return sb.ToString();
         }
@@ -937,7 +1048,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
             bool first = true;
             foreach (var p in ex.Parameters)
             {
-                if (IsString(p.Type))
+                if (IsPtrLenAggregate(p.Type))
                 {
                     if (!first) sb.Append(", ");
                     sb.Append("int, int");
