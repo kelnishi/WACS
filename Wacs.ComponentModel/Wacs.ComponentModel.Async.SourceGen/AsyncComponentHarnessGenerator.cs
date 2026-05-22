@@ -478,29 +478,30 @@ namespace Wacs.ComponentModel.Async.SourceGen
             if (!IsTuple(fqType)) return false;
             var elems = TupleElementTypes(fqType);
             foreach (var e in elems)
-                if (!IsPrimitive(e)
-                    && !IsPtrLenAggregate(e)
-                    && !IsNullablePrimitive(e)
-                    && !IsSupportedResult(e))
+                if (!IsSupportedFieldType(e))
                     return false;
             return elems.Count > 0;
         }
 
         // True for record/tuple field types that the
         // BuildRecordLayout + flat-codegen paths handle.
+        // Records nest recursively — a record field's own
+        // field types are validated when its layout is built.
         private static bool IsSupportedFieldType(string fqType)
             => IsPrimitive(fqType)
                 || IsPtrLenAggregate(fqType)
                 || IsNullablePrimitive(fqType)
-                || IsSupportedResult(fqType);
+                || IsSupportedResult(fqType)
+                || IsRecord(fqType);
 
         // Per-emission record-layout lookup. Set at the start
         // of each EmitHarness call, cleared after. ThreadStatic
         // because Roslyn generators may run concurrently across
         // compilations.
         [System.ThreadStatic]
-        private static System.Collections.Immutable
-            .ImmutableDictionary<string, RecordLayout>? _activeRecords;
+        private static System.Collections.Generic
+            .IReadOnlyDictionary<string, RecordLayout>?
+            _activeRecords;
 
         private static bool TryLookupRecord(
             string fqType, out RecordLayout layout)
@@ -591,6 +592,8 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 return ResultPayloadOffset(ok, err)
                     + PrimitiveSize(joined);
             }
+            if (TryLookupRecord(fqType, out var rec))
+                return RecordSize(rec);
             return PrimitiveSize(fqType);
         }
 
@@ -610,13 +613,16 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     PrimitiveAlign(ok), PrimitiveAlign(err));
                 return System.Math.Max(1, armAlign);
             }
+            if (TryLookupRecord(fqType, out var rec))
+                return RecordAlign(rec);
             return PrimitiveAlign(fqType);
         }
 
         // Flat-slot count for a field type. Primitives are 1
         // slot; string / byte[] are 2 (ptr + len); option<T>
         // is 2 (disc + payload); result<TOk, TErr> is 1 if
-        // both arms unit, else 2 (disc + joined payload).
+        // both arms unit, else 2 (disc + joined payload);
+        // nested record is the sum of its fields' slots.
         private static int FieldSlotCount(string fqType)
         {
             if (IsPtrLenAggregate(fqType)) return 2;
@@ -627,7 +633,31 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 return ResultJoinedPayload(ok, err) == null
                     ? 1 : 2;
             }
+            if (TryLookupRecord(fqType, out var rec))
+                return TotalFlatSlotsForRecord(rec);
             return 1;
+        }
+
+        // Canon-ABI record memory size: last field's end,
+        // rounded up to the record's alignment. Empty records
+        // wouldn't pass BuildRecordLayout so we don't handle
+        // that here.
+        private static int RecordSize(RecordLayout rec)
+        {
+            var last = rec.Fields[rec.Fields.Length - 1];
+            int end = last.Offset + FieldSize(last.Type);
+            return AlignTo(end, RecordAlign(rec));
+        }
+
+        private static int RecordAlign(RecordLayout rec)
+        {
+            int a = 1;
+            foreach (var f in rec.Fields)
+            {
+                int fa = FieldAlign(f.Type);
+                if (fa > a) a = fa;
+            }
+            return a;
         }
 
         private static int AlignTo(int offset, int alignment)
@@ -718,10 +748,15 @@ namespace Wacs.ComponentModel.Async.SourceGen
                         string, RecordLayout>.Empty);
 
             // Discover [WitRecord]-marked types and compute
-            // their canon-ABI layouts.
-            var records = System.Collections.Immutable
-                .ImmutableDictionary.CreateBuilder<
-                    string, RecordLayout>();
+            // their canon-ABI layouts. Nested records (a record
+            // field whose type is itself a [WitRecord]) are
+            // resolved via on-demand recursion: gather the
+            // candidate set first so IsSupportedFieldType /
+            // IsRecord can accept any [WitRecord], then build
+            // layouts in dependency order using a mutable
+            // dictionary that _activeRecords reads through.
+            var candidates = new System.Collections.Generic
+                .Dictionary<string, INamedTypeSymbol>();
             if (witRecordAttr != null)
             {
                 foreach (var type in EnumerateAllTypes(
@@ -729,13 +764,26 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 {
                     if (!HasAttribute(type, witRecordAttr))
                         continue;
-                    var layout = BuildRecordLayout(type);
-                    if (layout != null)
-                        records[layout.Value.TypeFqn] =
-                            layout.Value;
+                    string fqn = StripGlobal(type.ToDisplayString(
+                        SymbolDisplayFormat.FullyQualifiedFormat));
+                    candidates[fqn] = type;
                 }
             }
-            var recordMap = records.ToImmutable();
+            var built = new System.Collections.Generic
+                .Dictionary<string, RecordLayout>();
+            // Make in-progress builds visible to FieldAlign /
+            // FieldSize / IsSupportedFieldType.
+            _activeRecords = built;
+            var inProgress = new System.Collections.Generic
+                .HashSet<string>();
+            foreach (var kv in candidates)
+            {
+                BuildRecordLayoutRecursive(kv.Value,
+                    candidates, built, inProgress);
+            }
+            var recordMap = System.Collections.Immutable
+                .ImmutableDictionary
+                .CreateRange(built);
             // Make records visible to IsSupportedParam /
             // IsSupportedReturn / EmitExportMethod during
             // the harness-class scan below.
@@ -863,34 +911,64 @@ namespace Wacs.ComponentModel.Async.SourceGen
         // align_to. Returns null when any field is not a
         // primitive (the MVP doesn't yet handle aggregate
         // fields in records).
-        private static RecordLayout? BuildRecordLayout(
-            INamedTypeSymbol type)
+        private static RecordLayout? BuildRecordLayoutRecursive(
+            INamedTypeSymbol type,
+            System.Collections.Generic
+                .IDictionary<string, INamedTypeSymbol> candidates,
+            System.Collections.Generic
+                .Dictionary<string, RecordLayout> built,
+            System.Collections.Generic.HashSet<string> inProgress)
         {
-            string fqn = type.ToDisplayString(
-                SymbolDisplayFormat.FullyQualifiedFormat);
-            // Strip the global:: prefix to match the form
-            // we get from method-parameter type strings
-            // after StripGlobal().
-            fqn = StripGlobal(fqn);
-            var fields = System.Collections.Immutable
-                .ImmutableArray.CreateBuilder<RecordField>();
-            int offset = 0;
-            foreach (var member in type.GetMembers())
+            string fqn = StripGlobal(type.ToDisplayString(
+                SymbolDisplayFormat.FullyQualifiedFormat));
+            if (built.TryGetValue(fqn, out var existing))
+                return existing;
+            if (!inProgress.Add(fqn))
+                return null; // direct/indirect cycle — punt
+            try
             {
-                if (member is not IFieldSymbol field) continue;
-                if (field.IsStatic) continue;
-                if (field.IsImplicitlyDeclared) continue;
-                string ft = StripGlobal(field.Type.ToDisplayString(
-                    SymbolDisplayFormat.FullyQualifiedFormat));
-                if (!IsSupportedFieldType(ft))
-                    return null; // unsupported field type
-                offset = AlignTo(offset, FieldAlign(ft));
-                fields.Add(new RecordField(
-                    field.Name, ft, offset));
-                offset += FieldSize(ft);
+                var fields = System.Collections.Immutable
+                    .ImmutableArray.CreateBuilder<RecordField>();
+                int offset = 0;
+                foreach (var member in type.GetMembers())
+                {
+                    if (member is not IFieldSymbol field)
+                        continue;
+                    if (field.IsStatic) continue;
+                    if (field.IsImplicitlyDeclared) continue;
+                    string ft = StripGlobal(
+                        field.Type.ToDisplayString(
+                            SymbolDisplayFormat.FullyQualifiedFormat));
+                    // Recursively build the sub-record's layout
+                    // first so FieldAlign / FieldSize can read
+                    // it when laying this field out.
+                    if (candidates.TryGetValue(ft,
+                            out var subType)
+                        && !built.ContainsKey(ft))
+                    {
+                        var sub = BuildRecordLayoutRecursive(
+                            subType, candidates, built,
+                            inProgress);
+                        if (sub == null) return null;
+                        built[ft] = sub.Value;
+                    }
+                    if (!IsSupportedFieldType(ft))
+                        return null;
+                    offset = AlignTo(offset, FieldAlign(ft));
+                    fields.Add(new RecordField(
+                        field.Name, ft, offset));
+                    offset += FieldSize(ft);
+                }
+                if (fields.Count == 0) return null;
+                var layout = new RecordLayout(fqn,
+                    fields.ToImmutable());
+                built[fqn] = layout;
+                return layout;
             }
-            if (fields.Count == 0) return null;
-            return new RecordLayout(fqn, fields.ToImmutable());
+            finally
+            {
+                inProgress.Remove(fqn);
+            }
         }
 
         private static bool HasAttribute(
@@ -1612,6 +1690,9 @@ namespace Wacs.ComponentModel.Async.SourceGen
             else if (IsWitResult(fieldType))
                 EmitResultFieldLiftLocal(sb, fieldType,
                     localName, offset);
+            else if (TryLookupRecord(fieldType, out var subRec))
+                EmitRecordFieldLiftLocal(sb, fieldType, subRec,
+                    localName, offset);
         }
 
         // Build the C# expression that lifts a field of
@@ -1623,10 +1704,45 @@ namespace Wacs.ComponentModel.Async.SourceGen
         {
             if (IsPtrLenAggregate(fieldType)
                 || IsNullablePrimitive(fieldType)
-                || IsWitResult(fieldType))
+                || IsWitResult(fieldType)
+                || TryLookupRecord(fieldType, out _))
                 return localName;
             return ReadMemoryExprForType(fieldType,
                 "_memory!", "__raw + " + offset);
+        }
+
+        // Lift a nested record field. Recursively bind sub-
+        // field locals at the absolute retArea offset
+        // (`offset + sub.Offset`), then construct the inner
+        // record from those.
+        private static void EmitRecordFieldLiftLocal(
+            StringBuilder sb, string fieldType,
+            RecordLayout subRec,
+            string localName, int offset)
+        {
+            foreach (var f in subRec.Fields)
+                EmitFieldLiftLocalsIfNeeded(sb, f.Type,
+                    localName + "_" + f.Name,
+                    offset + f.Offset);
+            sb.Append("            ");
+            sb.Append(fieldType);
+            sb.Append(' ');
+            sb.Append(localName);
+            sb.Append(" = new ");
+            sb.Append(fieldType);
+            sb.Append(" { ");
+            bool first = true;
+            foreach (var f in subRec.Fields)
+            {
+                if (!first) sb.Append(", ");
+                sb.Append(f.Name);
+                sb.Append(" = ");
+                sb.Append(FieldLiftExpression(f.Type,
+                    localName + "_" + f.Name,
+                    offset + f.Offset));
+                first = false;
+            }
+            sb.AppendLine(" };");
         }
 
         // Lift an option<T> field at the given retArea offset
@@ -2283,6 +2399,17 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     sb.AppendLine(";");
                 }
             }
+            else if (TryLookupRecord(fieldType, out var subRec))
+            {
+                // Nested record field: recursively lower each
+                // sub-field. Naming scheme `<base>_<subField>`
+                // / source `<sourceExpr>.<subField>` keeps the
+                // locals unique even at arbitrary nesting.
+                foreach (var f in subRec.Fields)
+                    EmitAggregateFieldLower(sb, f.Type,
+                        baseName + "_" + f.Name,
+                        sourceExpr + "." + f.Name);
+            }
             else
             {
                 // Primitive: single typed local.
@@ -2405,6 +2532,17 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     sb.Append("_payload");
                 }
             }
+            else if (TryLookupRecord(fieldType, out var subRec))
+            {
+                bool first = true;
+                foreach (var f in subRec.Fields)
+                {
+                    if (!first) sb.Append(", ");
+                    EmitFlatArgsForField(sb, f.Type,
+                        baseName + "_" + f.Name);
+                    first = false;
+                }
+            }
             else
             {
                 sb.Append(baseName);
@@ -2442,13 +2580,26 @@ namespace Wacs.ComponentModel.Async.SourceGen
             if (IsTuple(fqType))
             {
                 foreach (var e in TupleElementTypes(fqType))
-                    if (IsPtrLenAggregate(e)) return true;
+                    if (FieldContainsPtrLen(e)) return true;
             }
             if (TryLookupRecord(fqType, out var rec))
             {
                 foreach (var f in rec.Fields)
-                    if (IsPtrLenAggregate(f.Type)) return true;
+                    if (FieldContainsPtrLen(f.Type)) return true;
             }
+            return false;
+        }
+
+        // A field (or tuple element) contains a ptr/len when
+        // it IS one, or recursively when nested records /
+        // tuples contain one. option / result fields can't
+        // (yet) hold ptr/len arms — that's a separate punt.
+        private static bool FieldContainsPtrLen(string fqType)
+        {
+            if (IsPtrLenAggregate(fqType)) return true;
+            if (TryLookupRecord(fqType, out _)
+                || IsTuple(fqType))
+                return AggregateContainsPtrLen(fqType);
             return false;
         }
 
@@ -2791,6 +2942,16 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 {
                     sb.Append(", ");
                     sb.Append(joined);
+                }
+            }
+            else if (TryLookupRecord(fieldType, out var subRec))
+            {
+                bool first = true;
+                foreach (var f in subRec.Fields)
+                {
+                    if (!first) sb.Append(", ");
+                    AppendFlatFieldTypes(sb, f.Type);
+                    first = false;
                 }
             }
             else

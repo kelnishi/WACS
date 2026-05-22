@@ -202,6 +202,37 @@ namespace Wacs.ComponentModel.Test
             (int?, WitResult<int, int>) input);
     }
 
+    /// <summary>Nested-record fixture: <c>Contact</c>
+    /// contains a <c>Name</c> string, an <c>Address Home</c>
+    /// sub-record (string + int), and an <c>Age</c> int.
+    /// Exercises recursive layout, flat-arg expansion, and
+    /// retArea lift across one level of record nesting.
+    /// </summary>
+    [WitRecord]
+    internal struct Address
+    {
+        public string Street;
+        public int Zip;
+    }
+
+    [WitRecord]
+    internal struct Contact
+    {
+        public string Name;
+        public Address Home;
+        public int Age;
+    }
+
+    [AsyncComponentHarness]
+    internal partial class NestedRecordHarnessFixture
+    {
+        [SyncExport("write")]
+        internal partial int Write(Contact c);
+
+        [SyncExport("read")]
+        internal partial Contact Read(int id);
+    }
+
     /// <summary>Sync exports with <c>WitResult&lt;TOk,
     /// TErr&gt;</c> (canon-ABI <c>result&lt;TOk, TErr&gt;</c>).
     /// Covers the four canonical shapes:
@@ -655,6 +686,68 @@ namespace Wacs.ComponentModel.Test
                     | BindingFlags.Instance));
             Assert.Null(typeof(OptionResultTupleHarnessFixture)
                 .GetField("_post_Evaluate",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+        }
+
+        [Fact]
+        public void Generator_emits_nested_record_export_signatures()
+        {
+            // Contact { string Name; Address Home; int Age; }
+            // Address { string Street; int Zip; }
+            // Field flat-slot counts:
+            //   Name:    2 (ptr, len)
+            //   Home:    3 (street_ptr, street_len, zip)
+            //   Age:     1
+            // Total Contact slots: 6.
+
+            // int Write(Contact c) — param flattens to 6
+            // slots, return is 1 int. Func has 7 type args.
+            var write = typeof(NestedRecordHarnessFixture)
+                .GetMethod("Write",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(write);
+            Assert.Equal(typeof(int), write!.ReturnType);
+            Assert.Equal(typeof(Contact),
+                write.GetParameters()[0].ParameterType);
+            var writeInv = typeof(NestedRecordHarnessFixture)
+                .GetField("_invoker_Write",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(writeInv);
+            Assert.Equal(
+                typeof(Func<int, int, int, int, int, int, int>),
+                writeInv!.FieldType);
+
+            // Contact Read(int id) — retArea return. Total
+            // flat slots = 6 > 1 → retArea. Func<int, int>.
+            var read = typeof(NestedRecordHarnessFixture)
+                .GetMethod("Read",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(read);
+            Assert.Equal(typeof(Contact), read!.ReturnType);
+            var readInv = typeof(NestedRecordHarnessFixture)
+                .GetField("_invoker_Read",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(readInv);
+            Assert.Equal(typeof(Func<int, int>),
+                readInv!.FieldType);
+
+            // memory + realloc + post all needed (Contact
+            // carries a string param + string-bearing return).
+            Assert.NotNull(typeof(NestedRecordHarnessFixture)
+                .GetField("_memory",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+            Assert.NotNull(typeof(NestedRecordHarnessFixture)
+                .GetField("_reallocInvoke",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+            Assert.NotNull(typeof(NestedRecordHarnessFixture)
+                .GetField("_post_Read",
                     BindingFlags.NonPublic
                     | BindingFlags.Instance));
         }

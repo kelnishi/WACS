@@ -1,5 +1,61 @@
 # Changelog
 
+## WACS.ComponentModel.Async.SourceGen 0.4.8 — nested records (record-in-record / record-in-tuple)
+
+`[WitRecord]` types may now hold other `[WitRecord]`-typed
+fields. Every helper that operated per-field — type-detection,
+size / align / slot math, param lower, flat-arg expansion,
+flat-type emission, retArea lift — now recurses through
+nested records.
+
+* **Record discovery.** `CollectAndDiagnose` now does a
+  two-stage pass: first gather all `[WitRecord]` candidate
+  symbols into a map, then build layouts in dependency
+  order via `BuildRecordLayoutRecursive` with an
+  `inProgress` cycle-detection set. Sub-records always
+  exist in `_activeRecords` by the time an outer record's
+  `FieldAlign` / `FieldSize` run.
+* **`_activeRecords` interface widened** from
+  `ImmutableDictionary` to `IReadOnlyDictionary` so the
+  build-phase mutable `Dictionary` and the post-build
+  `ImmutableDictionary` can both back it.
+* **Layout math.** `FieldSize` / `FieldAlign` /
+  `FieldSlotCount` learned the record branch (via
+  `RecordSize` / `RecordAlign` /
+  `TotalFlatSlotsForRecord`). Record memory size is
+  `align_to(last_field_end, record_align)` — round-up at
+  the outer level so nested records align correctly
+  against the parent's next field.
+* **Param lower.** `EmitAggregateFieldLower` recurses for
+  record fields, naming locals `<base>_<subField>` and
+  source-expression-walking `<sourceExpr>.<subField>`.
+  `EmitFlatArgsForField` and `AppendFlatFieldTypes` recurse
+  identically — every helper that emits one field's flat
+  representation now recurses for sub-fields.
+* **Return lift.** New `EmitRecordFieldLiftLocal` binds
+  sub-field locals at absolute retArea offsets
+  (`outer_offset + sub.Offset`) and constructs the inner
+  record via property-initializer.  `FieldLiftExpression`
+  returns the bound local name for record-typed fields.
+* **cabi_post detection** updated: `AggregateContainsPtrLen`
+  recurses via a new `FieldContainsPtrLen` helper so a
+  ptr/len buried under any depth of records triggers the
+  post-return hook.
+* New generator test:
+  `Generator_emits_nested_record_export_signatures` pins
+  `Contact { string Name; Address Home; int Age; }` (where
+  `Address { string Street; int Zip; }`). `Write(Contact)`
+  param flattens to 6 slots → `Func<int, int, int, int,
+  int, int, int>`; `Read(int)` returns via retArea →
+  `Func<int, int>`. 17/17 generator integration tests,
+  656/656 across Wacs.ComponentModel.Test. Hello-spike
+  passes unchanged.
+
+**Still punted:** ptr/len aggregates inside option / result
+arms (`option<string>`, `result<list<u8>, ()>`); cyclic
+record references (currently rejected); lists of records;
+list<T> for T ≠ u8.
+
 ## WACS.ComponentModel.Async.SourceGen 0.4.7 — option / result fields inside tuples & records
 
 Extends the field-aware marshaling from 0.4.6: `option<T>`
