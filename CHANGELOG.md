@@ -1,5 +1,62 @@
 # Changelog
 
+## WACS.ComponentModel.Async.SourceGen 0.4.0 — string marshaling for sync exports
+
+Generator now emits canon-ABI string lift/lower glue for
+`[SyncExport]`-marked partial methods with `string`
+parameters or return types. Mirrors the hand-written
+hello-spike pattern.
+
+* **Per-method flat signature.** `string Greet(string name)`
+  flattens to `Func<int, int, int>` — the `name`
+  parameter expands to `(int ptr, int len)`, the `string`
+  return becomes a single `int retArea`. Generator builds
+  the right `CreateInvokerFunc<...>` generic arity.
+* **Class-scope marshaling state.** When any sync export
+  references a string, the generator emits three
+  additional fields:
+  * `MemoryInstance? _memory` — lazy-resolved via
+    `CoreRuntime.TryGetExportedMemory("memory", ...)`
+  * `Func<int, int, int, int, int>? _reallocInvoke` —
+    lazy-resolved cabi_realloc invoker
+  * `Action<int>? _post_<MethodName>` — per-method
+    cabi_post_<exportName> invoker (string-returning
+    methods only; absent post-return tolerated)
+* **Per-call body.** Ensures memory + realloc are
+  resolved, lowers each `string` param via
+  `StringCoding.LowerUtf8` into wasm memory, calls the
+  flat invoker, lifts a string return via
+  `MemoryHelpers.ReadI32LE` + `StringCoding.LiftUtf8`,
+  invokes `cabi_post_X` to free, returns.
+* **Consumer reference.** Consumers using string types
+  must add a project reference to
+  `Wacs.ComponentModel.Harness.Runtime` — the generated
+  code calls into `Wacs.ComponentModel.Harness.StringCoding`
+  + `MemoryHelpers`. The AOT spike's csproj demonstrates.
+* **End-to-end NativeAOT verification.** The hello-spike
+  (`Spec.Test/components/fixtures/wit-harness-spike-hello/Aot.Spike`)
+  now runs *both* the hand-written `HelloHarness` AND a
+  generator-emitted `GeneratedHelloHarness` side-by-side
+  against the same `hello.component.wasm`. The published
+  ARM64 native binary prints:
+  ```
+  hand-written:   Hello, World!
+  generator-emit: Hello, World!
+  ```
+  Proves the generator's string codegen matches the
+  hand-written canonical pattern under AOT.
+
+`Generator_emits_string_export_signature` test verifies
+the emitted fields + method shape (1 new test → 7/7
+generator integration tests).
+
+**Still punted:** `list<T>`, `Option<T>`, `Result<T,E>`,
+record / variant aggregates. Strings established the
+class-scope-state pattern that these will extend.
+async-export string support also pending — needs a
+typed task.return binding that lifts the wasm-side
+string back through the canon-async dispatcher.
+
 ## WACS.ComponentModel 0.10.1, WACS.ComponentModel.Async.SourceGen 0.3.3 — `[SyncExport]` support
 
 Generator now handles sync (non-async-lifted) exports

@@ -33,9 +33,28 @@ namespace WitHarnessSpike.Aot
 
                 var harness = HelloHarness.LoadFrom(componentBytes);
                 var greeting = harness.Greet("World");
+                Console.WriteLine($"hand-written:   {greeting}");
 
-                Console.WriteLine(greeting);
-                return greeting == "Hello, World!" ? 0 : 1;
+                // Run the generator-emitted equivalent too.
+                // Should produce identical output — proves the
+                // generator's string codegen matches the
+                // hand-written hello-spike pattern end-to-end
+                // under NativeAOT.
+                // Reuse the hand-written harness's WASI stubs
+                // — the generator only emits export-side
+                // marshaling, leaving import-side bindings to
+                // the consumer. (A future generator slice
+                // could emit these too once we settle on a
+                // typed-imports surface.)
+                var gen = new GeneratedHelloHarness(
+                    componentBytes, HelloHarness.BindWasiStubs);
+                var genGreeting = gen.Greet("World");
+                Console.WriteLine($"generator-emit: {genGreeting}");
+
+                bool ok = greeting == "Hello, World!"
+                    && genGreeting == "Hello, World!"
+                    && greeting == genGreeting;
+                return ok ? 0 : 1;
             }
             catch (Exception ex)
             {

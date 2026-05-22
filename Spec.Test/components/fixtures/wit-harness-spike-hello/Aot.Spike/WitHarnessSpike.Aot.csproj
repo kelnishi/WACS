@@ -42,6 +42,25 @@
         <ProjectReference Include="..\..\..\..\..\Wacs.Core\Wacs.Core\Wacs.Core.csproj" />
         <ProjectReference Include="..\..\..\..\..\Wacs.ComponentModel\Wacs.ComponentModel.Parser\Wacs.ComponentModel.Parser.csproj" />
         <ProjectReference Include="..\..\..\..\..\Wacs.ComponentModel\Wacs.ComponentModel.Harness.Runtime\Wacs.ComponentModel.Harness.Runtime.csproj" />
+
+        <!-- Reflective ComponentInstance for the generator-
+             driven harness. AOT-clean via
+             ComponentInstance.InstantiateAot which the
+             generator emits — the reflective Invoke() typed
+             bridge is NOT reached. -->
+        <ProjectReference Include="..\..\..\..\..\Wacs.ComponentModel\Wacs.ComponentModel\Wacs.ComponentModel.csproj"
+                          SetTargetFramework="TargetFramework=net8.0"
+                          UndefineProperties="PublishAot;PublishTrimmed;PublishReadyToRun;SelfContained;RuntimeIdentifier" />
+
+        <!-- The generator emits the
+             [AsyncComponentHarness] / [SyncExport] partial
+             class bodies — InstantiateAot wiring + the
+             StringCoding.LowerUtf8 + retArea lift for
+             string-returning exports. -->
+        <ProjectReference Include="..\..\..\..\..\Wacs.ComponentModel\Wacs.ComponentModel.Async.SourceGen\Wacs.ComponentModel.Async.SourceGen.csproj"
+                          SetTargetFramework="TargetFramework=netstandard2.0"
+                          OutputItemType="Analyzer"
+                          ReferenceOutputAssembly="false" />
     </ItemGroup>
 
 </Project>

@@ -49,6 +49,17 @@ namespace Wacs.ComponentModel.Test
         internal partial void PostGreet(int retArea);
     }
 
+    /// <summary>Sync exports with string params + return —
+    /// the canonical hello-spike shape. Generator emits
+    /// StringCoding.LowerUtf8/LiftUtf8 + MemoryHelpers
+    /// glue + cabi_realloc/cabi_post_X invokers.</summary>
+    [AsyncComponentHarness]
+    internal partial class StringHarnessFixture
+    {
+        [SyncExport("greet")]
+        internal partial string Greet(string name);
+    }
+
     /// <summary>
     /// Generator integration tests. The Wacs.ComponentModel.Test
     /// csproj wires
@@ -145,6 +156,70 @@ namespace Wacs.ComponentModel.Test
             var ascii = System.Text.Encoding.UTF8.GetString(bytes);
             Assert.Contains(
                 "is not a canon-ABI primitive", ascii);
+        }
+
+        [Fact]
+        public void Generator_emits_string_export_signature()
+        {
+            // string Greet(string name) — the canonical
+            // hello-spike shape. Generator emits the
+            // StringCoding.LowerUtf8 / LiftUtf8 + cabi_realloc
+            // glue. We reflect on the declared signature
+            // (declared as `string Greet(string)`) and the
+            // class-scope memo fields (_memory,
+            // _reallocInvoke, _post_Greet, _invoker_Greet
+            // with flat sig `Func<int,int,int>`).
+            var m = typeof(StringHarnessFixture).GetMethod("Greet",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.NotNull(m);
+            Assert.Equal(typeof(string), m!.ReturnType);
+            Assert.Single(m.GetParameters());
+            Assert.Equal(typeof(string),
+                m.GetParameters()[0].ParameterType);
+            Assert.NotNull(m.GetMethodBody());
+
+            // Class-scope state.
+            var memField = typeof(StringHarnessFixture)
+                .GetField("_memory",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(memField);
+            Assert.Equal(
+                "Wacs.Core.Runtime.Types.MemoryInstance",
+                memField!.FieldType.FullName);
+
+            var reallocField = typeof(StringHarnessFixture)
+                .GetField("_reallocInvoke",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(reallocField);
+            // Func<int,int,int,int,int> — 4 ints in, 1 int out.
+            Assert.True(reallocField!.FieldType.IsGenericType);
+            Assert.Equal(5,
+                reallocField.FieldType
+                    .GetGenericArguments().Length);
+
+            var postField = typeof(StringHarnessFixture)
+                .GetField("_post_Greet",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(postField);
+            Assert.Equal(typeof(Action<int>),
+                postField!.FieldType);
+
+            // The flat-signature invoker for `string Greet(string)`
+            // is Func<int, int, int> (string param flattens to
+            // 2 ints; string return flattens to 1 int retArea).
+            var invField = typeof(StringHarnessFixture)
+                .GetField("_invoker_Greet",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(invField);
+            Assert.True(invField!.FieldType.IsGenericType);
+            var args = invField.FieldType.GetGenericArguments();
+            Assert.Equal(3, args.Length);
+            Assert.All(args,
+                t => Assert.Equal(typeof(int), t));
         }
 
         [Fact]

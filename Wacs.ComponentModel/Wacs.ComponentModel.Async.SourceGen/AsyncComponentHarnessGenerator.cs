@@ -181,11 +181,9 @@ namespace Wacs.ComponentModel.Async.SourceGen
             }
         }
 
-        // Primitive (canon-ABI flat) types the MVP marshals
-        // directly through InvokeCoreAsyncLift. Aggregates
-        // (string / list / record / variant / option / result)
-        // need cabi-realloc + per-shape lift/lower — punted to
-        // a follow-up slice.
+        // Canon-ABI primitive types — pass straight through
+        // the canon-async lift adapter (boxed for object[]
+        // calls; statically-known for sync CreateInvokerFunc).
         private static readonly HashSet<string> PrimitiveTypes =
             new HashSet<string>(StringComparer.Ordinal)
             {
@@ -200,8 +198,24 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 "System.Double",
             };
 
+        // Aggregate types we know how to marshal at the
+        // generated-code layer via Wacs.ComponentModel.Harness
+        // helpers (StringCoding + MemoryHelpers).
+        private const string StringType = "string";
+        private const string StringTypeFq = "System.String";
+
         private static bool IsPrimitive(string fqType) =>
             PrimitiveTypes.Contains(fqType);
+
+        private static bool IsString(string fqType) =>
+            fqType == StringType || fqType == StringTypeFq;
+
+        private static bool IsSupportedParam(string fqType) =>
+            IsPrimitive(fqType) || IsString(fqType);
+
+        private static bool IsSupportedReturn(string? fqType) =>
+            fqType == null
+            || IsPrimitive(fqType) || IsString(fqType);
 
         private static ScanResult CollectAndDiagnose(
             Compilation compilation)
@@ -448,6 +462,40 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 sb.AppendLine(";");
             }
 
+            // String marshaling state — memory + cabi_realloc
+            // invoker + per-method cabi_post invokers. Only
+            // emitted when at least one sync export references
+            // a string param or return; otherwise these would
+            // be dead-fielding.
+            bool anyString = false;
+            foreach (var ex in cls.Exports)
+            {
+                if (ex.Kind == ExportKind.Sync && AnyString(ex))
+                {
+                    anyString = true;
+                    break;
+                }
+            }
+            if (anyString)
+            {
+                sb.AppendLine(
+                    "        private global::Wacs.Core.Runtime.Types" +
+                    ".MemoryInstance? _memory;");
+                sb.AppendLine(
+                    "        private System.Func<int, int, int, int, int>? " +
+                    "_reallocInvoke;");
+                foreach (var ex in cls.Exports)
+                {
+                    if (ex.Kind != ExportKind.Sync) continue;
+                    if (ex.ReturnType == null
+                        || !IsString(ex.ReturnType)) continue;
+                    sb.Append(
+                        "        private System.Action<int>? _post_");
+                    sb.Append(ex.MethodName);
+                    sb.AppendLine(";");
+                }
+            }
+
             foreach (var ex in cls.Exports)
             {
                 sb.AppendLine();
@@ -472,35 +520,56 @@ namespace Wacs.ComponentModel.Async.SourceGen
         {
             // Validate types up front so the error message
             // identifies the offending parameter / return type.
+            // Async exports currently only handle primitives —
+            // string lower-into-args + lift-from-task-return
+            // requires task.return wiring not yet emitted by
+            // the generator. Sync exports get the full
+            // primitive + string surface via
+            // StringCoding.LowerUtf8 / LiftUtf8 + cabi_realloc.
+            bool isSync = ex.Kind == ExportKind.Sync;
             foreach (var p in ex.Parameters)
             {
-                if (!IsPrimitive(p.Type))
+                bool ok = isSync
+                    ? IsSupportedParam(p.Type)
+                    : IsPrimitive(p.Type);
+                if (!ok)
                 {
                     sb.Append("        #error ");
                     sb.Append(
-                        $"[AsyncExport] parameter '{p.Name}' on " +
-                        $"{ex.MethodName} has unsupported type " +
-                        $"'{p.Type}'. The MVP generator marshals " +
-                        "only canon-ABI primitive (int/uint/long/" +
-                        "ulong/short/ushort/byte/sbyte/bool/float/" +
-                        "double) param + return types. Hand-write " +
-                        "this method until the string/list/" +
-                        "aggregate lift-lower codegen ships.");
+                        $"[{(isSync ? "SyncExport" : "AsyncExport")}] " +
+                        $"parameter '{p.Name}' on {ex.MethodName} " +
+                        $"has unsupported type '{p.Type}'. " +
+                        (isSync
+                            ? "Sync exports support primitives + " +
+                              "string today; list/aggregate lift-" +
+                              "lower codegen lands next."
+                            : "Async exports only support canon-" +
+                              "ABI primitives today (task.return " +
+                              "string codegen pending)."));
                     sb.AppendLine();
                     return;
                 }
             }
-            if (ex.ReturnType != null && !IsPrimitive(ex.ReturnType))
+            if (ex.ReturnType != null)
             {
-                sb.Append("        #error ");
-                sb.Append(
-                    $"[AsyncExport] return type '{ex.ReturnType}' " +
-                    $"on {ex.MethodName} is not a canon-ABI " +
-                    "primitive. Hand-write this method until the " +
-                    "string/list/aggregate lift-lower codegen " +
-                    "ships.");
-                sb.AppendLine();
-                return;
+                bool ok = isSync
+                    ? IsSupportedReturn(ex.ReturnType)
+                    : IsPrimitive(ex.ReturnType);
+                if (!ok)
+                {
+                    sb.Append("        #error ");
+                    sb.Append(
+                        $"[{(isSync ? "SyncExport" : "AsyncExport")}] " +
+                        $"return type '{ex.ReturnType}' on " +
+                        $"{ex.MethodName} is unsupported. " +
+                        (isSync
+                            ? "Sync exports support primitives + " +
+                              "string today."
+                            : "Async exports only support canon-" +
+                              "ABI primitives today."));
+                    sb.AppendLine();
+                    return;
+                }
             }
 
             sb.Append("        ");
@@ -582,19 +651,31 @@ namespace Wacs.ComponentModel.Async.SourceGen
         // <c>WasmRuntime.CreateInvokerFunc&lt;...&gt;</c> /
         // <c>CreateInvokerAction&lt;...&gt;</c> with statically
         // generic type args derived from the partial method's
-        // declared signature. No canon-async dispatcher
-        // involvement. The invoker is memoized per-instance in
-        // a field named <c>_invoker_&lt;MethodName&gt;</c>.
+        // canon-ABI flat signature (per-parameter ints for
+        // strings; statically-known primitive types otherwise).
+        // String params lower via cabi_realloc + UTF-8 encode;
+        // string returns lift via memory-read + UTF-8 decode +
+        // cabi_post_X cleanup.
         private static void EmitSyncExportBody(
             StringBuilder sb, ExportMethod ex)
         {
+            bool hasString = AnyString(ex);
+            if (hasString)
+            {
+                EmitSyncEnsureMemoryAndRealloc(sb);
+            }
+
             string field = "_invoker_" + ex.MethodName;
-            string invokerType = BuildInvokerDelegateType(ex);
             string createMethod = ex.ReturnType == null
                 ? "CreateInvokerAction"
                 : "CreateInvokerFunc";
 
-            // Lazy resolve + invoke.
+            // Lazy resolve the core invoker. For string-bearing
+            // methods the flat signature differs from the
+            // declared C# signature — strings flatten to (ptr,
+            // len) pairs and a string return flattens to (ptr,
+            // len) emitted into the retArea (returning a single
+            // i32 retArea pointer).
             sb.Append("            if (");
             sb.Append(field);
             sb.AppendLine(" == null)");
@@ -612,51 +693,263 @@ namespace Wacs.ComponentModel.Async.SourceGen
             sb.Append(field);
             sb.Append(" = _instance.CoreRuntime.");
             sb.Append(createMethod);
-            sb.Append(BuildInvokerTypeArgs(ex));
+            sb.Append(BuildFlatInvokerTypeArgs(ex));
             sb.AppendLine("(__addr);");
             sb.AppendLine("            }");
 
-            // Invoke + return.
+            // Lower string params into wasm memory before the
+            // call. Each `(string foo)` becomes
+            // `(int __foo_ptr, int __foo_len)`.
+            foreach (var p in ex.Parameters)
+            {
+                if (IsString(p.Type))
+                {
+                    sb.Append(
+                        "            global::Wacs.ComponentModel" +
+                        ".Harness.StringCoding.LowerUtf8(_memory!, ");
+                    sb.Append(p.Name);
+                    sb.Append(
+                        ", _reallocInvoke!, out int __");
+                    sb.Append(p.Name);
+                    sb.Append("_ptr, out int __");
+                    sb.Append(p.Name);
+                    sb.AppendLine("_len);");
+                }
+            }
+
+            // Call the underlying invoker with the flattened
+            // args. String args expand to (ptr, len); primitives
+            // pass straight through.
+            bool returnsString = ex.ReturnType != null
+                && IsString(ex.ReturnType);
             sb.Append("            ");
             if (ex.ReturnType != null)
-                sb.Append("return ");
+                sb.Append("var __raw = ");
             sb.Append(field);
             sb.Append('(');
-            for (int i = 0; i < ex.Parameters.Length; i++)
-            {
-                if (i > 0) sb.Append(", ");
-                sb.Append(ex.Parameters[i].Name);
-            }
+            EmitFlatArgsList(sb, ex);
             sb.AppendLine(");");
+
+            // If the export returned a primitive, just cast +
+            // return. If it returned a string, read the (ptr,
+            // len) tuple out of the retArea, lift, and call
+            // cabi_post_<exportName> to release the retArea.
+            if (returnsString)
+            {
+                EmitSyncStringReturnLift(sb, ex);
+            }
+            else if (ex.ReturnType != null)
+            {
+                sb.Append("            return __raw;");
+                sb.AppendLine();
+            }
         }
 
-        // Build the field type: Action / Action<T1,...> /
-        // Func<T1,...,TReturn>.
+        // String params + return all need access to the wasm
+        // memory + an invoker for cabi_realloc. Emitted once
+        // per call as guarded init — cheap branch on hot path.
+        private static void EmitSyncEnsureMemoryAndRealloc(
+            StringBuilder sb)
+        {
+            sb.AppendLine("            if (_memory == null)");
+            sb.AppendLine("            {");
+            sb.AppendLine("                if (!_instance.CoreRuntime" +
+                ".TryGetExportedMemory(\"memory\", out var __mem))");
+            sb.AppendLine("                    throw new System" +
+                ".InvalidOperationException(");
+            sb.AppendLine(
+                "                        \"String marshaling " +
+                "requires an exported memory named 'memory'.\");");
+            sb.AppendLine("                _memory = __mem;");
+            sb.AppendLine("            }");
+            sb.AppendLine("            if (_reallocInvoke == null)");
+            sb.AppendLine("            {");
+            sb.AppendLine("                if (!_instance.CoreRuntime" +
+                ".TryGetExportedFunction(\"cabi_realloc\", out var __reallocAddr))");
+            sb.AppendLine("                    throw new System" +
+                ".InvalidOperationException(");
+            sb.AppendLine(
+                "                        \"String marshaling " +
+                "requires the component to export cabi_realloc.\");");
+            sb.AppendLine("                _reallocInvoke = _instance" +
+                ".CoreRuntime.CreateInvokerFunc<int, int, int, int, int>" +
+                "(__reallocAddr);");
+            sb.AppendLine("            }");
+        }
+
+        // String return lift: memory[retArea] = ptr,
+        // memory[retArea+4] = len; UTF-8 decode + cabi_post.
+        private static void EmitSyncStringReturnLift(
+            StringBuilder sb, ExportMethod ex)
+        {
+            string postExport = "cabi_post_" + ex.ExportName;
+            string postField = "_post_" + ex.MethodName;
+            sb.AppendLine(
+                "            int __outPtr = global::Wacs" +
+                ".ComponentModel.Harness.MemoryHelpers" +
+                ".ReadI32LE(_memory!, __raw);");
+            sb.AppendLine(
+                "            int __outLen = global::Wacs" +
+                ".ComponentModel.Harness.MemoryHelpers" +
+                ".ReadI32LE(_memory!, __raw + 4);");
+            sb.AppendLine(
+                "            string __result = global::Wacs" +
+                ".ComponentModel.Harness.StringCoding" +
+                ".LiftUtf8(_memory!, __outPtr, __outLen);");
+            // Lazy cabi_post resolve. Some components don't
+            // emit cabi_post_X; we tolerate that by leaving
+            // the retArea unfreed (small leak per call,
+            // matches wasmtime's behavior when the post-return
+            // function is absent).
+            sb.Append("            if (");
+            sb.Append(postField);
+            sb.AppendLine(" == null)");
+            sb.AppendLine("            {");
+            sb.Append(
+                "                if (_instance.CoreRuntime" +
+                ".TryGetExportedFunction(\"");
+            sb.Append(EscapeStringLiteral(postExport));
+            sb.AppendLine("\", out var __postAddr))");
+            sb.Append("                    ");
+            sb.Append(postField);
+            sb.AppendLine(" = _instance.CoreRuntime" +
+                ".CreateInvokerAction<int>(__postAddr);");
+            sb.AppendLine("            }");
+            sb.Append("            ");
+            sb.Append(postField);
+            sb.AppendLine("?.Invoke(__raw);");
+            sb.AppendLine("            return __result;");
+        }
+
+        private static void EmitFlatArgsList(
+            StringBuilder sb, ExportMethod ex)
+        {
+            bool first = true;
+            foreach (var p in ex.Parameters)
+            {
+                if (!first) sb.Append(", ");
+                first = false;
+                if (IsString(p.Type))
+                {
+                    sb.Append("__");
+                    sb.Append(p.Name);
+                    sb.Append("_ptr, __");
+                    sb.Append(p.Name);
+                    sb.Append("_len");
+                }
+                else
+                {
+                    sb.Append(p.Name);
+                }
+            }
+        }
+
+        // Flat (canon-ABI lowered) generic args for
+        // CreateInvokerFunc<...> / CreateInvokerAction<...>.
+        // Each string expands to two ints; primitives stay; a
+        // string return flattens to a single int retArea.
+        private static string BuildFlatInvokerTypeArgs(
+            ExportMethod ex)
+        {
+            int paramSlots = 0;
+            foreach (var p in ex.Parameters)
+                paramSlots += IsString(p.Type) ? 2 : 1;
+            bool hasReturn = ex.ReturnType != null;
+            if (paramSlots == 0 && !hasReturn) return "";
+
+            var sb = new StringBuilder();
+            sb.Append('<');
+            bool first = true;
+            foreach (var p in ex.Parameters)
+            {
+                if (IsString(p.Type))
+                {
+                    if (!first) sb.Append(", ");
+                    sb.Append("int");
+                    sb.Append(", int");
+                    first = false;
+                }
+                else
+                {
+                    if (!first) sb.Append(", ");
+                    sb.Append(p.Type);
+                    first = false;
+                }
+            }
+            if (hasReturn)
+            {
+                if (!first) sb.Append(", ");
+                if (IsString(ex.ReturnType!))
+                    sb.Append("int");
+                else
+                    sb.Append(ex.ReturnType);
+            }
+            sb.Append('>');
+            return sb.ToString();
+        }
+
+        private static bool AnyString(ExportMethod ex)
+        {
+            if (ex.ReturnType != null && IsString(ex.ReturnType))
+                return true;
+            foreach (var p in ex.Parameters)
+                if (IsString(p.Type)) return true;
+            return false;
+        }
+
+        // Field type matching the FLAT (canon-ABI lowered)
+        // signature — string → int, int; string return →
+        // int retArea. Used for the memoized invoker field
+        // declaration.
         private static string BuildInvokerDelegateType(
             ExportMethod ex)
         {
+            int paramSlots = 0;
+            foreach (var p in ex.Parameters)
+                paramSlots += IsString(p.Type) ? 2 : 1;
+            bool hasReturn = ex.ReturnType != null;
+
             var sb = new StringBuilder();
-            if (ex.ReturnType == null)
+            if (!hasReturn)
             {
-                if (ex.Parameters.Length == 0)
-                {
-                    sb.Append("System.Action?");
-                    return sb.ToString();
-                }
+                if (paramSlots == 0)
+                    return "System.Action?";
                 sb.Append("System.Action<");
-                AppendParamTypes(sb, ex);
+                AppendFlatParamTypes(sb, ex);
                 sb.Append(">?");
                 return sb.ToString();
             }
             sb.Append("System.Func<");
-            if (ex.Parameters.Length > 0)
+            if (paramSlots > 0)
             {
-                AppendParamTypes(sb, ex);
+                AppendFlatParamTypes(sb, ex);
                 sb.Append(", ");
             }
-            sb.Append(ex.ReturnType);
+            if (IsString(ex.ReturnType!)) sb.Append("int");
+            else sb.Append(ex.ReturnType);
             sb.Append(">?");
             return sb.ToString();
+        }
+
+        private static void AppendFlatParamTypes(
+            StringBuilder sb, ExportMethod ex)
+        {
+            bool first = true;
+            foreach (var p in ex.Parameters)
+            {
+                if (IsString(p.Type))
+                {
+                    if (!first) sb.Append(", ");
+                    sb.Append("int, int");
+                    first = false;
+                }
+                else
+                {
+                    if (!first) sb.Append(", ");
+                    sb.Append(p.Type);
+                    first = false;
+                }
+            }
         }
 
         // Build the <T1,...> chunk for the CreateInvokerFunc /
