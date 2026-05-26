@@ -381,6 +381,25 @@ namespace Wacs.ComponentModel.Test
         [SyncExport("matrix")]
         internal partial WitResult<int[][], System.ValueTuple>
             Matrix(int seed);
+
+        // Mixed primitive + ptr/len arms: i32-or-smaller
+        // primitive in one arm, string / byte[] in the
+        // other. Joined slots = (disc, slot1, slot2);
+        // primitive arm uses slot1 with slot2=0, ptr/len
+        // arm uses (slot1=ptr, slot2=len). Restricted to
+        // primitive types of sizeof≤4 so the joined slot
+        // width stays i32.
+        [SyncExport("parse_or_int")]
+        internal partial WitResult<int, string>
+            ParseOrInt(string input);
+
+        [SyncExport("bytes_or_code")]
+        internal partial WitResult<byte[], int>
+            BytesOrCode(int seed);
+
+        [SyncExport("flag_or_text")]
+        internal partial WitResult<bool, string>
+            FlagOrText(int seed);
     }
 
     /// <summary>Sync exports with <c>WitResult&lt;TOk,
@@ -1504,6 +1523,72 @@ namespace Wacs.ComponentModel.Test
             Assert.NotNull(mxInv);
             Assert.Equal(typeof(Func<int, int>),
                 mxInv!.FieldType);
+
+            // result<int, string> — mixed primitive vs
+            // ptr/len. Joined payload = (slot1, slot2) where
+            // slot1 carries either the int (ok) or the
+            // string ptr (err); slot2 is unused for int (0)
+            // or carries the string len. Param flat = (disc,
+            // slot1, slot2) on input; one extra (ptr, len)
+            // for the string input param. Func<int, int, int, int>.
+            var pIo = typeof(ResultPtrLenHarnessFixture)
+                .GetMethod("ParseOrInt",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(pIo);
+            Assert.Equal(typeof(WitResult<int, string>),
+                pIo!.ReturnType);
+            var pIoInv = typeof(ResultPtrLenHarnessFixture)
+                .GetField("_invoker_ParseOrInt",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(pIoInv);
+            Assert.Equal(typeof(Func<int, int, int>),
+                pIoInv!.FieldType);
+            Assert.NotNull(typeof(ResultPtrLenHarnessFixture)
+                .GetField("_post_ParseOrInt",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+
+            // result<byte[], int> — mixed reverse direction
+            // (ptr/len arm first). Same joined shape.
+            var bOC = typeof(ResultPtrLenHarnessFixture)
+                .GetMethod("BytesOrCode",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(bOC);
+            Assert.Equal(typeof(WitResult<byte[], int>),
+                bOC!.ReturnType);
+            var bOCInv = typeof(ResultPtrLenHarnessFixture)
+                .GetField("_invoker_BytesOrCode",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(bOCInv);
+            Assert.Equal(typeof(Func<int, int>),
+                bOCInv!.FieldType);
+            Assert.NotNull(typeof(ResultPtrLenHarnessFixture)
+                .GetField("_post_BytesOrCode",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+
+            // result<bool, string> — bool widens to int in
+            // slot1. Tests the bool/single special-case in
+            // EmitPtrLenAssignInto + PtrLenLiftExpression
+            // primitive branches.
+            var fOT = typeof(ResultPtrLenHarnessFixture)
+                .GetMethod("FlagOrText",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(fOT);
+            Assert.Equal(typeof(WitResult<bool, string>),
+                fOT!.ReturnType);
+            var fOTInv = typeof(ResultPtrLenHarnessFixture)
+                .GetField("_invoker_FlagOrText",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(fOTInv);
+            Assert.Equal(typeof(Func<int, int>),
+                fOTInv!.FieldType);
         }
 
         [Fact]

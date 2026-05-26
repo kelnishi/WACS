@@ -1,5 +1,54 @@
 # Changelog
 
+## WACS.ComponentModel.Async.SourceGen 0.4.17 — mixed primitive ↔ ptr/len result arms
+
+`result<int, string>`, `result<byte[], int>`,
+`result<bool, string>`, and similar mixed-shape pairs
+where one arm is an i32-or-smaller primitive and the
+other is a ptr/len aggregate (string / byte[] /
+primitive array / simple list) are now supported. The
+joined payload uses two i32 slots: slot 1 carries the
+primitive value (for the primitive arm) or the ptr (for
+the ptr/len arm); slot 2 is 0 (primitive arm) or len
+(ptr/len arm).
+
+* **`ResultJoinedPayload`** gained the mixed-shape
+  branch — returns the ptr/len arm's type as the
+  joined-payload signal when the other arm is a
+  ≤4-byte primitive (`int`, `uint`, `bool`, `float`,
+  `byte`, etc.). Wider primitives (long, double) keep
+  the `"MIXED"` rejection because joined-slot widening
+  isn't emitted yet.
+* **`EmitPtrLenAssignInto` primitive branch.** For a
+  primitive arm in a mixed-shape result, packs the
+  value into `ptrLocal` (slot 1) and leaves `lenLocal`
+  at 0. Casts depending on the primitive's natural
+  type: `bool` → `(? 1 : 0)`; `float` →
+  `SingleToInt32Bits`; everything else → `(int)`.
+* **`PtrLenLiftExpression` primitive branch.** Reads
+  the primitive from slot 1 with the matching reverse
+  cast: `bool` → `(slot != 0)`; `float` →
+  `Int32BitsToSingle(slot)`; `int`/`uint`/`byte`/
+  `sbyte`/`short`/`ushort` → cast.
+* Test extensions:
+  `Generator_emits_result_ptrlen_export_signatures`
+  picks up `WitResult<int, string> ParseOrInt(string)`,
+  `WitResult<byte[], int> BytesOrCode(int)`,
+  `WitResult<bool, string> FlagOrText(int)`. Each
+  shape compiles to a flat invoker that matches what
+  canon-ABI specifies + the per-method `_post_X` field
+  for the ptr/len-bearing return. 21/21 generator
+  integration tests, 660/660 across
+  Wacs.ComponentModel.Test. Hello-spike passes
+  unchanged.
+
+**Still punted:** wider-primitive mixed arms (`result<
+long, string>` — needs joined-slot widening); lists of
+records with option/result/nested-record/nested-list
+fields; deeper-nested list shapes in option/result arms
+(`option<string[][]>`); cyclic record refs (canon-ABI
+prohibits, correctly rejected).
+
 ## WACS.ComponentModel.Async.SourceGen 0.4.16, Harness.Runtime 0.7.3 — option<list<...>> + result<list<...>, ...>
 
 Simple lists (`string[]` and `T[][]` for primitive T) can

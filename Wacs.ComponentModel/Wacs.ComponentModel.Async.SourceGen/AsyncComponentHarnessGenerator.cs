@@ -871,6 +871,22 @@ namespace Wacs.ComponentModel.Async.SourceGen
             if (IsPtrLenAggregate(ok)
                 && IsPtrLenAggregate(err))
                 return ok;
+            // Mixed primitive ↔ ptr/len: take the ptr/len
+            // type as the joined-payload signal. Both arms
+            // then share the (ptr, len) slot pair; the
+            // primitive arm uses slot 1 as the primitive
+            // value and leaves slot 2 at zero. Restricted to
+            // i32-or-smaller primitive arms — wider
+            // primitives need joined-slot widening that we
+            // don't emit yet.
+            if (IsPtrLenAggregate(ok)
+                && IsPrimitive(err)
+                && PrimitiveSize(err) <= 4)
+                return ok;
+            if (IsPtrLenAggregate(err)
+                && IsPrimitive(ok)
+                && PrimitiveSize(ok) <= 4)
+                return err;
             return "MIXED";
         }
 
@@ -3005,6 +3021,42 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 sb.AppendLine(");");
                 return;
             }
+            // Primitive arm in a mixed-shape result (e.g.,
+            // `result<int, string>`): pack the value into
+            // slot 1 (`ptrLocal`); slot 2 stays at 0. Cast
+            // depends on the primitive's natural C# type —
+            // bool widens to int via `? 1 : 0`; float
+            // re-bits via SingleToInt32Bits; the rest cast
+            // to int directly.
+            if (IsPrimitive(type))
+            {
+                sb.Append(indent);
+                sb.Append(ptrLocal);
+                sb.Append(" = ");
+                switch (type)
+                {
+                    case "bool":
+                    case "System.Boolean":
+                        sb.Append("(");
+                        sb.Append(sourceExpr);
+                        sb.Append(" ? 1 : 0)");
+                        break;
+                    case "float":
+                    case "System.Single":
+                        sb.Append("global::System.BitConverter" +
+                            ".SingleToInt32Bits(");
+                        sb.Append(sourceExpr);
+                        sb.Append(")");
+                        break;
+                    default:
+                        sb.Append("(int)(");
+                        sb.Append(sourceExpr);
+                        sb.Append(")");
+                        break;
+                }
+                sb.AppendLine(";");
+                return;
+            }
             // List type (string[] / T[][]): run the full list
             // lower into a fresh `<inner>_ptr` / `<inner>_len`
             // pair, then copy those values to the target
@@ -3566,6 +3618,45 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 return "global::Wacs.ComponentModel.Harness" +
                     ".MemoryHelpers.LiftBytes(_memory!, "
                     + ptrLocal + ", " + lenLocal + ")";
+            // Primitive arm in a mixed-shape result: read
+            // slot 1 (`ptrLocal`) and cast back to the
+            // primitive's C# type. Mirrors the packing in
+            // `EmitPtrLenAssignInto`'s primitive branch.
+            if (IsPrimitive(type))
+            {
+                switch (type)
+                {
+                    case "bool":
+                    case "System.Boolean":
+                        return "(" + ptrLocal + " != 0)";
+                    case "float":
+                    case "System.Single":
+                        return "global::System.BitConverter" +
+                            ".Int32BitsToSingle(" + ptrLocal
+                            + ")";
+                    case "int":
+                    case "System.Int32":
+                        return ptrLocal;
+                    case "uint":
+                    case "System.UInt32":
+                        return "(uint)" + ptrLocal;
+                    case "byte":
+                    case "System.Byte":
+                        return "(byte)" + ptrLocal;
+                    case "sbyte":
+                    case "System.SByte":
+                        return "(sbyte)" + ptrLocal;
+                    case "short":
+                    case "System.Int16":
+                        return "(short)" + ptrLocal;
+                    case "ushort":
+                    case "System.UInt16":
+                        return "(ushort)" + ptrLocal;
+                    default:
+                        return "(" + type + ")"
+                            + ptrLocal;
+                }
+            }
             if (IsPrimitiveArray(type))
             {
                 string pElem = ArrayElementType(type);
