@@ -241,6 +241,17 @@ namespace Wacs.ComponentModel.Test
     /// element body is a separate allocation (string) or
     /// laid out at the record's canon-ABI offsets
     /// (record).</summary>
+    /// <summary>Record carrying a byte[] field — exercises
+    /// the ptr/len-field branch of list&lt;record&gt; lower /
+    /// lift beyond the string case.</summary>
+    [WitRecord]
+    internal struct Document
+    {
+        public string Title;
+        public byte[] Body;
+        public int Version;
+    }
+
     [AsyncComponentHarness]
     internal partial class ListShapeHarnessFixture
     {
@@ -261,6 +272,24 @@ namespace Wacs.ComponentModel.Test
 
         [SyncExport("get_people")]
         internal partial Person[] GetPeople(int count);
+
+        [SyncExport("send_documents")]
+        internal partial int SendDocuments(Document[] docs);
+
+        [SyncExport("get_documents")]
+        internal partial Document[] GetDocuments(int n);
+
+        // list<list<X>>: outer + inner are both (ptr, len).
+        // Lower nests EmitListLower; lift nests
+        // EmitListLiftStatements via depth-suffixed loop vars.
+        [SyncExport("send_buckets")]
+        internal partial int SendBuckets(string[][] buckets);
+
+        [SyncExport("get_buckets")]
+        internal partial string[][] GetBuckets(int n);
+
+        [SyncExport("send_int_lists")]
+        internal partial int SendIntLists(int[][] xss);
     }
 
     /// <summary>Primitive arrays beyond byte[] — canon-ABI
@@ -996,6 +1025,103 @@ namespace Wacs.ComponentModel.Test
                 .GetField("_post_GetPeople",
                     BindingFlags.NonPublic
                     | BindingFlags.Instance));
+
+            // int SendDocuments(Document[] docs) — Document {
+            // string Title; byte[] Body; int Version; }. Two
+            // ptr/len fields per element; lower uses the
+            // shared EmitPtrLenAssignInto for each. Same flat
+            // shape as the other Send/Get pairs.
+            var sDo = typeof(ListShapeHarnessFixture)
+                .GetMethod("SendDocuments",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(sDo);
+            Assert.Equal(typeof(Document[]),
+                sDo!.GetParameters()[0].ParameterType);
+            var sDoInv = typeof(ListShapeHarnessFixture)
+                .GetField("_invoker_SendDocuments",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(sDoInv);
+            Assert.Equal(typeof(Func<int, int, int>),
+                sDoInv!.FieldType);
+
+            // Document[] GetDocuments(int) — retArea return
+            // carries multiple heap-allocated bodies per
+            // element; cabi_post still freed at the outer
+            // level.
+            var gDo = typeof(ListShapeHarnessFixture)
+                .GetMethod("GetDocuments",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(gDo);
+            Assert.Equal(typeof(Document[]), gDo!.ReturnType);
+            var gDoInv = typeof(ListShapeHarnessFixture)
+                .GetField("_invoker_GetDocuments",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(gDoInv);
+            Assert.Equal(typeof(Func<int, int>),
+                gDoInv!.FieldType);
+            Assert.NotNull(typeof(ListShapeHarnessFixture)
+                .GetField("_post_GetDocuments",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+
+            // int SendBuckets(string[][] buckets) — outer
+            // (ptr, len) param. Same flat shape as any list.
+            // Func<int, int, int> (ptr, len, retArea).
+            var sB = typeof(ListShapeHarnessFixture)
+                .GetMethod("SendBuckets",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(sB);
+            Assert.Equal(typeof(string[][]),
+                sB!.GetParameters()[0].ParameterType);
+            var sBInv = typeof(ListShapeHarnessFixture)
+                .GetField("_invoker_SendBuckets",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(sBInv);
+            Assert.Equal(typeof(Func<int, int, int>),
+                sBInv!.FieldType);
+
+            // string[][] GetBuckets(int)
+            var gB = typeof(ListShapeHarnessFixture)
+                .GetMethod("GetBuckets",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(gB);
+            Assert.Equal(typeof(string[][]), gB!.ReturnType);
+            var gBInv = typeof(ListShapeHarnessFixture)
+                .GetField("_invoker_GetBuckets",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(gBInv);
+            Assert.Equal(typeof(Func<int, int>),
+                gBInv!.FieldType);
+            Assert.NotNull(typeof(ListShapeHarnessFixture)
+                .GetField("_post_GetBuckets",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+
+            // int SendIntLists(int[][] xss) — list-of-
+            // primitive-array. Lower nests EmitPrimitiveArrayLower
+            // inside the outer list loop.
+            var sIL = typeof(ListShapeHarnessFixture)
+                .GetMethod("SendIntLists",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(sIL);
+            Assert.Equal(typeof(int[][]),
+                sIL!.GetParameters()[0].ParameterType);
+            var sILInv = typeof(ListShapeHarnessFixture)
+                .GetField("_invoker_SendIntLists",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(sILInv);
+            Assert.Equal(typeof(Func<int, int, int>),
+                sILInv!.FieldType);
         }
 
         [Fact]

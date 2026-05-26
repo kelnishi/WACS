@@ -320,22 +320,32 @@ namespace Wacs.ComponentModel.Async.SourceGen
             if (IsPrimitiveArray(fqType)) return false;
             string elem = ArrayElementType(fqType);
             if (IsString(elem)) return true;
+            // list-of-list: outer flat shape is still (ptr,
+            // len). The inner list is itself a ptr/len shape
+            // — at any nesting depth.
+            if (IsPrimitiveArray(elem)) return true;
+            if (IsListType(elem)) return true;
             if (TryLookupRecord(elem, out var rec))
                 return IsRecordSupportedAsListElement(rec);
             return false;
         }
 
         // True iff every field of `rec` is canon-ABI
-        // primitive or string. Restricts list<record> to
-        // shapes the lower/lift loops can write/read inline
-        // per field. Records carrying byte[] / options /
-        // results / nested records land later.
+        // primitive or a ptr/len aggregate (string,
+        // byte[], or any primitive array). Restricts
+        // list<record> to shapes whose per-element lower /
+        // lift loop can dispatch on each field via the
+        // existing `EmitPtrLenAssignInto` +
+        // `PtrLenLiftExpression` helpers. Records carrying
+        // options / results / nested records / nested lists
+        // as list-element fields land later.
         private static bool IsRecordSupportedAsListElement(
             RecordLayout rec)
         {
             foreach (var f in rec.Fields)
                 if (!IsPrimitive(f.Type)
-                    && !IsString(f.Type)) return false;
+                    && !IsPtrLenAggregate(f.Type))
+                    return false;
             return true;
         }
 
@@ -3081,11 +3091,16 @@ namespace Wacs.ComponentModel.Async.SourceGen
         // names across multiple list lowerings.
         private static void EmitListLower(
             StringBuilder sb, string listType,
-            string baseName, string sourceExpr)
+            string baseName, string sourceExpr,
+            int depth = 0)
         {
             string elem = ArrayElementType(listType);
             int elemSize = FieldSize(elem);
             int elemAlign = FieldAlign(elem);
+            string iVar = depth == 0
+                ? "__i" : "__i" + depth;
+            string offVar = depth == 0
+                ? "__elemOff" : "__elemOff" + depth;
             sb.Append("            int ");
             sb.Append(baseName);
             sb.Append("_len = ");
@@ -3102,17 +3117,28 @@ namespace Wacs.ComponentModel.Async.SourceGen
             sb.Append("_len * ");
             sb.Append(elemSize);
             sb.AppendLine(");");
-            sb.Append("            for (int __i = 0; __i < ");
+            sb.Append("            for (int ");
+            sb.Append(iVar);
+            sb.Append(" = 0; ");
+            sb.Append(iVar);
+            sb.Append(" < ");
             sb.Append(baseName);
-            sb.AppendLine("_len; __i++)");
+            sb.Append("_len; ");
+            sb.Append(iVar);
+            sb.AppendLine("++)");
             sb.AppendLine("            {");
-            sb.Append("                int __elemOff = ");
+            sb.Append("                int ");
+            sb.Append(offVar);
+            sb.Append(" = ");
             sb.Append(baseName);
-            sb.Append("_ptr + __i * ");
+            sb.Append("_ptr + ");
+            sb.Append(iVar);
+            sb.Append(" * ");
             sb.Append(elemSize);
             sb.AppendLine(";");
             EmitListElementLower(sb, elem,
-                sourceExpr + "[__i]", "__elemOff");
+                sourceExpr + "[" + iVar + "]",
+                offVar, depth);
             sb.AppendLine("            }");
         }
 
@@ -3124,56 +3150,105 @@ namespace Wacs.ComponentModel.Async.SourceGen
         //   element using EmitWriteMemoryStatement.
         private static void EmitListElementLower(
             StringBuilder sb, string elemType,
-            string valueExpr, string offsetExpr)
+            string valueExpr, string offsetExpr,
+            int depth = 0)
         {
             if (IsString(elemType))
             {
+                // String element: lower body, write (ptr, len)
+                // at the element's offset. Use depth-suffixed
+                // locals so nested lowerings don't collide.
+                string ptrLoc = "__elemPtr"
+                    + (depth == 0 ? "" : depth.ToString());
+                string lenLoc = "__elemLen"
+                    + (depth == 0 ? "" : depth.ToString());
                 sb.Append("                global::Wacs" +
                     ".ComponentModel.Harness.StringCoding" +
                     ".LowerUtf8(_memory!, ");
                 sb.Append(valueExpr);
-                sb.AppendLine(", _reallocInvoke!, " +
-                    "out int __elemPtr, " +
-                    "out int __elemLen);");
+                sb.Append(", _reallocInvoke!, out int ");
+                sb.Append(ptrLoc);
+                sb.Append(", out int ");
+                sb.Append(lenLoc);
+                sb.AppendLine(");");
                 sb.Append("                global::Wacs" +
                     ".ComponentModel.Harness.MemoryHelpers" +
                     ".WriteI32LE(_memory!, ");
                 sb.Append(offsetExpr);
-                sb.AppendLine(", __elemPtr);");
+                sb.Append(", ");
+                sb.Append(ptrLoc);
+                sb.AppendLine(");");
                 sb.Append("                global::Wacs" +
                     ".ComponentModel.Harness.MemoryHelpers" +
                     ".WriteI32LE(_memory!, ");
                 sb.Append(offsetExpr);
-                sb.AppendLine(" + 4, __elemLen);");
+                sb.Append(" + 4, ");
+                sb.Append(lenLoc);
+                sb.AppendLine(");");
+                return;
+            }
+            // Nested list / primitive array element: invoke
+            // the inner list lower with a depth-bumped base.
+            // After return, the inner `<innerBase>_ptr` /
+            // `<innerBase>_len` locals are bound — write them
+            // at the parent element's offset.
+            if (IsPrimitiveArray(elemType)
+                || IsListType(elemType))
+            {
+                string innerBase = "__inner" + (depth + 1);
+                if (IsPrimitiveArray(elemType))
+                {
+                    EmitPrimitiveArrayLower(sb, elemType,
+                        innerBase, valueExpr);
+                }
+                else
+                {
+                    EmitListLower(sb, elemType,
+                        innerBase, valueExpr, depth + 1);
+                }
+                sb.Append("                global::Wacs" +
+                    ".ComponentModel.Harness.MemoryHelpers" +
+                    ".WriteI32LE(_memory!, ");
+                sb.Append(offsetExpr);
+                sb.Append(", ");
+                sb.Append(innerBase);
+                sb.AppendLine("_ptr);");
+                sb.Append("                global::Wacs" +
+                    ".ComponentModel.Harness.MemoryHelpers" +
+                    ".WriteI32LE(_memory!, ");
+                sb.Append(offsetExpr);
+                sb.Append(" + 4, ");
+                sb.Append(innerBase);
+                sb.AppendLine("_len);");
                 return;
             }
             if (TryLookupRecord(elemType, out var rec))
             {
                 foreach (var f in rec.Fields)
                 {
-                    if (IsString(f.Type))
+                    if (IsPtrLenAggregate(f.Type))
                     {
-                        // Lower the string body, then write
-                        // the (ptr, len) pair at the field's
-                        // canon-ABI offset within the
-                        // element. Locals are field-name
-                        // suffixed so multiple string fields
+                        // Lower the field body (string body,
+                        // byte[] body, primitive-array body)
+                        // and write the (ptr, len) pair at
+                        // the field's canon-ABI offset within
+                        // the element. Locals are field-name
+                        // suffixed so multiple ptr/len fields
                         // don't collide in the for-body.
                         string ptrLoc = "__f_" + f.Name
                             + "_ptr";
                         string lenLoc = "__f_" + f.Name
                             + "_len";
-                        sb.Append("                global::Wacs" +
-                            ".ComponentModel.Harness" +
-                            ".StringCoding.LowerUtf8(_memory!, ");
-                        sb.Append(valueExpr);
-                        sb.Append('.');
-                        sb.Append(f.Name);
-                        sb.Append(", _reallocInvoke!, out int ");
+                        sb.Append("                int ");
                         sb.Append(ptrLoc);
-                        sb.Append(", out int ");
+                        sb.AppendLine(" = 0;");
+                        sb.Append("                int ");
                         sb.Append(lenLoc);
-                        sb.AppendLine(");");
+                        sb.AppendLine(" = 0;");
+                        EmitPtrLenAssignInto(sb, f.Type,
+                            valueExpr + "." + f.Name,
+                            ptrLoc, lenLoc,
+                            "                ");
                         sb.Append("                global::Wacs" +
                             ".ComponentModel.Harness" +
                             ".MemoryHelpers.WriteI32LE(_memory!, ");
@@ -3213,30 +3288,49 @@ namespace Wacs.ComponentModel.Async.SourceGen
         private static void EmitListLiftStatements(
             StringBuilder sb, string listType,
             string resultLocal,
-            string ptrLocal, string lenLocal)
+            string ptrLocal, string lenLocal,
+            int depth = 0)
         {
             string elem = ArrayElementType(listType);
             int elemSize = FieldSize(elem);
+            string iVar = depth == 0
+                ? "__i" : "__i" + depth;
+            string offVar = depth == 0
+                ? "__elemOff" : "__elemOff" + depth;
+            // C# jagged-array allocation: `new T[size]` for
+            // T with no further []s, `new Base[size][]...[]`
+            // when T itself is an array type. Use the helper
+            // so list-of-list lifts emit valid syntax.
             sb.Append("            ");
             sb.Append(elem);
             sb.Append("[] ");
             sb.Append(resultLocal);
-            sb.Append(" = new ");
-            sb.Append(elem);
-            sb.Append('[');
+            sb.Append(" = ");
+            sb.Append(JaggedArrayAllocExpression(elem,
+                lenLocal));
+            sb.AppendLine(";");
+            sb.Append("            for (int ");
+            sb.Append(iVar);
+            sb.Append(" = 0; ");
+            sb.Append(iVar);
+            sb.Append(" < ");
             sb.Append(lenLocal);
-            sb.AppendLine("];");
-            sb.Append("            for (int __i = 0; __i < ");
-            sb.Append(lenLocal);
-            sb.AppendLine("; __i++)");
+            sb.Append("; ");
+            sb.Append(iVar);
+            sb.AppendLine("++)");
             sb.AppendLine("            {");
-            sb.Append("                int __elemOff = ");
+            sb.Append("                int ");
+            sb.Append(offVar);
+            sb.Append(" = ");
             sb.Append(ptrLocal);
-            sb.Append(" + __i * ");
+            sb.Append(" + ");
+            sb.Append(iVar);
+            sb.Append(" * ");
             sb.Append(elemSize);
             sb.AppendLine(";");
             EmitListElementLift(sb, elem,
-                resultLocal + "[__i]", "__elemOff");
+                resultLocal + "[" + iVar + "]",
+                offVar, depth);
             sb.AppendLine("            }");
         }
 
@@ -3248,35 +3342,72 @@ namespace Wacs.ComponentModel.Async.SourceGen
         //   initializer.
         private static void EmitListElementLift(
             StringBuilder sb, string elemType,
-            string targetExpr, string offsetExpr)
+            string targetExpr, string offsetExpr,
+            int depth = 0)
         {
             if (IsString(elemType))
             {
-                sb.Append("                int __elemPtr = " +
-                    "global::Wacs.ComponentModel.Harness" +
-                    ".MemoryHelpers.ReadI32LE(_memory!, ");
-                sb.Append(offsetExpr);
-                sb.AppendLine(");");
-                sb.Append("                int __elemLen = " +
-                    "global::Wacs.ComponentModel.Harness" +
-                    ".MemoryHelpers.ReadI32LE(_memory!, ");
-                sb.Append(offsetExpr);
-                sb.AppendLine(" + 4);");
+                // Use the inline ReadI32LE form so we don't
+                // need to declare locals — the assignment
+                // happens in one statement.
                 sb.Append("                ");
                 sb.Append(targetExpr);
-                sb.AppendLine(" = global::Wacs.ComponentModel" +
-                    ".Harness.StringCoding.LiftUtf8(_memory!, " +
-                    "__elemPtr, __elemLen);");
+                sb.Append(" = ");
+                sb.Append(PtrLenLiftExpressionAtOffset(
+                    elemType, offsetExpr));
+                sb.AppendLine(";");
+                return;
+            }
+            // Primitive-array / nested-list element: read
+            // inner (ptr, len), then lift via the matching
+            // primitive-array helper or recursive list-lift.
+            if (IsPtrLenAggregate(elemType))
+            {
+                // byte[] / int[] / etc — single-expression lift.
+                sb.Append("                ");
+                sb.Append(targetExpr);
+                sb.Append(" = ");
+                sb.Append(PtrLenLiftExpressionAtOffset(
+                    elemType, offsetExpr));
+                sb.AppendLine(";");
+                return;
+            }
+            if (IsListType(elemType))
+            {
+                string innerLocal = "__inner" + (depth + 1);
+                sb.Append("                int ");
+                sb.Append(innerLocal);
+                sb.Append("_ptr = global::Wacs.ComponentModel" +
+                    ".Harness.MemoryHelpers.ReadI32LE(_memory!, ");
+                sb.Append(offsetExpr);
+                sb.AppendLine(");");
+                sb.Append("                int ");
+                sb.Append(innerLocal);
+                sb.Append("_len = global::Wacs.ComponentModel" +
+                    ".Harness.MemoryHelpers.ReadI32LE(_memory!, ");
+                sb.Append(offsetExpr);
+                sb.AppendLine(" + 4);");
+                EmitListLiftStatements(sb, elemType,
+                    innerLocal,
+                    innerLocal + "_ptr",
+                    innerLocal + "_len",
+                    depth + 1);
+                sb.Append("                ");
+                sb.Append(targetExpr);
+                sb.Append(" = ");
+                sb.Append(innerLocal);
+                sb.AppendLine(";");
                 return;
             }
             if (TryLookupRecord(elemType, out var rec))
             {
-                // For string fields, the property-initializer
-                // expression has to read (ptr, len) and
-                // decode. C# allows nested method calls in an
-                // initializer, so we inline the two
-                // ReadI32LE + LiftUtf8 calls without binding
-                // intermediates.
+                // Property-initializer with one expression
+                // per field. Primitive fields use the inline
+                // read; ptr/len-aggregate fields (string /
+                // byte[] / primitive arrays) use the shared
+                // `PtrLenLiftExpressionAtOffset` so the
+                // record construction stays a single
+                // expression.
                 sb.Append("                ");
                 sb.Append(targetExpr);
                 sb.Append(" = new ");
@@ -3288,24 +3419,13 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     if (!first) sb.Append(", ");
                     sb.Append(f.Name);
                     sb.Append(" = ");
-                    if (IsString(f.Type))
+                    if (IsPtrLenAggregate(f.Type))
                     {
-                        sb.Append("global::Wacs" +
-                            ".ComponentModel.Harness" +
-                            ".StringCoding.LiftUtf8(_memory!, " +
-                            "global::Wacs.ComponentModel" +
-                            ".Harness.MemoryHelpers" +
-                            ".ReadI32LE(_memory!, ");
-                        sb.Append(offsetExpr);
-                        sb.Append(" + ");
-                        sb.Append(f.Offset);
-                        sb.Append("), global::Wacs.ComponentModel" +
-                            ".Harness.MemoryHelpers" +
-                            ".ReadI32LE(_memory!, ");
-                        sb.Append(offsetExpr);
-                        sb.Append(" + ");
-                        sb.Append(f.Offset + 4);
-                        sb.Append("))");
+                        sb.Append(
+                            PtrLenLiftExpressionAtOffset(
+                                f.Type,
+                                offsetExpr + " + "
+                                    + f.Offset));
                     }
                     else
                     {
@@ -3317,6 +3437,56 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 }
                 sb.AppendLine(" };");
             }
+        }
+
+        // C# jagged-array allocation for an outer array of
+        // `elemType[size]`. If elemType has no [] suffix, the
+        // result is `new <elemType>[size]`. For nested array
+        // element types (e.g., `string[]`), C# requires the
+        // size in the outer pair and the inner brackets to
+        // trail: `new string[size][]`. Recurses through any
+        // depth of jagging.
+        private static string JaggedArrayAllocExpression(
+            string elemType, string sizeExpr)
+        {
+            int innerDims = 0;
+            string baseT = elemType;
+            while (baseT.EndsWith("[]",
+                StringComparison.Ordinal))
+            {
+                innerDims++;
+                baseT = baseT.Substring(0,
+                    baseT.Length - 2);
+            }
+            var s = new StringBuilder();
+            s.Append("new ");
+            s.Append(baseT);
+            s.Append('[');
+            s.Append(sizeExpr);
+            s.Append(']');
+            for (int i = 0; i < innerDims; i++)
+                s.Append("[]");
+            return s.ToString();
+        }
+
+        // PtrLenLiftExpression variant that reads the
+        // (ptr, len) inline at `offsetExpr` / `offsetExpr + 4`
+        // rather than from named locals. Used inside property-
+        // initializers where binding intermediate locals would
+        // require an outer block.
+        private static string PtrLenLiftExpressionAtOffset(
+            string type, string offsetExpr)
+        {
+            string ptrExpr =
+                "global::Wacs.ComponentModel.Harness" +
+                ".MemoryHelpers.ReadI32LE(_memory!, "
+                + offsetExpr + ")";
+            string lenExpr =
+                "global::Wacs.ComponentModel.Harness" +
+                ".MemoryHelpers.ReadI32LE(_memory!, "
+                + offsetExpr + " + 4)";
+            return PtrLenLiftExpression(type,
+                ptrExpr, lenExpr);
         }
 
         // C# expression that lifts a string / primitive

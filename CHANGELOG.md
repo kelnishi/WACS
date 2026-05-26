@@ -1,5 +1,52 @@
 # Changelog
 
+## WACS.ComponentModel.Async.SourceGen 0.4.15 — list<record> with byte[]/primitive-array fields + list<list<X>>
+
+Two related extensions to the list-shape codegen from
+0.4.13–0.4.14:
+
+1. **list<record> with any ptr/len-aggregate field.**
+   `IsRecordSupportedAsListElement` widened to allow
+   primitive + any ptr/len aggregate (string, byte[],
+   primitive arrays). `EmitListElementLower` record branch
+   replaced the inline string-field code with a call to
+   `EmitPtrLenAssignInto` (the same helper used by top-
+   level ptr/len param lower), making `Document {
+   string Title; byte[] Body; int Version; }` etc. work.
+   `EmitListElementLift` record branch uses a new
+   `PtrLenLiftExpressionAtOffset` helper so the
+   property-initializer body lifts string / byte[] /
+   primitive-array fields inline.
+
+2. **list<list<X>>.** `IsListType` accepts list-typed
+   elements (recursively) and primitive-array elements
+   (`int[][]`, `byte[][]`, etc.). `EmitListLower`,
+   `EmitListLiftStatements`, `EmitListElementLower`, and
+   `EmitListElementLift` gained a `depth` parameter so
+   nested invocations emit unique loop variables
+   (`__i`, `__i1`, `__i2`, …) and element-offset locals
+   (`__elemOff`, `__elemOff1`, …) — C# rejects shadowed
+   `for (int __i...)` declarations across nested loops.
+   New `JaggedArrayAllocExpression` helper emits valid
+   C# jagged-array allocation (`new string[size][]` not
+   `new string[][size]`) for list-of-list lift.
+
+* Test extensions to
+  `Generator_emits_list_shape_export_signatures`:
+  `SendDocuments(Document[])` / `GetDocuments(int)`
+  pin the byte[]-bearing record list shape;
+  `SendBuckets(string[][])` / `GetBuckets(int)` /
+  `SendIntLists(int[][])` pin the list-of-list /
+  list-of-primitive-array shapes. 21/21 generator
+  integration tests, 660/660 across
+  Wacs.ComponentModel.Test. Hello-spike passes
+  unchanged.
+
+**Still punted:** lists of records with option/result/
+nested-record/nested-list fields; option<list<...>>;
+result<list<...>, ...>; mixed primitive vs ptr/len
+result arms; cyclic record refs.
+
 ## WACS.ComponentModel.Async.SourceGen 0.4.14 — list<record> with string fields
 
 Records carrying `string` fields are now valid elements of
