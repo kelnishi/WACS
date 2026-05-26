@@ -308,9 +308,10 @@ namespace Wacs.ComponentModel.Async.SourceGen
 
         // Canon-ABI list<T> where T's lift is multi-statement
         // — list<string> (`string[]`) and list<record>
-        // (`R[]` for a primitive-only [WitRecord] R).
-        // Same flat (ptr, len) handle as IsPtrLenAggregate
-        // shapes; codegen branches on the element type.
+        // (`R[]` for a [WitRecord] R whose every field is
+        // primitive or string). Same flat (ptr, len) handle
+        // as IsPtrLenAggregate shapes; codegen branches on
+        // the element type and per-field.
         private static bool IsListType(string fqType)
         {
             if (!fqType.EndsWith("[]",
@@ -320,19 +321,21 @@ namespace Wacs.ComponentModel.Async.SourceGen
             string elem = ArrayElementType(fqType);
             if (IsString(elem)) return true;
             if (TryLookupRecord(elem, out var rec))
-                return IsRecordOfPrimitives(rec);
+                return IsRecordSupportedAsListElement(rec);
             return false;
         }
 
-        // True iff every field of `rec` is a canon-ABI
-        // primitive. Limits list<record> support to the
-        // simplest record shape; lists of records carrying
-        // strings / nested aggregates land later.
-        private static bool IsRecordOfPrimitives(
+        // True iff every field of `rec` is canon-ABI
+        // primitive or string. Restricts list<record> to
+        // shapes the lower/lift loops can write/read inline
+        // per field. Records carrying byte[] / options /
+        // results / nested records land later.
+        private static bool IsRecordSupportedAsListElement(
             RecordLayout rec)
         {
             foreach (var f in rec.Fields)
-                if (!IsPrimitive(f.Type)) return false;
+                if (!IsPrimitive(f.Type)
+                    && !IsString(f.Type)) return false;
             return true;
         }
 
@@ -3148,11 +3151,56 @@ namespace Wacs.ComponentModel.Async.SourceGen
             {
                 foreach (var f in rec.Fields)
                 {
-                    EmitWriteMemoryStatement(sb, f.Type,
-                        "_memory!",
-                        offsetExpr + " + " + f.Offset,
-                        valueExpr + "." + f.Name,
-                        "                ");
+                    if (IsString(f.Type))
+                    {
+                        // Lower the string body, then write
+                        // the (ptr, len) pair at the field's
+                        // canon-ABI offset within the
+                        // element. Locals are field-name
+                        // suffixed so multiple string fields
+                        // don't collide in the for-body.
+                        string ptrLoc = "__f_" + f.Name
+                            + "_ptr";
+                        string lenLoc = "__f_" + f.Name
+                            + "_len";
+                        sb.Append("                global::Wacs" +
+                            ".ComponentModel.Harness" +
+                            ".StringCoding.LowerUtf8(_memory!, ");
+                        sb.Append(valueExpr);
+                        sb.Append('.');
+                        sb.Append(f.Name);
+                        sb.Append(", _reallocInvoke!, out int ");
+                        sb.Append(ptrLoc);
+                        sb.Append(", out int ");
+                        sb.Append(lenLoc);
+                        sb.AppendLine(");");
+                        sb.Append("                global::Wacs" +
+                            ".ComponentModel.Harness" +
+                            ".MemoryHelpers.WriteI32LE(_memory!, ");
+                        sb.Append(offsetExpr);
+                        sb.Append(" + ");
+                        sb.Append(f.Offset);
+                        sb.Append(", ");
+                        sb.Append(ptrLoc);
+                        sb.AppendLine(");");
+                        sb.Append("                global::Wacs" +
+                            ".ComponentModel.Harness" +
+                            ".MemoryHelpers.WriteI32LE(_memory!, ");
+                        sb.Append(offsetExpr);
+                        sb.Append(" + ");
+                        sb.Append(f.Offset + 4);
+                        sb.Append(", ");
+                        sb.Append(lenLoc);
+                        sb.AppendLine(");");
+                    }
+                    else
+                    {
+                        EmitWriteMemoryStatement(sb, f.Type,
+                            "_memory!",
+                            offsetExpr + " + " + f.Offset,
+                            valueExpr + "." + f.Name,
+                            "                ");
+                    }
                 }
             }
         }
@@ -3223,6 +3271,12 @@ namespace Wacs.ComponentModel.Async.SourceGen
             }
             if (TryLookupRecord(elemType, out var rec))
             {
+                // For string fields, the property-initializer
+                // expression has to read (ptr, len) and
+                // decode. C# allows nested method calls in an
+                // initializer, so we inline the two
+                // ReadI32LE + LiftUtf8 calls without binding
+                // intermediates.
                 sb.Append("                ");
                 sb.Append(targetExpr);
                 sb.Append(" = new ");
@@ -3234,9 +3288,31 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     if (!first) sb.Append(", ");
                     sb.Append(f.Name);
                     sb.Append(" = ");
-                    sb.Append(ReadMemoryExprForType(f.Type,
-                        "_memory!",
-                        offsetExpr + " + " + f.Offset));
+                    if (IsString(f.Type))
+                    {
+                        sb.Append("global::Wacs" +
+                            ".ComponentModel.Harness" +
+                            ".StringCoding.LiftUtf8(_memory!, " +
+                            "global::Wacs.ComponentModel" +
+                            ".Harness.MemoryHelpers" +
+                            ".ReadI32LE(_memory!, ");
+                        sb.Append(offsetExpr);
+                        sb.Append(" + ");
+                        sb.Append(f.Offset);
+                        sb.Append("), global::Wacs.ComponentModel" +
+                            ".Harness.MemoryHelpers" +
+                            ".ReadI32LE(_memory!, ");
+                        sb.Append(offsetExpr);
+                        sb.Append(" + ");
+                        sb.Append(f.Offset + 4);
+                        sb.Append("))");
+                    }
+                    else
+                    {
+                        sb.Append(ReadMemoryExprForType(f.Type,
+                            "_memory!",
+                            offsetExpr + " + " + f.Offset));
+                    }
                     first = false;
                 }
                 sb.AppendLine(" };");

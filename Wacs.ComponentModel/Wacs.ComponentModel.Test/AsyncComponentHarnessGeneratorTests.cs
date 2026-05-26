@@ -255,6 +255,12 @@ namespace Wacs.ComponentModel.Test
 
         [SyncExport("get_points")]
         internal partial Point[] GetPoints(int count);
+
+        [SyncExport("send_people")]
+        internal partial int SendPeople(Person[] people);
+
+        [SyncExport("get_people")]
+        internal partial Person[] GetPeople(int count);
     }
 
     /// <summary>Primitive arrays beyond byte[] — canon-ABI
@@ -945,6 +951,49 @@ namespace Wacs.ComponentModel.Test
                     | BindingFlags.Instance));
             Assert.NotNull(typeof(ListShapeHarnessFixture)
                 .GetField("_post_GetPoints",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+
+            // int SendPeople(Person[] people)
+            // Person { string Name; int Age; } — list<record>
+            // where the record carries a string field. Same
+            // flat shape; the per-element record write loops
+            // through fields, LowerUtf8-ing the string and
+            // WriteI32LE-ing the int.
+            var sPe = typeof(ListShapeHarnessFixture)
+                .GetMethod("SendPeople",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(sPe);
+            Assert.Equal(typeof(Person[]),
+                sPe!.GetParameters()[0].ParameterType);
+            Assert.Equal(typeof(int), sPe.ReturnType);
+            var sPeInv = typeof(ListShapeHarnessFixture)
+                .GetField("_invoker_SendPeople",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(sPeInv);
+            Assert.Equal(typeof(Func<int, int, int>),
+                sPeInv!.FieldType);
+
+            // Person[] GetPeople(int) — flat Func<int, int>.
+            // cabi_post needed since the lifted records carry
+            // heap-allocated string bodies.
+            var gPe = typeof(ListShapeHarnessFixture)
+                .GetMethod("GetPeople",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(gPe);
+            Assert.Equal(typeof(Person[]), gPe!.ReturnType);
+            var gPeInv = typeof(ListShapeHarnessFixture)
+                .GetField("_invoker_GetPeople",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(gPeInv);
+            Assert.Equal(typeof(Func<int, int>),
+                gPeInv!.FieldType);
+            Assert.NotNull(typeof(ListShapeHarnessFixture)
+                .GetField("_post_GetPeople",
                     BindingFlags.NonPublic
                     | BindingFlags.Instance));
         }

@@ -1,5 +1,49 @@
 # Changelog
 
+## WACS.ComponentModel.Async.SourceGen 0.4.14 — list<record> with string fields
+
+Records carrying `string` fields are now valid elements of
+`list<record>`. The per-element record write/read loop
+runs `StringCoding.LowerUtf8` / `LiftUtf8` for each
+string field at its canon-ABI offset within the element,
+alongside the existing `WriteI32LE` / `ReadMemoryExprForType`
+path for primitive fields.
+
+* **Acceptance gate.** `IsRecordOfPrimitives` renamed +
+  loosened to `IsRecordSupportedAsListElement` — accepts
+  fields that are primitive or string. Records with
+  byte[] / nested aggregates / nested records as list
+  elements still land later.
+* **Element lower.** `EmitListElementLower` record branch
+  walks fields and dispatches per field type:
+  - string field: `StringCoding.LowerUtf8` into
+    field-name-suffixed (ptr, len) locals (so multiple
+    string fields don't collide in the same loop-body
+    scope), then two `WriteI32LE` at the field's offset.
+  - primitive field: existing `EmitWriteMemoryStatement`.
+* **Element lift.** `EmitListElementLift` record branch
+  emits a property-initializer with inline nested
+  `StringCoding.LiftUtf8(_memory!, ReadI32LE(...),
+  ReadI32LE(... + 4))` for string fields and the existing
+  `ReadMemoryExprForType` for primitives. No intermediate
+  locals — C# allows nested method calls inside the
+  initializer body.
+* Test extension:
+  `Generator_emits_list_shape_export_signatures` picks up
+  two more cases — `int SendPeople(Person[])` and
+  `Person[] GetPeople(int)` where `Person { string Name;
+  int Age; }`. Both flat shapes assert as `Func<int, int,
+  int>` / `Func<int, int>` with `_post_GetPeople` for the
+  string-bearing return. 21/21 generator integration
+  tests, 660/660 across Wacs.ComponentModel.Test.
+  Hello-spike passes unchanged.
+
+**Still punted:** lists of records with `byte[]` / option
+/ result / nested-record fields; `list<list<X>>` for
+arbitrary X; mixed primitive vs ptr/len result arms;
+option<list<...>> / result<list<...>, ...>; cyclic
+record refs.
+
 ## WACS.ComponentModel.Async.SourceGen 0.4.13 — list<string> and list<record>
 
 Canon-ABI `list<string>` (`string[]`) and `list<record>`
