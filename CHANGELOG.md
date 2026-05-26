@@ -1,5 +1,34 @@
 # Changelog
 
+## WACS.ComponentModel.Async.SourceGen 0.4.18 — list<record> with option<primitive> fields
+
+`IsRecordSupportedAsListElement` widened to also accept
+`int?`, `bool?`, `long?` etc. fields. Per-element lower
+writes the disc:u8 + payload at the field's canon-ABI
+offsets; lift uses an inline `(ReadU8(...) == 0 ?
+(T?)null : ReadX(...))` ternary in the
+property-initializer.
+
+* As a bonus from 0.4.16's `IsPtrLenAggregate` widening,
+  `Document { string Title; byte[] Body; int Version; }`
+  and any record carrying a simple-list field now also
+  serializes through the existing ptr/len-field branch
+  of `EmitListElementLower` / `EmitListElementLift`.
+* Test extensions:
+  `Generator_emits_list_shape_export_signatures` picks
+  up `SendEntries(Entry[])` / `GetEntries(int)` for
+  `Entry { int Id; int? Expires; }`. 21/21 generator
+  integration tests, 660/660 across
+  Wacs.ComponentModel.Test. Hello-spike passes
+  unchanged.
+
+**Still punted:** lists of records with option<ptr/len>
+/ result / nested-record / nested-list fields; deeper-
+nested list shapes in option/result arms
+(`option<string[][]>`); wider-primitive mixed result
+arms (`result<long, string>`); cyclic record refs
+(canon-ABI prohibits, correctly rejected).
+
 ## WACS.ComponentModel.Async.SourceGen 0.4.17 — mixed primitive ↔ ptr/len result arms
 
 `result<int, string>`, `result<byte[], int>`,

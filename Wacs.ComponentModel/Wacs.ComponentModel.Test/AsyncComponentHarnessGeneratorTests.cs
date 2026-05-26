@@ -252,6 +252,16 @@ namespace Wacs.ComponentModel.Test
         public int Version;
     }
 
+    /// <summary>Record carrying an option&lt;primitive&gt;
+    /// field — exercises the option-field branch of
+    /// list&lt;record&gt; lower / lift.</summary>
+    [WitRecord]
+    internal struct Entry
+    {
+        public int Id;
+        public int? Expires;
+    }
+
     [AsyncComponentHarness]
     internal partial class ListShapeHarnessFixture
     {
@@ -290,6 +300,12 @@ namespace Wacs.ComponentModel.Test
 
         [SyncExport("send_int_lists")]
         internal partial int SendIntLists(int[][] xss);
+
+        [SyncExport("send_entries")]
+        internal partial int SendEntries(Entry[] entries);
+
+        [SyncExport("get_entries")]
+        internal partial Entry[] GetEntries(int n);
     }
 
     /// <summary>Primitive arrays beyond byte[] — canon-ABI
@@ -1164,6 +1180,34 @@ namespace Wacs.ComponentModel.Test
             Assert.NotNull(sILInv);
             Assert.Equal(typeof(Func<int, int, int>),
                 sILInv!.FieldType);
+
+            // int SendEntries(Entry[]) — Entry has an
+            // option<int> field. Per-element lower writes
+            // disc:u8 + payload:int32 at the field offset.
+            var sEn = typeof(ListShapeHarnessFixture)
+                .GetMethod("SendEntries",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(sEn);
+            Assert.Equal(typeof(Entry[]),
+                sEn!.GetParameters()[0].ParameterType);
+            var sEnInv = typeof(ListShapeHarnessFixture)
+                .GetField("_invoker_SendEntries",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(sEnInv);
+            Assert.Equal(typeof(Func<int, int, int>),
+                sEnInv!.FieldType);
+
+            // Entry[] GetEntries(int) — lift reads each
+            // element's option<int> via inline (disc != 0
+            // ? payload : null) expression.
+            var gEn = typeof(ListShapeHarnessFixture)
+                .GetMethod("GetEntries",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(gEn);
+            Assert.Equal(typeof(Entry[]), gEn!.ReturnType);
         }
 
         [Fact]

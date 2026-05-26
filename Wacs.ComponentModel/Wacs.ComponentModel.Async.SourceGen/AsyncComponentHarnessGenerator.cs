@@ -349,21 +349,23 @@ namespace Wacs.ComponentModel.Async.SourceGen
         }
 
         // True iff every field of `rec` is canon-ABI
-        // primitive or a ptr/len aggregate (string,
-        // byte[], or any primitive array). Restricts
-        // list<record> to shapes whose per-element lower /
-        // lift loop can dispatch on each field via the
-        // existing `EmitPtrLenAssignInto` +
-        // `PtrLenLiftExpression` helpers. Records carrying
-        // options / results / nested records / nested lists
-        // as list-element fields land later.
+        // primitive, ptr/len aggregate (string / byte[] /
+        // primitive array / simple list — via the widened
+        // `IsPtrLenAggregate`), or
+        // option-of-primitive. Other shapes (option of
+        // ptr/len, result, nested records, nested lists)
+        // would need more codegen at the per-element write
+        // / read sites — punted.
         private static bool IsRecordSupportedAsListElement(
             RecordLayout rec)
         {
             foreach (var f in rec.Fields)
-                if (!IsPrimitive(f.Type)
-                    && !IsPtrLenAggregate(f.Type))
-                    return false;
+            {
+                if (IsPrimitive(f.Type)) continue;
+                if (IsPtrLenAggregate(f.Type)) continue;
+                if (IsNullablePrimitive(f.Type)) continue;
+                return false;
+            }
             return true;
         }
 
@@ -3379,6 +3381,33 @@ namespace Wacs.ComponentModel.Async.SourceGen
                         sb.Append(lenLoc);
                         sb.AppendLine(");");
                     }
+                    else if (IsNullablePrimitive(f.Type))
+                    {
+                        // option<primitive> field: disc:u8 at
+                        // f.Offset, payload at f.Offset +
+                        // NullablePayloadOffset(inner).
+                        string innerT = InnerOfNullable(f.Type);
+                        int payOff = NullablePayloadOffset(
+                            innerT);
+                        sb.Append("                global::Wacs" +
+                            ".ComponentModel.Harness" +
+                            ".MemoryHelpers.WriteU8(_memory!, ");
+                        sb.Append(offsetExpr);
+                        sb.Append(" + ");
+                        sb.Append(f.Offset);
+                        sb.Append(", (byte)(");
+                        sb.Append(valueExpr);
+                        sb.Append('.');
+                        sb.Append(f.Name);
+                        sb.AppendLine(".HasValue ? 1 : 0));");
+                        EmitWriteMemoryStatement(sb, innerT,
+                            "_memory!",
+                            offsetExpr + " + "
+                                + (f.Offset + payOff),
+                            valueExpr + "." + f.Name
+                                + ".GetValueOrDefault()",
+                            "                ");
+                    }
                     else
                     {
                         EmitWriteMemoryStatement(sb, f.Type,
@@ -3537,6 +3566,29 @@ namespace Wacs.ComponentModel.Async.SourceGen
                                 f.Type,
                                 offsetExpr + " + "
                                     + f.Offset));
+                    }
+                    else if (IsNullablePrimitive(f.Type))
+                    {
+                        // option<primitive> inline lift:
+                        // (disc != 0 ? payload : null).
+                        string innerT = InnerOfNullable(
+                            f.Type);
+                        int payOff = NullablePayloadOffset(
+                            innerT);
+                        sb.Append("(global::Wacs" +
+                            ".ComponentModel.Harness" +
+                            ".MemoryHelpers.ReadU8(_memory!, ");
+                        sb.Append(offsetExpr);
+                        sb.Append(" + ");
+                        sb.Append(f.Offset);
+                        sb.Append(") == 0 ? (");
+                        sb.Append(f.Type);
+                        sb.Append(")null : ");
+                        sb.Append(ReadMemoryExprForType(innerT,
+                            "_memory!",
+                            offsetExpr + " + "
+                                + (f.Offset + payOff)));
+                        sb.Append(")");
                     }
                     else
                     {
