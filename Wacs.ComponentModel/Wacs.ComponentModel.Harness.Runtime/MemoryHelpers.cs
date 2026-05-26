@@ -143,5 +143,58 @@ namespace Wacs.ComponentModel.Harness
                     len * elementSize);
             return arr;
         }
+
+        /// <summary>Lift a canon-ABI list&lt;string&gt; from
+        /// a (ptr, len) pair into a fresh <c>string[]</c>.
+        /// Each element occupies 8 bytes in the outer array
+        /// (the (ptr, len) pair for its UTF-8 body). Used by
+        /// the sourcegen as a single-expression lift when a
+        /// `string[]` shows up in an option / result arm.
+        /// </summary>
+        public static string[] LiftStringList(
+            MemoryInstance memory, int ptr, int len)
+        {
+            var arr = new string[len];
+            for (int i = 0; i < len; i++)
+            {
+                int elemPtr = ReadI32LE(memory,
+                    ptr + i * 8);
+                int elemLen = ReadI32LE(memory,
+                    ptr + i * 8 + 4);
+                arr[i] = StringCoding.LiftUtf8(memory,
+                    elemPtr, elemLen);
+            }
+            return arr;
+        }
+
+        /// <summary>Lift a canon-ABI list&lt;list&lt;T&gt;&gt;
+        /// (jagged primitive array) from a (ptr, len) pair
+        /// into a fresh <c>T[][]</c>. Outer (ptr, len)
+        /// addresses a contiguous array of inner (ptr, len)
+        /// pairs (8 bytes each); each inner pair addresses a
+        /// flat block of N * elementSize bytes.
+        /// <para><paramref name="innerElementSize"/> is the
+        /// byte width of T (the innermost primitive). Used as
+        /// a single-expression lift for `T[][]` in option /
+        /// result arm contexts.</para></summary>
+        public static T[][] LiftPrimitiveArrayList<T>(
+            MemoryInstance memory, int ptr, int len,
+            int innerElementSize)
+        {
+            var outer = new T[len][];
+            for (int i = 0; i < len; i++)
+            {
+                int innerPtr = ReadI32LE(memory,
+                    ptr + i * 8);
+                int innerLen = ReadI32LE(memory,
+                    ptr + i * 8 + 4);
+                outer[i] = new T[innerLen];
+                if (innerLen > 0)
+                    System.Buffer.BlockCopy(memory.Data,
+                        innerPtr, outer[i], 0,
+                        innerLen * innerElementSize);
+            }
+            return outer;
+        }
     }
 }

@@ -330,6 +330,17 @@ namespace Wacs.ComponentModel.Test
 
         [SyncExport("maybe_bytes")]
         internal partial byte[]? MaybeBytes(byte[]? input);
+
+        // option<list<X>> for X ∈ {string, primitive array}.
+        // Inner lift uses MemoryHelpers.LiftStringList /
+        // LiftPrimitiveArrayList<T>; lower routes through
+        // EmitPtrLenAssignInto's list branch.
+        [SyncExport("maybe_names")]
+        internal partial string[]? MaybeNames(
+            string[]? input);
+
+        [SyncExport("maybe_ints")]
+        internal partial int[][]? MaybeInts(int[][]? xs);
     }
 
     /// <summary>Result types whose arms are ptr/len
@@ -358,6 +369,18 @@ namespace Wacs.ComponentModel.Test
         [SyncExport("blob_or_text")]
         internal partial WitResult<string, byte[]>
             BlobOrText(int kind);
+
+        // result<list<X>, ...> arms — same flat (ptr, len)
+        // shape; per-arm lift/lower routes through
+        // PtrLenLiftExpression + EmitPtrLenAssignInto which
+        // now branch on IsListType.
+        [SyncExport("first_names")]
+        internal partial WitResult<string[], System.ValueTuple>
+            FirstNames(int seed);
+
+        [SyncExport("matrix")]
+        internal partial WitResult<int[][], System.ValueTuple>
+            Matrix(int seed);
     }
 
     /// <summary>Sync exports with <c>WitResult&lt;TOk,
@@ -1296,6 +1319,39 @@ namespace Wacs.ComponentModel.Test
                 .GetField("_post_MaybeBytes",
                     BindingFlags.NonPublic
                     | BindingFlags.Instance));
+
+            // string[]? MaybeNames(string[]?) — option<list>.
+            // Same flat shape as option<string>: (disc, ptr,
+            // len) param + retArea return. Func<int, int,
+            // int, int>.
+            var mn = typeof(OptionPtrLenHarnessFixture)
+                .GetMethod("MaybeNames",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(mn);
+            Assert.Equal(typeof(string[]), mn!.ReturnType);
+            var mnInv = typeof(OptionPtrLenHarnessFixture)
+                .GetField("_invoker_MaybeNames",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(mnInv);
+            Assert.Equal(typeof(Func<int, int, int, int>),
+                mnInv!.FieldType);
+
+            // int[][]? MaybeInts(int[][]?) — option<list<list>>.
+            var mi = typeof(OptionPtrLenHarnessFixture)
+                .GetMethod("MaybeInts",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(mi);
+            Assert.Equal(typeof(int[][]), mi!.ReturnType);
+            var miInv = typeof(OptionPtrLenHarnessFixture)
+                .GetField("_invoker_MaybeInts",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(miInv);
+            Assert.Equal(typeof(Func<int, int, int, int>),
+                miInv!.FieldType);
         }
 
         [Fact]
@@ -1408,6 +1464,46 @@ namespace Wacs.ComponentModel.Test
                 .GetField("_post_BlobOrText",
                     BindingFlags.NonPublic
                     | BindingFlags.Instance));
+
+            // result<string[], ()> — list arm. Same flat
+            // (disc, ptr, len) shape as result<string, ()>.
+            // Func<int, int> (seed, retArea).
+            var fn = typeof(ResultPtrLenHarnessFixture)
+                .GetMethod("FirstNames",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(fn);
+            Assert.Equal(
+                typeof(WitResult<string[], ValueTuple>),
+                fn!.ReturnType);
+            var fnInv = typeof(ResultPtrLenHarnessFixture)
+                .GetField("_invoker_FirstNames",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(fnInv);
+            Assert.Equal(typeof(Func<int, int>),
+                fnInv!.FieldType);
+            Assert.NotNull(typeof(ResultPtrLenHarnessFixture)
+                .GetField("_post_FirstNames",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+
+            // result<int[][], ()> — nested-list arm.
+            var mx = typeof(ResultPtrLenHarnessFixture)
+                .GetMethod("Matrix",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(mx);
+            Assert.Equal(
+                typeof(WitResult<int[][], ValueTuple>),
+                mx!.ReturnType);
+            var mxInv = typeof(ResultPtrLenHarnessFixture)
+                .GetField("_invoker_Matrix",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(mxInv);
+            Assert.Equal(typeof(Func<int, int>),
+                mxInv!.FieldType);
         }
 
         [Fact]

@@ -291,20 +291,22 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 ? fqType.Substring(0, fqType.Length - 2)
                 : fqType;
 
-        // String + primitive arrays (list<T>) both flatten to
-        // (i32 ptr, i32 len) — same canon-ABI shape with
-        // different encodings. Treating them uniformly in the
-        // flat-signature computation simplifies the
-        // generic-args build.
+        // String + primitive arrays + simple lists all
+        // flatten to (i32 ptr, i32 len) and can ride a
+        // single-expression / single-helper lift path. Treat
+        // them uniformly in size / align / slot / flat-sig
+        // contexts. The lift / lower dispatch at codegen
+        // sites still branches on the specific element-type
+        // family (IsString, IsByteArray, IsPrimitiveArray,
+        // IsListType) to pick the right helper.
         //
-        // NOTE: Heterogeneous-element lists (list<string>,
-        // list<record>) are NOT in this predicate — those
-        // have the same flat shape but their lift is
-        // multi-statement (a per-element loop) so they can't
-        // ride the option / result single-expression arm lift
-        // paths. They go through `IsListType` instead.
+        // list<record> stays out of this predicate — its lift
+        // is per-record-type and can't be expressed as a
+        // single helper call.
         private static bool IsPtrLenAggregate(string fqType) =>
-            IsString(fqType) || IsPrimitiveArray(fqType);
+            IsString(fqType)
+            || IsPrimitiveArray(fqType)
+            || IsSimpleList(fqType);
 
         // Canon-ABI list<T> where T's lift is multi-statement
         // — list<string> (`string[]`) and list<record>
@@ -328,6 +330,22 @@ namespace Wacs.ComponentModel.Async.SourceGen
             if (TryLookupRecord(elem, out var rec))
                 return IsRecordSupportedAsListElement(rec);
             return false;
+        }
+
+        // A "simple list" is a list whose lift and lower can
+        // ride single-expression / single-helper paths —
+        // `string[]` and `T[][]` for primitive T. Excludes
+        // list<record> (each record needs per-field
+        // codegen) and deeper nestings (e.g.,
+        // list<list<list<X>>>) which would need their own
+        // helper. Used to gate list-shape acceptance in
+        // option / result arm contexts.
+        private static bool IsSimpleList(string fqType)
+        {
+            if (!IsListType(fqType)) return false;
+            string elem = ArrayElementType(fqType);
+            return IsString(elem)
+                || IsPrimitiveArray(elem);
         }
 
         // True iff every field of `rec` is canon-ABI
@@ -373,17 +391,20 @@ namespace Wacs.ComponentModel.Async.SourceGen
             NullablePrimitiveTypes.Contains(fqType);
 
         // option<T> where the inner T is a ptr/len aggregate
-        // (string or byte[]). Detection relies on the
-        // nullable-annotation `?` having been appended by
-        // TypeDisplayWithNullability during the parse pass —
-        // C#'s FullyQualifiedFormat does NOT include the `?`
-        // for reference-type nullables on its own.
+        // (string / byte[] / primitive array) or a simple
+        // list (`string[]`, `T[][]` for primitive T).
+        // Detection relies on the nullable-annotation `?`
+        // having been appended by TypeDisplayWithNullability
+        // during the parse pass — C#'s FullyQualifiedFormat
+        // does NOT include the `?` for reference-type
+        // nullables on its own.
         private static bool IsOptionRef(string fqType)
         {
             if (!fqType.EndsWith("?", StringComparison.Ordinal))
                 return false;
-            return IsPtrLenAggregate(
-                InnerOfNullable(fqType));
+            string inner = InnerOfNullable(fqType);
+            return IsPtrLenAggregate(inner)
+                || IsSimpleList(inner);
         }
 
         // Either flavor of canon-ABI option<T>:
@@ -494,6 +515,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
         private static bool IsResultArm(string fqType) =>
             IsPrimitive(fqType)
             || IsPtrLenAggregate(fqType)
+            || IsSimpleList(fqType)
             || fqType == ValueTupleType;
 
         private static bool IsSupportedResult(string fqType)
@@ -629,6 +651,17 @@ namespace Wacs.ComponentModel.Async.SourceGen
         private static System.Collections.Generic
             .IReadOnlyDictionary<string, RecordLayout>?
             _activeRecords;
+
+        // Counter for unique inner-list base names within a
+        // single emit pass. Per `EmitHarness` call we reset
+        // to 0; each EmitPtrLenAssignInto-of-list bump gives
+        // a fresh suffix so multiple lowerings in the same
+        // outer scope can't collide on the inner-list locals.
+        [System.ThreadStatic]
+        private static int _listInnerCounter;
+
+        private static int NextListInnerId()
+            => ++_listInnerCounter;
 
         private static bool TryLookupRecord(
             string fqType, out RecordLayout layout)
@@ -1214,6 +1247,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
         private static string EmitHarness(HarnessClass cls)
         {
             _activeRecords = cls.Records;
+            _listInnerCounter = 0;
             try
             {
                 return EmitHarnessInner(cls);
@@ -2971,6 +3005,31 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 sb.AppendLine(");");
                 return;
             }
+            // List type (string[] / T[][]): run the full list
+            // lower into a fresh `<inner>_ptr` / `<inner>_len`
+            // pair, then copy those values to the target
+            // locals. The counter-suffixed base ensures
+            // multiple list lowerings in the same outer
+            // scope don't collide on the inner-list locals
+            // (the for-loop vars themselves are block-scoped
+            // by C# so they stay safe).
+            if (IsListType(type))
+            {
+                int n = NextListInnerId();
+                string innerBase = "__listInner" + n;
+                EmitListLower(sb, type, innerBase, sourceExpr);
+                sb.Append(indent);
+                sb.Append(ptrLocal);
+                sb.Append(" = ");
+                sb.Append(innerBase);
+                sb.AppendLine("_ptr;");
+                sb.Append(indent);
+                sb.Append(lenLocal);
+                sb.Append(" = ");
+                sb.Append(innerBase);
+                sb.AppendLine("_len;");
+                return;
+            }
             // Primitive array: scale realloc size + BlockCopy
             // count by sizeof(element). For byte[] the scale
             // is 1 so the generated source matches the old
@@ -3507,13 +3566,42 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 return "global::Wacs.ComponentModel.Harness" +
                     ".MemoryHelpers.LiftBytes(_memory!, "
                     + ptrLocal + ", " + lenLocal + ")";
-            string elem = ArrayElementType(type);
-            int elemSize = PrimitiveSize(elem);
-            return "global::Wacs.ComponentModel.Harness" +
-                ".MemoryHelpers.LiftPrimitiveArray<"
-                + elem + ">(_memory!, "
-                + ptrLocal + ", " + lenLocal + ", "
-                + elemSize + ")";
+            if (IsPrimitiveArray(type))
+            {
+                string pElem = ArrayElementType(type);
+                int pSize = PrimitiveSize(pElem);
+                return "global::Wacs.ComponentModel.Harness" +
+                    ".MemoryHelpers.LiftPrimitiveArray<"
+                    + pElem + ">(_memory!, "
+                    + ptrLocal + ", " + lenLocal + ", "
+                    + pSize + ")";
+            }
+            // Simple list — string[] or T[][] for primitive
+            // T. Routes through the dedicated MemoryHelpers
+            // list helpers so the lift stays a single
+            // expression (used by option / result arm
+            // contexts and per-record-field list lifts).
+            if (IsListType(type))
+            {
+                string elem = ArrayElementType(type);
+                if (IsString(elem))
+                    return "global::Wacs.ComponentModel" +
+                        ".Harness.MemoryHelpers" +
+                        ".LiftStringList(_memory!, "
+                        + ptrLocal + ", " + lenLocal + ")";
+                if (IsPrimitiveArray(elem))
+                {
+                    string innerElem = ArrayElementType(elem);
+                    int innerSize = PrimitiveSize(innerElem);
+                    return "global::Wacs.ComponentModel" +
+                        ".Harness.MemoryHelpers" +
+                        ".LiftPrimitiveArrayList<"
+                        + innerElem + ">(_memory!, "
+                        + ptrLocal + ", " + lenLocal + ", "
+                        + innerSize + ")";
+                }
+            }
+            return "default(" + type + ")";
         }
 
         // Emit shared option-lower statements: disc + payload

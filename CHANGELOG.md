@@ -1,5 +1,67 @@
 # Changelog
 
+## WACS.ComponentModel.Async.SourceGen 0.4.16, Harness.Runtime 0.7.3 — option<list<...>> + result<list<...>, ...>
+
+Simple lists (`string[]` and `T[][]` for primitive T) can
+now appear inside `option<>` and `result<>` arm types.
+Lower routes through the existing `EmitPtrLenAssignInto`
+helper (which gained a list branch); lift routes through
+`PtrLenLiftExpression` (which now dispatches to two new
+`MemoryHelpers` list helpers).
+
+* **`IsPtrLenAggregate` widened** to also include
+  `IsSimpleList` (`string[]` and `T[][]` for primitive
+  T). Size / align / slot / flat-sig sites that branch
+  on `IsPtrLenAggregate` automatically pick up the new
+  shapes. `list<record>` stays out (its lift is per-
+  record-type, not expressible as a single helper call).
+* **`IsResultArm` accepts simple-list arms**; same-
+  shape pairs (`result<string[], string[]>`,
+  `result<int[][], int[][]>`) and unit-and-list shapes
+  (`result<string[], ()>`, `result<(), int[][]>`) all
+  compile through the existing joined-payload paths.
+  The mixed-arm branch (from 0.4.11) already handled
+  list shapes — only the gate moved.
+* **`IsOptionRef` accepts simple-list inners** —
+  `string[]?`, `int[][]?`, `byte[][]?`, etc.
+* **`EmitPtrLenAssignInto` list branch.** For
+  `IsListType(type)` emits a counter-suffixed
+  `__listInnerN` base via `EmitListLower`, then copies
+  the resulting outer-(ptr, len) into the target
+  `ptrLocal` / `lenLocal`. New thread-static
+  `_listInnerCounter` (reset per `EmitHarness` pass)
+  keeps multiple list lowerings in the same outer scope
+  from colliding on inner-base names.
+* **`PtrLenLiftExpression` list branches.** `string[]`
+  → `MemoryHelpers.LiftStringList(_memory!, ptr, len)`.
+  `T[][]` (primitive inner) →
+  `MemoryHelpers.LiftPrimitiveArrayList<T>(_memory!,
+  ptr, len, sizeof(T))`.
+* **Harness.Runtime 0.7.3**: new
+  `MemoryHelpers.LiftStringList` (per-element loop with
+  `StringCoding.LiftUtf8`) and
+  `MemoryHelpers.LiftPrimitiveArrayList<T>` (per-element
+  loop with `Buffer.BlockCopy`).
+* Test extensions:
+  `Generator_emits_option_ptrlen_export_signatures`
+  picks up `string[]? MaybeNames(string[]?)` and
+  `int[][]? MaybeInts(int[][]?)`;
+  `Generator_emits_result_ptrlen_export_signatures`
+  picks up `WitResult<string[], ValueTuple> FirstNames(int)`
+  and `WitResult<int[][], ValueTuple> Matrix(int)`.
+  21/21 generator integration tests, 660/660 across
+  Wacs.ComponentModel.Test. Hello-spike passes
+  unchanged.
+
+**Still punted:** lists of records with option/result/
+nested-record/nested-list fields; deeper-nested list
+shapes in option/result arms (e.g., `option<string[][]>`);
+mixed primitive vs ptr/len result arms (`result<int,
+string>` — needs index-by-index flat-slot widening);
+cyclic record refs (canon-ABI prohibits, correctly
+rejected via `BuildRecordLayoutRecursive`'s
+`inProgress` set).
+
 ## WACS.ComponentModel.Async.SourceGen 0.4.15 — list<record> with byte[]/primitive-array fields + list<list<X>>
 
 Two related extensions to the list-shape codegen from
