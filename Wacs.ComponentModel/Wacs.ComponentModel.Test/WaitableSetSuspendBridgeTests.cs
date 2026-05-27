@@ -259,32 +259,49 @@ namespace Wacs.ComponentModel.Test
             // possible with sync WaitableSetWait if both ran on
             // one thread; with the async path the runtime can
             // schedule both on the thread pool.
+            //
+            // Determinism note: AsyncDispatcher._handles is a
+            // plain Dictionary, so two bodies running their
+            // WaitableSetNew / WaitableJoin setup concurrently
+            // would race on the table. Stage the bodies — start
+            // t1, wait for it to signal past its WaitableJoin,
+            // then start t2 — and they'll still both end up
+            // parked in WaitableSetWaitAsync at the same time
+            // (since the first wait blocks on the unwritten
+            // future). That's the property the test is actually
+            // exercising. The serial setup just keeps the
+            // dispatcher's handle table from corrupting under
+            // contention.
             var d = new AsyncDispatcher();
             var f1 = d.FutureNew(0);
             var f2 = d.FutureNew(0);
+            var joined1 = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var joined2 = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
 
-            async Task<object?> Body(int futureHandle)
+            async Task<object?> Body(int futureHandle,
+                TaskCompletionSource<bool> joined)
             {
                 return await AsyncLiftAdapter.InvokeAsync(
                     d, MakeCont(), async () =>
                     {
                         var ws = d.WaitableSetNew();
                         d.WaitableJoin(ws, futureHandle);
+                        joined.TrySetResult(true);
                         int got = await d.WaitableSetWaitAsync(
                             null!, ws, 0, false);
                         d.TaskReturn(null!, got);
                     });
             }
 
-            var t1 = Body(f1);
-            var t2 = Body(f2);
+            var t1 = Body(f1, joined1);
+            await joined1.Task;
+            var t2 = Body(f2, joined2);
+            await joined2.Task;
 
-            _ = Task.Run(async () =>
-            {
-                await Task.Delay(30);
-                d.FutureWrite(f1, null);
-                d.FutureWrite(f2, null);
-            });
+            d.FutureWrite(f1, null);
+            d.FutureWrite(f2, null);
 
             var results = await Task.WhenAll(t1, t2);
             Assert.Equal(f1, results[0]);
