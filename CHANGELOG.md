@@ -1,5 +1,42 @@
 # Changelog
 
+## WACS.ComponentModel.Async.SourceGen 0.4.24 — list<record> with list-typed fields
+
+`IsRecordSupportedAsListElement` widened to also accept
+`IsListType` field types — including record-element lists
+(`Point[]`) and other shapes outside `IsPtrLenAggregate`.
+A new narrower `IsRecordInlineLiftable` predicate gates
+NESTED record fields (which must construct inline within
+the outer property-initializer), excluding list fields
+there.
+
+* **Lift pre-bind.** `EmitListElementLift` record branch
+  walks fields once to pre-bind a `__fListVal<N>` local
+  per list-typed field via `EmitListLiftStatements`,
+  then references the local from the property-
+  initializer. Other field shapes stay inline-expression.
+* **Lower.** New branch in `EmitListElementLower` record
+  case for `IsListType` fields: invokes `EmitListLower`
+  with a counter-suffixed base + `depth + 1` to keep the
+  inner loop vars from colliding with the outer
+  list-element loop's `__i` / `__elemOff`, then writes
+  the inner `(ptr, len)` at the field's offset via
+  `WriteI32LE`.
+* Test extension:
+  `Generator_emits_list_shape_export_signatures` picks
+  up `SendBundles(Bundle[])` / `GetBundles(int)` for
+  `Bundle { string Name; Point[] Items; }`.
+  22/22 generator integration tests; 660/660 across
+  Wacs.ComponentModel.Test (minus pre-existing
+  `WaitableSetSuspendBridgeTests` timing flake).
+  Hello-spike passes unchanged.
+
+**Still punted:** lists of records whose NESTED record
+fields carry lists (one-level-deep limitation); even
+deeper option/result-arm list nestings beyond
+`string[][]` / `T[][]`; cyclic record refs (canon-ABI
+prohibits, correctly rejected).
+
 ## WACS.ComponentModel.Async.SourceGen 0.4.23, Harness.Runtime 0.7.4 — string[][] in option / result arms
 
 `IsSimpleList` recurses one more level so `string[][]`

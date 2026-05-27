@@ -283,6 +283,18 @@ namespace Wacs.ComponentModel.Test
         public WitResult<int, string> Result;
     }
 
+    /// <summary>Record carrying a record-list field —
+    /// exercises the multi-statement pre-bind in
+    /// EmitListElementLift and the EmitListLower-based
+    /// branch in EmitListElementLower for list-fields that
+    /// don't fit `IsPtrLenAggregate`.</summary>
+    [WitRecord]
+    internal struct Bundle
+    {
+        public string Name;
+        public Point[] Items;
+    }
+
     [AsyncComponentHarness]
     internal partial class ListShapeHarnessFixture
     {
@@ -354,6 +366,12 @@ namespace Wacs.ComponentModel.Test
 
         [SyncExport("get_audits")]
         internal partial Audit[] GetAudits(int n);
+
+        [SyncExport("send_bundles")]
+        internal partial int SendBundles(Bundle[] bundles);
+
+        [SyncExport("get_bundles")]
+        internal partial Bundle[] GetBundles(int n);
     }
 
     /// <summary>Primitive arrays beyond byte[] — canon-ABI

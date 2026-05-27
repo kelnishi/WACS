@@ -376,16 +376,45 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 if (IsNullablePrimitive(f.Type)) continue;
                 if (IsOptionRef(f.Type)) continue;
                 // Nested record field: the inner record must
-                // itself be supported as a list element so
-                // the per-element lower / lift can recurse.
+                // be inline-liftable (its own fields all fit
+                // in single expressions, no further list
+                // fields). The outer record is the one
+                // pre-binding multi-statement lifts.
                 if (TryLookupRecord(f.Type, out var sub)
-                    && IsRecordSupportedAsListElement(sub))
+                    && IsRecordInlineLiftable(sub))
                     continue;
-                // result<...> field — every shape already
-                // gated by IsSupportedResult is compatible
-                // with the inline lift / lower since result
-                // payloads are at most a (disc, ptr/len) or
-                // (disc, slot1, slot2) tuple of memory reads.
+                if (IsWitResult(f.Type)
+                    && IsSupportedResult(f.Type))
+                    continue;
+                // List field that isn't already a ptr/len
+                // aggregate (i.e., Point[] or any other
+                // record-element list / deeper-nested list).
+                // The per-element lift pre-binds a local via
+                // EmitListLiftStatements; the lower uses
+                // EmitListLower directly.
+                if (IsListType(f.Type)) continue;
+                return false;
+            }
+            return true;
+        }
+
+        // Narrower predicate: every field of `rec` lifts via
+        // a single C# expression. Excludes list fields that
+        // would require pre-bind. Used to gate nested-record
+        // fields (which are constructed inline inside an
+        // outer property-initializer).
+        private static bool IsRecordInlineLiftable(
+            RecordLayout rec)
+        {
+            foreach (var f in rec.Fields)
+            {
+                if (IsPrimitive(f.Type)) continue;
+                if (IsPtrLenAggregate(f.Type)) continue;
+                if (IsNullablePrimitive(f.Type)) continue;
+                if (IsOptionRef(f.Type)) continue;
+                if (TryLookupRecord(f.Type, out var sub)
+                    && IsRecordInlineLiftable(sub))
+                    continue;
                 if (IsWitResult(f.Type)
                     && IsSupportedResult(f.Type))
                     continue;
@@ -3523,6 +3552,42 @@ namespace Wacs.ComponentModel.Async.SourceGen
                             offsetExpr + " + " + f.Offset,
                             "                ");
                     }
+                    else if (IsListType(f.Type))
+                    {
+                        // Multi-statement list field
+                        // (record-element list / deeper-
+                        // nested list). Allocate + fill the
+                        // inner list, then write its (ptr,
+                        // len) at the field's offset. Bump
+                        // depth so the inner loop vars
+                        // (`__i1`, `__elemOff1` …) don't
+                        // collide with the outer
+                        // list-element loop's `__i` /
+                        // `__elemOff`.
+                        int n = NextListInnerId();
+                        string innerBase = "__fListBase" + n;
+                        EmitListLower(sb, f.Type, innerBase,
+                            valueExpr + "." + f.Name,
+                            depth + 1);
+                        sb.Append("                global::Wacs" +
+                            ".ComponentModel.Harness" +
+                            ".MemoryHelpers.WriteI32LE(_memory!, ");
+                        sb.Append(offsetExpr);
+                        sb.Append(" + ");
+                        sb.Append(f.Offset);
+                        sb.Append(", ");
+                        sb.Append(innerBase);
+                        sb.AppendLine("_ptr);");
+                        sb.Append("                global::Wacs" +
+                            ".ComponentModel.Harness" +
+                            ".MemoryHelpers.WriteI32LE(_memory!, ");
+                        sb.Append(offsetExpr);
+                        sb.Append(" + ");
+                        sb.Append(f.Offset + 4);
+                        sb.Append(", ");
+                        sb.Append(innerBase);
+                        sb.AppendLine("_len);");
+                    }
                     else
                     {
                         EmitWriteMemoryStatement(sb, f.Type,
@@ -3656,13 +3721,57 @@ namespace Wacs.ComponentModel.Async.SourceGen
             }
             if (TryLookupRecord(elemType, out var rec))
             {
+                // Pre-bind locals for any list-typed field
+                // whose lift requires a multi-statement loop
+                // (i.e., IsListType but NOT IsPtrLenAggregate
+                // — record arrays, deeper nested lists). The
+                // property-initializer below references the
+                // bound local for those fields.
+                var listFieldLocals = new System.Collections
+                    .Generic.Dictionary<string, string>();
+                foreach (var f in rec.Fields)
+                {
+                    if (IsListType(f.Type)
+                        && !IsPtrLenAggregate(f.Type))
+                    {
+                        int n = NextListInnerId();
+                        string lpLoc = "__fListPtr" + n;
+                        string llLoc = "__fListLen" + n;
+                        string lvLoc = "__fListVal" + n;
+                        sb.Append("                int ");
+                        sb.Append(lpLoc);
+                        sb.Append(" = global::Wacs" +
+                            ".ComponentModel.Harness" +
+                            ".MemoryHelpers.ReadI32LE(" +
+                            "_memory!, ");
+                        sb.Append(offsetExpr);
+                        sb.Append(" + ");
+                        sb.Append(f.Offset);
+                        sb.AppendLine(");");
+                        sb.Append("                int ");
+                        sb.Append(llLoc);
+                        sb.Append(" = global::Wacs" +
+                            ".ComponentModel.Harness" +
+                            ".MemoryHelpers.ReadI32LE(" +
+                            "_memory!, ");
+                        sb.Append(offsetExpr);
+                        sb.Append(" + ");
+                        sb.Append(f.Offset + 4);
+                        sb.AppendLine(");");
+                        EmitListLiftStatements(sb, f.Type,
+                            lvLoc, lpLoc, llLoc,
+                            depth + 1);
+                        listFieldLocals[f.Name] = lvLoc;
+                    }
+                }
                 // Property-initializer with one expression
                 // per field. Primitive fields use the inline
                 // read; ptr/len-aggregate fields (string /
                 // byte[] / primitive arrays) use the shared
                 // `PtrLenLiftExpressionAtOffset` so the
                 // record construction stays a single
-                // expression.
+                // expression. List fields reference the
+                // pre-bound local from the dictionary above.
                 sb.Append("                ");
                 sb.Append(targetExpr);
                 sb.Append(" = new ");
@@ -3671,6 +3780,16 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 bool first = true;
                 foreach (var f in rec.Fields)
                 {
+                    if (listFieldLocals.TryGetValue(f.Name,
+                        out var lvLocal))
+                    {
+                        if (!first) sb.Append(", ");
+                        sb.Append(f.Name);
+                        sb.Append(" = ");
+                        sb.Append(lvLocal);
+                        first = false;
+                        continue;
+                    }
                     if (!first) sb.Append(", ");
                     sb.Append(f.Name);
                     sb.Append(" = ");
