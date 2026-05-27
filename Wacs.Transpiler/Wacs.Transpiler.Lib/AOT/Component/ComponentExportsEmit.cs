@@ -939,6 +939,11 @@ namespace Wacs.Transpiler.AOT.Component
                 if (p.Type.IsPrimitive) continue;
                 if (TryResolveListOfPrim(p.Type, types, out _)) continue;
                 if (TryResolveResourceHandleParam(p.Type, types, out _)) continue;
+                // record-of-primitive-fields lowers as a single ptr
+                // into linear memory holding the fields at their
+                // naturally-aligned offsets. Emit-side fills via
+                // EmitLowerRecordParamToLocals.
+                if (TryResolveRecordOfPrims(p.Type, types, out _, out _)) continue;
                 return false;
             }
             if (fn.Results.Count == 0) return true;
@@ -1574,6 +1579,17 @@ namespace Wacs.Transpiler.AOT.Component
                     if (named == null) return;
                     paramTypes[i] = named;
                 }
+                else if (TryResolveRecordOfPrims(pt, types, out _, out _))
+                {
+                    // Record param: surface as the harness's emitted
+                    // CLR record class (looked up by name through the
+                    // decoded WIT + emittedTypes/preRegisteredTypes
+                    // cache — same path resource handle params use).
+                    var named = TryFindNamedParamType(
+                        decodedWit, emittedTypes, export.Name, i);
+                    if (named == null) return;
+                    paramTypes[i] = named;
+                }
                 else
                 {
                     return;   // shouldn't reach — IsEmittable rejects
@@ -1734,6 +1750,20 @@ namespace Wacs.Transpiler.AOT.Component
                 var named = TryFindNamedReturn(decodedWit, emittedTypes,
                                                 export.Name);
                 if (named == null) return;
+                // Variant CLR-class shape gate: EmitVariantReturnBody
+                // assumes the transpiler-emitted "flat ctor"
+                // (disc + every payload). Harness-emitted variants
+                // (Wacs.ComponentModel.Harness.Lib.WitTypeEmit's
+                // nested-subclass pattern: abstract base + Case
+                // subclasses each with their own ctor) are wire-
+                // compatible but require per-case dispatch IL, which
+                // isn't built yet. Skip the export when the named
+                // class doesn't expose the flat ctor — HarnessImpl
+                // then emits a NotImplementedException stub for the
+                // corresponding interface method. Sibling exports
+                // (e.g. richer's `add`) still emit cleanly.
+                if (!VariantClassHasFlatCtor(named, variantShape))
+                    return;
                 returnType = named;
             }
             else if (TryResolveOwnReturn(
@@ -1890,12 +1920,20 @@ namespace Wacs.Transpiler.AOT.Component
                 var pt = export.Signature.Params[i].Type;
                 if (ptrLocals[i] != null)
                 {
-                    // String or list<prim> — the precompute step
-                    // stashed (ptr, count) in locals. Push them
-                    // as the two core args.
+                    // Aggregate-buffer-style param. String and list<T>
+                    // push (ptr, count) — two core slots. Record params
+                    // push only the ptr (countLocal stays null) — one
+                    // core slot.
                     il.Emit(OpCodes.Ldloc, ptrLocals[i]!);
-                    il.Emit(OpCodes.Ldloc, countLocals[i]!);
-                    coreParamIdx += 2;
+                    if (countLocals[i] != null)
+                    {
+                        il.Emit(OpCodes.Ldloc, countLocals[i]!);
+                        coreParamIdx += 2;
+                    }
+                    else
+                    {
+                        coreParamIdx++;
+                    }
                 }
                 else if (export.CsParamTypes != null
                     && !pt.IsPrimitive
@@ -1967,6 +2005,12 @@ namespace Wacs.Transpiler.AOT.Component
                     anyBuffer = true;
                     break;
                 }
+                if (!pt.IsPrimitive
+                    && TryResolveRecordOfPrims(pt, types, out _, out _))
+                {
+                    anyBuffer = true;
+                    break;
+                }
             }
             if (!anyBuffer) return;
 
@@ -1997,6 +2041,22 @@ namespace Wacs.Transpiler.AOT.Component
                         il, instanceField, reallocMethod, memoryGetter,
                         i, elemPrim,
                         out ptrLocals[i], out countLocals[i]);
+                }
+                else if (!pt.IsPrimitive
+                         && TryResolveRecordOfPrims(pt, types,
+                             out var recFieldPrims, out var recFieldNames))
+                {
+                    // record-of-primitives param. Lower to a single
+                    // ptr via cabi_realloc + per-field StoreXxx. The
+                    // CLR class on the C# side comes from
+                    // export.CsParamTypes[i] (resolved earlier via
+                    // TryFindNamedParamType). countLocals[i] stays
+                    // null — the wire form is a single i32 pointer.
+                    EmitLowerRecordParamToLocals(
+                        il, instanceField, reallocMethod, memoryGetter,
+                        i, export.CsParamTypes![i],
+                        recFieldPrims, recFieldNames,
+                        out ptrLocals[i]);
                 }
             }
         }
@@ -2142,6 +2202,111 @@ namespace Wacs.Transpiler.AOT.Component
             il.EmitCall(OpCodes.Call, copyClosed, null);
 
             _ = arrayType;
+        }
+
+        /// <summary>
+        /// IL for the <c>record</c>-param lower path:
+        /// <c>cabi_realloc</c>(0, 0, maxAlign, totalSize) → for each
+        /// field, <c>PrimitiveStore.Store&lt;P&gt;(memory, ptr + offset, recordArg.Field)</c>.
+        /// Stashes <c>ptr</c> in a local for the caller to push at
+        /// core-call time (records pass as a single i32 — no count
+        /// slot, unlike strings/lists).
+        ///
+        /// <para>Field offsets follow the canonical-ABI rule: each
+        /// field starts at the next multiple of its own alignment.
+        /// Record alignment is <c>max</c>(field alignments); record
+        /// size is the running offset after the last field, rounded
+        /// up to record alignment so subsequent same-type records
+        /// stack cleanly.</para>
+        /// </summary>
+        private static void EmitLowerRecordParamToLocals(
+            ILGenerator il, FieldBuilder instanceField,
+            MethodInfo reallocMethod, MethodInfo memoryGetter,
+            int argIdx, Type recordClrType,
+            ComponentPrim[] fieldPrims, string[] fieldNames,
+            out LocalBuilder ptrLocal)
+        {
+            int totalSize = 0;
+            int maxAlign = 1;
+            var offsets = new int[fieldPrims.Length];
+            for (int i = 0; i < fieldPrims.Length; i++)
+            {
+                int align = PrimByteSize(fieldPrims[i]);
+                if (align > maxAlign) maxAlign = align;
+                totalSize = AlignUp(totalSize, align);
+                offsets[i] = totalSize;
+                totalSize += PrimByteSize(fieldPrims[i]);
+            }
+            // Round size up to record alignment so arrays of records
+            // stack cleanly (not strictly needed for the single-record
+            // case but matches the canonical-ABI layout rule).
+            totalSize = AlignUp(totalSize, maxAlign);
+
+            ptrLocal = il.DeclareLocal(typeof(int));
+
+            // ptr = instance.CabiRealloc(0, 0, maxAlign, totalSize)
+            il.Emit(OpCodes.Ldsfld, instanceField);
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Ldc_I4, maxAlign);
+            il.Emit(OpCodes.Ldc_I4, totalSize);
+            il.EmitCall(OpCodes.Callvirt, reallocMethod, null);
+            il.Emit(OpCodes.Stloc, ptrLocal);
+
+            for (int i = 0; i < fieldPrims.Length; i++)
+            {
+                // PrimitiveStore.Store<P>(memory, ptr + offset, record.Field)
+                var storeMethod = ResolvePrimitiveStoreMethod(fieldPrims[i]);
+                il.Emit(OpCodes.Ldsfld, instanceField);
+                il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
+
+                il.Emit(OpCodes.Ldloc, ptrLocal);
+                if (offsets[i] != 0)
+                {
+                    il.Emit(OpCodes.Ldc_I4, offsets[i]);
+                    il.Emit(OpCodes.Add);
+                }
+
+                // Load the field's CLR value off the record arg.
+                il.Emit(OpCodes.Ldarg, argIdx);
+                var propName = PascalCase(fieldNames[i]);
+                var getter = recordClrType.GetMethod(
+                    "get_" + propName,
+                    BindingFlags.Public | BindingFlags.Instance);
+                if (getter == null)
+                    throw new InvalidOperationException(
+                        "Record class " + recordClrType.FullName
+                        + " missing public property '" + propName
+                        + "' for WIT field '" + fieldNames[i] + "'.");
+                il.EmitCall(OpCodes.Callvirt, getter, null);
+
+                il.EmitCall(OpCodes.Call, storeMethod, null);
+            }
+        }
+
+        /// <summary>Resolve <see cref="PrimitiveStore"/>'s
+        /// <c>Store&lt;P&gt;</c> method matching <paramref name="prim"/>.
+        /// Signature is uniformly <c>(MemoryInstance, int, T)</c>.</summary>
+        private static MethodInfo ResolvePrimitiveStoreMethod(ComponentPrim prim)
+        {
+            string name = prim switch
+            {
+                ComponentPrim.Bool => nameof(PrimitiveStore.StoreBool),
+                ComponentPrim.S8 => nameof(PrimitiveStore.StoreI8),
+                ComponentPrim.U8 => nameof(PrimitiveStore.StoreU8),
+                ComponentPrim.S16 => nameof(PrimitiveStore.StoreI16),
+                ComponentPrim.U16 => nameof(PrimitiveStore.StoreU16),
+                ComponentPrim.S32 => nameof(PrimitiveStore.StoreI32),
+                ComponentPrim.U32 => nameof(PrimitiveStore.StoreU32),
+                ComponentPrim.S64 => nameof(PrimitiveStore.StoreI64),
+                ComponentPrim.U64 => nameof(PrimitiveStore.StoreU64),
+                ComponentPrim.F32 => nameof(PrimitiveStore.StoreF32),
+                ComponentPrim.F64 => nameof(PrimitiveStore.StoreF64),
+                _ => throw new NotSupportedException(
+                    "PrimitiveStore.Store<P> not yet wired for " + prim),
+            };
+            // Single overload per name; GetMethod by name resolves uniquely.
+            return typeof(PrimitiveStore).GetMethod(name)!;
         }
 
         /// <summary>Byte size of a primitive type's native
@@ -3066,6 +3231,43 @@ namespace Wacs.Transpiler.AOT.Component
                     + "align with EmitVariantType's ctor signature.");
             il.Emit(OpCodes.Newobj, ctor);
             il.Emit(OpCodes.Ret);
+        }
+
+        /// <summary>True when <paramref name="variantType"/> is
+        /// shaped like the transpiler's own variant emit — a single
+        /// class with a public ctor taking <c>(disc, payload0,
+        /// payload1, …)</c> in case order. False when the class
+        /// came from a harness assembly via <c>preRegisteredTypes</c>
+        /// (which emits an abstract base + nested per-case
+        /// subclasses, each carrying just its own payload).
+        /// EmitVariantReturnBody only handles the flat shape today.
+        /// </summary>
+        private static bool VariantClassHasFlatCtor(
+            Type variantType, VariantShape shape)
+        {
+            var caseCount = shape.CaseNames.Count;
+            var discWidth = caseCount <= 256 ? 1
+                : caseCount <= 65536 ? 2 : 4;
+            var expected = new List<Type>();
+            expected.Add(discWidth == 1 ? typeof(byte)
+                : discWidth == 2 ? typeof(ushort)
+                : typeof(uint));
+            for (int i = 0; i < caseCount; i++)
+            {
+                switch (shape.CasePayloads[i])
+                {
+                    case VariantPayload.Prim pp:
+                        expected.Add(PrimToCs(pp.P));
+                        break;
+                    case VariantPayload.ListOfPrim ll:
+                        expected.Add(PrimToCs(ll.ElemP).MakeArrayType());
+                        break;
+                    case VariantPayload.RecordOfPrim rr:
+                        expected.Add(rr.RecordClrType);
+                        break;
+                }
+            }
+            return variantType.GetConstructor(expected.ToArray()) != null;
         }
 
         /// <summary>Variant payload alignment — same as

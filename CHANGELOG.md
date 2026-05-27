@@ -1,5 +1,52 @@
 # Changelog
 
+## WACS.Transpiler.Lib 0.12.9 — aggregate-param lowering for harness records
+
+Closes #3b of the wit-harness plan: record-of-primitives params lower
+into linear memory via `cabi_realloc` + per-field `PrimitiveStore.Store`
+calls, so harness fixtures whose exports take record args
+(e.g. `richer.add(vec2, vec2)`) now flow through `ComponentExports`
+end-to-end.
+
+* **`IsEmittable` param check**: accepts `TryResolveRecordOfPrims`
+  shapes alongside primitives, list-of-primitive, and resource
+  handles. Predicates stay decoupled from the WIT decoder for the
+  structural gate; emit-side WIT lookup resolves the harness's
+  CLR record class.
+* **`EmitPrecomputeBufferParamLocals`**: dispatches records to the
+  new `EmitLowerRecordParamToLocals`. Strings and lists still go
+  through the existing two-slot `(ptr, count)` path; records leave
+  `countLocals[i]` null because the wire form is a single i32
+  pointer.
+* **`EmitLowerRecordParamToLocals`**: computes record alignment as
+  `max(field alignments)` and total size as the running offset
+  after the last field rounded up to record alignment; allocates
+  via `instance.CabiRealloc(0, 0, maxAlign, totalSize)`; emits one
+  `PrimitiveStore.Store<P>(memory, ptr + offset, recordArg.<Field>)`
+  per field. Field lookup goes through `recordType.GetMethod("get_" + PascalCase(fieldName))`
+  to read the harness's read-only property surface.
+* **`EmitCoreCall` push loop**: when `ptrLocals[i]` is set but
+  `countLocals[i]` is null, push only the pointer (one core slot)
+  rather than (ptr, count). Pre-existing string/list semantics
+  unchanged.
+* **`VariantClassHasFlatCtor` gate**: variant returns whose CLR
+  class is the harness's abstract-base + nested-subclasses shape
+  can't go through the existing `EmitVariantReturnBody` (which
+  assumes a flat `(disc, payload0, payload1, …)` ctor). Detect
+  the shape via the expected ctor's presence and skip the export
+  when absent — `HarnessImpl` then emits a `NotImplementedException`
+  stub for that interface method while sibling exports still emit.
+  Per-case dispatch IL for harness variants is a follow-up.
+
+New test `Richer_transpile_with_harness_emits_HarnessImpl_implementing_IRicher`
+verifies the `wit-harness-spike-richer` fixture (`add(vec2, vec2) -> vec2`
++ `normalize-or-fail(vec2) -> outcome`) emits `RicherHarnessImpl`
+assignable to `IRicher`. The `add` method flows end-to-end through
+the new record-param lowering; `NormalizeOrFail` (variant return)
+is the stub'd method documenting the variant-dispatch gap.
+
+Tests: 841/841 Wacs.Transpiler.Test (+ 1 skip).
+
 ## WACS.Transpiler.Lib 0.12.8 — record-of-flat-types harness support
 
 Closes the first of three remaining gaps in the harness-impl

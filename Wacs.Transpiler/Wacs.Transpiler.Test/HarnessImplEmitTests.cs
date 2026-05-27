@@ -135,6 +135,54 @@ namespace Wacs.Transpiler.Test
         }
 
         [Fact]
+        public void Richer_transpile_with_harness_emits_HarnessImpl_implementing_IRicher()
+        {
+            // wit-harness-spike-richer exports add(a: vec2, b: vec2) -> vec2
+            // and normalize-or-fail(v: vec2) -> outcome. Record params
+            // lower as a single ptr each via cabi_realloc + per-field
+            // PrimitiveStore.Store calls. Acceptance: RicherHarnessImpl
+            // emits and implements IRicher.
+            var fixtureDir = FixtureDir("wit-harness-spike-richer");
+            var witDir = Path.Combine(fixtureDir, "wit");
+            var componentWasm = Path.Combine(fixtureDir, "wasm", "richer.component.wasm");
+
+            var tmpHarness = Path.Combine(Path.GetTempPath(),
+                $"richer-harness-{Guid.NewGuid():N}.dll");
+            try
+            {
+                HarnessEmitter.EmitToFile(witDir, tmpHarness);
+                using var fs = File.OpenRead(componentWasm);
+                var result = ComponentTranspiler.TranspileSingleModule(
+                    fs,
+                    assemblyNamespace: "Wacs.Transpiled.Richer",
+                    options: new TranspilerOptions
+                    {
+                        HarnessAssemblyPath = tmpHarness,
+                    });
+
+                var allTypes = result.Assembly.GetTypes()
+                    .Select(t => t.FullName).ToArray();
+                var harnessImpl = result.Assembly.GetTypes()
+                    .FirstOrDefault(t => t.Name == "RicherHarnessImpl");
+                Assert.True(harnessImpl != null,
+                    "RicherHarnessImpl not found. Emitted types: "
+                    + string.Join(", ", allTypes));
+
+                var harnessAsm = Assembly.LoadFrom(tmpHarness);
+                var iRicher = harnessAsm.GetTypes()
+                    .FirstOrDefault(t => t.Name == "IRicher" && t.IsInterface);
+                Assert.NotNull(iRicher);
+
+                Assert.True(iRicher!.IsAssignableFrom(harnessImpl),
+                    $"{harnessImpl!.FullName} must implement {iRicher.FullName}.");
+            }
+            finally
+            {
+                try { File.Delete(tmpHarness); } catch { }
+            }
+        }
+
+        [Fact]
         public void EnumFlags_transpile_with_harness_emits_HarnessImpl_implementing_ISecurity()
         {
             // wit-harness-spike-enum-flags exports get-status returning
