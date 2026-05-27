@@ -212,10 +212,6 @@ up through the existing `Wacs.Spec.Test` xUnit collection.
 
 - [wasip3-architecture.md](./wasip3-architecture.md) — how the
   CM async dispatcher builds on this substrate.
-- [wasip3-phase-3-closeout.md](./wasip3-phase-3-closeout.md) —
-  the slice-by-slice closeout of the Phase 3 work that landed
-  these files.
-- [wit-harness-plan.md](./wit-harness-plan.md) /
-  [WIT_HARNESS_APPROACH.md](./WIT_HARNESS_APPROACH.md) — the
+- [WIT_HARNESS_APPROACH.md](./WIT_HARNESS_APPROACH.md) — the
   IDL-driven harness emitter that calls into the async
   dispatcher from generated C# bindings.

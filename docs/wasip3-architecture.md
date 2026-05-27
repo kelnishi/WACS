@@ -240,7 +240,6 @@ the matching subdirectory (`Cli`, `Clocks`, `Filesystem`,
 vendors the `0.3.0-rc-2026-03-15` IDL definitions; the host
 package re-emits them on build via the wit-harness
 infrastructure documented in
-[wit-harness-plan.md](./wit-harness-plan.md) and
 [WIT_HARNESS_APPROACH.md](./WIT_HARNESS_APPROACH.md).
 
 ### Fixture coverage (Preview3.Test)
@@ -343,11 +342,7 @@ the package.
 
 - [stack-switching-architecture.md](./stack-switching-architecture.md)
   — the substrate.
-- [wasip3-phase-3-closeout.md](./wasip3-phase-3-closeout.md)
-  — slice-by-slice closeout of the dispatcher / binder /
-  shim recognizer / source-gen registry work.
-- [WIT_HARNESS_APPROACH.md](./WIT_HARNESS_APPROACH.md) +
-  [wit-harness-plan.md](./wit-harness-plan.md) — how
+- [WIT_HARNESS_APPROACH.md](./WIT_HARNESS_APPROACH.md) — how
   generated C# bindings call into the dispatcher.
 - `Wacs.Core/Wacs.Core/Runtime/CanonResourceBinder.cs` +
   `ResourceHandleTable.cs` — the Phase-0 resource-table
@@ -355,6 +350,3 @@ the package.
   for handle allocation. Wired into `ComponentInstance`
   (`_resourceTables` field) and into the transpiler CLI
   via the same binder.
-- [wacs-multi-core-instantiation-plan.md](./wacs-multi-core-instantiation-plan.md)
-  — multi-core instantiation, which the shim recognizer
-  integrates with.
