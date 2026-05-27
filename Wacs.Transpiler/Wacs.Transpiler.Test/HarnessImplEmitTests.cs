@@ -135,16 +135,14 @@ namespace Wacs.Transpiler.Test
         }
 
         [Fact]
-        public void EnumFlags_transpile_with_harness_emits_HarnessImpl_or_documents_gap()
+        public void EnumFlags_transpile_with_harness_emits_HarnessImpl_implementing_ISecurity()
         {
             // wit-harness-spike-enum-flags exports get-status returning
             // status { sev: severity, perms: permissions } where the
-            // fields are an enum and a flags type. Today
-            // TryResolveRecordOfPrims requires primitive fields, so
-            // the export is silently skipped and SecurityHarnessImpl
-            // never emits. This test documents that gap explicitly —
-            // when emit grows enum/flags record-field support, flip
-            // the assertion sense.
+            // fields are an enum and a flags type. ComponentExportsEmit
+            // now accepts records whose fields are primitives, enums,
+            // or flags via TryResolveRecordOfFlat + the
+            // EmitPrimCtorArgConv enum branch.
             var fixtureDir = FixtureDir("wit-harness-spike-enum-flags");
             var witDir = Path.Combine(fixtureDir, "wit");
             var componentWasm = Path.Combine(fixtureDir, "wasm", "security.component.wasm");
@@ -163,12 +161,21 @@ namespace Wacs.Transpiler.Test
                         HarnessAssemblyPath = tmpHarness,
                     });
 
+                var allTypes = result.Assembly.GetTypes()
+                    .Select(t => t.FullName).ToArray();
                 var harnessImpl = result.Assembly.GetTypes()
                     .FirstOrDefault(t => t.Name == "SecurityHarnessImpl");
-                Assert.True(harnessImpl == null,
-                    "SecurityHarnessImpl WAS emitted — IsEmittable now "
-                    + "accepts enum/flags record fields. Flip this test "
-                    + "to assert positive emit, drop the comment.");
+                Assert.True(harnessImpl != null,
+                    "SecurityHarnessImpl not found. Emitted types: "
+                    + string.Join(", ", allTypes));
+
+                var harnessAsm = Assembly.LoadFrom(tmpHarness);
+                var iSecurity = harnessAsm.GetTypes()
+                    .FirstOrDefault(t => t.Name == "ISecurity" && t.IsInterface);
+                Assert.NotNull(iSecurity);
+
+                Assert.True(iSecurity!.IsAssignableFrom(harnessImpl),
+                    $"{harnessImpl!.FullName} must implement {iSecurity.FullName}.");
             }
             finally
             {

@@ -956,6 +956,7 @@ namespace Wacs.Transpiler.AOT.Component
             if (TryResolveEnumReturn(r, types, out _)) return true;
             if (TryResolveFlagsReturn(r, types, out _)) return true;
             if (TryResolveRecordOfPrims(r, types, out _, out _)) return true;
+            if (IsStructurallyEmittableRecordOfFlat(r, types)) return true;
             if (IsStructurallyEmittableVariant(r, types)) return true;
             if (TryResolveOwnReturn(r, types, out _)) return true;
             return false;
@@ -1106,6 +1107,44 @@ namespace Wacs.Transpiler.AOT.Component
                 CasePayloads = payloads;
                 HasUnsupportedAggregate = hasUnsupported;
             }
+        }
+
+        /// <summary>Structural-only "is this emittable as a
+        /// record return with enum/flags fields" check for
+        /// <see cref="IsEmittable"/>. Mirrors
+        /// <see cref="TryResolveRecordOfPrims"/> but also accepts
+        /// fields whose type is a structural enum or flags. The
+        /// resolver downstream re-runs with the decoded WIT to
+        /// bind each enum/flags field to its CLR type from
+        /// emittedTypes; exports whose CLR types can't be bound
+        /// surface as silent skips (same pattern variant returns
+        /// use).</summary>
+        private static bool IsStructurallyEmittableRecordOfFlat(
+            ComponentValType t, IReadOnlyList<DefTypeEntry> types)
+        {
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= types.Count) return false;
+            if (!(types[(int)t.TypeIdx] is ComponentRecordType rec)) return false;
+            // Reject if every field is primitive — TryResolveRecordOfPrims
+            // already accepted this shape above. Only fire when at
+            // least one field needs the enum/flags extension, so we
+            // don't double-accept and confuse the downstream resolver
+            // pickup order.
+            bool anyNonPrim = false;
+            for (int i = 0; i < rec.Fields.Count; i++)
+            {
+                var ft = rec.Fields[i].Type;
+                if (ft.IsPrimitive) continue;
+                if (ft.TypeIdx >= types.Count) return false;
+                var def = types[(int)ft.TypeIdx];
+                if (def is ComponentEnumType || def is ComponentFlagsType)
+                {
+                    anyNonPrim = true;
+                    continue;
+                }
+                return false;
+            }
+            return anyNonPrim;
         }
 
         /// <summary>Structural-only "is this emittable as a
@@ -1320,6 +1359,73 @@ namespace Wacs.Transpiler.AOT.Component
             fieldNames = names;
             return true;
         }
+
+        /// <summary>Like <see cref="TryResolveRecordOfPrims"/> but
+        /// also accepts fields whose type is a structural enum or
+        /// flags. For each such field the wire-side primitive width
+        /// is derived from the case/flag count (≤8 → u8, ≤16 → u16,
+        /// ≤32 → u32 for flags; same width breakdown for enums via
+        /// case count). The CLR-side ctor parameter type comes from
+        /// the harness's pre-registered enum/flags class, looked up
+        /// via the decoded WIT and emittedTypes.
+        ///
+        /// <para>Returns true only when at least one field is non-
+        /// primitive — otherwise <see cref="TryResolveRecordOfPrims"/>
+        /// would have matched first. Keeps the predicate ordering
+        /// in <see cref="EmitExportMethod"/> unambiguous.</para>
+        /// </summary>
+        private static bool TryResolveRecordOfFlat(
+            ComponentValType t, IReadOnlyList<DefTypeEntry> types,
+            out ComponentPrim[] fieldPrims, out string[] fieldNames)
+        {
+            fieldPrims = Array.Empty<ComponentPrim>();
+            fieldNames = Array.Empty<string>();
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= types.Count) return false;
+            if (!(types[(int)t.TypeIdx] is ComponentRecordType rec)) return false;
+            var prims = new ComponentPrim[rec.Fields.Count];
+            var names = new string[rec.Fields.Count];
+            bool anyNonPrim = false;
+            for (int i = 0; i < prims.Length; i++)
+            {
+                var ft = rec.Fields[i].Type;
+                names[i] = rec.Fields[i].Name;
+                if (ft.IsPrimitive)
+                {
+                    prims[i] = ft.Prim;
+                    continue;
+                }
+                if (ft.TypeIdx >= types.Count) return false;
+                var def = types[(int)ft.TypeIdx];
+                if (def is ComponentEnumType en)
+                {
+                    prims[i] = EnumWirePrim(en.Cases.Count);
+                    anyNonPrim = true;
+                    continue;
+                }
+                if (def is ComponentFlagsType fl)
+                {
+                    prims[i] = FlagsWirePrim(fl.Flags.Count);
+                    anyNonPrim = true;
+                    continue;
+                }
+                return false;
+            }
+            if (!anyNonPrim) return false;
+            fieldPrims = prims;
+            fieldNames = names;
+            return true;
+        }
+
+        private static ComponentPrim EnumWirePrim(int caseCount) =>
+            caseCount <= 256 ? ComponentPrim.U8
+            : caseCount <= 65536 ? ComponentPrim.U16
+            : ComponentPrim.U32;
+
+        private static ComponentPrim FlagsWirePrim(int flagCount) =>
+            flagCount <= 8 ? ComponentPrim.U8
+            : flagCount <= 16 ? ComponentPrim.U16
+            : ComponentPrim.U32;
 
         /// <summary>True iff <paramref name="t"/> is a type-ref
         /// to <c>option&lt;string&gt;</c>. Separate predicate
@@ -1592,6 +1698,25 @@ namespace Wacs.Transpiler.AOT.Component
                 // emit; reject the export in that case (keeps the
                 // ComponentExports class clean of anonymous
                 // nested types).
+                var named = TryFindNamedReturn(decodedWit, emittedTypes,
+                                                export.Name);
+                if (named == null) return;
+                returnType = named;
+            }
+            else if (TryResolveRecordOfFlat(
+                export.Signature.Results[0], types,
+                out recordFieldPrims, out recordFieldNames))
+            {
+                // record-with-flat-fields: at least one field is
+                // an enum or flags. Wire reads use the per-field
+                // primitive width; the ctor expects the matching
+                // CLR enum/flags type from emittedTypes (the
+                // harness's pre-registered class). The shared
+                // EmitRecordReturnBody handles both shapes —
+                // EmitPrimCtorArgConv tolerates enum-typed ctor
+                // params with no conv emit (CLR enums are
+                // bit-compatible with their underlying primitive).
+                isRecordReturn = true;
                 var named = TryFindNamedReturn(decodedWit, emittedTypes,
                                                 export.Name);
                 if (named == null) return;
@@ -2750,6 +2875,29 @@ namespace Wacs.Transpiler.AOT.Component
                 // would truncate but the harness convention chose
                 // this representation knowingly.
                 il.Emit(OpCodes.Conv_U2);
+                return;
+            }
+            if (expected.IsEnum)
+            {
+                // record-of-flat-types: the field is an enum or
+                // a [Flags] enum. The stack value came from
+                // EmitReadPayloadAtOffset as the underlying
+                // primitive width (u8 / u16 / u32 per case or flag
+                // count). CLR enums are bit-compatible with their
+                // underlying — assignment-compatible at the IL
+                // verifier level — so Newobj takes it without an
+                // explicit conv. Verify the underlying width
+                // matches what the wire shape produced; mismatches
+                // would be a harness-vs-binary contract divergence.
+                var underlying = Enum.GetUnderlyingType(expected);
+                if (underlying != canonicalClr)
+                    throw new InvalidOperationException(
+                        "Record ctor expects enum " + expected.FullName
+                        + " with underlying " + underlying.FullName
+                        + " but the field's wire primitive " + canonical
+                        + " maps to " + canonicalClr.FullName
+                        + " — case/flag count drift between harness and "
+                        + "component binary.");
                 return;
             }
             throw new InvalidOperationException(

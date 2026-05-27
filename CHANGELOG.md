@@ -1,5 +1,41 @@
 # Changelog
 
+## WACS.Transpiler.Lib 0.12.8 — record-of-flat-types harness support
+
+Closes the first of three remaining gaps in the harness-impl
+pipeline (bucket #3a from the wit-harness plan): records whose
+fields are enums or `[Flags]` enums now flow through
+`ComponentExportsEmit` end-to-end.
+
+* **`IsStructurallyEmittableRecordOfFlat`**: new structural-only
+  check in `IsEmittable`'s return-side dispatch. Accepts records
+  where every field is a primitive, a `ComponentEnumType`, or a
+  `ComponentFlagsType`. Fires only when at least one field is
+  non-primitive — otherwise `TryResolveRecordOfPrims` would match
+  first, keeping predicate ordering unambiguous.
+* **`TryResolveRecordOfFlat`**: emit-side resolver returning the
+  per-field wire primitive width. Enum fields lower to
+  `u8 / u16 / u32` per case count (≤256 / ≤65536 / else); flags
+  per flag count (≤8 / ≤16 / else). The CLR ctor side uses the
+  harness's pre-registered enum/flags class via the existing
+  `recordType.GetConstructors` lookup in `ResolveRecordCtor`.
+* **`EmitPrimCtorArgConv` enum branch**: when the ctor expects an
+  enum or `[Flags]` enum, accept the i4 stack value directly (CLR
+  enums are bit-compatible with their underlying primitive — no
+  conv emit needed). Validates underlying width matches the wire
+  primitive; a drift throws with a clear "harness vs binary
+  contract divergence" message.
+
+Unlocks the `wit-harness-spike-enum-flags` fixture. Test
+`EnumFlags_transpile_with_harness_emits_HarnessImpl_implementing_ISecurity`
+flipped from negative-gap-doc to positive assertion. Verified the
+emitted `SecurityHarnessImpl` is assignable to the harness's
+`ISecurity` interface; the underlying `Status` record's `Sev`
+(enum `Severity`) + `Perms` ([Flags] `Permissions`) fields flow
+through the same emit path as primitives.
+
+Tests: 840/840 Wacs.Transpiler.Test (+ 1 skip).
+
 ## WACS.Cli 1.10.1 — `wacs run --harness` / `--wit-dir`
 
 Closes the second remaining bucket of the wit-harness plan: the
