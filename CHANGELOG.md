@@ -1,5 +1,43 @@
 # Changelog
 
+## WACS.Transpiler.Lib 0.12.5 — harness-impl ctor lookup tolerates pre-registered records
+
+Fixes a latent bug in `ComponentExportsEmit.EmitRecordReturnBody`:
+when `recordType` came from a harness assembly via
+`preRegisteredTypes` (the cross-engine symmetry path shipped
+in 0.11.0), the ctor lookup used a `Type[]` built from
+`PrimToCs(prim)`. Harness types diverge at one point —
+`CtPrim.Char` maps to `typeof(char)` in
+`Wacs.ComponentModel.Harness.Lib.WitTypeEmit.MapClrType`
+but `typeof(uint)` in the transpiler's `PrimToCs`. The
+mismatch made `GetConstructor` return null, then
+`Emit(OpCodes.Newobj, null)` threw with
+`ArgumentNullException: con` on any harness fixture whose
+record carried a `char` field.
+
+* **`ResolveRecordCtor`**: locate the record's canonical-field
+  ctor by parameter count rather than exact type list. A single
+  public instance ctor matching the field count wins; multiple
+  matches throw `InvalidOperationException` for the loud-failure
+  diagnostic.
+* **`EmitPrimCtorArgConv`**: per-arg conv between the transpiler's
+  canonical-ABI primitive width (read via `EmitReadPayloadAtOffset`)
+  and the ctor's declared parameter type. `CtPrim.Char → char`
+  emits `Conv.U2` to narrow the i32 codepoint into a 16-bit CLR
+  char. Throws for any unconfigured divergence so future shape
+  drift fails fast.
+
+New test: `Wacs.Transpiler.Test/HarnessImplEmitTests.cs`
+`Primitives_transpile_with_harness_emits_HarnessImpl_implementing_IStats`
+— builds the `wit-harness-spike-primitives` fixture's harness via
+`HarnessEmitter.EmitToFile`, transpiles `stats.component.wasm`
+with `TranspilerOptions.HarnessAssemblyPath` pointed at it, and
+asserts the emitted `StatsHarnessImpl` is assignable to the
+harness's `IStats`. First end-to-end coverage of the
+`Transpiler.Lib 0.11.0` harness-implementation pipeline.
+
+Tests: 834/834 Wacs.Transpiler.Test (+ 1 skip).
+
 ## WACS.ComponentModel.Async.SourceGen 0.4.24 — list<record> with list-typed fields
 
 `IsRecordSupportedAsListElement` widened to also accept

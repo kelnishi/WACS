@@ -2684,13 +2684,79 @@ namespace Wacs.Transpiler.AOT.Component
                 offset += PrimByteSize(fieldPrims[i]);
             }
 
-            // Call ctor matching the field types in order.
-            var ctorParams = new Type[fieldPrims.Length];
-            for (int i = 0; i < fieldPrims.Length; i++)
-                ctorParams[i] = PrimToCs(fieldPrims[i]);
-            var ctor = recordType.GetConstructor(ctorParams)!;
+            // Look up the record's canonical ctor by parameter count
+            // and adapt to its param types. When recordType is a
+            // pre-registered harness type, its ctor signature may
+            // differ from the transpiler-emitted convention — e.g.
+            // harness emits char as typeof(char) while the
+            // transpiler's PrimToCs returns typeof(uint). Reading
+            // the actual ctor lets the two conventions coexist with
+            // a per-arg conv emit at the boundary.
+            var ctor = ResolveRecordCtor(recordType, fieldPrims.Length);
+            var ctorPs = ctor.GetParameters();
+            for (int i = ctorPs.Length - 1; i >= 0; i--)
+            {
+                EmitPrimCtorArgConv(il, fieldPrims[i], ctorPs[i].ParameterType);
+            }
             il.Emit(OpCodes.Newobj, ctor);
             il.Emit(OpCodes.Ret);
+        }
+
+        /// <summary>Locate the record type's canonical-field ctor —
+        /// the one that takes a positional argument per field. When
+        /// only one public instance ctor is declared (the common
+        /// case), use it directly. When several exist, prefer one
+        /// whose param count matches the field count; throw if none
+        /// matches so the mismatch is loud rather than silent.</summary>
+        private static ConstructorInfo ResolveRecordCtor(
+            Type recordType, int fieldCount)
+        {
+            var ctors = recordType.GetConstructors(
+                BindingFlags.Public | BindingFlags.Instance);
+            ConstructorInfo? match = null;
+            foreach (var c in ctors)
+            {
+                if (c.GetParameters().Length != fieldCount) continue;
+                if (match != null)
+                    throw new InvalidOperationException(
+                        "Ambiguous record ctor on " + recordType.FullName
+                        + ": multiple public ctors with " + fieldCount + " parameters.");
+                match = c;
+            }
+            if (match == null)
+                throw new InvalidOperationException(
+                    "No public ctor on " + recordType.FullName
+                    + " with " + fieldCount + " parameters.");
+            return match;
+        }
+
+        /// <summary>When a record ctor's expected parameter type
+        /// diverges from the canonical-ABI primitive width (e.g.
+        /// harness emits <c>char</c> for <c>CtPrim.Char</c> while
+        /// the transpiler reads the field as <c>uint</c>), insert
+        /// the matching conv opcode. Emitted just before
+        /// <c>Newobj</c>; the value on the stack came from
+        /// <see cref="EmitReadPayloadAtOffset"/> and is typed per
+        /// <see cref="PrimToCs"/>.</summary>
+        private static void EmitPrimCtorArgConv(
+            ILGenerator il, ComponentPrim canonical, Type expected)
+        {
+            var canonicalClr = PrimToCs(canonical);
+            if (canonicalClr == expected) return;
+            if (canonical == ComponentPrim.Char && expected == typeof(char))
+            {
+                // i32 codepoint → CLR char. Conv.U2 narrows the
+                // 32-bit value to 16 bits; characters above BMP
+                // would truncate but the harness convention chose
+                // this representation knowingly.
+                il.Emit(OpCodes.Conv_U2);
+                return;
+            }
+            throw new InvalidOperationException(
+                "Record ctor expects " + expected.FullName
+                + " but canonical-ABI primitive " + canonical
+                + " maps to " + canonicalClr.FullName
+                + " — no conversion configured.");
         }
 
         private static int AlignUp(int offset, int alignment)
