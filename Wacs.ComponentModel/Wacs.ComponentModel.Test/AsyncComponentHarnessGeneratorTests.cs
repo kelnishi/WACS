@@ -324,6 +324,20 @@ namespace Wacs.ComponentModel.Test
 
         [SyncExport("get_profiles")]
         internal partial Profile[] GetProfiles(int n);
+
+        // list<record> with a nested-record field. Contact
+        // (declared earlier) is { string Name; Address Home;
+        // int Age; } where Address is { string Street; int
+        // Zip; }. Lower recursively writes inner Address
+        // fields at outer + sub-field offsets; lift uses
+        // InlineRecordFieldLiftExpression to build a nested
+        // property-initializer in one expression.
+        [SyncExport("send_contacts")]
+        internal partial int SendContacts(
+            Contact[] contacts);
+
+        [SyncExport("get_contacts")]
+        internal partial Contact[] GetContacts(int n);
     }
 
     /// <summary>Primitive arrays beyond byte[] — canon-ABI

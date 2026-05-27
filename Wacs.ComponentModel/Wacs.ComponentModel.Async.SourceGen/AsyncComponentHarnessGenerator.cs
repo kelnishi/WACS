@@ -363,6 +363,12 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 if (IsPtrLenAggregate(f.Type)) continue;
                 if (IsNullablePrimitive(f.Type)) continue;
                 if (IsOptionRef(f.Type)) continue;
+                // Nested record field: the inner record must
+                // itself be supported as a list element so
+                // the per-element lower / lift can recurse.
+                if (TryLookupRecord(f.Type, out var sub)
+                    && IsRecordSupportedAsListElement(sub))
+                    continue;
                 return false;
             }
             return true;
@@ -3468,6 +3474,16 @@ namespace Wacs.ComponentModel.Async.SourceGen
                         sb.Append(lenLoc);
                         sb.AppendLine(");");
                     }
+                    else if (TryLookupRecord(f.Type, out _))
+                    {
+                        // Nested record field: recursive
+                        // write at the bumped offset.
+                        EmitInlineRecordFieldLowerStatements(
+                            sb, f.Type,
+                            valueExpr + "." + f.Name,
+                            offsetExpr + " + " + f.Offset,
+                            "                ");
+                    }
                     else
                     {
                         EmitWriteMemoryStatement(sb, f.Type,
@@ -3674,6 +3690,17 @@ namespace Wacs.ComponentModel.Async.SourceGen
                                 + (f.Offset + payOff)));
                         sb.Append(")");
                     }
+                    else if (TryLookupRecord(f.Type, out _))
+                    {
+                        // Nested record field: recursive
+                        // inline construction via the shared
+                        // helper.
+                        sb.Append(
+                            InlineRecordFieldLiftExpression(
+                                f.Type,
+                                offsetExpr + " + "
+                                    + f.Offset));
+                    }
                     else
                     {
                         sb.Append(ReadMemoryExprForType(f.Type,
@@ -3714,6 +3741,204 @@ namespace Wacs.ComponentModel.Async.SourceGen
             for (int i = 0; i < innerDims; i++)
                 s.Append("[]");
             return s.ToString();
+        }
+
+        // Recursive multi-statement lower for a record /
+        // tuple field at `offsetExpr`. Mirrors
+        // InlineRecordFieldLiftExpression: handles primitive
+        // (WriteX inline), ptr/len (counter-suffixed locals
+        // + WriteI32LE), option<primitive>
+        // (WriteU8 + WriteX), option<ptr/len> (WriteU8 +
+        // conditional lower + WriteI32LE pair), and nested
+        // record (recurse with offset bumped by sub.Offset).
+        private static void EmitInlineRecordFieldLowerStatements(
+            StringBuilder sb, string fieldType,
+            string valueExpr, string offsetExpr,
+            string indent)
+        {
+            if (IsPtrLenAggregate(fieldType))
+            {
+                int n = NextListInnerId();
+                string ptrLoc = "__rfPtr" + n;
+                string lenLoc = "__rfLen" + n;
+                sb.Append(indent);
+                sb.Append("int ");
+                sb.Append(ptrLoc);
+                sb.AppendLine(" = 0;");
+                sb.Append(indent);
+                sb.Append("int ");
+                sb.Append(lenLoc);
+                sb.AppendLine(" = 0;");
+                EmitPtrLenAssignInto(sb, fieldType,
+                    valueExpr, ptrLoc, lenLoc, indent);
+                sb.Append(indent);
+                sb.Append("global::Wacs.ComponentModel" +
+                    ".Harness.MemoryHelpers.WriteI32LE(" +
+                    "_memory!, ");
+                sb.Append(offsetExpr);
+                sb.Append(", ");
+                sb.Append(ptrLoc);
+                sb.AppendLine(");");
+                sb.Append(indent);
+                sb.Append("global::Wacs.ComponentModel" +
+                    ".Harness.MemoryHelpers.WriteI32LE(" +
+                    "_memory!, ");
+                sb.Append(offsetExpr);
+                sb.Append(" + 4, ");
+                sb.Append(lenLoc);
+                sb.AppendLine(");");
+                return;
+            }
+            if (IsNullablePrimitive(fieldType))
+            {
+                string innerT = InnerOfNullable(fieldType);
+                int payOff = NullablePayloadOffset(innerT);
+                sb.Append(indent);
+                sb.Append("global::Wacs.ComponentModel" +
+                    ".Harness.MemoryHelpers.WriteU8(_memory!, ");
+                sb.Append(offsetExpr);
+                sb.Append(", (byte)(");
+                sb.Append(valueExpr);
+                sb.AppendLine(".HasValue ? 1 : 0));");
+                EmitWriteMemoryStatement(sb, innerT,
+                    "_memory!",
+                    offsetExpr + " + " + payOff,
+                    valueExpr + ".GetValueOrDefault()",
+                    indent);
+                return;
+            }
+            if (IsOptionRef(fieldType))
+            {
+                string innerT = InnerOfNullable(fieldType);
+                int payOff = NullablePayloadOffset(innerT);
+                int n = NextListInnerId();
+                string ptrLoc = "__rfPtr" + n;
+                string lenLoc = "__rfLen" + n;
+                sb.Append(indent);
+                sb.Append("global::Wacs.ComponentModel" +
+                    ".Harness.MemoryHelpers.WriteU8(_memory!, ");
+                sb.Append(offsetExpr);
+                sb.Append(", (byte)(");
+                sb.Append(valueExpr);
+                sb.AppendLine(" != null ? 1 : 0));");
+                sb.Append(indent);
+                sb.Append("int ");
+                sb.Append(ptrLoc);
+                sb.AppendLine(" = 0;");
+                sb.Append(indent);
+                sb.Append("int ");
+                sb.Append(lenLoc);
+                sb.AppendLine(" = 0;");
+                sb.Append(indent);
+                sb.Append("if (");
+                sb.Append(valueExpr);
+                sb.AppendLine(" != null)");
+                sb.Append(indent);
+                sb.AppendLine("{");
+                EmitPtrLenAssignInto(sb, innerT, valueExpr,
+                    ptrLoc, lenLoc, indent + "    ");
+                sb.Append(indent);
+                sb.AppendLine("}");
+                sb.Append(indent);
+                sb.Append("global::Wacs.ComponentModel" +
+                    ".Harness.MemoryHelpers.WriteI32LE(" +
+                    "_memory!, ");
+                sb.Append(offsetExpr);
+                sb.Append(" + ");
+                sb.Append(payOff);
+                sb.Append(", ");
+                sb.Append(ptrLoc);
+                sb.AppendLine(");");
+                sb.Append(indent);
+                sb.Append("global::Wacs.ComponentModel" +
+                    ".Harness.MemoryHelpers.WriteI32LE(" +
+                    "_memory!, ");
+                sb.Append(offsetExpr);
+                sb.Append(" + ");
+                sb.Append(payOff + 4);
+                sb.Append(", ");
+                sb.Append(lenLoc);
+                sb.AppendLine(");");
+                return;
+            }
+            if (TryLookupRecord(fieldType, out var sub))
+            {
+                foreach (var f in sub.Fields)
+                {
+                    EmitInlineRecordFieldLowerStatements(sb,
+                        f.Type,
+                        valueExpr + "." + f.Name,
+                        offsetExpr + " + " + f.Offset,
+                        indent);
+                }
+                return;
+            }
+            // Primitive — falls through to a simple Write.
+            EmitWriteMemoryStatement(sb, fieldType,
+                "_memory!", offsetExpr, valueExpr, indent);
+        }
+
+        // Recursive single-expression lift for a record /
+        // tuple field at `offsetExpr` within memory. Used by
+        // the list<record> element lift to build inline
+        // property-initializers across primitive / ptr/len /
+        // option / nested-record field types. Multi-statement
+        // shapes (result, list-of-record nested via list-of-
+        // X) still need the field-by-field helpers, but
+        // anything that lifts to a single expression composes
+        // through here.
+        private static string InlineRecordFieldLiftExpression(
+            string fieldType, string offsetExpr)
+        {
+            if (IsPtrLenAggregate(fieldType))
+                return PtrLenLiftExpressionAtOffset(
+                    fieldType, offsetExpr);
+            if (IsNullablePrimitive(fieldType))
+            {
+                string innerT = InnerOfNullable(fieldType);
+                int payOff = NullablePayloadOffset(innerT);
+                return "(global::Wacs.ComponentModel.Harness" +
+                    ".MemoryHelpers.ReadU8(_memory!, "
+                    + offsetExpr + ") == 0 ? ("
+                    + fieldType + ")null : "
+                    + ReadMemoryExprForType(innerT,
+                        "_memory!",
+                        offsetExpr + " + " + payOff)
+                    + ")";
+            }
+            if (IsOptionRef(fieldType))
+            {
+                string innerT = InnerOfNullable(fieldType);
+                int payOff = NullablePayloadOffset(innerT);
+                return "(global::Wacs.ComponentModel.Harness" +
+                    ".MemoryHelpers.ReadU8(_memory!, "
+                    + offsetExpr + ") == 0 ? null : "
+                    + PtrLenLiftExpressionAtOffset(innerT,
+                        offsetExpr + " + " + payOff)
+                    + ")";
+            }
+            if (TryLookupRecord(fieldType, out var sub))
+            {
+                var s = new StringBuilder();
+                s.Append("new ");
+                s.Append(fieldType);
+                s.Append(" { ");
+                bool first = true;
+                foreach (var f in sub.Fields)
+                {
+                    if (!first) s.Append(", ");
+                    s.Append(f.Name);
+                    s.Append(" = ");
+                    s.Append(InlineRecordFieldLiftExpression(
+                        f.Type,
+                        offsetExpr + " + " + f.Offset));
+                    first = false;
+                }
+                s.Append(" }");
+                return s.ToString();
+            }
+            return ReadMemoryExprForType(fieldType,
+                "_memory!", offsetExpr);
         }
 
         // PtrLenLiftExpression variant that reads the

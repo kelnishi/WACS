@@ -1,5 +1,43 @@
 # Changelog
 
+## WACS.ComponentModel.Async.SourceGen 0.4.20 — list<record> with nested record fields
+
+`IsRecordSupportedAsListElement` recurses so nested record
+fields are accepted as long as the inner record itself
+satisfies the predicate. New recursive helpers
+`InlineRecordFieldLiftExpression` (single-expression lift,
+including `new Inner { ... }` property-initializers) and
+`EmitInlineRecordFieldLowerStatements` (multi-statement
+lower with counter-suffixed ptr/len locals) drive the
+list<record> per-element write / read across arbitrary
+nesting depths.
+
+* Lift composes through arbitrarily deep nesting: a
+  `Contact { string Name; Address Home; int Age; }` where
+  `Address { string Street; int Zip; }` lifts to
+  `new Contact { Name = LiftUtf8(...), Home = new Address
+  { Street = LiftUtf8(...), Zip = ReadI32LE(...) },
+  Age = ReadI32LE(...) }` — one expression, no intermediate
+  locals.
+* Lower walks each sub-field recursively, emitting the
+  matching write statements at `outer_off + sub.Offset`.
+  Ptr/len + option<ptr/len> branches use the global
+  `_listInnerCounter` (introduced in 0.4.16) so the
+  per-field temporary locals don't collide.
+* Test extension:
+  `Generator_emits_list_shape_export_signatures` picks up
+  `SendContacts(Contact[])` / `GetContacts(int)`.
+  21/21 generator integration tests, 660/660 across
+  Wacs.ComponentModel.Test. Hello-spike passes unchanged.
+
+**Still punted:** lists of records with result /
+nested-list fields (recursive lower for result-shaped
+fields needs more work); deeper-nested list shapes in
+option/result arms (`option<string[][]>`); wider-primitive
+mixed result arms (`result<long, string>` — needs joined-
+slot widening to i64); cyclic record refs (canon-ABI
+prohibits, correctly rejected).
+
 ## WACS.ComponentModel.Async.SourceGen 0.4.19 — list<record> with option<ptr/len> fields
 
 `IsRecordSupportedAsListElement` widened to also accept
