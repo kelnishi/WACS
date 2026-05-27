@@ -149,14 +149,38 @@ namespace Wacs.Transpiler.AOT.Component
             // pass made signatures align — same Vec2 / Outcome
             // CLR types on both sides — so direct match works in
             // either shape.
+            //
+            // Manual enumeration + parameter-type filter rather than
+            // GetMethod-with-types: a TypeBuilder-built Type's
+            // GetMethod-with-types overload silently rejects matches
+            // whose param types are themselves from the assembly's
+            // pre-registered-types pool (sibling-assembly Type ref
+            // identity is preserved but its binder mismatches on
+            // ParameterModifier comparison). Manual filter walks
+            // ReferenceEquals on each param type — exactly what we
+            // want since the same Type instance was used on both
+            // sides during ComponentExports emit.
             var bindingFlags = BindingFlags.Public
                 | (ceField == null ? BindingFlags.Static : BindingFlags.Instance);
-            var target = componentExports.GetMethod(
-                ifaceMethod.Name,
-                bindingFlags,
-                binder: null,
-                types: paramTypes,
-                modifiers: null);
+            MethodInfo? target = null;
+            foreach (var m in componentExports.GetMethods(bindingFlags))
+            {
+                if (m.Name != ifaceMethod.Name) continue;
+                var mps = m.GetParameters();
+                if (mps.Length != paramTypes.Length) continue;
+                bool match = true;
+                for (int j = 0; j < mps.Length; j++)
+                {
+                    if (mps[j].ParameterType != paramTypes[j])
+                    {
+                        match = false;
+                        break;
+                    }
+                }
+                if (!match) continue;
+                target = m;
+                break;
+            }
 
             if (target == null)
             {

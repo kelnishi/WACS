@@ -1800,23 +1800,22 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 isVariantReturn = true;
                 // Variants need a generated class — reject
-                // unnamed cases.
+                // unnamed cases. Two CLR-class shapes both succeed:
+                //   - Flat ctor (transpiler's own emit): a single
+                //     class with `(disc, payload0, payload1, …)`
+                //     ctor. EmitVariantReturnBody routes here.
+                //   - Nested subclasses (harness's emit): abstract
+                //     base + one `Case` nested-sealed subclass per
+                //     case, each with its own ctor (no-arg for
+                //     payload-less cases, single-arg for payload
+                //     cases). EmitVariantReturnBodyNested dispatches
+                //     on the disc and Newobjs the matching subclass.
+                // Reject only if neither shape matches.
                 var named = TryFindNamedReturn(decodedWit, emittedTypes,
                                                 export.Name);
                 if (named == null) return;
-                // Variant CLR-class shape gate: EmitVariantReturnBody
-                // assumes the transpiler-emitted "flat ctor"
-                // (disc + every payload). Harness-emitted variants
-                // (Wacs.ComponentModel.Harness.Lib.WitTypeEmit's
-                // nested-subclass pattern: abstract base + Case
-                // subclasses each with their own ctor) are wire-
-                // compatible but require per-case dispatch IL, which
-                // isn't built yet. Skip the export when the named
-                // class doesn't expose the flat ctor — HarnessImpl
-                // then emits a NotImplementedException stub for the
-                // corresponding interface method. Sibling exports
-                // (e.g. richer's `add`) still emit cleanly.
-                if (!VariantClassHasFlatCtor(named, variantShape))
+                if (!VariantClassHasFlatCtor(named, variantShape)
+                    && !VariantClassHasNestedSubclasses(named, variantShape))
                     return;
                 returnType = named;
             }
@@ -3213,6 +3212,29 @@ namespace Wacs.Transpiler.AOT.Component
             IReadOnlyList<DefTypeEntry> types, Type variantType,
             VariantShape shape)
         {
+            // Dispatch on variant class shape (gate already
+            // verified in EmitExportMethod). Both shapes share
+            // the disc + payload read setup; the divergence is
+            // in how the final CLR object is constructed —
+            // flat-ctor `Newobj(disc, p0, p1, …)` vs per-case
+            // `Newobj NestedSubclass(payloadOnly?)` after a switch
+            // on the disc value.
+            if (VariantClassHasFlatCtor(variantType, shape))
+            {
+                EmitVariantReturnBodyFlatCtor(il, instanceField,
+                    coreMethod, export, types, variantType, shape);
+                return;
+            }
+            EmitVariantReturnBodyNestedSubclass(il, instanceField,
+                coreMethod, export, types, variantType, shape);
+        }
+
+        private static void EmitVariantReturnBodyFlatCtor(
+            ILGenerator il, FieldBuilder instanceField,
+            MethodInfo coreMethod, EmittableExport export,
+            IReadOnlyList<DefTypeEntry> types, Type variantType,
+            VariantShape shape)
+        {
             var memoryGetter = instanceField.FieldType.GetMethod("get_Memory");
             if (memoryGetter == null)
                 throw new InvalidOperationException(
@@ -3323,6 +3345,200 @@ namespace Wacs.Transpiler.AOT.Component
                     + "align with EmitVariantType's ctor signature.");
             il.Emit(OpCodes.Newobj, ctor);
             il.Emit(OpCodes.Ret);
+        }
+
+        /// <summary>
+        /// IL body for a variant return whose CLR class follows the
+        /// harness's nested-subclass shape: an abstract base type
+        /// (e.g. <c>Outcome</c>) plus one nested sealed subclass per
+        /// case (<c>Outcome.Success</c>, <c>Outcome.Invalid</c>),
+        /// each with its own ctor — parameterless for payload-less
+        /// cases, single-arg for payload cases.
+        ///
+        /// <para>Reads the disc byte, switches on its value, and per
+        /// case reads just THAT case's payload (if any) before
+        /// <c>Newobj</c>-ing the matching nested subclass. Pre-
+        /// existing payload readers
+        /// (<see cref="EmitReadPayloadAtOffset"/> /
+        /// <see cref="EmitReadStringPayloadAtOffset"/> /
+        /// <see cref="EmitReadListPayloadAtOffset"/> /
+        /// <see cref="EmitReadRecordPayloadAtOffset"/>) push the CLR
+        /// payload value on the stack; <c>Newobj</c> on the subclass
+        /// ctor consumes it.</para>
+        /// </summary>
+        private static void EmitVariantReturnBodyNestedSubclass(
+            ILGenerator il, FieldBuilder instanceField,
+            MethodInfo coreMethod, EmittableExport export,
+            IReadOnlyList<DefTypeEntry> types, Type variantType,
+            VariantShape shape)
+        {
+            var memoryGetter = instanceField.FieldType.GetMethod("get_Memory");
+            if (memoryGetter == null)
+                throw new InvalidOperationException(
+                    "Variant-returning component requires Module.Memory.");
+
+            var retAreaLocal = il.DeclareLocal(typeof(int));
+            var memoryLocal = il.DeclareLocal(typeof(MemoryInstance));
+            var discLocal = il.DeclareLocal(typeof(int));
+
+            EmitCoreCall(il, instanceField, coreMethod, export, types);
+            il.Emit(OpCodes.Stloc, retAreaLocal);
+
+            EmitLoadInstance(il, instanceField);
+            il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
+            il.Emit(OpCodes.Stloc, memoryLocal);
+
+            var caseCount = shape.CaseNames.Count;
+            var discWidth = caseCount <= 256 ? 1
+                : caseCount <= 65536 ? 2 : 4;
+            int payloadAlign = 1;
+            foreach (var p in shape.CasePayloads)
+            {
+                int a = p switch
+                {
+                    VariantPayload.Prim pp => PrimVariantAlign(pp.P),
+                    VariantPayload.ListOfPrim _ => 4,
+                    VariantPayload.RecordOfPrim rr => RecordAlign(rr.FieldPrims),
+                    _ => 1,
+                };
+                if (a > payloadAlign) payloadAlign = a;
+            }
+            var payloadOffset = AlignUp(discWidth, payloadAlign);
+
+            // Read disc → discLocal (kept as i32 for the switch table).
+            il.Emit(OpCodes.Ldloc, memoryLocal);
+            il.Emit(OpCodes.Ldloc, retAreaLocal);
+            string readerName = discWidth == 1 ? nameof(PrimitiveStore.ReadU8)
+                : discWidth == 2 ? nameof(PrimitiveStore.ReadU16LE)
+                : nameof(PrimitiveStore.ReadU32LE);
+            var discReader = typeof(PrimitiveStore).GetMethod(
+                readerName,
+                new[] { typeof(MemoryInstance), typeof(int) })!;
+            il.EmitCall(OpCodes.Call, discReader, null);
+            il.Emit(OpCodes.Stloc, discLocal);
+
+            // Per-case labels + a default-throw fallthrough.
+            var caseLabels = new Label[caseCount];
+            for (int i = 0; i < caseCount; i++)
+                caseLabels[i] = il.DefineLabel();
+            var endLabel = il.DefineLabel();
+            var defaultLabel = il.DefineLabel();
+
+            il.Emit(OpCodes.Ldloc, discLocal);
+            il.Emit(OpCodes.Switch, caseLabels);
+            il.Emit(OpCodes.Br, defaultLabel);
+
+            for (int i = 0; i < caseCount; i++)
+            {
+                il.MarkLabel(caseLabels[i]);
+
+                var caseName = shape.CaseNames[i];
+                var nestedTypeName = PascalCase(caseName);
+                var nestedType = variantType.GetNestedType(
+                    nestedTypeName, BindingFlags.Public);
+                if (nestedType == null)
+                    throw new InvalidOperationException(
+                        "Variant " + variantType.FullName
+                        + " missing nested case type '" + nestedTypeName
+                        + "' for WIT case '" + caseName + "'.");
+
+                Type[] subCtorParams;
+                switch (shape.CasePayloads[i])
+                {
+                    case VariantPayload.None _:
+                        subCtorParams = Type.EmptyTypes;
+                        break;
+                    case VariantPayload.Prim pp:
+                        if (pp.P == ComponentPrim.String)
+                        {
+                            EmitReadStringPayloadAtOffset(il, memoryLocal,
+                                retAreaLocal, payloadOffset,
+                                export.StringEncoding);
+                            subCtorParams = new[] { typeof(string) };
+                        }
+                        else
+                        {
+                            EmitReadPayloadAtOffset(il, memoryLocal,
+                                retAreaLocal, payloadOffset, pp.P);
+                            subCtorParams = new[] { PrimToCs(pp.P) };
+                        }
+                        break;
+                    case VariantPayload.ListOfPrim ll:
+                        EmitReadListPayloadAtOffset(il, memoryLocal,
+                            retAreaLocal, payloadOffset, ll.ElemP);
+                        subCtorParams = new[] { PrimToCs(ll.ElemP).MakeArrayType() };
+                        break;
+                    case VariantPayload.RecordOfPrim rr:
+                        EmitReadRecordPayloadAtOffset(il, memoryLocal,
+                            retAreaLocal, payloadOffset, rr);
+                        subCtorParams = new[] { rr.RecordClrType };
+                        break;
+                    default:
+                        throw new InvalidOperationException(
+                            "Unhandled variant payload kind for case "
+                            + caseName + " on " + variantType.FullName);
+                }
+
+                var subCtor = nestedType.GetConstructor(subCtorParams);
+                if (subCtor == null)
+                    throw new InvalidOperationException(
+                        "Variant case class " + nestedType.FullName
+                        + " missing matching constructor (expected "
+                        + subCtorParams.Length + " params).");
+                il.Emit(OpCodes.Newobj, subCtor);
+                il.Emit(OpCodes.Br, endLabel);
+            }
+
+            // Default: disc value outside the case range. Throw with
+            // a clear diagnostic so the failure is loud rather than
+            // a silent unrooted-stack mistype.
+            il.MarkLabel(defaultLabel);
+            il.Emit(OpCodes.Ldstr,
+                "Variant " + variantType.FullName
+                + " received out-of-range discriminant.");
+            il.Emit(OpCodes.Newobj,
+                typeof(InvalidOperationException).GetConstructor(
+                    new[] { typeof(string) })!);
+            il.Emit(OpCodes.Throw);
+
+            il.MarkLabel(endLabel);
+            il.Emit(OpCodes.Ret);
+        }
+
+        /// <summary>True when <paramref name="variantType"/> exposes
+        /// a nested public sealed subclass per case (the harness's
+        /// <c>WitTypeEmit.PopulateVariant</c> shape: abstract base +
+        /// per-case nested classes). Each expected subclass is
+        /// looked up by <see cref="PascalCase"/>(caseName); each
+        /// must declare a public ctor whose param list matches the
+        /// case's payload (empty for no-payload cases). Used by
+        /// <see cref="EmitVariantReturnBodyNestedSubclass"/> as the
+        /// gate before per-case dispatch IL.</summary>
+        private static bool VariantClassHasNestedSubclasses(
+            Type variantType, VariantShape shape)
+        {
+            for (int i = 0; i < shape.CaseNames.Count; i++)
+            {
+                var nestedName = PascalCase(shape.CaseNames[i]);
+                var nested = variantType.GetNestedType(
+                    nestedName, BindingFlags.Public);
+                if (nested == null) return false;
+                Type[] expected = shape.CasePayloads[i] switch
+                {
+                    VariantPayload.None _ => Type.EmptyTypes,
+                    VariantPayload.Prim pp => pp.P == ComponentPrim.String
+                        ? new[] { typeof(string) }
+                        : new[] { PrimToCs(pp.P) },
+                    VariantPayload.ListOfPrim ll
+                        => new[] { PrimToCs(ll.ElemP).MakeArrayType() },
+                    VariantPayload.RecordOfPrim rr
+                        => new[] { rr.RecordClrType },
+                    _ => null!,
+                };
+                if (expected == null) return false;
+                if (nested.GetConstructor(expected) == null) return false;
+            }
+            return true;
         }
 
         /// <summary>True when <paramref name="variantType"/> is

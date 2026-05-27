@@ -1,5 +1,56 @@
 # Changelog
 
+## WACS.Transpiler.Lib 0.12.11 — variant nested-subclass dispatch + discovered record-param gap
+
+Closes the residual sub-gap from #3b: variants whose CLR class
+uses the harness's nested-subclass pattern (`Outcome` abstract
+base + `Outcome.Success(payload)` / `Outcome.Invalid()` nested
+sealed subclasses) now flow through `ComponentExports`. The
+existing flat-ctor path (transpiler-emitted `Outcome(disc, p0,
+p1, …)` shape) is preserved; the dispatcher picks at emit time
+based on which shape the CLR class exposes.
+
+* **`EmitVariantReturnBody` two-shape dispatch**: flat-ctor body
+  (existing) and new `EmitVariantReturnBodyNestedSubclass`. The
+  outer dispatcher checks `VariantClassHasFlatCtor` first; falls
+  through to the nested-subclass body otherwise.
+* **`EmitVariantReturnBodyNestedSubclass`**: reads the disc byte
+  into a local, emits a `switch` table over per-case labels,
+  per case reads the matching payload (using the existing
+  `EmitReadPayloadAtOffset` / `EmitReadStringPayloadAtOffset` /
+  `EmitReadListPayloadAtOffset` / `EmitReadRecordPayloadAtOffset`
+  helpers) and `Newobj`s the matching nested subclass ctor. A
+  default-label branch throws `InvalidOperationException` for
+  out-of-range disc values.
+* **`VariantClassHasNestedSubclasses`**: gate predicate. Per case,
+  expects `variantType.GetNestedType(PascalCase(caseName), Public)`
+  with a ctor matching the case's payload (empty for no-payload,
+  single-arg for payload cases).
+* **`EmitExportMethod` variant branch**: accepts a variant return
+  if EITHER shape gate fires (was: flat-ctor only).
+
+Richer's `normalize-or-fail(vec2) -> outcome` now emits a real
+~166-byte dispatch body on `ComponentExports.NormalizeOrFail`
+where it was previously skipped to a `HarnessImpl`
+`NotImplementedException` stub.
+
+### Discovered gap (not addressed): flat-record-param lowering
+
+End-to-end invocation of the Richer harness still throws
+`InvalidProgramException` at JIT time because of a separate
+pre-existing bug from `Transpiler.Lib 0.12.9`'s aggregate-param
+lowering: small records flatten into individual flat slots per
+the canonical ABI (Vec2 → 2 i32 args, not 1 ptr arg), but
+`EmitLowerRecordParamToLocals` always emits the
+`cabi_realloc` + ptr-pass path. The actual core method takes
+`(Int32, Int32, Int32, Int32) => Int32` for `add(vec2, vec2)`;
+the emitted IL pushes `(ptr_a, ptr_b)` and the JIT rejects the
+arity mismatch. Structural assertions pass; full end-to-end
+exercise of imports-less record-bearing harness fixtures awaits
+the flat-record-param fix.
+
+Tests: 842/842 Wacs.Transpiler.Test (+ 1 skip).
+
 ## WACS.Transpiler.Lib 0.12.10 — instance-shape ComponentExports for imports-bearing modules
 
 Closes #3c of the wit-harness plan: components whose core Module

@@ -234,6 +234,35 @@ namespace Wacs.Transpiler.Test
 
                 Assert.True(iRicher!.IsAssignableFrom(harnessImpl),
                     $"{harnessImpl!.FullName} must implement {iRicher.FullName}.");
+
+                // Variant nested-subclass dispatch produces a real
+                // body for NormalizeOrFail (was a NotImplementedException
+                // stub before this sprint's residual). ~150+ bytes of
+                // alloc + write + core call + switch + per-case payload
+                // reads + newobj of nested subclasses.
+                //
+                // Note: end-to-end invocation is held back by a
+                // separate gap discovered during this sprint — small
+                // record params flatten into individual field slots
+                // per the canonical ABI (Vec2 → 2 i32 args, not
+                // 1 ptr arg), but EmitLowerRecordParamToLocals always
+                // emits the ptr-pass path. Triggers
+                // InvalidProgramException at JIT time. Structural
+                // assertion lands here; flat-record-param lowering is
+                // a follow-up.
+                var ce = result.Assembly.GetTypes()
+                    .First(t => t.Name == "ComponentExports");
+                var ceNormalize = ce.GetMethods()
+                    .FirstOrDefault(m => m.Name == "NormalizeOrFail");
+                Assert.True(ceNormalize != null,
+                    "ComponentExports.NormalizeOrFail not emitted — "
+                    + "the variant nested-subclass gate is rejecting "
+                    + "the harness's Outcome shape.");
+                var ilLen = ceNormalize!.GetMethodBody()!
+                    .GetILAsByteArray()!.Length;
+                Assert.True(ilLen > 50,
+                    "NormalizeOrFail IL body is " + ilLen
+                    + " bytes — expected the full variant dispatch.");
             }
             finally
             {
