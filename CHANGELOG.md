@@ -1,5 +1,57 @@
 # Changelog
 
+## WACS.ComponentModel.Async.SourceGen 0.4.22 — wider-primitive mixed result arms (result<long, string> etc.)
+
+Mixed `result<>` arms where one arm is an 8-byte
+primitive (`long`, `ulong`, `double`) and the other is a
+ptr/len aggregate now compile. Joined-payload slot 1
+widens from i32 to i64 (matching canon-ABI's index-by-
+index widest-type-per-slot rule); slot 2 stays i32.
+
+* **`ResultJoinedPayload`** loosened the mixed-shape gate
+  from `PrimitiveSize <= 4` to `<= 8`, accepting any
+  primitive arm width. New `ResultPayloadIsWide` flags
+  the 8-byte case so codegen branches.
+* **Flat sig.** `AppendFlatFieldTypes`,
+  `AppendFlatParamTypes`, `BuildFlatInvokerTypeArgs`
+  emit `long, int` for joined slots when
+  `ResultPayloadIsWide`, vs the existing `int, int` for
+  narrow. (`AppendFlatParamTypes` also picked up the
+  pre-existing ptr/len-joined gap — was bare-appending
+  `joined` for any non-null joined type, which silently
+  emitted `string` / `byte[]` in the flat sig. Now
+  branches on `IsPtrLenAggregate(joined)`.)
+* **Lower.** `EmitResultArgLower` ptr/len-joined branch
+  splits into narrow + wide. Wide declares
+  `long <base>_ptr = 0; int <base>_len = 0;`. New helper
+  `EmitWideArmAssign` writes one arm's value into the
+  long-typed slot: primitive 8-byte → `(long)value` or
+  `DoubleToInt64Bits(value)`; ptr/len → lower body to
+  temp int locals, then `_ptr = (long)(uint)tmpPtr;
+  _len = tmpLen` (zero-extending the ptr to i64).
+* **Lift.** No code change needed — the memory layout
+  (disc at 0, payload at `ResultPayloadOffset` which
+  uses `Math.Max(FieldAlign(ok), FieldAlign(err))` = 8
+  for wide) was already correct.
+  `EmitResultArmReturn` reads `ReadI64LE` for the
+  primitive long arm and `ReadI32LE` at payOff + 0/4 for
+  the ptr/len arm — the same code path serves narrow +
+  wide.
+* Test extensions:
+  `Generator_emits_result_ptrlen_export_signatures`
+  picks up `WitResult<long, string> LongOrText(int)` and
+  `WitResult<double, byte[]> DblOrBytes(int)`.
+  22/22 generator integration tests; 660/660 across
+  Wacs.ComponentModel.Test (minus pre-existing
+  `WaitableSetSuspendBridgeTests` timing flake).
+  Hello-spike passes unchanged.
+
+**Still punted:** lists of records with `list<X>` fields
+(list-as-field needs its own multi-statement lift
+wrapper); deeper-nested list shapes in option/result
+arms (`option<string[][]>`); cyclic record refs (canon-
+ABI prohibits, correctly rejected).
+
 ## WACS.ComponentModel.Async.SourceGen 0.4.21 — list<record> with result fields
 
 `IsRecordSupportedAsListElement` accepts any

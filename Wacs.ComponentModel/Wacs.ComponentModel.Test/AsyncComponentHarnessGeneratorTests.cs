@@ -464,6 +464,18 @@ namespace Wacs.ComponentModel.Test
         [SyncExport("flag_or_text")]
         internal partial WitResult<bool, string>
             FlagOrText(int seed);
+
+        // Wider mixed: i64 (long / double) prim arm vs ptr/
+        // len. Joined slot 1 widens to long; slot 2 stays
+        // int. Param flat = (int disc, long slot1, int slot2).
+        // Memory layout: disc:u8 at 0, payload at +8.
+        [SyncExport("long_or_text")]
+        internal partial WitResult<long, string>
+            LongOrText(int seed);
+
+        [SyncExport("dbl_or_bytes")]
+        internal partial WitResult<double, byte[]>
+            DblOrBytes(int seed);
     }
 
     /// <summary>Sync exports with <c>WitResult&lt;TOk,
@@ -1681,6 +1693,45 @@ namespace Wacs.ComponentModel.Test
             Assert.NotNull(fOTInv);
             Assert.Equal(typeof(Func<int, int>),
                 fOTInv!.FieldType);
+
+            // result<long, string> — wide-mixed. Return-only
+            // so the flat invoker is Func<int seed, int
+            // retArea>. The retArea memory layout uses long
+            // slot at offset 8.
+            var lOT = typeof(ResultPtrLenHarnessFixture)
+                .GetMethod("LongOrText",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(lOT);
+            Assert.Equal(typeof(WitResult<long, string>),
+                lOT!.ReturnType);
+            var lOTInv = typeof(ResultPtrLenHarnessFixture)
+                .GetField("_invoker_LongOrText",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(lOTInv);
+            Assert.Equal(typeof(Func<int, int>),
+                lOTInv!.FieldType);
+            Assert.NotNull(typeof(ResultPtrLenHarnessFixture)
+                .GetField("_post_LongOrText",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance));
+
+            // result<double, byte[]>
+            var dOB = typeof(ResultPtrLenHarnessFixture)
+                .GetMethod("DblOrBytes",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(dOB);
+            Assert.Equal(typeof(WitResult<double, byte[]>),
+                dOB!.ReturnType);
+            var dOBInv = typeof(ResultPtrLenHarnessFixture)
+                .GetField("_invoker_DblOrBytes",
+                    BindingFlags.NonPublic
+                    | BindingFlags.Instance);
+            Assert.NotNull(dOBInv);
+            Assert.Equal(typeof(Func<int, int>),
+                dOBInv!.FieldType);
         }
 
         [Fact]

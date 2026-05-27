@@ -888,21 +888,38 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 return ok;
             // Mixed primitive ↔ ptr/len: take the ptr/len
             // type as the joined-payload signal. Both arms
-            // then share the (ptr, len) slot pair; the
-            // primitive arm uses slot 1 as the primitive
-            // value and leaves slot 2 at zero. Restricted to
-            // i32-or-smaller primitive arms — wider
-            // primitives need joined-slot widening that we
-            // don't emit yet.
+            // share the (slot1, slot2) pair; for ≤4-byte
+            // primitives slot1 is i32 (the prim arm packs
+            // its value into the low 32 bits), for 8-byte
+            // primitives (long / ulong / double) slot1
+            // widens to i64. `ResultPayloadIsWide` flags
+            // the latter; `EmitResultArgLower` /
+            // flat-sig emission branch on it.
             if (IsPtrLenAggregate(ok)
                 && IsPrimitive(err)
-                && PrimitiveSize(err) <= 4)
+                && PrimitiveSize(err) <= 8)
                 return ok;
             if (IsPtrLenAggregate(err)
                 && IsPrimitive(ok)
-                && PrimitiveSize(ok) <= 4)
+                && PrimitiveSize(ok) <= 8)
                 return err;
             return "MIXED";
+        }
+
+        // True iff the result has a mixed primitive ↔
+        // ptr/len shape where the primitive arm is 8 bytes
+        // wide (long / ulong / double). In that case the
+        // joined-payload slot 1 widens to i64; slot 2 stays
+        // i32. Drives flat-sig + lower codegen branches.
+        private static bool ResultPayloadIsWide(
+            string ok, string err)
+        {
+            return (IsPtrLenAggregate(ok)
+                    && IsPrimitive(err)
+                    && PrimitiveSize(err) == 8)
+                || (IsPtrLenAggregate(err)
+                    && IsPrimitive(ok)
+                    && PrimitiveSize(ok) == 8);
         }
 
         private static int ResultPayloadOffset(
@@ -4263,6 +4280,68 @@ namespace Wacs.ComponentModel.Async.SourceGen
             }
         }
 
+        // Helper for the wide mixed-result lower: write one
+        // arm's value into the (long ptr, int len) slot pair.
+        //   * unit arm: leaves both slots at 0.
+        //   * primitive 8-byte arm: ptr = (long)value (or
+        //     DoubleToInt64Bits for double); len stays 0.
+        //   * ptr/len arm: lower body to temp int locals,
+        //     then ptr = (long)(uint)tmpPtr; len = tmpLen.
+        private static void EmitWideArmAssign(
+            StringBuilder sb, string armType,
+            string sourceExpr,
+            string ptrLocal, string lenLocal, string indent)
+        {
+            if (armType == ValueTupleType) return;
+            if (IsPrimitive(armType))
+            {
+                sb.Append(indent);
+                sb.Append(ptrLocal);
+                sb.Append(" = ");
+                if (armType == "double"
+                    || armType == "System.Double")
+                {
+                    sb.Append("global::System.BitConverter" +
+                        ".DoubleToInt64Bits(");
+                    sb.Append(sourceExpr);
+                    sb.Append(")");
+                }
+                else
+                {
+                    sb.Append("(long)(");
+                    sb.Append(sourceExpr);
+                    sb.Append(")");
+                }
+                sb.AppendLine(";");
+                return;
+            }
+            // ptr/len arm: lower body to temp int locals, then
+            // widen ptr to long via (long)(uint) zero-extend.
+            int n = NextListInnerId();
+            string tPtr = "__widePtr" + n;
+            string tLen = "__wideLen" + n;
+            sb.Append(indent);
+            sb.Append("int ");
+            sb.Append(tPtr);
+            sb.AppendLine(" = 0;");
+            sb.Append(indent);
+            sb.Append("int ");
+            sb.Append(tLen);
+            sb.AppendLine(" = 0;");
+            EmitPtrLenAssignInto(sb, armType,
+                sourceExpr + "!", tPtr, tLen, indent);
+            sb.Append(indent);
+            sb.Append(ptrLocal);
+            sb.Append(" = (long)(uint)");
+            sb.Append(tPtr);
+            sb.AppendLine(";");
+            sb.Append(indent);
+            sb.Append(lenLocal);
+            sb.Append(" = ");
+            sb.Append(tLen);
+            sb.AppendLine(";");
+        }
+
         // Emit shared result-lower statements: disc + payload
         // locals. Handles all four payload shapes:
         //   * joined == null (both arms unit) → disc only
@@ -4284,7 +4363,8 @@ namespace Wacs.ComponentModel.Async.SourceGen
             sb.Append(sourceExpr);
             sb.AppendLine(".IsOk ? 0 : 1;");
             if (joined == null) return;
-            if (IsPtrLenAggregate(joined))
+            if (IsPtrLenAggregate(joined)
+                && !ResultPayloadIsWide(ok, err))
             {
                 sb.Append("            int ");
                 sb.Append(baseName);
@@ -4311,6 +4391,36 @@ namespace Wacs.ComponentModel.Async.SourceGen
                         baseName + "_ptr",
                         baseName + "_len",
                         "                ");
+                sb.AppendLine("            }");
+            }
+            else if (IsPtrLenAggregate(joined)
+                && ResultPayloadIsWide(ok, err))
+            {
+                // Wide mixed: slot 1 is i64, slot 2 is i32.
+                // Primitive arm packs into ptr (long); ptr/len
+                // arm lowers body to temp ints and casts ptr
+                // to long via (long)(uint)ptr (zero-extend).
+                sb.Append("            long ");
+                sb.Append(baseName);
+                sb.AppendLine("_ptr = 0;");
+                sb.Append("            int ");
+                sb.Append(baseName);
+                sb.AppendLine("_len = 0;");
+                sb.Append("            if (");
+                sb.Append(sourceExpr);
+                sb.AppendLine(".IsOk)");
+                sb.AppendLine("            {");
+                EmitWideArmAssign(sb, ok,
+                    sourceExpr + ".OkValue",
+                    baseName + "_ptr", baseName + "_len",
+                    "                ");
+                sb.AppendLine("            }");
+                sb.AppendLine("            else");
+                sb.AppendLine("            {");
+                EmitWideArmAssign(sb, err,
+                    sourceExpr + ".ErrValue",
+                    baseName + "_ptr", baseName + "_len",
+                    "                ");
                 sb.AppendLine("            }");
             }
             else
@@ -4524,7 +4634,9 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     {
                         sb.Append(", ");
                         if (IsPtrLenAggregate(joined))
-                            sb.Append("int, int");
+                            sb.Append(ResultPayloadIsWide(ok,
+                                err)
+                                ? "long, int" : "int, int");
                         else
                             sb.Append(joined);
                     }
@@ -4772,7 +4884,10 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     // result<TOk, TErr> flat lowering:
                     // (i32 disc, joined-payload). joined-
                     // payload is null when both arms are
-                    // unit (no payload slot).
+                    // unit (no payload slot); ptr/len joined
+                    // takes (int, int) — or (long, int) when
+                    // the joined-payload widens to i64 for
+                    // mixed prim↔ptr/len pairs.
                     var (ok, err) = WitResultArgs(p.Type);
                     var joined = ResultJoinedPayload(ok, err);
                     if (!first) sb.Append(", ");
@@ -4780,7 +4895,12 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     if (joined != null)
                     {
                         sb.Append(", ");
-                        sb.Append(joined);
+                        if (IsPtrLenAggregate(joined))
+                            sb.Append(ResultPayloadIsWide(ok,
+                                err)
+                                ? "long, int" : "int, int");
+                        else
+                            sb.Append(joined);
                     }
                     first = false;
                 }
@@ -4848,7 +4968,8 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 {
                     sb.Append(", ");
                     if (IsPtrLenAggregate(joined))
-                        sb.Append("int, int");
+                        sb.Append(ResultPayloadIsWide(ok, err)
+                            ? "long, int" : "int, int");
                     else
                         sb.Append(joined);
                 }
