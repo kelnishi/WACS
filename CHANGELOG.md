@@ -1,5 +1,42 @@
 # Changelog
 
+## WACS.ComponentModel.Async.SourceGen 0.4.21 — list<record> with result fields
+
+`IsRecordSupportedAsListElement` accepts any
+`IsSupportedResult` field type. The recursive helpers
+extend with a result-field branch:
+* `InlineRecordFieldLiftExpression` builds a
+  `(ReadU8(off) == 0 ? T.Ok(<okExpr>) : T.Err(<errExpr>))`
+  ternary, with the arm bodies routed through
+  `ReadMemoryExprForType` (primitive arms) or
+  `PtrLenLiftExpressionAtOffset` (ptr/len arms).
+* `EmitInlineRecordFieldLowerStatements` writes
+  `disc:u8` at the field offset, then either inlines the
+  primitive-joined arm value or branches `.IsOk` and uses
+  `EmitPtrLenAssignInto` per arm before the
+  `WriteI32LE` pair for ptr/len joined.
+* Arm-value accesses (`.OkValue!`, `.ErrValue!`) get the
+  null-forgiving operator since the `WitResult<TOk,
+  TErr>` arm properties return nullable for ref-type arms
+  — silences CS8604 in the generated source.
+* Test extension:
+  `Generator_emits_list_shape_export_signatures` picks up
+  `SendAudits(Audit[])` / `GetAudits(int)` for `Audit
+  { int Id; WitResult<int, string> Result; }`.
+  22/22 generator integration tests, 660/660 across
+  Wacs.ComponentModel.Test (excluding the known timing-
+  flake `WaitableSetSuspendBridgeTests`). Hello-spike
+  passes unchanged.
+
+**Still punted:** lists of records with `list<X>` fields
+(`Doc[] { string Name; int[] Tags; }` — list-as-field
+needs its own multi-statement lift wrapper);
+deeper-nested list shapes in option/result arms
+(`option<string[][]>`); wider-primitive mixed result arms
+(`result<long, string>` — needs joined-slot widening to
+i64); cyclic record refs (canon-ABI prohibits, correctly
+rejected).
+
 ## WACS.ComponentModel.Async.SourceGen 0.4.20 — list<record> with nested record fields
 
 `IsRecordSupportedAsListElement` recurses so nested record

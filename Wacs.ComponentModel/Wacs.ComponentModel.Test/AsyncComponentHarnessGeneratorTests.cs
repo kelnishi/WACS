@@ -273,6 +273,16 @@ namespace Wacs.ComponentModel.Test
         public string? Email;
     }
 
+    /// <summary>Record carrying a result field — exercises
+    /// the result-field branch of list&lt;record&gt;
+    /// recursive helpers.</summary>
+    [WitRecord]
+    internal struct Audit
+    {
+        public int Id;
+        public WitResult<int, string> Result;
+    }
+
     [AsyncComponentHarness]
     internal partial class ListShapeHarnessFixture
     {
@@ -338,6 +348,12 @@ namespace Wacs.ComponentModel.Test
 
         [SyncExport("get_contacts")]
         internal partial Contact[] GetContacts(int n);
+
+        [SyncExport("send_audits")]
+        internal partial int SendAudits(Audit[] audits);
+
+        [SyncExport("get_audits")]
+        internal partial Audit[] GetAudits(int n);
     }
 
     /// <summary>Primitive arrays beyond byte[] — canon-ABI

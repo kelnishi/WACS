@@ -369,6 +369,14 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 if (TryLookupRecord(f.Type, out var sub)
                     && IsRecordSupportedAsListElement(sub))
                     continue;
+                // result<...> field — every shape already
+                // gated by IsSupportedResult is compatible
+                // with the inline lift / lower since result
+                // payloads are at most a (disc, ptr/len) or
+                // (disc, slot1, slot2) tuple of memory reads.
+                if (IsWitResult(f.Type)
+                    && IsSupportedResult(f.Type))
+                    continue;
                 return false;
             }
             return true;
@@ -3474,10 +3482,12 @@ namespace Wacs.ComponentModel.Async.SourceGen
                         sb.Append(lenLoc);
                         sb.AppendLine(");");
                     }
-                    else if (TryLookupRecord(f.Type, out _))
+                    else if (TryLookupRecord(f.Type, out _)
+                        || IsWitResult(f.Type))
                     {
-                        // Nested record field: recursive
-                        // write at the bumped offset.
+                        // Nested record / result field —
+                        // recursive lower via the shared
+                        // helper.
                         EmitInlineRecordFieldLowerStatements(
                             sb, f.Type,
                             valueExpr + "." + f.Name,
@@ -3690,10 +3700,11 @@ namespace Wacs.ComponentModel.Async.SourceGen
                                 + (f.Offset + payOff)));
                         sb.Append(")");
                     }
-                    else if (TryLookupRecord(f.Type, out _))
+                    else if (TryLookupRecord(f.Type, out _)
+                        || IsWitResult(f.Type))
                     {
-                        // Nested record field: recursive
-                        // inline construction via the shared
+                        // Nested record / result field —
+                        // recursive lift via the shared
                         // helper.
                         sb.Append(
                             InlineRecordFieldLiftExpression(
@@ -3873,6 +3884,112 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 }
                 return;
             }
+            if (IsWitResult(fieldType))
+            {
+                // Write disc at field offset; write payload
+                // at field offset + ResultPayloadOffset based
+                // on the active arm. Mirrors
+                // EmitResultArgLower but writes to memory at
+                // the field offset rather than to flat slot
+                // locals.
+                var (ok, err) = WitResultArgs(fieldType);
+                var joined = ResultJoinedPayload(ok, err);
+                int payOff = ResultPayloadOffset(ok, err);
+                sb.Append(indent);
+                sb.Append("global::Wacs.ComponentModel" +
+                    ".Harness.MemoryHelpers.WriteU8(" +
+                    "_memory!, ");
+                sb.Append(offsetExpr);
+                sb.Append(", (byte)(");
+                sb.Append(valueExpr);
+                sb.AppendLine(".IsOk ? 0 : 1));");
+                if (joined != null)
+                {
+                    if (IsPtrLenAggregate(joined))
+                    {
+                        // ptr/len payload — branch on .IsOk
+                        // and write (ptr, len) via a local
+                        // pair.
+                        int n = NextListInnerId();
+                        string ptrLoc = "__rfRPtr" + n;
+                        string lenLoc = "__rfRLen" + n;
+                        sb.Append(indent);
+                        sb.Append("int ");
+                        sb.Append(ptrLoc);
+                        sb.AppendLine(" = 0;");
+                        sb.Append(indent);
+                        sb.Append("int ");
+                        sb.Append(lenLoc);
+                        sb.AppendLine(" = 0;");
+                        sb.Append(indent);
+                        sb.Append("if (");
+                        sb.Append(valueExpr);
+                        sb.AppendLine(".IsOk)");
+                        sb.Append(indent);
+                        sb.AppendLine("{");
+                        if (ok != ValueTupleType)
+                            EmitPtrLenAssignInto(sb, ok,
+                                valueExpr + ".OkValue!",
+                                ptrLoc, lenLoc,
+                                indent + "    ");
+                        sb.Append(indent);
+                        sb.AppendLine("}");
+                        sb.Append(indent);
+                        sb.AppendLine("else");
+                        sb.Append(indent);
+                        sb.AppendLine("{");
+                        if (err != ValueTupleType)
+                            EmitPtrLenAssignInto(sb, err,
+                                valueExpr + ".ErrValue!",
+                                ptrLoc, lenLoc,
+                                indent + "    ");
+                        sb.Append(indent);
+                        sb.AppendLine("}");
+                        sb.Append(indent);
+                        sb.Append("global::Wacs.ComponentModel" +
+                            ".Harness.MemoryHelpers" +
+                            ".WriteI32LE(_memory!, ");
+                        sb.Append(offsetExpr);
+                        sb.Append(" + ");
+                        sb.Append(payOff);
+                        sb.Append(", ");
+                        sb.Append(ptrLoc);
+                        sb.AppendLine(");");
+                        sb.Append(indent);
+                        sb.Append("global::Wacs.ComponentModel" +
+                            ".Harness.MemoryHelpers" +
+                            ".WriteI32LE(_memory!, ");
+                        sb.Append(offsetExpr);
+                        sb.Append(" + ");
+                        sb.Append(payOff + 4);
+                        sb.Append(", ");
+                        sb.Append(lenLoc);
+                        sb.AppendLine(");");
+                    }
+                    else
+                    {
+                        // Primitive joined payload — write
+                        // the appropriate arm's value at
+                        // payOff. Inactive arm contributes
+                        // default(T) (the wasm side reads
+                        // only the arm matching disc).
+                        string val =
+                            valueExpr + ".IsOk ? "
+                            + (ok == ValueTupleType
+                                ? "default(" + joined + ")"
+                                : valueExpr + ".OkValue")
+                            + " : "
+                            + (err == ValueTupleType
+                                ? "default(" + joined + ")"
+                                : valueExpr + ".ErrValue");
+                        EmitWriteMemoryStatement(sb, joined,
+                            "_memory!",
+                            offsetExpr + " + " + payOff,
+                            "(" + val + ")", indent);
+                    }
+                }
+                return;
+            }
             // Primitive — falls through to a simple Write.
             EmitWriteMemoryStatement(sb, fieldType,
                 "_memory!", offsetExpr, valueExpr, indent);
@@ -3936,6 +4053,43 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 }
                 s.Append(" }");
                 return s.ToString();
+            }
+            if (IsWitResult(fieldType))
+            {
+                // Single-expression result lift:
+                //   (disc == 0 ? T.Ok(<okExpr>) :
+                //                T.Err(<errExpr>))
+                // where <okExpr>/<errExpr> read the joined
+                // payload slots inline at the field's offset.
+                var (ok, err) = WitResultArgs(fieldType);
+                var joined = ResultJoinedPayload(ok, err);
+                int payOff = ResultPayloadOffset(ok, err);
+                string discRead =
+                    "global::Wacs.ComponentModel.Harness" +
+                    ".MemoryHelpers.ReadU8(_memory!, "
+                    + offsetExpr + ")";
+                string okBody, errBody;
+                if (joined == null || ok == ValueTupleType)
+                    okBody = "default";
+                else if (IsPtrLenAggregate(ok))
+                    okBody = PtrLenLiftExpressionAtOffset(
+                        ok, offsetExpr + " + " + payOff);
+                else
+                    okBody = ReadMemoryExprForType(ok,
+                        "_memory!",
+                        offsetExpr + " + " + payOff);
+                if (joined == null || err == ValueTupleType)
+                    errBody = "default";
+                else if (IsPtrLenAggregate(err))
+                    errBody = PtrLenLiftExpressionAtOffset(
+                        err, offsetExpr + " + " + payOff);
+                else
+                    errBody = ReadMemoryExprForType(err,
+                        "_memory!",
+                        offsetExpr + " + " + payOff);
+                return "(" + discRead + " == 0 ? "
+                    + fieldType + ".Ok(" + okBody + ") : "
+                    + fieldType + ".Err(" + errBody + "))";
             }
             return ReadMemoryExprForType(fieldType,
                 "_memory!", offsetExpr);
