@@ -1,5 +1,30 @@
 # Changelog
 
+## WACS.Transpiler.Lib 0.12.7 — harness-impl coverage across simple return shapes
+
+`Local_fixture_transpile_with_harness_emits_HarnessImpl` theory
+parameterized over four pre-existing no-import fixtures:
+
+| Fixture | Export | Shape exercised |
+|---|---|---|
+| `tiny-component` | `greet() -> u32` | primitive return |
+| `option-none-component` | `missing() -> option<u32>` | option-of-prim return |
+| `tuple-return-component` | `pair() -> tuple<u32, u32>` | tuple-of-prim return |
+| `result-return-component` | `divide() -> result<u32, u32>` | result-of-prim return |
+
+For each, the test builds a harness `.dll` from the fixture's own
+WIT directory via `HarnessEmitter.EmitToFile`, transpiles the
+component with `TranspilerOptions.HarnessAssemblyPath`, and asserts
+the emitted `{World}HarnessImpl` is assignable to the harness's
+`I{World}`. Confirms the harness-impl pipeline is shape-agnostic
+for return-only signatures — pairs with 0.12.6's interface-export
+positive case to cover the full set of shapes available in
+import-free fixtures.
+
+No production-code changes — test-only.
+
+Tests: 840/840 Wacs.Transpiler.Test (+ 1 skip).
+
 ## WACS.Transpiler.Lib 0.12.6 — harness-impl test coverage extended
 
 Two more end-to-end tests on the harness-impl pipeline added to

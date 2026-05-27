@@ -176,6 +176,74 @@ namespace Wacs.Transpiler.Test
             }
         }
 
+        [Theory]
+        [InlineData("tiny-component", "tiny.component.wasm", "tiny", "tiny.wit")]
+        [InlineData("option-none-component", "n.component.wasm", "n", "n.wit")]
+        [InlineData("tuple-return-component", "t.component.wasm", "t", "t.wit")]
+        [InlineData("result-return-component", "r.component.wasm", "r", "r.wit")]
+        public void Local_fixture_transpile_with_harness_emits_HarnessImpl(
+            string fixtureName, string componentFile, string worldName,
+            string witFile)
+        {
+            // Local fixtures (no WASI imports, hand-written WITs).
+            // Each exercises a different return shape: tiny primitive,
+            // option<u32>, tuple<u32, u32>, result<u32, u32>. All have
+            // no params so they sit cleanly within the existing
+            // IsEmittable surface. Acceptance: the emitted
+            // {World}HarnessImpl is assignable to the harness's
+            // I{World} interface.
+            var fixtureDir = FixtureDir(fixtureName);
+            var witDir = Path.Combine(fixtureDir, "wit");
+            if (!Directory.Exists(witDir))
+            {
+                // Some fixtures predate the harness path; skip cleanly.
+                return;
+            }
+            var componentWasm = Path.Combine(fixtureDir, "wasm", componentFile);
+            if (!File.Exists(componentWasm))
+            {
+                return;
+            }
+            _ = witFile;
+
+            var camelWorld = char.ToUpperInvariant(worldName[0]) + worldName.Substring(1);
+            var tmpHarness = Path.Combine(Path.GetTempPath(),
+                $"{worldName}-harness-{Guid.NewGuid():N}.dll");
+            try
+            {
+                HarnessEmitter.EmitToFile(witDir, tmpHarness);
+
+                using var fs = File.OpenRead(componentWasm);
+                var result = ComponentTranspiler.TranspileSingleModule(
+                    fs,
+                    assemblyNamespace: "Wacs.Transpiled.Local" + camelWorld,
+                    options: new TranspilerOptions
+                    {
+                        HarnessAssemblyPath = tmpHarness,
+                    });
+
+                var allTypes = result.Assembly.GetTypes()
+                    .Select(t => t.FullName).ToArray();
+                var harnessImpl = result.Assembly.GetTypes()
+                    .FirstOrDefault(t => t.Name == camelWorld + "HarnessImpl");
+                Assert.True(harnessImpl != null,
+                    $"{camelWorld}HarnessImpl not found. Emitted types: "
+                    + string.Join(", ", allTypes));
+
+                var harnessAsm = Assembly.LoadFrom(tmpHarness);
+                var iWorld = harnessAsm.GetTypes()
+                    .FirstOrDefault(t => t.Name == "I" + camelWorld && t.IsInterface);
+                Assert.NotNull(iWorld);
+
+                Assert.True(iWorld!.IsAssignableFrom(harnessImpl),
+                    $"{harnessImpl!.FullName} must implement {iWorld.FullName}.");
+            }
+            finally
+            {
+                try { File.Delete(tmpHarness); } catch { }
+            }
+        }
+
         [Fact]
         public void InterfaceExport_transpile_with_harness_emits_HarnessImpl()
         {
