@@ -1,5 +1,44 @@
 # Changelog
 
+## WACS.Cli 1.10.1 — `wacs run --harness` / `--wit-dir`
+
+Closes the second remaining bucket of the wit-harness plan: the
+`run` verb now accepts the same `--harness` / `--wit-dir` flags
+that have been on `wacs build` / `wacs aot` since `WACS.Cli 1.10.0`.
+Symmetric validation across all three verbs.
+
+* `RunOptions.Harness` / `RunOptions.WitDir` — same shape as the
+  build-side options. Mutually exclusive.
+* `RunHandler.ExecuteComponentInner`: when either flag is set on
+  the interpreter component path, the component bytes are diffed
+  against the contract via `ComponentTranspiler.Parse` (which already
+  does the primary-section decoder fallback for cargo-built fixtures)
+  + `WitContractCompare.Diff` before `ComponentInstance.Instantiate`.
+  Mismatch prints the typed diff to stderr and exits 2.
+* `RunHandler.BuildTranspilerOptions`: pipes both
+  `HarnessContractText` and `HarnessAssemblyPath` into the existing
+  transpiler-engine validation, so `--engine transpiler --harness X`
+  on `run` behaves identically to `wacs build --harness X`.
+* New `Wacs.Console.Verbs.HarnessContractLoader` shared helper —
+  `BuildHandler.ResolveHarnessContractText` collapses to a one-line
+  delegate, the new `run`-verb path calls the same code. Single
+  source of truth for the load-`.dll`-vs-walk-`.wit`-dir logic.
+
+Smoke verified on the `wit-harness-spike-primitives` fixture:
+
+```
+# Match → invokes get-sample successfully.
+wacs run --harness stats.dll stats.component.wasm --call get-sample
+
+# Mismatch → typed diff to stderr, exit 2.
+wacs run --harness stats.dll tiny.component.wasm
+  wacs run: component does not match harness WIT contract:
+    export 'get-sample': declared in harness, missing from component.
+    export 'greet': present in component, not declared in harness.
+```
+
+Tests: 840/840 Wacs.Transpiler.Test (+ 1 skip).
+
 ## WACS.Core 0.16.14 / WACS.ComponentModel 0.10.3 — AOT trim-warning cleanup
 
 Closes the AOT trim-warning bucket from the wit-harness plan. Three
