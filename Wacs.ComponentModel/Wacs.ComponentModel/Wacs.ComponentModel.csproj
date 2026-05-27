@@ -12,11 +12,17 @@
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.ComponentModel</AssemblyName>
-        <AssemblyVersion>0.10.2</AssemblyVersion>
-        <Version>0.10.2</Version>
+        <AssemblyVersion>0.10.3</AssemblyVersion>
+        <Version>0.10.3</Version>
         <RepositoryType>git</RepositoryType>
         <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
-        <IsAotCompatible>true</IsAotCompatible>
+        <!-- IsAotCompatible unconditionally trips NETSDK1210 on the
+             netstandard2.1 target framework (the analyzer is only
+             supported on net6.0+ where IsAotCompatible has meaning).
+             Condition it to net8.0 only — the AOT scenarios this
+             package supports (transpiler-emitted consumers, harness
+             pipeline) all run under net8.0. -->
+        <IsAotCompatible Condition="'$(TargetFramework)' == 'net8.0'">true</IsAotCompatible>
         <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
         <IncludeSymbols>true</IncludeSymbols>
         <SymbolPackageFormat>snupkg</SymbolPackageFormat>

@@ -1,5 +1,35 @@
 # Changelog
 
+## WACS.Core 0.16.14 / WACS.ComponentModel 0.10.3 — AOT trim-warning cleanup
+
+Closes the AOT trim-warning bucket from the wit-harness plan. Three
+reflective callsites in `Wacs.Core` and one csproj condition fix in
+`Wacs.ComponentModel`. No behavior change; the warnings collapse to
+clear `UnconditionalSuppressMessage` justifications so consumers
+publishing under NativeAOT or IL2CPP can tell the difference between
+"known-safe convenience reflection" and "real problem."
+
+* **`WasmRuntimeBinding.BindHostFunction<TDelegate>`** (line 485):
+  IL2070 suppression. `func.GetType().GetMethod("Invoke")` reflects
+  on the bound delegate's `Invoke` — preserved by every delegate's
+  type contract. Mirrors the existing pattern in `HostFunction.cs:54`.
+* **`HostFunction.InvokeAsync`** (line 330): IL2075 suppression.
+  `task.GetType().GetProperty("Result")` on a `Task<T>` returned by
+  the bound delegate; `Task<T>.Result` is framework-rooted. Embedders
+  using SourceGen-emitted typed harnesses bypass this path entirely.
+* **`WasmRuntimeExecution.CreateInvokerAsync` + `CreateInvoker`**
+  (lines 173 + 305): IL2075 suppressions. `exc.GetType().GetConstructor((int,string))`
+  rebuilds a caught `SignalException` with a line-decorated message.
+  Concrete signal subclasses stay rooted via instruction-loop throw
+  sites; their `(int, string)` ctors are part of the contract.
+* **`Wacs.ComponentModel.csproj`**: `<IsAotCompatible>` conditioned
+  to `net8.0` only (matching `Wacs.Core.csproj`'s pattern). Fixes the
+  `NETSDK1210` warning that fired on every consumer build because
+  `IsAotCompatible` isn't supported on the `netstandard2.1` target.
+
+Tests: 840/840 Wacs.Transpiler.Test (+ 1 skip). Build is warning-clean
+on both target frameworks.
+
 ## WACS.Transpiler.Lib 0.12.7 — harness-impl coverage across simple return shapes
 
 `Local_fixture_transpile_with_harness_emits_HarnessImpl` theory

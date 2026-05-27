@@ -14,6 +14,7 @@
 
 using System;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Runtime.ExceptionServices;
 using System.Threading.Tasks;
@@ -169,6 +170,13 @@ namespace Wacs.Core.Runtime
             return CreateInvokerAsync(funcAddr, options);
         }
 
+        [UnconditionalSuppressMessage("Trimming", "IL2075",
+            Justification = "exc.GetType().GetConstructor((int,string)) " +
+                "reflects on the caught SignalException's runtime type to " +
+                "re-throw with line-decorated message. Concrete signal " +
+                "subclasses are reachable from instruction-loop throw " +
+                "sites; their (int,string) ctors are part of the " +
+                "exception-class contract and stay rooted.")]
         private Delegates.GenericFuncsAsync CreateInvokerAsync(FuncAddr funcAddr, InvokerOptions options)
         {
             if (options.SynchronousExecution)
@@ -302,6 +310,12 @@ namespace Wacs.Core.Runtime
             }
         }
 
+        [UnconditionalSuppressMessage("Trimming", "IL2075",
+            Justification = "exc.GetType().GetConstructor((int,string)) " +
+                "reflects on the caught SignalException's runtime type to " +
+                "re-throw with line-decorated message. Same shape as " +
+                "CreateInvokerAsync's catch block — concrete signal " +
+                "subclasses stay rooted via instruction-loop throw sites.")]
         public Delegates.GenericFuncs CreateInvoker(FuncAddr funcAddr, InvokerOptions options)
         {
             return GenericDelegate;

@@ -327,6 +327,13 @@ namespace Wacs.Core.Runtime.Types
             }
         }
 
+        [UnconditionalSuppressMessage("Trimming", "IL2075",
+            Justification = "task.GetType().GetProperty(\"Result\") on " +
+                "a Task<T> returned by the bound delegate. Task<T> is " +
+                "framework-rooted; its Result property is preserved by " +
+                "the runtime. Embedders using SourceGen-emitted typed " +
+                "harnesses don't reach this path — the reflective fallback " +
+                "is for the convenience JIT binding surface.")]
         public async ValueTask InvokeAsync(ExecContext context)
         {
             //Fetch the parameters

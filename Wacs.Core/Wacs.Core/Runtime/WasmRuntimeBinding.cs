@@ -14,6 +14,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -482,6 +483,12 @@ namespace Wacs.Core.Runtime
             (string module, string entity) id)
             => _directLinkProvidedEntities.Contains(id);
 
+        [UnconditionalSuppressMessage("Trimming", "IL2070",
+            Justification = "func.GetType() returns the runtime " +
+                "TDelegate type; Invoke is preserved on every delegate " +
+                "(it's the delegate's contract). Mirrors the pattern in " +
+                "Wacs.Core.Runtime.Types.HostFunction's ctor — both " +
+                "paths reflect on a delegate's Invoke method only.")]
         public void BindHostFunction<TDelegate>((string module, string entity) id, TDelegate func)
             where TDelegate : Delegate
         {
