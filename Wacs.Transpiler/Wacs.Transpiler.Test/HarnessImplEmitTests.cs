@@ -134,6 +134,97 @@ namespace Wacs.Transpiler.Test
             }
         }
 
+        [Fact]
+        public void EnumFlags_transpile_with_harness_emits_HarnessImpl_or_documents_gap()
+        {
+            // wit-harness-spike-enum-flags exports get-status returning
+            // status { sev: severity, perms: permissions } where the
+            // fields are an enum and a flags type. Today
+            // TryResolveRecordOfPrims requires primitive fields, so
+            // the export is silently skipped and SecurityHarnessImpl
+            // never emits. This test documents that gap explicitly —
+            // when emit grows enum/flags record-field support, flip
+            // the assertion sense.
+            var fixtureDir = FixtureDir("wit-harness-spike-enum-flags");
+            var witDir = Path.Combine(fixtureDir, "wit");
+            var componentWasm = Path.Combine(fixtureDir, "wasm", "security.component.wasm");
+
+            var tmpHarness = Path.Combine(Path.GetTempPath(),
+                $"sec-harness-{Guid.NewGuid():N}.dll");
+            try
+            {
+                HarnessEmitter.EmitToFile(witDir, tmpHarness);
+                using var fs = File.OpenRead(componentWasm);
+                var result = ComponentTranspiler.TranspileSingleModule(
+                    fs,
+                    assemblyNamespace: "Wacs.Transpiled.Sec",
+                    options: new TranspilerOptions
+                    {
+                        HarnessAssemblyPath = tmpHarness,
+                    });
+
+                var harnessImpl = result.Assembly.GetTypes()
+                    .FirstOrDefault(t => t.Name == "SecurityHarnessImpl");
+                Assert.True(harnessImpl == null,
+                    "SecurityHarnessImpl WAS emitted — IsEmittable now "
+                    + "accepts enum/flags record fields. Flip this test "
+                    + "to assert positive emit, drop the comment.");
+            }
+            finally
+            {
+                try { File.Delete(tmpHarness); } catch { }
+            }
+        }
+
+        [Fact]
+        public void InterfaceExport_transpile_with_harness_emits_HarnessImpl()
+        {
+            // wit-harness-spike-interface-export: a world that
+            // exports an interface (ops { add; swap }) alongside a
+            // world-level free function (bake). All u32-only signatures,
+            // no records, no aggregates — exercises the harness-impl
+            // pipeline against the simplest primitive-export shape.
+            var fixtureDir = FixtureDir("wit-harness-spike-interface-export");
+            var witDir = Path.Combine(fixtureDir, "wit");
+            var componentWasm = Path.Combine(fixtureDir, "wasm", "calculator.component.wasm");
+
+            var tmpHarness = Path.Combine(Path.GetTempPath(),
+                $"calc-harness-{Guid.NewGuid():N}.dll");
+            try
+            {
+                HarnessEmitter.EmitToFile(witDir, tmpHarness);
+
+                using var fs = File.OpenRead(componentWasm);
+                var result = ComponentTranspiler.TranspileSingleModule(
+                    fs,
+                    assemblyNamespace: "Wacs.Transpiled.Calc",
+                    options: new TranspilerOptions
+                    {
+                        HarnessAssemblyPath = tmpHarness,
+                    });
+
+                var allTypes = result.Assembly.GetTypes()
+                    .Select(t => t.FullName).ToArray();
+                var harnessImpl = result.Assembly.GetTypes()
+                    .FirstOrDefault(t => t.Name == "CalculatorHarnessImpl");
+                Assert.True(harnessImpl != null,
+                    "CalculatorHarnessImpl not found. Emitted types: "
+                    + string.Join(", ", allTypes));
+
+                var harnessAsm = Assembly.LoadFrom(tmpHarness);
+                var iCalculator = harnessAsm.GetTypes()
+                    .FirstOrDefault(t => t.Name == "ICalculator" && t.IsInterface);
+                Assert.NotNull(iCalculator);
+
+                Assert.True(iCalculator!.IsAssignableFrom(harnessImpl),
+                    $"{harnessImpl!.FullName} must implement {iCalculator.FullName}.");
+            }
+            finally
+            {
+                try { File.Delete(tmpHarness); } catch { }
+            }
+        }
+
         // Mirrors HelloHarness.BindWasiStubs in the spike fixture's
         // Aot.Spike project — the hello.component.wasm imports a
         // fixed set of wasi:io / wasi:cli resource-drop + stdio

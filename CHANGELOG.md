@@ -1,5 +1,35 @@
 # Changelog
 
+## WACS.Transpiler.Lib 0.12.6 — harness-impl test coverage extended
+
+Two more end-to-end tests on the harness-impl pipeline added to
+`Wacs.Transpiler.Test/HarnessImplEmitTests.cs`:
+
+* `InterfaceExport_transpile_with_harness_emits_HarnessImpl` —
+  positive case. The `wit-harness-spike-interface-export` fixture
+  exports `ops { add; swap }` plus a world-level `bake`; all u32-
+  only signatures. The transpiler emits `CalculatorHarnessImpl`
+  assignable to the harness's `ICalculator`. Confirms the pipeline
+  handles interface-qualified exports (`wacs:interface-export-spike/ops#add`)
+  alongside world-level free functions in a single emitted impl class.
+
+* `EnumFlags_transpile_with_harness_emits_HarnessImpl_or_documents_gap` —
+  negative case documenting a known gap. The
+  `wit-harness-spike-enum-flags` fixture exports `get-status`
+  returning `status { sev: severity, perms: permissions }` where
+  the fields are enum + flags types. Today
+  `ComponentExportsEmit.TryResolveRecordOfPrims` requires all
+  fields be primitives (line 1315), so the export is silently
+  skipped and `SecurityHarnessImpl` never emits. The test asserts
+  `harnessImpl == null` with a guidance comment for the future
+  enum/flags-field extension.
+
+No production-code changes — this commit is test-only coverage that
+captures the current behavior contract so any future emit-side
+change either preserves the gap or flips the assertion sense.
+
+Tests: 836/836 Wacs.Transpiler.Test (+ 1 skip).
+
 ## WACS.Transpiler.Lib 0.12.5 — harness-impl ctor lookup tolerates pre-registered records
 
 Fixes a latent bug in `ComponentExportsEmit.EmitRecordReturnBody`:
