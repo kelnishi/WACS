@@ -1,5 +1,42 @@
 # Changelog
 
+## WACS.ComponentModel.Async.SourceGen 0.4.19 — list<record> with option<ptr/len> fields
+
+`IsRecordSupportedAsListElement` widened to also accept
+`option<string>` / `option<byte[]>` / `option<primitive
+array>` / `option<simple list>` fields. Per-element lower
+writes the disc:u8 + conditional ptr/len at the field's
+canon-ABI offsets (12 bytes total: disc + pad + ptr +
+len, align 4). Lift uses an inline
+`(ReadU8(...) == 0 ? null :
+PtrLenLiftExpressionAtOffset(inner, off + payOff))`
+ternary in the property-initializer.
+
+* `EmitListElementLower` record branch gained the
+  option<ptr/len> case alongside the existing option<
+  primitive> case. Locals are field-name suffixed
+  (`__f_<Field>_ptr` / `_len`) to avoid collision when
+  records hold multiple optional ptr/len fields.
+* `EmitListElementLift` record branch gained the
+  matching inline ternary; uses the existing
+  `PtrLenLiftExpressionAtOffset` helper which dispatches
+  string / byte[] / primitive-array / simple-list via
+  `PtrLenLiftExpression`.
+* Test extension:
+  `Generator_emits_list_shape_export_signatures` picks
+  up `SendProfiles(Profile[])` / `GetProfiles(int)` for
+  `Profile { string Name; string? Email; }`.
+  21/21 generator integration tests, 660/660 across
+  Wacs.ComponentModel.Test. Hello-spike passes
+  unchanged.
+
+**Still punted:** lists of records with result /
+nested-record / nested-list fields; deeper-nested list
+shapes in option/result arms (`option<string[][]>`);
+wider-primitive mixed result arms (`result<long,
+string>` — needs joined-slot widening to i64); cyclic
+record refs (canon-ABI prohibits, correctly rejected).
+
 ## WACS.ComponentModel.Async.SourceGen 0.4.18 — list<record> with option<primitive> fields
 
 `IsRecordSupportedAsListElement` widened to also accept

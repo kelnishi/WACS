@@ -262,6 +262,17 @@ namespace Wacs.ComponentModel.Test
         public int? Expires;
     }
 
+    /// <summary>Record carrying an
+    /// option&lt;string&gt; field — exercises the
+    /// option&lt;ptr/len&gt;-field branch of
+    /// list&lt;record&gt; lower / lift.</summary>
+    [WitRecord]
+    internal struct Profile
+    {
+        public string Name;
+        public string? Email;
+    }
+
     [AsyncComponentHarness]
     internal partial class ListShapeHarnessFixture
     {
@@ -306,6 +317,13 @@ namespace Wacs.ComponentModel.Test
 
         [SyncExport("get_entries")]
         internal partial Entry[] GetEntries(int n);
+
+        [SyncExport("send_profiles")]
+        internal partial int SendProfiles(
+            Profile[] profiles);
+
+        [SyncExport("get_profiles")]
+        internal partial Profile[] GetProfiles(int n);
     }
 
     /// <summary>Primitive arrays beyond byte[] — canon-ABI

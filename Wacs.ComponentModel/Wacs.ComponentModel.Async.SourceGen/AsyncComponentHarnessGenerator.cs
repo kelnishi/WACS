@@ -351,11 +351,9 @@ namespace Wacs.ComponentModel.Async.SourceGen
         // True iff every field of `rec` is canon-ABI
         // primitive, ptr/len aggregate (string / byte[] /
         // primitive array / simple list — via the widened
-        // `IsPtrLenAggregate`), or
-        // option-of-primitive. Other shapes (option of
-        // ptr/len, result, nested records, nested lists)
-        // would need more codegen at the per-element write
-        // / read sites — punted.
+        // `IsPtrLenAggregate`), option of either primitive
+        // or ptr/len. Result / nested-record / nested-list
+        // fields still land later.
         private static bool IsRecordSupportedAsListElement(
             RecordLayout rec)
         {
@@ -364,6 +362,7 @@ namespace Wacs.ComponentModel.Async.SourceGen
                 if (IsPrimitive(f.Type)) continue;
                 if (IsPtrLenAggregate(f.Type)) continue;
                 if (IsNullablePrimitive(f.Type)) continue;
+                if (IsOptionRef(f.Type)) continue;
                 return false;
             }
             return true;
@@ -3408,6 +3407,67 @@ namespace Wacs.ComponentModel.Async.SourceGen
                                 + ".GetValueOrDefault()",
                             "                ");
                     }
+                    else if (IsOptionRef(f.Type))
+                    {
+                        // option<ptr/len> field: disc:u8 at
+                        // f.Offset; if !=null lower body into
+                        // (ptr, len) locals and write at
+                        // f.Offset + payOff and +payOff+4.
+                        // Both slots zero if null.
+                        string innerT = InnerOfNullable(f.Type);
+                        int payOff = NullablePayloadOffset(
+                            innerT);
+                        string ptrLoc = "__f_" + f.Name
+                            + "_ptr";
+                        string lenLoc = "__f_" + f.Name
+                            + "_len";
+                        sb.Append("                global::Wacs" +
+                            ".ComponentModel.Harness" +
+                            ".MemoryHelpers.WriteU8(_memory!, ");
+                        sb.Append(offsetExpr);
+                        sb.Append(" + ");
+                        sb.Append(f.Offset);
+                        sb.Append(", (byte)(");
+                        sb.Append(valueExpr);
+                        sb.Append('.');
+                        sb.Append(f.Name);
+                        sb.AppendLine(" != null ? 1 : 0));");
+                        sb.Append("                int ");
+                        sb.Append(ptrLoc);
+                        sb.AppendLine(" = 0;");
+                        sb.Append("                int ");
+                        sb.Append(lenLoc);
+                        sb.AppendLine(" = 0;");
+                        sb.Append("                if (");
+                        sb.Append(valueExpr);
+                        sb.Append('.');
+                        sb.Append(f.Name);
+                        sb.AppendLine(" != null)");
+                        sb.AppendLine("                {");
+                        EmitPtrLenAssignInto(sb, innerT,
+                            valueExpr + "." + f.Name,
+                            ptrLoc, lenLoc,
+                            "                    ");
+                        sb.AppendLine("                }");
+                        sb.Append("                global::Wacs" +
+                            ".ComponentModel.Harness" +
+                            ".MemoryHelpers.WriteI32LE(_memory!, ");
+                        sb.Append(offsetExpr);
+                        sb.Append(" + ");
+                        sb.Append(f.Offset + payOff);
+                        sb.Append(", ");
+                        sb.Append(ptrLoc);
+                        sb.AppendLine(");");
+                        sb.Append("                global::Wacs" +
+                            ".ComponentModel.Harness" +
+                            ".MemoryHelpers.WriteI32LE(_memory!, ");
+                        sb.Append(offsetExpr);
+                        sb.Append(" + ");
+                        sb.Append(f.Offset + payOff + 4);
+                        sb.Append(", ");
+                        sb.Append(lenLoc);
+                        sb.AppendLine(");");
+                    }
                     else
                     {
                         EmitWriteMemoryStatement(sb, f.Type,
@@ -3586,6 +3646,30 @@ namespace Wacs.ComponentModel.Async.SourceGen
                         sb.Append(")null : ");
                         sb.Append(ReadMemoryExprForType(innerT,
                             "_memory!",
+                            offsetExpr + " + "
+                                + (f.Offset + payOff)));
+                        sb.Append(")");
+                    }
+                    else if (IsOptionRef(f.Type))
+                    {
+                        // option<ptr/len> inline lift:
+                        // (disc == 0 ? null :
+                        //   LiftXxx(_memory!,
+                        //     ReadI32(off+payOff),
+                        //     ReadI32(off+payOff+4))).
+                        string innerT = InnerOfNullable(
+                            f.Type);
+                        int payOff = NullablePayloadOffset(
+                            innerT);
+                        sb.Append("(global::Wacs" +
+                            ".ComponentModel.Harness" +
+                            ".MemoryHelpers.ReadU8(_memory!, ");
+                        sb.Append(offsetExpr);
+                        sb.Append(" + ");
+                        sb.Append(f.Offset);
+                        sb.Append(") == 0 ? null : ");
+                        sb.Append(PtrLenLiftExpressionAtOffset(
+                            innerT,
                             offsetExpr + " + "
                                 + (f.Offset + payOff)));
                         sb.Append(")");
