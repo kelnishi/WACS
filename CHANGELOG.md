@@ -1,5 +1,52 @@
 # Changelog
 
+## WACS.Transpiler.Lib 0.12.10 — instance-shape ComponentExports for imports-bearing modules
+
+Closes #3c of the wit-harness plan: components whose core Module
+takes an `IImports` ctor arg now flow through `ComponentExports`
+end-to-end. The harness fixtures with bundled WASI imports (hello,
+all medium-to-large spike fixtures) emit a working `{World}HarnessImpl`
+that constructs ComponentExports through an injected `IImports`.
+
+Two-shape dispatch in `EmitComponentExportsClass`:
+
+* **Static ComponentExports** (existing, parameterless Module ctor):
+  `Public | Abstract | Sealed`, `_instance` is a static field,
+  cctor news up `Module()` once, methods are static. Untouched
+  behavior for every existing imports-less consumer.
+* **Instance ComponentExports** (new, imports-bearing Module ctor):
+  `Public | Sealed`, `_instance` is an instance field, public ctor
+  takes `IImports` and stores `new Module(imports)`, methods are
+  instance. Triggered when the Module has any single-arg ctor (per
+  `ModuleClassGenerator.cs:1601-1613` the first arg is always
+  `IImports`).
+
+Two shape-agnostic helpers route the existing emit bodies:
+
+* **`EmitLoadInstance`**: Static path → `Ldsfld instanceField`;
+  instance path → `Ldarg.0; Ldfld instanceField`. Replaces 21
+  call sites.
+* **`EmitLdargCsharp`**: Static method → `Ldarg csIdx`; instance
+  method → `Ldarg csIdx + 1` (skip the implicit `this` slot).
+  Used by every per-arg lowering helper (string, list, record).
+
+`HarnessImplEmit` mirrors the shape:
+
+* Static CE → parameterless `HarnessImpl` ctor; forward to static
+  methods with `Call`. (Existing behavior.)
+* Instance CE → `HarnessImpl(IImports)` ctor that news up
+  `ComponentExports(imports)` into a `_componentExports` field;
+  forward to instance methods with `Callvirt`.
+
+New test `Hello_transpile_with_harness_emits_HarnessImpl_implementing_IHello`
+verifies the wit-harness-spike-hello fixture (whose core module
+imports the wasm32-wasip2 WASI bundle): `HelloHarnessImpl` emits,
+implements `IHello`, exposes a single public ctor taking the IImports
+interface. WASI stubs reuse the existing
+`BindHelloWasiStubs` test helper via `configureImports`.
+
+Tests: 842/842 Wacs.Transpiler.Test (+ 1 skip).
+
 ## WACS.Transpiler.Lib 0.12.9 — aggregate-param lowering for harness records
 
 Closes #3b of the wit-harness plan: record-of-primitives params lower

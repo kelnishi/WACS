@@ -135,6 +135,65 @@ namespace Wacs.Transpiler.Test
         }
 
         [Fact]
+        public void Hello_transpile_with_harness_emits_HarnessImpl_implementing_IHello()
+        {
+            // wit-harness-spike-hello has WASI imports — the Module
+            // ctor takes IImports. Verifies the instance-shape
+            // ComponentExports path: HarnessImpl gains a (IImports)
+            // ctor; export methods become instance, callvirt'd off
+            // _componentExports.
+            var fixtureDir = FixtureDir("wit-harness-spike-hello");
+            var witDir = Path.Combine(fixtureDir, "wit");
+            var componentWasm = Path.Combine(fixtureDir, "wasm", "hello.component.wasm");
+
+            var tmpHarness = Path.Combine(Path.GetTempPath(),
+                $"hello-harness-{Guid.NewGuid():N}.dll");
+            try
+            {
+                HarnessEmitter.EmitToFile(witDir, tmpHarness);
+                using var fs = File.OpenRead(componentWasm);
+                var result = ComponentTranspiler.TranspileSingleModule(
+                    fs,
+                    assemblyNamespace: "Wacs.Transpiled.Hello",
+                    options: new TranspilerOptions
+                    {
+                        HarnessAssemblyPath = tmpHarness,
+                    },
+                    configureImports: BindHelloWasiStubs);
+
+                var allTypes = result.Assembly.GetTypes()
+                    .Select(t => t.FullName).ToArray();
+                var harnessImpl = result.Assembly.GetTypes()
+                    .FirstOrDefault(t => t.Name == "HelloHarnessImpl");
+                Assert.True(harnessImpl != null,
+                    "HelloHarnessImpl not found. Emitted types: "
+                    + string.Join(", ", allTypes));
+
+                var harnessAsm = Assembly.LoadFrom(tmpHarness);
+                var iHello = harnessAsm.GetTypes()
+                    .FirstOrDefault(t => t.Name == "IHello" && t.IsInterface);
+                Assert.NotNull(iHello);
+
+                Assert.True(iHello!.IsAssignableFrom(harnessImpl),
+                    $"{harnessImpl!.FullName} must implement {iHello.FullName}.");
+
+                // HarnessImpl should now have an (IImports) ctor —
+                // verify by looking up a public ctor with one arg
+                // and confirming the arg is an interface (IImports).
+                var ctors = harnessImpl.GetConstructors();
+                Assert.Single(ctors);
+                var ctorParams = ctors[0].GetParameters();
+                Assert.Single(ctorParams);
+                Assert.True(ctorParams[0].ParameterType.IsInterface,
+                    "HarnessImpl ctor's single arg should be the IImports interface.");
+            }
+            finally
+            {
+                try { File.Delete(tmpHarness); } catch { }
+            }
+        }
+
+        [Fact]
         public void Richer_transpile_with_harness_emits_HarnessImpl_implementing_IRicher()
         {
             // wit-harness-spike-richer exports add(a: vec2, b: vec2) -> vec2

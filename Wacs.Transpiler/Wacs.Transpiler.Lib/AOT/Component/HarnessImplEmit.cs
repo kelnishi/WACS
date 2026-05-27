@@ -52,44 +52,76 @@ namespace Wacs.Transpiler.AOT.Component
             var iface = binder.WorldInterface;
             var typeName = @namespace + "." + iface.Name.TrimStart('I') + "HarnessImpl";
 
+            // Detect ComponentExports's shape via its public ctors.
+            // Static class → no public ctors → HarnessImpl ctor is
+            // parameterless and forwards to static methods.
+            // Instance class → exactly one public ctor taking
+            // IImports → HarnessImpl ctor takes the same IImports
+            // and constructs a held ComponentExports instance.
+            var ceCtors = componentExports.GetConstructors(
+                BindingFlags.Public | BindingFlags.Instance);
+            bool ceIsInstance = ceCtors.Length > 0;
+            Type? importsType = ceIsInstance
+                ? ceCtors[0].GetParameters()[0].ParameterType : null;
+
             var tb = module.DefineType(
                 typeName,
                 TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.BeforeFieldInit,
                 parent: typeof(object),
                 interfaces: new[] { iface });
 
-            // Public parameterless ctor — required so embedders can
-            // `new {World}HarnessImpl()` directly.
+            FieldBuilder? ceField = null;
+            if (ceIsInstance)
+            {
+                ceField = tb.DefineField(
+                    "_componentExports", componentExports,
+                    FieldAttributes.Private | FieldAttributes.InitOnly);
+            }
+
+            // Ctor shape mirrors ComponentExports's. Static CE →
+            // parameterless HarnessImpl ctor (back-compat with
+            // embedders that just do `new {World}HarnessImpl()`).
+            // Instance CE → ctor takes IImports, constructs CE,
+            // stores in _componentExports.
+            var ctorParams = ceIsInstance ? new[] { importsType! } : Type.EmptyTypes;
             var ctor = tb.DefineConstructor(
                 MethodAttributes.Public | MethodAttributes.HideBySig
                     | MethodAttributes.SpecialName | MethodAttributes.RTSpecialName,
                 CallingConventions.HasThis,
-                Type.EmptyTypes);
+                ctorParams);
+            if (ceIsInstance)
+                ctor.DefineParameter(1, ParameterAttributes.None, "imports");
             var cil = ctor.GetILGenerator();
             cil.Emit(OpCodes.Ldarg_0);
             cil.Emit(OpCodes.Call, typeof(object).GetConstructor(Type.EmptyTypes)!);
+            if (ceIsInstance)
+            {
+                // _componentExports = new ComponentExports(imports);
+                cil.Emit(OpCodes.Ldarg_0);
+                cil.Emit(OpCodes.Ldarg_1);
+                cil.Emit(OpCodes.Newobj, ceCtors[0]);
+                cil.Emit(OpCodes.Stfld, ceField!);
+            }
             cil.Emit(OpCodes.Ret);
 
-            // Per interface method: emit a forwarding instance method
-            // that calls the matching static method on
-            // ComponentExports. Method matching is by simple name
-            // + arity + parameter type identity. Methods that don't
-            // line up (e.g. ComponentExports skipped emit for an
-            // unsupported shape) get an instance method that
-            // throws NotImplementedException — keeps the type
-            // structurally complete for IL2 verification, surfaces
-            // the gap at first call.
+            // Per interface method: emit a forwarding instance method.
+            // Static CE → call the matching static method. Instance
+            // CE → load _componentExports, callvirt the matching
+            // instance method. Methods that don't line up emit a
+            // NotImplementedException-throwing body.
             foreach (var ifaceMethod in iface.GetMethods(
                 BindingFlags.Public | BindingFlags.Instance))
             {
-                EmitForwardingMethod(tb, ifaceMethod, componentExports);
+                EmitForwardingMethod(tb, ifaceMethod, componentExports,
+                    ceField);
             }
 
             return tb.CreateType();
         }
 
         private static void EmitForwardingMethod(
-            TypeBuilder tb, MethodInfo ifaceMethod, Type componentExports)
+            TypeBuilder tb, MethodInfo ifaceMethod, Type componentExports,
+            FieldBuilder? ceField)
         {
             var paramTypes = ifaceMethod.GetParameters()
                 .Select(p => p.ParameterType).ToArray();
@@ -110,36 +142,48 @@ namespace Wacs.Transpiler.AOT.Component
 
             var il = method.GetILGenerator();
 
-            // Match against ComponentExports's static methods by
-            // name + signature shape. The pre-registered-types
+            // Match against ComponentExports by name + signature
+            // shape. Static CE → look up static method, Call.
+            // Instance CE → look up instance method, load
+            // _componentExports, Callvirt. The pre-registered-types
             // pass made signatures align — same Vec2 / Outcome
-            // CLR types on both sides — so direct match works.
+            // CLR types on both sides — so direct match works in
+            // either shape.
+            var bindingFlags = BindingFlags.Public
+                | (ceField == null ? BindingFlags.Static : BindingFlags.Instance);
             var target = componentExports.GetMethod(
                 ifaceMethod.Name,
-                BindingFlags.Public | BindingFlags.Static,
+                bindingFlags,
                 binder: null,
                 types: paramTypes,
                 modifiers: null);
 
             if (target == null)
             {
-                // No matching static — emit a throw so the build
-                // still completes (the interface contract is
-                // structurally satisfied), but the missing
-                // implementation surfaces loudly at the first call.
+                // No match — emit a throw so the build still
+                // completes (the interface contract is structurally
+                // satisfied), but the missing implementation
+                // surfaces loudly at the first call.
                 il.Emit(OpCodes.Ldstr,
-                    "HarnessImpl: ComponentExports has no matching static method for '"
-                    + ifaceMethod.Name + "'.");
+                    "HarnessImpl: ComponentExports has no matching "
+                    + (ceField == null ? "static" : "instance")
+                    + " method for '" + ifaceMethod.Name + "'.");
                 il.Emit(OpCodes.Newobj,
                     typeof(NotImplementedException).GetConstructor(new[] { typeof(string) })!);
                 il.Emit(OpCodes.Throw);
                 return;
             }
 
-            // Forward: push each arg, call the static, return.
+            if (ceField != null)
+            {
+                // Instance CE: load _componentExports first.
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, ceField);
+            }
+            // Forward: push each arg, call the target.
             for (int i = 0; i < paramTypes.Length; i++)
                 EmitLdarg(il, i + 1);
-            il.Emit(OpCodes.Call, target);
+            il.Emit(ceField == null ? OpCodes.Call : OpCodes.Callvirt, target);
             il.Emit(OpCodes.Ret);
         }
 

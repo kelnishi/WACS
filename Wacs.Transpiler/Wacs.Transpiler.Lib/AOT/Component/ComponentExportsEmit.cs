@@ -89,31 +89,85 @@ namespace Wacs.Transpiler.AOT.Component
             var emittable = FindEmittableExports(component);
             if (emittable.Count == 0) return null;
 
-            // Imports-less components only — components with
-            // imports need a factory method (deferred). Bail BEFORE
-            // DefineType so Lokad.ILPack doesn't trip over an
-            // un-CreateType'd TypeBuilder at save time.
-            var coreCtor = coreModuleClass.GetConstructor(Type.EmptyTypes);
-            if (coreCtor == null) return null;
+            // Two-shape dispatch on the Module's ctor signature:
+            //
+            //  - Parameterless ctor present → STATIC ComponentExports
+            //    (existing path): cctor news up Module() once;
+            //    every export method is static; `_instance` is a
+            //    static field.
+            //
+            //  - Single-arg ctor present (the WACS transpiler always
+            //    surfaces IImports as the first arg per
+            //    ModuleClassGenerator.cs:1601-1613) → INSTANCE
+            //    ComponentExports: public ctor(IImports) news up
+            //    Module(imports) and stores in an instance field;
+            //    every export method is instance. The harness's
+            //    {World}HarnessImpl takes IImports in its own ctor
+            //    and constructs ComponentExports through it.
+            //
+            //  - Neither → bail. Multi-arg ctors (hostBundle /
+            //    resources) are a follow-up.
+            var coreParameterlessCtor = coreModuleClass.GetConstructor(Type.EmptyTypes);
+            ConstructorInfo? coreImportsCtor = null;
+            if (coreParameterlessCtor == null)
+            {
+                foreach (var c in coreModuleClass.GetConstructors())
+                {
+                    var ps = c.GetParameters();
+                    if (ps.Length == 1)
+                    {
+                        coreImportsCtor = c;
+                        break;
+                    }
+                }
+            }
+            if (coreParameterlessCtor == null && coreImportsCtor == null)
+                return null;
 
+            bool isInstanceShape = coreImportsCtor != null;
+            var typeAttrs = TypeAttributes.Public | TypeAttributes.Sealed;
+            if (!isInstanceShape)
+                typeAttrs |= TypeAttributes.Abstract;   // static class
             var typeBuilder = module.DefineType(
-                @namespace + ".ComponentExports",
-                TypeAttributes.Public | TypeAttributes.Abstract
-                    | TypeAttributes.Sealed);
+                @namespace + ".ComponentExports", typeAttrs);
 
-            // Cached default Module instance — every export
-            // call reuses it.
+            var fieldAttrs = FieldAttributes.Private | FieldAttributes.InitOnly;
+            if (!isInstanceShape) fieldAttrs |= FieldAttributes.Static;
             var instanceField = typeBuilder.DefineField(
-                "_instance",
-                coreModuleClass,
-                FieldAttributes.Private | FieldAttributes.Static
-                    | FieldAttributes.InitOnly);
+                "_instance", coreModuleClass, fieldAttrs);
 
-            var cctor = typeBuilder.DefineTypeInitializer();
-            var cctorIl = cctor.GetILGenerator();
-            cctorIl.Emit(OpCodes.Newobj, coreCtor);
-            cctorIl.Emit(OpCodes.Stsfld, instanceField);
-            cctorIl.Emit(OpCodes.Ret);
+            if (!isInstanceShape)
+            {
+                // Static path: cctor news up Module() once; every
+                // export method is static; subsequent calls reuse
+                // _instance.
+                var cctor = typeBuilder.DefineTypeInitializer();
+                var cctorIl = cctor.GetILGenerator();
+                cctorIl.Emit(OpCodes.Newobj, coreParameterlessCtor!);
+                cctorIl.Emit(OpCodes.Stsfld, instanceField);
+                cctorIl.Emit(OpCodes.Ret);
+            }
+            else
+            {
+                // Instance path: ctor takes IImports (the first
+                // and only arg of the chosen Module ctor), news up
+                // Module(imports), stores in _instance.
+                var importsType = coreImportsCtor!.GetParameters()[0].ParameterType;
+                var ctor = typeBuilder.DefineConstructor(
+                    MethodAttributes.Public | MethodAttributes.SpecialName
+                        | MethodAttributes.RTSpecialName,
+                    CallingConventions.Standard,
+                    new[] { importsType });
+                ctor.DefineParameter(1, ParameterAttributes.None, "imports");
+                var cIl = ctor.GetILGenerator();
+                cIl.Emit(OpCodes.Ldarg_0);
+                cIl.Emit(OpCodes.Call, typeof(object).GetConstructor(Type.EmptyTypes)!);
+                cIl.Emit(OpCodes.Ldarg_0);
+                cIl.Emit(OpCodes.Ldarg_1);
+                cIl.Emit(OpCodes.Newobj, coreImportsCtor);
+                cIl.Emit(OpCodes.Stfld, instanceField);
+                cIl.Emit(OpCodes.Ret);
+            }
 
             // Pre-emit named C# types from the decoded WIT so
             // `ComponentExports` methods can reference them as
@@ -430,7 +484,7 @@ namespace Wacs.Transpiler.AOT.Component
                 typeof(object).GetConstructor(Type.EmptyTypes)!);
             // this.Handle = _instance.[constructor]<type>();
             il.Emit(OpCodes.Ldarg_0);
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.EmitCall(OpCodes.Callvirt, coreCtor, null);
             il.Emit(OpCodes.Stfld, handleField);
             il.Emit(OpCodes.Ret);
@@ -464,7 +518,7 @@ namespace Wacs.Transpiler.AOT.Component
                     "arg" + i);
 
             var il = method.GetILGenerator();
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldfld, handleField);
             for (int i = 0; i < userParams.Length; i++)
@@ -498,7 +552,7 @@ namespace Wacs.Transpiler.AOT.Component
                     "arg" + i);
 
             var il = method.GetILGenerator();
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             for (int i = 0; i < userParams.Length; i++)
                 il.Emit(OpCodes.Ldarg, i);
             il.EmitCall(OpCodes.Callvirt, coreMethod, null);
@@ -1783,10 +1837,14 @@ namespace Wacs.Transpiler.AOT.Component
             }
 
             var methodName = PascalCase(export.Name);
+            // Static vs instance method dispatch keys off
+            // instanceField's shape — set by EmitComponentExportsClass
+            // when it picks the static-or-instance class layout.
+            var methodAttrs = MethodAttributes.Public | MethodAttributes.HideBySig;
+            if (instanceField.IsStatic)
+                methodAttrs |= MethodAttributes.Static;
             var method = typeBuilder.DefineMethod(
-                methodName,
-                MethodAttributes.Public | MethodAttributes.Static,
-                returnType, paramTypes);
+                methodName, methodAttrs, returnType, paramTypes);
             for (int i = 0; i < export.Signature.Params.Count; i++)
                 method.DefineParameter(i + 1, ParameterAttributes.None,
                                        CamelCase(export.Signature.Params[i].Name));
@@ -1912,7 +1970,7 @@ namespace Wacs.Transpiler.AOT.Component
                 il, instanceField, coreMethod, export, types,
                 out var ptrLocals, out var countLocals);
 
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             var coreParams = coreMethod.GetParameters();
             int coreParamIdx = 0;
             for (int i = 0; i < export.Signature.Params.Count; i++)
@@ -1951,13 +2009,13 @@ namespace Wacs.Transpiler.AOT.Component
                         throw new InvalidOperationException(
                             "Resource class missing Handle field for "
                             + export.Name + " param " + i);
-                    il.Emit(OpCodes.Ldarg, i);
+                    EmitLdargCsharp(il, instanceField, i);
                     il.Emit(OpCodes.Ldfld, handleField);
                     coreParamIdx++;
                 }
                 else
                 {
-                    il.Emit(OpCodes.Ldarg, i);
+                    EmitLdargCsharp(il, instanceField, i);
                     EmitParamCast(il, pt.Prim,
                                   coreParams[coreParamIdx].ParameterType);
                     coreParamIdx++;
@@ -2101,7 +2159,7 @@ namespace Wacs.Transpiler.AOT.Component
             countLocal = il.DeclareLocal(typeof(int));
             ptrLocal = il.DeclareLocal(typeof(int));
 
-            il.Emit(OpCodes.Ldarg, argIdx);
+            EmitLdargCsharp(il, instanceField, argIdx);
             il.EmitCall(OpCodes.Call, encode, null);
             il.Emit(OpCodes.Stloc, bytesLocal);
 
@@ -2128,7 +2186,7 @@ namespace Wacs.Transpiler.AOT.Component
             }
             il.Emit(OpCodes.Stloc, countLocal);
 
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.Emit(OpCodes.Ldc_I4_0);     // oldPtr
             il.Emit(OpCodes.Ldc_I4_0);     // oldLen
             il.Emit(OpCodes.Ldc_I4, isUtf16 ? 2 : 1);   // align
@@ -2137,7 +2195,7 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Stloc, ptrLocal);
 
             il.Emit(OpCodes.Ldloc, bytesLocal);
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Ldloc, ptrLocal);
             il.EmitCall(OpCodes.Call, copy, null);
@@ -2174,7 +2232,7 @@ namespace Wacs.Transpiler.AOT.Component
             ptrLocal = il.DeclareLocal(typeof(int));
 
             // count = values.Length
-            il.Emit(OpCodes.Ldarg, argIdx);
+            EmitLdargCsharp(il, instanceField, argIdx);
             il.Emit(OpCodes.Ldlen);
             il.Emit(OpCodes.Conv_I4);
             il.Emit(OpCodes.Stloc, countLocal);
@@ -2186,7 +2244,7 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Stloc, byteLenLocal);
 
             // ptr = instance.CabiRealloc(0, 0, elemSize, byteLen)
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ldc_I4, elemSize);
@@ -2195,8 +2253,8 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Stloc, ptrLocal);
 
             // ListMarshal.CopyArrayToGuest<T>(values, instance.Memory, ptr)
-            il.Emit(OpCodes.Ldarg, argIdx);
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLdargCsharp(il, instanceField, argIdx);
+            EmitLoadInstance(il, instanceField);
             il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Ldloc, ptrLocal);
             il.EmitCall(OpCodes.Call, copyClosed, null);
@@ -2245,7 +2303,7 @@ namespace Wacs.Transpiler.AOT.Component
             ptrLocal = il.DeclareLocal(typeof(int));
 
             // ptr = instance.CabiRealloc(0, 0, maxAlign, totalSize)
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ldc_I4, maxAlign);
@@ -2257,7 +2315,7 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 // PrimitiveStore.Store<P>(memory, ptr + offset, record.Field)
                 var storeMethod = ResolvePrimitiveStoreMethod(fieldPrims[i]);
-                il.Emit(OpCodes.Ldsfld, instanceField);
+                EmitLoadInstance(il, instanceField);
                 il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
 
                 il.Emit(OpCodes.Ldloc, ptrLocal);
@@ -2268,7 +2326,7 @@ namespace Wacs.Transpiler.AOT.Component
                 }
 
                 // Load the field's CLR value off the record arg.
-                il.Emit(OpCodes.Ldarg, argIdx);
+                EmitLdargCsharp(il, instanceField, argIdx);
                 var propName = PascalCase(fieldNames[i]);
                 var getter = recordClrType.GetMethod(
                     "get_" + propName,
@@ -2381,7 +2439,7 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
             // byte[] memory = instance.Memory;
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 
@@ -2436,7 +2494,7 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
             // byte[] memory = instance.Memory;
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 
@@ -2491,7 +2549,7 @@ namespace Wacs.Transpiler.AOT.Component
             EmitCoreCall(il, instanceField, coreMethod, export, types);
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 
@@ -2554,7 +2612,7 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
             // byte[] memory = instance.Memory;
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 
@@ -2640,7 +2698,7 @@ namespace Wacs.Transpiler.AOT.Component
             EmitCoreCall(il, instanceField, coreMethod, export, types);
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 
@@ -2722,7 +2780,7 @@ namespace Wacs.Transpiler.AOT.Component
             EmitCoreCall(il, instanceField, coreMethod, export, types);
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 
@@ -2957,7 +3015,7 @@ namespace Wacs.Transpiler.AOT.Component
             EmitCoreCall(il, instanceField, coreMethod, export, types);
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 
@@ -3078,6 +3136,40 @@ namespace Wacs.Transpiler.AOT.Component
             return rem == 0 ? offset : offset + (alignment - rem);
         }
 
+        /// <summary>Push the cached Module instance onto the IL
+        /// stack. Static <c>ComponentExports</c> (imports-less core
+        /// modules) loads the <c>_instance</c> static field directly;
+        /// instance <c>ComponentExports</c> (imports-bearing core
+        /// modules where the Module ctor takes <c>IImports</c>) loads
+        /// it as an instance field off <c>this</c>. Centralized so
+        /// the emit bodies stay shape-agnostic.</summary>
+        private static void EmitLoadInstance(
+            ILGenerator il, FieldBuilder instanceField)
+        {
+            if (instanceField.IsStatic)
+            {
+                il.Emit(OpCodes.Ldsfld, instanceField);
+            }
+            else
+            {
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, instanceField);
+            }
+        }
+
+        /// <summary>Load the export method's <paramref name="csIdx"/>th
+        /// C#-level parameter. Static methods map directly
+        /// (<c>Ldarg csIdx</c>); instance methods bias by one to
+        /// skip past the implicit <c>this</c> slot
+        /// (<c>Ldarg csIdx + 1</c>). Centralized so per-arg lowering
+        /// helpers stay shape-agnostic.</summary>
+        private static void EmitLdargCsharp(
+            ILGenerator il, FieldBuilder instanceField, int csIdx)
+        {
+            int ilIdx = instanceField.IsStatic ? csIdx : csIdx + 1;
+            il.Emit(OpCodes.Ldarg, ilIdx);
+        }
+
         /// <summary>
         /// IL body for an <c>own&lt;R&gt;</c> return. Core
         /// returns the handle as i32; the C# surface wraps that
@@ -3132,7 +3224,7 @@ namespace Wacs.Transpiler.AOT.Component
             EmitCoreCall(il, instanceField, coreMethod, export, types);
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 
@@ -3496,7 +3588,7 @@ namespace Wacs.Transpiler.AOT.Component
             EmitCoreCall(il, instanceField, coreMethod, export, types);
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 
