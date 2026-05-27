@@ -196,5 +196,28 @@ namespace Wacs.ComponentModel.Harness
             }
             return outer;
         }
+
+        /// <summary>Lift a canon-ABI
+        /// list&lt;list&lt;string&gt;&gt; from a (ptr, len)
+        /// pair into a fresh <c>string[][]</c>. Wraps
+        /// <see cref="LiftStringList"/> per outer element so
+        /// `string[][]` stays expressible as a single
+        /// helper call in option / result arm contexts.
+        /// </summary>
+        public static string[][] LiftStringListList(
+            MemoryInstance memory, int ptr, int len)
+        {
+            var outer = new string[len][];
+            for (int i = 0; i < len; i++)
+            {
+                int innerPtr = ReadI32LE(memory,
+                    ptr + i * 8);
+                int innerLen = ReadI32LE(memory,
+                    ptr + i * 8 + 4);
+                outer[i] = LiftStringList(memory,
+                    innerPtr, innerLen);
+            }
+            return outer;
+        }
     }
 }

@@ -1,5 +1,42 @@
 # Changelog
 
+## WACS.ComponentModel.Async.SourceGen 0.4.23, Harness.Runtime 0.7.4 — string[][] in option / result arms
+
+`IsSimpleList` recurses one more level so `string[][]`
+(list<list<string>>) qualifies as a single-expression-
+liftable shape — usable as an `option<string[][]>` inner
+or `result<string[][], ...>` arm. The new
+`MemoryHelpers.LiftStringListList` helper wraps
+`LiftStringList` per outer element so the lift expression
+stays a single helper call.
+
+* `IsSimpleList` accepts the list<list<string>> case;
+  other deeper / heterogeneous nestings (`string[][][]`,
+  `Point[][]`, `byte[][][]`) still fall back to the
+  multi-statement `EmitListLower` /
+  `EmitListLiftStatements` pipeline used at top-level
+  param / return + record/tuple field sites.
+* `PtrLenLiftExpression` dispatches the new shape to
+  `MemoryHelpers.LiftStringListList`.
+* **Harness.Runtime 0.7.4**: new
+  `MemoryHelpers.LiftStringListList(memory, ptr, len)`
+  — per-outer-element loop reading inner (ptr, len)
+  pairs and delegating to `LiftStringList`.
+* Test extension:
+  `Generator_emits_option_ptrlen_export_signatures`
+  picks up `string[][]? MaybeGrid(int)`.
+  22/22 generator integration tests; 660/660 across
+  Wacs.ComponentModel.Test (minus pre-existing
+  `WaitableSetSuspendBridgeTests` timing flake).
+  Hello-spike passes unchanged.
+
+**Still punted:** lists of records with `list<X>` fields
+(list-as-field needs its own multi-statement lift
+wrapper); even deeper option/result-arm list nestings
+(`option<string[][][]>`, `result<Point[], ()>` —
+need per-shape helpers or per-call-site emission); cyclic
+record refs (canon-ABI prohibits, correctly rejected).
+
 ## WACS.ComponentModel.Async.SourceGen 0.4.22 — wider-primitive mixed result arms (result<long, string> etc.)
 
 Mixed `result<>` arms where one arm is an 8-byte

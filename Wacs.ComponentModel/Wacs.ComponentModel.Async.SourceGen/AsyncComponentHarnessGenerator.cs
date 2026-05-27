@@ -333,19 +333,31 @@ namespace Wacs.ComponentModel.Async.SourceGen
         }
 
         // A "simple list" is a list whose lift and lower can
-        // ride single-expression / single-helper paths —
-        // `string[]` and `T[][]` for primitive T. Excludes
-        // list<record> (each record needs per-field
-        // codegen) and deeper nestings (e.g.,
-        // list<list<list<X>>>) which would need their own
-        // helper. Used to gate list-shape acceptance in
-        // option / result arm contexts.
+        // ride single-expression / single-helper paths.
+        // Includes `string[]`, `T[][]` for primitive T, and
+        // `string[][]` (via the dedicated
+        // MemoryHelpers.LiftStringListList helper). Deeper
+        // nestings (`string[][][]`, mixing record + list
+        // elements, etc.) would need their own per-shape
+        // helper — they fall back to the multi-statement
+        // EmitListLower / EmitListLiftStatements pipeline
+        // used by top-level params + record/tuple fields.
+        // Used to gate list-shape acceptance in option /
+        // result arm contexts.
         private static bool IsSimpleList(string fqType)
         {
             if (!IsListType(fqType)) return false;
             string elem = ArrayElementType(fqType);
-            return IsString(elem)
-                || IsPrimitiveArray(elem);
+            if (IsString(elem)) return true;
+            if (IsPrimitiveArray(elem)) return true;
+            // One more level of nesting: list<list<string>>
+            // (`string[][]`) maps to LiftStringListList.
+            if (IsListType(elem))
+            {
+                string inner = ArrayElementType(elem);
+                return IsString(inner);
+            }
+            return false;
         }
 
         // True iff every field of `rec` is canon-ABI
@@ -4199,11 +4211,10 @@ namespace Wacs.ComponentModel.Async.SourceGen
                     + ptrLocal + ", " + lenLocal + ", "
                     + pSize + ")";
             }
-            // Simple list — string[] or T[][] for primitive
-            // T. Routes through the dedicated MemoryHelpers
-            // list helpers so the lift stays a single
-            // expression (used by option / result arm
-            // contexts and per-record-field list lifts).
+            // Simple list — string[], T[][] for primitive T,
+            // or string[][]. Routes through the dedicated
+            // MemoryHelpers list helpers so the lift stays a
+            // single expression.
             if (IsListType(type))
             {
                 string elem = ArrayElementType(type);
@@ -4223,6 +4234,13 @@ namespace Wacs.ComponentModel.Async.SourceGen
                         + ptrLocal + ", " + lenLocal + ", "
                         + innerSize + ")";
                 }
+                // string[][]
+                if (IsListType(elem)
+                    && IsString(ArrayElementType(elem)))
+                    return "global::Wacs.ComponentModel" +
+                        ".Harness.MemoryHelpers" +
+                        ".LiftStringListList(_memory!, "
+                        + ptrLocal + ", " + lenLocal + ")";
             }
             return "default(" + type + ")";
         }

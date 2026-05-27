@@ -405,6 +405,12 @@ namespace Wacs.ComponentModel.Test
 
         [SyncExport("maybe_ints")]
         internal partial int[][]? MaybeInts(int[][]? xs);
+
+        // option<list<list<string>>> — IsSimpleList recurses
+        // one level so `string[][]` rides
+        // MemoryHelpers.LiftStringListList.
+        [SyncExport("maybe_grid")]
+        internal partial string[][]? MaybeGrid(int seed);
     }
 
     /// <summary>Result types whose arms are ptr/len
