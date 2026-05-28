@@ -12,18 +12,26 @@
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.ComponentModel.Harness.Lib</AssemblyName>
-        <AssemblyVersion>0.27.1</AssemblyVersion>
-        <Version>0.27.1</Version>
+        <AssemblyVersion>0.27.2</AssemblyVersion>
+        <Version>0.27.2</Version>
         <RepositoryType>git</RepositoryType>
         <TargetFramework>net9.0</TargetFramework>
         <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
         <IncludeSymbols>true</IncludeSymbols>
         <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
     </PropertyGroup>
 
     <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
       <DebugSymbols>true</DebugSymbols>
     </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="README.md">
+            <Pack>true</Pack>
+            <PackagePath/>
+        </None>
+    </ItemGroup>
 
     <ItemGroup>
       <ProjectReference Include="..\..\Wacs.Core\Wacs.Core\Wacs.Core.csproj" />

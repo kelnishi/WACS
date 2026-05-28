@@ -1,5 +1,40 @@
 # Changelog
 
+## WACS.ComponentModel.Parser 0.2.2 / Harness.Runtime 0.7.5 / Harness.Lib 0.27.2 / Async.SourceGen 0.4.25 — package READMEs
+
+NuGet listing tightening: the four newly-split public packages
+each carry a README that explains the role and the relationship
+to the rest of the WACS package family. No code change — the
+README ships inside the .nupkg via `PackageReadmeFile` so it
+renders on nuget.org.
+
+* **`WACS.ComponentModel.Parser`** — "AOT-safe byte walker;
+  produces `ComponentModule`; doesn't pull the reflective
+  `ComponentInstance` surface."
+* **`WACS.ComponentModel.Harness.Runtime`** — "AOT-safe runtime
+  primitives the emitted `{World}Harness.dll` links against;
+  pair with `WACS` at runtime; multi-targets net8.0 / netstandard2.1."
+* **`WACS.ComponentModel.Harness.Lib`** — "Build-time IL emitter;
+  `EmitToFile` / `EmitToStream` / `EmitInMemory`; cross-engine
+  symmetry with the transpiler's `{World}HarnessImpl`."
+* **`WACS.ComponentModel.Async.SourceGen`** — "Three independent
+  generators behind the CM async path: `[AsyncComponentHarness]`,
+  `[CanonAsync]` registry, `[ComponentLifter]` registration."
+
+## WACS.WASI.Preview3 0.2.3 / DependencyInjection 0.1.1 — netstandard2.1 build fix + README
+
+`File.CreateSymbolicLink` is net6.0+ only; guarded with
+`#if NET6_0_OR_GREATER` so the netstandard2.1 build succeeds.
+The netstandard2.1 path throws `FilesystemException(Unsupported,
+"symbolic-link creation requires net6.0 or greater")` at the
+call site. Closes the publish failure on tag
+`WACS-WASI-Preview3-v0.2.2` (run 26598056815) so both packages
+can ship.
+
+DI sibling rolls forward with no code change — just the version
+floor on its `ProjectReference` to Preview3 + a packaging tag
+bump for the run.
+
 ## WACS.WASI.GFX 0.3.0-preview / DependencyInjection 0.2.1-preview / Silk 0.2.1-preview — replace WasiGfxAmbient with AsyncLocal-scoped WasiGfxCurrent
 
 Closes the last v1 phase-1g residual: the
