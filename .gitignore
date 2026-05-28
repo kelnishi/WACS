@@ -100,3 +100,6 @@ Spec.Test/TestResults/**
 Wacs.Compilation/Sample*.cs.txt
 Wacs.Core/Generated
 **/TestResults/
+
+# Local-only Claude Code plan artifacts (moved out of docs/)
+.claude/plans/
