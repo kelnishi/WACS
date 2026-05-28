@@ -24,10 +24,10 @@ namespace Wacs.WASI.GFX.DependencyInjection
     /// <c>TryFindResourceImpl</c>. They use a parameterless
     /// ctor + <c>Create()</c> shape (the SourceGen-resource
     /// convention) and pull the backend from
-    /// <see cref="WasiGfxAmbient"/> at <c>Create()</c> time —
+    /// <see cref="WasiGfxCurrent"/> at <c>Create()</c> time —
     /// the bundle's role is to carry that backend through DI
-    /// so the ambient is set before any wasm guest resource
-    /// is minted.</para>
+    /// so the AsyncLocal handle is installed before any wasm
+    /// guest resource is minted.</para>
     /// </summary>
     public sealed class WasiGfxBundle
     {

@@ -35,12 +35,7 @@ namespace Wacs.WASI.GFX.DependencyInjection
         {
             GfxLog.Trace("DI.Device.Create: invoked");
             var backend = _bundle?.Configuration.Backend
-#pragma warning disable CS0618
-                ?? WasiGfxAmbient.RequireBackend();
-#pragma warning restore CS0618
-            if (backend == null)
-                throw new Types.WasiGfxException(
-                    "DI.Device.Create: no backend available.");
+                ?? WasiGfxCurrent.RequireBackend();
             Inner = backend.CreateFrameBufferDevice();
         }
 
@@ -100,17 +95,15 @@ namespace Wacs.WASI.GFX.DependencyInjection
                     "buffer.from-graphics-buffer: abstract-buffer not initialized");
             // The static call has no surface/device handle; the
             // backend's CPU-path frame-buffer device is the single
-            // wasi:frame-buffer.device that was constructed.
-            // The WIT [static]buffer.from-graphics-buffer signature
-            // still ties this to the ambient — a static method
-            // can't take the bundle through normal ctor injection.
-            // The transpiler-direct-link path for [static]
-            // resource factories uses the impl's static method
-            // directly, so future work could pass the bundle
-            // through a thread-local set at dispatch time.
-#pragma warning disable CS0618
-            var backend = WasiGfxAmbient.RequireBackend();
-#pragma warning restore CS0618
+            // wasi:frame-buffer.device that was constructed. The
+            // WIT [static]buffer.from-graphics-buffer signature
+            // can't take the bundle through ctor injection, so the
+            // backend is sourced from WasiGfxCurrent (AsyncLocal-
+            // scoped): the binding layer
+            // (WasiGfxSilkBindable.BindToRuntime / AddWasiGfx)
+            // installs it before the wasm guest can call here, and
+            // standard .NET async flow carries it through.
+            var backend = WasiGfxCurrent.RequireBackend();
             var dev = backend.CreateFrameBufferDevice();
             var inner = dev.FromGraphicsBuffer(ab.Inner);
 #pragma warning disable CS0618 // Type or member is obsolete

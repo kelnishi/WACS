@@ -33,9 +33,13 @@ and wasi-gfx are loaded.
 
 Per-resource impl classes (`Context`, `AbstractBuffer`,
 `Surface`, `Device`, `Buffer`) follow the SourceGen-resource
-convention — parameterless ctor + `Create()`, with the
-backend pulled from `WasiGfxAmbient` at construction time.
-They live in this package and the resolver discovers them via
+convention — parameterless ctor + `Create()`. `Context` /
+`Surface` / `Device` prefer a bundle-taking ctor (the v1
+phase-1g shape) and source the backend from
+`bundle.Configuration.Backend`. The `[static]buffer.from-
+graphics-buffer` factory and any parameterless-ctor fallback
+read from the AsyncLocal-scoped `WasiGfxCurrent`. They live in
+this package and the resolver discovers them via
 `TryFindResourceImpl`.
 
 Both engines run wasi-gfx components end-to-end:

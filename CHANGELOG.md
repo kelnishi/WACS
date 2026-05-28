@@ -1,5 +1,48 @@
 # Changelog
 
+## WACS.WASI.GFX 0.3.0-preview / DependencyInjection 0.2.1-preview / Silk 0.2.1-preview — replace WasiGfxAmbient with AsyncLocal-scoped WasiGfxCurrent
+
+Closes the last v1 phase-1g residual: the
+`[static]buffer.from-graphics-buffer` factory and the
+parameterless-ctor fallback in `Context` / `Surface` / `Device`
+no longer pull from a process-global static field. The new
+`WasiGfxCurrent` AsyncLocal-scoped handle replaces
+`WasiGfxAmbient`; multi-runtime async embedders get isolation
+through standard .NET ExecutionContext flow.
+
+* **`WasiGfxCurrent`** (new public static class): `Backend`
+  getter reads an `AsyncLocal<IBackend?>`; `SetBackend` /
+  `PushBackend` (scoped IDisposable) install it. The factory's
+  `RequireBackend` throws a typed `WasiGfxException` if nothing
+  was bound, same diagnostic shape as before.
+* **`WasiGfxAmbient`** deleted (was 50 lines / one public class).
+  Breaking change to `Wacs.WASI.GFX` — minor version bump to
+  `0.3.0-preview`. Consumers update `WasiGfxAmbient.*` →
+  `WasiGfxCurrent.*` (same signatures).
+* **DI impls** (`Context.Create()` / `Surface.Create(desc)` /
+  `Device.Create()`): drop the manual null-check on backend;
+  the resolver path (`WasiGfxCurrent.RequireBackend()`) throws
+  with the typed diagnostic if bind hasn't run yet. The
+  bundle-aware ctor path (v1 phase 1g) keeps its existing
+  `_bundle.Configuration.Backend ??` short-circuit.
+* **`Buffer.FromGraphicsBufferStatic`** sources its backend
+  from `WasiGfxCurrent.RequireBackend()`. The transpiler-direct-
+  link static-method emit (1f) calls into this directly; the
+  reflective `InvokeStaticFactoryReflective` path
+  (`Wacs.ComponentModel.Runtime.HostInterfaceRuntime`)
+  is unchanged — the AsyncLocal flows through standard async
+  rules without IL emit changes.
+* **`WasiGfxSilkBindable.BindToRuntime`** installs the backend
+  via `WasiGfxCurrent.SetBackend(Backend)` at bind time; the
+  value flows to the wasm guest's invocation context per .NET
+  async semantics.
+
+Tests: 85/85 Wacs.WASI.GFX.{Test,Silk.Test,Webgpu.Test}, 842/842
+Wacs.Transpiler.Test (+ 1 skip). No regressions; the existing
+`Context_BundleCtor_PullsBackendFromConfiguration` test
+documents the multi-runtime isolation that the previous static
+ambient prevented.
+
 ## WACS.Transpiler.Lib 0.12.12 — flat-record-param lowering closes the harness e2e gap
 
 Closes the next residual gap discovered in 0.12.11: small record

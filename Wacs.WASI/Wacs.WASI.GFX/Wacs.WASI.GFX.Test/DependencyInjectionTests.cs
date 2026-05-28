@@ -66,9 +66,12 @@ namespace Wacs.WASI.GFX.Test
         {
             // Two separate runtimes in one AppDomain — each gets
             // its own bundle pointing at a distinct backend. The
-            // legacy WasiGfxAmbient static would have made this
-            // impossible; the bundle ctor threads the backend
-            // through so each impl sees only its owner's backend.
+            // v0 WasiGfxAmbient process-global static would have
+            // made this impossible; the bundle ctor threads the
+            // backend through so each impl sees only its owner's
+            // backend (with WasiGfxCurrent's AsyncLocal scope
+            // providing the same isolation for the [static]
+            // factory case).
             var cfg1 = WasiGfxConfiguration.DefaultConfiguration();
             var stub1 = new StubBackend();
             cfg1.Backend = stub1;
