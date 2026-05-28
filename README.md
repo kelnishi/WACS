@@ -47,15 +47,21 @@ Versions auto-update from NuGet. See the [CHANGELOG](CHANGELOG.md) for release n
 | Package | Version | Notes |
 |---|---|---|
 | [`WACS`](https://www.nuget.org/packages/WACS) | [![](https://img.shields.io/nuget/v/WACS?label=&style=flat-square)](https://www.nuget.org/packages/WACS) | Core interpreter runtime |
-| [`WACS.Cli`](https://www.nuget.org/packages/WACS.Cli) | [![](https://img.shields.io/nuget/v/WACS.Cli?label=&style=flat-square)](https://www.nuget.org/packages/WACS.Cli) | Unified `wacs` global CLI (`run` / `build` / `aot` / `inspect` / `bindgen`) |
+| [`WACS.Cli`](https://www.nuget.org/packages/WACS.Cli) | [![](https://img.shields.io/nuget/v/WACS.Cli?label=&style=flat-square)](https://www.nuget.org/packages/WACS.Cli) | Unified `wacs` global CLI (`run` / `build` / `aot` / `harness` / `bindgen` / `inspect` / `wast2json`) |
 | [`WACS.Transpiler.Lib`](https://www.nuget.org/packages/WACS.Transpiler.Lib) | [![](https://img.shields.io/nuget/v/WACS.Transpiler.Lib?label=&style=flat-square)](https://www.nuget.org/packages/WACS.Transpiler.Lib) | AOT transpiler: WASM → .NET IL, JIT or NativeAOT |
 | [`WACS.ComponentModel`](https://www.nuget.org/packages/WACS.ComponentModel) | [![](https://img.shields.io/nuget/v/WACS.ComponentModel?label=&style=flat-square)](https://www.nuget.org/packages/WACS.ComponentModel) | Component runtime, canonical-ABI lift/lower, `ComponentBridge` |
+| [`WACS.ComponentModel.Parser`](https://www.nuget.org/packages/WACS.ComponentModel.Parser) | [![](https://img.shields.io/nuget/v/WACS.ComponentModel.Parser?label=&style=flat-square)](https://www.nuget.org/packages/WACS.ComponentModel.Parser) | AOT-safe component-binary parser split out of `WACS.ComponentModel` — what harness consumers reference under NativeAOT / IL2CPP |
 | [`WACS.ComponentModel.Bindgen.Lib`](https://www.nuget.org/packages/WACS.ComponentModel.Bindgen.Lib) | [![](https://img.shields.io/nuget/v/WACS.ComponentModel.Bindgen.Lib?label=&style=flat-square)](https://www.nuget.org/packages/WACS.ComponentModel.Bindgen.Lib) | Programmatic forward / reverse bindgen (used by `wacs bindgen`) |
+| [`WACS.ComponentModel.Harness.Lib`](https://www.nuget.org/packages/WACS.ComponentModel.Harness.Lib) | [![](https://img.shields.io/nuget/v/WACS.ComponentModel.Harness.Lib?label=&style=flat-square)](https://www.nuget.org/packages/WACS.ComponentModel.Harness.Lib) | IL emitter producing typed `{World}Harness` + `I{World}` assemblies from a WIT directory (the `wacs harness` verb's emit core) |
+| [`WACS.ComponentModel.Harness.Runtime`](https://www.nuget.org/packages/WACS.ComponentModel.Harness.Runtime) | [![](https://img.shields.io/nuget/v/WACS.ComponentModel.Harness.Runtime?label=&style=flat-square)](https://www.nuget.org/packages/WACS.ComponentModel.Harness.Runtime) | Runtime primitives the emitted harness IL calls: `MemoryHelpers`, `StringCoding`, `HarnessLoader.Load`, `Borrowed<T>` host-handle table |
+| [`WACS.ComponentModel.Async.SourceGen`](https://www.nuget.org/packages/WACS.ComponentModel.Async.SourceGen) | [![](https://img.shields.io/nuget/v/WACS.ComponentModel.Async.SourceGen?label=&style=flat-square)](https://www.nuget.org/packages/WACS.ComponentModel.Async.SourceGen) | Roslyn `IIncrementalGenerator` emitting `[AsyncComponentHarness]` / `[AsyncExport]` / `[SyncExport]` adapters at consumer build time |
 | [`WACS.HostBindings.Abstractions`](https://www.nuget.org/packages/WACS.HostBindings.Abstractions) | [![](https://img.shields.io/nuget/v/WACS.HostBindings.Abstractions?label=&style=flat-square)](https://www.nuget.org/packages/WACS.HostBindings.Abstractions) | `[WacsImport]` attribute surface for typed host bindings |
 | [`WACS.HostBindings.SourceGen`](https://www.nuget.org/packages/WACS.HostBindings.SourceGen) | [![](https://img.shields.io/nuget/v/WACS.HostBindings.SourceGen?label=&style=flat-square)](https://www.nuget.org/packages/WACS.HostBindings.SourceGen) | Source generator emitting `IImports` adapters from `[WacsImport]` |
 | [`WACS.WASI.Preview1`](https://www.nuget.org/packages/WACS.WASI.Preview1) | [![](https://img.shields.io/nuget/v/WACS.WASI.Preview1?label=&style=flat-square)](https://www.nuget.org/packages/WACS.WASI.Preview1) | `wasi_snapshot_preview1` host implementation |
 | [`WACS.WASI.Preview2`](https://www.nuget.org/packages/WACS.WASI.Preview2) | [![](https://img.shields.io/nuget/v/WACS.WASI.Preview2?label=&style=flat-square)](https://www.nuget.org/packages/WACS.WASI.Preview2) | Typed host impls for every WASI 0.2.3 subsystem + `IBindable` composite |
 | [`WACS.WASI.Preview2.DependencyInjection`](https://www.nuget.org/packages/WACS.WASI.Preview2.DependencyInjection) | [![](https://img.shields.io/nuget/v/WACS.WASI.Preview2.DependencyInjection?label=&style=flat-square)](https://www.nuget.org/packages/WACS.WASI.Preview2.DependencyInjection) | One-call DI registration of the WASI Preview 2 bundle |
+| [`WACS.WASI.Preview3`](https://www.nuget.org/packages/WACS.WASI.Preview3) | [![](https://img.shields.io/nuget/v/WACS.WASI.Preview3?label=&style=flat-square)](https://www.nuget.org/packages/WACS.WASI.Preview3) | WASI Preview 3 host impls — canon-async dispatcher, stream / future / error-context handle tables. Pinned to `wasi-0.3.0-rc-2026-03-15` |
+| [`WACS.WASI.Preview3.DependencyInjection`](https://www.nuget.org/packages/WACS.WASI.Preview3.DependencyInjection) | [![](https://img.shields.io/nuget/v/WACS.WASI.Preview3.DependencyInjection?label=&style=flat-square)](https://www.nuget.org/packages/WACS.WASI.Preview3.DependencyInjection) | DI registration of the Preview 3 bundle + per-runtime canon-async binder |
 | [`WACS.WASI.Threads`](https://www.nuget.org/packages/WACS.WASI.Threads) | [![](https://img.shields.io/nuget/v/WACS.WASI.Threads?label=&style=flat-square)](https://www.nuget.org/packages/WACS.WASI.Threads) | `wasi:thread-spawn` host adapter |
 | [`WACS.WASI.NN`](https://www.nuget.org/packages/WACS.WASI.NN) | [![](https://img.shields.io/nuget/v/WACS.WASI.NN?label=&style=flat-square)](https://www.nuget.org/packages/WACS.WASI.NN) | wasi-nn host bindings (WIT + WITX), backend-agnostic core |
 | [`WACS.WASI.NN.DependencyInjection`](https://www.nuget.org/packages/WACS.WASI.NN.DependencyInjection) | [![](https://img.shields.io/nuget/v/WACS.WASI.NN.DependencyInjection?label=&style=flat-square)](https://www.nuget.org/packages/WACS.WASI.NN.DependencyInjection) | DI scope + `WasiNNBundle` for the transpiler's direct-link emit |
@@ -82,6 +88,10 @@ Versions auto-update from NuGet. See the [CHANGELOG](CHANGELOG.md) for release n
 - **Async Tasks**: [JSPI](https://github.com/WebAssembly/js-promise-integration)-like non-blocking calls for async functions.
 - **WASI:** WACS.WASI.Preview1 provides a [wasi\_snapshot\_preview1](https://github.com/WebAssembly/WASI/blob/main/legacy/preview1/docs.md) implementation.
 - **Component Model & WASI Preview 2:** Full canonical-ABI lift/lower with WIT ↔ C# bindgen (forward and reverse); `Wacs.WASI.Preview2` ships default host implementations for every WASI 0.2.3 subsystem (`cli` / `clocks` / `filesystem` / `http` / `io` / `random` / `sockets`).
+- **WIT-shaped harness:** `wacs harness <wit-dir> -o <out.dll>` emits a typed C# façade against a `.wit` contract; `--harness` / `--wit-dir` flags on `wacs run` / `build` / `aot` validate components against the harness's embedded contract before run / IL emit. Interpreter (`{World}Harness.LoadFrom`) and transpiler (`{World}HarnessImpl : I{World}`) implement the same interface — engine choice is a deployment detail, not an API divergence. See [`docs/WIT_HARNESS_APPROACH.md`](docs/WIT_HARNESS_APPROACH.md).
+- **wasi-nn (machine learning):** seven backend packages — ONNX Runtime, OnnxRuntime-GenAI (LLMs: Gemma / Llama / Qwen / Phi), LlamaSharp (llama.cpp / GGUF, Metal on Apple Silicon), ML.NET, TorchSharp, OpenVINO — chosen at runtime via `--bind`. See [`docs/WASI_NN_USAGE.md`](docs/WASI_NN_USAGE.md).
+- **wasi-gfx (graphics / GPU):** `graphics-context` / `surface` / `frame-buffer` / `webgpu` proposals against one SDL window via Silk.NET + wgpu-native. `wacs run --wasi-gfx --windowed --call start <component>` boots the bundled CPU + GPU hosts together. Packages ship `-preview` while the upstream proposal stabilizes. See [`docs/WASI_GFX_USAGE.md`](docs/WASI_GFX_USAGE.md).
+- **Stack Switching:** `cont.new` / `resume` / `suspend` semantics implemented as the substrate the canon-async dispatcher builds on. See [`docs/stack-switching-architecture.md`](docs/stack-switching-architecture.md).
 
 **WACS is for _mobile games_**. 
 
@@ -121,6 +131,8 @@ Harnessed results from [wasm-feature-detect](https://github.com/GoogleChromeLabs
 |[JS Promise Integration](https://github.com/WebAssembly/js-promise-integration)|jspi|<span title="Browser idiom, but conceptually supported">✳️</span>|
 |[Threads](https://github.com/webassembly/threads)|threads|✅|
 |[Web Content Security Policy](https://github.com/WebAssembly/content-security-policy)||<span title="Browser idioms, not directly supported">🌐</span>|
+|**Phase 3 – Implementation**|
+|[Stack Switching](https://github.com/WebAssembly/stack-switching)||<span title="cont.new / resume / suspend implemented; substrate for the canon-async dispatcher — see docs/stack-switching-architecture.md">✅</span>|
 
 Legend: ✅ supported · ❌ not yet · ✳️ [conceptually supported (browser idiom)](./docs/BROWSER_IDIOMS.md) · 🌐 browser-only / N/A for non-web hosts
 
@@ -282,10 +294,10 @@ Each folder has its own README explaining the projects underneath.
 |---|---|
 | **[Wacs.Core/](Wacs.Core/README.md)** | The interpreter — `WasmRuntime`, parsers, polymorphic + switch runtimes, full op set. Source generator for the switch dispatcher lives alongside. |
 | **[Wacs.Transpiler/](Wacs.Transpiler/README.md)** | Ahead-of-time wasm → .NET IL transpiler. `WACS.Transpiler.Lib` is the programmatic API; the deprecated `wasm-transpile` CLI sits here too. |
-| **[Wacs.Console/](Wacs.Console/README.md)** | The unified `wacs` CLI (NuGet `WACS.Cli`) — `wacs run / build / aot / inspect / bindgen`, with `--wasi` / `--wasip2` baking in host packages. |
-| **[Wacs.ComponentModel/](Wacs.ComponentModel/README.md)** | Component-model runtime + WIT parser + canonical-ABI engine + `wit-bindgen-wacs` (forward & reverse C# bindgen). |
+| **[Wacs.Console/](Wacs.Console/README.md)** | The unified `wacs` CLI (NuGet `WACS.Cli`) — `wacs run / build / aot / harness / bindgen / inspect / wast2json`, with `--wasi` / `--wasip2` / `--wasi-gfx` / `--wasi-nn` / `--wasi-threads` / `--harness` / `--wit-dir` baking in host packages or contract validation. |
+| **[Wacs.ComponentModel/](Wacs.ComponentModel/README.md)** | Component-model runtime + WIT parser + canonical-ABI engine + `wit-bindgen-wacs` (forward & reverse C# bindgen) + the typed WIT-harness emitter (`Harness.Lib` IL emit + `Harness.Runtime` consumer surface) + the `[AsyncComponentHarness]` source generator. |
 | **[Wacs.HostBindings/](Wacs.HostBindings/README.md)** | Attribute contract (`[WacsImport]`, `WacsHostMemory`) + Roslyn source generator that emits dispatch glue for the transpiler's NativeAOT path. |
-| **[Wacs.WASI/](Wacs.WASI/README.md)** | All WASI host implementations, organized by sub-family — `Wacs.WASI.Preview1/`, `Wacs.WASI.Preview2/` (WASI 0.2.3), `Wacs.WASI.NN/` (wasi-nn + 3 backends), `Wacs.WASI.Threads/`. |
+| **[Wacs.WASI/](Wacs.WASI/README.md)** | All WASI host implementations, organized by sub-family — `Wacs.WASI.Preview1/`, `Wacs.WASI.Preview2/` (WASI 0.2.3), `Wacs.WASI.Preview3/` (canon-async + stream/future bridges, pinned to `wasi-0.3.0-rc-2026-03-15`), `Wacs.WASI.NN/` (wasi-nn + 6 backends: ONNX Runtime, OnnxRuntime-GenAI, ML.NET, LlamaSharp, TorchSharp, OpenVINO), `Wacs.WASI.GFX/` (wasi-gfx: graphics-context / surface / frame-buffer / webgpu against one SDL window via Silk.NET + wgpu-native), `Wacs.WASI.Threads/`. |
 | **[Wacs.Bench/](Wacs.Bench/README.md)** | Developer-only perf harnesses — bench, AOT bench, opcode profiler. Not packaged. |
 
 Top-level non-`Wacs.*` projects:
@@ -383,9 +395,10 @@ Want to know which host packages a component needs? `wacs inspect
 running.
 
 See [`Wacs.Console/Wacs.Console/README.md`](Wacs.Console/Wacs.Console/README.md) for the full
-verb reference (`run` / `build` / `inspect`), the direct-run
-shortcut, the engine-choice trade-off, and concrete migrations
-from the deprecated `wasm-transpile`.
+verb reference (`run` / `build` / `aot` / `harness` / `bindgen` /
+`inspect` / `wast2json`), the direct-run shortcut, the
+engine-choice trade-off, and concrete migrations from the
+deprecated `wasm-transpile`.
 
 ### From source
 
@@ -738,7 +751,8 @@ three-build-flag matrix in [`docs/COLDSTART.md`](docs/COLDSTART.md).
 ### Running `wacs`
 
 `wacs` is the reference CLI — verb-based subcommand layout (`run`
-/ `build` / `inspect`) with a direct-run shortcut so a bare
+/ `build` / `aot` / `harness` / `bindgen` / `inspect` /
+`wast2json`) with a direct-run shortcut so a bare
 `wacs file.wasm` defaults to `run`. All examples assume the
 `WACS.Cli` global tool is installed (`dotnet tool install -g
 WACS.Cli`); the `dotnet run --project Wacs.Console -c Release --`
