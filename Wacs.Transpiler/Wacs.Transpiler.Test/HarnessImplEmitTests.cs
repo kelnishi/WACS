@@ -235,34 +235,41 @@ namespace Wacs.Transpiler.Test
                 Assert.True(iRicher!.IsAssignableFrom(harnessImpl),
                     $"{harnessImpl!.FullName} must implement {iRicher.FullName}.");
 
-                // Variant nested-subclass dispatch produces a real
-                // body for NormalizeOrFail (was a NotImplementedException
-                // stub before this sprint's residual). ~150+ bytes of
-                // alloc + write + core call + switch + per-case payload
-                // reads + newobj of nested subclasses.
-                //
-                // Note: end-to-end invocation is held back by a
-                // separate gap discovered during this sprint — small
-                // record params flatten into individual field slots
-                // per the canonical ABI (Vec2 → 2 i32 args, not
-                // 1 ptr arg), but EmitLowerRecordParamToLocals always
-                // emits the ptr-pass path. Triggers
-                // InvalidProgramException at JIT time. Structural
-                // assertion lands here; flat-record-param lowering is
-                // a follow-up.
-                var ce = result.Assembly.GetTypes()
-                    .First(t => t.Name == "ComponentExports");
-                var ceNormalize = ce.GetMethods()
-                    .FirstOrDefault(m => m.Name == "NormalizeOrFail");
-                Assert.True(ceNormalize != null,
-                    "ComponentExports.NormalizeOrFail not emitted — "
-                    + "the variant nested-subclass gate is rejecting "
-                    + "the harness's Outcome shape.");
-                var ilLen = ceNormalize!.GetMethodBody()!
-                    .GetILAsByteArray()!.Length;
-                Assert.True(ilLen > 50,
-                    "NormalizeOrFail IL body is " + ilLen
-                    + " bytes — expected the full variant dispatch.");
+                // End-to-end exercise both exports. Add (record
+                // params + record return, flattens to 4 i32 in,
+                // 1 i32 retArea out) and normalize-or-fail (record
+                // param + variant return via nested-subclass
+                // dispatch). Construct the harness, invoke through
+                // IRicher, assert guest behavior — add componentwise,
+                // normalize-or-fail returns Invalid for (0,0) else
+                // Success(signum(x), signum(y)).
+                var vec2Type = harnessAsm.GetTypes()
+                    .First(t => t.Name == "Vec2");
+                var outcomeType = harnessAsm.GetTypes()
+                    .First(t => t.Name == "Outcome");
+                var vec2Ctor = vec2Type.GetConstructors().Single();
+                var instance = Activator.CreateInstance(harnessImpl);
+
+                var a = vec2Ctor.Invoke(new object[] { 3, 4 });
+                var b = vec2Ctor.Invoke(new object[] { 1, 2 });
+                var sum = iRicher.GetMethod("Add")!
+                    .Invoke(instance, new[] { a, b })!;
+                Assert.Equal(4, (int)vec2Type.GetProperty("X")!.GetValue(sum)!);
+                Assert.Equal(6, (int)vec2Type.GetProperty("Y")!.GetValue(sum)!);
+
+                var zero = vec2Ctor.Invoke(new object[] { 0, 0 });
+                var outZero = iRicher.GetMethod("NormalizeOrFail")!
+                    .Invoke(instance, new[] { zero })!;
+                Assert.IsType(outcomeType.GetNestedType("Invalid")!, outZero);
+
+                var off = vec2Ctor.Invoke(new object[] { -5, 10 });
+                var outOff = iRicher.GetMethod("NormalizeOrFail")!
+                    .Invoke(instance, new[] { off })!;
+                var successType = outcomeType.GetNestedType("Success")!;
+                Assert.IsType(successType, outOff);
+                var payload = successType.GetProperty("Value")!.GetValue(outOff)!;
+                Assert.Equal(-1, (int)vec2Type.GetProperty("X")!.GetValue(payload)!);
+                Assert.Equal(1, (int)vec2Type.GetProperty("Y")!.GetValue(payload)!);
             }
             finally
             {

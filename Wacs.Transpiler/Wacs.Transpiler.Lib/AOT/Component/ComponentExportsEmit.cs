@@ -2012,6 +2012,37 @@ namespace Wacs.Transpiler.AOT.Component
                     il.Emit(OpCodes.Ldfld, handleField);
                     coreParamIdx++;
                 }
+                else if (export.CsParamTypes != null
+                    && !pt.IsPrimitive
+                    && TryResolveRecordOfPrims(pt, types,
+                        out var recFieldPrims, out var recFieldNames))
+                {
+                    // Record-of-primitives param: flatten into one
+                    // core slot per field, per the canonical ABI's
+                    // MAX_FLAT_PARAMS rule. Each field's CLR value
+                    // is loaded via the record's get_<PascalField>
+                    // property (the harness's read-only surface) and
+                    // narrowed to the core wire type via EmitParamCast.
+                    var recordClrType = export.CsParamTypes[i];
+                    for (int f = 0; f < recFieldPrims.Length; f++)
+                    {
+                        EmitLdargCsharp(il, instanceField, i);
+                        var propName = PascalCase(recFieldNames[f]);
+                        var getter = recordClrType.GetMethod(
+                            "get_" + propName,
+                            BindingFlags.Public | BindingFlags.Instance);
+                        if (getter == null)
+                            throw new InvalidOperationException(
+                                "Record class " + recordClrType.FullName
+                                + " missing public property '" + propName
+                                + "' for WIT field '" + recFieldNames[f]
+                                + "' on " + export.Name + " param " + i);
+                        il.EmitCall(OpCodes.Callvirt, getter, null);
+                        EmitParamCast(il, recFieldPrims[f],
+                                      coreParams[coreParamIdx].ParameterType);
+                        coreParamIdx++;
+                    }
+                }
                 else
                 {
                     EmitLdargCsharp(il, instanceField, i);
@@ -2062,12 +2093,14 @@ namespace Wacs.Transpiler.AOT.Component
                     anyBuffer = true;
                     break;
                 }
-                if (!pt.IsPrimitive
-                    && TryResolveRecordOfPrims(pt, types, out _, out _))
-                {
-                    anyBuffer = true;
-                    break;
-                }
+                // Record-of-primitives PARAMS lower to flat fields
+                // (per the canonical ABI's MAX_FLAT_PARAMS=16 rule:
+                // small records get their fields passed inline as
+                // separate core slots, not via ptr-to-memory). The
+                // EmitCoreCall push loop handles them directly via
+                // per-field getter loads — no precompute needed.
+                // The >16-slot ptr-bundle fallback is a follow-up;
+                // typical harness fixtures stay well under the limit.
             }
             if (!anyBuffer) return;
 
@@ -2099,22 +2132,8 @@ namespace Wacs.Transpiler.AOT.Component
                         i, elemPrim,
                         out ptrLocals[i], out countLocals[i]);
                 }
-                else if (!pt.IsPrimitive
-                         && TryResolveRecordOfPrims(pt, types,
-                             out var recFieldPrims, out var recFieldNames))
-                {
-                    // record-of-primitives param. Lower to a single
-                    // ptr via cabi_realloc + per-field StoreXxx. The
-                    // CLR class on the C# side comes from
-                    // export.CsParamTypes[i] (resolved earlier via
-                    // TryFindNamedParamType). countLocals[i] stays
-                    // null — the wire form is a single i32 pointer.
-                    EmitLowerRecordParamToLocals(
-                        il, instanceField, reallocMethod, memoryGetter,
-                        i, export.CsParamTypes![i],
-                        recFieldPrims, recFieldNames,
-                        out ptrLocals[i]);
-                }
+                // Records are intentionally NOT lowered here — the
+                // push loop walks their fields directly.
             }
         }
 
@@ -2259,111 +2278,6 @@ namespace Wacs.Transpiler.AOT.Component
             il.EmitCall(OpCodes.Call, copyClosed, null);
 
             _ = arrayType;
-        }
-
-        /// <summary>
-        /// IL for the <c>record</c>-param lower path:
-        /// <c>cabi_realloc</c>(0, 0, maxAlign, totalSize) → for each
-        /// field, <c>PrimitiveStore.Store&lt;P&gt;(memory, ptr + offset, recordArg.Field)</c>.
-        /// Stashes <c>ptr</c> in a local for the caller to push at
-        /// core-call time (records pass as a single i32 — no count
-        /// slot, unlike strings/lists).
-        ///
-        /// <para>Field offsets follow the canonical-ABI rule: each
-        /// field starts at the next multiple of its own alignment.
-        /// Record alignment is <c>max</c>(field alignments); record
-        /// size is the running offset after the last field, rounded
-        /// up to record alignment so subsequent same-type records
-        /// stack cleanly.</para>
-        /// </summary>
-        private static void EmitLowerRecordParamToLocals(
-            ILGenerator il, FieldBuilder instanceField,
-            MethodInfo reallocMethod, MethodInfo memoryGetter,
-            int argIdx, Type recordClrType,
-            ComponentPrim[] fieldPrims, string[] fieldNames,
-            out LocalBuilder ptrLocal)
-        {
-            int totalSize = 0;
-            int maxAlign = 1;
-            var offsets = new int[fieldPrims.Length];
-            for (int i = 0; i < fieldPrims.Length; i++)
-            {
-                int align = PrimByteSize(fieldPrims[i]);
-                if (align > maxAlign) maxAlign = align;
-                totalSize = AlignUp(totalSize, align);
-                offsets[i] = totalSize;
-                totalSize += PrimByteSize(fieldPrims[i]);
-            }
-            // Round size up to record alignment so arrays of records
-            // stack cleanly (not strictly needed for the single-record
-            // case but matches the canonical-ABI layout rule).
-            totalSize = AlignUp(totalSize, maxAlign);
-
-            ptrLocal = il.DeclareLocal(typeof(int));
-
-            // ptr = instance.CabiRealloc(0, 0, maxAlign, totalSize)
-            EmitLoadInstance(il, instanceField);
-            il.Emit(OpCodes.Ldc_I4_0);
-            il.Emit(OpCodes.Ldc_I4_0);
-            il.Emit(OpCodes.Ldc_I4, maxAlign);
-            il.Emit(OpCodes.Ldc_I4, totalSize);
-            il.EmitCall(OpCodes.Callvirt, reallocMethod, null);
-            il.Emit(OpCodes.Stloc, ptrLocal);
-
-            for (int i = 0; i < fieldPrims.Length; i++)
-            {
-                // PrimitiveStore.Store<P>(memory, ptr + offset, record.Field)
-                var storeMethod = ResolvePrimitiveStoreMethod(fieldPrims[i]);
-                EmitLoadInstance(il, instanceField);
-                il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
-
-                il.Emit(OpCodes.Ldloc, ptrLocal);
-                if (offsets[i] != 0)
-                {
-                    il.Emit(OpCodes.Ldc_I4, offsets[i]);
-                    il.Emit(OpCodes.Add);
-                }
-
-                // Load the field's CLR value off the record arg.
-                EmitLdargCsharp(il, instanceField, argIdx);
-                var propName = PascalCase(fieldNames[i]);
-                var getter = recordClrType.GetMethod(
-                    "get_" + propName,
-                    BindingFlags.Public | BindingFlags.Instance);
-                if (getter == null)
-                    throw new InvalidOperationException(
-                        "Record class " + recordClrType.FullName
-                        + " missing public property '" + propName
-                        + "' for WIT field '" + fieldNames[i] + "'.");
-                il.EmitCall(OpCodes.Callvirt, getter, null);
-
-                il.EmitCall(OpCodes.Call, storeMethod, null);
-            }
-        }
-
-        /// <summary>Resolve <see cref="PrimitiveStore"/>'s
-        /// <c>Store&lt;P&gt;</c> method matching <paramref name="prim"/>.
-        /// Signature is uniformly <c>(MemoryInstance, int, T)</c>.</summary>
-        private static MethodInfo ResolvePrimitiveStoreMethod(ComponentPrim prim)
-        {
-            string name = prim switch
-            {
-                ComponentPrim.Bool => nameof(PrimitiveStore.StoreBool),
-                ComponentPrim.S8 => nameof(PrimitiveStore.StoreI8),
-                ComponentPrim.U8 => nameof(PrimitiveStore.StoreU8),
-                ComponentPrim.S16 => nameof(PrimitiveStore.StoreI16),
-                ComponentPrim.U16 => nameof(PrimitiveStore.StoreU16),
-                ComponentPrim.S32 => nameof(PrimitiveStore.StoreI32),
-                ComponentPrim.U32 => nameof(PrimitiveStore.StoreU32),
-                ComponentPrim.S64 => nameof(PrimitiveStore.StoreI64),
-                ComponentPrim.U64 => nameof(PrimitiveStore.StoreU64),
-                ComponentPrim.F32 => nameof(PrimitiveStore.StoreF32),
-                ComponentPrim.F64 => nameof(PrimitiveStore.StoreF64),
-                _ => throw new NotSupportedException(
-                    "PrimitiveStore.Store<P> not yet wired for " + prim),
-            };
-            // Single overload per name; GetMethod by name resolves uniquely.
-            return typeof(PrimitiveStore).GetMethod(name)!;
         }
 
         /// <summary>Byte size of a primitive type's native

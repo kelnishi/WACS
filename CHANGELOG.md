@@ -1,5 +1,47 @@
 # Changelog
 
+## WACS.Transpiler.Lib 0.12.12 — flat-record-param lowering closes the harness e2e gap
+
+Closes the next residual gap discovered in 0.12.11: small record
+params flatten into individual core slots per the canonical ABI's
+`MAX_FLAT_PARAMS=16` rule, not via a single `cabi_realloc`-allocated
+pointer.
+
+`richer.add(a: vec2, b: vec2) -> vec2` lowers core-side to
+`add(Int32, Int32, Int32, Int32) => Int32` — 4 i32 slots in, 1 i32
+return-area out. Pre-0.12.11 emit pushed `(ptr_a, ptr_b)` and the
+JIT rejected the 2-vs-4 arity mismatch with `InvalidProgramException`
+on first invocation. The bug was masked by tests that asserted type
+structure only; switching the Richer test to actually invoke
+through `IRicher.Add` / `IRicher.NormalizeOrFail` surfaced it.
+
+* **`EmitPrecomputeBufferParamLocals`**: removed the record branch
+  + the no-longer-reachable `EmitLowerRecordParamToLocals` and
+  `ResolvePrimitiveStoreMethod` helpers (~100 LOC of dead code).
+  Strings and lists still take the precompute → `(ptr, count)` path.
+* **`EmitCoreCall` push loop**: new record-of-primitives branch.
+  Per field: `EmitLdargCsharp` the record arg, `Callvirt get_PascalCase`
+  via the harness's read-only property, `EmitParamCast` against the
+  core method's expected wire type, increment `coreParamIdx`. Fields
+  flow straight into the core call's slot sequence.
+* Defer >16-slot record bundling — out of scope until a fixture
+  demands it; typical harness fixtures stay well under the limit.
+
+Richer e2e:
+
+```
+RicherHarnessImpl impl = ...;
+var sum = impl.Add(new Vec2(3, 4), new Vec2(1, 2));      // → Vec2(4, 6)
+var z   = impl.NormalizeOrFail(new Vec2(0, 0));          // → Outcome.Invalid
+var s   = impl.NormalizeOrFail(new Vec2(-5, 10));        // → Outcome.Success(Vec2(-1, 1))
+```
+
+All three round-trip the guest's WASM logic through the transpiled
+ComponentExports + the harness-impl forwarder. The Richer test now
+asserts the actual values, not just type structure.
+
+Tests: 842/842 Wacs.Transpiler.Test (+ 1 skip).
+
 ## WACS.Transpiler.Lib 0.12.11 — variant nested-subclass dispatch + discovered record-param gap
 
 Closes the residual sub-gap from #3b: variants whose CLR class
