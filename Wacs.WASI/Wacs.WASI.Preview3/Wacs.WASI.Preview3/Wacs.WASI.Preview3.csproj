@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <LangVersion>9</LangVersion>
+        <Nullable>enable</Nullable>
+        <Title>Wacs WASI Preview 3</Title>
+        <PackageId>WACS.WASI.Preview3</PackageId>
+        <Authors>Kelvin Nishikawa</Authors>
+        <Description>WASI Preview 3 (component-model async ABI) host implementations for WACS. Pinned to wasi-0.3.0-rc-2026-03-15. Vertical-slice v0: wasi:cli/run + wasi:cli/{stdin,stdout,stderr} + the stream&lt;u8&gt; bridge to host System.IO.Stream backings. Full end-to-end validation against wit-component-emitted components awaits Preview 3 RC stabilization.</Description>
+        <Copyright>(c) 2026 Kelvin Nishikawa</Copyright>
+        <PackageProjectUrl>https://github.com/kelnishi/WACS</PackageProjectUrl>
+        <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <AssemblyName>Wacs.WASI.Preview3</AssemblyName>
+        <AssemblyVersion>0.2.2</AssemblyVersion>
+        <Version>0.2.2</Version>
+        <RepositoryType>git</RepositoryType>
+        <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
+        <IsAotCompatible Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net7.0'))">true</IsAotCompatible>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\..\Wacs.ComponentModel\Wacs.ComponentModel\Wacs.ComponentModel.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <!-- Test project drives TcpSocket.ListenInternal directly
+           to validate the accept-loop pathway without going
+           through the full canon-async-binding indirection. -->
+      <InternalsVisibleTo Include="Wacs.WASI.Preview3.Test" />
+    </ItemGroup>
+
+    <!-- Embed vendored WIT files in the assembly so downstream
+         tooling can recover the contract from the DLL alone — same
+         pattern as WACS.WASI.Preview2. Preview3's WIT pins
+         wasi-0.3.0-rc-2026-03-15 (the snapshot in
+         Spec.Test/wasi/tests/rust/wasm32-wasip3/wit/deps). -->
+    <ItemGroup>
+        <EmbeddedResource Include="wit\**\*.wit"
+                          LogicalName="wit/%(RecursiveDir)%(Filename)%(Extension)" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="README.md">
+            <Pack>true</Pack>
+            <PackagePath/>
+        </None>
+    </ItemGroup>
+
+</Project>

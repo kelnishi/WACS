@@ -110,6 +110,56 @@ namespace Wacs.ComponentModel.Types
         public CtTupleType(IReadOnlyList<CtValType> elements) { Elements = elements; }
     }
 
+    // ---- Async ABI handle types -----------------------------------------
+
+    /// <summary>
+    /// <c>stream&lt;T&gt;</c> — Component Model async ABI handle to a
+    /// producer/consumer half-channel of elements of <see cref="Element"/>.
+    /// <see cref="Element"/> is <c>null</c> for the empty form
+    /// (<c>stream</c>), used by status-only streams.
+    ///
+    /// <para>Wire form: a 4-byte handle (i32) drawn from the same
+    /// handle table as <c>own</c> / <c>borrow</c>. Lift/lower marshaling
+    /// touches only the handle integer; the underlying buffer is owned
+    /// by the host's stream-dispatcher (Phase 3).</para>
+    /// </summary>
+    public sealed class CtStreamType : CtValType
+    {
+        public CtValType? Element { get; }
+        public CtStreamType(CtValType? element) { Element = element; }
+    }
+
+    /// <summary>
+    /// <c>future&lt;T&gt;</c> — Component Model async ABI handle to a
+    /// single-write/single-read cell of <see cref="Element"/>.
+    /// <see cref="Element"/> is <c>null</c> for the empty form
+    /// (<c>future</c>), used by completion-only futures.
+    ///
+    /// <para>Wire form: a 4-byte handle (i32) drawn from the same
+    /// handle table as <c>own</c> / <c>borrow</c>.</para>
+    /// </summary>
+    public sealed class CtFutureType : CtValType
+    {
+        public CtValType? Element { get; }
+        public CtFutureType(CtValType? element) { Element = element; }
+    }
+
+    /// <summary>
+    /// <c>error-context</c> — Component Model async ABI handle to an
+    /// opaque error description (a debug-message string the host can
+    /// retrieve via <c>error-context.debug-message</c>).
+    ///
+    /// <para>Wire form: a 4-byte handle (i32) drawn from the same
+    /// handle table as <c>own</c> / <c>borrow</c>. Has no inner type
+    /// parameter — the carried payload is always a string surfaced via
+    /// the canon builtin, not part of the handle's static type.</para>
+    /// </summary>
+    public sealed class CtErrorContextType : CtValType
+    {
+        public static readonly CtErrorContextType Instance = new CtErrorContextType();
+        private CtErrorContextType() { }
+    }
+
     // ---- User-defined aggregates -----------------------------------------
 
     /// <summary>

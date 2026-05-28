@@ -225,4 +225,3 @@ The compute kernel + render shader share the surface texture only for display; t
 - [`Wacs.WASI.GFX.Silk/README.md`](../Wacs.WASI/Wacs.WASI.GFX/Wacs.WASI.GFX.Silk/README.md) — Silk backend internals
 - [`Wacs.WASI.GFX.Webgpu/README.md`](../Wacs.WASI/Wacs.WASI.GFX/Wacs.WASI.GFX.Webgpu/README.md) — webgpu contract assembly
 - [`docs/COMPONENT_CHAINING.md`](COMPONENT_CHAINING.md#wasi-gfx-chaining) — multi-host chaining details
-- [`docs/wasi-gfx-v1-plan.md`](wasi-gfx-v1-plan.md) — the v1 roadmap that produced this surface

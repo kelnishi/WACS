@@ -523,6 +523,15 @@ namespace Wacs.Transpiler.AOT
                 if (needsReeval) pendingElemReeval.Add((id, elem.Initializers));
             }
 
+            // === Pass 0c: Emit per-signature StandaloneContInvoker classes ===
+            // Scan the module's cont.* sites, generate one
+            // invoker per unique continuation typeidx. Bakes the
+            // classes immediately so emit sites can ldsfld their
+            // Instance singletons.
+            var contInvokerEmitter = new ContInvokerEmitter(
+                moduleBuilder, $"{_namespace}.{moduleName}", moduleInst);
+            contInvokerEmitter.EmitInvokers(wasmFunctions);
+
             // === Pass 1: Create method stubs ===
             var methodBuilders = new MethodBuilder[wasmFunctions.Count];
             for (int i = 0; i < wasmFunctions.Count; i++)
@@ -544,7 +553,7 @@ namespace Wacs.Transpiler.AOT
             {
                 var funcInst = wasmFunctions[i];
                 var mb = methodBuilders[i];
-                var codegen = new FunctionCodegen(mb, funcInst, wasmFunctions.ToArray(), methodBuilders, importCount, gcTypeEmitter, allFunctionTypes, _options, diagnostics);
+                var codegen = new FunctionCodegen(mb, funcInst, wasmFunctions.ToArray(), methodBuilders, importCount, gcTypeEmitter, allFunctionTypes, _options, diagnostics, contInvokerEmitter.InvokerFields);
 
                 bool emitted = codegen.TryEmit();
 

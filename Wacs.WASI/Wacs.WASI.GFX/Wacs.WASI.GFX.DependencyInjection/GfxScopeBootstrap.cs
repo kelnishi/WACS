@@ -21,12 +21,13 @@ namespace Wacs.WASI.GFX.DependencyInjection
     /// Preview2.DI.
     ///
     /// <para>The backend (SilkGfxBackend) is wired into
-    /// WasiGfxAmbient by WasiGfxSilkBindable.BindToRuntime, not
-    /// via a DI configure callback — so the gfx Configuration can
-    /// stay at its DefaultConfiguration() defaults here. The DI
-    /// registration's only job is to make the composite
-    /// WasiPreview2GfxBundle resolvable; the bundle's GfxBackend
-    /// forwarder picks up the ambient at first use.</para>
+    /// WasiGfxCurrent (AsyncLocal-scoped) by
+    /// WasiGfxSilkBindable.BindToRuntime, not via a DI configure
+    /// callback — so the gfx Configuration can stay at its
+    /// DefaultConfiguration() defaults here. The DI registration's
+    /// only job is to make the composite WasiPreview2GfxBundle
+    /// resolvable; the bundle's GfxBackend forwarder picks up the
+    /// current handle at first use.</para>
     /// </summary>
     public sealed class GfxScopeBootstrap : IWasiScopeBootstrap
     {

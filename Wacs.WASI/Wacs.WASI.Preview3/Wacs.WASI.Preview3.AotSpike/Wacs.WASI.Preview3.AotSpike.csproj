@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net8.0</TargetFramework>
+        <ImplicitUsings>disable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <LangVersion>latest</LangVersion>
+        <RootNamespace>Wacs.WASI.Preview3.AotSpike</RootNamespace>
+        <AssemblyName>Wacs.WASI.Preview3.AotSpike</AssemblyName>
+
+        <!-- Whole-program NativeAOT. The intent is to prove the
+             WASIp3 dispatcher path (canon-async waitable plumbing,
+             host subtasks, callback-driver loop) is reachable from
+             AOT-safe consumer code. -->
+        <PublishAot>true</PublishAot>
+        <IsAotCompatible>true</IsAotCompatible>
+        <TrimMode>full</TrimMode>
+        <InvariantGlobalization>true</InvariantGlobalization>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- run-with-err.wasm is the minimal async-lifted
+             wasip3 fixture — single-poll body returning
+             `Err(())`. Verifying we drive it through the
+             callback loop and surface the exit code is
+             enough to demonstrate the WASIp3 dispatcher
+             path lives downstream of AOT-clean code. -->
+        <None Include="..\Wacs.WASI.Preview3.Test\Fixtures\run-with-err.wasm">
+            <Link>run-with-err.wasm</Link>
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </None>
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\..\Wacs.Core\Wacs.Core\Wacs.Core.csproj"
+                          SetTargetFramework="TargetFramework=net8.0" />
+        <ProjectReference Include="..\..\..\Wacs.ComponentModel\Wacs.ComponentModel\Wacs.ComponentModel.csproj"
+                          SetTargetFramework="TargetFramework=net8.0"
+                          UndefineProperties="PublishAot;PublishTrimmed;PublishReadyToRun;SelfContained;RuntimeIdentifier" />
+        <ProjectReference Include="..\Wacs.WASI.Preview3\Wacs.WASI.Preview3.csproj"
+                          SetTargetFramework="TargetFramework=net8.0"
+                          UndefineProperties="PublishAot;PublishTrimmed;PublishReadyToRun;SelfContained;RuntimeIdentifier" />
+
+        <!-- Roslyn source generator. Emits the
+             [AsyncComponentHarness] partial class bodies. -->
+        <ProjectReference Include="..\..\..\Wacs.ComponentModel\Wacs.ComponentModel.Async.SourceGen\Wacs.ComponentModel.Async.SourceGen.csproj"
+                          SetTargetFramework="TargetFramework=netstandard2.0"
+                          OutputItemType="Analyzer"
+                          ReferenceOutputAssembly="false" />
+    </ItemGroup>
+
+</Project>

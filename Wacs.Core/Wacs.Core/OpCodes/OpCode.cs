@@ -300,6 +300,17 @@ namespace Wacs.Core.OpCodes
         [OpCode("i64.extend16_s")] I64Extend16S = 0xC3,
         [OpCode("i64.extend32_s")] I64Extend32S = 0xC4,
 
+        // =========================
+        // Stack Switching proposal
+        //   https://github.com/WebAssembly/stack-switching
+        // =========================
+        [OpCode("cont.new")]      ContNew      = 0xE0,
+        [OpCode("cont.bind")]     ContBind     = 0xE1,
+        [OpCode("suspend")]       Suspend      = 0xE2,
+        [OpCode("resume")]        Resume       = 0xE3,
+        [OpCode("resume_throw")]  ResumeThrow  = 0xE4,
+        [OpCode("switch")]        Switch       = 0xE5,
+
         // Prefix GC
         FB = 0xFB,
         // Prefix Ext

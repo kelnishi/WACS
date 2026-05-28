@@ -353,5 +353,84 @@ namespace Wacs.ComponentModel.Test
             Assert.Throws<FormatException>(() =>
                 WitParser.Parse("package foo:bar; interface i { run: func() }"));
         }
+
+        // ---- Component-Model async ABI types (Phase 2) -------------------
+
+        [Fact]
+        public void Stream_typed_element()
+        {
+            var doc = WitParser.Parse(@"
+                package a:b;
+                interface i {
+                    type s = stream<u8>;
+                }
+            ");
+            var td = Assert.IsType<WitTypeDef>(doc.Packages[0].Interfaces[0].Items[0]);
+            var stream = Assert.IsType<WitStreamType>(td.Type);
+            Assert.NotNull(stream.Element);
+            Assert.Equal(WitPrim.U8,
+                Assert.IsType<WitPrimType>(stream.Element!).Kind);
+        }
+
+        [Fact]
+        public void Stream_without_element_parameter()
+        {
+            // Bare `stream` (no <T>) — status-only stream form.
+            var doc = WitParser.Parse(@"
+                package a:b;
+                interface i {
+                    type s = stream;
+                }
+            ");
+            var stream = Assert.IsType<WitStreamType>(
+                Assert.IsType<WitTypeDef>(doc.Packages[0].Interfaces[0].Items[0]).Type);
+            Assert.Null(stream.Element);
+        }
+
+        [Fact]
+        public void Future_typed_element()
+        {
+            var doc = WitParser.Parse(@"
+                package a:b;
+                interface i {
+                    type f = future<string>;
+                }
+            ");
+            var fut = Assert.IsType<WitFutureType>(
+                Assert.IsType<WitTypeDef>(doc.Packages[0].Interfaces[0].Items[0]).Type);
+            Assert.NotNull(fut.Element);
+            Assert.Equal(WitPrim.String,
+                Assert.IsType<WitPrimType>(fut.Element!).Kind);
+        }
+
+        [Fact]
+        public void Error_context_keyword()
+        {
+            var doc = WitParser.Parse(@"
+                package a:b;
+                interface i {
+                    type e = error-context;
+                }
+            ");
+            Assert.IsType<WitErrorContextType>(
+                Assert.IsType<WitTypeDef>(doc.Packages[0].Interfaces[0].Items[0]).Type);
+        }
+
+        [Fact]
+        public void Stream_of_record_payload()
+        {
+            // Nested-type form — stream<list<u8>> exercises ParseType
+            // recursion through the optional-element branch.
+            var doc = WitParser.Parse(@"
+                package a:b;
+                interface i {
+                    type bytes = stream<list<u8>>;
+                }
+            ");
+            var stream = Assert.IsType<WitStreamType>(
+                Assert.IsType<WitTypeDef>(doc.Packages[0].Interfaces[0].Items[0]).Type);
+            var list = Assert.IsType<WitListType>(stream.Element);
+            Assert.Equal(WitPrim.U8, Assert.IsType<WitPrimType>(list.Element).Kind);
+        }
     }
 }

@@ -52,6 +52,17 @@ namespace Wacs.Core.Runtime
         private readonly ObjectPool<Frame> _framePool;
 
         private readonly Stack<BlockTarget> _linkLabelStack = new();
+
+        /// <summary>
+        /// Active <c>resume</c> handler frames — one pushed per
+        /// <c>resume</c> / <c>resume_throw</c> / <c>switch</c>
+        /// invocation, popped when the call stack unwinds past
+        /// the installing frame. Walked top-down by the
+        /// <c>SuspensionException</c> catch arm to route a
+        /// <c>suspend $tag</c> to the matching handler label.
+        /// </summary>
+        public readonly Stack<Concurrency.ResumeHandlerFrame> ActiveResumeHandlers = new();
+
         private readonly ArrayPool<Value> _localsDataPool;
         public readonly Stopwatch InstructionTimer = new();
 
@@ -577,6 +588,14 @@ namespace Wacs.Core.Runtime
 #endif
             var address = PopFrame();
             InstructionPointer = address;
+            // Drop resume handler frames whose install depth is
+            // now past the top of the call stack — those scopes
+            // have been popped.
+            while (ActiveResumeHandlers.Count > 0
+                   && ActiveResumeHandlers.Peek().InstallFrameDepth > _callStack.Count)
+            {
+                ActiveResumeHandlers.Pop();
+            }
         }
 
         [UnconditionalSuppressMessage("AOT", "IL3050",

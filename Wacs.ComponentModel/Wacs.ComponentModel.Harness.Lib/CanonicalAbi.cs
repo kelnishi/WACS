@@ -113,9 +113,15 @@ namespace Wacs.ComponentModel.Harness.Lib
 
                 // own<R> / borrow<R> / a bare resource reference all
                 // serialize to a single i32 handle on the wasm side.
+                // stream<T> / future<T> / error-context share the same
+                // 4-byte handle space — only the dispatcher semantics
+                // differ at runtime (Phase 3).
                 case CtResourceType:
                 case CtOwnType:
                 case CtBorrowType:
+                case CtStreamType:
+                case CtFutureType:
+                case CtErrorContextType:
                     return (4, 4);
 
                 default:

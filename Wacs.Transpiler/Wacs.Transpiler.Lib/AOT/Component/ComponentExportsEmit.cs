@@ -89,31 +89,85 @@ namespace Wacs.Transpiler.AOT.Component
             var emittable = FindEmittableExports(component);
             if (emittable.Count == 0) return null;
 
-            // Imports-less components only — components with
-            // imports need a factory method (deferred). Bail BEFORE
-            // DefineType so Lokad.ILPack doesn't trip over an
-            // un-CreateType'd TypeBuilder at save time.
-            var coreCtor = coreModuleClass.GetConstructor(Type.EmptyTypes);
-            if (coreCtor == null) return null;
+            // Two-shape dispatch on the Module's ctor signature:
+            //
+            //  - Parameterless ctor present → STATIC ComponentExports
+            //    (existing path): cctor news up Module() once;
+            //    every export method is static; `_instance` is a
+            //    static field.
+            //
+            //  - Single-arg ctor present (the WACS transpiler always
+            //    surfaces IImports as the first arg per
+            //    ModuleClassGenerator.cs:1601-1613) → INSTANCE
+            //    ComponentExports: public ctor(IImports) news up
+            //    Module(imports) and stores in an instance field;
+            //    every export method is instance. The harness's
+            //    {World}HarnessImpl takes IImports in its own ctor
+            //    and constructs ComponentExports through it.
+            //
+            //  - Neither → bail. Multi-arg ctors (hostBundle /
+            //    resources) are a follow-up.
+            var coreParameterlessCtor = coreModuleClass.GetConstructor(Type.EmptyTypes);
+            ConstructorInfo? coreImportsCtor = null;
+            if (coreParameterlessCtor == null)
+            {
+                foreach (var c in coreModuleClass.GetConstructors())
+                {
+                    var ps = c.GetParameters();
+                    if (ps.Length == 1)
+                    {
+                        coreImportsCtor = c;
+                        break;
+                    }
+                }
+            }
+            if (coreParameterlessCtor == null && coreImportsCtor == null)
+                return null;
 
+            bool isInstanceShape = coreImportsCtor != null;
+            var typeAttrs = TypeAttributes.Public | TypeAttributes.Sealed;
+            if (!isInstanceShape)
+                typeAttrs |= TypeAttributes.Abstract;   // static class
             var typeBuilder = module.DefineType(
-                @namespace + ".ComponentExports",
-                TypeAttributes.Public | TypeAttributes.Abstract
-                    | TypeAttributes.Sealed);
+                @namespace + ".ComponentExports", typeAttrs);
 
-            // Cached default Module instance — every export
-            // call reuses it.
+            var fieldAttrs = FieldAttributes.Private | FieldAttributes.InitOnly;
+            if (!isInstanceShape) fieldAttrs |= FieldAttributes.Static;
             var instanceField = typeBuilder.DefineField(
-                "_instance",
-                coreModuleClass,
-                FieldAttributes.Private | FieldAttributes.Static
-                    | FieldAttributes.InitOnly);
+                "_instance", coreModuleClass, fieldAttrs);
 
-            var cctor = typeBuilder.DefineTypeInitializer();
-            var cctorIl = cctor.GetILGenerator();
-            cctorIl.Emit(OpCodes.Newobj, coreCtor);
-            cctorIl.Emit(OpCodes.Stsfld, instanceField);
-            cctorIl.Emit(OpCodes.Ret);
+            if (!isInstanceShape)
+            {
+                // Static path: cctor news up Module() once; every
+                // export method is static; subsequent calls reuse
+                // _instance.
+                var cctor = typeBuilder.DefineTypeInitializer();
+                var cctorIl = cctor.GetILGenerator();
+                cctorIl.Emit(OpCodes.Newobj, coreParameterlessCtor!);
+                cctorIl.Emit(OpCodes.Stsfld, instanceField);
+                cctorIl.Emit(OpCodes.Ret);
+            }
+            else
+            {
+                // Instance path: ctor takes IImports (the first
+                // and only arg of the chosen Module ctor), news up
+                // Module(imports), stores in _instance.
+                var importsType = coreImportsCtor!.GetParameters()[0].ParameterType;
+                var ctor = typeBuilder.DefineConstructor(
+                    MethodAttributes.Public | MethodAttributes.SpecialName
+                        | MethodAttributes.RTSpecialName,
+                    CallingConventions.Standard,
+                    new[] { importsType });
+                ctor.DefineParameter(1, ParameterAttributes.None, "imports");
+                var cIl = ctor.GetILGenerator();
+                cIl.Emit(OpCodes.Ldarg_0);
+                cIl.Emit(OpCodes.Call, typeof(object).GetConstructor(Type.EmptyTypes)!);
+                cIl.Emit(OpCodes.Ldarg_0);
+                cIl.Emit(OpCodes.Ldarg_1);
+                cIl.Emit(OpCodes.Newobj, coreImportsCtor);
+                cIl.Emit(OpCodes.Stfld, instanceField);
+                cIl.Emit(OpCodes.Ret);
+            }
 
             // Pre-emit named C# types from the decoded WIT so
             // `ComponentExports` methods can reference them as
@@ -430,7 +484,7 @@ namespace Wacs.Transpiler.AOT.Component
                 typeof(object).GetConstructor(Type.EmptyTypes)!);
             // this.Handle = _instance.[constructor]<type>();
             il.Emit(OpCodes.Ldarg_0);
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.EmitCall(OpCodes.Callvirt, coreCtor, null);
             il.Emit(OpCodes.Stfld, handleField);
             il.Emit(OpCodes.Ret);
@@ -464,7 +518,7 @@ namespace Wacs.Transpiler.AOT.Component
                     "arg" + i);
 
             var il = method.GetILGenerator();
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldfld, handleField);
             for (int i = 0; i < userParams.Length; i++)
@@ -498,7 +552,7 @@ namespace Wacs.Transpiler.AOT.Component
                     "arg" + i);
 
             var il = method.GetILGenerator();
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             for (int i = 0; i < userParams.Length; i++)
                 il.Emit(OpCodes.Ldarg, i);
             il.EmitCall(OpCodes.Callvirt, coreMethod, null);
@@ -939,6 +993,11 @@ namespace Wacs.Transpiler.AOT.Component
                 if (p.Type.IsPrimitive) continue;
                 if (TryResolveListOfPrim(p.Type, types, out _)) continue;
                 if (TryResolveResourceHandleParam(p.Type, types, out _)) continue;
+                // record-of-primitive-fields lowers as a single ptr
+                // into linear memory holding the fields at their
+                // naturally-aligned offsets. Emit-side fills via
+                // EmitLowerRecordParamToLocals.
+                if (TryResolveRecordOfPrims(p.Type, types, out _, out _)) continue;
                 return false;
             }
             if (fn.Results.Count == 0) return true;
@@ -956,6 +1015,7 @@ namespace Wacs.Transpiler.AOT.Component
             if (TryResolveEnumReturn(r, types, out _)) return true;
             if (TryResolveFlagsReturn(r, types, out _)) return true;
             if (TryResolveRecordOfPrims(r, types, out _, out _)) return true;
+            if (IsStructurallyEmittableRecordOfFlat(r, types)) return true;
             if (IsStructurallyEmittableVariant(r, types)) return true;
             if (TryResolveOwnReturn(r, types, out _)) return true;
             return false;
@@ -1106,6 +1166,44 @@ namespace Wacs.Transpiler.AOT.Component
                 CasePayloads = payloads;
                 HasUnsupportedAggregate = hasUnsupported;
             }
+        }
+
+        /// <summary>Structural-only "is this emittable as a
+        /// record return with enum/flags fields" check for
+        /// <see cref="IsEmittable"/>. Mirrors
+        /// <see cref="TryResolveRecordOfPrims"/> but also accepts
+        /// fields whose type is a structural enum or flags. The
+        /// resolver downstream re-runs with the decoded WIT to
+        /// bind each enum/flags field to its CLR type from
+        /// emittedTypes; exports whose CLR types can't be bound
+        /// surface as silent skips (same pattern variant returns
+        /// use).</summary>
+        private static bool IsStructurallyEmittableRecordOfFlat(
+            ComponentValType t, IReadOnlyList<DefTypeEntry> types)
+        {
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= types.Count) return false;
+            if (!(types[(int)t.TypeIdx] is ComponentRecordType rec)) return false;
+            // Reject if every field is primitive — TryResolveRecordOfPrims
+            // already accepted this shape above. Only fire when at
+            // least one field needs the enum/flags extension, so we
+            // don't double-accept and confuse the downstream resolver
+            // pickup order.
+            bool anyNonPrim = false;
+            for (int i = 0; i < rec.Fields.Count; i++)
+            {
+                var ft = rec.Fields[i].Type;
+                if (ft.IsPrimitive) continue;
+                if (ft.TypeIdx >= types.Count) return false;
+                var def = types[(int)ft.TypeIdx];
+                if (def is ComponentEnumType || def is ComponentFlagsType)
+                {
+                    anyNonPrim = true;
+                    continue;
+                }
+                return false;
+            }
+            return anyNonPrim;
         }
 
         /// <summary>Structural-only "is this emittable as a
@@ -1321,6 +1419,73 @@ namespace Wacs.Transpiler.AOT.Component
             return true;
         }
 
+        /// <summary>Like <see cref="TryResolveRecordOfPrims"/> but
+        /// also accepts fields whose type is a structural enum or
+        /// flags. For each such field the wire-side primitive width
+        /// is derived from the case/flag count (≤8 → u8, ≤16 → u16,
+        /// ≤32 → u32 for flags; same width breakdown for enums via
+        /// case count). The CLR-side ctor parameter type comes from
+        /// the harness's pre-registered enum/flags class, looked up
+        /// via the decoded WIT and emittedTypes.
+        ///
+        /// <para>Returns true only when at least one field is non-
+        /// primitive — otherwise <see cref="TryResolveRecordOfPrims"/>
+        /// would have matched first. Keeps the predicate ordering
+        /// in <see cref="EmitExportMethod"/> unambiguous.</para>
+        /// </summary>
+        private static bool TryResolveRecordOfFlat(
+            ComponentValType t, IReadOnlyList<DefTypeEntry> types,
+            out ComponentPrim[] fieldPrims, out string[] fieldNames)
+        {
+            fieldPrims = Array.Empty<ComponentPrim>();
+            fieldNames = Array.Empty<string>();
+            if (t.IsPrimitive) return false;
+            if (t.TypeIdx >= types.Count) return false;
+            if (!(types[(int)t.TypeIdx] is ComponentRecordType rec)) return false;
+            var prims = new ComponentPrim[rec.Fields.Count];
+            var names = new string[rec.Fields.Count];
+            bool anyNonPrim = false;
+            for (int i = 0; i < prims.Length; i++)
+            {
+                var ft = rec.Fields[i].Type;
+                names[i] = rec.Fields[i].Name;
+                if (ft.IsPrimitive)
+                {
+                    prims[i] = ft.Prim;
+                    continue;
+                }
+                if (ft.TypeIdx >= types.Count) return false;
+                var def = types[(int)ft.TypeIdx];
+                if (def is ComponentEnumType en)
+                {
+                    prims[i] = EnumWirePrim(en.Cases.Count);
+                    anyNonPrim = true;
+                    continue;
+                }
+                if (def is ComponentFlagsType fl)
+                {
+                    prims[i] = FlagsWirePrim(fl.Flags.Count);
+                    anyNonPrim = true;
+                    continue;
+                }
+                return false;
+            }
+            if (!anyNonPrim) return false;
+            fieldPrims = prims;
+            fieldNames = names;
+            return true;
+        }
+
+        private static ComponentPrim EnumWirePrim(int caseCount) =>
+            caseCount <= 256 ? ComponentPrim.U8
+            : caseCount <= 65536 ? ComponentPrim.U16
+            : ComponentPrim.U32;
+
+        private static ComponentPrim FlagsWirePrim(int flagCount) =>
+            flagCount <= 8 ? ComponentPrim.U8
+            : flagCount <= 16 ? ComponentPrim.U16
+            : ComponentPrim.U32;
+
         /// <summary>True iff <paramref name="t"/> is a type-ref
         /// to <c>option&lt;string&gt;</c>. Separate predicate
         /// from <see cref="TryResolveOptionOfPrim"/> because the
@@ -1468,6 +1633,17 @@ namespace Wacs.Transpiler.AOT.Component
                     if (named == null) return;
                     paramTypes[i] = named;
                 }
+                else if (TryResolveRecordOfPrims(pt, types, out _, out _))
+                {
+                    // Record param: surface as the harness's emitted
+                    // CLR record class (looked up by name through the
+                    // decoded WIT + emittedTypes/preRegisteredTypes
+                    // cache — same path resource handle params use).
+                    var named = TryFindNamedParamType(
+                        decodedWit, emittedTypes, export.Name, i);
+                    if (named == null) return;
+                    paramTypes[i] = named;
+                }
                 else
                 {
                     return;   // shouldn't reach — IsEmittable rejects
@@ -1597,6 +1773,25 @@ namespace Wacs.Transpiler.AOT.Component
                 if (named == null) return;
                 returnType = named;
             }
+            else if (TryResolveRecordOfFlat(
+                export.Signature.Results[0], types,
+                out recordFieldPrims, out recordFieldNames))
+            {
+                // record-with-flat-fields: at least one field is
+                // an enum or flags. Wire reads use the per-field
+                // primitive width; the ctor expects the matching
+                // CLR enum/flags type from emittedTypes (the
+                // harness's pre-registered class). The shared
+                // EmitRecordReturnBody handles both shapes —
+                // EmitPrimCtorArgConv tolerates enum-typed ctor
+                // params with no conv emit (CLR enums are
+                // bit-compatible with their underlying primitive).
+                isRecordReturn = true;
+                var named = TryFindNamedReturn(decodedWit, emittedTypes,
+                                                export.Name);
+                if (named == null) return;
+                returnType = named;
+            }
             else if (TryResolveVariantReturn(
                 export.Signature.Results[0], types,
                 decodedWit, emittedTypes, export.Name,
@@ -1605,10 +1800,23 @@ namespace Wacs.Transpiler.AOT.Component
             {
                 isVariantReturn = true;
                 // Variants need a generated class — reject
-                // unnamed cases.
+                // unnamed cases. Two CLR-class shapes both succeed:
+                //   - Flat ctor (transpiler's own emit): a single
+                //     class with `(disc, payload0, payload1, …)`
+                //     ctor. EmitVariantReturnBody routes here.
+                //   - Nested subclasses (harness's emit): abstract
+                //     base + one `Case` nested-sealed subclass per
+                //     case, each with its own ctor (no-arg for
+                //     payload-less cases, single-arg for payload
+                //     cases). EmitVariantReturnBodyNested dispatches
+                //     on the disc and Newobjs the matching subclass.
+                // Reject only if neither shape matches.
                 var named = TryFindNamedReturn(decodedWit, emittedTypes,
                                                 export.Name);
                 if (named == null) return;
+                if (!VariantClassHasFlatCtor(named, variantShape)
+                    && !VariantClassHasNestedSubclasses(named, variantShape))
+                    return;
                 returnType = named;
             }
             else if (TryResolveOwnReturn(
@@ -1628,10 +1836,14 @@ namespace Wacs.Transpiler.AOT.Component
             }
 
             var methodName = PascalCase(export.Name);
+            // Static vs instance method dispatch keys off
+            // instanceField's shape — set by EmitComponentExportsClass
+            // when it picks the static-or-instance class layout.
+            var methodAttrs = MethodAttributes.Public | MethodAttributes.HideBySig;
+            if (instanceField.IsStatic)
+                methodAttrs |= MethodAttributes.Static;
             var method = typeBuilder.DefineMethod(
-                methodName,
-                MethodAttributes.Public | MethodAttributes.Static,
-                returnType, paramTypes);
+                methodName, methodAttrs, returnType, paramTypes);
             for (int i = 0; i < export.Signature.Params.Count; i++)
                 method.DefineParameter(i + 1, ParameterAttributes.None,
                                        CamelCase(export.Signature.Params[i].Name));
@@ -1757,7 +1969,7 @@ namespace Wacs.Transpiler.AOT.Component
                 il, instanceField, coreMethod, export, types,
                 out var ptrLocals, out var countLocals);
 
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             var coreParams = coreMethod.GetParameters();
             int coreParamIdx = 0;
             for (int i = 0; i < export.Signature.Params.Count; i++)
@@ -1765,12 +1977,20 @@ namespace Wacs.Transpiler.AOT.Component
                 var pt = export.Signature.Params[i].Type;
                 if (ptrLocals[i] != null)
                 {
-                    // String or list<prim> — the precompute step
-                    // stashed (ptr, count) in locals. Push them
-                    // as the two core args.
+                    // Aggregate-buffer-style param. String and list<T>
+                    // push (ptr, count) — two core slots. Record params
+                    // push only the ptr (countLocal stays null) — one
+                    // core slot.
                     il.Emit(OpCodes.Ldloc, ptrLocals[i]!);
-                    il.Emit(OpCodes.Ldloc, countLocals[i]!);
-                    coreParamIdx += 2;
+                    if (countLocals[i] != null)
+                    {
+                        il.Emit(OpCodes.Ldloc, countLocals[i]!);
+                        coreParamIdx += 2;
+                    }
+                    else
+                    {
+                        coreParamIdx++;
+                    }
                 }
                 else if (export.CsParamTypes != null
                     && !pt.IsPrimitive
@@ -1788,13 +2008,44 @@ namespace Wacs.Transpiler.AOT.Component
                         throw new InvalidOperationException(
                             "Resource class missing Handle field for "
                             + export.Name + " param " + i);
-                    il.Emit(OpCodes.Ldarg, i);
+                    EmitLdargCsharp(il, instanceField, i);
                     il.Emit(OpCodes.Ldfld, handleField);
                     coreParamIdx++;
                 }
+                else if (export.CsParamTypes != null
+                    && !pt.IsPrimitive
+                    && TryResolveRecordOfPrims(pt, types,
+                        out var recFieldPrims, out var recFieldNames))
+                {
+                    // Record-of-primitives param: flatten into one
+                    // core slot per field, per the canonical ABI's
+                    // MAX_FLAT_PARAMS rule. Each field's CLR value
+                    // is loaded via the record's get_<PascalField>
+                    // property (the harness's read-only surface) and
+                    // narrowed to the core wire type via EmitParamCast.
+                    var recordClrType = export.CsParamTypes[i];
+                    for (int f = 0; f < recFieldPrims.Length; f++)
+                    {
+                        EmitLdargCsharp(il, instanceField, i);
+                        var propName = PascalCase(recFieldNames[f]);
+                        var getter = recordClrType.GetMethod(
+                            "get_" + propName,
+                            BindingFlags.Public | BindingFlags.Instance);
+                        if (getter == null)
+                            throw new InvalidOperationException(
+                                "Record class " + recordClrType.FullName
+                                + " missing public property '" + propName
+                                + "' for WIT field '" + recFieldNames[f]
+                                + "' on " + export.Name + " param " + i);
+                        il.EmitCall(OpCodes.Callvirt, getter, null);
+                        EmitParamCast(il, recFieldPrims[f],
+                                      coreParams[coreParamIdx].ParameterType);
+                        coreParamIdx++;
+                    }
+                }
                 else
                 {
-                    il.Emit(OpCodes.Ldarg, i);
+                    EmitLdargCsharp(il, instanceField, i);
                     EmitParamCast(il, pt.Prim,
                                   coreParams[coreParamIdx].ParameterType);
                     coreParamIdx++;
@@ -1842,6 +2093,14 @@ namespace Wacs.Transpiler.AOT.Component
                     anyBuffer = true;
                     break;
                 }
+                // Record-of-primitives PARAMS lower to flat fields
+                // (per the canonical ABI's MAX_FLAT_PARAMS=16 rule:
+                // small records get their fields passed inline as
+                // separate core slots, not via ptr-to-memory). The
+                // EmitCoreCall push loop handles them directly via
+                // per-field getter loads — no precompute needed.
+                // The >16-slot ptr-bundle fallback is a follow-up;
+                // typical harness fixtures stay well under the limit.
             }
             if (!anyBuffer) return;
 
@@ -1873,6 +2132,8 @@ namespace Wacs.Transpiler.AOT.Component
                         i, elemPrim,
                         out ptrLocals[i], out countLocals[i]);
                 }
+                // Records are intentionally NOT lowered here — the
+                // push loop walks their fields directly.
             }
         }
 
@@ -1916,7 +2177,7 @@ namespace Wacs.Transpiler.AOT.Component
             countLocal = il.DeclareLocal(typeof(int));
             ptrLocal = il.DeclareLocal(typeof(int));
 
-            il.Emit(OpCodes.Ldarg, argIdx);
+            EmitLdargCsharp(il, instanceField, argIdx);
             il.EmitCall(OpCodes.Call, encode, null);
             il.Emit(OpCodes.Stloc, bytesLocal);
 
@@ -1943,7 +2204,7 @@ namespace Wacs.Transpiler.AOT.Component
             }
             il.Emit(OpCodes.Stloc, countLocal);
 
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.Emit(OpCodes.Ldc_I4_0);     // oldPtr
             il.Emit(OpCodes.Ldc_I4_0);     // oldLen
             il.Emit(OpCodes.Ldc_I4, isUtf16 ? 2 : 1);   // align
@@ -1952,7 +2213,7 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Stloc, ptrLocal);
 
             il.Emit(OpCodes.Ldloc, bytesLocal);
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Ldloc, ptrLocal);
             il.EmitCall(OpCodes.Call, copy, null);
@@ -1989,7 +2250,7 @@ namespace Wacs.Transpiler.AOT.Component
             ptrLocal = il.DeclareLocal(typeof(int));
 
             // count = values.Length
-            il.Emit(OpCodes.Ldarg, argIdx);
+            EmitLdargCsharp(il, instanceField, argIdx);
             il.Emit(OpCodes.Ldlen);
             il.Emit(OpCodes.Conv_I4);
             il.Emit(OpCodes.Stloc, countLocal);
@@ -2001,7 +2262,7 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Stloc, byteLenLocal);
 
             // ptr = instance.CabiRealloc(0, 0, elemSize, byteLen)
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ldc_I4_0);
             il.Emit(OpCodes.Ldc_I4, elemSize);
@@ -2010,8 +2271,8 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Stloc, ptrLocal);
 
             // ListMarshal.CopyArrayToGuest<T>(values, instance.Memory, ptr)
-            il.Emit(OpCodes.Ldarg, argIdx);
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLdargCsharp(il, instanceField, argIdx);
+            EmitLoadInstance(il, instanceField);
             il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Ldloc, ptrLocal);
             il.EmitCall(OpCodes.Call, copyClosed, null);
@@ -2091,7 +2352,7 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
             // byte[] memory = instance.Memory;
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 
@@ -2146,7 +2407,7 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
             // byte[] memory = instance.Memory;
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 
@@ -2201,7 +2462,7 @@ namespace Wacs.Transpiler.AOT.Component
             EmitCoreCall(il, instanceField, coreMethod, export, types);
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 
@@ -2264,7 +2525,7 @@ namespace Wacs.Transpiler.AOT.Component
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
             // byte[] memory = instance.Memory;
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 
@@ -2350,7 +2611,7 @@ namespace Wacs.Transpiler.AOT.Component
             EmitCoreCall(il, instanceField, coreMethod, export, types);
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 
@@ -2432,7 +2693,7 @@ namespace Wacs.Transpiler.AOT.Component
             EmitCoreCall(il, instanceField, coreMethod, export, types);
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 
@@ -2667,7 +2928,7 @@ namespace Wacs.Transpiler.AOT.Component
             EmitCoreCall(il, instanceField, coreMethod, export, types);
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 
@@ -2684,19 +2945,142 @@ namespace Wacs.Transpiler.AOT.Component
                 offset += PrimByteSize(fieldPrims[i]);
             }
 
-            // Call ctor matching the field types in order.
-            var ctorParams = new Type[fieldPrims.Length];
-            for (int i = 0; i < fieldPrims.Length; i++)
-                ctorParams[i] = PrimToCs(fieldPrims[i]);
-            var ctor = recordType.GetConstructor(ctorParams)!;
+            // Look up the record's canonical ctor by parameter count
+            // and adapt to its param types. When recordType is a
+            // pre-registered harness type, its ctor signature may
+            // differ from the transpiler-emitted convention — e.g.
+            // harness emits char as typeof(char) while the
+            // transpiler's PrimToCs returns typeof(uint). Reading
+            // the actual ctor lets the two conventions coexist with
+            // a per-arg conv emit at the boundary.
+            var ctor = ResolveRecordCtor(recordType, fieldPrims.Length);
+            var ctorPs = ctor.GetParameters();
+            for (int i = ctorPs.Length - 1; i >= 0; i--)
+            {
+                EmitPrimCtorArgConv(il, fieldPrims[i], ctorPs[i].ParameterType);
+            }
             il.Emit(OpCodes.Newobj, ctor);
             il.Emit(OpCodes.Ret);
+        }
+
+        /// <summary>Locate the record type's canonical-field ctor —
+        /// the one that takes a positional argument per field. When
+        /// only one public instance ctor is declared (the common
+        /// case), use it directly. When several exist, prefer one
+        /// whose param count matches the field count; throw if none
+        /// matches so the mismatch is loud rather than silent.</summary>
+        private static ConstructorInfo ResolveRecordCtor(
+            Type recordType, int fieldCount)
+        {
+            var ctors = recordType.GetConstructors(
+                BindingFlags.Public | BindingFlags.Instance);
+            ConstructorInfo? match = null;
+            foreach (var c in ctors)
+            {
+                if (c.GetParameters().Length != fieldCount) continue;
+                if (match != null)
+                    throw new InvalidOperationException(
+                        "Ambiguous record ctor on " + recordType.FullName
+                        + ": multiple public ctors with " + fieldCount + " parameters.");
+                match = c;
+            }
+            if (match == null)
+                throw new InvalidOperationException(
+                    "No public ctor on " + recordType.FullName
+                    + " with " + fieldCount + " parameters.");
+            return match;
+        }
+
+        /// <summary>When a record ctor's expected parameter type
+        /// diverges from the canonical-ABI primitive width (e.g.
+        /// harness emits <c>char</c> for <c>CtPrim.Char</c> while
+        /// the transpiler reads the field as <c>uint</c>), insert
+        /// the matching conv opcode. Emitted just before
+        /// <c>Newobj</c>; the value on the stack came from
+        /// <see cref="EmitReadPayloadAtOffset"/> and is typed per
+        /// <see cref="PrimToCs"/>.</summary>
+        private static void EmitPrimCtorArgConv(
+            ILGenerator il, ComponentPrim canonical, Type expected)
+        {
+            var canonicalClr = PrimToCs(canonical);
+            if (canonicalClr == expected) return;
+            if (canonical == ComponentPrim.Char && expected == typeof(char))
+            {
+                // i32 codepoint → CLR char. Conv.U2 narrows the
+                // 32-bit value to 16 bits; characters above BMP
+                // would truncate but the harness convention chose
+                // this representation knowingly.
+                il.Emit(OpCodes.Conv_U2);
+                return;
+            }
+            if (expected.IsEnum)
+            {
+                // record-of-flat-types: the field is an enum or
+                // a [Flags] enum. The stack value came from
+                // EmitReadPayloadAtOffset as the underlying
+                // primitive width (u8 / u16 / u32 per case or flag
+                // count). CLR enums are bit-compatible with their
+                // underlying — assignment-compatible at the IL
+                // verifier level — so Newobj takes it without an
+                // explicit conv. Verify the underlying width
+                // matches what the wire shape produced; mismatches
+                // would be a harness-vs-binary contract divergence.
+                var underlying = Enum.GetUnderlyingType(expected);
+                if (underlying != canonicalClr)
+                    throw new InvalidOperationException(
+                        "Record ctor expects enum " + expected.FullName
+                        + " with underlying " + underlying.FullName
+                        + " but the field's wire primitive " + canonical
+                        + " maps to " + canonicalClr.FullName
+                        + " — case/flag count drift between harness and "
+                        + "component binary.");
+                return;
+            }
+            throw new InvalidOperationException(
+                "Record ctor expects " + expected.FullName
+                + " but canonical-ABI primitive " + canonical
+                + " maps to " + canonicalClr.FullName
+                + " — no conversion configured.");
         }
 
         private static int AlignUp(int offset, int alignment)
         {
             var rem = offset % alignment;
             return rem == 0 ? offset : offset + (alignment - rem);
+        }
+
+        /// <summary>Push the cached Module instance onto the IL
+        /// stack. Static <c>ComponentExports</c> (imports-less core
+        /// modules) loads the <c>_instance</c> static field directly;
+        /// instance <c>ComponentExports</c> (imports-bearing core
+        /// modules where the Module ctor takes <c>IImports</c>) loads
+        /// it as an instance field off <c>this</c>. Centralized so
+        /// the emit bodies stay shape-agnostic.</summary>
+        private static void EmitLoadInstance(
+            ILGenerator il, FieldBuilder instanceField)
+        {
+            if (instanceField.IsStatic)
+            {
+                il.Emit(OpCodes.Ldsfld, instanceField);
+            }
+            else
+            {
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, instanceField);
+            }
+        }
+
+        /// <summary>Load the export method's <paramref name="csIdx"/>th
+        /// C#-level parameter. Static methods map directly
+        /// (<c>Ldarg csIdx</c>); instance methods bias by one to
+        /// skip past the implicit <c>this</c> slot
+        /// (<c>Ldarg csIdx + 1</c>). Centralized so per-arg lowering
+        /// helpers stay shape-agnostic.</summary>
+        private static void EmitLdargCsharp(
+            ILGenerator il, FieldBuilder instanceField, int csIdx)
+        {
+            int ilIdx = instanceField.IsStatic ? csIdx : csIdx + 1;
+            il.Emit(OpCodes.Ldarg, ilIdx);
         }
 
         /// <summary>
@@ -2742,6 +3126,29 @@ namespace Wacs.Transpiler.AOT.Component
             IReadOnlyList<DefTypeEntry> types, Type variantType,
             VariantShape shape)
         {
+            // Dispatch on variant class shape (gate already
+            // verified in EmitExportMethod). Both shapes share
+            // the disc + payload read setup; the divergence is
+            // in how the final CLR object is constructed —
+            // flat-ctor `Newobj(disc, p0, p1, …)` vs per-case
+            // `Newobj NestedSubclass(payloadOnly?)` after a switch
+            // on the disc value.
+            if (VariantClassHasFlatCtor(variantType, shape))
+            {
+                EmitVariantReturnBodyFlatCtor(il, instanceField,
+                    coreMethod, export, types, variantType, shape);
+                return;
+            }
+            EmitVariantReturnBodyNestedSubclass(il, instanceField,
+                coreMethod, export, types, variantType, shape);
+        }
+
+        private static void EmitVariantReturnBodyFlatCtor(
+            ILGenerator il, FieldBuilder instanceField,
+            MethodInfo coreMethod, EmittableExport export,
+            IReadOnlyList<DefTypeEntry> types, Type variantType,
+            VariantShape shape)
+        {
             var memoryGetter = instanceField.FieldType.GetMethod("get_Memory");
             if (memoryGetter == null)
                 throw new InvalidOperationException(
@@ -2753,7 +3160,7 @@ namespace Wacs.Transpiler.AOT.Component
             EmitCoreCall(il, instanceField, coreMethod, export, types);
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 
@@ -2852,6 +3259,237 @@ namespace Wacs.Transpiler.AOT.Component
                     + "align with EmitVariantType's ctor signature.");
             il.Emit(OpCodes.Newobj, ctor);
             il.Emit(OpCodes.Ret);
+        }
+
+        /// <summary>
+        /// IL body for a variant return whose CLR class follows the
+        /// harness's nested-subclass shape: an abstract base type
+        /// (e.g. <c>Outcome</c>) plus one nested sealed subclass per
+        /// case (<c>Outcome.Success</c>, <c>Outcome.Invalid</c>),
+        /// each with its own ctor — parameterless for payload-less
+        /// cases, single-arg for payload cases.
+        ///
+        /// <para>Reads the disc byte, switches on its value, and per
+        /// case reads just THAT case's payload (if any) before
+        /// <c>Newobj</c>-ing the matching nested subclass. Pre-
+        /// existing payload readers
+        /// (<see cref="EmitReadPayloadAtOffset"/> /
+        /// <see cref="EmitReadStringPayloadAtOffset"/> /
+        /// <see cref="EmitReadListPayloadAtOffset"/> /
+        /// <see cref="EmitReadRecordPayloadAtOffset"/>) push the CLR
+        /// payload value on the stack; <c>Newobj</c> on the subclass
+        /// ctor consumes it.</para>
+        /// </summary>
+        private static void EmitVariantReturnBodyNestedSubclass(
+            ILGenerator il, FieldBuilder instanceField,
+            MethodInfo coreMethod, EmittableExport export,
+            IReadOnlyList<DefTypeEntry> types, Type variantType,
+            VariantShape shape)
+        {
+            var memoryGetter = instanceField.FieldType.GetMethod("get_Memory");
+            if (memoryGetter == null)
+                throw new InvalidOperationException(
+                    "Variant-returning component requires Module.Memory.");
+
+            var retAreaLocal = il.DeclareLocal(typeof(int));
+            var memoryLocal = il.DeclareLocal(typeof(MemoryInstance));
+            var discLocal = il.DeclareLocal(typeof(int));
+
+            EmitCoreCall(il, instanceField, coreMethod, export, types);
+            il.Emit(OpCodes.Stloc, retAreaLocal);
+
+            EmitLoadInstance(il, instanceField);
+            il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
+            il.Emit(OpCodes.Stloc, memoryLocal);
+
+            var caseCount = shape.CaseNames.Count;
+            var discWidth = caseCount <= 256 ? 1
+                : caseCount <= 65536 ? 2 : 4;
+            int payloadAlign = 1;
+            foreach (var p in shape.CasePayloads)
+            {
+                int a = p switch
+                {
+                    VariantPayload.Prim pp => PrimVariantAlign(pp.P),
+                    VariantPayload.ListOfPrim _ => 4,
+                    VariantPayload.RecordOfPrim rr => RecordAlign(rr.FieldPrims),
+                    _ => 1,
+                };
+                if (a > payloadAlign) payloadAlign = a;
+            }
+            var payloadOffset = AlignUp(discWidth, payloadAlign);
+
+            // Read disc → discLocal (kept as i32 for the switch table).
+            il.Emit(OpCodes.Ldloc, memoryLocal);
+            il.Emit(OpCodes.Ldloc, retAreaLocal);
+            string readerName = discWidth == 1 ? nameof(PrimitiveStore.ReadU8)
+                : discWidth == 2 ? nameof(PrimitiveStore.ReadU16LE)
+                : nameof(PrimitiveStore.ReadU32LE);
+            var discReader = typeof(PrimitiveStore).GetMethod(
+                readerName,
+                new[] { typeof(MemoryInstance), typeof(int) })!;
+            il.EmitCall(OpCodes.Call, discReader, null);
+            il.Emit(OpCodes.Stloc, discLocal);
+
+            // Per-case labels + a default-throw fallthrough.
+            var caseLabels = new Label[caseCount];
+            for (int i = 0; i < caseCount; i++)
+                caseLabels[i] = il.DefineLabel();
+            var endLabel = il.DefineLabel();
+            var defaultLabel = il.DefineLabel();
+
+            il.Emit(OpCodes.Ldloc, discLocal);
+            il.Emit(OpCodes.Switch, caseLabels);
+            il.Emit(OpCodes.Br, defaultLabel);
+
+            for (int i = 0; i < caseCount; i++)
+            {
+                il.MarkLabel(caseLabels[i]);
+
+                var caseName = shape.CaseNames[i];
+                var nestedTypeName = PascalCase(caseName);
+                var nestedType = variantType.GetNestedType(
+                    nestedTypeName, BindingFlags.Public);
+                if (nestedType == null)
+                    throw new InvalidOperationException(
+                        "Variant " + variantType.FullName
+                        + " missing nested case type '" + nestedTypeName
+                        + "' for WIT case '" + caseName + "'.");
+
+                Type[] subCtorParams;
+                switch (shape.CasePayloads[i])
+                {
+                    case VariantPayload.None _:
+                        subCtorParams = Type.EmptyTypes;
+                        break;
+                    case VariantPayload.Prim pp:
+                        if (pp.P == ComponentPrim.String)
+                        {
+                            EmitReadStringPayloadAtOffset(il, memoryLocal,
+                                retAreaLocal, payloadOffset,
+                                export.StringEncoding);
+                            subCtorParams = new[] { typeof(string) };
+                        }
+                        else
+                        {
+                            EmitReadPayloadAtOffset(il, memoryLocal,
+                                retAreaLocal, payloadOffset, pp.P);
+                            subCtorParams = new[] { PrimToCs(pp.P) };
+                        }
+                        break;
+                    case VariantPayload.ListOfPrim ll:
+                        EmitReadListPayloadAtOffset(il, memoryLocal,
+                            retAreaLocal, payloadOffset, ll.ElemP);
+                        subCtorParams = new[] { PrimToCs(ll.ElemP).MakeArrayType() };
+                        break;
+                    case VariantPayload.RecordOfPrim rr:
+                        EmitReadRecordPayloadAtOffset(il, memoryLocal,
+                            retAreaLocal, payloadOffset, rr);
+                        subCtorParams = new[] { rr.RecordClrType };
+                        break;
+                    default:
+                        throw new InvalidOperationException(
+                            "Unhandled variant payload kind for case "
+                            + caseName + " on " + variantType.FullName);
+                }
+
+                var subCtor = nestedType.GetConstructor(subCtorParams);
+                if (subCtor == null)
+                    throw new InvalidOperationException(
+                        "Variant case class " + nestedType.FullName
+                        + " missing matching constructor (expected "
+                        + subCtorParams.Length + " params).");
+                il.Emit(OpCodes.Newobj, subCtor);
+                il.Emit(OpCodes.Br, endLabel);
+            }
+
+            // Default: disc value outside the case range. Throw with
+            // a clear diagnostic so the failure is loud rather than
+            // a silent unrooted-stack mistype.
+            il.MarkLabel(defaultLabel);
+            il.Emit(OpCodes.Ldstr,
+                "Variant " + variantType.FullName
+                + " received out-of-range discriminant.");
+            il.Emit(OpCodes.Newobj,
+                typeof(InvalidOperationException).GetConstructor(
+                    new[] { typeof(string) })!);
+            il.Emit(OpCodes.Throw);
+
+            il.MarkLabel(endLabel);
+            il.Emit(OpCodes.Ret);
+        }
+
+        /// <summary>True when <paramref name="variantType"/> exposes
+        /// a nested public sealed subclass per case (the harness's
+        /// <c>WitTypeEmit.PopulateVariant</c> shape: abstract base +
+        /// per-case nested classes). Each expected subclass is
+        /// looked up by <see cref="PascalCase"/>(caseName); each
+        /// must declare a public ctor whose param list matches the
+        /// case's payload (empty for no-payload cases). Used by
+        /// <see cref="EmitVariantReturnBodyNestedSubclass"/> as the
+        /// gate before per-case dispatch IL.</summary>
+        private static bool VariantClassHasNestedSubclasses(
+            Type variantType, VariantShape shape)
+        {
+            for (int i = 0; i < shape.CaseNames.Count; i++)
+            {
+                var nestedName = PascalCase(shape.CaseNames[i]);
+                var nested = variantType.GetNestedType(
+                    nestedName, BindingFlags.Public);
+                if (nested == null) return false;
+                Type[] expected = shape.CasePayloads[i] switch
+                {
+                    VariantPayload.None _ => Type.EmptyTypes,
+                    VariantPayload.Prim pp => pp.P == ComponentPrim.String
+                        ? new[] { typeof(string) }
+                        : new[] { PrimToCs(pp.P) },
+                    VariantPayload.ListOfPrim ll
+                        => new[] { PrimToCs(ll.ElemP).MakeArrayType() },
+                    VariantPayload.RecordOfPrim rr
+                        => new[] { rr.RecordClrType },
+                    _ => null!,
+                };
+                if (expected == null) return false;
+                if (nested.GetConstructor(expected) == null) return false;
+            }
+            return true;
+        }
+
+        /// <summary>True when <paramref name="variantType"/> is
+        /// shaped like the transpiler's own variant emit — a single
+        /// class with a public ctor taking <c>(disc, payload0,
+        /// payload1, …)</c> in case order. False when the class
+        /// came from a harness assembly via <c>preRegisteredTypes</c>
+        /// (which emits an abstract base + nested per-case
+        /// subclasses, each carrying just its own payload).
+        /// EmitVariantReturnBody only handles the flat shape today.
+        /// </summary>
+        private static bool VariantClassHasFlatCtor(
+            Type variantType, VariantShape shape)
+        {
+            var caseCount = shape.CaseNames.Count;
+            var discWidth = caseCount <= 256 ? 1
+                : caseCount <= 65536 ? 2 : 4;
+            var expected = new List<Type>();
+            expected.Add(discWidth == 1 ? typeof(byte)
+                : discWidth == 2 ? typeof(ushort)
+                : typeof(uint));
+            for (int i = 0; i < caseCount; i++)
+            {
+                switch (shape.CasePayloads[i])
+                {
+                    case VariantPayload.Prim pp:
+                        expected.Add(PrimToCs(pp.P));
+                        break;
+                    case VariantPayload.ListOfPrim ll:
+                        expected.Add(PrimToCs(ll.ElemP).MakeArrayType());
+                        break;
+                    case VariantPayload.RecordOfPrim rr:
+                        expected.Add(rr.RecordClrType);
+                        break;
+                }
+            }
+            return variantType.GetConstructor(expected.ToArray()) != null;
         }
 
         /// <summary>Variant payload alignment — same as
@@ -3080,7 +3718,7 @@ namespace Wacs.Transpiler.AOT.Component
             EmitCoreCall(il, instanceField, coreMethod, export, types);
             il.Emit(OpCodes.Stloc, retAreaLocal);
 
-            il.Emit(OpCodes.Ldsfld, instanceField);
+            EmitLoadInstance(il, instanceField);
             il.EmitCall(OpCodes.Callvirt, memoryGetter, null);
             il.Emit(OpCodes.Stloc, memoryLocal);
 

@@ -93,6 +93,21 @@ namespace Wacs.Console.Verbs
             + "Component-mode only.")]
         public bool Wasip2 { get; set; }
 
+        [Option("harness", HelpText =
+            "Path to a harness .dll (produced by `wacs harness`). "
+            + "When set, the component's embedded WIT custom section "
+            + "is diffed against the harness's _WitContract before "
+            + "the run starts — mismatch surfaces a typed report and "
+            + "aborts with a non-zero exit. Symmetric to the same "
+            + "flag on `wacs aot` / `wacs build`. Component-mode only.")]
+        public string? Harness { get; set; }
+
+        [Option("wit-dir", HelpText =
+            "Path to a directory of .wit files used as the contract "
+            + "(no .dll needed; in-process equivalent of --harness). "
+            + "Useful during iteration. Component-mode only.")]
+        public string? WitDir { get; set; }
+
         [Option("bind", Separator = ',', HelpText =
             "Path(s) to assemblies containing IBindable host "
             + "libraries to wire into the runtime before execution. "

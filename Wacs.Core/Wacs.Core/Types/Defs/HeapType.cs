@@ -35,7 +35,10 @@ namespace Wacs.Core.Types.Defs
         
         [WatToken("exn")]      Exn         = 0x69,   // -0x17
         [WatToken("noexn")]    NoExn       = 0x74,   // -0x0c
-        
+
+        [WatToken("cont")]     Cont        = 0x68,   // -0x18
+        [WatToken("nocont")]   NoCont      = 0x75,   // -0x0b
+
         Bot = 0x81, // -0x81
     }
 }

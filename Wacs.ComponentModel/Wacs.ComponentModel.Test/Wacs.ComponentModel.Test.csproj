@@ -15,6 +15,16 @@
       <ProjectReference Include="..\Wacs.ComponentModel\Wacs.ComponentModel.csproj" />
       <ProjectReference Include="..\Wacs.ComponentModel.Harness.Runtime\Wacs.ComponentModel.Harness.Runtime.csproj" />
       <ProjectReference Include="..\Wacs.ComponentModel.Harness.Lib\Wacs.ComponentModel.Harness.Lib.csproj" />
+      <!-- Source generator scans this test assembly for
+           [ComponentLifter("…")]-decorated methods and emits the
+           [ModuleInitializer] that registers them with
+           ComponentLifterRegistry. Without this analyzer reference
+           the registry-integration tests (Slice K3) wouldn't have
+           any typed lifters wired up. -->
+      <ProjectReference Include="..\Wacs.ComponentModel.Async.SourceGen\Wacs.ComponentModel.Async.SourceGen.csproj"
+                        OutputItemType="Analyzer"
+                        ReferenceOutputAssembly="false"
+                        UndefineProperties="PublishAot;PublishTrimmed;PublishReadyToRun;SelfContained;RuntimeIdentifier" />
     </ItemGroup>
 
     <ItemGroup>

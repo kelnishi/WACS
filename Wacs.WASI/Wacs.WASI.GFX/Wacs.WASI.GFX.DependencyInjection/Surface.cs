@@ -36,7 +36,8 @@ namespace Wacs.WASI.GFX.DependencyInjection
         }
 
         [Obsolete("Prefer Surface(WasiGfxBundle) — the bundle " +
-            "ctor moves off the WasiGfxAmbient static.")]
+            "ctor lets the impl source the backend from the bundle " +
+            "rather than the AsyncLocal-scoped WasiGfxCurrent.")]
         public Surface()
         {
             GfxLog.Trace("DI.Surface: ctor invoked (ambient path)");
@@ -52,12 +53,7 @@ namespace Wacs.WASI.GFX.DependencyInjection
         {
             GfxLog.Trace("DI.Surface.Create: invoked");
             var backend = _bundle?.Configuration.Backend
-#pragma warning disable CS0618
-                ?? WasiGfxAmbient.RequireBackend();
-#pragma warning restore CS0618
-            if (backend == null)
-                throw new SpiTypes.WasiGfxException(
-                    "DI.Surface.Create: no backend available.");
+                ?? WasiGfxCurrent.RequireBackend();
             uint? w = desc.Width.HasValue ? desc.Width.Value : (uint?)null;
             uint? h = desc.Height.HasValue ? desc.Height.Value : (uint?)null;
             Inner = backend.CreateSurface(w, h);

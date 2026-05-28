@@ -117,7 +117,7 @@ namespace WitHarnessSpike.Aot
         /// <c>WACS.WASI.Preview2</c> bundle, or per-subsystem
         /// stubs the embedder ships). For the spike, throw.</para>
         /// </summary>
-        private static void BindWasiStubs(WasmRuntime runtime)
+        internal static void BindWasiStubs(WasmRuntime runtime)
         {
             // Type 3: (i32) -> ()
             Action<ExecContext, int> drop = (_, _) =>

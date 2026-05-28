@@ -483,51 +483,7 @@ namespace Wacs.Console.Verbs
         /// so the build fails early with a clear message.
         /// </summary>
         private static string? ResolveHarnessContractText(BuildOptions opts)
-        {
-            bool haveHarness = !string.IsNullOrEmpty(opts.Harness);
-            bool haveWitDir = !string.IsNullOrEmpty(opts.WitDir);
-            if (!haveHarness && !haveWitDir) return null;
-            if (haveHarness && haveWitDir)
-                throw new ArgumentException(
-                    "wacs aot: --harness and --wit-dir are mutually exclusive.");
-
-            if (haveHarness)
-            {
-                var path = Path.GetFullPath(opts.Harness!);
-                if (!File.Exists(path))
-                    throw new FileNotFoundException(
-                        $"wacs aot: --harness file not found: {path}");
-                var asm = System.Runtime.Loader.AssemblyLoadContext.Default
-                    .LoadFromAssemblyPath(path);
-                foreach (var t in asm.GetTypes())
-                {
-                    var field = t.GetField("_WitContract",
-                        System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-                    if (field != null && field.FieldType == typeof(string))
-                    {
-                        var s = (string?)field.GetValue(null);
-                        if (!string.IsNullOrEmpty(s)) return s;
-                    }
-                }
-                throw new InvalidOperationException(
-                    $"wacs aot: --harness '{path}' carries no _WitContract field. "
-                    + "Was it produced by `wacs harness`?");
-            }
-
-            // --wit-dir: concatenate the directory's .wit files.
-            var dir = Path.GetFullPath(opts.WitDir!);
-            if (!Directory.Exists(dir))
-                throw new DirectoryNotFoundException(
-                    $"wacs aot: --wit-dir directory not found: {dir}");
-            var sb = new System.Text.StringBuilder();
-            foreach (var path in Directory.EnumerateFiles(dir, "*.wit", SearchOption.AllDirectories))
-            {
-                sb.AppendLine("// === " + Path.GetRelativePath(dir, path) + " ===");
-                sb.Append(File.ReadAllText(path));
-                sb.AppendLine();
-            }
-            return sb.ToString();
-        }
+            => HarnessContractLoader.Resolve(opts.Harness, opts.WitDir, "wacs aot");
 
         private static EmissionTarget ParseEmissionTarget(string s) => (s ?? "").ToLowerInvariant() switch
         {

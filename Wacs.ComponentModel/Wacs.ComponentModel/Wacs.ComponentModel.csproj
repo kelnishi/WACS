@@ -12,11 +12,17 @@
         <RepositoryUrl>https://github.com/kelnishi/WACS</RepositoryUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <AssemblyName>Wacs.ComponentModel</AssemblyName>
-        <AssemblyVersion>0.7.1</AssemblyVersion>
-        <Version>0.7.1</Version>
+        <AssemblyVersion>0.10.3</AssemblyVersion>
+        <Version>0.10.3</Version>
         <RepositoryType>git</RepositoryType>
         <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
-        <IsAotCompatible>true</IsAotCompatible>
+        <!-- IsAotCompatible unconditionally trips NETSDK1210 on the
+             netstandard2.1 target framework (the analyzer is only
+             supported on net6.0+ where IsAotCompatible has meaning).
+             Condition it to net8.0 only — the AOT scenarios this
+             package supports (transpiler-emitted consumers, harness
+             pipeline) all run under net8.0. -->
+        <IsAotCompatible Condition="'$(TargetFramework)' == 'net8.0'">true</IsAotCompatible>
         <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
         <IncludeSymbols>true</IncludeSymbols>
         <SymbolPackageFormat>snupkg</SymbolPackageFormat>
@@ -37,6 +43,24 @@
     <ItemGroup>
       <ProjectReference Include="..\..\Wacs.Core\Wacs.Core\Wacs.Core.csproj" />
       <ProjectReference Include="..\Wacs.ComponentModel.Parser\Wacs.ComponentModel.Parser.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <!-- Roslyn source generator that emits CanonOpRegistry's
+           static known-names set from [CanonAsync]-decorated
+           methods on AsyncDispatcher. Replaces Slice G1's
+           runtime reflection — keeps the registry AOT-safe. -->
+      <ProjectReference Include="..\Wacs.ComponentModel.Async.SourceGen\Wacs.ComponentModel.Async.SourceGen.csproj"
+                        OutputItemType="Analyzer"
+                        ReferenceOutputAssembly="false"
+                        UndefineProperties="PublishAot;PublishTrimmed;PublishReadyToRun;SelfContained;RuntimeIdentifier" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <!-- System.Threading.Channels is in-box for net8.0+; netstandard2.1
+           needs the package. Used by the Phase 3 StreamBuffer for the
+           bounded producer/consumer half-channel that backs stream<T>. -->
+      <PackageReference Include="System.Threading.Channels" Version="8.0.0" />
     </ItemGroup>
 
     <ItemGroup>

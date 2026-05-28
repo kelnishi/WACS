@@ -39,8 +39,9 @@ namespace Wacs.WASI.GFX.DependencyInjection
         /// embedders run separate <see cref="IBackend"/>s in one
         /// process.</summary>
         [Obsolete("Prefer the bundle-taking ctor — multi-runtime " +
-            "support drops the WasiGfxAmbient static. Kept for " +
-            "transpiler back-compat with the earlier emit shape.")]
+            "support uses the AsyncLocal-scoped WasiGfxCurrent " +
+            "instead. Kept for transpiler back-compat with the " +
+            "earlier emit shape.")]
         public Context()
         {
             GfxLog.Trace("DI.Context: ctor invoked (Activator.CreateInstance, ambient path)");
@@ -56,14 +57,7 @@ namespace Wacs.WASI.GFX.DependencyInjection
         {
             GfxLog.Trace("DI.Context.Create: invoked");
             var backend = _bundle?.Configuration.Backend
-#pragma warning disable CS0618 // Type or member is obsolete
-                ?? WasiGfxAmbient.RequireBackend();
-#pragma warning restore CS0618
-            if (backend == null)
-                throw new Types.WasiGfxException(
-                    "DI.Context.Create: no backend available. "
-                    + "Construct via Context(WasiGfxBundle) or set "
-                    + "the legacy WasiGfxAmbient.Backend.");
+                ?? WasiGfxCurrent.RequireBackend();
             Inner = backend.CreateContext();
         }
 

@@ -409,6 +409,23 @@ namespace Wacs.Core.Text
                     throw new FormatException($"line {body.Token.Line}: (array …) expects exactly one field");
                 return new ArrayType(fields[0]);
             }
+            if (body.IsForm("cont"))
+            {
+                // (cont $ft)  — Stack Switching continuation type
+                // wrapping a function-type reference.
+                if (body.Children.Count != 2)
+                    throw new FormatException(
+                        $"line {body.Token.Line}: (cont …) expects exactly one type ref");
+                var inner = body.Children[1];
+                if (inner.Kind != SExprKind.Atom)
+                    throw new FormatException(
+                        $"line {body.Token.Line}: (cont …) inner must be a type reference (e.g. $ft)");
+                uint ftIdx = ResolveNamespaceIdx(ctx.Types, inner, "type");
+                // ContType.FuncTypeRef is a ValType-encoded DefType
+                // index — positive integer, no Ref / Nullable bits.
+                var ftValType = (ValType)(int)ftIdx;
+                return new ContType(ftValType);
+            }
             throw new FormatException(
                 $"line {body.Token.Line}: (type …) body '{body.Head}' not recognized");
         }

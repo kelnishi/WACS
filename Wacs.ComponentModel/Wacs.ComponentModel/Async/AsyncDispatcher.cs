@@ -1,0 +1,1678 @@
+// Copyright 2026 Kelvin Nishikawa
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+
+using System;
+using System.Collections.Generic;
+using System.Text;
+using System.Threading.Tasks;
+using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Concurrency;
+using Wacs.Core.Runtime.Types;
+
+namespace Wacs.ComponentModel.Async
+{
+    /// <summary>
+    /// Central API surface for the Component Model async ABI runtime.
+    /// One instance per <see cref="Wacs.ComponentModel.Runtime.ComponentInstance"/>
+    /// — holds the per-component handle spaces for tasks, subtasks,
+    /// waitable-sets, streams, futures, and error contexts; exposes
+    /// methods named after the canon-async builtins that the
+    /// interpreter and transpiler both call.
+    ///
+    /// <para><b>Engine symmetry:</b> the dispatcher's public method
+    /// shapes are deliberately stable — the interpreter dispatches
+    /// canon entries directly through these methods, and the
+    /// transpiler emits CIL <c>callvirt</c> sites against the same
+    /// methods. Two engines, one dispatcher.</para>
+    ///
+    /// <para><b>What's implemented in Slice C:</b> handle allocation /
+    /// drop for streams, futures, error contexts, and waitable
+    /// sets; non-blocking stream and future I/O; basic subtask
+    /// management; waitable-set membership. These are the canon
+    /// ops that don't require suspending the current task body.</para>
+    ///
+    /// <para><b>What's stubbed for Slice D:</b> task lifecycle
+    /// (<c>task.return</c>, <c>task.cancel</c>), backpressure,
+    /// per-task context slots, <c>thread.yield</c>, waitable-set
+    /// wait/poll, and the suspend-driven stream/future blocking
+    /// reads. Each throws <see cref="NotImplementedException"/>
+    /// with a clear "Slice D" message — the contract is pinned,
+    /// the dispatch through <see cref="IContinuationContext"/>
+    /// lands when the integration with the interpreter loop is
+    /// wired.</para>
+    /// </summary>
+    public sealed class AsyncDispatcher
+    {
+        // Shared per-component handle store. Spec: the Component
+        // Model's task/subtask/waitable-set/stream/future/error-
+        // context handles all live in a single namespace, with
+        // kind tracked alongside each entry. The per-kind
+        // AsyncHandleTable<T> properties below are typed facades
+        // over THIS store — each tagged with its WaitableKind so
+        // Get/Drop reject cross-kind lookups cleanly.
+        //
+        // Single counter + single freelist → the same integer
+        // never resolves to two different waitables, and dropped
+        // handles get recycled across all kinds.
+
+        private readonly struct HandleEntry
+        {
+            public readonly WaitableKind Kind;
+            public readonly object Payload;
+            public HandleEntry(WaitableKind kind, object payload)
+            {
+                Kind = kind;
+                Payload = payload;
+            }
+        }
+
+        private readonly Dictionary<int, HandleEntry> _handles =
+            new Dictionary<int, HandleEntry>();
+        private readonly Stack<int> _handleFreelist =
+            new Stack<int>();
+        private int _nextHandle = 1; // 0 is the canon null sentinel
+
+        /// <summary>Typed facade for the <see cref="WaitableKind.Task"/>
+        /// slice of the shared handle store.</summary>
+        public AsyncHandleTable<ComponentTask> Tasks { get; }
+
+        /// <summary>Typed facade for the <see cref="WaitableKind.Subtask"/>
+        /// slice of the shared handle store.</summary>
+        public AsyncHandleTable<ComponentSubtask> Subtasks { get; }
+
+        /// <summary>Typed facade for the <see cref="WaitableKind.WaitableSet"/>
+        /// slice of the shared handle store.</summary>
+        public AsyncHandleTable<ComponentWaitableSet> WaitableSets { get; }
+
+        /// <summary>Typed facade for the <see cref="WaitableKind.Stream"/>
+        /// slice. Payload erases to <c>object</c>; the dispatcher's
+        /// stream canon ops cast to the concrete
+        /// <see cref="StreamSlot"/> on the way out.</summary>
+        public AsyncHandleTable<object> Streams { get; }
+
+        // Wrapper around a stream buffer that tracks the drop state
+        // of each half. Spec: stream<T> has separate readable and
+        // writable halves; drop-writable closes the writer but the
+        // reader can still drain pending items; drop-readable
+        // signals the writer no further reads will arrive. The
+        // handle slot is released only after BOTH halves are dropped.
+        internal sealed class StreamSlot
+        {
+            public StreamBuffer<byte> Buffer = null!;
+            public bool WriterDropped;
+            public bool ReaderDropped;
+            // Item size in bytes for the stream's element type
+            // (canonical-ABI form). For stream<u8> this is 1
+            // and item-count == byte-count; for typed streams
+            // like stream<directory-entry> (24 bytes per item)
+            // the canon-async `stream-read` scaffolding passes
+            // an item count and we have to translate to and
+            // from byte count when transferring between guest
+            // memory and the byte buffer. Defaults to 1.
+            public int ItemSize = 1;
+            // Optional synchronous write sink. When set, the
+            // canon-async stream-write scaffolding bypasses the
+            // buffered channel and writes guest bytes directly
+            // through this Action. Used by host bridges that
+            // need write-then-stat synchrony (e.g. the wasip3
+            // filesystem write-via-stream / append-via-stream
+            // paths — the pappend fixture asserts file size
+            // immediately after each tx.write).
+            public Action<ReadOnlyMemory<byte>>? SyncWriteSink;
+            // Fired after the writer half drops with all bytes
+            // delivered. Lets the host bridge resolve the
+            // completion future synchronously.
+            public Action? SyncWriteSinkClose;
+            // Pending async stream-read state. Set when the
+            // guest's `[async-lower][stream-read]` call hits an
+            // empty buffer and returns BLOCKED; consumed at
+            // waitable-set.wait/poll time when the stream has
+            // new bytes (or its writer dropped). PendingPtr /
+            // PendingCap are the guest-memory buffer; PendingCode
+            // is filled in when the wait fires (encodes the
+            // canon-ABI return code wit-bindgen-rt will pass to
+            // its in-progress callback).
+            public uint? PendingReadPtr;
+            public int PendingReadCap;
+            public int? PendingReadCode;
+        }
+
+        /// <summary>Typed facade for the <see cref="WaitableKind.Future"/>
+        /// slice. Payload erases to <c>object</c>; the dispatcher's
+        /// future canon ops cast to <see cref="FutureCell{T}"/>.</summary>
+        public AsyncHandleTable<object> Futures { get; }
+
+        /// <summary>Typed facade for the <see cref="WaitableKind.ErrorContext"/>
+        /// slice. Payload is the debug message string.</summary>
+        public AsyncHandleTable<string> ErrorContexts { get; }
+
+        public AsyncDispatcher()
+        {
+            Tasks = new AsyncHandleTable<ComponentTask>(this, WaitableKind.Task);
+            Subtasks = new AsyncHandleTable<ComponentSubtask>(this, WaitableKind.Subtask);
+            WaitableSets = new AsyncHandleTable<ComponentWaitableSet>(
+                this, WaitableKind.WaitableSet);
+            Streams = new AsyncHandleTable<object>(this, WaitableKind.Stream);
+            Futures = new AsyncHandleTable<object>(this, WaitableKind.Future);
+            ErrorContexts = new AsyncHandleTable<string>(this, WaitableKind.ErrorContext);
+        }
+
+        // ---- Shared-store internal helpers used by AsyncHandleTable<T> ----
+
+        internal int AllocateHandleInternal(WaitableKind kind, object payload)
+        {
+            int handle = _handleFreelist.Count > 0
+                ? _handleFreelist.Pop() : _nextHandle++;
+            _handles[handle] = new HandleEntry(kind, payload);
+            return handle;
+        }
+
+        internal int AllocateHandleInternalWithFactory<T>(
+            WaitableKind kind, Func<int, T> factory) where T : class
+        {
+            int handle = _handleFreelist.Count > 0
+                ? _handleFreelist.Pop() : _nextHandle++;
+            _handles[handle] = new HandleEntry(kind, factory(handle));
+            return handle;
+        }
+
+        internal T? GetHandleInternal<T>(int handle, WaitableKind kind)
+            where T : class
+        {
+            if (!_handles.TryGetValue(handle, out var e) || e.Kind != kind)
+                return null;
+            return (T)e.Payload;
+        }
+
+        internal T? DropHandleInternal<T>(int handle, WaitableKind kind)
+            where T : class
+        {
+            if (!_handles.TryGetValue(handle, out var e) || e.Kind != kind)
+                return null;
+            _handles.Remove(handle);
+            _handleFreelist.Push(handle);
+            return (T)e.Payload;
+        }
+
+        /// <summary>Kind discriminator for an arbitrary handle, or
+        /// null if the handle isn't currently allocated. Embedders
+        /// implementing generic waitable handlers (custom poll
+        /// loops, debug introspection) can use this to dispatch
+        /// without trial-and-error <c>Get</c> probing.</summary>
+        public WaitableKind? GetHandleKind(int handle) =>
+            _handles.TryGetValue(handle, out var e)
+                ? (WaitableKind?)e.Kind : null;
+
+        // Internal-shape variant used by the facade's Contains
+        // probe. Returns a non-nullable sentinel value
+        // (WaitableKind.Task) when absent so the facade can
+        // compare without boxing — Contains is supposed to be cheap.
+        internal WaitableKind? HandleKindInternal(int handle) =>
+            _handles.TryGetValue(handle, out var e)
+                ? (WaitableKind?)e.Kind : null;
+
+        internal int CountByKindInternal(WaitableKind kind)
+        {
+            int n = 0;
+            foreach (var entry in _handles.Values)
+                if (entry.Kind == kind) n++;
+            return n;
+        }
+
+        /// <summary>The component's exported memory, set by the
+        /// host after core-module instantiation. Memory-touching
+        /// canon ops (stream.read/write, error-context.new) +
+        /// the canon-async lift adapter (string/list/option/result
+        /// results for task.return) read from here. Null when the
+        /// host hasn't yet wired the memory, in which case
+        /// memory-touching ops throw.</summary>
+        public Wacs.Core.Runtime.Types.MemoryInstance? Memory { get; set; }
+
+        /// <summary>The string-encoding option resolved from the
+        /// canon-lift's opts during component instantiation
+        /// (<c>(string-encoding utf8|utf16|latin1+utf16)</c>).
+        /// The lift adapter consults this to pick the right
+        /// <see cref="StringMarshal"/> variant for string-typed
+        /// canon-async results. Default UTF-8.</summary>
+        public Wacs.ComponentModel.Runtime.Parser.CanonOption.Kind StringEncoding { get; set; }
+            = Wacs.ComponentModel.Runtime.Parser.CanonOption.Kind.StringUtf8;
+
+        /// <summary>The component's type table, set by the host
+        /// at dispatcher allocation time. The lift adapter
+        /// resolves typeidx references in canon entries (e.g.
+        /// <c>task.return list&lt;u8&gt;</c>) by indexing into
+        /// this list to discover the
+        /// <see cref="Wacs.ComponentModel.Runtime.Parser.DefTypeEntry"/>
+        /// shape. Null when the host hasn't wired it — aggregate
+        /// lift paths return null delegates in that case.</summary>
+        public IReadOnlyList<Wacs.ComponentModel.Runtime.Parser.DefTypeEntry>? Types
+        { get; set; }
+
+        // ---- Typed-lifter mapping --------------------------------------
+        //
+        // Bindgen-emitted code calls RegisterTypeMapping at
+        // instantiation time to declare "type-table index N is
+        // WIT identifier X". The canon-async binder, when
+        // building a `task.return` delegate for an aggregate at
+        // type-table index N, queries this map for a typed lifter
+        // before falling back to the per-arity helpers in
+        // CanonAsyncBinder.
+        //
+        // The map is sparse — only indices the bindgen knows
+        // about are populated. Per-call lookup is allocation-free
+        // (Dictionary lookup, no boxing of typeIdx).
+
+        private readonly Dictionary<uint, string> _typeIdxToWitIdent =
+            new Dictionary<uint, string>();
+
+        /// <summary>
+        /// Declare that type-table index <paramref name="typeIdx"/>
+        /// corresponds to the WIT-level identifier
+        /// <paramref name="witIdent"/>. Idempotent — re-registering
+        /// the same (idx, ident) pair is a no-op. Re-registering a
+        /// different ident for the same index throws to surface a
+        /// bindgen bug rather than silently overwriting.
+        /// </summary>
+        public void RegisterTypeMapping(uint typeIdx, string witIdent)
+        {
+            if (witIdent == null) throw new ArgumentNullException(nameof(witIdent));
+            if (_typeIdxToWitIdent.TryGetValue(typeIdx, out var existing))
+            {
+                if (!string.Equals(existing, witIdent, StringComparison.Ordinal))
+                    throw new InvalidOperationException(
+                        $"Type-table index {typeIdx} already mapped to " +
+                        $"WIT identifier '{existing}'; refusing to overwrite " +
+                        $"with '{witIdent}'.");
+                return;
+            }
+            _typeIdxToWitIdent[typeIdx] = witIdent;
+        }
+
+        /// <summary>
+        /// Try to resolve a typed lifter for the value at type-table
+        /// index <paramref name="typeIdx"/>. Returns true and a
+        /// non-null <paramref name="lifter"/> iff the index has
+        /// been registered via
+        /// <see cref="RegisterTypeMapping(uint, string)"/> AND a
+        /// matching <c>[ComponentLifter]</c>-decorated method exists
+        /// in <see cref="ComponentLifterRegistry"/>. Otherwise the
+        /// canon-async binder falls back to its per-arity helpers.
+        /// </summary>
+        public bool TryGetTypedLifterForTypeIdx(
+            uint typeIdx, out Delegate? lifter)
+        {
+            if (!_typeIdxToWitIdent.TryGetValue(typeIdx, out var ident))
+            {
+                lifter = null;
+                return false;
+            }
+            return ComponentLifterRegistry.TryGet(ident, out lifter);
+        }
+
+        // ---- Current-task stack ----------------------------------------
+        //
+        // The "ambient task" is the task whose body is currently
+        // executing on the wasm stack. The lift adapter (Slice E)
+        // pushes a fresh task on body entry and pops on
+        // return/cancel/exception. Canon ops that reference the
+        // current task (task.return, task.cancel, context.get/set)
+        // peek the top.
+
+        // Flow-context-aware task frame: each push allocates a new
+        // immutable frame node and stores it as the AsyncLocal
+        // value, so sibling async bodies (each with its own
+        // ExecutionContext) see their OWN task stack. Without this,
+        // two cooperatively-yielding bodies on the same dispatcher
+        // clobber each other's CurrentTask state.
+        private sealed class TaskFrame
+        {
+            public readonly ComponentTask Task;
+            public readonly TaskFrame? Parent;
+            public TaskFrame(ComponentTask task, TaskFrame? parent)
+            {
+                Task = task;
+                Parent = parent;
+            }
+        }
+
+        private readonly System.Threading.AsyncLocal<TaskFrame?> _currentTaskFrame =
+            new System.Threading.AsyncLocal<TaskFrame?>();
+
+        /// <summary>The task whose body is currently executing on
+        /// the calling ExecutionContext, or <c>null</c> when none.
+        /// Flow-aware: distinct async bodies on the same dispatcher
+        /// see distinct ambient tasks.</summary>
+        public ComponentTask? CurrentTask => _currentTaskFrame.Value?.Task;
+
+        /// <summary>Lift-adapter entry point: push a freshly-created
+        /// task as the ambient task in the current ExecutionContext.
+        /// Transitions <see cref="ComponentTaskState.Starting"/> →
+        /// <see cref="ComponentTaskState.Started"/>.</summary>
+        public void PushCurrentTask(ComponentTask task)
+        {
+            task.State = ComponentTaskState.Started;
+            _currentTaskFrame.Value = new TaskFrame(task, _currentTaskFrame.Value);
+        }
+
+        /// <summary>Lift-adapter exit point: pop the ambient task
+        /// from the current ExecutionContext's frame chain. Returns
+        /// the popped task or null if the chain was empty.</summary>
+        public ComponentTask? PopCurrentTask()
+        {
+            var frame = _currentTaskFrame.Value;
+            if (frame == null) return null;
+            _currentTaskFrame.Value = frame.Parent;
+            return frame.Task;
+        }
+
+        // ---- Backpressure ----------------------------------------------
+        //
+        // A monotone counter the embedder consults to gate new task
+        // creation. Set clears, Inc/Dec adjust. The state is
+        // process-wide for the component instance — not per-task —
+        // which matches the spec's "backpressure is an ambient
+        // flag, not a per-call argument" stance.
+
+        private int _backpressureLevel;
+
+        /// <summary>Current backpressure level. Embedders consult
+        /// this before lifting new tasks; a positive level means
+        /// the component is asking callers to slow down.</summary>
+        public int BackpressureLevel => _backpressureLevel;
+
+        // ---- Task lifecycle --------------------------------------------
+
+        /// <summary><c>canon task.return rs opts</c> — settle the
+        /// ambient task's completion with the lifted result.
+        /// Caller passes the already-lifted CLR object (the canon-
+        /// ABI lift converted the wasm-side value before reaching
+        /// here). Body continues to its natural return after this
+        /// call; the lift adapter pops the task on body exit.</summary>
+        [CanonAsync]
+        public void TaskReturn(IContinuationContext ctx, object? result)
+        {
+            var task = CurrentTask
+                ?? throw new InvalidOperationException(
+                    "task.return called outside an active task body.");
+            if (task.State != ComponentTaskState.Started)
+                throw new InvalidOperationException(
+                    $"task.return: task is in state {task.State}, expected Started.");
+            task.State = ComponentTaskState.Returned;
+            task.Completion.TrySetResult(result);
+        }
+
+        /// <summary><c>canon task.cancel</c> — transition the ambient
+        /// task to <see cref="ComponentTaskState.Cancelled"/>. The
+        /// body continues to its natural exit after this call —
+        /// like <see cref="TaskReturn"/> the lift adapter handles
+        /// the pop.</summary>
+        [CanonAsync]
+        public void TaskCancel(IContinuationContext ctx)
+        {
+            var task = CurrentTask
+                ?? throw new InvalidOperationException(
+                    "task.cancel called outside an active task body.");
+            if (task.State != ComponentTaskState.Started)
+                throw new InvalidOperationException(
+                    $"task.cancel: task is in state {task.State}, expected Started.");
+            task.State = ComponentTaskState.Cancelled;
+            task.Completion.TrySetCanceled();
+        }
+
+        /// <summary>Mark the ambient task as failed and fault its
+        /// completion. Called by the lift adapter when an exception
+        /// escapes the body without being caught.</summary>
+        public void TaskFail(Exception exception)
+        {
+            var task = CurrentTask
+                ?? throw new InvalidOperationException(
+                    "TaskFail called outside an active task body.");
+            task.State = ComponentTaskState.Failed;
+            task.Completion.TrySetException(exception);
+        }
+
+        /// <summary>Register a freshly-allocated task with the
+        /// dispatcher. Called by the canon-lift adapter when an
+        /// async export entry runs. Slice D fills in the
+        /// current-task push on body entry.</summary>
+        public ComponentTask RegisterTask(ContInstance continuation)
+        {
+            ComponentTask? created = null;
+            Tasks.Allocate(handle =>
+            {
+                created = new ComponentTask(handle, continuation);
+                return created;
+            });
+            return created!;
+        }
+
+        // ---- Subtask -----------------------------------------------------
+
+        /// <summary><c>canon subtask.cancel async?</c> — request
+        /// cancellation of the child task. Transitions the child's
+        /// state and faults its completion; the <paramref name="asyncFlag"/>
+        /// is the spec's hint that the caller does/doesn't intend
+        /// to wait synchronously — Phase 3 implementation treats
+        /// both the same (the caller decides whether to await the
+        /// canceled completion).</summary>
+        [CanonAsync]
+        public void SubtaskCancel(int subtaskHandle, bool asyncFlag)
+        {
+            var sub = Subtasks.Get(subtaskHandle)
+                ?? throw new InvalidOperationException(
+                    $"subtask.cancel: handle {subtaskHandle} not allocated.");
+            var child = sub.Child;
+            // Idempotent: only transition out of running states.
+            if (child.State == ComponentTaskState.Starting
+                || child.State == ComponentTaskState.Started)
+            {
+                child.State = ComponentTaskState.Cancelled;
+                child.Completion.TrySetCanceled();
+            }
+        }
+
+        /// <summary><c>canon subtask.drop</c> — release the subtask
+        /// handle. The child task itself is owned through its own
+        /// task-table slot; dropping the subtask handle just severs
+        /// the parent relationship.</summary>
+        [CanonAsync]
+        public bool SubtaskDrop(int subtaskHandle) =>
+            Subtasks.Drop(subtaskHandle) != null;
+
+        /// <summary>
+        /// Adopt a CLR <see cref="Task"/> as a Component Model
+        /// subtask. Used by host bindings that need to surface
+        /// an in-flight async OS operation (e.g.
+        /// <c>Socket.ReceiveFromAsync</c>) through the
+        /// canon-async <c>[async-lower]</c> STARTED protocol so
+        /// the guest's <c>waitable-set.wait</c> can yield to
+        /// other concurrent futures (typical <c>futures::join!</c>
+        /// pattern) instead of the host sync-blocking the
+        /// dispatcher thread.
+        ///
+        /// <para>Creates a minimal <see cref="ComponentTask"/>
+        /// + <see cref="ComponentSubtask"/>. The task has a
+        /// no-op continuation (it is never resumed — the
+        /// underlying work runs in the supplied CLR task) and
+        /// inherits <see cref="ComponentTaskState.Started"/>
+        /// immediately. When the CLR task completes
+        /// (successfully, faulted, or canceled) we propagate
+        /// the outcome to <see cref="ComponentTask.Completion"/>
+        /// so <see cref="WaitableSetWaitAsync"/> wakes the
+        /// guest.</para>
+        ///
+        /// <para>Returned handle is the subtask handle the
+        /// async-lower binding packs into
+        /// <c>(subtask &lt;&lt; 4) | STARTED</c>. The guest is
+        /// responsible for the eventual <c>subtask.drop</c>.</para>
+        /// </summary>
+        public int RegisterHostSubtask(Task task)
+        {
+            if (task == null) throw new ArgumentNullException(nameof(task));
+            // No-op continuation. The standalone-delegate ctor
+            // skips the FuncAddr path, and the dispatcher never
+            // invokes this continuation — the host CLR task is
+            // the work.
+            var dummyCont = new ContInstance(
+                idx: -1,
+                contTypeIndex: default,
+                standaloneDelegate: (Action)(() => { }));
+            ComponentTask child = null!;
+            Tasks.Allocate(handle =>
+            {
+                child = new ComponentTask(handle, dummyCont);
+                child.State = ComponentTaskState.Started;
+                return child;
+            });
+            task.ContinueWith(t =>
+            {
+                if (t.IsCanceled) child.Completion.TrySetCanceled();
+                else if (t.IsFaulted)
+                    child.Completion.TrySetException(
+                        t.Exception?.InnerException
+                        ?? (Exception)t.Exception!);
+                else child.Completion.TrySetResult(null);
+            }, TaskContinuationOptions.ExecuteSynchronously);
+            int subtaskHandle = 0;
+            Subtasks.Allocate(handle =>
+            {
+                subtaskHandle = handle;
+                return new ComponentSubtask(
+                    handle, child, parent: child);
+            });
+            return subtaskHandle;
+        }
+
+        // ---- Stream (byte-typed; Slice D generalizes) -------------------
+
+        /// <summary><c>canon stream.new t</c> — allocate a fresh
+        /// stream<u8> backed by a bounded <see cref="StreamBuffer{T}"/>.
+        /// The <paramref name="typeIdx"/> identifies the element
+        /// type at the component-model level; Slice C concrete
+        /// implementation hard-codes byte buffers (the producer/
+        /// consumer fixture's <c>stream&lt;u8&gt;</c>). Slice D
+        /// generalizes to other element widths.</summary>
+        [CanonAsync]
+        public int StreamNew(int typeIdx, int capacity = 64)
+        {
+            var slot = new StreamSlot { Buffer = new StreamBuffer<byte>(capacity) };
+            return Streams.Allocate(slot);
+        }
+
+        /// <summary>Set the canonical-ABI item size (bytes per
+        /// element) for an existing stream slot. Required for
+        /// typed streams like <c>stream&lt;directory-entry&gt;</c>
+        /// where the canon-async <c>stream-read</c> scaffolding
+        /// negotiates in item counts; left at the default of 1
+        /// for byte streams.</summary>
+        public void SetStreamItemSize(int streamHandle, int itemSize)
+        {
+            if (itemSize <= 0)
+                throw new ArgumentOutOfRangeException(nameof(itemSize));
+            if (Streams.Get(streamHandle) is not StreamSlot slot)
+                throw new InvalidOperationException(
+                    $"SetStreamItemSize: handle {streamHandle} is " +
+                    "not allocated.");
+            slot.ItemSize = itemSize;
+        }
+
+        // Per spec, an `[async-lower][stream-read]` call that
+        // can't immediately satisfy returns BLOCKED and "saves"
+        // the buffer so the eventual wait/poll event can deliver
+        // the result. Only one read is in flight at a time per
+        // stream. The scaffolding binder calls this to record
+        // the pending buffer; <see cref="DrainPendingStreamRead"/>
+        // consumes it when the stream becomes deliverable.
+        public void RegisterStreamPendingRead(
+            int streamHandle, MemoryInstance memory,
+            uint ptr, int itemCap)
+        {
+            var slot = GetStreamSlot(
+                streamHandle, "stream-read");
+            slot.PendingReadPtr = ptr;
+            slot.PendingReadCap = itemCap;
+            slot.PendingReadCode = null;
+        }
+
+        /// <summary>
+        /// If <paramref name="streamHandle"/> has a saved pending
+        /// read and the buffer now has data (or the writer has
+        /// dropped), perform the read into the saved guest
+        /// buffer and return the canon-ABI encoded result code
+        /// (<c>(items&lt;&lt;4)|status</c>). Returns null when
+        /// either no read is pending or the stream has nothing
+        /// to surface yet.
+        /// </summary>
+        public int? DrainPendingStreamRead(
+            int streamHandle, MemoryInstance memory)
+        {
+            if (Streams.Get(streamHandle) is not StreamSlot slot)
+                return null;
+            if (slot.PendingReadPtr == null) return null;
+            // Re-use the non-blocking item-aware reader. The
+            // saved capacity is in item units; the helper
+            // translates to bytes via slot.ItemSize.
+            int read = StreamReadItemsToMemory(
+                streamHandle, memory,
+                slot.PendingReadPtr.Value,
+                slot.PendingReadCap);
+            bool dropped = slot.Buffer.IsCompleted;
+            if (read == 0 && !dropped)
+                return null; // still blocked
+            slot.PendingReadPtr = null;
+            slot.PendingReadCap = 0;
+            int code = dropped
+                ? (read << 4) | 1 // DROPPED
+                : (read << 4) | 0; // COMPLETED
+            slot.PendingReadCode = code;
+            return code;
+        }
+
+        // Resolve the StreamSlot for a handle, throwing with the
+        // canon-op name on failure.
+        private StreamSlot GetStreamSlot(int handle, string canonOp)
+        {
+            var raw = Streams.Get(handle)
+                ?? throw new InvalidOperationException(
+                    $"{canonOp}: handle {handle} is not allocated.");
+            return raw as StreamSlot
+                ?? throw new InvalidOperationException(
+                    $"{canonOp}: handle {handle} is not a byte stream.");
+        }
+
+        /// <summary>Non-blocking write of a byte to the stream.
+        /// Returns false when the buffer is at capacity — backpressure.
+        /// Slice D adds the suspend-on-full variant.</summary>
+        public bool StreamTryWrite(int streamHandle, byte value)
+        {
+            var slot = GetStreamSlot(streamHandle, "stream.write");
+            if (slot.SyncWriteSink != null)
+            {
+                // Mirror the canon-async stream-write
+                // scaffolding: when a sync sink is bound, the
+                // bytes go straight through it (no channel
+                // buffering). Host-side test paths that drive
+                // the stream via StreamTryWrite/StreamDropWritable
+                // need to see the same behavior as the wit-
+                // bindgen-rt-emitted [async-lower] path.
+                slot.SyncWriteSink(new ReadOnlyMemory<byte>(
+                    new[] { value }));
+                return true;
+            }
+            return slot.Buffer.TryWrite(value);
+        }
+
+        /// <summary>Non-blocking read of a byte. Returns false when
+        /// the buffer is empty.</summary>
+        public bool StreamTryRead(int streamHandle, out byte value)
+        {
+            value = 0;
+            var raw = Streams.Get(streamHandle);
+            if (raw is not StreamSlot slot) return false;
+            return slot.Buffer.TryRead(out value);
+        }
+
+        /// <summary>
+        /// Expose the underlying <see cref="StreamBuffer{T}"/>
+        /// for a byte stream handle, or null when the handle is
+        /// absent / wrong-typed. Host bridges (e.g. the
+        /// <c>StreamBackedSink</c> in WACS.WASI.Preview3) use this
+        /// to subscribe to the buffer's
+        /// <see cref="System.Threading.Channels.ChannelReader{T}.WaitToReadAsync"/>
+        /// signal instead of polling.
+        /// </summary>
+        public StreamBuffer<byte>? GetByteStreamBuffer(int streamHandle)
+        {
+            return (Streams.Get(streamHandle) as StreamSlot)?.Buffer;
+        }
+
+        /// <summary><c>canon stream.write t opts</c> with memory
+        /// access — read <paramref name="length"/> bytes from
+        /// <paramref name="memory"/> starting at
+        /// <paramref name="ptr"/> and write them to the stream.
+        /// Returns the number of bytes actually written (less than
+        /// <paramref name="length"/> when the buffer fills up).
+        /// </summary>
+        [CanonAsync("stream-write")]
+        public int StreamWriteFromMemory(
+            int streamHandle, MemoryInstance memory, uint ptr, int length)
+        {
+            if (length < 0)
+                throw new ArgumentOutOfRangeException(nameof(length));
+            if (length == 0) return 0;
+            var slot = GetStreamSlot(streamHandle, "stream.write");
+            var src = memory.AsSpan((int)ptr, length);
+            // If a synchronous write sink is registered (e.g.
+            // host file-write bridge), bypass the buffered
+            // channel — the bridge writes + flushes during this
+            // call so that follow-up stats see the updated
+            // file size immediately. This is what wasip3's
+            // pappend / pwrite fixture relies on between
+            // tx.write completions and fd.stat() calls.
+            if (slot.SyncWriteSink != null)
+            {
+                var copy = new byte[length];
+                src.CopyTo(copy);
+                slot.SyncWriteSink(copy);
+                return length;
+            }
+            int written = 0;
+            for (int i = 0; i < length; i++)
+            {
+                if (!slot.Buffer.TryWrite(src[i])) break;
+                written++;
+            }
+            return written;
+        }
+
+        /// <summary><c>canon stream.read t opts</c> with memory
+        /// access — read up to <paramref name="capacity"/> bytes
+        /// from the stream and write them to
+        /// <paramref name="memory"/> starting at
+        /// <paramref name="ptr"/>. Returns the number of bytes
+        /// actually transferred (less than <paramref name="capacity"/>
+        /// when the stream had less data, or zero when empty).
+        /// </summary>
+        [CanonAsync("stream-read")]
+        public int StreamReadToMemory(
+            int streamHandle, MemoryInstance memory, uint ptr, int capacity)
+        {
+            if (capacity < 0)
+                throw new ArgumentOutOfRangeException(nameof(capacity));
+            if (capacity == 0) return 0;
+            var slot = GetStreamSlot(streamHandle, "stream.read");
+            var dst = memory.AsSpan((int)ptr, capacity);
+            int read = 0;
+            for (int i = 0; i < capacity; i++)
+            {
+                if (!slot.Buffer.TryRead(out var b)) break;
+                dst[i] = b;
+                read++;
+            }
+            return read;
+        }
+
+        /// <summary>
+        /// Blocking variant of <see cref="StreamReadToMemory"/>:
+        /// if no data is immediately available and the stream
+        /// hasn't been completed, block the calling CLR thread
+        /// on the buffer's channel-reader signal until either
+        /// at least one byte is available or the writer half is
+        /// dropped. Returns the number of bytes actually
+        /// transferred (0 only when the stream completed empty).
+        ///
+        /// <para>This is what the canon-lowered
+        /// <c>[async-lower][stream-read-N]&lt;fn&gt;</c> import
+        /// uses: wit-bindgen interprets <c>Completed(N)</c> as a
+        /// synchronous return, so the host blocking inside the
+        /// import call sidesteps the BLOCKED + waitable.join +
+        /// waitable-set.wait callback dance. Matches the model
+        /// the rest of the host already uses for sync-blocking
+        /// async-func imports (see clocks <c>wait-for</c>).</para>
+        /// </summary>
+        /// <summary>Returns true when the stream's writer side
+        /// has been dropped (no more data will arrive). The
+        /// canon-async stream-read scaffolding surfaces this as
+        /// the DROPPED status code so wit-bindgen-rt's read loop
+        /// can exit instead of spinning on Complete(0).</summary>
+        public bool IsStreamCompleted(int streamHandle)
+        {
+            if (Streams.Get(streamHandle) is not StreamSlot slot)
+                return true;
+            return slot.Buffer.IsCompleted;
+        }
+
+        /// <summary>Non-blocking, item-aware sibling of
+        /// <see cref="StreamReadToMemoryBlocking"/>. Translates
+        /// the item capacity through the stream's
+        /// <see cref="StreamSlot.ItemSize"/> so typed streams
+        /// (e.g. <c>stream&lt;own&lt;tcp-socket&gt;&gt;</c> at
+        /// 4 bytes/item) report counts in the unit the canon-
+        /// async scaffolding negotiates.</summary>
+        public int StreamReadItemsToMemory(
+            int streamHandle, MemoryInstance memory,
+            uint ptr, int itemCapacity)
+        {
+            if (itemCapacity < 0)
+                throw new ArgumentOutOfRangeException(nameof(itemCapacity));
+            if (itemCapacity == 0) return 0;
+            var slot = GetStreamSlot(streamHandle, "stream.read");
+            int byteBudget = itemCapacity * slot.ItemSize;
+            int bytesRead = TryReadIntoMemory(
+                slot, memory, ptr, byteBudget);
+            return bytesRead / slot.ItemSize;
+        }
+
+        public int StreamReadToMemoryBlocking(
+            int streamHandle, MemoryInstance memory, uint ptr, int itemCapacity)
+        {
+            if (itemCapacity < 0)
+                throw new ArgumentOutOfRangeException(nameof(itemCapacity));
+            if (itemCapacity == 0) return 0;
+            var slot = GetStreamSlot(streamHandle, "stream.read");
+            // The canon-async stream-read scaffolding negotiates
+            // in ITEM counts. Translate to bytes for the
+            // buffered byte channel, then back to items on
+            // return so wit-bindgen-rt's
+            // `assert!(amt <= cap.len() - cur_len)` holds.
+            int byteBudget = itemCapacity * slot.ItemSize;
+            int bytesRead = TryReadIntoMemory(
+                slot, memory, ptr, byteBudget);
+            if (bytesRead == 0 && !slot.Buffer.IsCompleted)
+            {
+                var waitVT = slot.Buffer.Reader.WaitToReadAsync();
+                bool hasMore = waitVT.IsCompleted
+                    ? waitVT.Result
+                    : waitVT.AsTask().GetAwaiter().GetResult();
+                if (hasMore)
+                    bytesRead = TryReadIntoMemory(
+                        slot, memory, ptr, byteBudget);
+            }
+            // Round DOWN to whole items — wit-bindgen-rt only
+            // lifts complete records. A partial-item residue
+            // would mean the host writer interleaved with the
+            // reader mid-record; for our current bindings every
+            // host writer (e.g. WriteDirectoryEntry's 24-byte
+            // loop inside a synchronous InvokeDescriptor call)
+            // completes whole records before the guest gets to
+            // read, so a residue should never occur in practice.
+            // If it does, the bytes are silently dropped — we
+            // cannot push back into a System.Threading.Channels
+            // Channel<byte>. Logging only at this layer; surfacing
+            // this is a future refinement.
+            return bytesRead / slot.ItemSize;
+        }
+
+        private static int TryReadIntoMemory(
+            StreamSlot slot, MemoryInstance memory, uint ptr, int byteBudget)
+        {
+            var dst = memory.AsSpan((int)ptr, byteBudget);
+            int read = 0;
+            for (int i = 0; i < byteBudget; i++)
+            {
+                if (!slot.Buffer.TryRead(out var b)) break;
+                dst[i] = b;
+                read++;
+            }
+            return read;
+        }
+
+        /// <summary><c>canon stream.cancel-read t async?</c> —
+        /// signals the stream that no further reads will arrive.
+        /// The buffer keeps any unread items (writer may still call
+        /// <see cref="StreamTryWrite"/>); the reader half is marked
+        /// done. Returns true on a known handle.</summary>
+        [CanonAsync]
+        public bool StreamCancelRead(int streamHandle, bool asyncFlag)
+        {
+            // For the byte stream slice, cancel-read is observationally
+            // equivalent to drop-readable: pending and future reads
+            // will see end-of-stream. Distinguishing the two arms
+            // (sync vs. async hint) is a Slice F refinement.
+            return StreamDropReadable(streamHandle);
+        }
+
+        /// <summary><c>canon stream.cancel-write t async?</c> —
+        /// signals the stream that no further writes will arrive.
+        /// Completes the channel so the reader observes EOS.</summary>
+        [CanonAsync]
+        public bool StreamCancelWrite(int streamHandle, bool asyncFlag) =>
+            StreamDropWritable(streamHandle);
+
+        /// <summary><c>canon stream.drop-readable t</c> — drop the
+        /// reader half of the stream handle. The slot stays in the
+        /// table until <see cref="StreamDropWritable"/> also fires;
+        /// pending writes effectively go nowhere once the reader
+        /// is dropped (the spec allows the runtime to short-circuit
+        /// further writes, but this implementation just keeps
+        /// buffering until the writer-side also closes).</summary>
+        [CanonAsync]
+        public bool StreamDropReadable(int streamHandle)
+        {
+            if (Streams.Get(streamHandle) is not StreamSlot slot)
+                return false;
+            slot.ReaderDropped = true;
+            if (slot.WriterDropped) Streams.Drop(streamHandle);
+            return true;
+        }
+
+        /// <summary><c>canon stream.drop-writable t</c> — drop the
+        /// writer half. Completes the channel so the reader observes
+        /// end-of-stream once the buffer drains; the table slot is
+        /// retained until the reader-side also drops.</summary>
+        [CanonAsync]
+        public bool StreamDropWritable(int streamHandle)
+        {
+            if (Streams.Get(streamHandle) is not StreamSlot slot)
+                return false;
+            slot.Buffer.Complete();
+            slot.WriterDropped = true;
+            // Synchronous sink close — runs the host bridge's
+            // completion handler (e.g. close-and-flush the
+            // FileStream + resolve the bound future).
+            slot.SyncWriteSinkClose?.Invoke();
+            if (slot.ReaderDropped) Streams.Drop(streamHandle);
+            return true;
+        }
+
+        /// <summary>Bind a synchronous write sink to a stream's
+        /// writer side. Used by host bridges that need
+        /// write-then-stat synchrony.</summary>
+        public void BindStreamSyncWriteSink(
+            int streamHandle,
+            Action<ReadOnlyMemory<byte>> onWrite,
+            Action onClose)
+        {
+            if (Streams.Get(streamHandle) is not StreamSlot slot)
+                throw new InvalidOperationException(
+                    $"BindStreamSyncWriteSink: handle {streamHandle} " +
+                    "is not allocated.");
+            slot.SyncWriteSink = onWrite;
+            slot.SyncWriteSinkClose = onClose;
+        }
+
+        // ---- Future ------------------------------------------------------
+
+        /// <summary><c>canon future.new t</c> — allocate a fresh
+        /// future cell. Element type is <c>object</c> (typed
+        /// boxing); Slice D generalizes typed cells.</summary>
+        [CanonAsync]
+        public int FutureNew(int typeIdx)
+        {
+            var cell = new FutureCell<object?>();
+            return Futures.Allocate(cell);
+        }
+
+        /// <summary><c>canon future.write t opts</c> — single-shot
+        /// write. Returns false on double-write (matching the spec's
+        /// trap behavior — caller turns false into a trap).</summary>
+        public bool FutureWrite(int futureHandle, object? value)
+        {
+            if (Futures.Get(futureHandle) is not FutureCell<object?> cell)
+                return false;
+            return cell.TrySetResult(value);
+        }
+
+        /// <summary>Returns the future's underlying
+        /// <see cref="Task{TResult}"/> so the host can <c>await</c>
+        /// it. Slice D wires the wasm-side <c>future.read</c> through
+        /// suspend instead of returning the Task directly.</summary>
+        public Task<object?> FutureReadAsync(int futureHandle)
+        {
+            if (Futures.Get(futureHandle) is not FutureCell<object?> cell)
+                throw new InvalidOperationException(
+                    $"future.read: handle {futureHandle} is not allocated.");
+            return cell.Task;
+        }
+
+        /// <summary>Blocking variant of
+        /// <see cref="FutureReadAsync"/>: synchronously wait for
+        /// the future to resolve, then copy its byte payload (if
+        /// any) to <paramref name="memory"/> at
+        /// <paramref name="ptr"/>. Used by the canon-async
+        /// <c>[async-lower][future-read-N]</c> scaffolding
+        /// import — wit-bindgen-rt interprets a synchronous
+        /// COMPLETED return as "value already in the buffer", so
+        /// blocking inside the import call sidesteps the
+        /// BLOCKED + waitable.join dance (matching the existing
+        /// pattern for <see cref="StreamReadToMemoryBlocking"/>).
+        ///
+        /// <para>Convention: the future's resolved value is a
+        /// pre-encoded <c>byte[]</c> when the producer wants to
+        /// surface a typed payload (e.g.
+        /// <c>result&lt;_, error-code&gt;</c>). A <c>null</c>
+        /// value writes nothing — used when the future's
+        /// element type is unit and the guest only needs the
+        /// completion signal.</para>
+        /// </summary>
+        public int FutureReadToMemoryBlocking(
+            int futureHandle, MemoryInstance memory, uint ptr)
+        {
+            if (Futures.Get(futureHandle) is not FutureCell<object?> cell)
+                return 0;
+            object? value;
+            try { value = cell.Task.GetAwaiter().GetResult(); }
+            catch (TaskCanceledException) { value = null; }
+            CopyFutureValueToMemory(value, memory, ptr);
+            return 0;
+        }
+
+        /// <summary>Non-blocking sibling. Returns
+        /// <c>true</c> when the future has resolved and its
+        /// payload has been copied into <paramref name="memory"/>
+        /// at <paramref name="ptr"/>; <c>false</c> when still
+        /// pending. Used by the BLOCKED-aware
+        /// <c>[async-lower][future-read]</c> scaffolding so the
+        /// host doesn't sync-block the dispatcher when the guest
+        /// is in a <c>futures::join!</c> with a peer that
+        /// resolves the future.</summary>
+        public bool TryReadFutureToMemory(
+            int futureHandle, MemoryInstance memory, uint ptr)
+        {
+            if (Futures.Get(futureHandle) is not FutureCell<object?> cell)
+                return true; // missing future = treat as resolved-empty
+            if (!cell.Task.IsCompleted) return false;
+            object? value;
+            try { value = cell.Task.GetAwaiter().GetResult(); }
+            catch (TaskCanceledException) { value = null; }
+            CopyFutureValueToMemory(value, memory, ptr);
+            return true;
+        }
+
+        private static void CopyFutureValueToMemory(
+            object? value, MemoryInstance memory, uint ptr)
+        {
+            if (FutureReadTraceEnabled)
+                System.Console.Error.WriteLine(
+                    $"[future-read] value=" +
+                    (value == null ? "null"
+                        : value.GetType().Name) +
+                    $" ptr=0x{ptr:X8}");
+            if (value is byte[] bytes && bytes.Length > 0)
+            {
+                var dest = memory.AsSpan((int)ptr, bytes.Length);
+                new ReadOnlySpan<byte>(bytes).CopyTo(dest);
+            }
+        }
+
+        /// <summary>Per-future state for a saved
+        /// <c>[async-lower][future-read]</c>. Stored in a side
+        /// table keyed by future handle since
+        /// <see cref="FutureCell{T}"/> doesn't carry the
+        /// guest-buffer pointer itself.</summary>
+        private readonly Dictionary<int, uint> _pendingFutureReadPtrs =
+            new Dictionary<int, uint>();
+
+        public void RegisterFuturePendingRead(
+            int futureHandle, uint ptr)
+        {
+            _pendingFutureReadPtrs[futureHandle] = ptr;
+        }
+
+        /// <summary>If the future is now resolved and a pending
+        /// read was registered, copy the payload to the saved
+        /// ptr and return the encoded code (always COMPLETED
+        /// since a future is single-shot). Returns null when
+        /// either no read pending or future still pending.</summary>
+        public int? DrainPendingFutureRead(
+            int futureHandle, MemoryInstance memory)
+        {
+            if (!_pendingFutureReadPtrs.TryGetValue(
+                    futureHandle, out var ptr))
+                return null;
+            if (Futures.Get(futureHandle) is not FutureCell<object?> cell)
+            {
+                _pendingFutureReadPtrs.Remove(futureHandle);
+                return 0; // COMPLETED(0)
+            }
+            if (!cell.Task.IsCompleted) return null;
+            object? value;
+            try { value = cell.Task.GetAwaiter().GetResult(); }
+            catch (TaskCanceledException) { value = null; }
+            CopyFutureValueToMemory(value, memory, ptr);
+            _pendingFutureReadPtrs.Remove(futureHandle);
+            return 0; // COMPLETED(0) — futures carry their bytes
+                      // via the saved ptr; the code's count slot
+                      // is unused.
+        }
+
+        private static readonly bool FutureReadTraceEnabled =
+            Environment.GetEnvironmentVariable("WACS_TRACE_FUTURE") == "1";
+
+        /// <summary><c>canon future.cancel-read t async?</c> —
+        /// abandon the reader side. Pending read is cancelled.</summary>
+        [CanonAsync]
+        public bool FutureCancelRead(int futureHandle, bool asyncFlag) =>
+            FutureDropReadable(futureHandle);
+
+        /// <summary><c>canon future.cancel-write t async?</c> —
+        /// abandon the writer side without resolving. Reader
+        /// observes cancellation.</summary>
+        [CanonAsync]
+        public bool FutureCancelWrite(int futureHandle, bool asyncFlag) =>
+            FutureDropReadable(futureHandle);
+
+        /// <summary><c>canon future.drop-readable t</c>. Cancels any
+        /// pending reader and drops the handle.</summary>
+        [CanonAsync]
+        public bool FutureDropReadable(int futureHandle)
+        {
+            if (Futures.Get(futureHandle) is FutureCell<object?> cell)
+                cell.TrySetCanceled();
+            return Futures.Drop(futureHandle) != null;
+        }
+
+        /// <summary><c>canon future.drop-writable t</c>. Same as
+        /// drop-readable at this slice; full single-direction
+        /// semantics land in Slice D.</summary>
+        [CanonAsync]
+        public bool FutureDropWritable(int futureHandle) =>
+            FutureDropReadable(futureHandle);
+
+        // ---- Error context -----------------------------------------------
+
+        /// <summary><c>canon error-context.new opts</c> — allocate an
+        /// error-context handle carrying the supplied debug message.
+        /// Lift of the message bytes happens at the canon-ABI boundary
+        /// before reaching here.</summary>
+        public int ErrorContextNew(string debugMessage) =>
+            ErrorContexts.Allocate(debugMessage);
+
+        /// <summary>Memory-aware variant of
+        /// <see cref="ErrorContextNew(string)"/>: reads the debug
+        /// message as a UTF-8 string from
+        /// <paramref name="memory"/> at <paramref name="ptr"/>,
+        /// <paramref name="len"/>, then allocates a handle.</summary>
+        [CanonAsync("error-context-new")]
+        public int ErrorContextNewFromMemory(
+            MemoryInstance memory, uint ptr, uint len)
+        {
+            var bytes = memory.AsSpan((int)ptr, (int)len);
+            var str = Encoding.UTF8.GetString(bytes);
+            return ErrorContextNew(str);
+        }
+
+        /// <summary>Memory-aware variant of
+        /// <see cref="ErrorContextDebugMessage(int)"/>: writes the
+        /// allocated string into <paramref name="memory"/> at
+        /// <paramref name="dstPtr"/> as UTF-8. The caller is
+        /// responsible for ensuring <paramref name="dstPtr"/>
+        /// addresses a sufficiently-sized buffer; spec-compliant
+        /// callers use <c>cabi_realloc</c> to allocate first via
+        /// the returned byte count.
+        ///
+        /// <para>Returns the number of UTF-8 bytes written. Returns
+        /// the message's required byte count even when
+        /// <paramref name="dstPtr"/> is 0 — that's the spec-defined
+        /// way to query the size before allocating.</para>
+        /// </summary>
+        [CanonAsync("error-context-debug-message")]
+        public int ErrorContextDebugMessageToMemory(
+            int errorContextHandle, MemoryInstance memory, uint dstPtr)
+        {
+            var msg = ErrorContexts.Get(errorContextHandle)
+                ?? throw new InvalidOperationException(
+                    $"error-context.debug-message: handle {errorContextHandle} not allocated.");
+            int byteCount = Encoding.UTF8.GetByteCount(msg);
+            if (dstPtr != 0)
+            {
+                memory.WriteUtf8String(dstPtr, msg, nullTerminate: false);
+            }
+            return byteCount;
+        }
+
+        /// <summary><c>canon error-context.debug-message opts</c> —
+        /// retrieve the message string for an allocated handle.</summary>
+        public string ErrorContextDebugMessage(int errorContextHandle)
+        {
+            var msg = ErrorContexts.Get(errorContextHandle)
+                ?? throw new InvalidOperationException(
+                    $"error-context.debug-message: handle {errorContextHandle} not allocated.");
+            return msg;
+        }
+
+        /// <summary><c>canon error-context.drop</c>. Releases the handle.</summary>
+        [CanonAsync]
+        public bool ErrorContextDrop(int errorContextHandle) =>
+            ErrorContexts.Drop(errorContextHandle) != null;
+
+        // ---- Waitable set ------------------------------------------------
+
+        /// <summary><c>canon waitable-set.new</c>.</summary>
+        [CanonAsync]
+        public int WaitableSetNew() =>
+            WaitableSets.Allocate(handle => new ComponentWaitableSet(handle));
+
+        /// <summary><c>canon waitable-set.wait cancel? memidx</c> —
+        /// block until any member of the set reaches a deliverable
+        /// state. Returns the handle of the first deliverable
+        /// member (any member already deliverable when called wins).
+        ///
+        /// <para><b>Two flavors share the same body:</b>
+        /// this synchronous entry point is the canon-async binder's
+        /// default, intended for wasm bodies that run synchronously
+        /// on the calling CLR thread.
+        /// <see cref="WaitableSetWaitAsync(IContinuationContext, int, int, bool, System.Threading.CancellationToken)"/>
+        /// is the cooperative-yield variant for async wasm bodies
+        /// (the lift adapter's
+        /// <see cref="AsyncLiftAdapter.InvokeAsync(AsyncDispatcher, ContInstance, System.Func{Task})"/>
+        /// overload) — same wait semantics, but the CLR thread
+        /// is free to run other work while parked.</para>
+        ///
+        /// <para>The wasm-side stackful suspend (where the wasm
+        /// continuation captures via <c>cont.new</c> /
+        /// <c>suspend</c> and yields control back to a wasm-defined
+        /// dispatch loop) is a future refinement that lights up
+        /// when wit-component-emitted async components actually
+        /// use the Stack Switching opcodes. The current async-body
+        /// path covers the CLR-side concurrency case adequately.</para>
+        ///
+        /// <para>Returns <c>0</c> (canon null) when the set is
+        /// empty. Members without a wait-able completion source
+        /// (e.g. raw stream handles with no buffered data and no
+        /// EOS yet) are still polled on each wakeup, so a stream
+        /// becoming ready re-arms the loop.</para>
+        ///
+        /// <para>The <paramref name="memoryIdx"/> parameter is the
+        /// spec-defined target where canon-spec implementations
+        /// write the deliverable-event struct. This implementation
+        /// returns the handle directly via the method's return
+        /// value instead — the canon-ABI memory write lands when
+        /// the lift adapter generates per-call memory marshaling.</para>
+        /// </summary>
+        [CanonAsync]
+        public int WaitableSetWait(
+            IContinuationContext ctx, int waitableSetHandle,
+            int memoryIdx, bool cancellable)
+        {
+            // Sync entry: block on the async body. GetAwaiter().GetResult()
+            // unwraps the Task<int> and rethrows any inner exception
+            // without the AggregateException wrapper that .Result
+            // would introduce.
+            return WaitableSetWaitAsync(
+                ctx, waitableSetHandle, memoryIdx,
+                cancellable, default).GetAwaiter().GetResult();
+        }
+
+        // Per canon-ABI, waitable-set.wait/poll return an event
+        // record: { event0: u32 (event type), payload: (u32, u32) }.
+        // The event type tells wit-bindgen-rt which kind of
+        // waitable became deliverable so it can dispatch to the
+        // right callback. Payload carries (waitable_handle, code).
+        public const int EventNone = 0;
+        public const int EventSubtask = 1;
+        public const int EventStreamRead = 2;
+        public const int EventStreamWrite = 3;
+        public const int EventFutureRead = 4;
+        public const int EventFutureWrite = 5;
+        public const int EventCancel = 6;
+
+        /// <summary>
+        /// Wait variant that writes the canon-ABI event record
+        /// to memory and returns the event type. This is the
+        /// shape wit-bindgen-rt actually consumes: see
+        /// guest-rust/src/rt/async_support/waitable_set.rs ::
+        /// <c>fn wait(_: u32, _: *mut [u32; 2]) -&gt; u32</c> and
+        /// the deliver path in async_support.rs:286.
+        ///
+        /// <para>Writes 8 bytes at <paramref name="payloadPtr"/>:
+        /// little-endian u32 waitable handle + little-endian
+        /// u32 code. Returns event0 (e.g.
+        /// <see cref="EventStreamRead"/>).</para>
+        /// </summary>
+        public int WaitableSetWaitWithPayload(
+            IContinuationContext ctx, int waitableSetHandle,
+            MemoryInstance memory, int payloadPtr, bool cancellable)
+        {
+            int member = WaitableSetWaitAsync(
+                ctx, waitableSetHandle, 0,
+                cancellable, default).GetAwaiter().GetResult();
+            return BuildAndWriteWaitableEvent(
+                member, memory, payloadPtr);
+        }
+
+        /// <summary>Async sibling for the <c>(callback)</c>-
+        /// style lift driver: waits on the set, materializes the
+        /// (eventType, event1, event2) triple that wit-bindgen-rt
+        /// passes to the callback function. Yields the CLR
+        /// thread while parked so host CLR Tasks (e.g. background
+        /// socket reads) can run.</summary>
+        public async Task<(int eventType, int event1, int event2)>
+            WaitableSetWaitAsyncForCallback(int waitableSetHandle)
+        {
+            int member = await WaitableSetWaitAsync(
+                null!, waitableSetHandle, 0,
+                cancellable: false).ConfigureAwait(false);
+            var (et, e1, e2) = BuildWaitableEventValues(member);
+            return (et, e1, e2);
+        }
+
+        // Per-kind event dispatch identical to
+        // <see cref="BuildAndWriteWaitableEvent"/> but doesn't
+        // touch guest memory — callback-style lifts pass the
+        // event by register, not memory.
+        private (int eventType, int event1, int event2)
+            BuildWaitableEventValues(int member)
+        {
+            var kind = HandleKindInternal(member);
+            int eventType, code;
+            switch (kind)
+            {
+                case WaitableKind.Subtask:
+                    eventType = EventSubtask;
+                    var sub = Subtasks.Get(member);
+                    code = (sub?.Child.Completion.Task.IsCanceled ?? false)
+                        ? 4 // STATUS_RETURNED_CANCELLED
+                        : 2; // STATUS_RETURNED
+                    break;
+                case WaitableKind.Stream:
+                    eventType = EventStreamRead;
+                    var sc = DrainPendingStreamRead(member, Memory!);
+                    code = sc ?? 0;
+                    break;
+                case WaitableKind.Future:
+                    eventType = EventFutureRead;
+                    var fc = DrainPendingFutureRead(member, Memory!);
+                    code = fc ?? 0;
+                    break;
+                case WaitableKind.Task:
+                    eventType = EventSubtask;
+                    code = 2;
+                    break;
+                default:
+                    eventType = EventNone;
+                    code = 0;
+                    break;
+            }
+            return (eventType, member, code);
+        }
+
+        /// <summary>Non-blocking sibling of
+        /// <see cref="WaitableSetWaitWithPayload"/>; returns
+        /// <see cref="EventNone"/> + leaves memory untouched
+        /// when nothing is currently deliverable.</summary>
+        public int WaitableSetPollWithPayload(
+            IContinuationContext ctx, int waitableSetHandle,
+            MemoryInstance memory, int payloadPtr, bool cancellable)
+        {
+            int member = WaitableSetPoll(
+                ctx, waitableSetHandle, 0, cancellable);
+            if (member == 0) return EventNone;
+            return BuildAndWriteWaitableEvent(
+                member, memory, payloadPtr);
+        }
+
+        private int BuildAndWriteWaitableEvent(
+            int member, MemoryInstance memory, int payloadPtr)
+        {
+            var kind = HandleKindInternal(member);
+            int eventType = EventNone;
+            int code = 0;
+            switch (kind)
+            {
+                case WaitableKind.Subtask:
+                    eventType = EventSubtask;
+                    // Subtask completed → status RETURNED = 2.
+                    var sub = Subtasks.Get(member);
+                    if (sub?.Child.Completion.Task.IsCanceled
+                        ?? false)
+                        code = 4; // STATUS_RETURNED_CANCELLED
+                    else
+                        code = 2; // STATUS_RETURNED
+                    break;
+                case WaitableKind.Stream:
+                    // We don't track which side initiated the
+                    // join (read vs write). Default to STREAM_READ
+                    // — sockets fixtures only block on reads.
+                    eventType = EventStreamRead;
+                    // If a previous stream-read returned BLOCKED
+                    // and saved its (ptr, cap), drain the buffer
+                    // into the guest's saved area now and report
+                    // the actual transfer count. Without this
+                    // wit-bindgen-rt's callback sees Complete(0)
+                    // and treats the stream as exhausted instead
+                    // of re-polling for real data.
+                    var streamCode = DrainPendingStreamRead(
+                        member, memory);
+                    code = streamCode ?? 0;
+                    break;
+                case WaitableKind.Future:
+                    eventType = EventFutureRead;
+                    var futureCode = DrainPendingFutureRead(
+                        member, memory);
+                    code = futureCode ?? 0;
+                    break;
+                case WaitableKind.Task:
+                    eventType = EventSubtask;
+                    code = 2;
+                    break;
+                default:
+                    eventType = EventNone;
+                    break;
+            }
+            if (memory != null && payloadPtr >= 0
+                && payloadPtr + 8 <= memory.Data.Length)
+            {
+                var span = memory.AsSpan(payloadPtr, 8);
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(span, member);
+                System.Buffers.Binary.BinaryPrimitives
+                    .WriteInt32LittleEndian(span.Slice(4), code);
+            }
+            return eventType;
+        }
+
+        /// <summary>Cooperative-yield variant of
+        /// <see cref="WaitableSetWait(IContinuationContext, int, int, bool)"/>.
+        /// Returns a <see cref="Task{T}"/> that completes when any
+        /// member of the set reaches a deliverable state — the
+        /// CLR thread is yielded to the host scheduler while
+        /// parked, so other tasks on the same scheduler can run.
+        ///
+        /// <para>Use this from async wasm bodies launched via
+        /// <see cref="AsyncLiftAdapter.InvokeAsync(AsyncDispatcher, ContInstance, System.Func{Task})"/>.</para>
+        ///
+        /// <para>Honors
+        /// <paramref name="cancellationToken"/>: cancellation
+        /// surfaces as <see cref="OperationCanceledException"/>
+        /// from the awaiting body. The <paramref name="cancellable"/>
+        /// flag is the wasm-side hint that the runtime is free to
+        /// cancel-on-deliver if needed — implementation does not
+        /// currently distinguish, both flavors honor the token.</para>
+        /// </summary>
+        public async Task<int> WaitableSetWaitAsync(
+            IContinuationContext ctx, int waitableSetHandle,
+            int memoryIdx, bool cancellable,
+            System.Threading.CancellationToken cancellationToken = default)
+        {
+            var ws = WaitableSets.Get(waitableSetHandle)
+                ?? throw new InvalidOperationException(
+                    $"waitable-set.wait: handle {waitableSetHandle} not allocated.");
+
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                // Sync scan — wins immediately when any member is
+                // already deliverable, so a polling caller never
+                // pays the WhenAny overhead.
+                foreach (var member in ws.Members)
+                    if (IsWaitableDeliverable(member)) return member;
+
+                if (ws.Members.Count == 0) return 0;
+
+                // Build the WhenAny-able task set. Streams use the
+                // channel reader's WaitToReadAsync to wake on
+                // buffered-data or EOS. Tasks/subtasks/futures use
+                // their completion task directly.
+                var waitables = new List<Task>(ws.Members.Count);
+                foreach (var member in ws.Members)
+                {
+                    var t = GetMemberWaitTask(member);
+                    if (t != null) waitables.Add(t);
+                }
+
+                if (waitables.Count == 0)
+                {
+                    // No member has a wait-able source — only
+                    // happens when every member is a stream
+                    // without a producer-side TCS. Treat as
+                    // empty-set wakeup.
+                    return 0;
+                }
+
+                // WhenAny + cancellation: race the wait against a
+                // cancellation-triggered TCS so cancellationToken
+                // cancellation unblocks promptly without abandoning
+                // the underlying tasks.
+                if (cancellationToken.CanBeCanceled)
+                {
+                    var cancelTcs = new TaskCompletionSource<bool>(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
+                    using (cancellationToken.Register(
+                        s => ((TaskCompletionSource<bool>)s!).TrySetResult(true),
+                        cancelTcs))
+                    {
+                        waitables.Add(cancelTcs.Task);
+                        await Task.WhenAny(waitables).ConfigureAwait(false);
+                    }
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+                else
+                {
+                    await Task.WhenAny(waitables).ConfigureAwait(false);
+                }
+                // Loop back and re-scan: WhenAny only proves SOME
+                // task completed, not which one.
+            }
+        }
+
+        // Build a Task that completes when the given waitable
+        // handle becomes deliverable. Returns null for handles
+        // that don't exist or aren't a wait-able kind. With the
+        // shared-store refactor each handle has exactly one kind,
+        // so this is a clean kind-dispatch — no cross-table
+        // union needed.
+        private Task? GetMemberWaitTask(int handle)
+        {
+            var kind = HandleKindInternal(handle);
+            if (kind == null) return null;
+            switch (kind.Value)
+            {
+                case WaitableKind.Task:
+                    return Tasks.Get(handle)?.Completion.Task;
+                case WaitableKind.Subtask:
+                    return Subtasks.Get(handle)?.Child.Completion.Task;
+                case WaitableKind.Future:
+                    return (Futures.Get(handle) as FutureCell<object?>)?.Task;
+                case WaitableKind.Stream:
+                    if (Streams.Get(handle) is StreamSlot ss)
+                    {
+                        var vt = ss.Buffer.Reader.WaitToReadAsync();
+                        return vt.IsCompleted ? Task.CompletedTask : vt.AsTask();
+                    }
+                    return null;
+                // WaitableSet / ErrorContext: no completion source —
+                // they're not directly waitable, only joinable into
+                // a waitable-set or read by error-context.debug-message.
+                default:
+                    return null;
+            }
+        }
+
+        /// <summary><c>canon waitable-set.poll cancel? memidx</c> —
+        /// non-blocking check. Returns the handle of the first
+        /// deliverable member, or 0 (the canon null sentinel) when
+        /// no member is ready. Deliverable = the underlying
+        /// <see cref="ComponentTask"/> is past Started,
+        /// <see cref="FutureCell{T}"/> is completed, or
+        /// <see cref="StreamBuffer{T}"/> has buffered items or has
+        /// completed.</summary>
+        [CanonAsync]
+        public int WaitableSetPoll(
+            IContinuationContext ctx, int waitableSetHandle,
+            int memoryIdx, bool cancellable)
+        {
+            var ws = WaitableSets.Get(waitableSetHandle)
+                ?? throw new InvalidOperationException(
+                    $"waitable-set.poll: handle {waitableSetHandle} not allocated.");
+            foreach (var memberHandle in ws.Members)
+            {
+                if (IsWaitableDeliverable(memberHandle)) return memberHandle;
+            }
+            return 0; // canon null
+        }
+
+        // Determine whether a waitable handle has reached a state
+        // that wait/poll should surface. Clean kind-dispatch under
+        // the shared-store model — each handle has exactly one
+        // kind, no cross-table union required.
+        private bool IsWaitableDeliverable(int waitableHandle)
+        {
+            var kind = HandleKindInternal(waitableHandle);
+            if (kind == null) return false;
+            switch (kind.Value)
+            {
+                case WaitableKind.Task:
+                    return Tasks.Get(waitableHandle)
+                        ?.Completion.Task.IsCompleted ?? false;
+                case WaitableKind.Subtask:
+                    return Subtasks.Get(waitableHandle)
+                        ?.Child.Completion.Task.IsCompleted ?? false;
+                case WaitableKind.Future:
+                    return (Futures.Get(waitableHandle) as FutureCell<object?>)
+                        ?.IsCompleted ?? false;
+                case WaitableKind.Stream:
+                    if (Streams.Get(waitableHandle) is StreamSlot ss)
+                        return ss.Buffer.IsCompleted
+                            || ss.Buffer.Reader.Count > 0;
+                    return false;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary><c>canon waitable-set.drop</c>.</summary>
+        [CanonAsync]
+        public bool WaitableSetDrop(int waitableSetHandle) =>
+            WaitableSets.Drop(waitableSetHandle) != null;
+
+        /// <summary><c>canon waitable.join</c> — adds the current
+        /// waitable to the set. The "current waitable-set context"
+        /// is needed; Slice D wires it.</summary>
+        [CanonAsync]
+        public void WaitableJoin(int waitableSetHandle, int waitableHandle)
+        {
+            // Per canon ABI + wit-bindgen-rt convention, set=0
+            // means "remove the waitable from every set it's
+            // currently a member of" — used at subtask-drop time
+            // to detach pending wait registrations.
+            if (waitableSetHandle == 0)
+            {
+                foreach (var entry in _handles.Values)
+                    if (entry.Kind == WaitableKind.WaitableSet)
+                        ((ComponentWaitableSet)entry.Payload)
+                            .Remove(waitableHandle);
+                return;
+            }
+            var ws = WaitableSets.Get(waitableSetHandle)
+                ?? throw new InvalidOperationException(
+                    $"waitable.join: waitable-set {waitableSetHandle} not allocated.");
+            ws.Join(waitableHandle);
+        }
+
+        // ---- Backpressure -----------------------------------------------
+
+        /// <summary><c>canon backpressure.set</c> — clear the
+        /// component's backpressure flag. Embedders are free to
+        /// resume creating new tasks.</summary>
+        [CanonAsync]
+        public void BackpressureSet() { _backpressureLevel = 0; }
+
+        /// <summary><c>canon backpressure.inc</c> — raise the
+        /// backpressure level by one. Multiple increments stack;
+        /// the embedder reads <see cref="BackpressureLevel"/>.</summary>
+        [CanonAsync]
+        public void BackpressureInc() { _backpressureLevel++; }
+
+        /// <summary><c>canon backpressure.dec</c> — drop the
+        /// level by one (floor 0).</summary>
+        [CanonAsync]
+        public void BackpressureDec()
+        {
+            if (_backpressureLevel > 0) _backpressureLevel--;
+        }
+
+        // ---- Context ----------------------------------------------------
+
+        /// <summary><c>canon context.get v i</c> — read the ambient
+        /// task's context slot <paramref name="slotIdx"/>. Returns
+        /// a default-initialized <see cref="Value"/> when the slot
+        /// has never been written. Throws when no task is ambient.</summary>
+        [CanonAsync]
+        public Value ContextGet(int slotIdx)
+        {
+            var task = CurrentTask
+                ?? throw new InvalidOperationException(
+                    "context.get called outside an active task body.");
+            return task.Context.TryGetValue(slotIdx, out var v) ? v : default;
+        }
+
+        /// <summary><c>canon context.set v i</c> — write the ambient
+        /// task's context slot. Throws when no task is ambient.</summary>
+        [CanonAsync]
+        public void ContextSet(int slotIdx, Value value)
+        {
+            var task = CurrentTask
+                ?? throw new InvalidOperationException(
+                    "context.set called outside an active task body.");
+            task.Context[slotIdx] = value;
+        }
+
+        // ---- Thread.yield -----------------------------------------------
+
+        /// <summary><c>canon thread.yield cancel?</c> — yield the
+        /// current task's slot to other runnable tasks. In a
+        /// single-task body (the only model Phase 3 implements),
+        /// there are no other tasks to schedule, so yield is a
+        /// synchronous no-op. <paramref name="cancellable"/>
+        /// controls whether task-cancellation is observable across
+        /// the yield boundary; today both arms are identical
+        /// because there is no scheduler that could interleave.
+        ///
+        /// <para>When Phase 3 grows a multi-task scheduler, this
+        /// method becomes the runtime's natural cooperative
+        /// yield point — at that time the suspend integration
+        /// with <see cref="IContinuationContext"/> lands.</para>
+        /// </summary>
+        [CanonAsync]
+        public void ThreadYield(IContinuationContext ctx, bool cancellable)
+        {
+            // Intentional no-op. See doc comment.
+        }
+    }
+}

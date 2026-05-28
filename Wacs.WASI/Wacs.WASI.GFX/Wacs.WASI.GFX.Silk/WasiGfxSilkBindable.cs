@@ -131,13 +131,15 @@ namespace Wacs.WASI.GFX.Silk
                     return null;
                 }));
 
-            // Set the AppDomain-wide ambient so the transpiler-
-            // direct-link path's resource constructors (Context,
-            // Surface, Device, Buffer in Wacs.WASI.GFX.
-            // DependencyInjection) can find the backend without
-            // a per-instance reference threaded through their
-            // parameterless ctor.
-            WasiGfxAmbient.SetBackend(Backend);
+            // Install the backend on the AsyncLocal-scoped
+            // WasiGfxCurrent for the duration of this
+            // ExecutionContext. Resource impls that took the
+            // bundle-aware ctor (Context, Surface, Device — v1
+            // phase 1g) prefer that path; the [static]buffer.
+            // from-graphics-buffer factory reads from here
+            // because a static method can't take the bundle
+            // through ctor injection.
+            WasiGfxCurrent.SetBackend(Backend);
 
             // 1c: the explicit Assembly.Load of
             // Wacs.WASI.GFX.DependencyInjection is now driven by

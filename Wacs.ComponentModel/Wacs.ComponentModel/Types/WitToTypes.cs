@@ -388,6 +388,18 @@ namespace Wacs.ComponentModel.Types
                     return new CtOwnType(ResolveRef(own.ResourceName, symbols));
                 case WitBorrowType bor:
                     return new CtBorrowType(ResolveRef(bor.ResourceName, symbols));
+                case WitStreamType stream:
+                    return new CtStreamType(
+                        stream.Element != null
+                            ? ConvertType(stream.Element, symbols, null)
+                            : null);
+                case WitFutureType fut:
+                    return new CtFutureType(
+                        fut.Element != null
+                            ? ConvertType(fut.Element, symbols, null)
+                            : null);
+                case WitErrorContextType:
+                    return CtErrorContextType.Instance;
                 case WitTypeRef tr:
                     return ResolveRef(tr.Name, symbols);
                 default:

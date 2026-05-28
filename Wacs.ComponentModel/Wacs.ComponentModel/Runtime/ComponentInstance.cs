@@ -95,6 +95,152 @@ namespace Wacs.ComponentModel.Runtime
         internal Dictionary<string, Wacs.Core.Runtime.ResourceHandleTable> _resourceTables
             = new();
 
+        /// <summary>Component-scope async dispatcher — Phase 3
+        /// surface. Holds the per-component handle tables for
+        /// tasks, subtasks, waitable-sets, streams, futures, and
+        /// error-contexts; the canon-async builtins route through
+        /// here. Null when the component declared no async-ABI
+        /// canon entries.</summary>
+        public Wacs.ComponentModel.Async.AsyncDispatcher? AsyncDispatcher { get; internal set; }
+
+        /// <summary>
+        /// The underlying core <see cref="WasmRuntime"/>. Exposed
+        /// so embedders can reach into the core module for
+        /// exports that aren't surfaced through the component-
+        /// level Invoke API (e.g., wit-component-emitted
+        /// <c>[async-lift]&lt;iface&gt;#&lt;func&gt;</c> entry
+        /// points, before the canon-async lift-adapter
+        /// integration completes).
+        /// </summary>
+        public WasmRuntime CoreRuntime => _runtime;
+
+        /// <summary>
+        /// Invoke a wit-component-emitted
+        /// <c>[async-lift]&lt;iface&gt;#&lt;func&gt;</c> core
+        /// export through the canon-async lift adapter.
+        /// Synchronously blocks on the resulting
+        /// <see cref="Task{TResult}"/> and returns the
+        /// dispatcher's <c>task.return</c> value (or
+        /// <c>null</c> if the body returned implicitly).
+        ///
+        /// <para>Component-level async-lifted exports are
+        /// wrapped in <c>Sort=Instance</c> by wit-component,
+        /// so the public <see cref="Invoke(string, object[])"/>
+        /// API doesn't reach them — that path expects
+        /// <c>Sort=Func</c>. This entry point fills the gap
+        /// until canon-async invoke integration into the
+        /// component-level surface lands.</para>
+        ///
+        /// <para>Args are passed to the core function as the
+        /// untyped invoker takes them. The wasm-side
+        /// async-lift body sets up canon-async machinery
+        /// (registers a task, runs the body, calls
+        /// <c>task.return</c> on completion); the lift
+        /// adapter unwraps that and surfaces the value.</para>
+        /// </summary>
+        public object? InvokeCoreAsyncLift(
+            string coreExportName, params object?[] args)
+        {
+            if (string.IsNullOrEmpty(coreExportName))
+                throw new ArgumentException(
+                    "Core export name must not be empty.",
+                    nameof(coreExportName));
+            if (AsyncDispatcher == null)
+                throw new InvalidOperationException(
+                    "Component has no AsyncDispatcher — the " +
+                    "canon section had no async entries. " +
+                    "InvokeCoreAsyncLift only applies to " +
+                    "components with async-lifted exports.");
+            if (!_runtime.TryGetExportedFunction(
+                    coreExportName, out var addr))
+                throw new ArgumentException(
+                    $"Core module has no export '{coreExportName}'.",
+                    nameof(coreExportName));
+
+            // Allocate a placeholder ContInstance. The lift
+            // adapter uses it to register a ComponentTask; the
+            // continuation itself isn't executed (the body
+            // runs synchronously on the CLR stack).
+            var contStore = new Wacs.Core.Runtime.Concurrency.ContinuationStore();
+            var continuation = contStore.Allocate(
+                (Wacs.Core.Types.TypeIdx)0,
+                (Delegate)(Func<int>)(() => 0));
+
+            // Components compiled with the `(callback)` lift
+            // option return a CallbackCode (encoded i32) from
+            // each entry-point call. We have to drive the
+            // callback function in a loop so multi-poll async
+            // bodies (e.g. anything using `futures::join!`)
+            // actually run to completion — otherwise the first
+            // suspension just falls back to the host and the
+            // body's tail never executes (silent false-pass).
+            //
+            // Encoding (per wit-bindgen-rt async_support.rs:418):
+            //   Exit       = 0
+            //   Yield      = 1
+            //   Wait(set)  = 2 | (set << 4)
+            string callbackName = "[callback]" + coreExportName;
+            FuncAddr callbackAddr = default;
+            bool hasCallback = _runtime.TryGetExportedFunction(
+                callbackName, out callbackAddr);
+
+            var hostTask = Wacs.ComponentModel.Async.AsyncLiftAdapter
+                .InvokeAsync(AsyncDispatcher, continuation, async () =>
+                {
+                    var invoker = _runtime.CreateInvoker(addr,
+                        new InvokerOptions());
+                    var rawArgs = args ?? Array.Empty<object?>();
+                    var boxedArgs = new object[rawArgs.Length];
+                    for (int i = 0; i < rawArgs.Length; i++)
+                        boxedArgs[i] = rawArgs[i] ?? 0;
+                    var ret = invoker(boxedArgs);
+                    if (!hasCallback) return;
+                    int code = (ret != null && ret.Length > 0)
+                        ? Convert.ToInt32(ret[0]) : 0;
+                    await DriveCallbackLoopAsync(callbackAddr, code);
+                });
+            return hostTask.GetAwaiter().GetResult();
+        }
+
+        // Drive a `(callback)`-style async export until it
+        // signals Exit. The dispatcher tracks the in-flight
+        // waitables / pending host subtasks; when the body
+        // says Wait(N) we block on that set's
+        // <see cref="AsyncDispatcher.WaitableSetWaitAsync"/>
+        // (which yields the CLR thread to the host scheduler
+        // so background tasks can complete) then re-enter the
+        // callback with the resulting event.
+        private async System.Threading.Tasks.Task DriveCallbackLoopAsync(
+            FuncAddr callbackAddr, int initialCode)
+        {
+            int code = initialCode;
+            var cbInvoker = _runtime.CreateInvoker(callbackAddr,
+                new InvokerOptions());
+            while (true)
+            {
+                if (code == 0) return; // Exit
+                if (code == 1)
+                {
+                    // Yield: re-enter with EVENT_NONE so the
+                    // body can take another scheduler turn.
+                    var ret = cbInvoker(new object[] { 0, 0, 0 });
+                    code = (ret != null && ret.Length > 0)
+                        ? Convert.ToInt32(ret[0]) : 0;
+                    continue;
+                }
+                // Wait(set): low nibble = 2, upper 28 = set
+                int setHandle = (int)((uint)code >> 4);
+                var ev = await AsyncDispatcher!
+                    .WaitableSetWaitAsyncForCallback(setHandle);
+                var ret2 = cbInvoker(new object[]
+                {
+                    ev.eventType, ev.event1, ev.event2,
+                });
+                code = (ret2 != null && ret2.Length > 0)
+                    ? Convert.ToInt32(ret2[0]) : 0;
+            }
+        }
+
         private ComponentInstance(
             ComponentModule component,
             WasmRuntime runtime,
@@ -129,6 +275,54 @@ namespace Wacs.ComponentModel.Runtime
         {
             using var ms = new MemoryStream(componentBytes);
             return Instantiate(ms, configureImports);
+        }
+
+        /// <summary>
+        /// AOT-safe entry point that wires the runtime + the
+        /// canon-async dispatcher without surfacing the reflective
+        /// typed-bridge requirement to the caller. The body is
+        /// identical to <see cref="Instantiate(byte[], Action{WasmRuntime})"/>
+        /// — only the typed <see cref="Invoke(string, object[])"/>
+        /// surface is reflective (it builds Option/Result/list/variant
+        /// CLR types via <c>Type.MakeGenericType</c>); the
+        /// parse + import-bind + dispatcher-wire path it calls is
+        /// purely primitive.
+        ///
+        /// <para>Consumers using this entry point MUST stay on the
+        /// primitive surface (<see cref="InvokeCoreAsyncLift"/>,
+        /// direct <c>WasmRuntime.CreateInvoker</c> handles,
+        /// <see cref="Wacs.ComponentModel.Async.AsyncDispatcher"/>)
+        /// — any call to <see cref="Invoke(string, object[])"/>
+        /// will trigger trim-analysis warnings at THAT call site.
+        /// That's the load-bearing distinction: typed component
+        /// exports route through reflective lift/lower, primitive
+        /// core exports don't.</para>
+        ///
+        /// <para>Suppression rationale (IL2026 / IL3050):
+        /// <c>Instantiate</c> wears the RDC/RUC attributes
+        /// defensively because the typed surface a consumer
+        /// MIGHT reach is reflective. We've audited
+        /// <c>Instantiate</c>'s body — it doesn't itself call
+        /// <c>MakeGenericType</c>, <c>MakeGenericMethod</c>, or
+        /// <c>Activator.CreateInstance</c>. The
+        /// <see cref="UnconditionalSuppressMessageAttribute"/>
+        /// is correct for this entry point's usage contract.</para>
+        /// </summary>
+        [UnconditionalSuppressMessage("AOT",
+            "IL3050:RequiresDynamicCode",
+            Justification =
+            "ComponentInstance.Instantiate's body is purely " +
+            "primitive — parse + bind imports + wire AsyncDispatcher. " +
+            "The typed Invoke() surface is the reflective bit, " +
+            "and is the consumer's choice to call.")]
+        [UnconditionalSuppressMessage("Trim",
+            "IL2026:RequiresUnreferencedCode",
+            Justification = "Same as IL3050 above.")]
+        public static ComponentInstance InstantiateAot(
+            byte[] componentBytes,
+            Action<WasmRuntime>? configureImports = null)
+        {
+            return Instantiate(componentBytes, configureImports);
         }
 
         [RequiresDynamicCode("Component-model lift/lower instantiates " +
@@ -194,6 +388,33 @@ namespace Wacs.ComponentModel.Runtime
                     Wacs.Core.Runtime.CanonResourceBinder
                         .BindImports(runtime, coreModule);
 
+                // Canon-async builtins — bind host functions for
+                // the canon entries in this component (task/subtask/
+                // stream/future/error-context/waitable-set/etc.).
+                // No-op when the component has no canon-async
+                // entries. See CanonAsyncBinder for the placeholder
+                // name convention; embedders can override via the
+                // NameResolver hook when wit-component's convention
+                // settles.
+                Wacs.ComponentModel.Async.AsyncDispatcher? asyncDispatcher = null;
+                if (HasAnyCanonAsync(component.Canons))
+                {
+                    asyncDispatcher = new Wacs.ComponentModel.Async.AsyncDispatcher
+                    {
+                        Types = component.Types,
+                    };
+                    Wacs.ComponentModel.Async.CanonAsyncBinder.BindImports(
+                        runtime, component.Canons, asyncDispatcher);
+                    // wit-bindgen-rt emits per-imported-method
+                    // canon-async helper imports under
+                    // <iface>.[<canon-op>-N]<funcname>. Bind
+                    // them too — these aren't reached by the
+                    // canon-section walk because they're core-
+                    // module-local declarations.
+                    Wacs.ComponentModel.Async.WitBindgenScaffoldingBinder
+                        .BindImports(runtime, coreModule, asyncDispatcher);
+                }
+
                 configureImports?.Invoke(runtime);
                 var coreInstance = runtime.InstantiateModule(coreModule,
                     new RuntimeOptions { MemoryStorage = AmbientRuntime.MemoryStorage });
@@ -201,8 +422,21 @@ namespace Wacs.ComponentModel.Runtime
                 Wacs.Core.Runtime.CanonResourceBinder
                     .ResolveDtorTrampolines(runtime, coreInstance, dtorBindings);
 
+                // Late-bind the dispatcher's memory + string
+                // encoding from the now-instantiated core
+                // instance + canon-lift options. The lift adapter
+                // (for string task.return, etc.) consults these
+                // at delegate-call time.
+                if (asyncDispatcher != null)
+                {
+                    runtime.TryGetExportedMemory("memory", out var asyncMem);
+                    asyncDispatcher.Memory = asyncMem;
+                    asyncDispatcher.StringEncoding =
+                        FindCanonLiftStringEncoding(component);
+                }
+
                 return new ComponentInstance(component, runtime, coreInstance)
-                    { _resourceTables = tables };
+                    { _resourceTables = tables, AsyncDispatcher = asyncDispatcher };
             }
 
             // Composer mode: no core modules of our own — every
@@ -270,6 +504,36 @@ namespace Wacs.ComponentModel.Runtime
         /// fails (unrecognized layout). Public so the transpiler
         /// can reuse the same heuristic.
         /// </summary>
+        /// <summary>True iff <paramref name="canons"/> contains any
+        /// Component Model async-ABI canon entry (task / subtask /
+        /// stream / future / error-context / waitable-set /
+        /// waitable.join / backpressure / context / thread.yield).
+        /// Used to decide whether to allocate an
+        /// <see cref="Wacs.ComponentModel.Async.AsyncDispatcher"/>.</summary>
+        internal static bool HasAnyCanonAsync(IReadOnlyList<CanonEntry> canons)
+        {
+            foreach (var c in canons)
+            {
+                switch (c)
+                {
+                    case CanonTaskReturn _:
+                    case CanonTaskCancel _:
+                    case CanonSubtaskCancel _:
+                    case CanonSubtaskDrop _:
+                    case CanonBackpressureOp _:
+                    case CanonContextOp _:
+                    case CanonThreadYield _:
+                    case CanonStreamOp _:
+                    case CanonFutureOp _:
+                    case CanonErrorContextOp _:
+                    case CanonWaitableSetOp _:
+                    case CanonWaitableJoin _:
+                        return true;
+                }
+            }
+            return false;
+        }
+
         public static int? FindPrimaryCoreModuleIdx(ComponentModule component)
         {
             // Build core-func-idx → core-instance-idx map from
@@ -306,15 +570,37 @@ namespace Wacs.ComponentModel.Runtime
                         var entries = CanonSectionReader.Decode(s.Payload);
                         foreach (var e in entries)
                         {
-                            // Both canon lower AND
-                            // canon resource.* (new / drop /
-                            // rep) add to the core-func index
-                            // space. Counting only CanonLower
-                            // would mis-align subsequent core-
-                            // alias indices when wit-component
-                            // emits resource handles.
-                            if (e is CanonLower) coreFuncIdx++;
-                            else if (e is CanonResourceOp) coreFuncIdx++;
+                            // Every canon-form except `canon lift`
+                            // produces a (core func) — see the
+                            // canon grammar in component-model
+                            // Binary.md. Counting only some
+                            // mis-aligns subsequent core-alias
+                            // indices when wit-component emits
+                            // mixed resource + async builtins.
+                            switch (e)
+                            {
+                                case CanonLift _:
+                                    // Lift produces a *component*-
+                                    // level func; doesn't bump the
+                                    // core-func counter.
+                                    break;
+                                case CanonLower _:
+                                case CanonResourceOp _:
+                                case CanonTaskReturn _:
+                                case CanonTaskCancel _:
+                                case CanonSubtaskCancel _:
+                                case CanonSubtaskDrop _:
+                                case CanonBackpressureOp _:
+                                case CanonContextOp _:
+                                case CanonThreadYield _:
+                                case CanonStreamOp _:
+                                case CanonFutureOp _:
+                                case CanonErrorContextOp _:
+                                case CanonWaitableSetOp _:
+                                case CanonWaitableJoin _:
+                                    coreFuncIdx++;
+                                    break;
+                            }
                         }
                         break;
                     }
@@ -357,12 +643,100 @@ namespace Wacs.ComponentModel.Runtime
             Action<WasmRuntime>? configureImports)
         {
             var runtime = new WasmRuntime();
-            using var coreMs = new MemoryStream(coreBinaries[primaryIdx]);
-            var coreModule = BinaryModuleParser.ParseWasm(coreMs);
-            configureImports?.Invoke(runtime);
-            var coreInstance = runtime.InstantiateModule(coreModule,
-                new RuntimeOptions { MemoryStorage = AmbientRuntime.MemoryStorage });
-            return new ComponentInstance(component, runtime, coreInstance);
+
+            // wit-component-emitted multi-core components include a
+            // shim module that proxies canon-async builtin imports.
+            // Recognize + bind it BEFORE the primary module
+            // instantiates so its imports of the shim's exports
+            // resolve through the binder.
+            //
+            // ParseCustomNames is opt-in process-wide; flip it on
+            // for the shim-scan window then restore. The primary
+            // module is parsed below with this also enabled, which
+            // costs a few µs but harms nothing.
+            Wacs.ComponentModel.Async.AsyncDispatcher? asyncDispatcher = null;
+            var prevParseNames = BinaryModuleParser.ParseCustomNames;
+            BinaryModuleParser.ParseCustomNames = true;
+            try
+            {
+                // Scan every binary for a shim module — wit-component
+                // can put it anywhere in the module list.
+                for (int i = 0; i < coreBinaries.Count; i++)
+                {
+                    if (i == primaryIdx) continue;
+                    using var ms = new MemoryStream(coreBinaries[i]);
+                    var candidate = BinaryModuleParser.ParseWasm(ms);
+                    if (!Wacs.ComponentModel.Async.ShimModuleRecognizer
+                            .IsShimModule(candidate))
+                        continue;
+
+                    asyncDispatcher ??=
+                        new Wacs.ComponentModel.Async.AsyncDispatcher
+                        {
+                            Types = component.Types,
+                        };
+                    Wacs.ComponentModel.Async.ShimModuleRecognizer
+                        .BindShimImports(
+                            runtime, candidate, component.Canons,
+                            asyncDispatcher);
+                    // Multiple shims (wit-component:shim and a
+                    // matching fixups module) can appear — keep
+                    // scanning so each one gets a pass.
+                }
+
+                // Parse the primary module after the shim binder
+                // has registered its delegates.
+                using var coreMs = new MemoryStream(coreBinaries[primaryIdx]);
+                var coreModule = BinaryModuleParser.ParseWasm(coreMs);
+
+                // Bind wit-bindgen-rt-emitted per-method canon-
+                // async helper imports. These live on the
+                // primary core module (not in the shim) and
+                // are named (<iface>, "[<op>-N]<funcname>").
+                if (asyncDispatcher != null)
+                {
+                    Wacs.ComponentModel.Async.WitBindgenScaffoldingBinder
+                        .BindImports(runtime, coreModule, asyncDispatcher);
+                }
+
+                configureImports?.Invoke(runtime);
+
+                // Wire the wit-component shim+fixup pair: bind
+                // host functions under ("", "<slot>") for each
+                // shim slot that maps to a per-interface
+                // canon-lower, instantiate the shim (defines
+                // the funcref table), expose its table at
+                // ("", "$imports"), then instantiate the fixup
+                // (element segment fills the table). No-op
+                // when the component doesn't have this pattern.
+                ShimFixupWiring.Wire(
+                    runtime, component, coreBinaries, primaryIdx);
+
+                var coreInstance = runtime.InstantiateModule(coreModule,
+                    new RuntimeOptions
+                    {
+                        MemoryStorage = AmbientRuntime.MemoryStorage,
+                    });
+
+                // Late-bind dispatcher memory + encoding (same as
+                // the single-core path).
+                if (asyncDispatcher != null)
+                {
+                    runtime.TryGetExportedMemory("memory", out var asyncMem);
+                    asyncDispatcher.Memory = asyncMem;
+                    asyncDispatcher.StringEncoding =
+                        FindCanonLiftStringEncoding(component);
+                }
+
+                return new ComponentInstance(component, runtime, coreInstance)
+                {
+                    AsyncDispatcher = asyncDispatcher,
+                };
+            }
+            finally
+            {
+                BinaryModuleParser.ParseCustomNames = prevParseNames;
+            }
         }
 
         /// <summary>Build a composer-mode instance: recursively
@@ -370,6 +744,16 @@ namespace Wacs.ComponentModel.Runtime
         /// outer's instance + alias sections to map outer
         /// component-func indices through to inner functions.
         /// Invoke routes through the alias chain.</summary>
+        [UnconditionalSuppressMessage("AOT",
+            "IL3050:RequiresDynamicCode",
+            Justification = "InstantiateComposer's recursive " +
+            "Instantiate call inherits the same primitive-body " +
+            "audit as ComponentInstance.InstantiateAot — the " +
+            "reflective surface is on Invoke(), not on the " +
+            "parse + import-bind path.")]
+        [UnconditionalSuppressMessage("Trim",
+            "IL2026:RequiresUnreferencedCode",
+            Justification = "Same as IL3050 above.")]
         private static ComponentInstance InstantiateComposer(
             ComponentModule component)
         {
@@ -543,6 +927,35 @@ namespace Wacs.ComponentModel.Runtime
 
         /// <summary>Pick the export's string encoding from its
         /// canon-lift options. Mirror of the transpiler's
+        /// Component-wide string-encoding probe: scan canon entries
+        /// for the first <see cref="CanonLift"/> and return its
+        /// resolved string-encoding option. Used to bake the
+        /// encoding into the
+        /// <see cref="Wacs.ComponentModel.Async.AsyncDispatcher"/>'s
+        /// state at instantiation time, so the canon-async lift
+        /// adapter can pick the right
+        /// <see cref="Wacs.ComponentModel.CanonicalABI.StringMarshal"/>
+        /// variant without re-walking the canon section per call.
+        ///
+        /// <para>A component with multiple lifts that disagree on
+        /// string-encoding is rare in practice (wit-component
+        /// emits one encoding per component); when it happens,
+        /// the first lift wins. Per-call refinement would require
+        /// threading the option through the binder per-canon-entry,
+        /// a follow-up if real fixtures surface the divergence.</para>
+        /// </summary>
+        internal static CanonOption.Kind FindCanonLiftStringEncoding(
+            ComponentModule component)
+        {
+            foreach (var c in component.Canons)
+            {
+                if (c is CanonLift cl)
+                    return ResolveStringEncoding(cl.Options);
+            }
+            return CanonOption.Kind.StringUtf8;
+        }
+
+        /// <summary>
         /// ResolveStringEncoding — defaults to UTF-8 when no
         /// option present.</summary>
         private static CanonOption.Kind ResolveStringEncoding(

@@ -777,6 +777,22 @@ namespace Wacs.Console.Verbs
                 // packages can satisfy component imports the same
                 // way they do on the core paths.
                 var bytes = File.ReadAllBytes(componentPath);
+
+                // --harness / --wit-dir: validate the component's
+                // embedded WIT against the contract before
+                // instantiating. Symmetric to the same flags on
+                // `wacs aot` / `wacs build` (where validation
+                // happens in TranspileSingleModule). Mismatch
+                // exits 2 with a typed diff report.
+                var contractText = HarnessContractLoader.Resolve(
+                    opts.Harness, opts.WitDir, "wacs run");
+                if (contractText != null)
+                {
+                    var diffExit = ValidateInterpreterContract(
+                        bytes, contractText);
+                    if (diffExit != 0) return diffExit;
+                }
+
                 var ci = Wacs.ComponentModel.Runtime.ComponentInstance
                     .Instantiate(bytes, rt => ApplyBindings(opts, rt));
 
@@ -1213,7 +1229,55 @@ namespace Wacs.Console.Verbs
                 EmitTailCallPrefix = !opts.NoTailCalls,
                 MaxFunctionSize = opts.MaxFnSize,
                 DataStorage = ParseDataStorage(opts.DataStorage),
+                // --harness / --wit-dir: pass the contract through so
+                // TranspileSingleModule's WitContractCompare validation
+                // fires before any IL emits. Symmetric to the same
+                // flags on `wacs aot` / `wacs build`.
+                HarnessContractText = HarnessContractLoader.Resolve(
+                    opts.Harness, opts.WitDir, "wacs run"),
+                // --harness <dll> also seeds preRegisteredTypes so
+                // the transpiled output's ComponentExports signatures
+                // use the harness's CLR types (Vec2 / Outcome /
+                // {World}HarnessImpl : I{World}).
+                HarnessAssemblyPath = string.IsNullOrEmpty(opts.Harness)
+                    ? null
+                    : Path.GetFullPath(opts.Harness),
             };
+        }
+
+        /// <summary>
+        /// Diff the interpreter-path component's embedded WIT against
+        /// the supplied harness contract text. Reuses the transpiler's
+        /// parse pipeline (which already does the primary-section
+        /// decoder fallback for cargo-built components without a
+        /// `component-type:*` custom section). Returns 0 on match,
+        /// 2 on mismatch (with diagnostics written to stderr), or 2
+        /// when the component carries no usable WIT for comparison.
+        /// </summary>
+        private static int ValidateInterpreterContract(
+            byte[] componentBytes, string contractText)
+        {
+            using var ms = new MemoryStream(componentBytes, writable: false);
+            var parsed = ComponentTranspiler.Parse(ms);
+            if (parsed.DecodedWit == null)
+            {
+                System.Console.Error.WriteLine(
+                    "wacs run: --harness validation requested but the "
+                    + "component binary carries no usable WIT (neither "
+                    + "a `component-type:*` custom section nor decodable "
+                    + "primary export sections). Run through "
+                    + "`wasm-tools component embed` to add the section, "
+                    + "or omit the harness flag.");
+                return 2;
+            }
+            var diffs = Wacs.Transpiler.AOT.Component
+                .WitContractCompare.Diff(contractText, parsed.DecodedWit);
+            if (diffs.Count == 0) return 0;
+            System.Console.Error.WriteLine(
+                "wacs run: component does not match harness WIT contract:");
+            foreach (var d in diffs)
+                System.Console.Error.WriteLine("  " + d);
+            return 2;
         }
 
         private static SimdStrategy ParseSimdStrategy(string value) => value switch

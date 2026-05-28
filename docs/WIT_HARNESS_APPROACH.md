@@ -30,6 +30,25 @@ host surface. Every supported WIT shape must round-trip:
   body, list element array) is handed up to the host, fire the
   guest's `cabi_post_*` to free it once we've copied.
 
+## Cross-engine symmetry
+
+The harness assembly emits an `I{World}` interface alongside the
+`{World}Harness` class. The interpreter path implements
+`I{World}` by lifting/lowering at runtime against the loaded
+core module. The transpiler path
+(`Wacs.Transpiler.Lib`'s `ComponentExportsEmit` + `HarnessImplEmit`,
+invoked when `wacs aot` / `wacs build` / `wacs run` sees a
+`--harness <dll>` flag) emits a `{World}HarnessImpl : I{World}`
+that forwards to the transpiled `ComponentExports` static or
+instance methods — pre-registering the harness's named CLR
+types (`Vec2`, `Outcome`, etc.) as the `ComponentExports`
+signature so consumer code can program against `I{World}`
+without caring which engine produced the implementation.
+
+Engine choice (`{World}Harness.LoadFrom(bytes)` for
+interpreter, `new {World}HarnessImpl(imports)` for transpiler)
+becomes a deployment detail rather than an API divergence.
+
 ## Architecture in three files
 
 ```

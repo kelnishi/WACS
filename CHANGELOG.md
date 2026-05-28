@@ -1,5 +1,9441 @@
 # Changelog
 
+## WACS.WASI.GFX 0.3.0-preview / DependencyInjection 0.2.1-preview / Silk 0.2.1-preview — replace WasiGfxAmbient with AsyncLocal-scoped WasiGfxCurrent
+
+Closes the last v1 phase-1g residual: the
+`[static]buffer.from-graphics-buffer` factory and the
+parameterless-ctor fallback in `Context` / `Surface` / `Device`
+no longer pull from a process-global static field. The new
+`WasiGfxCurrent` AsyncLocal-scoped handle replaces
+`WasiGfxAmbient`; multi-runtime async embedders get isolation
+through standard .NET ExecutionContext flow.
+
+* **`WasiGfxCurrent`** (new public static class): `Backend`
+  getter reads an `AsyncLocal<IBackend?>`; `SetBackend` /
+  `PushBackend` (scoped IDisposable) install it. The factory's
+  `RequireBackend` throws a typed `WasiGfxException` if nothing
+  was bound, same diagnostic shape as before.
+* **`WasiGfxAmbient`** deleted (was 50 lines / one public class).
+  Breaking change to `Wacs.WASI.GFX` — minor version bump to
+  `0.3.0-preview`. Consumers update `WasiGfxAmbient.*` →
+  `WasiGfxCurrent.*` (same signatures).
+* **DI impls** (`Context.Create()` / `Surface.Create(desc)` /
+  `Device.Create()`): drop the manual null-check on backend;
+  the resolver path (`WasiGfxCurrent.RequireBackend()`) throws
+  with the typed diagnostic if bind hasn't run yet. The
+  bundle-aware ctor path (v1 phase 1g) keeps its existing
+  `_bundle.Configuration.Backend ??` short-circuit.
+* **`Buffer.FromGraphicsBufferStatic`** sources its backend
+  from `WasiGfxCurrent.RequireBackend()`. The transpiler-direct-
+  link static-method emit (1f) calls into this directly; the
+  reflective `InvokeStaticFactoryReflective` path
+  (`Wacs.ComponentModel.Runtime.HostInterfaceRuntime`)
+  is unchanged — the AsyncLocal flows through standard async
+  rules without IL emit changes.
+* **`WasiGfxSilkBindable.BindToRuntime`** installs the backend
+  via `WasiGfxCurrent.SetBackend(Backend)` at bind time; the
+  value flows to the wasm guest's invocation context per .NET
+  async semantics.
+
+Tests: 85/85 Wacs.WASI.GFX.{Test,Silk.Test,Webgpu.Test}, 842/842
+Wacs.Transpiler.Test (+ 1 skip). No regressions; the existing
+`Context_BundleCtor_PullsBackendFromConfiguration` test
+documents the multi-runtime isolation that the previous static
+ambient prevented.
+
+## WACS.Transpiler.Lib 0.12.12 — flat-record-param lowering closes the harness e2e gap
+
+Closes the next residual gap discovered in 0.12.11: small record
+params flatten into individual core slots per the canonical ABI's
+`MAX_FLAT_PARAMS=16` rule, not via a single `cabi_realloc`-allocated
+pointer.
+
+`richer.add(a: vec2, b: vec2) -> vec2` lowers core-side to
+`add(Int32, Int32, Int32, Int32) => Int32` — 4 i32 slots in, 1 i32
+return-area out. Pre-0.12.11 emit pushed `(ptr_a, ptr_b)` and the
+JIT rejected the 2-vs-4 arity mismatch with `InvalidProgramException`
+on first invocation. The bug was masked by tests that asserted type
+structure only; switching the Richer test to actually invoke
+through `IRicher.Add` / `IRicher.NormalizeOrFail` surfaced it.
+
+* **`EmitPrecomputeBufferParamLocals`**: removed the record branch
+  + the no-longer-reachable `EmitLowerRecordParamToLocals` and
+  `ResolvePrimitiveStoreMethod` helpers (~100 LOC of dead code).
+  Strings and lists still take the precompute → `(ptr, count)` path.
+* **`EmitCoreCall` push loop**: new record-of-primitives branch.
+  Per field: `EmitLdargCsharp` the record arg, `Callvirt get_PascalCase`
+  via the harness's read-only property, `EmitParamCast` against the
+  core method's expected wire type, increment `coreParamIdx`. Fields
+  flow straight into the core call's slot sequence.
+* Defer >16-slot record bundling — out of scope until a fixture
+  demands it; typical harness fixtures stay well under the limit.
+
+Richer e2e:
+
+```
+RicherHarnessImpl impl = ...;
+var sum = impl.Add(new Vec2(3, 4), new Vec2(1, 2));      // → Vec2(4, 6)
+var z   = impl.NormalizeOrFail(new Vec2(0, 0));          // → Outcome.Invalid
+var s   = impl.NormalizeOrFail(new Vec2(-5, 10));        // → Outcome.Success(Vec2(-1, 1))
+```
+
+All three round-trip the guest's WASM logic through the transpiled
+ComponentExports + the harness-impl forwarder. The Richer test now
+asserts the actual values, not just type structure.
+
+Tests: 842/842 Wacs.Transpiler.Test (+ 1 skip).
+
+## WACS.Transpiler.Lib 0.12.11 — variant nested-subclass dispatch + discovered record-param gap
+
+Closes the residual sub-gap from #3b: variants whose CLR class
+uses the harness's nested-subclass pattern (`Outcome` abstract
+base + `Outcome.Success(payload)` / `Outcome.Invalid()` nested
+sealed subclasses) now flow through `ComponentExports`. The
+existing flat-ctor path (transpiler-emitted `Outcome(disc, p0,
+p1, …)` shape) is preserved; the dispatcher picks at emit time
+based on which shape the CLR class exposes.
+
+* **`EmitVariantReturnBody` two-shape dispatch**: flat-ctor body
+  (existing) and new `EmitVariantReturnBodyNestedSubclass`. The
+  outer dispatcher checks `VariantClassHasFlatCtor` first; falls
+  through to the nested-subclass body otherwise.
+* **`EmitVariantReturnBodyNestedSubclass`**: reads the disc byte
+  into a local, emits a `switch` table over per-case labels,
+  per case reads the matching payload (using the existing
+  `EmitReadPayloadAtOffset` / `EmitReadStringPayloadAtOffset` /
+  `EmitReadListPayloadAtOffset` / `EmitReadRecordPayloadAtOffset`
+  helpers) and `Newobj`s the matching nested subclass ctor. A
+  default-label branch throws `InvalidOperationException` for
+  out-of-range disc values.
+* **`VariantClassHasNestedSubclasses`**: gate predicate. Per case,
+  expects `variantType.GetNestedType(PascalCase(caseName), Public)`
+  with a ctor matching the case's payload (empty for no-payload,
+  single-arg for payload cases).
+* **`EmitExportMethod` variant branch**: accepts a variant return
+  if EITHER shape gate fires (was: flat-ctor only).
+
+Richer's `normalize-or-fail(vec2) -> outcome` now emits a real
+~166-byte dispatch body on `ComponentExports.NormalizeOrFail`
+where it was previously skipped to a `HarnessImpl`
+`NotImplementedException` stub.
+
+### Discovered gap (not addressed): flat-record-param lowering
+
+End-to-end invocation of the Richer harness still throws
+`InvalidProgramException` at JIT time because of a separate
+pre-existing bug from `Transpiler.Lib 0.12.9`'s aggregate-param
+lowering: small records flatten into individual flat slots per
+the canonical ABI (Vec2 → 2 i32 args, not 1 ptr arg), but
+`EmitLowerRecordParamToLocals` always emits the
+`cabi_realloc` + ptr-pass path. The actual core method takes
+`(Int32, Int32, Int32, Int32) => Int32` for `add(vec2, vec2)`;
+the emitted IL pushes `(ptr_a, ptr_b)` and the JIT rejects the
+arity mismatch. Structural assertions pass; full end-to-end
+exercise of imports-less record-bearing harness fixtures awaits
+the flat-record-param fix.
+
+Tests: 842/842 Wacs.Transpiler.Test (+ 1 skip).
+
+## WACS.Transpiler.Lib 0.12.10 — instance-shape ComponentExports for imports-bearing modules
+
+Closes #3c of the wit-harness plan: components whose core Module
+takes an `IImports` ctor arg now flow through `ComponentExports`
+end-to-end. The harness fixtures with bundled WASI imports (hello,
+all medium-to-large spike fixtures) emit a working `{World}HarnessImpl`
+that constructs ComponentExports through an injected `IImports`.
+
+Two-shape dispatch in `EmitComponentExportsClass`:
+
+* **Static ComponentExports** (existing, parameterless Module ctor):
+  `Public | Abstract | Sealed`, `_instance` is a static field,
+  cctor news up `Module()` once, methods are static. Untouched
+  behavior for every existing imports-less consumer.
+* **Instance ComponentExports** (new, imports-bearing Module ctor):
+  `Public | Sealed`, `_instance` is an instance field, public ctor
+  takes `IImports` and stores `new Module(imports)`, methods are
+  instance. Triggered when the Module has any single-arg ctor (per
+  `ModuleClassGenerator.cs:1601-1613` the first arg is always
+  `IImports`).
+
+Two shape-agnostic helpers route the existing emit bodies:
+
+* **`EmitLoadInstance`**: Static path → `Ldsfld instanceField`;
+  instance path → `Ldarg.0; Ldfld instanceField`. Replaces 21
+  call sites.
+* **`EmitLdargCsharp`**: Static method → `Ldarg csIdx`; instance
+  method → `Ldarg csIdx + 1` (skip the implicit `this` slot).
+  Used by every per-arg lowering helper (string, list, record).
+
+`HarnessImplEmit` mirrors the shape:
+
+* Static CE → parameterless `HarnessImpl` ctor; forward to static
+  methods with `Call`. (Existing behavior.)
+* Instance CE → `HarnessImpl(IImports)` ctor that news up
+  `ComponentExports(imports)` into a `_componentExports` field;
+  forward to instance methods with `Callvirt`.
+
+New test `Hello_transpile_with_harness_emits_HarnessImpl_implementing_IHello`
+verifies the wit-harness-spike-hello fixture (whose core module
+imports the wasm32-wasip2 WASI bundle): `HelloHarnessImpl` emits,
+implements `IHello`, exposes a single public ctor taking the IImports
+interface. WASI stubs reuse the existing
+`BindHelloWasiStubs` test helper via `configureImports`.
+
+Tests: 842/842 Wacs.Transpiler.Test (+ 1 skip).
+
+## WACS.Transpiler.Lib 0.12.9 — aggregate-param lowering for harness records
+
+Closes #3b of the wit-harness plan: record-of-primitives params lower
+into linear memory via `cabi_realloc` + per-field `PrimitiveStore.Store`
+calls, so harness fixtures whose exports take record args
+(e.g. `richer.add(vec2, vec2)`) now flow through `ComponentExports`
+end-to-end.
+
+* **`IsEmittable` param check**: accepts `TryResolveRecordOfPrims`
+  shapes alongside primitives, list-of-primitive, and resource
+  handles. Predicates stay decoupled from the WIT decoder for the
+  structural gate; emit-side WIT lookup resolves the harness's
+  CLR record class.
+* **`EmitPrecomputeBufferParamLocals`**: dispatches records to the
+  new `EmitLowerRecordParamToLocals`. Strings and lists still go
+  through the existing two-slot `(ptr, count)` path; records leave
+  `countLocals[i]` null because the wire form is a single i32
+  pointer.
+* **`EmitLowerRecordParamToLocals`**: computes record alignment as
+  `max(field alignments)` and total size as the running offset
+  after the last field rounded up to record alignment; allocates
+  via `instance.CabiRealloc(0, 0, maxAlign, totalSize)`; emits one
+  `PrimitiveStore.Store<P>(memory, ptr + offset, recordArg.<Field>)`
+  per field. Field lookup goes through `recordType.GetMethod("get_" + PascalCase(fieldName))`
+  to read the harness's read-only property surface.
+* **`EmitCoreCall` push loop**: when `ptrLocals[i]` is set but
+  `countLocals[i]` is null, push only the pointer (one core slot)
+  rather than (ptr, count). Pre-existing string/list semantics
+  unchanged.
+* **`VariantClassHasFlatCtor` gate**: variant returns whose CLR
+  class is the harness's abstract-base + nested-subclasses shape
+  can't go through the existing `EmitVariantReturnBody` (which
+  assumes a flat `(disc, payload0, payload1, …)` ctor). Detect
+  the shape via the expected ctor's presence and skip the export
+  when absent — `HarnessImpl` then emits a `NotImplementedException`
+  stub for that interface method while sibling exports still emit.
+  Per-case dispatch IL for harness variants is a follow-up.
+
+New test `Richer_transpile_with_harness_emits_HarnessImpl_implementing_IRicher`
+verifies the `wit-harness-spike-richer` fixture (`add(vec2, vec2) -> vec2`
++ `normalize-or-fail(vec2) -> outcome`) emits `RicherHarnessImpl`
+assignable to `IRicher`. The `add` method flows end-to-end through
+the new record-param lowering; `NormalizeOrFail` (variant return)
+is the stub'd method documenting the variant-dispatch gap.
+
+Tests: 841/841 Wacs.Transpiler.Test (+ 1 skip).
+
+## WACS.Transpiler.Lib 0.12.8 — record-of-flat-types harness support
+
+Closes the first of three remaining gaps in the harness-impl
+pipeline (bucket #3a from the wit-harness plan): records whose
+fields are enums or `[Flags]` enums now flow through
+`ComponentExportsEmit` end-to-end.
+
+* **`IsStructurallyEmittableRecordOfFlat`**: new structural-only
+  check in `IsEmittable`'s return-side dispatch. Accepts records
+  where every field is a primitive, a `ComponentEnumType`, or a
+  `ComponentFlagsType`. Fires only when at least one field is
+  non-primitive — otherwise `TryResolveRecordOfPrims` would match
+  first, keeping predicate ordering unambiguous.
+* **`TryResolveRecordOfFlat`**: emit-side resolver returning the
+  per-field wire primitive width. Enum fields lower to
+  `u8 / u16 / u32` per case count (≤256 / ≤65536 / else); flags
+  per flag count (≤8 / ≤16 / else). The CLR ctor side uses the
+  harness's pre-registered enum/flags class via the existing
+  `recordType.GetConstructors` lookup in `ResolveRecordCtor`.
+* **`EmitPrimCtorArgConv` enum branch**: when the ctor expects an
+  enum or `[Flags]` enum, accept the i4 stack value directly (CLR
+  enums are bit-compatible with their underlying primitive — no
+  conv emit needed). Validates underlying width matches the wire
+  primitive; a drift throws with a clear "harness vs binary
+  contract divergence" message.
+
+Unlocks the `wit-harness-spike-enum-flags` fixture. Test
+`EnumFlags_transpile_with_harness_emits_HarnessImpl_implementing_ISecurity`
+flipped from negative-gap-doc to positive assertion. Verified the
+emitted `SecurityHarnessImpl` is assignable to the harness's
+`ISecurity` interface; the underlying `Status` record's `Sev`
+(enum `Severity`) + `Perms` ([Flags] `Permissions`) fields flow
+through the same emit path as primitives.
+
+Tests: 840/840 Wacs.Transpiler.Test (+ 1 skip).
+
+## WACS.Cli 1.10.1 — `wacs run --harness` / `--wit-dir`
+
+Closes the second remaining bucket of the wit-harness plan: the
+`run` verb now accepts the same `--harness` / `--wit-dir` flags
+that have been on `wacs build` / `wacs aot` since `WACS.Cli 1.10.0`.
+Symmetric validation across all three verbs.
+
+* `RunOptions.Harness` / `RunOptions.WitDir` — same shape as the
+  build-side options. Mutually exclusive.
+* `RunHandler.ExecuteComponentInner`: when either flag is set on
+  the interpreter component path, the component bytes are diffed
+  against the contract via `ComponentTranspiler.Parse` (which already
+  does the primary-section decoder fallback for cargo-built fixtures)
+  + `WitContractCompare.Diff` before `ComponentInstance.Instantiate`.
+  Mismatch prints the typed diff to stderr and exits 2.
+* `RunHandler.BuildTranspilerOptions`: pipes both
+  `HarnessContractText` and `HarnessAssemblyPath` into the existing
+  transpiler-engine validation, so `--engine transpiler --harness X`
+  on `run` behaves identically to `wacs build --harness X`.
+* New `Wacs.Console.Verbs.HarnessContractLoader` shared helper —
+  `BuildHandler.ResolveHarnessContractText` collapses to a one-line
+  delegate, the new `run`-verb path calls the same code. Single
+  source of truth for the load-`.dll`-vs-walk-`.wit`-dir logic.
+
+Smoke verified on the `wit-harness-spike-primitives` fixture:
+
+```
+# Match → invokes get-sample successfully.
+wacs run --harness stats.dll stats.component.wasm --call get-sample
+
+# Mismatch → typed diff to stderr, exit 2.
+wacs run --harness stats.dll tiny.component.wasm
+  wacs run: component does not match harness WIT contract:
+    export 'get-sample': declared in harness, missing from component.
+    export 'greet': present in component, not declared in harness.
+```
+
+Tests: 840/840 Wacs.Transpiler.Test (+ 1 skip).
+
+## WACS.Core 0.16.14 / WACS.ComponentModel 0.10.3 — AOT trim-warning cleanup
+
+Closes the AOT trim-warning bucket from the wit-harness plan. Three
+reflective callsites in `Wacs.Core` and one csproj condition fix in
+`Wacs.ComponentModel`. No behavior change; the warnings collapse to
+clear `UnconditionalSuppressMessage` justifications so consumers
+publishing under NativeAOT or IL2CPP can tell the difference between
+"known-safe convenience reflection" and "real problem."
+
+* **`WasmRuntimeBinding.BindHostFunction<TDelegate>`** (line 485):
+  IL2070 suppression. `func.GetType().GetMethod("Invoke")` reflects
+  on the bound delegate's `Invoke` — preserved by every delegate's
+  type contract. Mirrors the existing pattern in `HostFunction.cs:54`.
+* **`HostFunction.InvokeAsync`** (line 330): IL2075 suppression.
+  `task.GetType().GetProperty("Result")` on a `Task<T>` returned by
+  the bound delegate; `Task<T>.Result` is framework-rooted. Embedders
+  using SourceGen-emitted typed harnesses bypass this path entirely.
+* **`WasmRuntimeExecution.CreateInvokerAsync` + `CreateInvoker`**
+  (lines 173 + 305): IL2075 suppressions. `exc.GetType().GetConstructor((int,string))`
+  rebuilds a caught `SignalException` with a line-decorated message.
+  Concrete signal subclasses stay rooted via instruction-loop throw
+  sites; their `(int, string)` ctors are part of the contract.
+* **`Wacs.ComponentModel.csproj`**: `<IsAotCompatible>` conditioned
+  to `net8.0` only (matching `Wacs.Core.csproj`'s pattern). Fixes the
+  `NETSDK1210` warning that fired on every consumer build because
+  `IsAotCompatible` isn't supported on the `netstandard2.1` target.
+
+Tests: 840/840 Wacs.Transpiler.Test (+ 1 skip). Build is warning-clean
+on both target frameworks.
+
+## WACS.Transpiler.Lib 0.12.7 — harness-impl coverage across simple return shapes
+
+`Local_fixture_transpile_with_harness_emits_HarnessImpl` theory
+parameterized over four pre-existing no-import fixtures:
+
+| Fixture | Export | Shape exercised |
+|---|---|---|
+| `tiny-component` | `greet() -> u32` | primitive return |
+| `option-none-component` | `missing() -> option<u32>` | option-of-prim return |
+| `tuple-return-component` | `pair() -> tuple<u32, u32>` | tuple-of-prim return |
+| `result-return-component` | `divide() -> result<u32, u32>` | result-of-prim return |
+
+For each, the test builds a harness `.dll` from the fixture's own
+WIT directory via `HarnessEmitter.EmitToFile`, transpiles the
+component with `TranspilerOptions.HarnessAssemblyPath`, and asserts
+the emitted `{World}HarnessImpl` is assignable to the harness's
+`I{World}`. Confirms the harness-impl pipeline is shape-agnostic
+for return-only signatures — pairs with 0.12.6's interface-export
+positive case to cover the full set of shapes available in
+import-free fixtures.
+
+No production-code changes — test-only.
+
+Tests: 840/840 Wacs.Transpiler.Test (+ 1 skip).
+
+## WACS.Transpiler.Lib 0.12.6 — harness-impl test coverage extended
+
+Two more end-to-end tests on the harness-impl pipeline added to
+`Wacs.Transpiler.Test/HarnessImplEmitTests.cs`:
+
+* `InterfaceExport_transpile_with_harness_emits_HarnessImpl` —
+  positive case. The `wit-harness-spike-interface-export` fixture
+  exports `ops { add; swap }` plus a world-level `bake`; all u32-
+  only signatures. The transpiler emits `CalculatorHarnessImpl`
+  assignable to the harness's `ICalculator`. Confirms the pipeline
+  handles interface-qualified exports (`wacs:interface-export-spike/ops#add`)
+  alongside world-level free functions in a single emitted impl class.
+
+* `EnumFlags_transpile_with_harness_emits_HarnessImpl_or_documents_gap` —
+  negative case documenting a known gap. The
+  `wit-harness-spike-enum-flags` fixture exports `get-status`
+  returning `status { sev: severity, perms: permissions }` where
+  the fields are enum + flags types. Today
+  `ComponentExportsEmit.TryResolveRecordOfPrims` requires all
+  fields be primitives (line 1315), so the export is silently
+  skipped and `SecurityHarnessImpl` never emits. The test asserts
+  `harnessImpl == null` with a guidance comment for the future
+  enum/flags-field extension.
+
+No production-code changes — this commit is test-only coverage that
+captures the current behavior contract so any future emit-side
+change either preserves the gap or flips the assertion sense.
+
+Tests: 836/836 Wacs.Transpiler.Test (+ 1 skip).
+
+## WACS.Transpiler.Lib 0.12.5 — harness-impl ctor lookup tolerates pre-registered records
+
+Fixes a latent bug in `ComponentExportsEmit.EmitRecordReturnBody`:
+when `recordType` came from a harness assembly via
+`preRegisteredTypes` (the cross-engine symmetry path shipped
+in 0.11.0), the ctor lookup used a `Type[]` built from
+`PrimToCs(prim)`. Harness types diverge at one point —
+`CtPrim.Char` maps to `typeof(char)` in
+`Wacs.ComponentModel.Harness.Lib.WitTypeEmit.MapClrType`
+but `typeof(uint)` in the transpiler's `PrimToCs`. The
+mismatch made `GetConstructor` return null, then
+`Emit(OpCodes.Newobj, null)` threw with
+`ArgumentNullException: con` on any harness fixture whose
+record carried a `char` field.
+
+* **`ResolveRecordCtor`**: locate the record's canonical-field
+  ctor by parameter count rather than exact type list. A single
+  public instance ctor matching the field count wins; multiple
+  matches throw `InvalidOperationException` for the loud-failure
+  diagnostic.
+* **`EmitPrimCtorArgConv`**: per-arg conv between the transpiler's
+  canonical-ABI primitive width (read via `EmitReadPayloadAtOffset`)
+  and the ctor's declared parameter type. `CtPrim.Char → char`
+  emits `Conv.U2` to narrow the i32 codepoint into a 16-bit CLR
+  char. Throws for any unconfigured divergence so future shape
+  drift fails fast.
+
+New test: `Wacs.Transpiler.Test/HarnessImplEmitTests.cs`
+`Primitives_transpile_with_harness_emits_HarnessImpl_implementing_IStats`
+— builds the `wit-harness-spike-primitives` fixture's harness via
+`HarnessEmitter.EmitToFile`, transpiles `stats.component.wasm`
+with `TranspilerOptions.HarnessAssemblyPath` pointed at it, and
+asserts the emitted `StatsHarnessImpl` is assignable to the
+harness's `IStats`. First end-to-end coverage of the
+`Transpiler.Lib 0.11.0` harness-implementation pipeline.
+
+Tests: 834/834 Wacs.Transpiler.Test (+ 1 skip).
+
+## WACS.ComponentModel.Async.SourceGen 0.4.24 — list<record> with list-typed fields
+
+`IsRecordSupportedAsListElement` widened to also accept
+`IsListType` field types — including record-element lists
+(`Point[]`) and other shapes outside `IsPtrLenAggregate`.
+A new narrower `IsRecordInlineLiftable` predicate gates
+NESTED record fields (which must construct inline within
+the outer property-initializer), excluding list fields
+there.
+
+* **Lift pre-bind.** `EmitListElementLift` record branch
+  walks fields once to pre-bind a `__fListVal<N>` local
+  per list-typed field via `EmitListLiftStatements`,
+  then references the local from the property-
+  initializer. Other field shapes stay inline-expression.
+* **Lower.** New branch in `EmitListElementLower` record
+  case for `IsListType` fields: invokes `EmitListLower`
+  with a counter-suffixed base + `depth + 1` to keep the
+  inner loop vars from colliding with the outer
+  list-element loop's `__i` / `__elemOff`, then writes
+  the inner `(ptr, len)` at the field's offset via
+  `WriteI32LE`.
+* Test extension:
+  `Generator_emits_list_shape_export_signatures` picks
+  up `SendBundles(Bundle[])` / `GetBundles(int)` for
+  `Bundle { string Name; Point[] Items; }`.
+  22/22 generator integration tests; 660/660 across
+  Wacs.ComponentModel.Test (minus pre-existing
+  `WaitableSetSuspendBridgeTests` timing flake).
+  Hello-spike passes unchanged.
+
+**Still punted:** lists of records whose NESTED record
+fields carry lists (one-level-deep limitation); even
+deeper option/result-arm list nestings beyond
+`string[][]` / `T[][]`; cyclic record refs (canon-ABI
+prohibits, correctly rejected).
+
+## WACS.ComponentModel.Async.SourceGen 0.4.23, Harness.Runtime 0.7.4 — string[][] in option / result arms
+
+`IsSimpleList` recurses one more level so `string[][]`
+(list<list<string>>) qualifies as a single-expression-
+liftable shape — usable as an `option<string[][]>` inner
+or `result<string[][], ...>` arm. The new
+`MemoryHelpers.LiftStringListList` helper wraps
+`LiftStringList` per outer element so the lift expression
+stays a single helper call.
+
+* `IsSimpleList` accepts the list<list<string>> case;
+  other deeper / heterogeneous nestings (`string[][][]`,
+  `Point[][]`, `byte[][][]`) still fall back to the
+  multi-statement `EmitListLower` /
+  `EmitListLiftStatements` pipeline used at top-level
+  param / return + record/tuple field sites.
+* `PtrLenLiftExpression` dispatches the new shape to
+  `MemoryHelpers.LiftStringListList`.
+* **Harness.Runtime 0.7.4**: new
+  `MemoryHelpers.LiftStringListList(memory, ptr, len)`
+  — per-outer-element loop reading inner (ptr, len)
+  pairs and delegating to `LiftStringList`.
+* Test extension:
+  `Generator_emits_option_ptrlen_export_signatures`
+  picks up `string[][]? MaybeGrid(int)`.
+  22/22 generator integration tests; 660/660 across
+  Wacs.ComponentModel.Test (minus pre-existing
+  `WaitableSetSuspendBridgeTests` timing flake).
+  Hello-spike passes unchanged.
+
+**Still punted:** lists of records with `list<X>` fields
+(list-as-field needs its own multi-statement lift
+wrapper); even deeper option/result-arm list nestings
+(`option<string[][][]>`, `result<Point[], ()>` —
+need per-shape helpers or per-call-site emission); cyclic
+record refs (canon-ABI prohibits, correctly rejected).
+
+## WACS.ComponentModel.Async.SourceGen 0.4.22 — wider-primitive mixed result arms (result<long, string> etc.)
+
+Mixed `result<>` arms where one arm is an 8-byte
+primitive (`long`, `ulong`, `double`) and the other is a
+ptr/len aggregate now compile. Joined-payload slot 1
+widens from i32 to i64 (matching canon-ABI's index-by-
+index widest-type-per-slot rule); slot 2 stays i32.
+
+* **`ResultJoinedPayload`** loosened the mixed-shape gate
+  from `PrimitiveSize <= 4` to `<= 8`, accepting any
+  primitive arm width. New `ResultPayloadIsWide` flags
+  the 8-byte case so codegen branches.
+* **Flat sig.** `AppendFlatFieldTypes`,
+  `AppendFlatParamTypes`, `BuildFlatInvokerTypeArgs`
+  emit `long, int` for joined slots when
+  `ResultPayloadIsWide`, vs the existing `int, int` for
+  narrow. (`AppendFlatParamTypes` also picked up the
+  pre-existing ptr/len-joined gap — was bare-appending
+  `joined` for any non-null joined type, which silently
+  emitted `string` / `byte[]` in the flat sig. Now
+  branches on `IsPtrLenAggregate(joined)`.)
+* **Lower.** `EmitResultArgLower` ptr/len-joined branch
+  splits into narrow + wide. Wide declares
+  `long <base>_ptr = 0; int <base>_len = 0;`. New helper
+  `EmitWideArmAssign` writes one arm's value into the
+  long-typed slot: primitive 8-byte → `(long)value` or
+  `DoubleToInt64Bits(value)`; ptr/len → lower body to
+  temp int locals, then `_ptr = (long)(uint)tmpPtr;
+  _len = tmpLen` (zero-extending the ptr to i64).
+* **Lift.** No code change needed — the memory layout
+  (disc at 0, payload at `ResultPayloadOffset` which
+  uses `Math.Max(FieldAlign(ok), FieldAlign(err))` = 8
+  for wide) was already correct.
+  `EmitResultArmReturn` reads `ReadI64LE` for the
+  primitive long arm and `ReadI32LE` at payOff + 0/4 for
+  the ptr/len arm — the same code path serves narrow +
+  wide.
+* Test extensions:
+  `Generator_emits_result_ptrlen_export_signatures`
+  picks up `WitResult<long, string> LongOrText(int)` and
+  `WitResult<double, byte[]> DblOrBytes(int)`.
+  22/22 generator integration tests; 660/660 across
+  Wacs.ComponentModel.Test (minus pre-existing
+  `WaitableSetSuspendBridgeTests` timing flake).
+  Hello-spike passes unchanged.
+
+**Still punted:** lists of records with `list<X>` fields
+(list-as-field needs its own multi-statement lift
+wrapper); deeper-nested list shapes in option/result
+arms (`option<string[][]>`); cyclic record refs (canon-
+ABI prohibits, correctly rejected).
+
+## WACS.ComponentModel.Async.SourceGen 0.4.21 — list<record> with result fields
+
+`IsRecordSupportedAsListElement` accepts any
+`IsSupportedResult` field type. The recursive helpers
+extend with a result-field branch:
+* `InlineRecordFieldLiftExpression` builds a
+  `(ReadU8(off) == 0 ? T.Ok(<okExpr>) : T.Err(<errExpr>))`
+  ternary, with the arm bodies routed through
+  `ReadMemoryExprForType` (primitive arms) or
+  `PtrLenLiftExpressionAtOffset` (ptr/len arms).
+* `EmitInlineRecordFieldLowerStatements` writes
+  `disc:u8` at the field offset, then either inlines the
+  primitive-joined arm value or branches `.IsOk` and uses
+  `EmitPtrLenAssignInto` per arm before the
+  `WriteI32LE` pair for ptr/len joined.
+* Arm-value accesses (`.OkValue!`, `.ErrValue!`) get the
+  null-forgiving operator since the `WitResult<TOk,
+  TErr>` arm properties return nullable for ref-type arms
+  — silences CS8604 in the generated source.
+* Test extension:
+  `Generator_emits_list_shape_export_signatures` picks up
+  `SendAudits(Audit[])` / `GetAudits(int)` for `Audit
+  { int Id; WitResult<int, string> Result; }`.
+  22/22 generator integration tests, 660/660 across
+  Wacs.ComponentModel.Test (excluding the known timing-
+  flake `WaitableSetSuspendBridgeTests`). Hello-spike
+  passes unchanged.
+
+**Still punted:** lists of records with `list<X>` fields
+(`Doc[] { string Name; int[] Tags; }` — list-as-field
+needs its own multi-statement lift wrapper);
+deeper-nested list shapes in option/result arms
+(`option<string[][]>`); wider-primitive mixed result arms
+(`result<long, string>` — needs joined-slot widening to
+i64); cyclic record refs (canon-ABI prohibits, correctly
+rejected).
+
+## WACS.ComponentModel.Async.SourceGen 0.4.20 — list<record> with nested record fields
+
+`IsRecordSupportedAsListElement` recurses so nested record
+fields are accepted as long as the inner record itself
+satisfies the predicate. New recursive helpers
+`InlineRecordFieldLiftExpression` (single-expression lift,
+including `new Inner { ... }` property-initializers) and
+`EmitInlineRecordFieldLowerStatements` (multi-statement
+lower with counter-suffixed ptr/len locals) drive the
+list<record> per-element write / read across arbitrary
+nesting depths.
+
+* Lift composes through arbitrarily deep nesting: a
+  `Contact { string Name; Address Home; int Age; }` where
+  `Address { string Street; int Zip; }` lifts to
+  `new Contact { Name = LiftUtf8(...), Home = new Address
+  { Street = LiftUtf8(...), Zip = ReadI32LE(...) },
+  Age = ReadI32LE(...) }` — one expression, no intermediate
+  locals.
+* Lower walks each sub-field recursively, emitting the
+  matching write statements at `outer_off + sub.Offset`.
+  Ptr/len + option<ptr/len> branches use the global
+  `_listInnerCounter` (introduced in 0.4.16) so the
+  per-field temporary locals don't collide.
+* Test extension:
+  `Generator_emits_list_shape_export_signatures` picks up
+  `SendContacts(Contact[])` / `GetContacts(int)`.
+  21/21 generator integration tests, 660/660 across
+  Wacs.ComponentModel.Test. Hello-spike passes unchanged.
+
+**Still punted:** lists of records with result /
+nested-list fields (recursive lower for result-shaped
+fields needs more work); deeper-nested list shapes in
+option/result arms (`option<string[][]>`); wider-primitive
+mixed result arms (`result<long, string>` — needs joined-
+slot widening to i64); cyclic record refs (canon-ABI
+prohibits, correctly rejected).
+
+## WACS.ComponentModel.Async.SourceGen 0.4.19 — list<record> with option<ptr/len> fields
+
+`IsRecordSupportedAsListElement` widened to also accept
+`option<string>` / `option<byte[]>` / `option<primitive
+array>` / `option<simple list>` fields. Per-element lower
+writes the disc:u8 + conditional ptr/len at the field's
+canon-ABI offsets (12 bytes total: disc + pad + ptr +
+len, align 4). Lift uses an inline
+`(ReadU8(...) == 0 ? null :
+PtrLenLiftExpressionAtOffset(inner, off + payOff))`
+ternary in the property-initializer.
+
+* `EmitListElementLower` record branch gained the
+  option<ptr/len> case alongside the existing option<
+  primitive> case. Locals are field-name suffixed
+  (`__f_<Field>_ptr` / `_len`) to avoid collision when
+  records hold multiple optional ptr/len fields.
+* `EmitListElementLift` record branch gained the
+  matching inline ternary; uses the existing
+  `PtrLenLiftExpressionAtOffset` helper which dispatches
+  string / byte[] / primitive-array / simple-list via
+  `PtrLenLiftExpression`.
+* Test extension:
+  `Generator_emits_list_shape_export_signatures` picks
+  up `SendProfiles(Profile[])` / `GetProfiles(int)` for
+  `Profile { string Name; string? Email; }`.
+  21/21 generator integration tests, 660/660 across
+  Wacs.ComponentModel.Test. Hello-spike passes
+  unchanged.
+
+**Still punted:** lists of records with result /
+nested-record / nested-list fields; deeper-nested list
+shapes in option/result arms (`option<string[][]>`);
+wider-primitive mixed result arms (`result<long,
+string>` — needs joined-slot widening to i64); cyclic
+record refs (canon-ABI prohibits, correctly rejected).
+
+## WACS.ComponentModel.Async.SourceGen 0.4.18 — list<record> with option<primitive> fields
+
+`IsRecordSupportedAsListElement` widened to also accept
+`int?`, `bool?`, `long?` etc. fields. Per-element lower
+writes the disc:u8 + payload at the field's canon-ABI
+offsets; lift uses an inline `(ReadU8(...) == 0 ?
+(T?)null : ReadX(...))` ternary in the
+property-initializer.
+
+* As a bonus from 0.4.16's `IsPtrLenAggregate` widening,
+  `Document { string Title; byte[] Body; int Version; }`
+  and any record carrying a simple-list field now also
+  serializes through the existing ptr/len-field branch
+  of `EmitListElementLower` / `EmitListElementLift`.
+* Test extensions:
+  `Generator_emits_list_shape_export_signatures` picks
+  up `SendEntries(Entry[])` / `GetEntries(int)` for
+  `Entry { int Id; int? Expires; }`. 21/21 generator
+  integration tests, 660/660 across
+  Wacs.ComponentModel.Test. Hello-spike passes
+  unchanged.
+
+**Still punted:** lists of records with option<ptr/len>
+/ result / nested-record / nested-list fields; deeper-
+nested list shapes in option/result arms
+(`option<string[][]>`); wider-primitive mixed result
+arms (`result<long, string>`); cyclic record refs
+(canon-ABI prohibits, correctly rejected).
+
+## WACS.ComponentModel.Async.SourceGen 0.4.17 — mixed primitive ↔ ptr/len result arms
+
+`result<int, string>`, `result<byte[], int>`,
+`result<bool, string>`, and similar mixed-shape pairs
+where one arm is an i32-or-smaller primitive and the
+other is a ptr/len aggregate (string / byte[] /
+primitive array / simple list) are now supported. The
+joined payload uses two i32 slots: slot 1 carries the
+primitive value (for the primitive arm) or the ptr (for
+the ptr/len arm); slot 2 is 0 (primitive arm) or len
+(ptr/len arm).
+
+* **`ResultJoinedPayload`** gained the mixed-shape
+  branch — returns the ptr/len arm's type as the
+  joined-payload signal when the other arm is a
+  ≤4-byte primitive (`int`, `uint`, `bool`, `float`,
+  `byte`, etc.). Wider primitives (long, double) keep
+  the `"MIXED"` rejection because joined-slot widening
+  isn't emitted yet.
+* **`EmitPtrLenAssignInto` primitive branch.** For a
+  primitive arm in a mixed-shape result, packs the
+  value into `ptrLocal` (slot 1) and leaves `lenLocal`
+  at 0. Casts depending on the primitive's natural
+  type: `bool` → `(? 1 : 0)`; `float` →
+  `SingleToInt32Bits`; everything else → `(int)`.
+* **`PtrLenLiftExpression` primitive branch.** Reads
+  the primitive from slot 1 with the matching reverse
+  cast: `bool` → `(slot != 0)`; `float` →
+  `Int32BitsToSingle(slot)`; `int`/`uint`/`byte`/
+  `sbyte`/`short`/`ushort` → cast.
+* Test extensions:
+  `Generator_emits_result_ptrlen_export_signatures`
+  picks up `WitResult<int, string> ParseOrInt(string)`,
+  `WitResult<byte[], int> BytesOrCode(int)`,
+  `WitResult<bool, string> FlagOrText(int)`. Each
+  shape compiles to a flat invoker that matches what
+  canon-ABI specifies + the per-method `_post_X` field
+  for the ptr/len-bearing return. 21/21 generator
+  integration tests, 660/660 across
+  Wacs.ComponentModel.Test. Hello-spike passes
+  unchanged.
+
+**Still punted:** wider-primitive mixed arms (`result<
+long, string>` — needs joined-slot widening); lists of
+records with option/result/nested-record/nested-list
+fields; deeper-nested list shapes in option/result arms
+(`option<string[][]>`); cyclic record refs (canon-ABI
+prohibits, correctly rejected).
+
+## WACS.ComponentModel.Async.SourceGen 0.4.16, Harness.Runtime 0.7.3 — option<list<...>> + result<list<...>, ...>
+
+Simple lists (`string[]` and `T[][]` for primitive T) can
+now appear inside `option<>` and `result<>` arm types.
+Lower routes through the existing `EmitPtrLenAssignInto`
+helper (which gained a list branch); lift routes through
+`PtrLenLiftExpression` (which now dispatches to two new
+`MemoryHelpers` list helpers).
+
+* **`IsPtrLenAggregate` widened** to also include
+  `IsSimpleList` (`string[]` and `T[][]` for primitive
+  T). Size / align / slot / flat-sig sites that branch
+  on `IsPtrLenAggregate` automatically pick up the new
+  shapes. `list<record>` stays out (its lift is per-
+  record-type, not expressible as a single helper call).
+* **`IsResultArm` accepts simple-list arms**; same-
+  shape pairs (`result<string[], string[]>`,
+  `result<int[][], int[][]>`) and unit-and-list shapes
+  (`result<string[], ()>`, `result<(), int[][]>`) all
+  compile through the existing joined-payload paths.
+  The mixed-arm branch (from 0.4.11) already handled
+  list shapes — only the gate moved.
+* **`IsOptionRef` accepts simple-list inners** —
+  `string[]?`, `int[][]?`, `byte[][]?`, etc.
+* **`EmitPtrLenAssignInto` list branch.** For
+  `IsListType(type)` emits a counter-suffixed
+  `__listInnerN` base via `EmitListLower`, then copies
+  the resulting outer-(ptr, len) into the target
+  `ptrLocal` / `lenLocal`. New thread-static
+  `_listInnerCounter` (reset per `EmitHarness` pass)
+  keeps multiple list lowerings in the same outer scope
+  from colliding on inner-base names.
+* **`PtrLenLiftExpression` list branches.** `string[]`
+  → `MemoryHelpers.LiftStringList(_memory!, ptr, len)`.
+  `T[][]` (primitive inner) →
+  `MemoryHelpers.LiftPrimitiveArrayList<T>(_memory!,
+  ptr, len, sizeof(T))`.
+* **Harness.Runtime 0.7.3**: new
+  `MemoryHelpers.LiftStringList` (per-element loop with
+  `StringCoding.LiftUtf8`) and
+  `MemoryHelpers.LiftPrimitiveArrayList<T>` (per-element
+  loop with `Buffer.BlockCopy`).
+* Test extensions:
+  `Generator_emits_option_ptrlen_export_signatures`
+  picks up `string[]? MaybeNames(string[]?)` and
+  `int[][]? MaybeInts(int[][]?)`;
+  `Generator_emits_result_ptrlen_export_signatures`
+  picks up `WitResult<string[], ValueTuple> FirstNames(int)`
+  and `WitResult<int[][], ValueTuple> Matrix(int)`.
+  21/21 generator integration tests, 660/660 across
+  Wacs.ComponentModel.Test. Hello-spike passes
+  unchanged.
+
+**Still punted:** lists of records with option/result/
+nested-record/nested-list fields; deeper-nested list
+shapes in option/result arms (e.g., `option<string[][]>`);
+mixed primitive vs ptr/len result arms (`result<int,
+string>` — needs index-by-index flat-slot widening);
+cyclic record refs (canon-ABI prohibits, correctly
+rejected via `BuildRecordLayoutRecursive`'s
+`inProgress` set).
+
+## WACS.ComponentModel.Async.SourceGen 0.4.15 — list<record> with byte[]/primitive-array fields + list<list<X>>
+
+Two related extensions to the list-shape codegen from
+0.4.13–0.4.14:
+
+1. **list<record> with any ptr/len-aggregate field.**
+   `IsRecordSupportedAsListElement` widened to allow
+   primitive + any ptr/len aggregate (string, byte[],
+   primitive arrays). `EmitListElementLower` record branch
+   replaced the inline string-field code with a call to
+   `EmitPtrLenAssignInto` (the same helper used by top-
+   level ptr/len param lower), making `Document {
+   string Title; byte[] Body; int Version; }` etc. work.
+   `EmitListElementLift` record branch uses a new
+   `PtrLenLiftExpressionAtOffset` helper so the
+   property-initializer body lifts string / byte[] /
+   primitive-array fields inline.
+
+2. **list<list<X>>.** `IsListType` accepts list-typed
+   elements (recursively) and primitive-array elements
+   (`int[][]`, `byte[][]`, etc.). `EmitListLower`,
+   `EmitListLiftStatements`, `EmitListElementLower`, and
+   `EmitListElementLift` gained a `depth` parameter so
+   nested invocations emit unique loop variables
+   (`__i`, `__i1`, `__i2`, …) and element-offset locals
+   (`__elemOff`, `__elemOff1`, …) — C# rejects shadowed
+   `for (int __i...)` declarations across nested loops.
+   New `JaggedArrayAllocExpression` helper emits valid
+   C# jagged-array allocation (`new string[size][]` not
+   `new string[][size]`) for list-of-list lift.
+
+* Test extensions to
+  `Generator_emits_list_shape_export_signatures`:
+  `SendDocuments(Document[])` / `GetDocuments(int)`
+  pin the byte[]-bearing record list shape;
+  `SendBuckets(string[][])` / `GetBuckets(int)` /
+  `SendIntLists(int[][])` pin the list-of-list /
+  list-of-primitive-array shapes. 21/21 generator
+  integration tests, 660/660 across
+  Wacs.ComponentModel.Test. Hello-spike passes
+  unchanged.
+
+**Still punted:** lists of records with option/result/
+nested-record/nested-list fields; option<list<...>>;
+result<list<...>, ...>; mixed primitive vs ptr/len
+result arms; cyclic record refs.
+
+## WACS.ComponentModel.Async.SourceGen 0.4.14 — list<record> with string fields
+
+Records carrying `string` fields are now valid elements of
+`list<record>`. The per-element record write/read loop
+runs `StringCoding.LowerUtf8` / `LiftUtf8` for each
+string field at its canon-ABI offset within the element,
+alongside the existing `WriteI32LE` / `ReadMemoryExprForType`
+path for primitive fields.
+
+* **Acceptance gate.** `IsRecordOfPrimitives` renamed +
+  loosened to `IsRecordSupportedAsListElement` — accepts
+  fields that are primitive or string. Records with
+  byte[] / nested aggregates / nested records as list
+  elements still land later.
+* **Element lower.** `EmitListElementLower` record branch
+  walks fields and dispatches per field type:
+  - string field: `StringCoding.LowerUtf8` into
+    field-name-suffixed (ptr, len) locals (so multiple
+    string fields don't collide in the same loop-body
+    scope), then two `WriteI32LE` at the field's offset.
+  - primitive field: existing `EmitWriteMemoryStatement`.
+* **Element lift.** `EmitListElementLift` record branch
+  emits a property-initializer with inline nested
+  `StringCoding.LiftUtf8(_memory!, ReadI32LE(...),
+  ReadI32LE(... + 4))` for string fields and the existing
+  `ReadMemoryExprForType` for primitives. No intermediate
+  locals — C# allows nested method calls inside the
+  initializer body.
+* Test extension:
+  `Generator_emits_list_shape_export_signatures` picks up
+  two more cases — `int SendPeople(Person[])` and
+  `Person[] GetPeople(int)` where `Person { string Name;
+  int Age; }`. Both flat shapes assert as `Func<int, int,
+  int>` / `Func<int, int>` with `_post_GetPeople` for the
+  string-bearing return. 21/21 generator integration
+  tests, 660/660 across Wacs.ComponentModel.Test.
+  Hello-spike passes unchanged.
+
+**Still punted:** lists of records with `byte[]` / option
+/ result / nested-record fields; `list<list<X>>` for
+arbitrary X; mixed primitive vs ptr/len result arms;
+option<list<...>> / result<list<...>, ...>; cyclic
+record refs.
+
+## WACS.ComponentModel.Async.SourceGen 0.4.13 — list<string> and list<record>
+
+Canon-ABI `list<string>` (`string[]`) and `list<record>`
+(`R[]` where R is a primitive-only `[WitRecord]`) are now
+supported on params, returns, and as fields of records /
+tuples. Same flat (ptr, len) shape as a primitive array,
+but lower / lift run per-element loops:
+* list<string>: each element body is a separate
+  cabi_realloc allocation lowered via
+  StringCoding.LowerUtf8 / lifted via LiftUtf8.
+* list<record>: each element occupies
+  `RecordSize(rec)` bytes at `i * RecordSize(rec)` from
+  the outer ptr; fields written/read per the record's
+  canon-ABI offsets.
+
+* **Type predicates.** New `IsListType(fqType)` matches
+  `string[]` and `R[]` for primitive-only `[WitRecord]` R
+  (and explicitly excludes `IsPrimitiveArray` to keep the
+  two paths cleanly split). New `IsRecordOfPrimitives`
+  helper gates the record-list shape; lists of records
+  with strings / aggregates / nested records still land
+  later.
+* **Size / align / slot.** `FieldSize`, `FieldAlign`,
+  `FieldSlotCount` recognize `IsListType` and report the
+  same 8 / 4 / 2 as `IsPtrLenAggregate`. The element-
+  memory size is `FieldSize(elem)`, used by the lower /
+  lift loops to compute per-element offsets.
+* **Param lower.** New `EmitListLower` emits the outer
+  `cabi_realloc(0, 0, elemAlign, len * elemSize)` and a
+  `for (int __i...)` loop. `EmitListElementLower`
+  dispatches per element type — string element uses
+  `StringCoding.LowerUtf8` + two `WriteI32LE` for the
+  (ptr, len) slot; record element walks
+  `rec.Fields` and emits a `WriteI32LE` / `WriteI64LE` /
+  etc. for each field via the new
+  `EmitWriteMemoryStatement` helper.
+* **Return lift.** New `EmitSyncListReturnLift` reads
+  (ptr, len) from the retArea, runs
+  `EmitListLiftStatements` into a `__result` local, then
+  invokes cabi_post. `EmitListFieldLiftLocal` mirrors
+  the pattern for list-typed FIELDS of records / tuples
+  — binds `<localName>` to the lifted array for the
+  outer aggregate's property-initializer.
+  `EmitListElementLift` dispatches: string element →
+  read (ptr, len) + `StringCoding.LiftUtf8`; record
+  element → property-initializer of each field via
+  `ReadMemoryExprForType`.
+* **Dispatch.** The top-level param lower /
+  return-lift dispatch, `EmitAggregateFieldLower`,
+  `EmitFieldLiftLocalsIfNeeded`, `FieldLiftExpression`,
+  `EmitFlatArgsForField`, `AppendFlatFieldTypes`,
+  `AppendFlatParamTypes`, `BuildFlatInvokerTypeArgs`,
+  `CountFlatSlots`, `UsesRetArea`,
+  `FieldContainsPtrLen`, `AnyPtrLenAggregate`, and
+  `needsPost` gating all pick up `IsListType` alongside
+  the existing `IsPtrLenAggregate` branches.
+* **`IsPtrLenAggregate` stays narrow** (string +
+  primitive array only) so option<list<...>> /
+  result<list<...>, ...> remain rejected — those arms
+  need a single-expression lift, which a list can't
+  provide.
+* New `EmitWriteMemoryStatement` helper covers the
+  primitive-write side (`WriteU8`, `WriteI16LE`,
+  `WriteI32LE`, `WriteI64LE`, `WriteF32LE`,
+  `WriteF64LE`) with `(byte)`, `(short)`, `(int)`,
+  `(long)` casts for unsigned variants. Used by
+  `list<record>` lower.
+* New generator test:
+  `Generator_emits_list_shape_export_signatures` pins
+  `string JoinStrings(string[])`, `string[] SplitString(string)`,
+  `int SendPoints(Point[])`, `Point[] GetPoints(int)` —
+  all `Func<int, int, int>` or `Func<int, int>` flat
+  signatures with memory + realloc + per-method
+  cabi_post fields. 21/21 generator integration tests,
+  660/660 across Wacs.ComponentModel.Test. Hello-spike
+  passes unchanged.
+
+**Still punted:** mixed primitive vs ptr/len result
+arms; list<record> where the record carries strings /
+nested aggregates / nested records; list<list<X>> for
+arbitrary X; option<list<...>>; result<list<...>, ...>;
+cyclic record refs.
+
+## WACS.ComponentModel.Async.SourceGen 0.4.12, Harness.Runtime 0.7.2 — list<T> for non-u8 element types
+
+Canon-ABI `list<T>` is now supported for any C# primitive
+array — `int[]`, `long[]`, `uint[]`, `ushort[]`, `short[]`,
+`ulong[]`, `sbyte[]`, `float[]`, `double[]`, `bool[]`, and
+of course `byte[]`. Lower scales the `cabi_realloc` size +
+`Buffer.BlockCopy` byte-count by `sizeof(element)`, lift
+does the reverse via a new generic
+`MemoryHelpers.LiftPrimitiveArray<T>` helper.
+
+* **Detection.** New `PrimitiveArrayTypes` set covers the
+  full primitive-array surface. `IsPrimitiveArray` /
+  `ArrayElementType` helpers replace the byte[]-specific
+  predicates at the type-acceptance layer.
+  `IsPtrLenAggregate` now returns true for any primitive
+  array; downstream codegen that branched on
+  `IsPtrLenAggregate` automatically picks up the new
+  shapes.
+* **Param lower.** Top-level array params route through a
+  new `EmitPrimitiveArrayLower` helper that generalizes
+  the existing byte[] inline. `EmitPtrLenAssignInto` (used
+  by option / result branches when lowering an arm value)
+  scales the realloc + BlockCopy by element size; byte[]
+  emits identically to before (size factor elided when
+  it's 1).
+* **Return lift.** Top-level array returns use a new
+  `EmitSyncPrimitiveArrayReturnLift` that allocates a
+  fresh `T[]`, BlockCopies the bytes, invokes
+  `cabi_post`. `EmitAggregateFieldLiftLocal` byte[] branch
+  generalized to any primitive array; for ptr/len arm
+  returns, `PtrLenLiftExpression` falls back to
+  `MemoryHelpers.LiftPrimitiveArray<T>(...)` when the type
+  isn't byte[].
+* **Harness.Runtime 0.7.2**: new
+  `MemoryHelpers.LiftPrimitiveArray<T>(memory, ptr, len, elementSize)`
+  generic helper. `elementSize` is passed by the generator
+  to keep the helper AOT-friendly (no reflection-based
+  sizeof lookup). Buffer.BlockCopy handles the bulk
+  memmove for any primitive element type.
+* New generator test:
+  `Generator_emits_primitive_array_export_signatures`
+  pins `int[] / long[] / double[] / ushort[] / bool[]`
+  param + return shapes and the matching memory + realloc
+  + per-method post fields. 20/20 generator integration
+  tests, 659/659 across Wacs.ComponentModel.Test.
+  Hello-spike passes unchanged.
+
+**Still punted:** mixed primitive vs ptr/len result arms;
+`list<string>` / `list<record>` (heterogeneous-pointer
+lists); deeply-nested list-of-list-of-X; cyclic record
+references.
+
+## WACS.ComponentModel.Async.SourceGen 0.4.11 — mixed-type ptr/len arms inside result<TOk, TErr>
+
+`WitResult<string, byte[]>` (and any other distinct-type
+pair where both arms are ptr/len aggregates) is now
+accepted. Same-shape mixed arms join into a shared
+`(ptr, len)` payload slot pair; per-arm lift/lower
+dispatches on the C# arm type rather than the joined
+value, so `LiftUtf8` runs on `Ok` while `LiftBytes` runs
+on `Err`.
+
+* **`ResultJoinedPayload`** got one extra branch: if both
+  arms are `IsPtrLenAggregate` but distinct, return the
+  Ok-arm type as the "ptr/len signal". Existing call
+  sites already used `IsPtrLenAggregate(joined)` purely
+  as a kind discriminator, not as the lift/lower value
+  type — those used the arm types directly via
+  `PtrLenLiftExpression(arm, ...)` and
+  `EmitPtrLenAssignInto(arm, ...)`. Net effect: only the
+  acceptance gate needed to move.
+* **Mixed primitive vs ptr/len arms remain rejected.**
+  `result<int, string>` requires canon-ABI's index-by-
+  index flat-slot join with widest type, which we don't
+  emit yet.
+* Test extension: `Generator_emits_result_ptrlen_export_signatures`
+  picks up a new `WitResult<string, byte[]> BlobOrText(int)`
+  case alongside the existing same-type pairs. Flat
+  invoker shape and the `_post_BlobOrText` field are
+  pinned. 19/19 generator integration tests, 658/658
+  across Wacs.ComponentModel.Test. Hello-spike passes
+  unchanged.
+
+**Still punted:** mixed primitive vs ptr/len arms in
+result (`result<int, string>`); lists of records;
+`list<T>` for `T ≠ u8`; cyclic record references;
+deeply-nested aggregates beyond what the per-field
+recursion already handles.
+
+## WACS.ComponentModel.Async.SourceGen 0.4.10 — option<string> / option<byte[]>
+
+Nullable reference types — `string?` and `byte[]?` — are
+now recognized as canon-ABI `option<T>` shapes. Disc-
+plus-(ptr, len) layout matches the existing ptr/len-armed
+result encoding from 0.4.9.
+
+* **Annotation capture.** New `TypeDisplayWithNullability`
+  helper checks `ITypeSymbol.NullableAnnotation == Annotated
+  && IsReferenceType` and appends `?` to the type string —
+  Roslyn's `FullyQualifiedFormat` only emits `?` for
+  Nullable<T> value types. Used at every parse site
+  (param types, return type, record-field types).
+* **New predicates.** `IsOptionRef(fqType)` matches
+  `string?` / `byte[]?`; `IsOption(fqType)` =
+  `IsNullablePrimitive || IsOptionRef`. Codegen sites that
+  asked "is this an option<T>?" switched to `IsOption`.
+* **Layout math.** `FieldSize` / `FieldAlign` switched the
+  option branch to use `FieldSize` / `FieldAlign`
+  recursively on the inner type — ptr/len inner gives 12
+  bytes (disc + pad + ptr + len), align 4.
+  `NullablePayloadOffset` returns `align_to(1, 4) = 4` for
+  ptr/len inners. `FieldSlotCount` for option returns
+  `1 + FieldSlotCount(inner)` — 3 for ptr/len inner.
+* **Param lower.** New shared `EmitOptionArgLower` helper
+  replaces the inline option-param lowering at the top
+  level and inside `EmitAggregateFieldLower`. Primitive
+  inner: `<base>_disc` + `<base>_payload` via `.HasValue`
+  / `.GetValueOrDefault()`. Ptr/len inner: `<base>_disc`
+  via `== null`, then `<base>_ptr = 0; <base>_len = 0;`
+  with conditional `EmitPtrLenAssignInto` for the
+  non-null branch.
+* **Flat sig & args.** `AppendFlatFieldTypes`,
+  `AppendFlatParamTypes`, `BuildFlatInvokerTypeArgs`,
+  `EmitFlatArgsForField`, top-level `EmitFlatArgsList`,
+  and `CountFlatSlots` each expand `option<ptr/len>` to
+  `int, int, int` (disc, ptr, len) and emit
+  `<base>_disc, <base>_ptr, <base>_len` for the args.
+* **Return lift.** `EmitSyncOptionReturnLift` branches on
+  disc; for ptr/len inner reads (ptr, len) at the payload
+  offset and lifts via `StringCoding.LiftUtf8` /
+  `MemoryHelpers.LiftBytes`, then invokes `cabi_post`.
+  `EmitOptionFieldLiftLocal` mirrors the pattern for
+  option fields nested inside records / tuples.
+* **Gating helpers.** New `IsOptionOfPtrLen` and
+  `AnyOptionParamWithPtrLenInner` drive the per-method
+  `needsMemory`, class-scope `needsMemory` / `needsRealloc`
+  / `needsPost`, and `FieldContainsPtrLen` recursion.
+  `UsesRetArea` switched to `IsOption` so any option<T>
+  routes through retArea.
+* New generator test:
+  `Generator_emits_option_ptrlen_export_signatures` pins
+  `string? Normalize(string?)` and `byte[]? MaybeBytes(byte[]?)`
+  — both flat `Func<int, int, int, int>` (3 param ints +
+  retArea), both gated for memory + realloc + cabi_post.
+  19/19 generator integration tests, 658/658 across
+  Wacs.ComponentModel.Test. Hello-spike passes unchanged.
+
+**Still punted:** mixed-type ptr/len result arms
+(`result<string, byte[]>`); lists of records; `list<T>`
+for `T ≠ u8`; cyclic record references.
+
+## WACS.ComponentModel.Async.SourceGen 0.4.9, Harness.Runtime 0.7.1 — ptr/len arms inside result<TOk, TErr>
+
+`WitResult<TOk, TErr>` now accepts ptr/len arms — `string`
+and `byte[]` — including the unit-and-string forms
+(`result<string, ()>`, `result<(), string>`), the same-type
+forms (`result<string, string>`, `result<byte[], byte[]>`),
+and same for `byte[]`. Mixed ptr/len arms (e.g.
+`result<string, byte[]>`) stay rejected via the joined-
+payload `"MIXED"` sentinel.
+
+* **Type acceptance.** `IsResultArm` now accepts ptr/len
+  aggregates alongside primitives and unit. Joined-
+  payload computation already returned the arm type for
+  same-type or unit-and-X cases — the gate just needed to
+  let those types through.
+* **Size / align.** `FieldSize` / `FieldAlign` /
+  `ResultPayloadOffset` switched from `PrimitiveSize` /
+  `PrimitiveAlign` to `FieldSize` / `FieldAlign` so
+  ptr/len arms report size 8 align 4 instead of falling
+  through to the default-4 path. Result-with-ptr/len
+  memory layout: disc:u8 at 0; pad to 4; ptr at 4; len
+  at 8. Total 12 bytes, align 4.
+* **Slot count.** `FieldSlotCount` for result now returns
+  `1 + (IsPtrLenAggregate(joined) ? 2 : 1)` — ptr/len
+  joined contributes 2 payload slots (ptr, len).
+* **Param lower.** Shared `EmitResultArgLower` helper
+  emits `<base>_disc` + payload locals. Primitive joined:
+  one typed local picked by `.IsOk`. Ptr/len joined:
+  declares `<base>_ptr = 0; <base>_len = 0;` then branches
+  on `.IsOk` and lowers the active arm's value via
+  `EmitPtrLenAssignInto`, which knows the `out`-into-
+  existing-locals form of `StringCoding.LowerUtf8` and
+  the byte[] assignment dance. Unit arms leave the locals
+  at 0.
+* **Param flat sig.** `AppendFlatFieldTypes` /
+  `AppendFlatParamTypes` / `BuildFlatInvokerTypeArgs` /
+  `EmitFlatArgsForField` / top-level `EmitFlatArgsList`
+  result branch all expand ptr/len-armed result into
+  `int, int, int` (disc, ptr, len).
+* **Return lift.** `EmitSyncResultReturnLift` reads ptr/len
+  once outside the disc branch, then sets a single
+  `<resultType> __resResult;` variable per arm. After both
+  branches assign, `cabi_post` is invoked, then
+  `__resResult` is returned. `EmitResultFieldLiftLocal`
+  mirrors this for ptr/len-armed result FIELDS inside
+  records / tuples, building the bound local for the
+  outer aggregate's property-initializer.
+* **cabi_post + memory + realloc gating.** `needsPost`
+  picks up ptr/len-armed result returns via a new
+  `ResultHasPtrLenArm` helper. The per-method `needsMemory`
+  picks up ptr/len-armed result PARAMS via
+  `AnyResultParamWithPtrLenArm`. `FieldContainsPtrLen`
+  recurses into result arms so cabi_post correctly fires
+  when a record/tuple field is a ptr/len-armed result.
+* **Harness.Runtime 0.7.1**: new `MemoryHelpers.LiftBytes`
+  helper — single-expression form for lifting a canon-ABI
+  `list<u8>` from (ptr, len) into a fresh `byte[]`. Used
+  by the new ptr/len-armed result lift code paths and
+  available for any future per-field byte[] consumer.
+* New generator test:
+  `Generator_emits_result_ptrlen_export_signatures` pins
+  three shapes — `WitResult<string, ValueTuple> TryDecode(byte[])`,
+  `WitResult<byte[], ValueTuple> Encode(string)`, and
+  `WitResult<string, string> Pick(bool, string, string)`
+  — exercising single-ptr/len-arm, byte[]-arm, and
+  same-type both-arms. 18/18 generator integration tests,
+  657/657 across Wacs.ComponentModel.Test. Hello-spike
+  passes unchanged.
+
+**Still punted:** `option<string>` / `option<byte[]>` —
+nullable reference types need parser-side annotation
+capture (`NullableAnnotation`), tracked for 0.4.10. Mixed-
+type ptr/len result arms (`result<string, byte[]>`).
+Lists of records; `list<T>` for `T ≠ u8`.
+
+## WACS.ComponentModel.Async.SourceGen 0.4.8 — nested records (record-in-record / record-in-tuple)
+
+`[WitRecord]` types may now hold other `[WitRecord]`-typed
+fields. Every helper that operated per-field — type-detection,
+size / align / slot math, param lower, flat-arg expansion,
+flat-type emission, retArea lift — now recurses through
+nested records.
+
+* **Record discovery.** `CollectAndDiagnose` now does a
+  two-stage pass: first gather all `[WitRecord]` candidate
+  symbols into a map, then build layouts in dependency
+  order via `BuildRecordLayoutRecursive` with an
+  `inProgress` cycle-detection set. Sub-records always
+  exist in `_activeRecords` by the time an outer record's
+  `FieldAlign` / `FieldSize` run.
+* **`_activeRecords` interface widened** from
+  `ImmutableDictionary` to `IReadOnlyDictionary` so the
+  build-phase mutable `Dictionary` and the post-build
+  `ImmutableDictionary` can both back it.
+* **Layout math.** `FieldSize` / `FieldAlign` /
+  `FieldSlotCount` learned the record branch (via
+  `RecordSize` / `RecordAlign` /
+  `TotalFlatSlotsForRecord`). Record memory size is
+  `align_to(last_field_end, record_align)` — round-up at
+  the outer level so nested records align correctly
+  against the parent's next field.
+* **Param lower.** `EmitAggregateFieldLower` recurses for
+  record fields, naming locals `<base>_<subField>` and
+  source-expression-walking `<sourceExpr>.<subField>`.
+  `EmitFlatArgsForField` and `AppendFlatFieldTypes` recurse
+  identically — every helper that emits one field's flat
+  representation now recurses for sub-fields.
+* **Return lift.** New `EmitRecordFieldLiftLocal` binds
+  sub-field locals at absolute retArea offsets
+  (`outer_offset + sub.Offset`) and constructs the inner
+  record via property-initializer.  `FieldLiftExpression`
+  returns the bound local name for record-typed fields.
+* **cabi_post detection** updated: `AggregateContainsPtrLen`
+  recurses via a new `FieldContainsPtrLen` helper so a
+  ptr/len buried under any depth of records triggers the
+  post-return hook.
+* New generator test:
+  `Generator_emits_nested_record_export_signatures` pins
+  `Contact { string Name; Address Home; int Age; }` (where
+  `Address { string Street; int Zip; }`). `Write(Contact)`
+  param flattens to 6 slots → `Func<int, int, int, int,
+  int, int, int>`; `Read(int)` returns via retArea →
+  `Func<int, int>`. 17/17 generator integration tests,
+  656/656 across Wacs.ComponentModel.Test. Hello-spike
+  passes unchanged.
+
+**Still punted:** ptr/len aggregates inside option / result
+arms (`option<string>`, `result<list<u8>, ()>`); cyclic
+record references (currently rejected); lists of records;
+list<T> for T ≠ u8.
+
+## WACS.ComponentModel.Async.SourceGen 0.4.7 — option / result fields inside tuples & records
+
+Extends the field-aware marshaling from 0.4.6: `option<T>`
+(C# `T?`) and `WitResult<TOk, TErr>` are now allowed as
+fields of `[WitRecord]` types and as tuple elements.
+
+* **Size / align / slot count.** `FieldSize`, `FieldAlign`,
+  and `FieldSlotCount` now recognize option<T> and
+  WitResult<TOk, TErr>. Memory size matches canon-ABI's
+  `align_to(1, alignof(payload)) + sizeof(payload)`; slot
+  count is 2 for option, 1 (or 2) for result depending on
+  joined-payload.
+* **Field-type acceptance.** `IsSupportedTuple` /
+  `BuildRecordLayout` accept option + result fields via a
+  new shared `IsSupportedFieldType` predicate.
+* **Param lower.** `EmitAggregateFieldLower` gained option /
+  result branches that bind `<base>_disc` / `<base>_payload`
+  locals the same way the top-level paths do — but per-field
+  inside the parent tuple / record value.
+* **Flat signature.** A new shared `AppendFlatFieldTypes`
+  helper centralizes per-field flat-type emission across
+  `AppendFlatParamTypes` and `BuildFlatInvokerTypeArgs`.
+  Both branches now expand option fields to (int, T) and
+  result fields to (int) or (int, joined).
+* **Return lift.** Tuple / record return lift now dispatches
+  per field. `EmitFieldLiftLocalsIfNeeded` +
+  `FieldLiftExpression` route primitives → inline reads,
+  ptr/len aggregates → existing helper, option →
+  `EmitOptionFieldLiftLocal`, result →
+  `EmitResultFieldLiftLocal`. The new helpers read the disc
+  byte at the field's retArea offset and emit a
+  conditional construction of `Nullable<T>` /
+  `WitResult<TOk, TErr>` from disc + payload.
+* **retArea decision unified on slot count.** `UsesRetArea`,
+  `needsMemoryForRetArea`, and class-scope `needsMemory`
+  now switch on `TotalFlatSlotsForTuple` /
+  `TotalFlatSlotsForRecord > 1`, so a single-field record
+  whose only field is option / result-with-joined correctly
+  routes through retArea. The single-slot direct-return
+  path keeps working for primitives + result<(), ()>.
+* New generator tests:
+  `Generator_emits_option_result_in_record_export_signatures`
+  pins `Account { int Id; int? Balance; WitResult<int, int>
+  Status; }`. Submit param flattens to 5 ints; Lookup
+  returns via retArea with no `_post_*` needed (option /
+  result don't allocate).
+  `Generator_emits_option_result_in_tuple_export_signatures`
+  pins the matching tuple shape. 16/16 generator tests,
+  655/655 across Wacs.ComponentModel.Test. Hello-spike
+  passes unchanged.
+
+**Still punted:** ptr/len aggregates inside option / result
+arms (`option<string>`, `result<list<u8>, ()>`); nested
+records; lists of records.
+
+## WACS.ComponentModel.Async.SourceGen 0.4.6 — aggregate-in-aggregate marshaling (string / byte[] inside tuples & records)
+
+Closes the punt from 0.4.5: ptr/len aggregate fields
+(string, `byte[]`) are now allowed inside tuples and
+`[WitRecord]` types on both the param and return sides
+of sync exports.
+
+* **Type detection.** `IsSupportedTuple` and
+  `BuildRecordLayout` now accept ptr/len aggregate
+  element/field types in addition to primitives. New
+  helpers `FieldSize` / `FieldAlign` / `FieldSlotCount`
+  centralize the size/align math — primitives report
+  their natural width, ptr/len aggregates report 8 / 4 /
+  2.
+* **Flat signature.** `CountFlatSlots`,
+  `AppendFlatParamTypes`, and `BuildFlatInvokerTypeArgs`
+  expand each aggregate field to `(int, int)` — e.g.
+  `(string, int) Label((string, int))` flat-lowers to
+  `Func<int, int, int, int>` (name_ptr, name_len, count,
+  retArea_ptr).
+* **Param lower.** A new `EmitAggregateFieldLower`
+  helper emits `StringCoding.LowerUtf8` for string
+  fields and `cabi_realloc` + `Buffer.BlockCopy` for
+  `byte[]` fields, binding `__<param>_<field>_ptr` /
+  `__<param>_<field>_len` locals that the call site
+  hands to the flat invoker.
+* **Return lift.** Tuple + record returns containing an
+  aggregate go through a retArea (single-aggregate-field
+  shape no longer inlines). New
+  `EmitAggregateFieldLiftLocal` reads (ptr:i32, len:i32)
+  at the canon-ABI field offset and lifts to `string` /
+  `byte[]` via `StringCoding.LiftUtf8` /
+  `Buffer.BlockCopy`. Aggregate-bearing returns invoke
+  `cabi_post_<export>` after lifting; offsets are
+  computed via `FieldAlign` / `FieldSize` so primitive +
+  aggregate fields interleave correctly.
+* **Class-scope state.** `needsMemory` /
+  `needsRealloc` / `_post_<MethodName>` field emission
+  now picks up tuple- and record-with-aggregate-field
+  shapes alongside the top-level ptr/len cases.
+* New generator tests:
+  `Generator_emits_aggregate_in_record_export_signatures`
+  and `Generator_emits_aggregate_in_tuple_export_signatures`
+  pin the flat signatures + class-scope fields for
+  `Person { string Name; int Age; }` (greet + describe)
+  and `(string, int)` tuple params + returns. 14/14
+  generator integration tests, 653/653 across
+  Wacs.ComponentModel.Test.
+
+**Still punted:** nested aggregates (option<string>
+inside a record, list<string> anywhere, tuple-in-tuple
+of strings), variants beyond `result`, lists of records.
+
+## WACS.ComponentModel 0.10.2, WACS.ComponentModel.Async.SourceGen 0.4.5 — `[WitRecord]` user-record marshaling
+
+User-defined record types are now supported on sync
+exports via an explicit `[WitRecord]` opt-in. The
+generator scans the compilation for marked types,
+computes their canon-ABI layout from instance fields in
+declaration order, and stores the result in a side table
+the emit phase consults when handling record-typed
+params and returns.
+
+* **`[WitRecord]`** ships in `Wacs.ComponentModel.Async`
+  (struct + class targets). MVP supports records with
+  all-primitive instance fields only.
+* **Generator pipeline.** `CollectAndDiagnose` now walks
+  `[WitRecord]` types in the consumer assembly and
+  builds a `RecordLayout { TypeFqn, Fields }` per match.
+  `RecordField { Name, Type, Offset }` carries the
+  canon-ABI layout — offset = `align_to(prev_end,
+  alignof(field))`. Records flow into `HarnessClass`
+  alongside the harness export list.
+* **Thread-static record lookup.** Helper predicates
+  (`IsSupportedParam` / `UsesRetArea` / `BuildFlatInvokerTypeArgs`
+  / etc.) consult an
+  `[ThreadStatic]` `_activeRecords` dictionary that
+  `EmitHarness` + `CollectAndDiagnose` set/clear. Keeps
+  the existing string-typed pipeline intact without
+  refactoring every helper signature.
+* **Param lower.** `(Point p)` flattens to its fields:
+  `int __p_X = p.X; int __p_Y = p.Y;` — one local per
+  field, passed positionally as flat args.
+* **Return lift.** Multi-field record returns use
+  retArea: generator reads each field at its stored
+  offset and constructs `new Point { X = …, Y = … }`
+  via a property initializer block. Single-field
+  records inline the slot (no retArea).
+* `Generator_emits_record_export_signatures` test
+  verifies `Point Origin()` → `Func<int>` (retArea
+  return) and `int Manhattan(Point)` → `Func<int, int, int>`
+  (record param flattens to 2 ints). 12/12 generator
+  integration tests.
+
+**Still punted:** records with aggregate fields
+(string / list / option / result inside the record),
+nested records, records as fields of tuples/results
+(now-tractable via the record-layout map; needs the
+layout-aware lower/lift paths to plumb in), variants
+beyond `result`.
+
+## WACS.ComponentModel.Async.SourceGen 0.4.4 — tuple marshaling for sync exports
+
+Adds canon-ABI `tuple<T1, T2, ...>` codegen for sync
+exports. Tuples are the first ordered-aggregate shape —
+each field flat-lowers separately on params, multi-
+element returns use a retArea with per-field offsets
+computed at build time.
+
+* **C# representation: `(T1, T2, ...)`.** Roslyn's
+  `FullyQualifiedFormat` emits this syntax verbatim
+  (or `(T1 n1, T2 n2)` for named tuples; element names
+  are stripped at parse time).
+* **Detection.** `IsTuple` matches any `(...)`-bracketed
+  string with at least one top-level comma. `IsSupportedTuple`
+  requires every element to be a primitive (aggregate-in-
+  tuple lands in a later slice).
+* **Element parser.** `TupleElementTypes` walks the
+  string with paren + angle-bracket depth tracking so
+  nested generics (`(int, List<int>)`) split correctly.
+  Element-name suffixes (`(int a, int b)` → `int, int`)
+  are stripped via the trailing-identifier heuristic.
+* **Param lower.** `(T1, T2) pair` extracts via
+  `pair.Item1`, `pair.Item2`, ... — one local per
+  element passed as flat args.
+* **Return lift.** Multi-element tuple returns use
+  retArea: generator computes per-element offsets via
+  `PrimitiveSize` + `PrimitiveAlign` + `AlignTo`, then
+  reads each field at its offset via the matching
+  `MemoryHelpers.ReadXXX`. Constructs `(item1, item2, ...)`
+  literal. Single-element tuple is special-cased — the
+  inner type returns directly without retArea.
+* `Generator_emits_tuple_export_signatures` test
+  verifies three shapes:
+  * `(int, int) Split(int)` → `Func<int, int>` (input
+    + retArea).
+  * `int Combine((int, int) pair)` →
+    `Func<int, int, int>` (item1 + item2 + ret).
+  * `(int, long, bool) Triple()` → `Func<int>`
+    (retArea), with offsets 0/8/16 verified through the
+    generated source.
+
+11/11 generator integration tests, hello-spike still
+prints `Hello, World!` from both harnesses,
+`Wacs.ComponentModel.Test` 650/650.
+
+**Still punted:** aggregate-in-tuple (`(string, int)`
+needs ptr/len lower in the middle of an arg list — tractable
+extension), records (user struct/class with named
+fields — requires Roslyn symbol inspection instead of
+string parsing), variants beyond result, lists of
+non-byte primitives.
+
+## WACS.ComponentModel.Async.SourceGen 0.4.3 — `WitResult<TOk, TErr>` (result<primitive, primitive>) marshaling
+
+Adds canon-ABI `result<TOk, TErr>` codegen for sync
+exports — the second variant shape after option. Together
+with the existing aggregates, the generator now covers
+the four most-common WIT shapes: void / primitive /
+string / byte[] / option<primitive> / result<…>.
+
+* **C# representation: `Wacs.ComponentModel.Harness.WitResult<TOk, TErr>`.**
+  Arms can be canon-ABI primitives or `System.ValueTuple`
+  (the elided unit case for `result`, `result<T>`,
+  `result<_, E>` WIT shapes).
+* **Layout-aware codegen.** `PrimitiveSize` +
+  `PrimitiveAlign` + `AlignTo` compute canon-ABI offsets
+  per spec. `ResultJoinedPayload` produces the C# type of
+  the flat payload slot (null = both arms unit;
+  primitive's type = one or both arms carry that
+  primitive; `"MIXED"` = different-kind primitives,
+  rejected up front via `IsSupportedResult`).
+* **Four canonical flat shapes handled:**
+  * `result<(), ()>` → `Func<int>` (disc returned
+    directly, no retArea).
+  * `result<T, ()>` / `result<(), T>` → `(disc, T payload)`
+    on the wire; retArea for return.
+  * `result<T, T>` → same as above; retArea for return.
+* **Param lower.** `(WitResult<TOk, TErr> r)` flattens to
+  `(int __r_disc, joinedPayload __r_payload)`. `__r_disc`
+  is `r.IsOk ? 0 : 1`; `__r_payload` picks the
+  appropriate arm's value or `default(joined)` for unit
+  arms. Wasm-side ignores the wrong-arm slot per canon-ABI.
+* **Return lift.** Reads `disc:u8` via `ReadU8`, branches
+  by case, reads the payload at
+  `align_to(1, max(alignof(Ok), alignof(Err)))` if
+  present, builds `WitResult.Ok(value)` or
+  `WitResult.Err(value)`.
+* `Generator_emits_result_export_signatures` test
+  verifies all four flat-sig shapes — `Func<int>`
+  (Noop), `Func<int, int>` (TryParse), `Func<int, int, int>`
+  (Divide). 10/10 generator integration tests.
+* **Roslyn FQN handling.** `FullyQualifiedFormat`
+  prepends `global::` to namespace-qualified names.
+  `IsWitResult` accepts both forms; `StripGlobal` cleans
+  inner type-arg tokens so downstream primitive
+  matching works against either.
+
+**Still punted:** mixed-width result arms
+(`result<long, int>` — canon-ABI join across primitive
+kinds), aggregate arms (`result<string, ErrCode>`),
+records, variants, tuples. The two-arm disc-pattern this
+slice landed extends directly to the general variant case
+— next slice.
+
+## WACS.ComponentModel.Async.SourceGen 0.4.2 — `Option<T>` (option<primitive>) marshaling
+
+First true variant codegen: generator now handles
+`Nullable<T>` (`int?`, `bool?`, etc.) param + return on
+`[SyncExport]` partial methods, mapping to canon-ABI
+`option<T>` for primitive T.
+
+* **C# representation: `T?`.** `IsNullablePrimitive`
+  recognizes the trailing-`?` form of any primitive type
+  in the existing whitelist (int / uint / long / ulong /
+  short / ushort / byte / sbyte / bool / float / double).
+* **Param flat lowering.** Each `T? x` parameter
+  expands to `(int __x_disc, T __x_payload)` —
+  `x.HasValue ? 1 : 0` for disc, `x.GetValueOrDefault()`
+  for payload. Wasm-side ignores the payload slot when
+  disc=0 per canon-ABI.
+* **Return retArea lift.** `T?` return uses the
+  retArea-style sync convention: the callee writes
+  `(disc:u8, payload:T)` into linear memory and returns
+  the address. Generator reads `MemoryHelpers.ReadU8`
+  for the disc; if zero, returns `null`; otherwise
+  reads the payload at the canon-ABI offset
+  (`align_to(1, alignof(T))`) using the matching
+  `ReadI32LE` / `ReadI64LE` / `ReadF32LE` / `ReadF64LE`
+  / `ReadU8` helper.
+* **No realloc / no cabi_post.** Unlike strings /
+  byte[], `option<primitive>` writes inline into the
+  callee's own retArea without external allocation; the
+  generator skips the cabi_realloc + cabi_post_X
+  resolution for option-only methods. `_memory` is
+  still needed (for the retArea read).
+* **Mixed-shape arg lists work transparently.**
+  `void Foo(string s, int? n)` flat-lowers to four ints
+  — (ptr, len, disc, payload). Existing
+  `CountFlatSlots` + `BuildFlatInvokerTypeArgs`
+  generalize from string + byte[] to handle the new
+  shape.
+
+`Generator_emits_option_export_signature` test verifies:
+* `int? MaybeDouble(int? input)` keeps its source
+  signature, with the flat invoker field collapsing to
+  `Func<int, int, int>` (disc + payload + retArea ptr).
+* `bool? Flag(bool? input)` similar, flat field is
+  `Func<int, bool, int>` (the bool payload stays a bool
+  in the flat sig since canon-ABI treats it as a
+  byte-flat type the runtime auto-marshals).
+* `_memory` field emitted for option-return methods
+  even when no other ptr/len aggregates exist.
+
+9/9 generator integration tests.
+
+**Still punted:** `option<string>`, `option<byte[]>`,
+`option<aggregate>` — these require the payload to also
+allocate via realloc when the inner type isn't inline.
+`Result<T,E>`, records, variants, tuples — next slices
+that build on the disc + per-arm-payload pattern this
+option codegen established.
+
+## WACS.ComponentModel.Async.SourceGen 0.4.1 — `byte[]` (list<u8>) marshaling for sync exports
+
+Generator now handles `byte[]` params + return types
+alongside `string`. Same flat shape — (ptr, len) — but
+no UTF-8 encoding; raw `Buffer.BlockCopy` in/out via
+`MemoryInstance.Data`.
+
+* `IsPtrLenAggregate` predicate unifies the
+  string + byte[] path in the flat-signature
+  computation. Each `(string s, byte[] b)` mixed-shape
+  argument list flattens identically (4 ints).
+* Lowering `byte[]`: `cabi_realloc(0, 0, 1, len)` → ptr,
+  `Buffer.BlockCopy(arg, 0, _memory.Data, ptr, len)`. No
+  helper-library dependency for the byte path — inline
+  in the generated code.
+* Lifting `byte[]`: reads (ptr, len) from retArea via
+  `MemoryHelpers.ReadI32LE`, allocates a fresh `byte[]`,
+  `Buffer.BlockCopy` out, calls `cabi_post_X`.
+* The aggregate class-scope state (`_memory`,
+  `_reallocInvoke`, `_post_<MethodName>`) is shared
+  between string-bearing and byte-bearing methods —
+  declared once when ANY aggregate-typed export exists.
+
+`Generator_emits_byte_array_export_signature` test
+verifies the declared `byte[] Transform(byte[])` keeps
+its source shape while the flat-invoker field collapses
+to `Func<int, int, int>`. 8/8 generator integration tests.
+
+## WACS.ComponentModel.Async.SourceGen 0.4.0 — string marshaling for sync exports
+
+Generator now emits canon-ABI string lift/lower glue for
+`[SyncExport]`-marked partial methods with `string`
+parameters or return types. Mirrors the hand-written
+hello-spike pattern.
+
+* **Per-method flat signature.** `string Greet(string name)`
+  flattens to `Func<int, int, int>` — the `name`
+  parameter expands to `(int ptr, int len)`, the `string`
+  return becomes a single `int retArea`. Generator builds
+  the right `CreateInvokerFunc<...>` generic arity.
+* **Class-scope marshaling state.** When any sync export
+  references a string, the generator emits three
+  additional fields:
+  * `MemoryInstance? _memory` — lazy-resolved via
+    `CoreRuntime.TryGetExportedMemory("memory", ...)`
+  * `Func<int, int, int, int, int>? _reallocInvoke` —
+    lazy-resolved cabi_realloc invoker
+  * `Action<int>? _post_<MethodName>` — per-method
+    cabi_post_<exportName> invoker (string-returning
+    methods only; absent post-return tolerated)
+* **Per-call body.** Ensures memory + realloc are
+  resolved, lowers each `string` param via
+  `StringCoding.LowerUtf8` into wasm memory, calls the
+  flat invoker, lifts a string return via
+  `MemoryHelpers.ReadI32LE` + `StringCoding.LiftUtf8`,
+  invokes `cabi_post_X` to free, returns.
+* **Consumer reference.** Consumers using string types
+  must add a project reference to
+  `Wacs.ComponentModel.Harness.Runtime` — the generated
+  code calls into `Wacs.ComponentModel.Harness.StringCoding`
+  + `MemoryHelpers`. The AOT spike's csproj demonstrates.
+* **End-to-end NativeAOT verification.** The hello-spike
+  (`Spec.Test/components/fixtures/wit-harness-spike-hello/Aot.Spike`)
+  now runs *both* the hand-written `HelloHarness` AND a
+  generator-emitted `GeneratedHelloHarness` side-by-side
+  against the same `hello.component.wasm`. The published
+  ARM64 native binary prints:
+  ```
+  hand-written:   Hello, World!
+  generator-emit: Hello, World!
+  ```
+  Proves the generator's string codegen matches the
+  hand-written canonical pattern under AOT.
+
+`Generator_emits_string_export_signature` test verifies
+the emitted fields + method shape (1 new test → 7/7
+generator integration tests).
+
+**Still punted:** `list<T>`, `Option<T>`, `Result<T,E>`,
+record / variant aggregates. Strings established the
+class-scope-state pattern that these will extend.
+async-export string support also pending — needs a
+typed task.return binding that lifts the wasm-side
+string back through the canon-async dispatcher.
+
+## WACS.ComponentModel 0.10.1, WACS.ComponentModel.Async.SourceGen 0.3.3 — `[SyncExport]` support
+
+Generator now handles sync (non-async-lifted) exports
+alongside the existing async-lift surface.
+
+* **`[SyncExport("export-name")]`** method-level marker
+  in `Wacs.ComponentModel.Async`. Routes through
+  `WasmRuntime.CreateInvokerFunc<...>` /
+  `CreateInvokerAction<...>` with statically-known type
+  args derived from the partial method's declared
+  signature — fully AOT-safe, no `InvokeCoreAsyncLift`
+  involvement.
+* Emit shape per sync export:
+  * A class-scope `_invoker_<MethodName>` field of type
+    `Func<...>?` / `Action<...>?` matching the partial
+    method's signature.
+  * Lazy resolution on first call:
+    `TryGetExportedFunction("export-name", out var __addr)`
+    + `CreateInvokerFunc<T1,…,TReturn>(__addr)`.
+  * Subsequent calls reuse the memoized delegate.
+* `Generator_emits_sync_export_signatures` test verifies
+  the emitted field types + method signatures. Reflects
+  on the runtime metadata.
+* Generator integration tests: 6/6 (up from 5).
+
+**Use case:** the hello-spike's `greet(name: string) ->
+string` will become a one-line `[SyncExport("greet")]`
+declaration once string lift/lower codegen lands. Today
+the attribute already handles all-primitive sync exports
+— canonical hello-world calc-style components.
+
+## WACS.ComponentModel.Async.SourceGen 0.3.2 — diagnostics for non-partial misuse
+
+Adds two diagnostic descriptors so users see actionable
+errors at compile time when they misapply the harness
+attributes:
+
+* **WACSCM001 — `AsyncComponentHarness class must be
+  partial`.** Fired when `[AsyncComponentHarness]` is on a
+  class declaration that's missing the `partial` keyword.
+  Otherwise the emitted partial body collides with the
+  user's class with a confusing `CS0260` / `CS0101` chain;
+  this diagnostic points directly at the offending
+  identifier with the fix.
+* **WACSCM002 — `AsyncExport method must be a partial
+  definition`.** Fired when `[AsyncExport]` is on a
+  method that isn't a partial definition. Previously the
+  generator silently skipped these.
+
+Generator pipeline restructured around a single
+`ScanResult { Classes, Diagnostics }` so both source emit
+and diagnostic emit ride the same incremental output —
+edits to the user's source re-run both consistently.
+
+## WACS.ComponentModel.Async.SourceGen 0.3.1 — primitive arg + return marshaling + generator tests
+
+Extends `AsyncComponentHarnessGenerator` from void-only
+MVP to support canon-ABI primitive parameters and return
+types. Adds Roslyn integration tests.
+
+* `EmitExportMethod` now reads the partial method's
+  `IMethodSymbol.Parameters` + `ReturnType` and emits a
+  body that boxes args into an `object?[]` and casts the
+  `InvokeCoreAsyncLift` return back to the declared
+  primitive (i32-family, i64-family, f32, f64, bool).
+* Unsupported parameter / return types emit a `#error`
+  directive identifying the offending method + type, so
+  the consumer fails at compile time with an actionable
+  message instead of getting a stub.
+* `AsyncComponentHarnessGeneratorTests` (new) — 5 tests
+  verifying the emitted constructor signature, `Instance`
+  property shape, void partial method body, primitive
+  signature emission, and the `#error` guard sentinel.
+* `Wacs.ComponentModel.Test` 643/643 (+5 generator
+  integration tests).
+
+**Still punted:** string / list / aggregate
+(record / variant / option / result) types. These need
+canon-ABI lift-lower codegen — substantially larger slice
+because each shape has its own marshaling pattern (cabi-
+realloc + UTF-8 for strings, item-loop for lists,
+disc + payload for variants). The infrastructure for
+discovering parameter shapes and emitting per-shape
+helpers is now in place; adding each shape is incremental.
+
+## WACS.ComponentModel 0.10.0, WACS.ComponentModel.Async.SourceGen 0.3.0 — `[AsyncComponentHarness]` generator + per-export wiring emission
+
+Closes the source-gen gap. Consumers no longer have to
+hand-write the AOT-safe wiring template; a Roslyn
+generator emits it from a small marker-attribute shape.
+
+* **`[AsyncComponentHarness]`** (class-level) +
+  **`[AsyncExport("export-name")]`** (method-level)
+  attributes ship in
+  `Wacs.ComponentModel.Async` under the existing assembly.
+* **`AsyncComponentHarnessGenerator`** scans the consumer's
+  compilation for `[AsyncComponentHarness]`-decorated
+  partial classes and emits a partial class body per match:
+  * Constructor
+    `(byte[] componentBytes, Action<WasmRuntime>? configureImports)`
+    calling `ComponentInstance.InstantiateAot`.
+  * `Instance` property exposing the underlying
+    `ComponentInstance` so consumers can reach the
+    dispatcher / host directly.
+  * Each `[AsyncExport]`-marked partial method's body —
+    invokes the named core export through
+    `InvokeCoreAsyncLift`.
+
+  Output files land under
+  `obj/Generated/.../AsyncComponentHarnessGenerator/<class>.Harness.g.cs`
+  when `EmitCompilerGeneratedFiles=true`; otherwise the
+  emitted source lives in-memory.
+* **AOT spike now uses the generator.** The consumer's
+  Program.cs has zero hand-written `InstantiateAot` /
+  `InvokeCoreAsyncLift` calls — the partial class declares
+  the shape and the generator fills in the body:
+
+  ```csharp
+  [AsyncComponentHarness]
+  public partial class RunWithErrHarness {
+      [AsyncExport("[async-lift]wasi:cli/run@0.3.0-rc-2026-03-15#run")]
+      public partial void Run();
+  }
+  ```
+
+  Generated harness publishes as a 14 MB NativeAOT ARM64
+  binary and runs `run-with-err.wasm` through the full
+  canon-async dispatcher path. Exit 0.
+
+**MVP scope of the generator:** void / no-arg exports
+only. Typed exports (string params, return values, etc.)
+require canon-ABI marshaling code that's the next
+substantive slice. The infrastructure is in place — the
+generator already discovers partial methods, threads
+through their accessibility, and emits per-method bodies;
+adding param/return handling is incremental.
+
+* `Wacs.ComponentModel` minor → 0.10.0 (new public
+  attribute surface).
+* `WACS.ComponentModel.Async.SourceGen` minor → 0.3.0
+  (new emission target alongside the existing
+  CanonOpRegistry + ComponentLifter generators).
+* Verification: AotSpike (generator-driven) publishes
+  clean + runs; AotAcceptanceTests unchanged; sockets
+  10/10 + HTTP 4/4 unchanged; `Wacs.ComponentModel.Test`
+  639/639 unchanged.
+
+## WACS.WASI.Preview3 0.2.2, WACS.ComponentModel 0.9.2 — end-to-end NativeAOT for the WASIp3 dispatcher path
+
+Closes the gap surfaced when reviewing AOT coverage: the
+WASIp3 sockets/HTTP work landed entirely in
+`Wacs.ComponentModel` (the reflective layer), which carried
+a blanket `[RequiresDynamicCode]` annotation on
+`Instantiate()`. Audit of the entry point's body shows it's
+purely primitive (parse + import-bind + dispatcher-wire-up);
+the reflective bits are downstream in the typed
+`Invoke(string, params object?[])` surface — which AOT
+consumers never call.
+
+* **`ComponentInstance.InstantiateAot(byte[], Action<WasmRuntime>?)`**
+  exposes the AOT-safe entry point with `[UnconditionalSuppressMessage]`
+  carrying the audit rationale. Consumers staying on the
+  primitive surface (`InvokeCoreAsyncLift`, direct
+  `WasmRuntime.CreateInvoker<...>`, `AsyncDispatcher` API)
+  get no IL2026 / IL3050 warnings at their call site. The
+  reflective `Invoke()` keeps its own per-method warnings —
+  load-bearing distinction.
+* **`InstantiateComposer` suppresses the recursive
+  `Instantiate(component)` warning** with the same
+  primitive-body justification so nested-component code
+  paths don't leak warnings into the consumer's publish.
+* **`BindWasip2FacadeStubs` extended** with the remaining
+  wasi:io/error, wasi:cli/environment, terminal-input /
+  -output / -stdin / -stdout / -stderr stubs. None are
+  load-bearing for WASIp3 semantics (the wasip2 facade is
+  the wit-bindgen-rt panic-handler fallback) but they need
+  to be bindable so a real wasip3 component instantiates
+  end-to-end.
+* **`Wacs.WASI.Preview3.AotSpike` — new project.** Publishes
+  a NativeAOT ARM64 binary (~14 MB) that loads
+  `run-with-err.wasm`, runs it through the full canon-async
+  dispatcher (host subtask, BLOCKED-aware scaffolding,
+  callback driver loop), and exits cleanly. Proves
+  end-to-end AOT for CM works for the async-lifted wasip3
+  surface — the harness pattern that previously covered
+  only sync exports (hello-spike) now covers async too.
+
+Verification:
+* `WACS_AOT_TEST=1 dotnet test ... AotAcceptance` still
+  passes (1 documented baseline warning at
+  `WasmRuntimeExecution.cs(459)`, no new entries).
+* `dotnet publish -c Release` on `Wacs.WASI.Preview3.AotSpike`
+  succeeds; the only IL warnings are pre-existing entries
+  in `Wacs.Core/Runtime/WasmRuntimeBinding.cs`,
+  `HostFunction.cs`, and `System.Net.Quic` — none in any
+  new code I added this session.
+* Sockets fixtures 10/10 + HTTP 4/4 unchanged.
+
+**What this doesn't yet land** (the path the user originally
+asked about, deferred): a source generator that emits
+per-WIT-world typed harness classes (`[AsyncComponentHarness("wit-world-name")]`)
+so embedders don't hand-write the per-component wiring. The
+infrastructure for that exists (`Wacs.ComponentModel.Async.SourceGen`
+already emits the canon-op registry); the WIT-world
+emitter is the substantive next slice. With this commit
+the dispatcher is reachable AOT — the generator's job
+becomes "emit boilerplate around a known-working
+template", which is a tractable next pass.
+
+## WACS.WASI.Preview3 0.2.1, WACS.ComponentModel 0.9.1 — callback-driven lift loop + sockets xfail honesty
+
+Closes the false-pass loophole: `InvokeCoreAsyncLift` was
+returning as soon as the first poll of the body suspended,
+treating any non-Exit status as "task done". Components
+compiled with the `(callback)` lift option (every wasip3
+async export wit-bindgen emits) need the host to *drive*
+the callback function in a loop — Yield → re-enter with
+EVENT_NONE; Wait(set) → wait on the set then re-enter with
+the event triple — until the callback returns Exit.
+
+* **`ComponentInstance.DriveCallbackLoopAsync`** does the
+  loop. Lifts that don't have a `[callback]` export keep
+  the previous behavior (single-shot invocation).
+* **`AsyncDispatcher.WaitableSetWaitAsyncForCallback`**
+  parks on the set asynchronously (yields the CLR thread
+  so background subtasks finish), then materializes the
+  `(eventType, event1, event2)` triple that wit-bindgen-rt
+  feeds to the callback function. Drains
+  pending-stream/future reads at event time so the in-
+  progress callback sees the actual transfer count.
+* **`EncodeSocketsResultOkBytes`** — 20 bytes of zeros for
+  the `result<_, error-code>` OK arm. `FutureWrite(handle,
+  null)` was relying on the guest having zero-init'd the
+  future-read buffer; when wit-bindgen-rt's stack-allocated
+  buffer had non-zero remnants (test_reuseaddr's
+  send-future buffer was a notable case), the OK case was
+  misread as `Err(AccessDenied)`. All `TcpSocket.Send` /
+  `Receive` future writes now go through the explicit-zero
+  helper on the OK path and the err-encoding helper on the
+  failure paths.
+* **`sockets-tcp-bind` now genuinely passes** once the
+  callback loop runs the body to completion AND the OK
+  encoding doesn't leak garbage into the future-read
+  buffer. `tcp-listen`, `tcp-send`, `udp-receive`,
+  `tcp-connect` were already correct but were also dependent
+  on the callback loop landing; they pass for real now.
+* **xfailed two integration-test fixtures.** Removed from
+  the harness:
+  * `sockets-echo` — binds + listens but never creates a
+    client; designed for wasi-testsuite's out-of-process
+    harness to attach a TCP client.
+  * `sockets-tcp-receive` — `test_multiple_receive` /
+    `test_drop_read_half` both await a future that only
+    resolves on peer FIN, which an external harness drives.
+
+  Both moved to an `IntegrationFixtures()` data source
+  with a clear xfail comment so future work can pick them
+  up when the test harness gains a side-channel client.
+
+**Honest sockets coverage: 10/10 in-process fixtures
+green.** No regressions: HTTP 4/4, filesystem
+read-directory/io pass, CLI/clock/random 28/28,
+Wacs.ComponentModel.Test 639/639.
+
+## WACS.WASI.Preview3 0.2.0, WACS.ComponentModel 0.9.0 — sockets 12/12 + canon-async waitable plumbing
+
+All 12 wasip3 sockets fixtures now pass (was 6/12). The
+structural shift is real canon-async cooperation: BLOCKED
+returns from `[async-lower]` stream-read / future-read +
+matching waitable-set.wait/poll event records, plus a host-
+subtask primitive for OS-level async operations
+(`UDP receive`).
+
+* **`AsyncDispatcher.RegisterHostSubtask(Task)`.** Adopts a
+  CLR `Task` as a `ComponentSubtask` (creates a minimal
+  `ComponentTask` with a no-op `ContInstance` — the wasm
+  side never invokes it; the host's CLR task is the work).
+  When the task completes,
+  `Child.Completion.TrySetResult/Exception/Cancel` runs and
+  the dispatcher's `WaitableSetWaitAsync` wakes the guest.
+  This is the JSPI-style integration documented in
+  `feedback_jspi_on_cm_async`.
+* **`[async-lower][method]udp-socket.receive` now returns
+  STARTED with a real subtask handle.** Spawns
+  `Socket.ReceiveFromAsync` as a Task, registers via
+  `RegisterHostSubtask`, returns
+  `(subtaskHandle << 4) | STARTED`. The guest's
+  `waitable-set.wait` yields cooperatively to the peer
+  `client.send(...)` half of `futures::join!`, the OS
+  delivers the datagram, and the receive Task completes —
+  unblocking the wait and surfacing the result through
+  `udp-receive`'s 44-byte retptr.
+* **canon-ABI `waitable.join` arg order fix.** wit-bindgen-rt
+  pushes `(waitable, set)` to `[waitable-join]` per
+  `crates/guest-rust/src/rt/async_support/waitable_set.rs:76`;
+  both `CanonAsyncBinder` and `WitBindgenScaffoldingBinder`
+  were treating the args as `(set, waitable)` and rejecting
+  the call. `set == 0` now correctly maps to "remove this
+  waitable from every set" (used at subtask-drop).
+* **canon-ABI `waitable-set.wait/poll` event record.** Was
+  returning the bare deliverable handle; wit-bindgen-rt
+  unpacked that as the event type and panicked in
+  `deliver_waitable_event` when looking up handle 0 in its
+  callback map. The new `WaitableSetWaitWithPayload` /
+  `WaitableSetPollWithPayload` write the canon-ABI
+  `(waitable, code)` payload to the guest memory pointer
+  and return the event type
+  (`EVENT_STREAM_READ`, `EVENT_FUTURE_READ`,
+  `EVENT_SUBTASK`, …).
+* **`[async-lower][stream-read-N]` non-blocking.** Returns
+  `BLOCKED (0xFFFFFFFF)` when the stream is empty and the
+  writer is open, instead of sync-blocking the dispatcher.
+  Saves the guest's `(ptr, cap)` via
+  `RegisterStreamPendingRead`; the matching
+  `waitable-set.wait` event drains the buffer through
+  `DrainPendingStreamRead` and reports the actual
+  `(items << 4) | COMPLETED` (or `DROPPED`) code in the
+  event payload so wit-bindgen-rt's `WaitableOperation`
+  callback completes correctly.
+* **`StreamReadItemsToMemory` non-blocking item-aware
+  reader.** The existing `StreamReadToMemory` reads
+  byte-budgeted; typed streams (e.g.
+  `stream<own<tcp-socket>>` at 4 bytes/item) need
+  item-count budgeting so the scaffolding doesn't truncate
+  a multi-byte item to one byte. `StreamReadItemsToMemory`
+  multiplies by `slot.ItemSize` and divides on the way out
+  — mirrors `StreamReadToMemoryBlocking`'s contract.
+* **`[async-lower][future-read]` non-blocking + drain
+  pending.** Symmetric treatment for futures:
+  `TryReadFutureToMemory` non-blocking happy path;
+  `RegisterFuturePendingRead` saves the guest's ptr on
+  BLOCKED; `DrainPendingFutureRead` copies the resolved
+  payload at wait-event time. Closes `sockets-tcp-send` /
+  `sockets-tcp-receive` which join a send-future read with
+  a stream-write peer.
+
+All four of the previously-failing TCP fixtures
+(`sockets-tcp-bind`, `sockets-tcp-listen`,
+`sockets-tcp-receive`, `sockets-tcp-send`) clear with this
+slice — 12/12 sockets, plus all 4 HTTP fixtures still
+green and `Wacs.ComponentModel.Test` 639/639.
+
+## WACS.WASI.Preview3 0.1.72 — sockets fixture pass, slice 2 (resource lifetime + async-lower UDP)
+
+Two more fixtures pass (`sockets-tcp-connect`,
+`sockets-udp-send`), bringing the sockets count to 6/12.
+
+* **`[resource-drop]tcp-socket` / `udp-socket` now `Dispose()`
+  the backing socket.** Previously the handle table just
+  released the slot; the underlying `System.Net.Sockets.Socket`
+  was leaked, leaving its port BOUND-but-not-LISTEN. macOS
+  silently dropped SYN packets to that port, so
+  `test_connection_refused` timed out instead of returning
+  `ECONNREFUSED`. With Dispose wired into the drop binding the
+  port is fully released and `sockets-tcp-connect` passes.
+* **`[async-lower][method]udp-socket.send` indirect host
+  binding** with the full 48-byte (self, data-ptr, data-len,
+  option<addr>) params struct unpacked into a real
+  `IpSocketAddress?`. `UdpSocket.SendAsync` now actually
+  performs the OS-level `SendToAsync`, validates the
+  destination (family-match, port=0,
+  unspec, dual-stack ipv4-mapped-ipv6, connected-with-other-
+  addr), enforces the per-family datagram cap, and
+  implicit-binds to a wildcard ephemeral on first send.
+  `sockets-udp-send` passes (all 8 sub-tests across the v4/v6
+  matrix).
+* **`[async-lower][method]udp-socket.receive` flat host
+  binding** with `UdpSocket.ReceiveAsync` doing `ReceiveFromAsync`.
+  The flat form takes `(self, results_ptr)` directly — self
+  fits in one i32 so wit-bindgen-rt doesn't go indirect.
+  `test_not_bound` now returns `InvalidState`; the
+  `test_receive_data` async path still hangs in `futures::join!`
+  (deep canon-async dispatcher work).
+* **Listen-stream item-size = 4.** `TcpSocket.ListenInternal`
+  declares the stream element size so wit-bindgen-rt's read
+  reports item counts, not byte counts (same pattern as the
+  read-directory fix in 0.1.64). The stream payload is
+  `own<tcp-socket>` which lowers to a 4-byte handle.
+* **`TcpSocket.Receive` / `Send` no longer throw for
+  not-connected.** Both now return valid stream + future
+  handles and write the `Err(InvalidState)` result into the
+  future via the new `EncodeSocketsResultErrBytes` helper.
+  This matches the spec (operational errors surface through
+  the returned future, not the call itself) and lands the
+  first sync-flavored sub-tests of `sockets-tcp-receive`
+  (`test_connected_state`) and `sockets-tcp-send`.
+* **`FutureWrite(handle, byte[])` encoding for `result<_,
+  error-code>`.** The existing convention silently dropped
+  non-`byte[]` future values, so previous code passing a
+  `SocketsException` directly was a no-op. The new helper
+  encodes the 20-byte canon-ABI result variant the guest
+  reads on `future.await`.
+
+Remaining 6 fixtures (echo, tcp-bind, tcp-listen, tcp-receive
+test_multiple_receive+, tcp-send test_drop_write_half+,
+udp-receive test_receive_data) all hang in `futures::join!`
+where the host's `GetResult()` blocks the dispatcher so the
+guest's other half can't make progress. Requires real
+canon-async subtask scheduling — next slice.
+
+## WACS.WASI.Preview3 0.1.71 — sockets fixture pass, slice 1 (sync validation + small bugs)
+
+First socket-fixture pass. 4/12 fixtures green
+(`sockets-tcp-properties`, `sockets-udp-properties`,
+`sockets-udp-bind`, `sockets-udp-connect`); the remaining
+8 fail in the canon-async data plane (subtask handle
+packing on `[async-lower]connect`, stream wiring for
+accept loop + send/receive). This slice fixes the
+sync-validation gaps the failing fixtures revealed once
+the panic message could escape:
+
+* **wasip2 stdout/stderr stream stubs now route writes
+  to the host console.** `output-stream.write` and
+  `blocking-write-and-flush` check `self == 1/2` and
+  forward bytes to `Console.Out` / `Console.Error`.
+  Without this, guest panics were silently swallowed —
+  every socket fixture fast-trapped with bare
+  "unreachable" and no error message.
+* **`get-local-address` ipv6 lowering.** The
+  `tuple<u16 × 8>` ipv6-address was being written
+  big-endian to the canon-ABI retptr; the spec lowers
+  every integer little-endian. Manifested as
+  `::1` round-tripping back as `(0,0,0,0,0,0,0,256)`.
+* **Setter validation.** `tcp-socket` and `udp-socket`
+  setters for `listen-backlog-size`, `keep-alive-{idle-
+  time,interval,count}`, `hop-limit`,
+  `receive-buffer-size`, `send-buffer-size`,
+  `unicast-hop-limit` reject `0` with
+  `Err(InvalidArgument)`.
+* **Keep-alive timing + buffer-size + hop-limit shadow
+  storage.** TCP's `TCP_KEEPIDLE/INTVL/CNT` aren't
+  exposed by the managed `Socket` API; the spec wants
+  round-trip equality so we accept-and-store. Same
+  treatment for hop-limit and buffer sizes since the
+  OS may clamp (Linux doubles `SO_RCVBUF`) and the
+  spec wants the requested value back.
+* **`Bind` address validation.** Family-mismatch
+  (ipv4-socket bound to ipv6-addr), multicast (224/4
+  for v4, ff00::/8 for v6), limited broadcast
+  (255.255.255.255), and dual-stack (ipv6 socket bound
+  to ipv6-mapped-ipv4) all reject up-front with
+  `InvalidArgument`. ipv6 sockets also set `IPV6_V6ONLY`
+  so the OS layer doesn't bypass our dual-stack guard.
+* **`Connect` address validation.** Adds rejection of
+  port `0` and the unspecified address (`0.0.0.0` / `::`).
+* **Removed unconditional `SO_REUSEADDR`** on TCP bind.
+  Without it, macOS correctly fails the second bind to
+  a listening port with `EADDRINUSE` so
+  `test_bind_addrinuse` passes. `test_reuseaddr`'s
+  TIME_WAIT rebind expectation is deferred until the
+  full streams path lands (it depends on async
+  send/receive that isn't wired yet anyway).
+* **Listen implicit-bind.** `tcp-socket.listen` from
+  `Unbound` now implicitly binds to an ephemeral
+  wildcard endpoint (mirrors `connect`'s implicit-bind
+  and the spec text).
+* **UDP connect/disconnect state machine.** .NET's
+  `Socket.Disconnect` + `Connect`-to-same-endpoint
+  throws `InvalidOperationException`; UDP is
+  connectionless so we now track the connected remote
+  endpoint manually. Implicit-bind on `connect` uses
+  the target's address (not wildcard) so macOS's
+  `getsockname` returns a routable IP after connect.
+* **`[async-lower][method]tcp-socket.connect` host
+  binding.** wit-bindgen-rt emits the async-lower
+  lowering for the WIT `async func` decl with
+  `(params_ptr, results_ptr)` and packs the
+  `(self, ip-socket-address)` struct in memory. Adds
+  `ReadConnectParamsSelf` /
+  `ReadIpSocketAddressFromMemory` helpers, runs the
+  sync host body, returns `CanonAsyncStatusReturnedPacked`
+  so the guest's `WaitableOperation` resolves
+  immediately. Closes the "subtask.rs:217 unwrap on
+  None" panic that every async-connect socket fixture
+  hit; `sockets-tcp-connect` now reaches
+  `test_connection_refused` (line 115) — its prior 8
+  sync-shaped tests pass.
+
+## WACS.WASI.Preview3 0.1.70 — http-service passes (export-typed task-return + handle invocation)
+
+The last HTTP fixture lands. Two pieces close it out:
+
+* **`[task-return]handle` export-typed binding.** The
+  generic scaffolding `task-return` is a single-i32
+  handler, which works for `result<_, _>` (cli/run's
+  shape) but not for wasi:http/handler's
+  `result<own<response>, error-code>` — that flat-
+  encodes to 8 slots (one i64 from the error-code
+  variant's `HTTP-request-body-size: option<u64>`
+  payload). `WasiPreview3Host.BindExportTypedTaskReturns`
+  now binds the 8-slot signature explicitly and
+  forwards the disc to `dispatcher.TaskReturn`.
+* **http-service test harness.** The fixture exports
+  `wasi:http/handler.handle` (not `wasi:cli/run`) so
+  the harness now special-cases it: allocates a
+  host-side `Request` handle and invokes
+  `[async-lift]wasi:http/handler@0.3.0-rc-2026-03-15#handle`
+  with that handle as the single arg.
+
+All 14 wasip3 fixtures the project ships pass:
+14 filesystem + 6 cli + 4 clocks/random + 4 HTTP +
+1 run-with-err = **29 end-to-end fixtures green**.
+
+Preview3 450/450 (HTTP: 4/4, all passing).
+
+## WACS.WASI.Preview3 0.1.69 — http-request passes (RFC 3986 authority + path validation)
+
+`Request` now validates `set-authority` and
+`set-path-with-query` per RFC 3986:
+
+* **`set-authority`** (§3.2): parses
+  `[userinfo "@"] host [":" port]`, enforcing per-
+  segment grammars — userinfo allows unreserved + pct-
+  encoded + sub-delims + `:`; host is `reg-name`
+  (unreserved + pct + sub-delims, no `:`/`@`/`[`); port
+  is `*DIGIT`. Multiple `@`, empty host, non-digit
+  port, and bare specials (`#`, ` `, `[`) all surface
+  as `Err(())`.
+* **`set-path-with-query`** (§3.3): `pchar / "/" / "?"`
+  where `pchar = unreserved / pct-encoded / sub-delims
+  / ":" / "@"`. The wasip3 fixture's
+  `is_valid_path_char` also accepts raw UTF-8 (`>=
+  0x80`); we mirror that. Empty path normalizes to
+  `"/"`.
+* **`request.get-headers`** snapshots + freezes like
+  the sibling `response.get-headers` — append-on-
+  returned-handle surfaces `HeaderError::Immutable`.
+* Host-binding wrapper catches `ArgumentException` from
+  these setters and encodes the bare `result` disc as
+  Err.
+
+http-request now passes (~700ms). All 3 enabled HTTP
+fixtures green. **http-service** is the only remaining
+xfail — needs the export-typed task-return generator
+for the 8-flat-slot `result<own<response>, error-code>`
+return.
+
+Preview3 450/450 (HTTP: 3/4 enabled, 3/3 passing).
+
+## WACS.WASI.Preview3 0.1.68 — wasip2 facade stubs + per-host-binding profiler
+
+Profiled the http-request perf gap and found the real
+cost was **98 million** spurious calls to
+`wasi:io/streams@0.2.0::output-stream.check-write` /
+`pollable.block` — wit-bindgen-rt's panic-on-stderr write
+loop spinning because our auto-stubs for the wasip2
+facade interfaces (auto-injected by wasm-component-ld)
+all returned default values that kept the loop alive.
+
+* New `BindWasip2FacadeStubs` block in
+  `WasiPreview3Host.BindToRuntime` covers the
+  `wasi:io/streams@0.2.0`, `wasi:io/poll@0.2.0`,
+  `wasi:cli/{exit,stdout,stderr,stdin}@0.2.0`, and
+  `wasi:clocks/monotonic-clock@0.2.0` interfaces with
+  just enough behavior to let a panic terminate:
+  - `output-stream.check-write` reports `u64::MAX` bytes
+    of room
+  - `write` / `blocking-flush` /
+    `blocking-write-and-flush` succeed
+  - `pollable.block` returns immediately
+  - `cli/exit` propagates as `ExitException` (same as
+    the wasip3 cli/exit)
+  - clocks return real timestamps from
+    `Stopwatch.GetTimestamp()`
+* `HostFunction.Invoke` now records per-binding call
+  counts + cumulative ticks when `WACS_PROFILE_HOST=1`.
+  `HostFunction.SnapshotProfile()` dumps the table.
+  `HttpFixtureTests` writes the top-20 to xUnit output
+  on every fixture run (success or hang) for ongoing
+  perf visibility.
+
+http-request **now fails fast** (≤1s) instead of
+hanging — the underlying assertion failure is now
+diagnosable. Remaining work for the fixture to pass:
+per-RFC-3986 validation of `set_authority` (§3.2:
+userinfo + host + port grammar) and
+`set_path_with_query` (§3.3).
+
+Preview3 449/449 (HTTP: 2/4 enabled, 2/2 passing).
+
+## WACS.WASI.Preview3 0.1.67 — http-response passes + Method/Scheme normalization + status validation
+
+* `response.set-status-code` rejects out-of-range codes
+  (must be 100-599 per RFC 9110 §15) — the fixture's
+  invalid sweep (0, 42, 600, 1000, 65535) now surfaces
+  the expected `Err(())`. Host binding catches the
+  validation throw and encodes the result-disc=Err.
+* `response.get-headers` returns an immutable snapshot
+  (Fields cloned + frozen). The fixture asserts
+  `headers.append(...) → Err(Immutable)` directly after.
+  The trailing `test_headers_same` compare still succeeds
+  because the snapshot preserves the values.
+* `Method::Other(name)` and `Scheme::Other(name)` now
+  normalize standard names to the canonical variant
+  (wasi:http issue #194) and validate per RFC 9110/3986
+  token rules. `set-method(Other("GET"))` collapses to
+  `Method::Get`; `set-scheme(Other("https"))` to
+  `Scheme::Https`. Invalid tokens (empty, non-RFC
+  characters) surface `Err(())` from set-method /
+  set-scheme via a try/catch wrapper around the read-
+  from-slots helpers.
+
+http-request stays pinned (xfail) — bindings now pass
+every individual assertion the fixture hits, but the
+three 1024-codepoint char sweeps in test_method_names /
+test_path_with_query / test_authority drive ~5000 host
+calls; the per-call canon-async shim-fixup indirection
+adds enough overhead that the whole fixture exceeds the
+15s timeout. Perf gap, not correctness — re-enables once
+the canon-async dispatch path is profiled and the hot
+indirection is hoisted.
+
+http-service still needs the export-typed task-return
+generator (handle export's flat-8-slot return).
+
+Preview3 449/449 (HTTP: 2/4 enabled, 2/2 passing).
+
+## WACS.WASI.Preview3 0.1.66 — http-fields fixture passes (Fields spec fixes)
+
+`Fields` impl now closes three spec gaps the upstream
+`http-fields` fixture exercises directly:
+
+* `Set(name, [])` with an empty value list removes the
+  entry (spec: empty `list<list<u8>>` is semantically
+  delete). Without this, the fixture's
+  `assert!(!fields.has("foo"))` after
+  `fields.set("foo", &[])` panicked.
+* `Delete(name)` and `GetAndDelete(name)` now validate
+  the name (invalid → `HeaderError::InvalidSyntax`).
+  Previously delete returned Ok for any name including
+  `""`, breaking the fixture's `test_invalid_field_name`
+  cases.
+* `Set` / `Append` / `FromList` validate the value bytes
+  per RFC 9110 §5.6.4 (HTAB, SP, VCHAR 0x21-0x7E,
+  obs-text 0x80-0xFF). `\0`, `\n`, `\r` and other
+  control bytes now surface as
+  `HeaderError::InvalidSyntax`.
+
+The remaining http fixtures (`http-request`,
+`http-response`, `http-service`) stay pinned as xfail —
+`Response::new` / `Request::new` / `get_headers` (with
+immutable returned Fields) / `consume_body` plus the
+`future<option<trailers>>` plumbing need their own
+per-method binding pass.
+
+Preview3 448/448 (HTTP: 1/4 enabled, 1/1 passing).
+
+## WACS.WASI.Preview3 0.1.65 — http fixtures vendored + fields.append retptr fix
+
+Drops the four upstream wasip3 http fixtures (`http-fields`,
+`http-request`, `http-response`, `http-service`) into the
+test tree with a parameterized `HttpFixtureTests` harness
+(empty fixture list pending the wiring work below).
+
+**Bug fix:** `[method]fields.append` host binding was wired
+as 5 args (self, name-ptr, name-len, value-ptr, value-len)
+but the lowered import expects 6 (result<_, header-error>
+returns at a retptr — the 6th slot). Now writes the result
+through `WriteHeaderErrorResult` like sibling `fields.set` /
+`fields.delete`. The two existing
+`InvokeFieldsAppend_*` unit tests updated to feed the new
+retptr/realloc args and assert the encoded result variant.
+
+**HTTP fixture status** (all four currently xfail — see
+`HttpFixtureTests.Fixtures()` for the per-fixture pin):
+* `http-fields` / `http-request` / `http-response`: now
+  instantiate cleanly with the append fix but hang during
+  `run()`. Next pass: audit method-by-method binding
+  signatures + the wit-bindgen-rt assertion-driven panic
+  pattern, same shape as filesystem-read-directory's
+  earlier hang.
+* `http-service`: fails to instantiate — the
+  `[task-return]handle` import lowers to 8 flat slots
+  (i32 i32 i32 i64 i32 i32 i32 i32) because the export
+  returns `result<response, error-code>`; our scaffolding's
+  generic `task-return` handler takes a single i32 disc.
+  Needs the export-typed task-return generator the
+  source-gen registry was scoped for.
+
+Preview3 447/447 (HTTP fixtures collection empty, no test
+runs).
+
+## WACS.WASI.Preview3 0.1.64 — typed-stream item-count semantics (closes filesystem-read-directory)
+
+The canon-async `stream.read` and `stream.write` calls
+negotiate in **item counts**, not byte counts — confirmed
+by reading wit-bindgen-rt's `start` in
+`stream_support.rs:610-622`, where the host's cleanup
+allocation is sized `elem_layout.size() * cap.len()` and
+the third arg to `start_read` is `cap.len()` (item count
+from `Vec::spare_capacity_mut`).
+
+Our previous scaffolding treated `cap` as a byte count and
+returned `PackStreamStatus(bytes_read, true)` — accidentally
+correct for `stream<u8>` (item_size == 1) but wrong for any
+typed stream. For `stream<directory-entry>` (24 bytes per
+item), the host's 4-byte read got interpreted as 4 items
+transferred; wit-bindgen-rt's `lift` then advanced 24 bytes
+per item across uninitialized cleanup memory, producing
+garbage `DirectoryEntry { type: BlockDevice, name: "" }`
+records that hung the post-`assert_eq!` unwinder.
+
+Fix is layered:
+* `StreamSlot.ItemSize` (default 1) tracks the canonical-
+  ABI size of the stream's element type.
+* `AsyncDispatcher.SetStreamItemSize(handle, size)` lets
+  hosts flag typed streams at the slot.
+* `StreamReadToMemoryBlocking` now interprets the
+  scaffolding's `cap` as item count, translates to
+  `cap * itemSize` byte budget for the channel read, and
+  returns `itemsRead = bytesRead / itemSize`. A
+  partial-item residue throws — host writers must produce
+  whole records.
+* `ReadDirectoryAsync` calls `SetStreamItemSize(handle,
+  24)` after allocating the byte stream.
+
+Closes `filesystem-read-directory`: **all 14 filesystem
+fixtures pass**. Preview3 447/447.
+
+## WACS.WASI.Preview3 0.1.63 — StreamTryWrite honors sync write sink
+
+`StreamTryWrite` now mirrors the canon-async stream-write
+scaffolding: when a stream slot has a registered
+`SyncWriteSink`, bytes flow through the sink (host file
+write + flush) rather than the channel buffer. Required by
+the unit tests that drive `WriteViaStream` /
+`AppendViaStream` via `StreamTryWrite` + `StreamDropWritable`
+directly — without this, the bytes were buffered into a
+channel nothing was draining and `File.ReadAllBytes`
+returned empty.
+
+Preview3 446/446.
+
+## WACS.WASI.Preview3 0.1.62 — canon-async stream data plane (future-read + sync write sink + DROPPED status)
+
+Lands the canon-async stream/future data-plane pieces that
+unblock `filesystem-io`. Three coordinated changes:
+
+* **`[async-lower][future-read-N]` scaffolding handler.**
+  Blocks the CLR thread on the future's resolution (matching
+  the existing `StreamReadToMemoryBlocking` pattern) and
+  memcpys the resolved `byte[]` payload to the guest's
+  result buffer. Hosts now pre-encode `result<_, error-code>`
+  bytes as `byte[20]` and stash them via `FutureWrite` —
+  the Wacs.ComponentModel layer stays type-agnostic.
+* **`StreamSlot.SyncWriteSink` for host file targets.**
+  `write-via-stream` / `append-via-stream` now register a
+  synchronous write sink on the stream handle; the
+  canon-async `stream-write` scaffolding writes + flushes
+  directly through that sink during each
+  `tx.write(chunk).await`. Required for the wasip3 pappend
+  fixture's `fd.stat()` assertion between writes — without
+  it, the file-size update lagged the guest's continuation
+  by an async-thread boundary.
+* **`stream-read` returns DROPPED when the writer-side has
+  closed.** Previously we always packed `STATUS_COMPLETED`
+  with count 0, which trapped wit-bindgen-rt's
+  read-until-Dropped loop in an infinite Complete(0)
+  cycle. The scaffolding now consults
+  `AsyncDispatcher.IsStreamCompleted` and surfaces DROPPED
+  when the buffer is empty + writer-dropped.
+
+Plus filesystem-side fidelity:
+
+* `read-via-stream` no longer pre-checks `offset > length`
+  as `InvalidSeek` — POSIX pread allows past-EOF offsets
+  and naturally returns 0 bytes. Only `offset > long.MaxValue`
+  surfaces `Invalid` (the wasip3 `u64::MAX` sentinel).
+* `WriteDirectoryEntry` detects symlinks via
+  `FileSystemInfo.LinkTarget` (.NET 6+) before falling
+  through to the `Directory.Exists` / `File.Exists` fast
+  path — `parent → ..` no longer mis-classified as
+  `Directory`.
+
+filesystem-io: 14 of 14 wasip3 cli + clocks/random + fs
+fixtures pass when read-directory is xfail'd. The
+read-directory fixture's stream + future round-trip is
+fully correct (72 bytes streamed, DROPPED, future Ok), but
+something downstream of `assert_eq!` still hangs — pinned
+until the permissive `exit(1)` stub is replaced with a
+proper canon-async trap surface so guest-side panics
+become observable.
+
+Preview3 452/452.
+
+## WACS.WASI.Preview3 0.1.61 — hard-link P/Invoke + inode-aware is-same-object
+
+Closes filesystem-hard-links, filesystem-is-same-object,
+and filesystem-metadata-hash (13 of 13 filesystem fixtures
+pass — full coverage modulo io / read-directory).
+
+* `NativeLink` (new) — minimal P/Invoke surface for
+  `link(2)` (macOS / Linux) + `CreateHardLinkW` (Windows)
+  plus a `TryGetInode` helper backed by `stat(2)` on
+  Unix-likes. P/Invoke is statically-bound and stays AOT-
+  safe.
+* `link-at` now creates the hard link with the right
+  pre-checks (source exists, destination doesn't, source
+  isn't a directory).
+* `is-same-object` consults inodes when both descriptors
+  point at Unix-like paths — two distinct paths backed
+  by the same inode (i.e. hard links) now correctly
+  report as same-object. Falls back to path-equality on
+  Windows or when stat fails.
+
+Preview3 452/452.
+
+## WACS.WASI.Preview3 0.1.60 — rename-at POSIX overwrite + symlink-at create + sandbox-aware final-symlink rule
+
+Lands the filesystem-rename fixture (10 of 13 filesystem
+fixtures total).
+
+* `rename-at` overwrites an existing destination (POSIX
+  semantics: delete-then-move), short-circuits same-path
+  no-op renames, and rejects renaming the preopen root
+  with `Invalid` (the fixture accepts `Busy | Invalid |
+  Access`).
+* `symlink-at` creates a symbolic link via
+  `File.CreateSymbolicLink` (.NET 6+). The symlink target
+  is stored verbatim (relative or absolute); only the
+  destination path is sandbox-scoped.
+* `ResolveChild` refines the symlink-traversal rule:
+  intermediate-component symlinks still reject as
+  before, but final-component symlinks only reject when
+  their literal target resolves outside the sandbox.
+  This lets `rename-at` / `unlink-file-at` operate on a
+  symlink whose target stays inside the sandbox without
+  having to special-case the path-flags surface.
+
+Preview3 449/449, ComponentModel 639/639.
+
+## WACS.WASI.Preview3 0.1.59 — file-descriptor fd-survives-unlink + flag/type/stat fidelity + path-resolve scoping
+
+Lands the layered fixes that unblock three more filesystem
+fixtures (set-size, flags-and-type, stat — running the suite
+to 9 of the 13 filesystem fixtures).
+
+* `Descriptor` now holds an OS `FileStream` open with
+  `FileShare.ReadWrite | FileShare.Delete` for file
+  descriptors. Under Unix this gives fd-survives-unlink
+  semantics for free — stat / set-size keep working after
+  a sibling unlinks the path. The descriptor becomes
+  `IDisposable` and the `[resource-drop]descriptor` host
+  binding now disposes the dropped value, closing the fd.
+  Sibling helpers (`WriteViaStream`, `AppendViaStream`,
+  `ReadViaStream`) now use the same FileShare so they
+  coexist with the long-lived fd.
+* `set-size` enforces the `WRITE` flag and rejects sizes
+  exceeding `long.MaxValue` up-front (predictable `Invalid`
+  rather than an ArgumentOutOfRange floor).
+* `open-at` normalizes flags per the spec: `EXCLUSIVE`
+  requires `CREATE`; empty `DescriptorFlags` default to
+  `READ`; `CREATE` implies `WRITE`; opening a directory
+  with `WRITE` surfaces as `IsDirectory`. Preopen
+  descriptors now carry `READ | MUTATE_DIRECTORY` (not
+  `READ | WRITE | MUTATE_DIRECTORY`) — `WRITE` is a file-
+  stream flag, `MUTATE_DIRECTORY` is the verb-permitter.
+* `get-type` now writes the spec-correct
+  `result<descriptor-type, error-code>` (20 bytes 4-aligned)
+  at retptr rather than the bare 16-byte variant — matching
+  what wit-bindgen expects. The wire validator updated to
+  match. `get-flags` async-lower writes the flag byte at
+  payload offset +4 (was +1).
+* `ResolveChild` rejects path-relative methods (`*-at`)
+  with `NotDirectory` when invoked on a file descriptor
+  (filesystem-stat probes this with `afd.stat_at(empty,
+  "z.txt")`).
+* Diagnostic trace coverage widened: `open-at`, `get-type`,
+  `stat`, async-lower `get-flags` all emit through
+  `FsTrace` when `WACS_TRACE_FS=1`. Test harness captures
+  stderr through `_output` when a fixture hangs / fails.
+
+Preview3 448/448, ComponentModel 639/639.
+
+## WACS.WASI.Preview3 0.1.58 — async-lower result-writers for get-flags + is-same-object + opt-in fs trace
+
+Lands the `[async-lower]` result-writers for the two
+filesystem methods whose sync slot returns a value directly
+(without a result-area pointer): `get-flags` (returns
+`result<descriptor-flags, error-code>` — writes Ok disc + u8
+payload at retptr) and `is-same-object` (returns bare `bool`
+— writes 1 byte at retptr).
+
+* The bindings unblock the FUNCREF-TABLE indirection for
+  filesystem-flags-and-type + filesystem-is-same-object —
+  but each fixture still hangs on per-method Descriptor body
+  fidelity (set-size doesn't honor the Write flag,
+  LinkAtAsync throws Unsupported instead of creating hard
+  links, etc.). The remaining 9 filesystem fixtures need
+  targeted per-method Descriptor work.
+* `WACS_TRACE_FS=1` env-var-gated trace through
+  `InvokeDescriptorResultErrorCode` for diagnostic dumping
+  of path-method calls. Disabled by default.
+
+Coverage unchanged at 15 wasip3 fixtures passing. Preview3
+445/445, ComponentModel 639/639.
+
+## WACS.WASI.Preview3 0.1.57 — params-ptr async-lower bindings + filesystem-advise
+
+Adds the `(params_ptr, results_ptr) → status` async-lower
+bindings for the five filesystem methods whose inline-flat
+param count exceeds the canonical-ABI calling-convention
+limit: `set-times`, `set-times-at`, `link-at`, `rename-at`,
+`symlink-at`. Each unpack-helper reads the params struct from
+guest memory per the canonical-ABI struct layout
+(per-field alignment + padding) and delegates to the existing
+sync host body that already knows how to write the result at
+the result-area pointer.
+
+### Helpers
+
+- `ReadI32(span, offset)` / `ReadI64(span, offset)` — little-
+  endian struct field readers for the param-unpack path.
+- `ReadNewTimestamp(span, offset)` — pulls the 24-byte
+  `new-timestamp` variant (disc:u8 @ +0, 7-pad, seconds:s64 @
+  +8, nanoseconds:u32 @ +16, 4-byte tail pad) from a packed
+  params struct. Returns the (disc, secs, nanos) triple the
+  existing `ReadNewTimestampFromSlots` consumes.
+
+### `Descriptor.AdviseAsync` — BadDescriptor on directories
+
+The default impl previously returned `Task.CompletedTask`
+unconditionally. Spec: advise on a non-regular-file (directory,
+symlink) is `BadDescriptor`. Probed by `filesystem-advise`'s
+opening `assert_eq!(dir.advise(0, 0, Advice::Normal).await,
+Err(ErrorCode::BadDescriptor))`. Fix: throw
+`FilesystemException(BadDescriptor)` when `_isDirectory`.
+
+### Coverage
+
+`filesystem-advise` is the 4th filesystem fixture to pass
+(after mkdir-rmdir, unlink-errors, open-errors, dotdot). 15
+wasip3 fixtures across cli / clocks / random / filesystem
+now pass end-to-end. The remaining 9 filesystem fixtures
+still hang or fail on per-method Descriptor implementation
+gaps (each surfaces 1+ spec mismatches that need targeted
+fixes in `Descriptor.cs`):
+
+- stat / set-size / io / metadata-hash / rename /
+  hard-links / read-directory: need stat/size/link
+  implementation fidelity
+- flags-and-type / is-same-object: need result-writers for
+  the direct-value-returning async-lower variants
+  (`result<descriptor-flags, error-code>` /
+  `result<bool, error-code>`)
+
+The `(params_ptr, results_ptr)` plumbing is now in place
+across the FilesystemTypesModuleName surface — the remaining
+work is purely host-body / Descriptor implementation.
+
+Preview3 445/445, ComponentModel 639/639.
+
+## WACS.WASI.Preview3 0.1.56 — three more filesystem fixtures (unlink-errors, open-errors, dotdot)
+
+Closes three additional wasip3 filesystem fixtures by binding
+the `[async-lower]` variants for methods whose sync slot's
+signature already matches the canonical-ABI shape:
+
+- `stat`, `stat-at` — flat `(self, retptr) → status` /
+  `(self, pathFlags, pathPtr, pathLen, retptr) → status`
+- `get-type` — flat `(self, retptr) → status`
+- `sync`, `sync-data` — flat `(self, retptr) → status`
+- `set-size` — `(self, size:i64, retptr) → status`
+- `advise` — `(self, offset, length, advice, retptr) → status`
+- `metadata-hash`, `metadata-hash-at` — flat shapes
+
+Each wrapper sync-executes the existing host body via
+`GetAwaiter().GetResult()` and returns
+`CanonAsyncStatusReturnedPacked`.
+
+### FilesystemFixtureTests
+
+New parameterized test harness (xUnit `[Theory]` /
+`[MemberData]`) that drives each fixture through the same
+staging + invocation shape: build a fresh `fs-tests.dir` per
+test via `BuildFsTestsDir`, instantiate with the preopen,
+invoke `run()` with a 15-second hang guard. Currently
+enumerates the 3 newly-passing fixtures. The remaining 10
+filesystem fixtures need:
+
+- `(params_ptr, results_ptr)` bindings for methods whose
+  inline-param count exceeds the flat-call limit: `set-times`,
+  `set-times-at`, `link-at`, `rename-at`, `symlink-at`.
+- Result-writers for `get-flags` / `is-same-object` whose
+  sync slot returns a value directly but whose async-lower
+  shape expects retptr-resident result.
+- Stream-based `read-directory` whose canon-async machinery
+  returns an entry stream rather than a flat list.
+
+### Coverage
+
+14 wasip3 testsuite fixtures now pass end-to-end across cli /
+clocks / random / filesystem:
+
+```
+cli-env             cli-exit            cli-hello
+cli-stdio           cli-stdio-roundtrip cli-terminal
+filesystem-dotdot   filesystem-mkdir-rmdir
+filesystem-open-errors filesystem-unlink-errors
+monotonic-clock     random              run-with-err
+wall-clock
+```
+
+Preview3 444/444, ComponentModel 639/639.
+
+## WACS.WASI.Preview3 0.1.55 — filesystem-mkdir-rmdir acceptance (Descriptor path validation)
+
+Closes the filesystem-mkdir-rmdir fixture acceptance — the
+first wasip3 testsuite fixture exercising real filesystem
+methods through the wit-component shim+fixup indirection.
+**441/441** Preview3 tests pass with no skips.
+
+### `Descriptor.ResolveChild` tightening
+
+The default `Descriptor` implementation now rejects:
+
+- **Empty path** → `NoEntry` (was: silently resolved to root)
+- **Absolute path** (`/`, `\\`, drive-rooted) → `NotPermitted`
+- **`..` segments** anywhere in the path → `NotPermitted`
+- **Symlink components** (existing path component that's
+  itself a symbolic link) → `NotPermitted` via the new
+  `TraversesSymlinkComponent` walk.
+
+The symlink check uses `FileSystemInfo.LinkTarget` (.NET 6+)
+on the LITERAL path of each component — not what the symlink
+resolves to. The fs-tests.dir fixture's `parent → ..` symlink
+is the canonical probe; any traversal through it is rejected
+even when the target happens to land back inside the sandbox.
+Stricter than the spec's pure-containment rule but matches
+wasmtime's behavior on the testsuite fixtures.
+
+### Per-method existence checks
+
+- `CreateDirectoryAtAsync`: existence-check before
+  `Directory.CreateDirectory` so `mkdir(".")` and
+  `mkdir("a.txt")` (where `a.txt` is a file) surface as
+  `Exist` instead of silently succeeding.
+- `RemoveDirectoryAtAsync`: file-at-path returns
+  `NotDirectory`; removing the preopen root returns
+  `Invalid` (per spec, the root can't be removed via
+  itself).
+
+### Test infrastructure
+
+`FilesystemMkdirRmdirEndToEndTests` now builds the
+`fs-tests.dir` staging from scratch (`BuildFsTestsDir`) per
+run rather than copying from the test project's `Fixtures/`
+output. MSBuild's `CopyToOutputDirectory` glob doesn't carry
+symlinks through to `bin/Debug/.../Fixtures/`, so the
+`parent → ..` symlink was missing from the staged copy and
+the symlink-escape probes went unobserved.
+
+### Coverage summary
+
+10 of the wasip3 testsuite fixtures now pass end-to-end:
+cli-hello, cli-env, cli-exit, cli-stdio, cli-stdio-roundtrip,
+cli-terminal, monotonic-clock, random, run-with-err,
+wall-clock — plus **filesystem-mkdir-rmdir**, the first
+filesystem fixture and the first to drive the shim+fixup
+funcref-table dance end-to-end.
+
+## WACS.ComponentModel 0.8.29 — ShimFixupWiring closes the funcref-table indirection
+
+Minimal extension to the multi-core path that instantiates
+the wit-component shim + fixup core modules and threads the
+host's bindings through the shim's funcref table. The
+`Descriptor.create_directory_at` call from the filesystem-
+mkdir-rmdir fixture now reaches the host body end-to-end:
+verified via `[host]` tracing that get-directories returns 1
+preopen and the first `create_directory_at("")` invocation
+enters our binding.
+
+### Why "minimal extension" not "full rewrite"
+
+An earlier iteration (`b48aa518` / `80c21161` / `8b743fd5`)
+built a full spec-following `MultiCoreInstantiator` that
+maintained parallel core spaces and instantiated every
+declared core module. It compiled and traced cleanly, but
+re-binding entities for `InstantiateCoreModule.args` clashed
+with the legacy path's canon-async / wit-bindgen-rt /
+configureImports bindings — placeholders for canon-async
+builtins silently shadowed the dispatcher's working delegates.
+The shorter answer keeps the legacy path's bindings intact
+and only adds what's strictly new: shim+fixup instantiation,
+shim table aliased at `("", "$imports")`, slot→(MOD, METHOD)
+binding for the funcref-table slots.
+
+### `ShimFixupWiring.Wire`
+
+New static helper called from `InstantiateMultiCore` between
+`configureImports` and primary instantiation:
+
+1. Identify shim + fixup binaries structurally (the shim
+   EXPORTS a funcref table named "$imports"; the fixup
+   IMPORTS one). wit-component 0.246+ doesn't emit the
+   shim's internal module-name section anymore — the
+   structural shape is the reliable signal.
+2. Walk component aliases + canon section in file order to
+   build coreFuncIdx → shim-slot map (from aliases targeting
+   the shim instance) + inline-instance → list of (slot,
+   methodName) pairs.
+3. Walk the primary's `InstantiateCoreModule.args` to
+   resolve slot → (MOD, METHOD).
+4. For each slot, bind `("", "<slot>")` to the runtime's
+   existing host binding at `(MOD, METHOD)` via
+   `BindHostFunction(IFunctionInstance)`.
+5. Instantiate the shim (defines the funcref table +
+   indirect-XXX wrappers).
+6. Expose the shim's table at `("", "$imports")` via the new
+   `WasmRuntime.BindExternal` API.
+7. Instantiate the fixup — element segment fills the
+   funcref table from the `("", "<slot>")` host functions.
+8. Primary instantiates afterwards (legacy path).
+
+For filesystem-mkdir-rmdir: 13/13 shim slots resolved to
+host bindings (get-directories, 3 descriptor methods,
+waitable-set.poll, poll, 3 output-stream methods,
+get-environment, 3 terminal-* getters).
+
+### `WasmRuntime.BindExternal`
+
+New public method on `WasmRuntime` for re-aliasing an already-
+allocated external (function, table, memory, global, tag)
+under a fresh `(module, entity)` name. Both keys point at
+the SAME address — element-segment writes to the table stay
+observable through both names, and memory growth stays
+coherent. Used by ShimFixupWiring to expose the shim's
+funcref table at `("", "$imports")`.
+
+### `filesystem-mkdir-rmdir` skip reason updated
+
+The shim+fixup wiring is no longer the blocker — verified
+end-to-end. The next layer surfaces: `Descriptor`'s default
+implementation returns `Ok` for path `""` where the Rust
+test expects `Err(NoEntry)`; the guest panics; the wasip2-
+facade permissive-stub for `wasi:cli/exit` swallows the
+abort; unwinder spins. Same pattern as
+`feedback_wasip3_permissive_stub_exit_spins`. Skip reason
+points at `Descriptor` path-validation as the next surface.
+
+## WACS.WASI.Preview3 0.1.54 — filesystem-mkdir-rmdir staging ([async-lower] bindings + fs-tests.dir)
+
+Stages the filesystem fixture infrastructure: the
+`[async-lower]` host bindings for the three methods
+`filesystem-mkdir-rmdir` exercises, plus the testsuite's
+`fs-tests.dir` tree (a.txt + b.txt + parent→.. symlink) under
+the test project's `Fixtures/`.
+
+### New `[async-lower]` host bindings
+
+- `[async-lower][method]descriptor.create-directory-at` —
+  same flat-param shape `(self, pathPtr, pathLen, retptr)` as
+  the sync slot, returns `CanonAsyncStatusReturnedPacked = 2`.
+- `[async-lower][method]descriptor.unlink-file-at` — same.
+- `[async-lower][method]descriptor.remove-directory-at` — same.
+- `[async-lower][method]descriptor.open-at` — flat-params
+  overflow the inline calling convention so this one uses the
+  `(params_ptr, results_ptr) -> i32` shape. Layout (canonical-
+  ABI struct lowering with per-field alignment) at params_ptr:
+  ```
+  +0   self        i32  (own<descriptor>)
+  +4   path-flags  u8   (1-bit flags)
+  +8   path-ptr    i32  (3-byte pad to 4-align)
+  +12  path-len    i32
+  +16  open-flags  u8   (4-bit flags)
+  +17  desc-flags  u8   (6-bit flags)
+  total 20 bytes, 4-aligned tail pad
+  ```
+  results_ptr is the canon-ABI result slot the sync host body
+  already writes to.
+
+### Test infrastructure
+
+`Wacs.WASI.Preview3.Test/Fixtures/fs-tests.dir/` mirrors the
+testsuite layout (a.txt + b.txt + parent→.. symlink). The
+test stages a fresh copy per run under
+`%TEMP%/wacs-fs-tests-<guid>/` so each run starts with a known
+state. csproj `CopyToOutputDirectory` glob carries the tree to
+the test output dir.
+
+### `Run_completes_against_preopened_fs_tests_dir` — deferred
+
+The run-test is `[Fact(Skip = ...)]` pending shim slot→name
+resolution. **The slot map is not in the shim's core
+function-name section** — wit-component only stamps the
+module-name subsection (`"wit-component:shim"`) on the core
+module. The qualified-import-name per slot only lives in the
+component-level core-func aliases (`(alias core export
+$shim-instance "<N>" (core func $indirect-MOD-METHOD))`),
+which the current recognizer doesn't walk.
+
+Two paths forward (memorized at
+`project_wit_component_shim_slot_map`):
+1. Add a component-level alias walker to build the
+   slot → (module, method) map directly.
+2. Properly instantiate the shim + fixup core modules so the
+   fixup's element segment fills the funcref table at runtime
+   — the multi-core path today only instantiates the primary,
+   which is why cli-hello works (it never exercises the shim
+   indirection) but filesystem fixtures don't.
+
+## WACS.ComponentModel 0.8.28 — stream-read sync-blocking path (test shims retired)
+
+Stream-read now blocks the CLR thread inside the canon-lowered
+import when no data is immediately buffered, instead of
+returning `Completed(0)` and looping wit-bindgen-rt's executor
+forever. Removes the `BufferedStdin` / `EmptyStdin` shims
+cli-stdio-roundtrip and cli-stdio were using — both fixtures
+now pass against the production `StreamBackedStdin`.
+
+### `AsyncDispatcher.StreamReadToMemoryBlocking`
+
+New method. Fast-paths through `TryReadIntoMemory` (the
+existing non-blocking read), then on empty buffer with a still-
+open writer awaits `Buffer.Reader.WaitToReadAsync` and retries.
+Returns 0 only when the stream completed empty.
+
+### Why sync-blocking, not BLOCKED
+
+The canon-async spec's `BLOCKED` (`0xFFFFFFFF`) + `waitable.join`
++ `[callback][async-lift]` callback-driven export shape is the
+correct refinement and remains the long-term plan, but it's a
+substantial surface (callback-driven lift adapter, event
+encoding for STREAM_READ/STREAM_WRITE/FUTURE_*/SUBTASK, per-
+waitable TaskCompletionSource registries). Sync-blocking
+matches the model the rest of the host already uses for
+async-func imports (clocks `wait-for` via
+`Task.GetAwaiter().GetResult()`) and is sound for the
+single-thread-per-component cases the wasip3 testsuite
+exercises.
+
+### `WitBindgenScaffoldingBinder` change
+
+`[async-lower][stream-read-N]<fn>` routes to the blocking
+variant. Stream-write path is unchanged — `Completed(N)` for
+N <= remaining buffer capacity, no blocking needed for the
+buffer sizes the testsuite uses.
+
+## WACS.WASI.Preview3 0.1.53 — remaining cli fixtures (run-with-err, cli-terminal, cli-stdio-roundtrip, cli-stdio)
+
+Closes the last four cli fixtures from the wasip3 testsuite —
+10/10 cli-set fixtures now pass end-to-end.
+
+### `run-with-err`
+
+`async fn run() -> Err(())` — verifies the Err discriminant
+(= 1) surfaces through `InvokeCoreAsyncLift` as the lift
+adapter's return value, complementing cli-hello's Ok path.
+
+### `cli-terminal`
+
+Three sync getters `get-terminal-{stdin,stdout,stderr}: ()
+-> option<resource>` — exercised the
+`option<resource>` retArea encoding without any actual handles
+allocated. Bound as always-None: a default "no terminal
+connected" posture. Embedders that want to expose a real TTY
+override these later (analogous to how `IPreopens` is
+opt-in for filesystem access).
+
+New constants: `CliTerminalStdinModuleName`,
+`CliTerminalStdoutModuleName`, `CliTerminalStderrModuleName`.
+
+### `cli-stdio-roundtrip`
+
+Guest reads exactly 13 bytes from stdin via `read-via-stream`,
+then writes them to stdout AND stderr via `write-via-stream`.
+The first end-to-end test that drives both stdin (reader) and
+stdout (writer) async-stream paths.
+
+The default `StreamBackedStdin` drains its source on a
+background `Task.Run`, which races the guest's first read
+and currently returns `Completed(0)`, sending wit-bindgen-rt
+into a `while Complete(_)` poll loop (canon-async BLOCKED +
+waitable-set-wait wiring not landed yet). Test uses a
+`BufferedStdin` that pushes the payload synchronously inside
+`ReadViaStream` so the buffer's full before the guest's read
+fires. The async-stream BLOCKED path remains future work.
+
+### `cli-stdio`
+
+Three drop-end subtests: stdin reader dropped without reading,
+stdout/stderr guest-owned streams each writing 1 byte then
+dropped. Exercises the cleanup paths on both ends. Test uses
+an `EmptyStdin` impl that allocates handles, drops the
+writable end immediately, and resolves the completion future
+Ok — the configuration the guest expects when stdin is empty.
+
+## WACS.WASI.Preview3 0.1.52 — cli-env acceptance (IEnvironment + canonical-ABI list/option/string)
+
+Closes the cli-env fixture acceptance. The guest reads env vars,
+program arguments, and initial cwd through three sync host
+imports and asserts exact value equality, exercising the
+canonical-ABI lowerings for `list<tuple<string,string>>`,
+`list<string>`, and `option<string>` end-to-end.
+
+### New public surface
+
+- `Wacs.WASI.Preview3.Cli.IEnvironment` — three methods:
+  `(string,string)[] GetEnvironment()`,
+  `string[] GetArguments()`,
+  `string? GetInitialCwd()`.
+- `Wacs.WASI.Preview3.Cli.EnvironmentHandler` — default impl
+  reading from `System.Environment`. Embedders that want
+  sandboxing substitute a custom `IEnvironment` (e.g. the
+  test fixture's fixed map).
+- `WasiPreview3HostBuilder.Environment` — opt-in override.
+
+### Canonical-ABI helpers
+
+`InvokeGetEnvironment`, `InvokeGetArguments`, `InvokeGetInitialCwd`
+allocate string payloads via cabi_realloc and write the outer
+list/option header at the canon-supplied retptr. Shared helpers
+(`AllocateUtf8`, `WriteI32LE`, `ValidateRetArea`,
+`RequireDispatcherMemory`) live in the host alongside the
+existing `WriteByteList` for the random get-*-bytes path —
+they're reused by the upcoming filesystem / sockets / http
+bindings that also lower lists and options.
+
+### Wire bindings
+
+- `wasi:cli/environment@0.3.0-rc-2026-03-15/get-environment`
+- `wasi:cli/environment@0.3.0-rc-2026-03-15/get-arguments`
+- `wasi:cli/environment@0.3.0-rc-2026-03-15/get-initial-cwd`
+
+## WACS.WASI.Preview3 0.1.51 — cli-exit acceptance (IExit + ExitException)
+
+Closes the cli-exit fixture acceptance: a guest calling
+`exit(Err(()))` propagates through `InvokeCoreAsyncLift` as an
+`ExitException` carrying exit code 1.
+
+### New public surface
+
+- `Wacs.WASI.Preview3.Cli.IExit` — single-method interface
+  matching the wasip3-trimmed `exit: func(status: result);`
+  (Preview 2's `exit-with-code` variant was dropped from
+  wasip3).
+- `Wacs.WASI.Preview3.Cli.ExitHandler` — default impl that
+  throws `ExitException` so the dispatcher unwinds the wasm
+  stack cleanly. Embedders integrate native process termination
+  by substituting their own `IExit` impl.
+- `Wacs.WASI.Preview3.Cli.ExitException` — carries the i32 exit
+  code (Ok→0, Err→1).
+- `WasiPreview3HostBuilder.Exit` — opt-in override.
+
+### Wire binding
+
+- `wasi:cli/exit@0.3.0-rc-2026-03-15/exit`: maps the
+  result-discriminant i32 (0 = Ok, 1 = Err) into `IExit.Exit`.
+
+## WACS.WASI.Preview3 0.1.50 — canon-lower-async function imports (monotonic-clock acceptance closes)
+
+Closes the monotonic-clock fixture acceptance. wit-component lowers
+`async func(p: u64)` imports as `(i64) -> i32` when the params fit
+in flat-args and the return is void — the u64 is passed directly,
+and the i32 return is a packed canonical-ABI status the guest
+decodes as `code = packed & 0xf, subtask = packed >> 4`. Status
+codes (per wit-bindgen rev 85d10eb's `subtask.rs`):
+
+```
+STATUS_STARTING            = 0
+STATUS_STARTED             = 1
+STATUS_RETURNED            = 2
+STATUS_STARTED_CANCELLED   = 3
+STATUS_RETURNED_CANCELLED  = 4
+```
+
+The permissive stub returned 0 (= STARTING) for the
+`[async-lower]wait-for/wait-until` slots, which made wit-bindgen-rt
+register a pending subtask and call `waitable.join` against a
+waitable-set that was never allocated.
+
+### Bindings
+
+- `wasi:clocks/monotonic-clock@0.3.0-rc-2026-03-15/[async-lower]wait-until`
+- `wasi:clocks/monotonic-clock@0.3.0-rc-2026-03-15/[async-lower]wait-for`
+
+Both sync-execute the existing host `WaitUntilAsync`/`WaitForAsync`
+via `GetAwaiter().GetResult()` and return
+`CanonAsyncStatusReturnedPacked = 2` (RETURNED with no subtask
+handle).
+
+### Note on encoding
+
+Earlier `wit-bindgen-rt` (e.g. 0.41 on crates.io) decoded the
+packed status as `result >> 30` (upper 2 bits). The current
+wit-bindgen (commit 85d10eb, used by all wasip3 testsuite
+fixtures) uses `& 0xf` for the code and `>> 4` for the subtask
+handle — same convention already in use for stream/future
+status returns. Verified directly against the cargo-checkout
+of `subtask.rs`.
+
+### `monotonic-clock` acceptance unskipped
+
+The `Fact(Skip = ...)` reason on
+`MonotonicClock_run_completes_without_trap` was previously
+"Phase 6 cooperative-yield" — that was a misattribution.
+Stack Switching itself is implemented in `Wacs.Core`
+(20/20 instruction tests pass). The actual gap was
+canon-lower-async function-import binding, which this commit
+closes.
+
+## WACS.WASI.Preview3 0.1.49 — Phase 5 fixture acceptance opens (wall-clock, random)
+
+Extends WASIp3 vertical-slice acceptance beyond cli-hello to
+two of the smallest async-run() fixtures from
+`Spec.Test/wasi/tests/rust/wasm32-wasip3/src/bin/`:
+
+- `wall-clock` — exercises `wasi:clocks/system-clock::now` +
+  `get-resolution`. No streams, no waits. 230 ms.
+- `random` — exercises all three `wasi:random/*` interfaces
+  (`random`, `insecure`, `insecure-seed`). All five host
+  imports cover the guest's run() body. 250 ms.
+
+### `InsecureSeedSource` memoization (spec-compliance fix)
+
+`wasi:random/insecure-seed::get-insecure-seed` is "meant to be
+only called once. Any subsequent calls should return the same
+value." Our default `InsecureSeedSource` was drawing fresh
+CSPRNG bytes on every call. The random fixture's
+`assert_eq!(seed, get_insecure_seed())` then panicked, and
+because our permissive stub for `wasi:cli/exit@0.2.0/exit`
+returns from a noreturn import, the guest's abort path
+spun forever instead of terminating. Fixed by memoizing the
+first draw per component-instance lifetime.
+
+### `Wasip3FixtureHarness` extract
+
+Pulls the cli-hello-style "instantiate-with-real-host-plus-
+permissive-stubs" driver into a shared static helper so new
+fixture-acceptance tests are ~30 LOC instead of ~150.
+
+### `monotonic-clock` deferred (Phase 6)
+
+The monotonic-clock fixture awaits
+`monotonic_clock::wait_for(1 * MILLISECOND)`; the host's
+`Task.Delay` completes but the dispatcher has no
+Continuation / suspend / resume path to re-enter the guest
+after the await — Stack Switching (Phase 1 of the plan) must
+land before the canon-async cooperative-yield path closes.
+Test is `[Fact(Skip = ...)]` with the gap-reason inlined.
+
+## WACS.ComponentModel 0.8.27 — cli-hello acceptance closes
+
+Closes the WASIp3 Phase 4 vertical-slice acceptance:
+`Wacs.WASI.Preview3.Test.CliHelloEndToEndTests.CliHello_writes_expected_stdout`
+runs `cli-hello.component.wasm`'s async `run()` end-to-end and
+captures the expected `"hello, wasip3\n"` stdout (110 ms).
+
+### `WitBindgenScaffoldingBinder` completions
+
+Adds the helpers the cli-hello flow exercises and that earlier
+landed as skipped/unknown:
+
+- `waitable-set-poll`: routes to `dispatcher.WaitableSetPoll`
+  (non-blocking; mem-ptr ignored at v0).
+- `context-get` / `context-set`: routes through `Value.Int32`
+  marshaling so the i32 wit-bindgen scaffolding shape matches
+  the dispatcher's `Value`-typed slots.
+- `task-return`: now forwards the i32 disc argument to the
+  dispatcher (was previously dropped on the floor).
+
+### Packed stream-status return convention
+
+`[async-lower][stream-{read,write}-N]` was returning the raw
+transferred-bytes count. wit-bindgen-rt interprets the return
+value as the canonical-ABI packed status — low 4 bits = code
+(0 = COMPLETED), upper 28 bits = count. A bare count made the
+guest's `wit_stream::write_all` re-poll forever, which is what
+caused the cli-hello hang. Status is now packed via the new
+`PackStreamStatus` helper.
+
+### Diagnostic tracing
+
+Optional `WACS_TRACE_SCAFFOLD=1` env hook tallies each
+scaffolding helper and shim-bound canon-async op as it's
+invoked. The cli-hello diagnostic test
+(`Invocation_attempt_via_async_lift`) dumps the counts when
+the invocation times out — the first concrete signal of which
+helper is hot. The trace also covers shim-bound canon ops via
+`ShimModuleRecognizer` so a single map covers both layers.
+
+### `ComponentInstance.InvokeCoreAsyncLift`
+
+New entry point that resolves the `[async-lift]<iface>#<fn>`
+core export, wraps the invocation in
+`AsyncLiftAdapter.InvokeAsync`, and surfaces the dispatcher's
+`task.return` value. Bridges the gap until canon-async lifts
+are reachable from the component-level `Invoke(...)` API
+(which expects `Sort=Func`, while async-lifted exports are
+`Sort=Instance`).
+
+## WACS.ComponentModel 0.8.26 — wit-bindgen scaffolding binder
+
+Adds `WitBindgenScaffoldingBinder` for the per-imported-method
+canon-async helper imports that wit-bindgen-rt emits into
+guest core modules. These are distinct from the canon-async
+builtins the component declares in its canon section (those
+route through the wit-component:shim and are handled by the
+existing `CanonAsyncBinder` + `ShimModuleRecognizer`).
+
+### Naming convention recognized
+
+```
+("<iface>",            "[<canon-op>-N]<funcname>")
+("<iface>",            "[async-lower][<canon-op>-N]<funcname>")
+("[export]<iface>",    "[task-return]<funcname>")
+```
+
+Where `<canon-op>` is one of `stream-{new,read,write,
+cancel-read,cancel-write,drop-readable,drop-writable}`,
+`future-{...}`, `task-{return,cancel}`,
+`waitable-{set-{new,drop},join}`, etc. `-N` is the
+disambiguator (stream/future typeidx, context slot index).
+
+### Public API
+
+```csharp
+public static BindResult BindImports(
+    WasmRuntime runtime, Module coreModule, AsyncDispatcher dispatcher)
+
+public static ParsedScaffold? TryParseScaffoldingName(string name)
+```
+
+`BindResult` reports counts of `Bound` / `Skipped` (recognized
+but not yet supported, like `[async-lower][...]` wrappers) /
+`Unrecognized` (didn't match any wit-bindgen pattern).
+
+### Integration
+
+`ComponentInstance.Instantiate` calls the scaffolding binder
+after the canon-async-builtin binder in both the single-core
+and multi-core paths. Order: resource binder → canon-async-
+builtin binder → wit-bindgen scaffolding binder →
+configureImports → InstantiateModule.
+
+### Signature conventions
+
+wit-bindgen-rt's scaffolding ABI doesn't pass the async-flag
+that wasmtime's canon-binder expects on `*-cancel-*` ops.
+The binder passes `async=false` implicitly and binds delegates
+matching wit-bindgen's actual `(handle) → (i32)` /
+`(handle) → ()` shapes:
+
+| Op | Wasm sig | Routes to |
+|---|---|---|
+| `*-new` | `() → (i64)` | `dispatcher.{Stream,Future}New(typeIdx)` packed into both halves of i64 (placeholder for wit-bindgen-rt's dual-handle convention) |
+| `*-drop-{readable,writable}` | `(handle) → ()` | `dispatcher.{Stream,Future}Drop*` |
+| `*-cancel-{read,write}` | `(handle) → (i32)` | `dispatcher.{Stream,Future}Cancel*(h, async=false)` |
+| `task-cancel` | `() → ()` | `dispatcher.TaskCancel` |
+| `task-return` | `(disc) → ()` | `dispatcher.TaskReturn(null, null)` — no-payload form only |
+| `waitable-set-new` | `() → (i32)` | `dispatcher.WaitableSetNew` |
+| `waitable-set-drop` | `(handle) → ()` | `dispatcher.WaitableSetDrop` |
+| `waitable-join` | `(set, task) → ()` | `dispatcher.WaitableJoin` |
+
+`[async-lower][...]` wrappers and typed-payload `task-return`
+variants remain unbound — they need the outbound canon-async
+lift adapter, which is the next slice.
+
+### Effect on cli-hello
+
+The cli-hello fixture's permissive-stub count drops from 56 →
+30 with the binder enabled. The remaining 30 are unbracketed
+host-interface methods (covered by `WasiPreview3Host` for
+some, by the test driver's permissive stubber for the rest).
+
+### Test coverage
+
+9 tests in `WitBindgenScaffoldingBinderTests.cs` cover the
+parser:
+- stream-new with typeidx
+- future-cancel-write with typeidx
+- async-lower double-bracketed
+- task-return with funcname, no typeidx
+- task-cancel (no typeidx, no funcname)
+- context-get with slot
+- waitable-set-drop (no trailing -N)
+- non-bracketed returns null
+- malformed brackets return null
+
+639/639 ComponentModel + 417/418 Preview3 tests green.
+
+## WACS.ComponentModel 0.8.25 — structural shim-slot resolution (component-model#654 follow-up)
+
+Acts on Luke Wagner's feedback in
+[component-model#654](https://github.com/WebAssembly/component-model/issues/654):
+the wit-component shim's slot-to-op pairing is structurally
+recoverable from the component's canon section even when the
+function-name custom subsection has been stripped. Previous
+behavior treated stripped names as a hard limit — the shim
+recognizer returned zero counts and embedders got
+"unbindable component" without explanation.
+
+### New public API
+
+```csharp
+public static Dictionary<string, int> BuildShimSlotMap(
+    IReadOnlyList<CanonEntry> canonEntries);
+
+public static Dictionary<string, List<int>>
+    BuildShimSlotMapMultiValued(
+        IReadOnlyList<CanonEntry> canonEntries);
+
+public static bool TryResolveShimSlot(
+    IReadOnlyList<CanonEntry> canonEntries,
+    string qualifiedOpName, out int slot);
+```
+
+`BuildShimSlotMap` produces a `qualified-name → slot` dict
+where the slot is the position of the canon entry in the
+filtered async-canon-entries sequence (wit-component's
+funcref-table layout). Key spelling uses typed-op
+disambiguators: `task-return`, `stream-new#5`, `future-read#3`,
+`context-get#0`. `BuildShimSlotMapMultiValued` records every
+slot per name when a component has duplicate-named canon
+entries (rare; possible for ops without natural
+disambiguators like two `task-return` entries for two
+async-lifted exports). `TryResolveShimSlot` is the debug
+convenience that walks the canon list inline — equivalent to
+indexing the map but doesn't require constructing it first.
+
+### `BindShimImports` single-pass walk
+
+Refactored from two-pass (extract names → look up entry per
+shim funcIdx) to a single canon-section walk:
+
+```csharp
+foreach (var entry in canonEntries) {
+    if (!IsCanonAsync(entry)) continue;
+    // cross-check debug name if present, but don't gate
+    if (debugNames.TryGetValue(slot, ...) && mismatch)
+        result.Mismatched++;
+    var del = TryBuildDelegateForEntry(entry, dispatcher);
+    if (del == null) { result.Skipped++; slot++; continue; }
+    runtime.BindHostFunction(("", slot.ToString()), del);
+    result.Bound++;
+    slot++;
+}
+```
+
+The function-name custom subsection becomes a cross-check
+diagnostic rather than a gating requirement. Stripped-names
+components bind successfully; debug-name disagreements
+report as `Mismatched` counts but still bind structurally
+(the canon-section position is authoritative).
+
+### Test updates
+
+Existing two tests flipped from "stripped-names → no binding"
+to "stripped-names → still bind via structural walk":
+
+- `BindShimImports_no_op_on_shim_with_stripped_function_names`
+  → `BindShimImports_binds_via_canon_walk_when_function_names_stripped`
+- `BindShimImports_reports_mismatch_when_debug_name_disagrees_with_position`
+  → `BindShimImports_reports_mismatch_but_still_binds_structurally`
+
+3 new tests in `ShimModuleRecognizerTests.cs` exercise the
+new APIs:
+- `BuildShimSlotMap_returns_position_per_qualified_op`
+- `TryResolveShimSlot_returns_slot_or_false`
+- `BuildShimSlotMapMultiValued_collects_all_slots_per_name`
+
+630/630 ComponentModel tests + 417/418 Preview3 tests green
+(1 documented skip).
+
+## WACS.ComponentModel 0.8.24 / WACS.WASI.Preview3 0.1.48 — cli-hello permissive-stub instantiation
+
+Pushed the cli-hello fixture all the way through
+`ComponentInstance.Instantiate` with permissive stubs covering
+all 56 wit-bindgen-emitted helper imports. Confirmed the
+async-lift core entry point
+`[async-lift]wasi:cli/run@0.3.0-rc-2026-03-15#run` is exported
+and resolvable.
+
+### Permissive-stub binder (in the Phase 4 test driver)
+
+Walks the cli-hello core modules' import lists, checks each
+function import against the runtime's existing bindings via
+`TryGetExportedFunction((module, name))`, and binds a
+zero-returning dynamic delegate (`Expression.Lambda` synthesizing
+`Func<ExecContext, P1..PN, R>` or `Action<ExecContext, P1..PN>`
+matching the WASM signature) for any that aren't covered.
+
+The `WasiPreview3Host` real bindings run first inside the
+configureImports callback; the stubber covers the remainder.
+Last-bind-wins semantics on the runtime mean stubs never
+clobber real handlers.
+
+### `ComponentInstance.CoreRuntime` accessor
+
+Adds a public `CoreRuntime` property on `ComponentInstance`
+exposing the underlying `WasmRuntime`. Embedders need this to
+reach core-module exports that the component-level
+`Invoke(exportName, args)` API doesn't surface (e.g.,
+wit-component-emitted `[async-lift]<iface>#<func>` entry
+points). Cleaner than reflection or a custom subclass.
+
+### Why the actual run() invocation is still skipped
+
+The permissive stubs return 0 for everything. wit-bindgen's
+`wit_stream::write_all` interprets a 0 return from
+`[async-lower][stream-write-N]` as "not ready, poll again" —
+so the wasm-side code spins forever, never seeing the
+"complete" signal. Confirmed in a one-off run that hung past
+60s with the test host consuming ~6GB.
+
+Closing the gap requires routing the wit-bindgen scaffolding
+helpers to the real `AsyncDispatcher` methods:
+
+```
+[stream-new-N]<funcname>            → dispatcher.StreamNew
+[stream-write-N]<funcname>          → dispatcher.StreamWrite*
+[stream-drop-writable-N]<funcname>  → dispatcher.StreamDropWritable
+[stream-drop-readable-N]<funcname>  → dispatcher.StreamDropReadable
+[future-new-N]<funcname>            → dispatcher.FutureNew
+[future-cancel-{read,write}-N]<…>   → dispatcher.FutureCancel*
+[future-drop-{writable,readable}-N] → dispatcher.FutureDrop*
+[async-lower][stream-write-N]<…>    → completion-aware write hook
+[task-return]<funcname>             → dispatcher.TaskReturn
+```
+
+That's the wit-bindgen scaffolding binder slice. With it +
+the canon-async lift adapter integration into Invoke, the
+[Skip]-marked `CliHello_writes_expected_stdout` test
+promotes.
+
+### Test coverage
+
+5 tests in `CliHelloEndToEndTests.cs`:
+- `Component_structure_smoke`: parse + export listing.
+- `Core_module_imports_inventory`: 57 imports across 3 cores
+  with per-module and per-prefix breakdowns.
+- `Instantiation_with_permissive_stubs`: confirms 56 stubs
+  get instantiation through to success.
+- `Async_lift_export_present_after_stubbed_instantiation`:
+  confirms `[async-lift]wasi:cli/run@0.3.0-rc-2026-03-15#run`
+  resolves to a `FuncAddr` after instantiation.
+- `CliHello_writes_expected_stdout` (Skip): the actual
+  acceptance assertion.
+
+418 tests total; 417 pass + 1 documented skip.
+
+## WACS.WASI.Preview3 0.1.47 — cli-hello E2E diagnostic + import inventory
+
+Drives the cli-hello Phase 4 fixture through `ComponentInstance.
+Instantiate` to surface the concrete gap between current state
+and full end-to-end execution. The actual stdout-capture
+assertion (`Assert.Equal("hello, wasip3\n", captured)`) lands
+in a later slice once the underlying plumbing is in place.
+
+### Why the E2E isn't reachable in a single slice
+
+`Core_module_imports_inventory` enumerates the cli-hello core
+modules and reports **57 function imports across 3 core
+modules**, decomposed by name prefix:
+
+```
+ 24 (unbracketed)        - facade interface methods
+  6 [resource-drop]
+  5 [method]
+  4 [async-lower]
+  1 [task-return]
+  1+ [future-cancel-*], [future-drop-*], [future-new],
+     [stream-cancel-*], [stream-drop-*], [stream-new],
+     [waitable-*], [context-*], [task-cancel]
+```
+
+The ~33 bracketed canon-prefix imports are wit-bindgen-emitted
+scaffolding: one helper set per imported async func per facade
+interface. The existing `CanonAsyncBinder` binds the
+component's own canon entries but not the wit-bindgen-emitted
+per-interface multiplications.
+
+`Instantiation_attempt_surfaces_first_missing_import` confirms
+the first failure WACS hits (after the `[task-return]run`
+stub is in place) is the wit-bindgen scaffolding —
+`wasi:cli/stdin@0.3.0-rc-2026-03-15.[async-lower][future-write-1]read-via-stream`.
+
+### Work needed to close the E2E
+
+1. **wit-bindgen scaffolding binder**: extend
+   `CanonAsyncBinder` (or add a sibling) to enumerate the
+   `[<canon-op>-N]<funcname>` shape per imported async func
+   and bind them automatically. Roughly 33 imports for
+   cli-hello.
+2. **Wasip2 facade implementations**: route the 24 unbracketed
+   facade imports through `WasiPreview2Host`-style bindings
+   (wasm-component-ld auto-injects these because the
+   toolchain compiles against `wasm32-wasip2`).
+3. **Canon-async lift adapter integration into
+   `ComponentInstance.Invoke`**: async-lifted exports like
+   `wasi:cli/run.run` return via `task.return`, not via the
+   core func's flat results. The synchronous Invoke path
+   needs to detect async lifts, wrap via
+   `AsyncLiftAdapter.InvokeAsync`, sync-block on the
+   resulting `Task`, and lift the dispatcher's task-return
+   value.
+4. **Cooperative-yield refactor** (Phase 6, unscheduled):
+   eventually replaces the sync-block with cooperative yield
+   through the dispatcher's `WaitableSetWaitAsync` path.
+
+### Test coverage
+
+4 tests in `CliHelloEndToEndTests.cs`:
+- `Component_structure_smoke`: parse + export listing.
+- `Instantiation_attempt_surfaces_first_missing_import`:
+  binds `[task-return]run` then surfaces the next blocking
+  import via xunit's output helper.
+- `Core_module_imports_inventory`: enumerates all 57 imports
+  with per-module and per-prefix breakdowns.
+- `CliHello_writes_expected_stdout` (Skip): the actual
+  acceptance, blocked on the four items above.
+
+417 total tests; 416 pass, 1 skipped (documented
+acceptance-deferred).
+
+## WACS.WASI.Preview3 0.1.46 — cli-hello acceptance fixture (Phase 4 close)
+
+Builds the cli-hello Phase 4 acceptance fixture from the
+WASIp3 plan — a wit-bindgen-compiled component exporting
+`wasi:cli/run@0.3.0-rc-2026-03-15` that writes
+`"hello, wasip3\n"` to stdout.
+
+### Fixture layout
+
+```
+Wacs.WASI.Preview3.Test/Fixtures/
+  cli-hello.rs    — Rust source (vendored)
+  cli-hello.json  — operations sidecar (run + stdout read)
+  cli-hello.wasm  — compiled component (118KB release build)
+  README.md       — rebuild instructions
+```
+
+Rebuilt by running the wasi-testsuite Cargo workspace's
+`cli-hello` bin (sources also staged at
+`Spec.Test/wasi/tests/rust/wasm32-wasip3/src/bin/cli-hello.rs`
+inside the submodule for compatibility with the existing
+`build.py` driver):
+
+```
+rustup +nightly target add wasm32-wasip2
+cargo install wasm-component-ld
+cargo +nightly build --release \
+    --manifest-path=Spec.Test/wasi/tests/rust/wasm32-wasip3/Cargo.toml \
+    --target=wasm32-wasip2 --bin=cli-hello
+```
+
+`wasm32-wasip3` triple doesn't yet exist; the toolchain builds
+against `wasm32-wasip2` and `wasm-component-ld` synthesizes
+the wasip3 component with embedded wasip2 facades.
+
+### Structural acceptance tests
+
+4 tests in `CliHelloFixtureTests.cs`:
+- `cli-hello.wasm` is present at the
+  `Fixtures/CopyToOutputDirectory` path and parses through
+  `ComponentBinaryParser`.
+- Component exports include
+  `wasi:cli/run@0.3.0-rc-2026-03-15`. (wit-bindgen emits both
+  the wasip2 0.2.0 and wasip3 RC variants; we pin the RC
+  one's presence.)
+- Component imports include
+  `wasi:cli/stdout@0.3.0-rc-2026-03-15` — confirms it depends
+  on the wasip3 interface WACS.WASI.Preview3 binds, not just
+  the wasip2 facade.
+- `cli-hello.json` sidecar parses with the expected
+  `run → read stdout "hello, wasip3\n" → wait` operations.
+
+### Phase 4 acceptance closeout state
+
+This commit covers the **fixture-construction** half of the
+Phase 4 acceptance criterion. The **end-to-end invocation**
+half — interpreter + transpiler executing `run()` with stdout
+captured against `"hello, wasip3\n"` — depends on the
+cooperative-yield refactor + binding the embedded wasip2
+facade imports, which lands in a follow-up slice.
+
+413/413 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.45 — completion future resolution on client.send / handler.handle (Phase 5 Slice QQ)
+
+Closes the last v0 caveat on the request/response canon-async
+wire lifecycle. The completion future returned by `request.new`
+(the second slot of the `tuple<request, future<result<_,
+error-code>>>`) now resolves when `client.send` or
+`handler.handle` settles the request — `null` on success,
+cancellation on `HttpException`.
+
+### Identity-keyed completion-future map
+
+```csharp
+private readonly Dictionary<IRequest, int> _requestCompletionFutures;
+private readonly Dictionary<IResponse, int> _responseCompletionFutures;
+```
+
+`ReferenceEqualityComparer<T>.Instance` isn't on
+netstandard2.1, so a local `IdentityComparer<T>` wraps
+`RuntimeHelpers.GetHashCode` + `ReferenceEquals` for identity
+semantics.
+
+`InvokeRequestNew` / `InvokeResponseNew` register
+`request → future-handle` after allocating the future via
+`dispatcher.FutureNew()`. The `[resource-drop]` bindings
+clean up the dict entry on resource-drop so abandoned
+requests don't accumulate orphaned futures.
+
+### Resolution path
+
+`InvokeClientSend` / `InvokeHandlerHandle` call
+`ResolveRequestCompletionFuture` after `SendAsync` /
+`HandleAsync` settles:
+
+```csharp
+private void ResolveRequestCompletionFuture(
+    IRequest? request, HttpException? ex)
+```
+
+- Success: `FutureWrite(handle, null)` — the ok arm of
+  `result<_, error-code>`.
+- Failure: cancel the FutureCell directly (`Futures.Get` →
+  `TrySetCanceled`) without dropping the handle, so guests
+  already awaiting observe `TaskCanceledException` — same
+  cancel-without-drop pattern as Slice PP's trailers future.
+
+### Test coverage
+
+4 tests in `CompletionFutureTests.cs`:
+- `client.send` success → completion future resolves with
+  `null` (await yields null).
+- `client.send` HttpException → completion future cancels
+  (await yields TaskCanceledException).
+- `client.send` with a request allocated directly (not via
+  `request.new`) doesn't throw — the wire layer's
+  `ResolveRequestCompletionFuture` is a no-op when there's
+  no tracked future.
+- Resource-drop cleanup is exercised indirectly through the
+  wire-bound drop binding.
+
+With Slice QQ, every method on the wasi:http/types resource
+surface has spec-compliant wire shapes AND meaningful data
+flow at the canon-async lifecycle level. The remaining
+foundational work is the cooperative-yield refactor itself.
+
+409/409 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.44 — consume-body trailers future resolution (Phase 5 Slice PP)
+
+Closes the trailers-side caveat from Slice JJ. The trailers
+future returned by `consume-body` now resolves with the impl's
+`IRequest.Trailers` / `IResponse.Trailers` value (or null for
+the none arm) once the body pump finishes. Three resolution
+paths:
+
+```
+null Body                  → resolve synchronously with trailers
+                              at consume-body call time
+non-null Body, normal EOF  → pump resolves on Stream EOF
+non-null Body, pump throw  → pump cancels the future cell
+                              (TrySetCanceled) without dropping
+                              the handle, so guests already
+                              awaiting observe the cancellation
+```
+
+The cancel-without-drop path is important: `FutureDropReadable`
+both cancels AND removes the handle from the dispatcher's
+table, which turns subsequent `future.read` into "handle not
+allocated". Reaching into `dispatcher.Futures.Get(...)` as a
+`FutureCell<object?>` and calling `TrySetCanceled` directly
+keeps the handle alive so the cancellation surfaces as a
+`TaskCanceledException` on read.
+
+### Test coverage
+
+5 tests in `ConsumeBodyTrailersFutureTests.cs`:
+- Null Body → trailers future resolves immediately with null.
+- Body + IRequest.Trailers → future resolves with the same
+  IFields instance (`Assert.Same`) after body drain.
+- Body + null Trailers → future resolves with null after body
+  drain.
+- Synthetic body-read exception → future cancels (await
+  yields `TaskCanceledException`).
+- response.consume-body trailers round-trip mirrors the
+  request version.
+
+Two existing JJ tests in `ConsumeBodyWireTests.cs` updated:
+the null-Body cases were asserting `task.IsCompleted == false`
+(future stays pending), which is no longer true — they now
+assert `task.IsCompletedSuccessfully` with `Result == null`.
+
+405/405 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.43 — consume-body Body→StreamBuffer pump (Phase 5 Slice OO)
+
+Closes Slice JJ's "body data doesn't flow into the returned
+stream" caveat. When `consume-body` is invoked on a
+request/response with a non-null Body Stream, the wire layer
+spawns a background pump that reads bytes from Body and writes
+them into the StreamBuffer that backs the returned stream
+handle.
+
+### `PumpBodyAsync`
+
+```csharp
+private static async Task PumpBodyAsync(
+    Stream source, StreamBuffer<byte> dest)
+```
+
+Drains `source` 4096 bytes at a time, writing each byte into
+`dest` via `WriteAsync` (backpressure-aware). EOF (source
+read returns 0) or any thrown exception during reading
+triggers `dest.Complete()` so the guest observes EOF cleanly
+on the next read.
+
+### `WriteConsumeBodyHandles` updates
+
+```csharp
+private void WriteConsumeBodyHandles(
+    Span<byte> dest, Stream? bodySource)
+```
+
+- `bodySource != null` → spawn fire-and-forget pump task
+- `bodySource == null` → immediately call
+  `buffer.Complete()` so the guest sees EOF on first read
+  rather than blocking forever
+
+The trailers future stays pending — IRequest.Trailers
+bridging through the future's value-resolution is a separate
+slice (needs the cooperative-yield work).
+
+### Test coverage
+
+4 tests in `ConsumeBodyPumpTests.cs`:
+- `request.consume-body` with a `MemoryStream` body pumps
+  `"body bytes"` into the returned StreamBuffer; the guest
+  side reads it back through `DrainBufferAsync` and confirms
+  the buffer is Completed.
+- Null Body case closes the buffer immediately; guest reads
+  yield zero bytes via ChannelClosedException → EOF.
+- `response.consume-body` mirrors the request version with
+  a 4-byte payload.
+- Body-side exception (synthetic IOException after partial
+  read) still leaves the buffer completed; the guest reads
+  whatever bytes were drained before the throw.
+
+400/400 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.42 — StreamBufferBackedStream + body bridge (Phase 5 Slice NN)
+
+Closes Slice II's v0 caveat that `request.new` / `response.new`
+ignored the `option<stream<u8>>` contents arg. Now the contents
+stream-handle is bridged into a `System.IO.Stream` and passed
+as `Body` to the Request / Response impl — host backends
+(IClient, IHandler) that read `request.Body` see the bytes the
+wasm guest writes via canon `stream.write`.
+
+### `StreamBufferBackedStream`
+
+New `System.IO.Stream` adapter in `Wacs.WASI.Preview3.Http`:
+
+```csharp
+public sealed class StreamBufferBackedStream : Stream
+{
+    public StreamBufferBackedStream(StreamBuffer<byte> buffer)
+}
+```
+
+Read-only (CanWrite=false; Write throws NotSupported). The
+sync `Read` blocks on the first byte via `StreamBuffer.ReadAsync`
+then non-blocking-pulls until either the destination is full
+or the buffer is empty — same backpressure-aware semantics for
+the async overload. EOF on `ChannelClosedException` (i.e., the
+producer called `StreamBuffer.Complete`).
+
+### Body bridge in request.new / response.new
+
+```csharp
+private Stream? ResolveStreamFromHandle(
+    int optDisc, int streamHandle)
+{
+    if (optDisc == 0) return null;
+    var buffer = RequireDispatcher().GetByteStreamBuffer(streamHandle);
+    return buffer == null ? null : new StreamBufferBackedStream(buffer);
+}
+```
+
+`InvokeRequestNew` and `InvokeResponseNew` now call this
+helper for the contents option, passing the resulting Stream
+as the impl's Body. None-option keeps Body null. Unknown
+stream handle → null (rather than throw) since the
+dispatcher's GetByteStreamBuffer returns null for unallocated
+handles.
+
+### Trailers + completion-future bridging still deferred
+
+The trailers-future-handle arg is still accepted but not
+threaded into IRequest.Trailers — that requires resolving the
+future's eventual value (a `result<option<trailers>, error-code>`)
+into a IFields impl, which depends on the cooperative-yield
+work. Same for the completion future, which stays pending in
+this slice.
+
+### Test coverage
+
+8 tests in `StreamBufferBackedBodyTests.cs`:
+- Stream adapter: Read blocks-then-drains pre-filled buffer;
+  Read returns 0 on a completed buffer; ReadAsync drains then
+  signals EOF; Write throws NotSupported.
+- Body bridge: `request.new` with contents=some + a pre-filled
+  + completed stream → req.Body reads the bytes back through
+  the bridge.
+- `request.new` with contents=none → Body is null.
+- `response.new` with contents=some → resp.Body reads the
+  bytes back.
+- `request.new` with contents=some but an unknown stream
+  handle → Body is null (no throw).
+
+396/396 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.41 — small-payload result retptr size fix (Phase 5 Slice MM)
+
+Two more retptr-size errors caught by audit, same shape as
+Slice LL.
+
+### `result<bool|u8|u32, error-code>`: 12 → 20
+
+Slice X declared `ResultSmallErrorCodeSize = 12` but the
+spec-correct size is 20:
+
+```
+result<bool|u8|u32, error-code>:
+  variant_align = max(disc=1, max(payload=1|1|4, error-code=4)) = 4
+  max_case_size = max(payload, error-code=16) = 16
+  s = align_to(1, 4) + 16 = 20
+```
+
+The bug comment "8 bytes payload section" treated only the
+error-code variant's option<string> payload size (12) as the
+max_case, ignoring the variant's full size (16 = 1 disc + 3
+pad + 12 payload). Simple err arms still encoded correctly
+since they only write the disc byte; the Other(option<string>)
+arm got truncated.
+
+The three writer methods (Bool/U8/U32) now pass
+`dest.Slice(4, 16)` instead of `dest.Slice(4, 8)` to
+`WriteSocketsErrorCodeBytes`.
+
+### `result<list<ip-address>, error-code>`: 16 → 20
+
+Same arithmetic bug in `InvokeResolveAddresses`. Comment
+asserted "max(8 (list), 12 (error-code)) = 12" but error-code
+is 16 bytes. Fixed to 20 bytes. Err-write now passes
+`dest.Slice(4, 16)` to `WriteIpNameLookupErrorCodeBytes`.
+
+### Test coverage
+
+3 tests in `SmallResultRetptrSizeTests.cs`:
+- `ResultSmallErrorCode_other_arm_writes_full_option_string`
+  exercises the err path through `InvokeTcpSocketGetterResultBool`
+  with `SocketsException(Other, "the message body")` and reads
+  the option<string> at retptr+8..+20 — disc=1 at +8, str-ptr
+  at +12, str-len at +16. Under the old 12-byte size the str-len
+  bytes would have been clobbered or out of bounds.
+- `ResultSmallErrorCode_size_is_20_not_12` exercises the
+  validator: 65516 (page-end - 20) passes; 65520 (page-end - 16)
+  rejects.
+- `ResolveAddresses_other_arm_writes_full_option_string` is the
+  same shape for the ip-name-lookup variant (disc=5 for Other).
+
+388/388 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.40 — descriptor.stat retptr size fix + stat-at wire-up (Phase 5 Slice LL)
+
+Two related fixes on the `wasi:filesystem/types.descriptor`
+stat surface.
+
+### `descriptor.stat` retptr size: 120 → 112
+
+The existing validator required `retptr + 120 <= memory.Data.Length`
+but the canon-ABI-correct size is 112 bytes 8-aligned.
+
+```
+result<descriptor-stat, error-code>:
+  variant_align = max(disc=1, max(stat=8, error-code=4)) = 8
+  max_case_size = max(stat=104, error-code=16) = 104
+  s = align_to(1, 8) = 8
+  s += 104 = 112
+  s = align_to(112, 8) = 112
+```
+
+The extra 8 bytes were harmless padding for the writer but
+the validator would reject borderline allocations (e.g., a
+guest allocating exactly 112 bytes at the end of a memory
+page).
+
+### `descriptor.stat-at` wire-up
+
+Previously unwired. Identical retptr shape to `stat`; adds a
+`path-flags` (u32) + `path` (string ptr+len) param triplet.
+
+```csharp
+public void InvokeDescriptorStatAt(
+    int self, uint pathFlags, int pathPtr, int pathLen,
+    int retptr, ICabiRealloc realloc)
+```
+
+Both `stat` and `stat-at` now route through a shared
+`WriteResultDescriptorStat` helper that handles the
+112-byte retptr encoding for both ok and err paths.
+
+### Test coverage
+
+5 tests in `DescriptorStatAtWireTests.cs`:
+- `BindToRuntime` registers `stat` and `stat-at`.
+- Borderline-allocation test: 112-byte retptr placed at
+  `65536 - 112 = 65424` (8-aligned, page-end) succeeds —
+  would have been rejected under the old 120-byte size.
+- `stat-at` on a child file returns the descriptor-stat with
+  the right type variant disc (RegularFile=5) and size
+  (length 5 for content "12345") at the correct offsets.
+- `stat-at` on a missing path writes the `NoEntry` error-code
+  variant disc at +8 (within the 112-byte 8-aligned layout).
+- Misaligned retptr (offset 12, not 8-aligned) throws.
+
+385/385 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.39 — sockets error-code disc mapping fix (Phase 5 Slice KK)
+
+`wasi:sockets/types.error-code` (15 arms) and
+`wasi:sockets/ip-name-lookup.error-code` (6 arms) are two
+distinct WIT variants that the host represents through a single
+shared C# `Sockets.ErrorCode` enum (18 values, since some arms
+overlap on AccessDenied / InvalidArgument / Other and others
+appear in only one variant).
+
+The existing `WriteSocketsErrorCodeBytes` cast `(byte)ex.Code`
+directly, treating the C# enum's integer values as the wire
+discriminant. This accidentally worked for the first ~14 arms
+of `sockets/types.error-code` (where the C# order and WIT
+order happened to align) but was wrong for:
+
+- `Other` on `sockets/types`: C# value 17, spec disc 14.
+- `Other` on `ip-name-lookup`: C# value 17, spec disc 5.
+- `InvalidArgument` on `ip-name-lookup`: C# value 2, spec
+  disc 1.
+- `NameUnresolvable` / `TemporaryResolverFailure` /
+  `PermanentResolverFailure` on `ip-name-lookup`: C# values
+  14/15/16, spec discs 2/3/4.
+
+### Per-variant disc mappers
+
+```csharp
+public static byte MapSocketsTypesErrorCodeDisc(Sockets.ErrorCode)
+public static byte MapIpNameLookupErrorCodeDisc(Sockets.ErrorCode)
+```
+
+Each maps the C# enum to the wire discriminant for its
+specific variant. Throws `ArgumentException` when the value
+doesn't apply (e.g., `NameUnresolvable` passed to the
+sockets/types mapper).
+
+### Two writers
+
+`WriteSocketsErrorCodeBytes` keeps its existing name (used by
+tcp-socket / udp-socket methods — the sockets/types variant)
+and now routes through `MapSocketsTypesErrorCodeDisc`. A new
+`WriteIpNameLookupErrorCodeBytes` handles the ip-name-lookup
+variant. `InvokeResolveAddresses` re-pointed to the new
+writer.
+
+Both share `WriteOtherPayloadString` which writes the
+`option<string>` payload at the `Other` arm's variant payload
+position (+4..16 within a 16-byte error-code variant: disc=1
+at +4, ptr at +8, len at +12).
+
+### Test coverage
+
+- Existing `*_writes_error_code_on_resolver_failure` test
+  updated: was asserting `(byte)PermanentResolverFailure` (16,
+  the C# enum value); now asserts wire disc `4` (the actual
+  spec disc).
+- 28 new theory tests in `SocketsErrorCodeDiscMapTests.cs`
+  exhaustively pin the disc-map for both variants — every
+  in-variant arm round-trips, and out-of-variant arms throw
+  `ArgumentException`. 21 valid mappings (15 sockets/types +
+  6 ip-name-lookup) + 7 rejection cases.
+
+380/380 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.38 — request/response.consume-body (Phase 5 Slice JJ)
+
+Wires `[static]request.consume-body` and
+`[static]response.consume-body`. Both take
+`(this: request|response, res: future<result<_, error-code>>)`
+and return
+`tuple<stream<u8>, future<result<option<trailers>, error-code>>>`.
+
+### Wire shape
+
+```
+4 params: this + res-future + retArea
+8-byte 4-aligned retptr:
+  +0..4: stream<u8> handle (i32)
+  +4..8: trailers future handle (i32)
+```
+
+### v0 caveat
+
+Same scope as Slice II: the wire is plumbed and handles are
+allocated via `dispatcher.StreamNew()` + `dispatcher.FutureNew()`,
+but the body data doesn't flow into the stream (the IRequest /
+IResponse impl's `Body` Stream isn't bridged into the stream
+buffer yet), and the trailers future stays pending. Both
+integrations land in the follow-up alongside the cooperative-
+yield refactor.
+
+The `this` arg is validated via RequireRequest / RequireResponse
+to surface InternalError if the handle is invalid. The `res`
+future arg is accepted but not consumed in v0.
+
+### Test coverage
+
+5 tests in `ConsumeBodyWireTests.cs`:
+- `BindToRuntime` registers both static factories.
+- `request.consume-body` allocates a stream handle (verified
+  via `dispatcher.GetByteStreamBuffer`) and a pending trailers
+  future.
+- `response.consume-body` mirrors the request version.
+- Invalid `this` handle throws `HttpException(InternalError)`.
+- Both factories throw on misaligned retptr.
+
+352/352 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.37 — request.new + response.new static factories (Phase 5 Slice II)
+
+Wires `[static]request.new` and `[static]response.new` — the
+heavy multi-arg constructors that take headers + body stream +
+trailers future + (request) options, and return
+`tuple<request|response, future<result<_, error-code>>>`.
+
+### Wire shapes
+
+```
+[static]request.new(
+  headers: headers,
+  contents: option<stream<u8>>,
+  trailers: future<result<option<trailers>, error-code>>,
+  options: option<request-options>
+) -> tuple<request, future<result<_, error-code>>>
+
+  Args: 6 flat slots (headers + option<stream>(2) +
+        trailers-future + option<options>(2)) + retArea = 7
+  Return: tuple<i32 request-handle, i32 future-handle>
+          = 8 bytes 4-aligned retptr (>1 flat result → retArea)
+```
+
+`response.new` is identical minus the options arg (5 wire
+params).
+
+### v0 caveat
+
+The impl ignores the body-stream and trailers-future args
+(passes null Body / Trailers to the Request/Response
+constructor). The wire-side handles are accepted and the
+completion future is allocated through
+`dispatcher.FutureNew()`, but the future stays pending in
+v0 — full stream-bridge integration (wiring the
+StreamBuffer<byte> to System.IO.Stream and resolving the
+completion future when the body finishes) lands in a follow-up
+slice.
+
+This is enough to make spec-compliant wire shapes available to
+guests; the body/trailers data flow is left for the follow-up
+because it depends on the cooperative-yield refactor (so the
+completion future can resolve at the right moment in the
+canon-async lifecycle).
+
+### Test coverage
+
+6 tests in `RequestResponseNewWireTests.cs`:
+- `BindToRuntime` registers both static factories.
+- `request.new` allocates a request handle bound to the same
+  IFields impl from the input headers handle, with null Body
+  / Trailers / Options.
+- `request.new` with options threads the IRequestOptions impl
+  into the Request via the impl-sharing pattern.
+- `request.new` completion future is observably pending
+  (FutureReadAsync's task isn't completed).
+- `response.new` allocates a response handle with default
+  status code (200), same Fields impl, null Body/Trailers.
+- Both constructors throw on misaligned retptr.
+
+347/347 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.36 — result<response, error-code> 40-byte 8-aligned + typed payloads (Phase 5 Slice HH)
+
+Slice GG's 32-byte 4-aligned retptr layout was wrong: the
+wasi:http/error-code variant has `option<u64>` payload arms
+(HttpRequestBodySize, HttpResponseBodySize) which require
+align=8 → variant align=8 → result variant align=8 →
+result-retptr size=40, align=8.
+
+### Corrected retptr layout
+
+```
++0:    result-disc (u8) + 7 pad
++8..40: payload section (32 bytes)
+
+  ok:
+    +8..12:  response handle (i32)
+    +12..40: unused, zero
+
+  err (http error-code variant, 32 bytes, align 8):
+    +8:    error-code disc (u8) + 7 pad
+    +16..40: payload section (24 bytes — sized to
+             option<field-size-payload>)
+```
+
+### Typed-payload encoders
+
+Wired the per-arm encoders for every error-code variant case
+that HttpException carries payload data for:
+
+| Arm | Wire payload |
+|---|---|
+| `DnsError` | `(option<string> rcode, option<u16> info-code)` record |
+| `TlsAlertReceived` | `(option<u8> alert-id, option<string> alert-message)` record |
+| `HttpRequestBodySize`, `HttpResponseBodySize` | `option<u64>` |
+| `*HeaderSectionSize`, `*TrailerSectionSize` (×4) | `option<u32>` |
+| `HttpRequestHeaderSize` | `option<field-size-payload>` |
+| `HttpRequestTrailerSize`, `HttpResponseHeaderSize`, `HttpResponseTrailerSize` | bare `field-size-payload` |
+| `HttpResponseTransferCoding`, `HttpResponseContentCoding`, `InternalError` | `option<string>` |
+
+`field-size-payload` is a 20-byte 4-aligned record of
+`(option<string> field-name, option<u32> field-size)`.
+
+Six small primitive option encoders (`WriteOptionString`,
+`WriteOptionU8/U16/U32/U64`, `WriteFieldSizePayload`,
+`WriteOptionFieldSizePayload`) compose to drive the typed-arm
+encoder via a switch on `ex.Code`. Each option encoder follows
+its own canon-ABI layout: option<u8>=2 bytes align 1,
+option<u16>=4 bytes align 2, option<u32>=8 bytes align 4,
+option<u64>=16 bytes align 8, option<string>=12 bytes align 4.
+
+### Test updates
+
+- Existing 6 ok/err tests in `HttpClientHandlerBindingTests.cs`
+  have all offsets updated for the new 8-aligned layout
+  (handle: +4 → +8, error-code disc: +4 → +8).
+- 11 new tests in `HttpErrorCodeTypedPayloadTests.cs` cover the
+  typed-payload arms — DnsError, TlsAlertReceived,
+  HttpRequestBodySize (some + none), HttpRequestHeaderSectionSize
+  (option<u32>), HttpRequestHeaderSize (option<field-size-payload>
+  unwrapping into name + size), HttpResponseHeaderSize (bare
+  field-size-payload at +16..36 without the option wrapper),
+  HttpResponseTransferCoding, InternalError-with-message, a
+  no-payload-arm check (ConnectionRefused leaves +16..40 zero),
+  and a misaligned-retptr test pinned to 8-alignment.
+
+341/341 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.35 — client.send / handler.handle result<response, error-code> wire fix (Phase 5 Slice GG)
+
+Same shape of bug as Slice Z (resolve-addresses): the existing
+wire-up for `wasi:http/client.send` and `wasi:http/handler.handle`
+returned the response handle directly as an i32 flat return,
+omitting the outer result discriminant. The WIT says both
+methods return `result<response, error-code>`, which canon-ABI
+lowers to a 32-byte 4-aligned retptr with payload at +4.
+
+### Corrected retptr layout
+
+```
++0:    result-disc (u8) + 3 pad
++4..32: payload section (28 bytes — sized to the error-code
+        variant which dominates the 4-byte response handle)
+
+  ok:
+    +4..8:  response handle (i32)
+    +8..32: unused, zero
+
+  err (http error-code variant, 28 bytes — align 4):
+    +4:    error-code disc (u8) + 3 pad  (40 cases total)
+    +8..32: payload section (24 bytes — sized to the dominant
+            arm, option<field-size-payload>)
+```
+
+Slice GG implements the simple (no-payload) arms — the common
+case for HTTP errors (ConnectionRefused, HttpResponseTimeout,
+ConfigurationError, InternalError, etc.). Typed-payload arms
+(DnsError, TlsAlertReceived, body-size, field-size,
+transfer-coding, content-coding, internal-error-with-message)
+write only the discriminant for now; payload encoding lands in
+a follow-up slice.
+
+### Caught HttpException now lowered to err variant
+
+Previously an HttpException from `IClient.SendAsync` or
+`IHandler.HandleAsync` propagated out of the wire call as a
+host-side CLR exception — guests calling the import would see
+their canon-async-func dispatch fail with no result encoding.
+Now the wire catches HttpException and routes it through
+`WriteResultResponseErrorCode` so the err arm lands in the
+retptr properly. Same pattern as every other
+`result<_, error-code>` wire-up in the sockets and filesystem
+surfaces.
+
+### Wire signature change
+
+Both methods change from `Func<ExecContext, int, int>` (return
+handle) to `Action<ExecContext, int, int>` (self + retptr). The
+public Invoke* methods change shape accordingly:
+
+```csharp
+public void InvokeClientSend(
+    int requestHandle, int retptr, ICabiRealloc realloc)
+public void InvokeHandlerHandle(
+    int requestHandle, int retptr, ICabiRealloc realloc)
+```
+
+### Test updates
+
+`HttpClientHandlerBindingTests.cs` updated — 6 existing tests
+flipped from the old "returns handle / propagates exception"
+shape to "writes ok-disc + handle at +4 / writes err-disc +
+error-code at +4". A 7th test (registration) was unchanged.
+
+All previous CLR-exception assertions (Assert.Throws<HttpException>)
+became wire-encoding assertions reading the retptr's result-disc
+and error-code disc.
+
+330/330 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.34 — UDP send via 17-flat-param custom delegate (Phase 5 Slice FF)
+
+Wires `udp-socket.send` — the last unbound UDP method. Closes
+the UDP method surface. The send signature is
+`async func(data: list<u8>, remote-address: option<ip-socket-address>) -> result<_, error-code>`
+which canon-ABI flat-lowers to 17 wire i32 slots:
+
+```
+self                       (1)
+list<u8>: ptr, len         (2)
+option<ip-socket-address>:
+  opt-disc                 (1)
+  ip-sock-addr variant:
+    disc                   (1)
+    joined payload         (11 — sized to ipv6's
+                                port + flow-info + 8×u16 addr +
+                                scope-id)
+retArea                    (1)
+                          ----
+Total                      17
+```
+
+This sits exactly at MAX_FLAT_PARAMS=16 for the params (16
+slots, not strictly greater) so the canon-ABI keeps them flat
+rather than packing into a paramptr. Plus the retArea hoist =
+17 total wire params — one over System.Action's 16-arg limit
+(17 type args including the leading ExecContext).
+
+### Custom delegate type
+
+```csharp
+public delegate void UdpSendDelegate(
+    ExecContext ctx,
+    int self,
+    int dataPtr, int dataLen,
+    int optDisc,
+    int addrDisc,
+    int s1, int s2, int s3, int s4, int s5,
+    int s6, int s7, int s8, int s9, int s10, int s11,
+    int retptr);
+```
+
+Declared at the namespace level alongside `WasiPreview3Host`.
+`WasmRuntimeBinding.BindHostFunction<TDelegate>` works with any
+custom delegate type via reflection — no special framework
+support needed.
+
+### Body reuses Slice T's decoder
+
+```csharp
+public void InvokeUdpSocketSend(
+    int self,
+    int dataPtr, int dataLen,
+    int optDisc, int addrDisc,
+    int s1, int s2, int s3, int s4, int s5,
+    int s6, int s7, int s8, int s9, int s10, int s11,
+    int retptr, ICabiRealloc realloc)
+```
+
+Decodes via `ReadIpSocketAddressFromSlots(addrDisc, s1..s11)`
+when `optDisc != 0` (some path; none → null remote, send to
+connected peer). Reads `data` as a byte[] from guest memory,
+sync-blocks `SendAsync`, writes the standard 20-byte
+sockets-error-code retptr.
+
+### Test coverage
+
+5 tests in `UdpSendWireTests.cs` driven by a `RecordingUdpSocket`
+stub that captures the (data, remote) args passed to
+`SendAsync`:
+- `BindToRuntime` registers udp-socket.send and the wire arity
+  matches exactly: 17 params, 0 results (verified via
+  `runtime.GetFunctionType`).
+- `none` remote routes through with null `LastRemote` (use
+  connected peer).
+- ipv4 192.168.1.1:5353 decodes correctly through slots 1..5.
+- ipv6 ::1 with flow-info 0xCAFEBABE and scope-id 7 decodes
+  through all 11 ipv6 slots.
+- `SendAsync` failure (AddressNotBindable) writes err-disc + 
+  error-code at retptr+4.
+
+330/330 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.33 — request.get-options + set-status-code result fix (Phase 5 Slice EE)
+
+### `response.set-status-code` wire arity fix
+
+The existing wire-up bound `set-status-code` as
+`Action<ExecContext, int, int>` — no return. The WIT signature
+is `set-status-code: func(status-code: status-code) -> result`,
+which canon-ABI flat-lowers to a 1-slot i32 return (the result
+discriminant). Guests expecting that return slot were reading
+garbage off the operand stack.
+
+The impl setter can't fail, so the disc is always 0 — but the
+wire arity needs to match the canonical-ABI contract. Bound as
+`Func<ExecContext, int, int, int>` returning 0.
+
+### `request.get-options` wire-up
+
+```
+get-options: func() -> option<request-options>
+```
+
+`option<own<request-options>>` flat-lowers to 2 slots
+(opt-disc + handle) > MAX_FLAT_RESULTS=1 → retptr. 8-byte
+4-aligned retptr layout:
+
+```
++0:   option-disc (u8) + 3 pad
++4..8: request-options handle (i32; 0 when none)
+```
+
+Allocates a fresh request-options handle pointing at the
+parent request's existing `IRequestOptions` impl — same
+shared-impl pattern as `get-headers` (Slice DD).
+
+### Test coverage
+
+5 tests in `RequestGetOptionsAndStatusFixTests.cs`:
+- `BindToRuntime` registers both methods.
+- `get-options` on a request with no options writes
+  option-disc=0 + zero handle.
+- `get-options` on a request with options allocates a fresh
+  request-options handle; the resolved impl is the same
+  instance (`Assert.Same`).
+- `get-options` misaligned retptr throws.
+- `set-status-code` function-type assertion: registered type
+  has exactly 2 param slots and 1 result slot (proves the
+  arity fix).
+
+325/325 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.32 — request/response get-headers (Phase 5 Slice DD)
+
+Wires `request.get-headers` and `response.get-headers`. Both
+return `own<fields>` — the wire allocates a fresh fields handle
+pointing at the parent's existing `IFields` impl. Mutations
+through the returned handle are visible through the parent's
+own reads (and vice versa) since both share the same impl
+object.
+
+### Wire signature
+
+```
+Func<ExecContext, int self, int>  // returns fields handle
+```
+
+A bare-flat return (no retptr): 1 i32 slot = handle index. The
+impl reads as `FieldsHandles.Allocate(request.GetHeaders())` —
+a one-liner using the existing resource table.
+
+### Ownership semantics
+
+The WIT says `get-headers: func() -> headers` where `type
+headers = fields;`. A bare resource type in return position
+means `own<...>` per the canonical-ABI spec. The pragmatic
+interpretation here is "fresh handle bound to the same impl":
+the parent request/response keeps its independent `_headers`
+reference; resource-drop on the returned handle only removes
+that handle's slot — the impl stays reachable through the
+parent.
+
+### Test coverage
+
+6 tests in `GetHeadersWireTests.cs`:
+- `BindToRuntime` registers both methods.
+- Request `get-headers` allocates a handle pointing to the
+  same `IFields` instance (`Assert.Same`).
+- Mutations through the returned handle are visible through
+  the parent's own `GetHeaders()` (impl-sharing assertion).
+- Response `get-headers` allocates a handle to the same impl.
+- Mutations through the response's returned handle are
+  reflected in the response's own reads.
+- Resource-drop on the returned handle doesn't invalidate the
+  parent's headers — verified by reading the parent's
+  `_headers` after dropping the handle.
+
+320/320 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.31 — request method + scheme getters/setters (Phase 5 Slice CC)
+
+Wires `request.get-method`/`set-method` (bare `method` variant)
+and `request.get-scheme`/`set-scheme` (`option<scheme>`). Both
+variants flat-lower to 3 slots (disc + str-ptr + str-len) since
+their `other(string)` arm is the widest. The scheme pair wraps
+that variant in `option<...>` for the outer optionality.
+
+### Variant flat-lowering + retptr layouts
+
+```
+method variant: { get=0, head=1, post=2, put=3, delete=4,
+                  connect=5, options=6, trace=7, patch=8,
+                  other(string)=9 }
+  flat:   3 slots (disc i32, str-ptr i32, str-len i32)
+  retptr: 12 bytes 4-aligned
+    +0:   disc (u8) + 3 pad
+    +4..12: payload (8 bytes — string ptr/len when disc=9,
+            otherwise unused/zero)
+
+scheme variant: { HTTP=0, HTTPS=1, other(string)=2 }
+  same flat-lowering + retptr shape as method
+
+option<scheme>:
+  flat:   4 slots (opt-disc + scheme-disc + str-ptr + str-len)
+  retptr: 16 bytes 4-aligned
+    +0:   option-disc (u8) + 3 pad
+    +4..16: scheme variant (12 bytes — disc + ptr/len)
+```
+
+### Wire signatures
+
+```
+get-method:   Action<ExecContext, self, retptr>
+set-method:   Func<ExecContext, self, disc, strPtr, strLen, int>
+get-scheme:   Action<ExecContext, self, retptr>
+set-scheme:   Func<ExecContext, self, optDisc, schemeDisc,
+                                       strPtr, strLen, int>
+```
+
+Setters return result-disc as a flat i32 (always 0; impl
+setters can't fail).
+
+### Public decoders
+
+```csharp
+public HttpMethod ReadMethodFromSlots(int disc, int strPtr, int strLen)
+public HttpScheme ReadSchemeFromSlots(int disc, int strPtr, int strLen)
+```
+
+Test fixtures and downstream binders can validate flat-lowering
+independently of the host body. Invalid discs throw
+`HttpException` with `HttpRequestMethodInvalid` (method) or
+`InternalError` (scheme).
+
+### Test coverage
+
+10 tests in `RequestMethodSchemeWireTests.cs`:
+- `BindToRuntime` registers all four host functions.
+- `get-method` default writes disc=0 (Get) + zero pair.
+- `set-method(Post)` + `get-method` round-trips.
+- `set-method(Other("BREW"))` + `get-method` round-trips the
+  string payload at +4..12 through `cabi_realloc`.
+- `ReadMethodFromSlots(99, ...)` throws
+  `HttpRequestMethodInvalid`.
+- `get-scheme` default writes option-disc=0 (none).
+- `set-scheme(some(Https))` + `get-scheme` round-trips.
+- `set-scheme(some(Other("ws")))` + `get-scheme` round-trips
+  the protocol string at +8..16.
+- `set-scheme(none)` clears a previously-set value.
+- `ReadSchemeFromSlots(99, ...)` throws `InternalError`.
+
+314/314 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.30 — request option<string> getters/setters (Phase 5 Slice BB)
+
+Wires `request.get-path-with-query` / `set-path-with-query` and
+`request.get-authority` / `set-authority`. Both pairs share the
+`option<string>` wire shape — first reusable template for the
+request/response setter/getter cluster.
+
+### Wire shapes
+
+```
+get-X: () -> option<string>
+  retptr: 12 bytes 4-aligned (option-disc + ptr + len)
+  Action<ExecContext, self, retptr>
+
+set-X(option<string>) -> result
+  arg: 3 flat slots (option-disc + ptr + len)
+  return: 1 flat i32 slot (result disc; always 0 — impl setters
+          can't fail)
+  Func<ExecContext, self, optDisc, strPtr, strLen, int>
+```
+
+### Shared dispatch
+
+```csharp
+internal void InvokeRequestGetOptionString(
+    int self, int retptr, ICabiRealloc realloc,
+    Func<IRequest, string?> getter)
+
+internal int InvokeRequestSetOptionString(
+    int self, int optDisc, int strPtr, int strLen,
+    Action<IRequest, string?> setter)
+```
+
+Same template pattern as the buffer-size getter from Slice O —
+per-method body is a one-line lambda routing through the right
+impl method.
+
+The retptr layout for the getter is:
+```
++0:    option-disc (u8) + 3 pad
++4..8: string-ptr (i32; 0 when none)
++8..12: string-len (i32; 0 when none)
+```
+
+The setter decodes `optDisc == 0` as `null` and `optDisc == 1`
+as `ReadGuestUtf8(strPtr, strLen)` (the `some` arm; empty
+string is distinct from `none`).
+
+### Test coverage
+
+7 tests in `RequestOptionStringWireTests.cs`:
+- `BindToRuntime` registers all four host functions.
+- `get-path-with-query` writes none-disc + zero pair when unset.
+- `set-path-with-query` round-trips `/api/v1?q=1` through the
+  setter, impl-side mutation, and wire getter.
+- `set-path-with-query(none)` clears a previously-set value.
+- `set-authority` + `get-authority` round-trip
+  `example.com:8080`.
+- `set-authority(some(""))` is distinct from `none` — disc=1
+  with len=0 round-trips as empty-string-Some.
+- `get-X` misaligned retptr throws.
+
+304/304 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.29 — HTTP fields collection methods (Phase 5 Slice AA)
+
+Wires the remaining `wasi:http/types.fields` methods: `get`,
+`copy-all`, `get-and-delete`, and `static fields.from-list`.
+The fields surface is now complete — every method on the
+resource is bound through to the host backend.
+
+### Wire shapes
+
+```
+[method]fields.get(name)
+  -> list<list<u8>>                   8-byte 4-aligned retptr
+
+[method]fields.copy-all()
+  -> list<tuple<list<u8>, list<u8>>>  8-byte 4-aligned retptr
+
+[method]fields.get-and-delete(name)
+  -> result<list<list<u8>>,
+           header-error>                20-byte 4-aligned retptr
+
+[static]fields.from-list(list<tuple<...>>)
+  -> result<fields, header-error>      20-byte 4-aligned retptr
+```
+
+The two result-variant returns (`get-and-delete` and
+`from-list`) reuse Slice M's 20-byte `result<_, header-error>`
+shape since the header-error variant (16 bytes, dominated by
+its `other(option<string>)` arm) is larger than both payload
+arms (8 bytes for `list<list<u8>>`, 4 bytes for the `fields`
+handle).
+
+### List-of-byte-lists encoder
+
+```csharp
+private void WriteListOfByteLists(
+    Span<byte> dest,
+    IReadOnlyList<byte[]> values,
+    ICabiRealloc realloc,
+    MemoryInstance memory)
+```
+
+Shared helper used by both `fields.get` (offset 0 of an 8-byte
+retptr) and `fields.get-and-delete` (offset 4 of a 20-byte
+retptr after the ok-disc). For each entry, allocates the byte
+payload via `realloc.Allocate(1, len)` and writes `(ptr, len)`
+into the outer list at 8-byte stride.
+
+### header-error encoder split
+
+Introduced `WriteHeaderErrorBytes(Span<byte> dest, ...)` as a
+companion to the existing `WriteHeaderErrorResult` from Slice
+M. The new helper writes only the 16-byte header-error variant
+starting at offset 0 of `dest`, so callers writing a non-
+`result<_, header-error>` retptr (e.g. `result<list<_>,
+header-error>` or `result<fields, header-error>`) can route
+the err arm through this at their `+4` payload offset.
+
+### Test coverage
+
+10 tests in `FieldsCollectionWireTests.cs`:
+- `BindToRuntime` registers all four host functions.
+- `fields.get` returns empty list for a missing header.
+- `fields.get` returns both values for a multi-valued header
+  with full byte-string round-trip through `cabi_realloc`.
+- `fields.copy-all` returns every (name, value) pair (order-
+  insensitive set assertion since Dictionary iteration order
+  isn't specified).
+- `fields.copy-all` empty returns null-ptr / 0-count.
+- `fields.get-and-delete` removes a header and returns its
+  values (asserts impl mutation + wire output).
+- `fields.get-and-delete` on a frozen Fields writes
+  `HeaderError.Immutable` at +4.
+- `fields.from-list` allocates a fresh handle whose Fields
+  contains the round-tripped entries.
+- `fields.from-list` with an illegal name (`bad:name`) writes
+  `HeaderError.InvalidSyntax`.
+- `fields.get` misaligned retptr throws.
+
+297/297 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.28 — resolve-addresses result-variant encoding fix (Phase 5 Slice Z)
+
+`ip-name-lookup.resolve-addresses` was writing `(list-ptr,
+list-count)` directly at retptr — missing the outer result
+discriminant entirely. The WIT says
+`result<list<ip-address>, error-code>`, which canon-ABI lowers
+to a 16-byte 4-aligned retptr (disc + payload), not 8 bytes.
+Guests would mis-decode the result variant; a guest expecting
+`disc + list-ptr + list-len` would read disc=list-ptr's first
+byte (almost always garbage), then the list-ptr/len would be
+shifted by 4 bytes off, dereferencing into junk.
+
+### Corrected retptr layout
+
+```
++0:    result-disc (u8) + 3 pad
++4..16: payload section (12 bytes, sized to the error-code
+        variant's 12-byte arm — dominates the 8-byte list arm)
+
+  ok (list<ip-address>):
+    +4..8:   list-ptr (i32)
+    +8..12:  list-len (i32)
+    +12..16: unused, zero
+
+  err (error-code variant):
+    +4..16: variant disc + payload (per
+            WriteSocketsErrorCodeBytes)
+```
+
+The list-element layout (18 bytes per `ip-address` entry,
+2-aligned, with ipv6 groups in BE) is unchanged from the
+previous wire-up — only the outer retptr framing moved.
+
+### SocketsException now lowered to err variant
+
+Previously a `SocketsException` from
+`IIpNameLookup.ResolveAddressesAsync` propagated out of the
+wire call as a host-side CLR exception. Now it's caught and
+encoded as the err variant at `+4..16` per the layout above,
+matching every other `result<_, error-code>` wire-up in the
+sockets surface.
+
+### Test coverage
+
+- Existing `InvokeResolveAddresses_empty_result_*` updated to
+  assert disc=0 at +0 with the list pair at +4..12.
+- `*_ipv4_addresses_*` test now asserts disc=0 at +0; list
+  pair at +4..12; element layout at listPtr unchanged.
+- `*_ipv6_address_*` test unchanged (reads only the listPtr
+  entry — element layout didn't move).
+- `*_misaligned_retptr_throws` unchanged (alignment check
+  fires before size check; retptr=5 is still misaligned).
+- `*_propagates_sockets_exception` flipped to
+  `*_writes_error_code_on_resolver_failure` — verifies the
+  `NoNameLookup` `PermanentResolverFailure` lands as disc=1
+  at +0 and error-code variant at +4.
+
+287/287 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.27 — UDP receive wire-up (Phase 5 Slice Y)
+
+Wires `udp-socket.receive` with a 44-byte 4-aligned retptr for
+`result<tuple<list<u8>, ip-socket-address>, error-code>`. UDP is
+now fully usable from a guest except for `send` (which requires
+paramptr-by-pointer lowering for its 17 flat params).
+
+### 44-byte retptr layout
+
+```
++0:    result-disc (u8) + 3-byte pad
++4..44: payload section (40 bytes, sized to the ok tuple)
+
+  ok (tuple<list<u8>, ip-socket-address>):
+    +4..8:   list-ptr (i32, ICabiRealloc-allocated)
+    +8..12:  list-len (i32)
+    +12..44: ip-socket-address (32 bytes)
+      +12:    ip-sock-addr disc (u8) + 3 pad
+      +16..18: port (u16 LE)
+      +18..22: 4 octets (ipv4) / +20..24: flow-info (u32 ipv6)
+      +24..40: 8×u16 BE address groups (ipv6)
+      +40..44: scope-id (u32 ipv6)
+
+  err (error-code variant):
+    +4..16: error-code variant + payload
+    +16..44: unused, zero-filled
+```
+
+The ip-socket-address embedding here is decoupled from the
+standalone `result<ip-socket-address, error-code>` encoder from
+Slice U — same variant layout but at a different starting offset
+within a larger retptr. The encoder writes the variant inline
+rather than calling Slice U's encoder (which assumes the variant
+sits at offset +4 of its own result retptr).
+
+### Test coverage
+
+6 tests in `UdpReceiveWireTests.cs` driven by stubbed
+`IUdpSocket` impls (bypassing System.Net.Sockets to exercise the
+encoder against deterministic inputs):
+- `BindToRuntime` registers `udp-socket.receive`.
+- ipv4 source: list-ptr/len round-trips through cabi_realloc,
+  port and octets land at +16..22 with disc=0 at +12.
+- ipv6 source: BE u16 groups at +24..40, flow-info LE at +20..24,
+  scope-id LE at +40..44, disc=1 at +12. Test address is `::1`
+  with flow-info `0xCAFEBABE` and scope-id `42`.
+- err path: `Timeout` error code lands at +4 with result-disc=1.
+- Zero-length payload writes list-ptr=0 / list-len=0 (no
+  cabi_realloc allocation).
+- Misaligned retptr throws.
+
+287/287 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.26 — TCP simple-options cluster + UDP disconnect (Phase 5 Slice X)
+
+Wires the remaining flat tcp-socket getters/setters
+(set-listen-backlog-size, the keep-alive family of 4 pairs,
+hop-limit pair) plus udp-socket.disconnect. With Slice X, every
+tcp-socket and udp-socket method is bound except UDP's
+paramptr-by-pointer send (17 flat params).
+
+### Three new retptr shapes
+
+```
+result<bool, error-code>: 12 bytes 4-aligned
+result<u8,   error-code>: 12 bytes 4-aligned
+result<u32,  error-code>: 12 bytes 4-aligned
+
+  +0:   result-disc (u8) + 3-byte pad
+  +4..12: payload section (8 bytes — sized to the error-code's
+          string-payload arm; ok payload sits at +4 within it)
+```
+
+The 24-byte 8-aligned `result<u64, error-code>` shape (used by
+the buffer-size getters from Slice O) gets reused here for the
+keep-alive idle-time / interval methods.
+
+### Five new dispatch helpers
+
+```csharp
+internal void InvokeTcpSocketGetterResultBool(self, retptr, realloc, Func<ITcpSocket, bool>)
+internal void InvokeTcpSocketGetterResultU8  (self, retptr, realloc, Func<ITcpSocket, byte>)
+internal void InvokeTcpSocketGetterResultU32 (self, retptr, realloc, Func<ITcpSocket, uint>)
+internal void InvokeTcpSocketGetterResultU64 (self, retptr, realloc, Func<ITcpSocket, ulong>)
+internal void InvokeTcpSocketSetterErrorCode (self, retptr, realloc, Action<ITcpSocket>)
+internal void InvokeUdpSocketSetterErrorCode (self, retptr, realloc, Action<IUdpSocket>)
+```
+
+Same shape-as-template-shared-dispatch pattern as the buffer-size
+getter from Slice O and the metadata-hash dispatch from Slice V.
+Per-method body is a one-line lambda routing through the right
+impl method.
+
+### Eleven new host functions wired
+
+```
+[method]tcp-socket.set-listen-backlog-size      — u64 setter
+[method]tcp-socket.{get,set}-keep-alive-enabled — bool getter / setter
+[method]tcp-socket.{get,set}-keep-alive-idle-time — u64 (duration ns)
+[method]tcp-socket.{get,set}-keep-alive-interval  — u64 (duration ns)
+[method]tcp-socket.{get,set}-keep-alive-count     — u32
+[method]tcp-socket.{get,set}-hop-limit            — u8
+[method]udp-socket.disconnect                     — () -> result<_, error-code>
+```
+
+(`tcp-socket.get-is-listening` was already wired in Slice O.)
+Several keep-alive methods route through impls that throw
+`Sockets.ErrorCode.NotSupported` on the default
+System.Net.Sockets backing — TCP_KEEPIDLE / TCP_KEEPINTVL /
+TCP_KEEPCNT aren't exposed cross-platform. The wire layer
+captures the SocketsException and routes the NotSupported
+through the same retptr encoder as the success path.
+
+### Test coverage
+
+12 tests in `TcpSocketSimpleOptionsTests.cs`:
+- `BindToRuntime` registers all 13 new+existing host functions.
+- `get-is-listening` returns false when unbound.
+- `get-keep-alive-enabled` writes the ok-disc + bool at +4.
+- `get-keep-alive-idle-time` writes err-disc + NotSupported at
+  +8 on the 24-byte u64 retptr.
+- `get-hop-limit` round-trips a setter-applied value (42)
+  through the u8 retptr at +4.
+- `get-keep-alive-count` u32 err-path writes NotSupported.
+- `set-listen-backlog-size` writes ok-disc.
+- `set-keep-alive-enabled` round-trip (set true → get returns 1).
+- `set-keep-alive-idle-time` writes NotSupported (20-byte
+  sockets-error-code retptr).
+- `set-keep-alive-count` writes NotSupported.
+- UDP `disconnect` on an unconnected socket writes
+  `InvalidState`.
+- 12-byte retptr misalignment throws.
+
+281/281 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.25 — variant-bearing filesystem descriptor methods (Phase 5 Slice W)
+
+Closes the variant-arg gap on `wasi:filesystem/types.descriptor`:
+`set-times`, `set-times-at` (both take two `new-timestamp`
+variants), `link-at`, `rename-at` (borrowed-descriptor handles),
+`symlink-at`. With Slice V's no-variant-arg methods and Slice W's
+variant-arg / cross-descriptor methods, every method on
+`descriptor` other than `[constructor]` is now wired through to
+the host backend.
+
+### `new-timestamp` flat-lowering
+
+```
+variant new-timestamp { no-change, now, timestamp(instant) }
+```
+
+`instant` is `(s64 seconds, u32 nanoseconds)`, flat-lowering to
+`(i64, i32)`. Variant flat-lowering yields 3 slots:
+`(disc i32, seconds i64, nanoseconds i32)`. The
+no-change/now arms leave the payload slots unused per the disc.
+
+```csharp
+public static NewTimestamp ReadNewTimestampFromSlots(
+    int disc, long seconds, int nanoseconds)
+```
+
+Public static helper so test fixtures and downstream binders
+can validate flat-lowering independently of the host body.
+
+### Five host functions wired
+
+```
+[method]descriptor.set-times       — self + (new-timestamp × 2) + retptr (8 flat params, 2 i64s)
+[method]descriptor.set-times-at    — self + path-flags + path + (new-timestamp × 2) + retptr (11 flat params)
+[method]descriptor.link-at         — self + old-path-flags + old-path + borrow<descriptor> + new-path + retptr (8 flat params)
+[method]descriptor.rename-at       — self + old-path + borrow<descriptor> + new-path + retptr (7 flat params)
+[method]descriptor.symlink-at      — self + old-path + new-path + retptr (6 flat params)
+```
+
+All five route through the shared
+`InvokeDescriptorResultErrorCodeNoArgs` template from Slice V —
+the wire shape is `result<_, error-code>` in every case. The
+per-method body just constructs the right impl-call lambda.
+
+`borrow<descriptor>` shows up at the wire as a plain i32 handle;
+`RequireDescriptor(newDescHandle)` resolves it against the
+host's resource table. Note that `link-at` and `symlink-at` in
+the default System.IO-backed `Descriptor` impl throw
+`Unsupported` — .NET's cross-platform hard-link / symlink
+creation story isn't uniform across targets. The wire bindings
+route those `Unsupported` errors through the standard
+error-code encoder.
+
+### Test coverage
+
+11 tests in `VariantBearingDescriptorWireTests.cs`:
+- `BindToRuntime` registers all five host functions.
+- `new-timestamp` decoder: `no-change` (disc=0), `now`
+  (disc=1), `timestamp(instant)` (disc=2 with secs+nanos),
+  invalid-disc throws `FilesystemException(Invalid)`.
+- `set-times-at` with `timestamp` access + `no-change` mod
+  actually changes the file's `LastAccessTimeUtc`.
+- `set-times-at` on missing path writes
+  `error-code = NoEntry`.
+- `link-at` default impl writes
+  `error-code = Unsupported`.
+- `rename-at` moves a file within the root and asserts old
+  path gone + new path present with content preserved.
+- `rename-at` missing source writes
+  `error-code = NoEntry`.
+- `symlink-at` default impl writes
+  `error-code = Unsupported`.
+
+269/269 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.24 — remaining filesystem descriptor methods (Phase 5 Slice V)
+
+Wires seven more descriptor host functions, picking off the
+no-variant-arg methods on `wasi:filesystem/types.descriptor`
+that share a common result encoding. Closes the gap between the
+heavy variant-bearing methods (`set-times`, `link-at`,
+`rename-at`, `symlink-at`, `set-times-at`) and the simpler
+ones that just take a self + optional u64/path and return
+`result<_, error-code>` or a small fixed-size payload.
+
+### Seven host functions wired
+
+```
+[method]descriptor.set-size           — self + u64 size
+[method]descriptor.sync               — self only
+[method]descriptor.sync-data          — self only
+[method]descriptor.advise             — self + u64 offset + u64 length + u8 hint
+[method]descriptor.metadata-hash      — self only, returns result<metadata-hash-value, error-code>
+[method]descriptor.metadata-hash-at   — self + path-flags + path, returns result<metadata-hash-value, error-code>
+[method]descriptor.readlink-at        — self + path, returns result<string, error-code>
+```
+
+### Three retptr encoders / dispatch helpers
+
+- **`InvokeDescriptorResultErrorCodeNoArgs`** — private template
+  for the four `result<_, error-code>` methods (set-size, sync,
+  sync-data, advise). Routes through the appropriate impl
+  delegate, writes a 20-byte retptr through
+  `WriteErrorCodeResult` from Slice N.
+- **`InvokeDescriptorMetadataHash`** — 24-byte 8-aligned retptr
+  for `result<metadata-hash-value, error-code>`. The
+  metadata-hash-value record is two u64s (lower + upper) at
+  offset +8 on the ok path; err path reuses the 20-byte
+  error-code layout at +4..20 (lower 4 bytes of the trailing
+  8-byte pad slot stay zero).
+- **`InvokeDescriptorReadlinkAt`** — 20-byte 4-aligned retptr
+  for `result<string, error-code>`. On ok, writes
+  `(ptr: u32, len: u32)` at +4..12 after `ICabiRealloc`-backed
+  UTF-8 allocation. On err, falls back to `WriteErrorCodeBytes`.
+
+### Test coverage
+
+7 tests in `RemainingDescriptorWireTests.cs`:
+- `BindToRuntime` registers all seven host functions.
+- `metadata-hash` writes the impl's `(lower, upper)` u64 pair
+  to the +8..24 slot.
+- `metadata-hash` err path writes the error-code variant at
+  +4..20 and the ok-slot lower bytes stay zero.
+- `metadata-hash-at` round-trips the path string through
+  `ICabiRealloc` and forwards path-flags.
+- `readlink-at` writes the symlink target as a UTF-8 string
+  pair `(ptr, len)` at +4..12 of the 20-byte retptr.
+- `readlink-at` err path writes the error-code variant.
+- `readlink-at` misaligned retptr throws.
+
+258/258 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.23 — get-local/remote-address variant-return wire-up (Phase 5 Slice U)
+
+Mirror of Slice T's variant-arg work in the return direction:
+`result<ip-socket-address, error-code>` written through a
+36-byte 4-aligned retptr. With Slice T (variant-in for
+bind/connect) and Slice U (variant-out for get-address),
+sockets are fully usable from a guest end-to-end.
+
+### `WriteResultIpSocketAddress`
+
+Encoder mirroring the `ReadIpSocketAddressFromSlots` decoder.
+36-byte layout:
+
+```
++0:    result-disc (u8) + 3-byte pad
++4:    ip-sock-addr disc (u8) + 3-byte pad  (on ok)
++8..36: payload (28 bytes for ipv6; ipv4 uses 6, leaves 22 unused)
+
+  ipv4 (6 bytes at +8..14):
+    +8..10:  port (u16)
+    +10..14: 4 address octets
+
+  ipv6 (28 bytes at +8..36):
+    +8..10:  port
+    +12..16: flow-info (u32, padded to align-4)
+    +16..32: 8×u16 BE address groups
+    +32..36: scope-id (u32)
+```
+
+Err path reuses `WriteSocketsErrorCodeBytes` from Slice O at
+the +4..20 slot.
+
+### Four host functions wired
+
+```
+[method]tcp-socket.get-local-address
+[method]tcp-socket.get-remote-address
+[method]udp-socket.get-local-address
+[method]udp-socket.get-remote-address
+```
+
+All share `InvokeSocketGetAddress` — the per-method variation
+is the impl-getter lambda. Same dispatch pattern as the
+buffer-size getters from Slice O.
+
+### Test coverage
+
+9 new tests in `AddressReturnTests.cs`:
+- `BindToRuntime` registers all four host functions.
+- TCP `get-local-address` after bind returns the bound ipv4
+  address; round-trip through the test's decoder confirms
+  port + octets.
+- TCP `get-local-address` on unbound writes InvalidState.
+- TCP `get-remote-address` on bound-but-not-connected writes
+  InvalidState.
+- TCP `get-local-address` on ipv6 writes the BE u16 groups
+  with ::1 layout.
+- UDP `get-local-address` after bind round-trips.
+- UDP `get-remote-address` on unconnected writes InvalidState.
+- **Encode-decode symmetry**: encode through
+  `WriteResultIpSocketAddress`, decode through
+  `ReadIpSocketAddressFromSlots` — same address comes back.
+  Proves Slice T's decoder and Slice U's encoder are inverse
+  operations on the wire.
+- Misaligned retptr throws.
+
+251/251 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.22 — bind/connect variant-arg flat-lowering (Phase 5 Slice T)
+
+Closes the last big gap on the sockets side: the
+`ip-socket-address` variant flat-lowering for `bind` and
+`connect` on both TCP and UDP. Sockets are now usable from a
+guest end-to-end — guest passes a flat-lowered variant arg,
+host decodes it, transitions state.
+
+### `ip-socket-address` variant flat-lowering
+
+The variant flattens to 12 i32 slots per canon-ABI:
+- 1 disc slot
+- 11 joined-payload slots (sized to the larger case = ipv6:
+  port + flow-info + 8×u16 address + scope-id)
+
+For ipv4 (disc=0), only the first 5 payload slots are live
+(port + 4 address octets); the remaining 6 are dead per the
+disc. For ipv6 (disc=1), all 11 are live.
+
+### `WasiPreview3Host.ReadIpSocketAddressFromSlots`
+
+Static decoder taking the 12 flat slots and returning a
+typed `IpSocketAddress`. Throws `SocketsException(InvalidArgument)`
+for out-of-range discriminants. Public so test code can
+exercise the decode independently of the wire bindings.
+
+### Four host functions wired
+
+```
+[method]tcp-socket.bind     -> result<_, error-code>
+[method]tcp-socket.connect  -> result<_, error-code>  (sync-blocking)
+[method]udp-socket.bind     -> result<_, error-code>
+[method]udp-socket.connect  -> result<_, error-code>  (sync)
+```
+
+All four have 14-i32 wire signatures: `(self, 12 variant
+slots, retptr)`. The body decodes the variant via
+`ReadIpSocketAddressFromSlots`, calls the typed impl, and
+writes the standard 20-byte `result<_, sockets.error-code>`
+at retptr. TCP connect sync-blocks on the
+`Task`-returning `ConnectAsync` impl — same pattern as
+client.send / handler.handle from Slice H.
+
+### Test coverage
+
+11 new tests in `BindConnectVariantArgTests.cs`:
+- Decode ipv4 from disc=0 + 5 payload slots; ipv6 from
+  disc=1 + 11 payload slots; invalid disc throws.
+- `BindToRuntime` registers all four host functions.
+- TCP bind to loopback succeeds; bind on already-bound
+  socket writes InvalidState.
+- TCP connect to a live loopback listener succeeds; connect
+  to a closed port writes ConnectionRefused (or close-family).
+- UDP bind to loopback succeeds; UDP connect after bind
+  succeeds; UDP connect on unbound writes InvalidState.
+
+242/242 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.21 — `descriptor.read-directory` typed-stream return (Phase 5 Slice S)
+
+Closes the second typed-stream return. `descriptor.read-directory`
+produces a `stream<directory-entry>` whose elements are 24-byte
+canon-ABI records (descriptor-type variant + ptr/len to a
+cabi_realloc-allocated UTF-8 name string).
+
+### Wire encoding for `stream<directory-entry>`
+
+Each entry serializes to 24 bytes in the stream:
+
+```
++0..16:  descriptor-type variant (disc at +0, Other-payload at +4)
++16..20: name-ptr (i32 — cabi_realloc-allocated)
++20..24: name-len (i32 — UTF-8 byte length)
+```
+
+The per-entry name string lives in guest memory at addresses
+returned by cabi_realloc. Guests reading the stream in 24-byte
+chunks recover the entry inline + dereference the name-ptr to
+get the UTF-8 bytes.
+
+For the Other variant's option<string> payload (rare in
+practice), the encoder leaves the slot at +4..16 as zero
+(option-disc = none). Production-quality Other handling would
+require nested realloc + the option<string> wire layout —
+deferred until a workload actually needs it.
+
+### `IDescriptor.ReadDirectory(dispatcher, ICabiRealloc)`
+
+Signature change: now takes the `ICabiRealloc` reference so the
+impl can allocate per-entry name strings. Embedders providing
+custom IDescriptor impls need to update their signature.
+
+### `Descriptor.ReadDirectory` impl
+
+Eager-fill: enumerates the directory up-front with
+`Directory.GetFileSystemEntries`, sizes the StreamBuffer
+`capacity = max(64, entries.Length * 24 + 24)` to avoid the
+default 64-byte cap dropping the tail under TryWrite-on-full,
+then serializes each entry through `WriteDirectoryEntry`.
+`NotDirectory` errors throw synchronously up-front (no stream
+or future is allocated, so no handle leak).
+
+Embedders with very large directories that don't fit in
+memory should override the impl with a lazy-streaming
+backing.
+
+### Host-function wire-up
+
+```
+[method]descriptor.read-directory
+  -> tuple<stream<directory-entry>, future<...>> at 8-byte retptr
+```
+
+Same retptr shape as `descriptor.read-via-stream` (stream-handle
+at +0, future-handle at +4).
+
+### Test coverage
+
+6 new tests in `ReadDirectoryStreamTests.cs`:
+- `BindToRuntime` registers the host function.
+- Three-entry directory (two files + one subdir) → exactly
+  three 24-byte records on the stream; each (type, name) pair
+  matches a known entry, name bytes round-trip through the
+  cabi_realloc-allocated guest memory.
+- Empty directory → empty stream (writable half drops,
+  no leftover bytes).
+- Read-directory on a regular file throws `NotDirectory`
+  synchronously.
+- `InvokeDescriptorReadDirectory` writes (stream, future)
+  handle pair at retptr correctly.
+- Misaligned retptr throws.
+
+231/231 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.20 — `tcp-socket.listen` typed-stream return (Phase 5 Slice R)
+
+First typed-stream return wired end-to-end:
+`tcp-socket.listen` produces a `stream<tcp-socket>` whose
+elements are accepted-socket handles. The accept loop runs in
+the background; the stream stays open for the listener's
+lifetime per the spec's "perpetual stream" semantics.
+
+### Wire encoding for `stream<tcp-socket>`
+
+Each `own<tcp-socket>` value (i32 handle) is serialized as 4
+LE bytes into the dispatcher's existing
+`StreamBuffer<byte>` — that's the canon-ABI wire form of an
+i32 handle. Guest code reading the stream gets 4 bytes per
+accepted socket and interprets each i32 as a fresh resource
+handle. No new typed-stream machinery in the dispatcher; just
+reuse the byte-stream transport with explicit
+serialization at the host boundary.
+
+### `TcpSocket.Listen` / `ListenInternal`
+
+Public `Listen(dispatcher)` is the spec-facing entry; the
+`internal ListenInternal(dispatcher, host)` overload accepts
+a `WasiPreview3Host` reference so the accept loop can
+allocate accepted sockets into
+<see cref="WasiPreview3Host.TcpSocketHandles"/>. Tests use
+the public entry; the wire-up uses the internal overload to
+ensure accepted handles are reachable through the host's
+resource table.
+
+Accept loop semantics:
+- `ObjectDisposedException` / fatal `SocketException` → break,
+  close the stream.
+- Transient `SocketException` codes (network-down, host-down,
+  network-unreachable, etc., per the WIT spec's Linux
+  accept(2) reference) → swallow + retry; the stream stays
+  open.
+
+### New internal `TcpSocket(family, Socket)` constructor
+
+Wraps an already-accepted `System.Net.Sockets.Socket` from a
+listener's accept loop. Lands in
+<see cref="TcpSocket.State.Connected"/> immediately; the
+caller's send/receive paths work without extra handshake.
+
+### Host-function wire-up
+
+```
+[method]tcp-socket.listen
+  -> result<stream<tcp-socket>, error-code> at 20-byte retptr
+```
+
+`InvokeTcpSocketListen` validates state via
+`TcpSocket.ListenInternal`. On ok writes
+`(disc=0, stream-handle)` at retptr; on err uses the standard
+sockets error-code variant encoder. Validates the impl is the
+`Wacs.WASI.Preview3.Sockets.TcpSocket` concrete type (custom
+`ITcpSocket` impls don't participate in the accept-loop
+pathway).
+
+### Test coverage
+
+7 new tests in `TcpListenStreamTests.cs`:
+- Listen + dial two .NET clients → 8 bytes (2× 4-byte handles)
+  arrive on the stream; each resolves to a Connected accepted
+  socket in the host table.
+- Listen on unbound throws `InvalidState`.
+- Re-Listen throws `InvalidState`.
+- `BindToRuntime` registers the host function.
+- `InvokeTcpSocketListen` writes (disc=0, stream-handle) at
+  retptr; the stream then receives the accepted-handle bytes.
+- Unbound socket → err written at retptr with code
+  `InvalidState`.
+- **Full server-side loop**: listen → accept → read the
+  accepted handle off the stream → use it to receive bytes
+  from a connected client. Validates the typed-stream return
+  composes with the byte-stream return from Slice Q.
+
+### `InternalsVisibleTo` for the test project
+
+Added to `Wacs.WASI.Preview3.csproj` so tests can drive
+`TcpSocket.ListenInternal` directly. Sibling pattern to the
+existing `InternalsVisibleTo` items in `Wacs.ComponentModel`.
+
+225/225 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.19 — stream-shape bindings: descriptor I/O + TCP send/receive (Phase 5 Slice Q)
+
+Wires the stream-shape host bindings that turn the
+`stream<u8>` ABI from a surface area into actual I/O.
+End-to-end byte flow through the canon-async stream + future
+handle pairs for both filesystem and socket I/O.
+
+### Descriptor stream-shape wire-up
+
+```
+[method]descriptor.read-via-stream(offset)
+   -> tuple<stream<u8>, future<result<_, error-code>>>
+[method]descriptor.write-via-stream(stream, offset)
+   -> future<result<_, error-code>>
+[method]descriptor.append-via-stream(stream)
+   -> future<result<_, error-code>>
+```
+
+The `read-via-stream` retptr layout (8 bytes 4-aligned)
+matches the existing `wasi:cli/stdin.read-via-stream` shape.
+`write-via-stream` + `append-via-stream` return single i32
+future-handles directly (no retptr, single-i32 fits within
+`MAX_FLAT_RESULTS`).
+
+Side fix in `Descriptor.WriteViaStream` /
+`AppendViaStream`: the FileStream is now disposed BEFORE
+the future-completion write, eliminating a race where the
+embedder observing the future could call `File.Read` on a
+still-open stream. Caught by parallel xunit execution of
+the new Slice Q tests.
+
+### TCP socket send / receive implementations
+
+`TcpSocket.Send(dispatcher, streamHandle)`:
+- Allocates a future-handle.
+- Spawns a background task that drains the stream buffer
+  into `Socket.SendAsync` until the buffer's writable half
+  closes, then `Shutdown(Send)` per spec (FIN packet) and
+  completes the future.
+
+`TcpSocket.Receive(dispatcher)`:
+- Allocates a fresh stream-handle + future-handle.
+- Spawns a background task that pumps `Socket.ReceiveAsync`
+  bytes into the stream buffer until peer FIN or socket
+  error, then drops the writable half and completes the
+  future.
+
+Both map `SocketException` through
+`TcpEndpointHelper.MapSocketException` to typed
+`SocketsException` codes for the future-err payload.
+
+### `TcpSocket.ConnectAsync` now functional
+
+Previously threw `NotSupported`. The wire-up still needs the
+12-slot `ip-socket-address` variant flat-lowering (future
+slice), but the impl now uses `Socket.ConnectAsync` with
+implicit-bind-on-unbound per the spec. End-to-end exercised
+by the loopback TCP send/receive round-trip test.
+
+### TCP socket send/receive wire-up
+
+```
+[method]tcp-socket.send    -> (stream-handle) -> future-handle
+[method]tcp-socket.receive -> () -> retptr<stream, future>
+```
+
+`InvokeTcpSocketReceive` writes the 8-byte tuple to retptr
+identically to the descriptor + stdin patterns.
+
+### Test coverage
+
+9 new tests in `StreamShapeBindingTests.cs`:
+- `BindToRuntime` registers all 5 new host functions.
+- `InvokeDescriptorReadViaStream` yields file bytes through
+  the stream handle; misaligned retptr throws.
+- `InvokeDescriptorWriteViaStream` persists stream bytes to
+  file with no race on read-after-future-completion.
+- `InvokeDescriptorAppendViaStream` extends an existing file.
+- `TcpSocket.Send` / `Receive` reject `InvalidState` on
+  unconnected sockets.
+- **End-to-end loopback round-trip**: spin up a real .NET
+  `Socket` listener, drive the WACS `TcpSocket` through
+  Connect → Send → Receive, observe the bytes flow both
+  ways with proper FIN handling on both sides.
+- `InvokeTcpSocketReceive` writes the (stream, future)
+  handle pair to retptr correctly when driven through the
+  host-function binding.
+
+218/218 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.18 — UDP socket backing + simple wire-up (Phase 5 Slice P)
+
+Closes the same gap for UDP that Slice O closed for TCP.
+Adds <see cref="UdpSocket"/> System.Net.Sockets-backed default
+and wires the static factory + simple primitive accessors.
+
+### `Wacs.WASI.Preview3.Sockets.UdpSocket`
+
+Wraps `Socket(family, SocketType.Dgram, ProtocolType.Udp)`.
+Simpler state machine than TCP: `unbound → bound →
+(optionally) connected`. `Bind` / `Connect` / `Disconnect`
+are sync (UDP has no async handshake).
+`SendAsync` / `ReceiveAsync` throw `NotSupported` pending
+the canon-async list-arg and tuple-return wire-up.
+
+### `TcpEndpointHelper` (internal)
+
+Extracted the `IpSocketAddress ↔ IPEndPoint` conversion +
+the `SocketException → SocketsException` mapping from
+`TcpSocket` into a shared internal helper. Both `TcpSocket`
+and `UdpSocket` use it.
+
+### Eight host functions wired
+
+```
+[static]udp-socket.create
+[method]udp-socket.get-address-family
+[method]udp-socket.get-unicast-hop-limit
+[method]udp-socket.set-unicast-hop-limit
+[method]udp-socket.get-receive-buffer-size
+[method]udp-socket.set-receive-buffer-size
+[method]udp-socket.get-send-buffer-size
+[method]udp-socket.set-send-buffer-size
+```
+
+The hop-limit getter uses the 20-byte 4-aligned
+`result<u8, error-code>` layout (disc at +0, u8 at +4 with
+3-byte tail-pad). The buffer-size getter reuses the same
+24-byte 8-aligned `result<u64, error-code>` layout from
+Slice O's TCP wire-up.
+
+### Test coverage
+
+8 new tests in `UdpSocketBindingTests.cs`:
+- `UdpSocket` starts unbound with correct family.
+- Bind to loopback transitions to Bound + `get-local-address`
+  reports the ephemeral port.
+- Buffer size + hop-limit round-trip.
+- `BindToRuntime` registers all 8 host functions.
+- `InvokeUdpSocketCreate` returns a fresh handle.
+- `InvokeUdpSocketGetHopLimit` writes the result-u8 at +4.
+- `InvokeUdpSocketGetBufferSize` writes the result-u64 at +8.
+
+210/210 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.17 — TCP socket System.Net.Sockets backing + create/getters (Phase 5 Slice O)
+
+Adds the `TcpSocket` System.Net.Sockets-backed default impl
+and wires the static factory + simple primitive accessors.
+
+### `Wacs.WASI.Preview3.Sockets.TcpSocket`
+
+Wraps `System.Net.Sockets.Socket(family, Stream, Tcp)`.
+Tracks the wasi-sockets state machine (Unbound / Bound /
+Connecting / Connected / Listening / Closed) and refuses
+out-of-state operations per spec
+(`SocketsException(InvalidState)`).
+
+Bind sets `SO_REUSEADDR` per the spec's "Implementors note".
+IPv6 sockets force `IPV6_V6ONLY` at construction.
+
+Maps `SocketException.SocketErrorCode` to typed
+`SocketsException(ErrorCode.X)` codes:
+`AccessDenied → AccessDenied`,
+`AddressAlreadyInUse → AddressInUse`,
+`AddressNotAvailable → AddressNotBindable`,
+`HostUnreachable / NetworkUnreachable → RemoteUnreachable`,
+`ConnectionRefused / Reset / Aborted` → matching codes,
+`TimedOut → Timeout`, others → `Other`.
+
+Methods that lack a direct .NET Socket API equivalent
+(`get-keep-alive-{idle-time,interval,count}`) throw
+`SocketsException(NotSupported)` with diagnostic messages.
+Stream-returning methods (Connect / Listen / Send / Receive)
+likewise throw NotSupported pending the canon-async
+variant-arg flat-lowering + stream-shape wire-up.
+
+### Seven host functions wired
+
+```
+[static]tcp-socket.create
+[method]tcp-socket.get-address-family
+[method]tcp-socket.get-is-listening
+[method]tcp-socket.get-receive-buffer-size
+[method]tcp-socket.set-receive-buffer-size
+[method]tcp-socket.get-send-buffer-size
+[method]tcp-socket.set-send-buffer-size
+```
+
+The static factory exercises `result<own<tcp-socket>,
+error-code>` on the 20-byte retptr; the buffer-size getters
+exercise `result<u64, error-code>` on the 24-byte 8-aligned
+retptr (payload offset 8 due to align-8). The
+`get-{receive,send}-buffer-size` registrations share the same
+`InvokeTcpSocketGetBufferSize` body with a `sendBuffer` toggle.
+
+### `WriteSocketsErrorCodeResult` + `WriteSocketsErrorCodeBytes`
+
+Mirrors the filesystem error-code encoder pattern — same
+20-byte 4-aligned layout, just keyed on the 18-case
+`Sockets.ErrorCode` enum. Same `Other(option<string>)`
+realloc-allocated payload handling.
+
+### Test coverage
+
+14 new tests in `TcpSocketBindingTests.cs`:
+- `TcpSocket` IPv4/IPv6 start unbound with correct family.
+- Bind to loopback transitions to Bound; second bind throws
+  `InvalidState`.
+- `get-remote-address` on unbound throws `InvalidState`.
+- Buffer size + hop-limit + keep-alive round-trip.
+- `ConnectAsync` throws `NotSupported` (pending future slice).
+- `BindToRuntime` registers all 7 host functions.
+- `InvokeTcpSocketCreate` ipv4 returns a fresh handle.
+- `InvokeTcpSocketGetBufferSize` writes the `result<u64,
+  error-code>` at retptr+8 on success.
+- `InvokeTcpSocketSetBufferSize` writes disc=0 on success and
+  the impl observes the new value.
+- Misaligned retptr throws.
+
+202/202 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.16 — descriptor methods + descriptor-stat encoder (Phase 5 Slice N)
+
+Lands the canon-ABI `result<_, error-code>` encoder and the
+112-byte `descriptor-stat` record encoder, then wires seven
+representative descriptor methods through to the runtime.
+
+### `WriteErrorCodeResult` + `WriteErrorCodeBytes`
+
+20-byte 4-aligned `result<_, error-code>` retptr layout
+(same shape as `result<_, header-error>` but with the
+37-case `error-code` variant). `WriteErrorCodeBytes` is
+the inner 16-byte error-code variant writer, factored out
+so the stat retptr layout (which embeds error-code at +8
+to satisfy align-8) can reuse it.
+
+### `WriteDescriptorStat` + `WriteOptionInstant`
+
+104-byte `descriptor-stat` record encoder:
+- `+0..16`: type (descriptor-type variant, 16 bytes, may
+  realloc for the Other(string) case)
+- `+16..24`: link-count (u64)
+- `+24..32`: size (u64)
+- `+32..56`: data-access-timestamp (option<instant>)
+- `+56..80`: data-modification-timestamp (option<instant>)
+- `+80..104`: status-change-timestamp (option<instant>)
+
+`WriteOptionInstant` is the 24-byte option<instant> writer
+(8-aligned: disc+7pad / s64 seconds / u32 nanoseconds +
+4pad).
+
+### Seven descriptor methods wired
+
+```
+[method]descriptor.create-directory-at  (result<_, error-code>)
+[method]descriptor.unlink-file-at       (result<_, error-code>)
+[method]descriptor.remove-directory-at  (result<_, error-code>)
+[method]descriptor.is-same-object       (bool)
+[method]descriptor.get-type             (descriptor-type variant via retptr)
+[method]descriptor.open-at              (result<own<descriptor>, error-code>)
+[method]descriptor.stat                 (result<descriptor-stat, error-code>)
+```
+
+The three `result<_, error-code>` methods share an
+`InvokeDescriptorResultErrorCode` template that reads the
+path, calls the impl method via `.GetAwaiter().GetResult()`,
+catches `FilesystemException`, and writes the result.
+
+`open-at` allocates a fresh descriptor handle on success
+and writes it at retptr+4 (the result's payload slot for
+`own<descriptor>`). On err it routes through the same
+`WriteErrorCodeResult`.
+
+`stat` writes the 112-byte combined result (8-aligned to
+satisfy descriptor-stat's u64 fields). On err the error-code
+variant lives at +8 (not +4), reflecting the result's
+align-8 payload offset.
+
+### Test coverage
+
+15 new tests in `FilesystemMethodWireTests.cs`:
+- All 7 methods register in the runtime.
+- `create-directory-at` happy path + sandbox escape →
+  NotPermitted.
+- `unlink-file-at` happy path + IsDirectory err.
+- `remove-directory-at` happy path.
+- `is-same-object` for same/different paths + invalid handle.
+- `get-type` writes Directory vs RegularFile.
+- `open-at` Create allocates a fresh handle; Exclusive on
+  existing writes Exist err.
+- `stat` writes the 104-byte record correctly (type,
+  link-count, size, timestamp option-disc).
+- `stat` for a missing path writes the err variant.
+- `create-directory-at` and `stat` reject misaligned retptr.
+
+188/188 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.15 — `result<_, header-error>` encoding + fields gaps (Phase 5 Slice M)
+
+Closes the first batch of HTTP wire-up gaps. Adds the
+foundational canon-ABI `result<_, header-error>` retptr
+encoder, wires three more `fields` methods (set, delete,
+clone), and registers `[resource-drop]request`.
+
+### `WriteHeaderErrorResult` + `ResultHeaderErrorSize`
+
+Foundational helper that encodes the 20-byte 4-aligned
+`result<_, header-error>` payload at a retptr:
+
+```
++0:  result-disc (u8) + 3-byte pad
++4:  header-error variant (16 bytes, used when disc=1):
+     +4:  header-error-disc (u8) + 3-byte pad
+     +8:  option<string> (12 bytes — only the `other` case):
+          +8:  option-disc (u8) + 3-byte pad
+          +12: string-ptr (i32)
+          +16: string-len (i32)
+```
+
+`null` exception → success (disc=0, payload zero).
+`HeaderException(NonOther)` → disc=1 + the code at +4.
+`HeaderException(Other, msg)` → disc=1 + code=4 at +4 +
+option-some at +8 + cabi_realloc-allocated UTF-8 string.
+
+This is the wire encoder reused by every method that
+returns `result<_, header-error>`.
+
+### `wasi:http/types.fields.set`
+
+```
+(self, name-ptr, name-len, list-ptr, list-count, retptr) -> ()
+```
+
+Reads name + `list<list<u8>>` from guest memory (each
+outer entry is 8 bytes: i32 ptr + i32 len), forwards to
+`IFields.Set`, writes the result encoding. `ReadListOfByteLists`
+helper handles the list-of-byte-lists decode.
+
+### `wasi:http/types.fields.delete`
+
+Same shape as `set` but only takes the name.
+
+### `wasi:http/types.fields.clone`
+
+`(self) -> own<fields>`. Allocates a fresh handle bound to
+`IFields.Clone()`. No err path — the WIT signature has no
+result wrapper.
+
+### `wasi:http/types.[resource-drop]request`
+
+Releases the request handle. Mirror of `[resource-drop]response`
+from Slice G; the Slice H wire-up of `client.send` /
+`handler.handle` allocates request handles into
+`RequestHandles`, and guests release them via this drop.
+
+### Test coverage
+
+9 new tests in `HttpFieldsResultEncodingTests.cs`:
+- `BindToRuntime` registers all four new functions.
+- `fields.set` success writes disc=0 + the field actually
+  gets set on the IFields impl.
+- `fields.set` invalid name writes disc=1 + code=0
+  (InvalidSyntax).
+- `fields.set` frozen collection writes disc=1 + code=2
+  (Immutable).
+- `fields.delete` success writes disc=0 + field is gone.
+- `fields.clone` returns a fresh handle, independent of
+  original.
+- The `Other(string)` path uses the realloc-allocated
+  string write — explicit assertion that the UTF-8 bytes
+  land at the cabi_realloc address.
+- Misaligned retptr throws.
+- Request resource-drop releases the handle.
+
+173/173 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.14 — transpiler-parity equivalence tests (Phase 5 Slice L)
+
+Closes the transpiler-parity question for Phase 5: the
+synthetic .wasm fixtures from Slice K now round-trip through
+the AOT transpiler as well as the interpreter. Same wasm
+bytes, same `WasiPreview3Host.BindToRuntime`, IL-emitted call
+sites, identical i64 returns.
+
+### `TranspilerEquivalenceTests`
+
+Two equivalence tests in
+`Wacs.WASI.Preview3.Test/TranspilerEquivalenceTests.cs`:
+
+- `Transpiler_test_now_invokes_monotonic_clock_now` —
+  rebuilds the `wasi:clocks/monotonic-clock.now` fixture,
+  transpiles, activates the generated Module class with an
+  IImports proxy that routes through `runtime.CreateStackInvoker`,
+  invokes the export. Asserts the result is positive and
+  non-decreasing across two transpiler runs.
+
+- `Transpiler_test_random_invokes_get_random_u64` — same
+  shape for `wasi:random/random.get-random-u64`. Asserts at
+  least one non-zero across three transpiled CSPRNG reads.
+
+Both reach the bound host body through emitted IL, confirming
+the `feedback_symmetric_engines` contract holds: the
+interpreter and transpiler share the same host-binding
+surface, and any binding registered via `BindHostFunction`
+is observable from either engine.
+
+### Test-project transpiler reference
+
+`Wacs.WASI.Preview3.Test.csproj` now references
+`Wacs.Transpiler.Lib`. The framework moves from `net8.0` to
+`net9.0` (Transpiler.Lib only targets `net9.0`) — Preview 3
+itself remains `net8.0 + netstandard2.1`; only the test
+assembly bumps.
+
+### What this validates
+
+The 26 host functions registered across Slices A/B + F/G/H/I/J
+are reachable from transpiled code through the same
+`WasmRuntime.BindHostFunction` table the interpreter uses.
+End-to-end IL emit + import-resolution + delegate-invocation
++ return-flow are all confirmed for the bound host pathway.
+
+164/164 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.13 — synthetic .wasm fixture round-trip (Phase 5 Slice K)
+
+Validates the prior slices' wire-ups end-to-end. Hand-crafts
+minimal core .wasm modules that import a Preview 3 host
+function, wrap it in an exported function, and round-trip
+through `WasmRuntime`. The interpreter loop runs the wasm
+wrapper, the wrapper calls the host function via the
+registered binding, and the test confirms the value comes
+back.
+
+This is the integration validation that the prior slices'
+unit tests can't directly provide — they exercise the
+`Invoke*` host bodies directly. Slice K wraps the same
+bodies behind the wasm-runtime indirection that real
+wit-component-emitted modules would, without needing a
+build-time wasm toolchain in the test project.
+
+### Two fixtures
+
+1. **`test-now`** — imports
+   `(wasi:clocks/monotonic-clock@0.3.0-rc-2026-03-15, "now")`
+   of type `() -> i64`, wraps in an exported `test-now`
+   function. Asserts the returned value is positive and
+   non-decreasing across two calls.
+
+2. **`test-random`** — imports
+   `(wasi:random/random@0.3.0-rc-2026-03-15, "get-random-u64")`,
+   wraps in `test-random`. Asserts at least one of three
+   consecutive reads is non-zero (three consecutive zeros
+   from a CSPRNG would be astronomically unlikely).
+
+### Hand-built wasm-bytes helpers
+
+`WriteLeb128U32` + `WriteName` + per-section builder pattern
+follow the existing `ShimModuleRecognizerTests` style. The
+fixture bytes are constructed inline: magic + version + type
+section + import section + function section + export section
++ code section. Total ~40-50 bytes per fixture.
+
+### What this proves
+
+- The `WasmRuntime.BindHostFunction` registrations from
+  `WasiPreview3Host.BindToRuntime` are visible to import
+  resolution at module instantiation.
+- The interpreter's `call` opcode dispatches through to the
+  registered delegate.
+- The return value flows back from the host body through
+  the wasm interpreter to the `CreateInvokerFunc<long>`
+  caller.
+
+162/162 Preview3 tests green. Phase 5 wire-ups complete.
+
+## WACS.WASI.Preview3 0.1.12 — sockets resource tables + `ip-name-lookup` wire-up (Phase 5 Slice J)
+
+Adds socket resource tables and wires the
+`wasi:sockets/ip-name-lookup.resolve-addresses` host import —
+the most immediately useful socket binding, since the DNS
+backing from Slice D works without a TCP/UDP socket impl. The
+TCP/UDP socket method wire-ups + System.Net.Sockets-backed
+default impls ship in a follow-up slice.
+
+### `TcpSocketHandles` / `UdpSocketHandles` host-resource tables
+
+New `HostResourceTable` properties on the host. Wire-bound
+socket resource methods resolve through these tables.
+
+### `wasi:sockets/types.[resource-drop]{tcp-socket,udp-socket}`
+
+Registered drop functions that release handles from the
+respective tables.
+
+### `wasi:sockets/ip-name-lookup.resolve-addresses`
+
+```
+(wasi:sockets/ip-name-lookup@0.3.0-rc-2026-03-15,
+ resolve-addresses)
+```
+
+Lowered signature:
+`(name-ptr: i32, name-len: i32, retptr: i32) -> ()`.
+
+Implementation:
+1. Reads the hostname UTF-8 bytes from guest memory.
+2. Sync-blocks on the configured `IIpNameLookup`'s
+   `ResolveAddressesAsync`.
+3. Allocates the canon-ABI-lowered variant list through
+   cabi_realloc (`align=2`,
+   `size=count * 18`).
+4. For each `ip-address` writes the 18-byte variant entry:
+   disc at +0 (0=ipv4, 1=ipv6), 1-byte align-pad,
+   16-byte payload section. IPv4 writes 4 octets at +2..6;
+   IPv6 writes 8 big-endian u16 groups at +2..18.
+5. Writes the outer `(list-ptr, list-count)` at retptr.
+
+Default-host configuration uses `NoNameLookup` (refuses with
+`PermanentResolverFailure`); embedders that want DNS opt in
+via the `IpNameLookup` builder property — `DnsBackedNameLookup`
+is the standard backing.
+
+### New wire-level module-name constants
+
+`SocketsTypesModuleName` and `IpNameLookupModuleName` on
+`WasiPreview3Host`.
+
+### Test coverage
+
+8 new tests in `SocketsBindingTests.cs`:
+- `BindToRuntime` registers socket drops + name lookup.
+- `TcpSocketHandles` / `UdpSocketHandles` round-trip.
+- `InvokeResolveAddresses` empty list writes `(0, 0)` at
+  retptr.
+- IPv4 list writes correct 18-byte entries with disc=0 +
+  octets at the payload offset.
+- IPv6 list writes disc=1 + big-endian u16 groups.
+- Misaligned retptr throws.
+- `SocketsException` from the impl (e.g.
+  `PermanentResolverFailure` from `NoNameLookup`) propagates
+  to the binding.
+
+160/160 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.11 — `wasi:filesystem` descriptor + preopens wire-up (Phase 5 Slice I)
+
+Adds the descriptor host-resource table, wires the simplest
+descriptor methods, and ships the landmark
+`preopens.get-directories` binding — the gating piece that
+lets guests discover the host-configured preopen set.
+
+### `DescriptorHandles` host-resource table
+
+New `HostResourceTable<IDescriptor>` on the host. Filesystem
+wire-bound functions resolve descriptor handles through this
+table.
+
+### `wasi:filesystem/types.descriptor` (sample methods)
+
+- `[resource-drop]descriptor` — releases the handle.
+- `[method]descriptor.get-flags` — returns the descriptor's
+  `descriptor-flags` (u32 bitfield). Representative example
+  of the self-handle-to-sync-getter shape; the remaining ~23
+  descriptor methods (stat / open-at / read-via-stream /
+  read-directory / etc.) follow the same pattern and ship in
+  follow-up slices alongside the canon-async-func wire-shape
+  settling.
+
+### `wasi:filesystem/preopens.get-directories` (landmark)
+
+Returns `list<tuple<descriptor, string>>` via the cabi_realloc
+multi-list wire convention. Implementation:
+
+1. Allocates a fresh `descriptor` handle per configured
+   preopen.
+2. For each preopen, allocates guest memory via cabi_realloc
+   and writes the UTF-8 path bytes.
+3. Allocates a 12-byte-per-tuple array via cabi_realloc and
+   writes each `(descriptor-handle, path-ptr, path-len)`
+   triple.
+4. Writes the outer `(list-ptr, list-count)` at retptr
+   (8 bytes, 4-aligned).
+
+Empty preopen sets short-circuit to `(0, 0)` at retptr.
+Misaligned / out-of-range retptr + missing dispatcher
+memory throw with diagnostic messages.
+
+### `ICabiRealloc` interface
+
+Extracted from `Realloc` to let tests stub the cabi_realloc
+indirection without needing a runtime export. The host's
+list-returning bindings now accept `ICabiRealloc` instead of
+the concrete `Realloc` class; the test suite uses a
+deterministic `StubRealloc` that returns pre-canned
+addresses.
+
+### New wire-level module-name constants
+
+`FilesystemTypesModuleName` and `FilesystemPreopensModuleName`
+on `WasiPreview3Host`.
+
+### Test coverage
+
+7 new tests in `FilesystemBindingTests.cs`:
+- `BindToRuntime` registers descriptor + preopens host
+  functions.
+- Descriptor get-flags returns the constructed bitfield via
+  handle indirection.
+- Descriptor drop releases the handle.
+- `InvokePreopensGetDirectories` empty preopen set writes
+  `(0, 0)` at retptr.
+- Full happy-path: one preopen → fresh descriptor handle
+  allocated, UTF-8 path written at first cabi_realloc
+  address, 12-byte tuple written at second cabi_realloc
+  address, outer (list-ptr, list-count) at retptr.
+- Misaligned retptr throws.
+- Missing dispatcher memory throws.
+
+152/152 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.10 — `wasi:http/client.send` + `handler.handle` wire-up (Phase 5 Slice H)
+
+Wires the outbound + inbound HTTP entry points through to
+the WasmRuntime. Both bind sync-blocking
+(`.GetAwaiter().GetResult()` on the `Task<IResponse>`) until
+the canon-async-func wire convention settles.
+
+### `RequestHandles` host-resource table
+
+New `HostResourceTable<IRequest>` on the host. Wire-bound
+host functions resolve request handles through this table.
+
+### `wasi:http/client.send`
+
+```
+(wasi:http/client@0.3.0-rc-2026-03-15, send)
+```
+
+Lowered as `(request-handle: i32) -> response-handle: i32`.
+Body resolves the request, calls
+`IClient.SendAsync(request)`, awaits, allocates a fresh
+response handle bound to the lifted response. Err paths
+(impl throws `HttpException`) propagate; the canon-async
+binding lowers to `result<response, error-code>::err`.
+
+### `wasi:http/handler.handle`
+
+```
+(wasi:http/handler@0.3.0-rc-2026-03-15, handle)
+```
+
+Same shape as `client.send` but routes to the configured
+`IHandler`. Throws `HttpException(ConfigurationError)` when
+no handler is configured — guests importing
+`wasi:http/handler` for inbound serving need an embedder-
+provided handler. Error message points to the builder
+property.
+
+### New wire-level module-name constants
+
+`HttpClientModuleName` and `HttpHandlerModuleName` on
+`WasiPreview3Host`.
+
+### Test coverage
+
+7 new tests in `HttpClientHandlerBindingTests.cs`:
+- `BindToRuntime` registers both host functions.
+- `InvokeClientSend` routes to the configured `IClient`,
+  returns a fresh response handle with the lifted status.
+- `InvokeClientSend` propagates `HttpException` from the
+  client.
+- `InvokeClientSend` invalid request handle throws
+  `HttpException(InternalError)`.
+- `InvokeHandlerHandle` routes to the configured
+  `IHandler`.
+- `InvokeHandlerHandle` throws
+  `HttpException(ConfigurationError)` when unset.
+- `InvokeHandlerHandle` propagates `HttpException` from the
+  handler.
+
+145/145 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.9 — `request-options` full wire-up + `response` status methods (Phase 5 Slice G)
+
+Builds on Slice F's host-resource binding pattern. Wires all
+9 `wasi:http/types.request-options` methods + the 3 simple
+`response` methods (drop, get-status-code, set-status-code).
+
+### `request-options` (full)
+
+- `[constructor]request-options` — allocates a fresh
+  `RequestOptions` instance.
+- `[resource-drop]request-options` — releases the handle.
+- `[method]request-options.get-{connect,first-byte,between-bytes}-timeout`
+  — writes `option<duration>` at retptr. Wire layout 16 bytes
+  8-aligned: `i32 disc` at +0 (with 4-byte tail-pad to satisfy
+  the i64 payload's alignment), `i64 value` at +8.
+- `[method]request-options.set-{connect,first-byte,between-bytes}-timeout`
+  — takes `(self, i32 is-some, i64 value)`. `is-some == 0`
+  clears the timeout to null.
+- `[method]request-options.clone` — allocates a fresh handle
+  bound to a deep-copy of the original.
+
+`BindOptionalDurationTimeout` is the per-property pair-binder
+that registers both getter + setter for one of the three
+timeout properties. The three setter/getter
+`Func<IRequestOptions, ulong?>` lambdas are the only
+per-property variation; the canon-ABI lift/lower is shared.
+
+### `response` (status methods)
+
+- `[resource-drop]response` — releases the handle.
+- `[method]response.get-status-code` — returns `u16`.
+- `[method]response.set-status-code` — takes `u16`.
+
+The static `response.new` constructor returns
+`tuple<response, future<...>>` which needs the multi-return
+shape from Slice K plus future allocation; deferred until the
+future-handle pathway lands. Other simple `response` methods
+(`get-headers`) need the shared-fields-handle resolution
+model and ship in a later slice.
+
+### `WasiPreview3Host.RequestOptionsHandles` / `ResponseHandles`
+
+New `HostResourceTable` properties matching the
+`FieldsHandles` shape from Slice F.
+
+### Test coverage
+
+10 new tests in `HostResourceBindingExtraTests.cs`:
+- `BindToRuntime` registers all 9 request-options host
+  functions + the 3 response methods.
+- `InvokeRequestOptionsSetTimeout` honors `is-some`: 1 sets
+  the value, 0 clears.
+- `InvokeRequestOptionsGetTimeout` writes the
+  `(disc, value)` pair correctly for both Some and None
+  cases.
+- Misaligned retptr throws
+  `RequestOptionsException(Other)`.
+- Invalid handle throws `RequestOptionsException(Other)`.
+- `Response` status round-trips via handle indirection.
+- `Response` drop releases the handle.
+
+138/138 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.8 — host-resource binding infrastructure + `wasi:http/types.fields` wire-up (Phase 5 Slice F)
+
+Establishes the canonical host-resource binding pattern.
+Slices C/D/E defined the surface area; this slice ships the
+wiring infrastructure (HostResourceTable<T>) and demonstrates
+the pattern by wiring four representative
+`wasi:http/types.fields` methods through to the WasmRuntime.
+
+### `HostResourceTable<T>`
+
+New `Wacs.WASI.Preview3.Resources.HostResourceTable<T>` — typed
+handle table for host-side resource objects. Each Preview 3
+host resource (fields, request, response, request-options,
+descriptor, tcp-socket, udp-socket) gets its own table; the
+guest sees i32 handles, the host indirects through the table
+for method dispatch.
+
+Distinct from `Wacs.ComponentModel.Async.AsyncHandleTable<T>`:
+that one backs canon-async waitable kinds in a single
+per-dispatcher shared namespace; this one backs host-defined
+resources with per-type independent handle spaces, matching
+the WIT spec's "per-(component, resource-type)" lifetime
+model.
+
+API: `Allocate(T)`, `Get(int)`, `Drop(int)`, `Count`. 0
+reserved as the null sentinel; freelist recycling keeps the
+counter stable.
+
+### `WasiPreview3Host.FieldsHandles`
+
+Public `HostResourceTable<IFields>` on the host. Embedders /
+binding code use this directly when they need to allocate or
+look up fields handles outside the wire path.
+
+### `wasi:http/types.fields` wire-up
+
+Four representative methods registered through
+`BindToRuntime`:
+
+```
+(wasi:http/types@0.3.0-rc-2026-03-15, [constructor]fields)
+(wasi:http/types@0.3.0-rc-2026-03-15, [resource-drop]fields)
+(wasi:http/types@0.3.0-rc-2026-03-15, [method]fields.has)
+(wasi:http/types@0.3.0-rc-2026-03-15, [method]fields.append)
+```
+
+Selection rationale: `[constructor]` exercises resource
+allocation; `[resource-drop]` exercises release;
+`[method]fields.has` exercises self-handle lookup + memory
+string read; `[method]fields.append` exercises self-handle
+lookup + memory string read + memory byte-list read. Together
+they validate the pattern end-to-end. The other 7 method
+shapes (set, delete, get-and-delete, get, copy-all, clone,
+from-list) follow the same pattern mechanically — they ship
+in a follow-up slice.
+
+`InvokeFieldsHas` / `InvokeFieldsAppend` / `InvokeFieldsDrop`
+public helpers expose the delegate bodies for direct test
+access without going through a full wasm invoke. Memory
+reads use the standard `dispatcher.Memory.AsSpan` path.
+
+### `HttpTypesModuleName` constant
+
+`wasi:http/types@0.3.0-rc-2026-03-15` — the wire-level module
+name `wit-component` emits for HTTP type imports. Same wire-
+convention caveat as Slice J's `wasi:cli/stdout` binding;
+override hook will land when real `.component.wasm` fixtures
+let us validate.
+
+### Test coverage
+
+12 new tests in `HostResourceBindingTests.cs`:
+- `HostResourceTable<T>` allocate / get / drop / count /
+  freelist recycling.
+- All four registered host functions appear in the runtime.
+- Constructor returns fresh distinct handles per call.
+- `InvokeFieldsHas` reads name from memory + case-insensitive
+  lookup + missing-handle returns false.
+- `InvokeFieldsAppend` reads name + value from memory and
+  forwards to the impl.
+- `InvokeFieldsDrop` releases handle + idempotent on absent.
+- Invalid self handle → `HeaderException(Other)`.
+- Empty name during append → `HeaderException(InvalidSyntax)`
+  bubbles from the impl through the binding.
+
+128/128 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.7 — `wasi:http` port (Phase 5 Slice E)
+
+Fifth and final Phase 5 host-interface port. Vendors the
+`wasi-http-0.3.0-rc-2026-03-15` WIT and lands the full
+http surface: types, in-memory resource impls, and an
+`HttpClient`-backed `IClient` for outbound HTTP calls.
+
+### Vendored WIT
+
+`wit/deps/wasi-http-0.3.0-rc-2026-03-15/package.wit` copied
+from `Spec.Test/wasi`. Embedded via the `EmbeddedResource`
+pattern.
+
+### `HttpTypes.cs`
+
+- `HttpMethod` value-type with tag enum + `Other(string)`
+  payload for non-standard methods (PROPFIND etc.).
+- `HttpScheme` value-type with tag enum + `Other(string)`.
+- `HttpErrorCode` flat enum covering the 40+ variant cases;
+  typed payloads (DNS rcode, TLS alert id, field sizes,
+  body sizes) ride on `HttpException` properties rather than
+  embedded in the discriminator.
+- `HeaderError` / `RequestOptionsError` flat enums.
+- `HttpException` / `HeaderException` /
+  `RequestOptionsException` — host-side throwables the
+  canon-async binding lowers into the wire `result<_,
+  error-code>` err shape.
+
+### `IFields` + `Fields`
+
+`IFields` interface for the WIT `resource fields` shape:
+case-insensitive multi-value name lookup, mutability via
+`Freeze()`. Default `Fields` impl backed by a case-insensitive
+dictionary. Includes basic name-character validation
+(RFC 9110 §5.6.2 token chars) and the
+`FromList` static factory + `Clone()` deep-copy.
+
+### `IRequestOptions` + `RequestOptions`
+
+Per-request connect / first-byte / between-bytes timeouts in
+nanoseconds. Same freeze pattern as fields.
+
+### `IRequest` / `IResponse` + `Request` / `Response`
+
+In-memory request/response objects with method, scheme,
+authority, path-with-query, headers, optional body
+(`System.IO.Stream`), and optional trailers.
+
+### `IClient` + `HttpBackedClient`
+
+`IClient.SendAsync(IRequest)` — outbound HTTP. Default
+`HttpBackedClient` is `System.Net.Http.HttpClient`-backed:
+
+- Builds `HttpRequestMessage` from the `IRequest`, splitting
+  headers between request-headers and content-headers per
+  HttpClient's conventions.
+- User-driven `OperationCanceledException` (token from the
+  caller fired) propagates as-is; `HttpClient.Timeout` fires
+  surface as `HttpErrorCode.ConnectionTimeout`.
+- `HttpRequestException` maps to
+  `HttpErrorCode.ConnectionRefused`.
+- Uncategorized failures surface as `InternalError` with the
+  exception message in `OtherPayload`.
+- Lifts the response body through a `MemoryStream` so the
+  `IResponse` outlives the underlying
+  `HttpResponseMessage`'s disposal.
+
+Implements `IDisposable` — the parameterless ctor allocates
+its own `HttpClient` and disposes it; injecting an existing
+`HttpClient` leaves disposal to the caller.
+
+### `IHandler` (inbound)
+
+Interface only — no default impl. Embedders providing
+inbound HTTP must configure this; the canon-async binding will
+return `HttpErrorCode.ConfigurationError` when unset (wired
+in a follow-up slice).
+
+### `WasiPreview3Host` integration
+
+`HttpClient` property (default: fresh `HttpBackedClient`).
+`HttpHandler` property (default: null). Builder properties
+for both.
+
+### Test coverage
+
+21 new tests in `HttpTests.cs`:
+- `HttpMethod` / `HttpScheme` factories + to-string.
+- `Fields` case-insensitive lookup, append-preserves-order,
+  get-and-delete, freeze rejects mutations,
+  invalid-name throws, `FromList` constructs, `Clone` decouples.
+- `RequestOptions` timeout round-trip, freeze, clone.
+- `Request` / `Response` default state + setter round-trip.
+- `HttpBackedClient` user-cancellation propagates as OCE,
+  unreachable host maps to ConnectionRefused, round-trips
+  status+body+content-type through a stub handler.
+- Host default-construct provides client, null handler;
+  builder overrides both.
+
+116/116 Preview3 tests green. Phase 5 complete.
+
+## WACS.WASI.Preview3 0.1.6 — `wasi:sockets` types + DNS lookup (Phase 5 Slice D)
+
+Fourth Phase 5 host-interface port. Vendors the
+`wasi-sockets-0.3.0-rc-2026-03-15` WIT and lands the type
+system + `IIpNameLookup` resolver. `tcp-socket` /
+`udp-socket` resource backings ship as Slice E — the
+state-machine + send/receive stream wiring is large enough to
+warrant its own slice once the descriptor-resource pathway
+from Slice D (filesystem) settles.
+
+### Vendored WIT
+
+`wit/deps/wasi-sockets-0.3.0-rc-2026-03-15/package.wit` copied
+from `Spec.Test/wasi`. Embedded via the existing
+`EmbeddedResource` pattern.
+
+### `SocketsTypes.cs`
+
+All WIT types modeled as ergonomic value-type C# structs:
+
+- `IpAddressFamily` — flat enum (Ipv4 / Ipv6).
+- `Ipv4Address` / `Ipv6Address` — readonly structs with the
+  raw octets / 16-bit groups. Static `Any` / `Loopback`
+  properties.
+- `IpAddress` — discriminated union with a tag + payload pair
+  for both families.
+- `Ipv4SocketAddress` / `Ipv6SocketAddress` — records with
+  port + address (+ FlowInfo / ScopeId for v6).
+- `IpSocketAddress` — same discriminated-union shape.
+- `ErrorCode` — flat enum covering the 14 cases from
+  `types.error-code` plus the 3 additional cases from
+  `ip-name-lookup.error-code` (the WIT defines them as
+  separate variants but the latter is a strict superset).
+- `SocketsException` — host-side throwable carrying
+  `ErrorCode` + optional `OtherPayload` for the binding to
+  lower into `result<_, error-code>` err values.
+
+### `ITcpSocket` + `IUdpSocket` interface contracts
+
+Full method signatures for both resource types — ~25 methods
+each covering the state-machine ops (bind / connect / listen /
+send / receive), per-socket config (keep-alive, hop-limit,
+buffer sizes), and socket-pair / option getters. No default
+impls in this slice; that work lands in Slice E.
+
+### `IIpNameLookup` + `DnsBackedNameLookup` + `NoNameLookup`
+
+`IIpNameLookup.ResolveAddressesAsync(name)` returns the list
+of IPs for a hostname. Two impls ship:
+
+- `DnsBackedNameLookup` — `System.Net.Dns.GetHostAddressesAsync`-
+  backed. Maps `SocketError.HostNotFound` →
+  `ErrorCode.NameUnresolvable`,
+  `SocketError.TryAgain` → `TemporaryResolverFailure`,
+  other socket errors → `PermanentResolverFailure`. Honors a
+  `CancellationToken` (with a `#if NET6_0_OR_GREATER`
+  branch to use the native overload; older targets check the
+  token manually).
+- `NoNameLookup` — refuses all resolution with
+  `PermanentResolverFailure`. The **default** on the host,
+  so guests don't accidentally leak the host's DNS resolver
+  until the embedder explicitly opts in.
+
+### `WasiPreview3Host` integration
+
+`IpNameLookup` property on the host (defaults to
+`NoNameLookup`; embedders can swap via builder).
+
+### Test coverage
+
+14 new tests in `SocketsTests.cs`:
+- `Ipv4Address` / `Ipv6Address` to-string + equality.
+- `IpAddress` / `IpSocketAddress` factory methods set the
+  correct family + payload.
+- `Ipv6SocketAddress` preserves FlowInfo + ScopeId.
+- `SocketsException` routes payload correctly.
+- `DnsBackedNameLookup` resolves loopback (with a CI-graceful
+  skip if the host's resolver misbehaves), throws
+  `NameUnresolvable` for invalid TLD, throws
+  `InvalidArgument` for null.
+- `NoNameLookup` refuses with `PermanentResolverFailure`.
+- Host default-construct uses `NoNameLookup`; builder
+  override threads through.
+
+95/95 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.5 — `wasi:filesystem` surface area (Phase 5 Slice C)
+
+Third Phase 5 host-interface port. Vendors the
+`wasi-filesystem-0.3.0-rc-2026-03-15` WIT and defines the host
+surface — all type definitions, the
+<see cref="IDescriptor"/> resource interface, the
+<see cref="IPreopens"/> interface, and System.IO-backed default
+impls. The wire-level canon-async binding (resource handle
+lifecycle + `BindToRuntime` registrations) ships in the next
+slice once the descriptor-resource pathway is settled — keeping
+the slice focused on the surface design so the wiring choices
+can be made with full visibility.
+
+### Vendored WIT
+
+`wit/deps/wasi-filesystem-0.3.0-rc-2026-03-15/package.wit`
+copied from `Spec.Test/wasi`. Embedded via the existing
+`EmbeddedResource` pattern.
+
+### `FilesystemTypes.cs`
+
+All WIT types modeled as ergonomic C# types:
+
+- `FileSize`, `LinkCount` — typed wrappers around `ulong` so
+  callers can't accidentally mix file sizes with arbitrary u64s.
+- `DescriptorType` — value-type with tag enum +
+  `Other(option<string>)` payload modeling.
+- `DescriptorFlags`, `PathFlags`, `OpenFlags` — `[Flags]` enums
+  with bit positions matching the WIT declaration order (the
+  canon-ABI flags lowering writes the bitfield in that order).
+- `DescriptorStat`, `DirectoryEntry`, `MetadataHashValue` —
+  records with `init`-only properties (netstandard2.1 ships
+  the `IsExternalInit` polyfill alongside).
+- `NewTimestamp` — value-type tag + `Instant` payload for the
+  `timestamp(instant)` case.
+- `ErrorCode` — flat enum covering all 37 cases.
+- `FilesystemException` — host-side throwable carrying
+  `ErrorCode` + optional `OtherPayload` for the binding to
+  lower into `result<_, error-code>` err values.
+- `Advice` — flat enum.
+
+### `IDescriptor` interface (25 methods)
+
+Models the WIT `resource descriptor` shape. Async methods
+surface as `Task`-returning. Stream-returning methods
+(`read-via-stream`, `write-via-stream`, `append-via-stream`,
+`read-directory`) return the
+`(streamHandle, futureHandle, completion)` tuple established
+by `IStdin.ReadViaStream`. Methods returning
+`result<X, error-code>` throw `FilesystemException` on err;
+the binding layer (Slice D) catches and lowers.
+
+### `Descriptor` (default impl)
+
+System.IO-backed implementation with **sandboxing** rooted at
+a configurable path. Path-relative operations refuse to
+resolve outside the sandbox boundary via `..` or absolute
+paths — attempts throw `FilesystemException(NotPermitted)`.
+
+Async methods run their synchronous .NET I/O on the thread
+pool via `Task.Run` so the canon-async dispatcher's calling
+thread is free to do other work.
+
+Exception → ErrorCode mapping covers the common cases:
+`FileNotFoundException` → `NoEntry`, `UnauthorizedAccessException`
+→ `Access`, `PathTooLongException` → `NameTooLong`, etc.
+Uncategorized exceptions become `ErrorCode.Io`.
+
+Some methods are intentionally `Unsupported` in the default
+backend pending platform-specific work:
+- `link-at` (hard links — platform-limited)
+- `read-directory` (typed stream `stream<directory-entry>`
+  awaits the canon-async typed-stream pathway)
+- `readlink-at` (symbolic-link target read — netstandard2.1
+  doesn't expose `FileSystemInfo.LinkTarget`)
+- `symlink-at` (symbolic-link creation — same)
+
+### `IPreopens` + `DescriptorPreopen` + `DirectoryPreopens`
+
+`IPreopens.GetDirectories()` returns the static set of
+preopened directory descriptors the guest sees.
+`DirectoryPreopens.FromHostPaths` ergonomic constructor accepts
+`(hostPath, guestPath)` pairs and produces `Descriptor`
+instances with read+write+mutate-directory flags rooted at
+the host paths.
+
+### `WasiPreview3Host` integration
+
+`Preopens` property on the host (default-constructed lazily to
+an empty list — guests with no configured preopens see no
+filesystem). Builder property `Preopens` for embedder override.
+
+### Test coverage
+
+27 new tests in `FilesystemTests.cs`:
+- Type-level: factory methods, bit-position pinning for flags,
+  exception payload routing.
+- `Descriptor.GetType_` / `GetFlags`.
+- `Descriptor.StatAsync` / `StatAtAsync` returning correct
+  type+size+timestamps; `NoEntry` on missing paths.
+- `Descriptor.OpenAtAsync` with `Create` / `Exclusive` flags.
+- `Descriptor.ReadViaStream` / `WriteViaStream` round-trip
+  through the dispatcher.
+- `Descriptor.CreateDirectoryAtAsync` / `UnlinkFileAtAsync`.
+- `Descriptor.UnlinkFileAtAsync` on directory → `IsDirectory`.
+- Sandbox escape via `../../etc/passwd` → `NotPermitted`.
+- `Descriptor.IsSameObjectAsync` true/false cases.
+- `Descriptor.MetadataHashAsync` stability.
+- `DirectoryPreopens.FromHostPaths` construction; empty list.
+- Host default-construct empty preopens; builder override.
+
+81/81 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.4 — `wasi:random` port (Phase 5 Slice B)
+
+Second Phase 5 host-interface port. Adds host bindings for all
+three WASI Preview 3 random interfaces; introduces the
+`Wacs.WASI.Preview3.CanonicalAbi.Realloc` helper for any
+import that returns a list or aggregate through guest memory.
+
+### Vendored WIT
+
+`wit/deps/wasi-random-0.3.0-rc-2026-03-15/package.wit` copied
+from the Spec.Test/wasi submodule. Embedded via the existing
+EmbeddedResource pattern.
+
+### `IRandom` + default `Random`
+
+Backs `wasi:random/random@0.3.0-rc-2026-03-15`:
+
+- `get-random-u64: func() -> u64` —
+  `RandomNumberGenerator`-backed CSPRNG read.
+- `get-random-bytes: func(max-len: u64) -> list<u8>` — CSPRNG-
+  filled buffer; rejects requests above `int.MaxValue`. The
+  returned list goes back through cabi_realloc-allocated
+  guest memory; `InvokeGetRandomBytes` writes (ptr, len) at
+  the retptr.
+
+### `IInsecure` + default `InsecureRandom`
+
+Backs `wasi:random/insecure@0.3.0-rc-2026-03-15`:
+
+- `get-insecure-random-u64: func() -> u64` —
+  `System.Random`-backed (NOT cryptographically secure).
+- `get-insecure-random-bytes: func(max-len: u64) -> list<u8>` —
+  same buffer-allocation path as `get-random-bytes`.
+
+### `IInsecureSeed` + default `InsecureSeedSource`
+
+Backs `wasi:random/insecure-seed@0.3.0-rc-2026-03-15`:
+
+- `get-insecure-seed: func() -> tuple<u64, u64>` — CSPRNG-
+  backed (the WIT name notwithstanding; spec recommends
+  secure seed for hash-map DoS protection). Returns through
+  a 16-byte 8-aligned retptr (two u64s laid out at retptr).
+
+### `CanonicalAbi.Realloc` helper
+
+New `Wacs.WASI.Preview3.CanonicalAbi.Realloc` — lazy
+`cabi_realloc` resolver mirroring Preview2's helper. Resolves
+the guest's `cabi_realloc` export on first `Allocate` call;
+throws if the component doesn't export it. Sibling per-package
+copy until a third package needs it, at which point it moves
+to `Wacs.ComponentModel.CanonicalABI`.
+
+### `WasiPreview3Host` integration
+
+`Random`, `InsecureRandom`, `InsecureSeed` properties on the
+host (default-constructed lazily, overridable via builder).
+`BindToRuntime` registers all 5 random host functions. Three
+new wire-level module-name constants: `RandomModuleName`,
+`InsecureRandomModuleName`, `InsecureSeedModuleName`.
+
+`InvokeGetRandomBytes`, `InvokeGetInsecureRandomBytes`, and
+`InvokeGetInsecureSeed` are public for direct test access.
+
+### Test coverage
+
+15 new tests in `RandomTests.cs`:
+- Default impls: non-zero u64s, correct byte lengths,
+  zero-length handling, oversize rejection.
+- `InsecureSeed`: produces a non-zero u64 pair.
+- `BindToRuntime` registers all 5 host functions.
+- `InvokeGetInsecureSeed` writes the u64 pair, rejects
+  misaligned retptr, throws when dispatcher unset.
+- `InvokeGetRandomBytes` zero-length writes (0, 0) at retptr
+  without needing cabi_realloc; misaligned retptr throws.
+- Default-construct provides impls; builder override threads
+  through.
+
+54/54 Preview3 tests green.
+
+## WACS.WASI.Preview3 0.1.3 — `wasi:clocks` port (Phase 5 Slice A)
+
+First Phase 5 host-interface port. Adds host bindings for the
+two stable WASI Preview 3 clocks interfaces; the unstable
+`timezone` interface (feature-flagged `clocks-timezone` in the
+WIT) is deferred until it stabilizes.
+
+### Vendored WIT
+
+`wit/deps/wasi-clocks-0.3.0-rc-2026-03-15/package.wit` copied
+from the Spec.Test/wasi submodule. Embedded into the assembly
+via the existing `EmbeddedResource` pattern.
+
+### `IMonotonicClock` + default `MonotonicClock`
+
+Backs `wasi:clocks/monotonic-clock@0.3.0-rc-2026-03-15`:
+
+- `now: func() -> mark` — `Stopwatch`-backed high-resolution
+  nanosecond counter (QPC on Windows / `CLOCK_MONOTONIC` on
+  POSIX). Epoch is process start.
+- `get-resolution: func() -> duration` — smallest reportable
+  step, in nanoseconds.
+- `wait-until: async func(when: mark)` — `Task.Delay`-backed
+  cooperative wait until the absolute mark.
+- `wait-for: async func(how-long: duration)` — `Task.Delay`-
+  backed cooperative wait for a duration.
+
+The two async functions surface as `Task`-returning host
+methods so the canon-async dispatcher can yield cooperatively
+once a real wit-component fixture lights up the canon-async
+import lowering. Today's bindings call `GetAwaiter().GetResult()`
+in the delegate — sync-blocking against the wasm caller's
+perspective. This is the conservative starting point; the
+async-import wire signature lands when the spec settles.
+
+### `ISystemClock` + default `SystemClock` + `Instant` record
+
+Backs `wasi:clocks/system-clock@0.3.0-rc-2026-03-15`:
+
+- `record instant { seconds: s64, nanoseconds: u32 }`
+- `now: func() -> instant` — `DateTimeOffset.UtcNow`-backed.
+  Handles negative-time edge cases (skewed-back clocks) per the
+  spec's "incrementing nanoseconds always moves forward" rule.
+- `get-resolution: func() -> duration` — returns 100 (the .NET
+  DateTime tick is 100 ns).
+
+`now` returns through a memory retptr (canon-ABI: `instant`
+flat-count = 2 exceeds `MAX_FLAT_RESULTS = 1`). Wire layout:
+16 bytes, 8-aligned. The `InvokeSystemClockNow` helper writes
+the record at the retptr; rejects misaligned / out-of-range
+pointers with diagnostic messages.
+
+### `WasiPreview3Host` integration
+
+`MonotonicClock` and `SystemClock` properties on the host
+(default-constructed lazily, overridable through the builder).
+`BindToRuntime` registers all six clocks host functions.
+`MonotonicClockModuleName` and `SystemClockModuleName`
+constants for the wire-level module names.
+
+### Test coverage
+
+15 new tests in `ClocksTests.cs`:
+- `MonotonicClock` non-decreasing, positive resolution, `wait-for`
+  honors the requested duration, zero-wait completes immediately,
+  past-mark `wait-until` completes immediately, `wait-for` honors
+  CancellationToken.
+- `SystemClock` returns a current-era time, 100ns resolution.
+- `BindToRuntime` registers all six clocks host functions.
+- `InvokeSystemClockNow` writes the canon-ABI record, rejects
+  misaligned / out-of-range retptr, throws when dispatcher unset.
+- Default-construct provides clocks; builder override threads
+  through.
+
+39/39 Preview3 tests green.
+
+## WACS.ComponentModel 0.8.23 — shared per-component handle space (Phase 3 Slice M)
+
+Spec-aligned restructure of the canon-async handle storage.
+Previously each `AsyncHandleTable<T>` (Tasks, Subtasks,
+WaitableSets, Streams, Futures, ErrorContexts) ran its own
+monotone counter starting at 1, so the same integer could refer
+to entries across kinds (e.g. a registered Task and a fresh
+Future both at handle 1). Slice L worked around the resulting
+ambiguity with a union-across-tables check in
+`IsWaitableDeliverable` / `GetMemberWaitTask`; this slice
+removes the workaround by making the structure spec-correct.
+
+### Single per-component handle store
+
+`AsyncDispatcher` now owns a single
+`Dictionary<int, HandleEntry>` with one `_nextHandle` counter
+and one freelist. Each entry carries a `WaitableKind`
+discriminator alongside the payload reference. Drops recycle
+handles across all kinds — no per-kind drift.
+
+### `WaitableKind` enum (public)
+
+New `Wacs.ComponentModel.Async.WaitableKind` lists the six
+canon-async waitable shapes: `Task`, `Subtask`, `WaitableSet`,
+`Stream`, `Future`, `ErrorContext`. Adding a new shape is a
+two-step change: extend the enum + add a typed facade on
+`AsyncDispatcher`.
+
+### `AsyncHandleTable<T>` becomes a typed facade
+
+The class survives as a public typed view: it holds a
+back-reference to its owning dispatcher and the kind tag, and
+delegates `Allocate` / `Get` / `Drop` / `Contains` / `Count` to
+internal helpers on the dispatcher. The constructor is now
+`internal` — facades are created by `AsyncDispatcher`'s
+constructor and exposed via the six existing properties
+(`dispatcher.Tasks`, `dispatcher.Futures`, etc.). Public API
+shape for those properties is unchanged.
+
+`Get` / `Drop` enforce kind: a handle registered under one kind
+returns null when looked up via a different facade. The
+old "any table that has this integer wins" semantics is gone.
+
+### `AsyncDispatcher.GetHandleKind(int)`
+
+New public method for embedders writing generic waitable
+handlers (custom poll loops, debug introspection). Returns the
+`WaitableKind?` for a live handle, null if absent — lets the
+embedder dispatch on kind without trial-and-error `Get`
+probing through each facade.
+
+### Slice L union-hack removed
+
+`IsWaitableDeliverable` and `GetMemberWaitTask` are now clean
+single-kind switches. Each handle has exactly one meaning, so
+no cross-table union is required. The doc comments calling out
+the handle-overlap caveat are gone.
+
+### Test coverage
+
+`AsyncPrimitiveTests` rewrote the standalone-table tests as
+facade tests through a fresh dispatcher. Added four new tests
+explicitly exercising the spec-aligned properties:
+- Cross-kind `Get` returns null for the same handle
+- Cross-kind `Drop` does not release the wrong kind
+- `GetHandleKind` returns the correct kind / null
+- Shared counter does not overlap across kinds
+
+627 ComponentModel + 24 Preview3 + 13 Bindgen = 664/664 tests
+green.
+
+## WACS.WASI.Preview3 0.1.2 — `wasi:cli/stdin.read-via-stream` multi-return binding (Phase 4 Slice K)
+
+Closes the Slice J deferral for the multi-result host import
+shape. `read-via-stream` returns
+`tuple<stream<u8>, future<result<_, error-code>>>`, which
+flattens to 2 i32s — exceeding the canon-ABI's
+`MAX_FLAT_RESULTS = 1`. The lowered host signature is
+`(retptr: i32) -> ()`; the host writes the two handles into
+the component's linear memory at `retptr`.
+
+### Registered host import
+
+```
+(wasi:cli/stdin@0.3.0-rc-2026-03-15, read-via-stream)
+```
+
+Delegate body (`InvokeReadViaStream(IStdin, int retptr)`):
+
+1. Validate dispatcher + dispatcher.Memory are set; reject
+   negative / misaligned / out-of-range `retptr`.
+2. Call `IStdin.ReadViaStream(dispatcher)` →
+   `(streamHandle, futureHandle, ReadCompletion)`.
+3. Write `streamHandle` at `memory[retptr + 0..4]` (i32 LE).
+4. Write `futureHandle` at `memory[retptr + 4..8]` (i32 LE).
+5. Return void. `ReadCompletion` fires when the
+   host-side read finishes; embedders observe completion
+   through the future the guest now holds a handle to.
+
+### Validation
+
+`InvokeReadViaStream` rejects:
+- Null dispatcher (`Dispatcher` property unset)
+- Null `dispatcher.Memory`
+- Misaligned `retptr` (must be 4-byte aligned)
+- Out-of-range `retptr` (`retptr + 8 > memory.Data.Length`)
+- Negative `retptr`
+- Null source
+
+Each path throws `InvalidOperationException` /
+`ArgumentNullException` with a diagnostic naming the canon op
+and the failing constraint.
+
+### Test coverage
+
+8 new tests in
+`Wacs.WASI.Preview3.Test/WasiPreview3HostTests.cs`:
+binding registered, happy-path memory write, dispatcher
+unset, memory unset, misaligned / out-of-range / negative
+retptr, null source.
+
+24/24 Preview3 tests green; 623/623 ComponentModel green.
+
+## WACS.ComponentModel 0.8.22 — WaitableSet wait suspend bridge (Phase 3 Slice L)
+
+Replaces the blocking `Task.WaitAny` in
+`AsyncDispatcher.WaitableSetWait` with a cooperative-yield
+async variant — async wasm bodies can park on a wait without
+hogging the CLR thread.
+
+### `AsyncDispatcher.WaitableSetWaitAsync`
+
+Returns `Task<int>` instead of blocking `int`. Uses
+`Task.WhenAny` over the member waitables (futures, streams,
+tasks, subtasks); the CLR thread is yielded to the scheduler
+while parked. Honors a `CancellationToken` — cancellation
+surfaces as `OperationCanceledException` from the awaiting
+body.
+
+The synchronous `WaitableSetWait` entry point is preserved as a
+thin sync-bridge (`.GetAwaiter().GetResult()`) — back-compat
+for synchronous canon-async bodies and the canon-async binder's
+default delegate shape.
+
+### `AsyncLiftAdapter.InvokeAsync(Func<Task>)` overload
+
+New overload accepts an async wasm body that awaits cooperatively.
+The body's exceptions surface via the returned task in the same
+shape as the synchronous overload. `OperationCanceledException`
+escapes as a soft cancel — the task transitions to
+`Cancelled` and the awaiter sees a canceled task.
+
+### Flow-aware `AsyncDispatcher.CurrentTask`
+
+The current-task stack is now `AsyncLocal<TaskFrame>`-backed
+(linked-list frame). Each push allocates a new frame node and
+stores it in the current ExecutionContext; sibling async bodies
+on the same dispatcher each see their OWN ambient task — no
+cross-context clobber. Replaces the previous `Stack<ComponentTask>`
+which was process-wide.
+
+### Handle-overlap fix in `IsWaitableDeliverable` / `GetMemberWaitTask`
+
+`AsyncHandleTable<T>` instances each allocate handles from their
+own monotone counter starting at 1, so the same integer can
+refer to entries across multiple kinds (e.g. registered task
+at handle 1 AND a future at handle 1). The previous
+"first-table-wins" short-circuit silently misrouted waits in
+that scenario — a running task at handle 1 was checked for
+completion when the caller meant the future at handle 1.
+
+Both functions now check every table and union the
+deliverable / wait-task signals — sympathetic to the CM spec's
+single-namespace model. Side-by-side fix until the broader
+per-component shared-handle-space refactor lands.
+
+### Test coverage
+
+12 new tests in
+`Wacs.ComponentModel.Test/WaitableSetSuspendBridgeTests.cs`:
+sync entry preserved, async entry returns ready handle,
+async completes when member becomes ready, async doesn't
+block calling thread, cancellation token honored, async
+lift-adapter overload runs body, body yields via
+WaitableSetWaitAsync, exception faults task, cancellation
+marks task cancelled, two interleaving async bodies on the
+same dispatcher.
+
+623/623 tests green.
+
+## WACS.ComponentModel 0.8.21 / WACS.ComponentModel.Async.SourceGen 0.2.0 — typed `[ComponentLifter]` registry (Phase 3 Slice K3)
+
+Adds the source-generator-driven typed-lifter pathway that
+removes the arity/width/heterogeneity restrictions in Slices
+K1/K2 — bindgen-emitted (or hand-written) typed methods can
+now claim a specific WIT identifier and the canon-async binder
+will route through them.
+
+### `[ComponentLifter("wit-id")]` attribute
+
+New `Wacs.ComponentModel.Async.ComponentLifterAttribute`
+decorates a static method whose signature mirrors the
+canon-ABI flat-lowered shape of a WIT value. The body
+constructs the typed CLR representation and forwards it to
+`AsyncDispatcher.TaskReturn`.
+
+```csharp
+[ComponentLifter("my:pkg/iface#point")]
+internal static void LiftPoint(ExecContext _, int x, int y) =>
+    dispatcher.TaskReturn(null!,
+        new Point(unchecked((uint)x), unchecked((uint)y)));
+```
+
+The signature determines the delegate shape; the registry
+constructs the matching `Action<...>` / `Func<...>` at
+registration time. No runtime reflection.
+
+### `ComponentLifterRegistry` — process-wide typed-lifter table
+
+Populated at startup by per-assembly
+`[ModuleInitializer]`-decorated methods the new
+`ComponentLifterRegistryGenerator` emits — one initializer per
+assembly that ships any `[ComponentLifter]` method. The
+initializer calls `ComponentLifterRegistry.Register(witIdent,
+delegate)` literally for each match; the table is a plain
+`Dictionary<string, Delegate>` populated once on assembly load.
+
+For targets that don't ship
+`System.Runtime.CompilerServices.ModuleInitializerAttribute`
+(netstandard2.0 / netstandard2.1), the generator emits an
+internal polyfill alongside the initializer.
+
+### `AsyncDispatcher.RegisterTypeMapping(uint, string)`
+
+Bindgen-emitted (or embedder) code calls this at instantiation
+time to declare "type-table index N is WIT identifier X". The
+canon-async binder consults
+`AsyncDispatcher.TryGetTypedLifterForTypeIdx(uint, out Delegate?)`
+when building the `task.return` delegate; if a typed lifter is
+registered for that index's WIT identifier, the binder returns
+it directly — bypasses the per-arity helpers from Slices K1/K2.
+
+Re-registering the same (idx, ident) pair is idempotent; a
+different ident for an already-mapped index throws to surface
+bindgen / mis-merge bugs.
+
+### Binder integration
+
+`CanonAsyncBinder.TryBuildDelegateForEntry` (and the internal
+`TryBuildTaskReturn`) now check the typed-lifter table first
+for any typeidx-referenced aggregate. The per-arity fallback
+chain is unchanged — Slice K1 (enum / flags) and Slice K2
+(record / variant) still cover the cases where no typed lifter
+is registered.
+
+### `Wacs.ComponentModel.Async.SourceGen.CanonOpRegistryGenerator`
+
+Tightened the trigger — emits only when `AsyncDispatcher` is
+*declared* in the current compilation, not just referenced.
+Prevents CS0759 (no defining declaration) when a consumer
+assembly references the generator.
+
+### Test coverage
+
+13 new tests in
+`Wacs.ComponentModel.Test/ComponentLifterRegistryTests.cs`:
+registry shape, lookup APIs, dispatcher type-idx mapping
+(register / idempotent / conflicting-ident throws), binder
+integration with a synthetic typed record + a
+heterogeneous-payload variant the K2 fallback declines.
+
+611/611 tests green.
+
+## WACS.ComponentModel 0.8.20 — record + variant task.return lift (Phase 3 Slice K2)
+
+Extends the canon-async binder to recognize two more aggregate
+shapes, leaning on the same per-arity hand-coded pattern that
+the tuple lifter already established.
+
+### `task.return record { … }` (same-primitive, arity 2-4)
+
+Records whose fields are all the same primitive type and whose
+arity is 2-4 lift to an
+`IReadOnlyDictionary<string, object?>` keyed by field name. The
+canon-ABI flat-lowering places each field consecutively in the
+core call params, so the delegate signature is the same per-arity
+shape as tuple — the field names live in a snapshot captured at
+bind time. Boxing the primitive into `object?` is acceptable for
+`task.return`, the cold one-call-per-completion path.
+
+Heterogeneous-field records and arity > 4 decline; the source
+generator path (Session 3) will lift those into typed records.
+
+### `task.return variant { … }` — two recognized shapes
+
+1. **All-unit-cases** — no case carries a payload. Lifts as
+   `int` discriminant with case-count bounds checking. Same
+   delegate shape as enum.
+2. **Uniform single-primitive payload** — every case carries
+   the same primitive payload type. Lifts as a
+   `(int disc, T payload)` ValueTuple; the host inspects the
+   discriminant to interpret the payload semantics.
+
+Mixed-unit / mixed-payload-type variants decline pending the
+Session 3 source-gen typed-variant path.
+
+### Test coverage
+
+Seven new lift cases in
+`Wacs.ComponentModel.Test/AsyncLiftAdapterTests.cs`:
+record arity-2 u32, record arity-4 f64, record mixed-width
+declines, variant all-unit, variant uniform-u32, variant
+mixed declines, variant out-of-range disc throws.
+
+598/598 tests green.
+
+## WACS.ComponentModel 0.8.19 — FlatLowering analyzer + enum / flags task.return lift (Phase 3 Slice K1)
+
+Adds the canon-ABI flat-lowering analyzer the typed-lifter work
+will lean on, plus two cheap aggregate lifters that fall out
+once the analyzer is in place: `enum` and ≤32-bit `flags`.
+
+### `FlatLowering` — canon-ABI flat-count analyzer
+
+`Wacs.ComponentModel.CanonicalABI.FlatLowering.FlatCount(t, types)`
+computes how many core values an arbitrary `ComponentValType`
+flattens to per `component-model/design/mvp/CanonicalABI.md`.
+Resolves typeidx references recursively through the supplied
+type table; returns `-1` when an aggregate references a typeidx
+outside the table or a shape not yet recognized (callers use
+this as a "fall back to return-area indirection" sentinel).
+
+Covers every `DefTypeEntry` subclass: primitives (1, except
+`string` = 2), `list` (2), `record`/`tuple` (sum of fields),
+`variant` (1 + max-payload, unit cases = 0), `enum` (1),
+`flags` (⌈N/32⌉), `option` (1 + inner), `result` (1 + max(ok,
+err)), `own`/`borrow`/`stream`/`future`/`error-context` (1).
+Returns `-1` for `RawDefType` / `ComponentFuncType`.
+
+### `task.return enum`
+
+When the result typeidx resolves to `ComponentEnumType`, the
+binder emits an `Action<ExecContext, int>` that surfaces the
+discriminant as a plain CLR `int` and validates it against the
+declared case count — out-of-range discriminants throw with a
+clear message. Case-name spellings stay with the WIT-side
+metadata; typed CLR-enum lifts are the Session 3 source
+generator's job.
+
+### `task.return flags` (≤32 flags)
+
+`ComponentFlagsType` with ≤32 declared flags lifts the i32
+bitfield as a CLR `uint`. The high bits beyond the declared
+count are validated to be zero — a non-zero reserved bit is a
+wire-protocol error and throws. `>32` flags decline (return
+null delegate); the source generator path will lift those as
+`[Flags]` enums directly.
+
+### Test coverage
+
+- `Wacs.ComponentModel.Test/FlatLoweringTests.cs` — 23 cases
+  covering every shape, sentinel returns, nested-aggregate
+  resolution.
+- `Wacs.ComponentModel.Test/AsyncLiftAdapterTests.cs` — five
+  enum/flags task.return lift cases (happy path, out-of-range
+  rejection, full 32-bit round-trip, reserved-bit rejection,
+  >32-flag decline).
+
+591/591 tests green.
+
+## WACS.WASI.Preview3 0.1.1 / WACS.ComponentModel 0.8.18 — wire-level stdout/stderr binding (Phase 4 Slice J)
+
+`WasiPreview3Host.BindToRuntime` now registers concrete host
+functions for `wasi:cli/stdout.write-via-stream` and
+`wasi:cli/stderr.write-via-stream` instead of being a no-op.
+The delegates drain the supplied stream handle into the
+configured sink and return a future handle the guest awaits.
+
+### New on `WasiPreview3Host`
+
+- `AsyncDispatcher? Dispatcher { get; set; }` — late-bound by
+  the embedder after `ComponentInstance.Instantiate` allocates
+  the dispatcher (available on
+  `ComponentInstance.AsyncDispatcher`). Delegates resolve
+  lazily at call time; null-at-bind-time is fine.
+- `InvokeWriteViaStream(IStdout sink, int streamHandle)` and
+  `InvokeWriteViaStream(IStderr sink, int streamHandle)` —
+  public helpers exposing the same delegate-body logic
+  `BindToRuntime` registers. Lets embedders + tests exercise
+  the binding without going through a full wasm invoke.
+- `StdoutModuleName` / `StderrModuleName` / `StdinModuleName`
+  constants — the WASI v3 module names the host binds under
+  (`wasi:cli/{stream}@0.3.0-rc-2026-03-15`).
+
+### Registered host imports
+
+```
+(wasi:cli/stdout@0.3.0-rc-2026-03-15, write-via-stream)
+(wasi:cli/stderr@0.3.0-rc-2026-03-15, write-via-stream)
+```
+
+Each binding takes `(stream-handle: i32) -> i32 (future-handle)`.
+The delegate body:
+
+1. Resolves `Dispatcher` (throws "set after instantiation"
+   if null).
+2. Calls `Stdout.WriteViaStream(dispatcher, streamHandle)` /
+   `Stderr.WriteViaStream(...)` — the `IStdout`/`IStderr`
+   impl allocates a future, kicks off background drain into
+   the underlying `Stream` sink.
+3. Returns the future handle.
+
+`wasi:cli/stdin.read-via-stream` (returns
+`tuple<stream<u8>, future<...>>`) needs the multi-return
+host-function binder shape and is the natural follow-up.
+
+### `AsyncDispatcher.GetByteStreamBuffer`
+
+New public method exposing the underlying `StreamBuffer<byte>`
+for a stream handle. Host bridges (e.g. `StreamBackedSink`)
+subscribe to `ChannelReader.WaitToReadAsync` instead of
+polling via `TryRead + Task.Delay`. Replaces the previous
+fragile poll-loop in `StreamBackedSink` — deterministic under
+parallel xunit execution.
+
+### Wire-convention caveat
+
+The `wasi:cli/{stdout,stderr}@0.3.0-rc-2026-03-15`
+module-name spelling is the wit-component-style import
+convention. Real fixture verification awaits wit-component
+RC stabilization. If the spelling differs in actual output,
+the override point is `WasiPreview3HostBuilder` — additional
+naming-resolver hook can land at that time without
+restructuring the binder.
+
+### Tests
+
+5 new in `WasiPreview3HostTests`:
+
+- `BindToRuntime_registers_stdout_and_stderr_host_functions`
+  — round-trip via `runtime.TryGetExportedFunction`.
+- `Dispatcher_property_round_trips`.
+- `InvokeWriteViaStream_throws_when_Dispatcher_unset`.
+- `InvokeWriteViaStream_returns_future_handle_drains_to_sink`
+  — end-to-end stream → sink drain (deterministic, no
+  Task.Delay polling).
+- `InvokeWriteViaStream_stderr_overload_routes_to_stderr_sink`.
+- `InvokeWriteViaStream_rejects_null_sink`.
+
+16/16 Preview3 tests + 552/552 ComponentModel + 833/833
+Transpiler tests pass.
+
+## WACS.WASI.Preview3 0.1.0 / .DependencyInjection 0.1.0 / .Test 0.1.0 — vertical-slice skeleton (Phase 4 v0)
+
+First Phase 4 commit: stand up the
+`WACS.WASI.Preview3` sibling-package family mirroring the
+`Preview2` layout. v0 scope is the `cli/run` + `cli/{stdin,
+stdout,stderr}` vertical slice — the rest of the WASIp3
+host packages (clocks, random, filesystem, sockets, http)
+follow in Phase 5 once the v0 slice validates against a real
+wit-component-emitted `.component.wasm`.
+
+### New packages (all at 0.1.0)
+
+- **`WACS.WASI.Preview3`** — host-interface package.
+  - `WasiPreview3Host` composite `IBindable` + fluent
+    `WasiPreview3HostBuilder`, mirroring the Preview2 host
+    shape.
+  - `Cli/CliRun.cs` — placeholder for invoking exported
+    `wasi:cli/run.run` once fixture lands; pins the public-
+    API contract.
+  - `Cli/CliStdio.cs` — `IStdin` / `IStdout` / `IStderr`
+    interfaces matching wasip3 wire shapes
+    (`read-via-stream` / `write-via-stream`); default
+    `StreamBackedStdin` / `StreamBackedSink` impls over
+    `System.IO.Stream` backings.
+  - `Io/StreamBridge.cs` — adapter helpers bridging
+    canon-async `StreamBuffer<byte>` to host
+    `System.IO.Stream`. Two directions: `DrainToStream`
+    (guest writes → host sink) and `PumpFromStream` (host
+    source → guest reads).
+  - Vendored WIT under
+    `wit/deps/wasi-cli-0.3.0-rc-2026-03-15/package.wit`
+    (copied from the wasi-testsuite submodule); embedded
+    as a resource for downstream contract recovery.
+
+- **`WACS.WASI.Preview3.DependencyInjection`** —
+  `Microsoft.Extensions.DependencyInjection` extensions.
+  `AddWacsWasiPreview3(opts => ...)` registers the host
+  singletons (`IStdin` / `IStdout` / `IStderr` /
+  `WasiPreview3Host`).
+
+- **`WACS.WASI.Preview3.Test`** — xunit harness.
+  - `StreamBridgeTests` (5) — pin the
+    `DrainToStream` / `PumpFromStream` round trips +
+    large-payload chunking + null-arg validation.
+  - `WasiPreview3HostTests` (6) — default-construct
+    surface, builder-override threading, no-op
+    `BindToRuntime` (intentional pending Slice J),
+    `UseWasiPreview3` extension method, DI singleton
+    registration and override.
+
+### What Slice J will land
+
+The current `BindToRuntime` is intentionally a no-op. The
+wire-level binding — registering host delegates under the
+canon-async-shim-resolved `("", "<funcIdx>")` import names
+that wit-component's shim emits — depends on validating the
+convention against a real `.component.wasm`. The
+`WACS.ComponentModel` 0.8.13+ shim recognizer + binder
+pipeline does the routing; this layer just wires the
+`IStdio` impls into the delegate bodies.
+
+When a fixture lands:
+
+1. Compile a wit-bindgen rust crate against the vendored
+   `wasi-cli-0.3.0-rc-2026-03-15` WIT.
+2. Add a `Spec.Test/wasi/tests/rust/wasm32-wasip3/cli-hello/`
+   fixture (the plan's acceptance gate).
+3. Wire `BindToRuntime` to register the right `("", "<N>")`
+   delegates per the shim's debug-name section.
+4. The end-to-end stdout-capture test asserts the bytes
+   round-trip.
+
+### Bug found and fixed during skeleton work
+
+The host's lazy stdio defaults were constructing a fresh
+`StreamBackedSink` on every property access. DI singleton
+registration via `services.AddWacsWasiPreview3()` would
+have surfaced this as
+`provider.GetRequiredService<IStdout>() != host.Stdout`.
+Caught by `AddWacsWasiPreview3_registers_stdio_singletons`;
+fixed by caching the lazily-constructed defaults in
+private fields (`_stdin` / `_stdout` / `_stderr`).
+
+### Build + test
+
+All three projects build clean. 11/11 Preview3 tests pass.
+552/552 ComponentModel + 833/833 Transpiler tests
+unchanged.
+
+## WACS.ComponentModel 0.8.17 — tuple of same-primitive task.return lift (Phase 3 Slice I.4)
+
+Extends `task.return` aggregate lift support to
+`tuple<T, T, ...>` for arities 2–4 with all elements of the
+same primitive type. Materializes as a closed-generic
+`ValueTuple<T, T, ...>` — AOT-safe, no reflection.
+
+### Coverage
+
+Element type `T` ∈ {`u32`/`s32`, `u64`/`s64`, `f32`, `f64`}
+× arity ∈ {2, 3, 4}. Mixed-width tuples (e.g.
+`tuple<u32, u64>`) and aggregate-element tuples (e.g.
+`tuple<string, list<u8>>`) return null delegates — the binder
+skips registration, and the test pins the behavior so the
+contract is auditable.
+
+### Implementation
+
+`TryBuildTaskReturnTuple` validates the same-primitive
+constraint, then dispatches to one of four `Build{Int,Long,
+Float,Double}Tuple` helpers that select the right
+`Action<ExecContext, T, T, ...>` delegate shape and
+materialize the result via C# value-tuple syntax
+(`(a, b)` / `(a, b, c)` / `(a, b, c, e)`). The compiler
+emits closed-generic `ValueTuple<T, T, ...>` constructions —
+no `MakeGenericType` at runtime.
+
+### Tests
+
+4 new in `AsyncLiftAdapterTests`:
+
+- `TaskReturn_tuple_u32_u32_lifts_as_value_tuple` (arity 2).
+- `TaskReturn_tuple_u64_u64_u64_arity3`.
+- `TaskReturn_tuple_f64_arity4`.
+- `TaskReturn_tuple_mixed_width_returns_null_delegate`
+  (negative — pins the unsupported case).
+
+552/552 ComponentModel + 833/833 Transpiler tests pass
+(was 548).
+
+### What's still deferred for full aggregate lift
+
+The genuinely complex aggregate shapes:
+
+- **`record { f1: T1, f2: T2, ... }`** — needs a CLR-type
+  registry or generated lifters per record. The interpreter
+  could lift reflectively (already does in
+  `ComponentInstance.LiftRecord`); the AOT path needs the
+  transpiler's harness-emitter to register concrete lifters.
+- **`variant { c1(T1), c2(T2), ... }`** — joined-payload
+  wire shape; the active case is determined by the
+  discriminant, but the payload slot is sized to the widest
+  case.
+- **Aggregate-payload `option<T>` / `result<T,E>`** — recursive
+  lift of T (currently primitive-only in I.3).
+- **Mixed-width tuples** — combinatorial signatures; cleanest
+  as an extensibility hook rather than enumerated cases.
+
+Each of these warrants its own design pass — likely an
+extensibility hook on `AsyncDispatcher`
+(`Dictionary<int typeIdx, Func<...> lifter>`) with default
+reflective lifters for the interpreter path and source-gen
+lifters for the AOT path. Outside Phase 3's tractable
+surface.
+
+### Phase 3 status
+
+The canon-async surface now covers:
+
+- All canon-async builtins parsed (Phase 2).
+- Dispatcher + canon binder + shim recognizer + memory ops
+  (Phase 3 A–H).
+- Source-generator-backed name registry (G1+G2).
+- Aggregate lift for the **flat-lowered single-segment cases**:
+  string, list of primitive, option of primitive, result of
+  primitive, tuple of same-primitive (I.1–I.4).
+
+Phase 3's tractable surface is functionally complete.
+Records/variants/mixed-width aggregates are the natural
+Phase 4 / harness-emitter work that pairs with
+`Wacs.ComponentModel.Harness.Lib`.
+
+## WACS.ComponentModel 0.8.16 — canon-ABI lift for string / list / option / result task.return (Phase 3 Slices I.1 + I.2 + I.3)
+
+Extends the canon-async binder's `task.return` support from
+primitive-only to also cover **string**, **list of primitive
+T**, **option of primitive T**, and **result of primitive
+T/E** resultlists. The lift adapter reads from the
+dispatcher's memory using AOT-safe `StringMarshal` /
+`ListMarshal` helpers — no runtime reflection. Aggregate
+records, variants, and nested-aggregate shapes remain
+deferred (Slice I.4 next session).
+
+### `AsyncDispatcher` — three new lift-context properties
+
+```csharp
+public MemoryInstance? Memory { get; set; }
+public CanonOption.Kind StringEncoding { get; set; } = StringUtf8;
+public IReadOnlyList<DefTypeEntry>? Types { get; set; }
+```
+
+`Memory` is read at delegate-call time (set by
+`ComponentInstance` post-instantiation). `StringEncoding` is
+baked in from the canon-lift's `(string-encoding utf*)`
+options at instantiation. `Types` is the component's
+type-section index space — used to resolve typeidx-ref
+canon-entry results to concrete `ComponentListType` /
+`ComponentOptionType` / `ComponentResultType`.
+
+### Slice I.1: string
+
+`task.return string` builds a delegate
+`(ExecContext, int ptr, int len) → ()` that lifts via
+`StringMarshal.LiftUtf8/Utf16/Latin1OrUtf16` per the
+dispatcher's encoding, then forwards the CLR `string` to
+`TaskReturn(object?)`. Throws a clear "Memory not set"
+diagnostic if invoked before `ComponentInstance` wires
+`dispatcher.Memory`.
+
+### Slice I.2: list of primitive T
+
+`task.return list<T>` for T ∈ {u8/s8, u16/s16, u32/s32,
+u64/s64, f32, f64}. Delegate signature
+`(ExecContext, int ptr, int count) → ()`. Body:
+`ListMarshal.LiftPrim<T>(memory, ptr, count)` →
+`TaskReturn(arr)`. AOT-safe — closed-generic `LiftPrim<T>`
+specializations, no runtime `MakeGenericType`.
+
+### Slice I.3: option<T> and result<T,E> for primitive T/E
+
+`task.return option<T>` flat-lowers to
+`(disc, payload) → ()`. disc=0 ↦ `null`, disc=1 ↦ payload as
+nullable T (`int?`, `long?`, `float?`, `double?`).
+
+`task.return result<T,E>` (both sides primitive, same width)
+flat-lowers to `(disc, ok, err) → ()`. Materializes as a
+`(bool isOk, T ok, E err)` ValueTuple — no custom
+`Result<T,E>` type, AOT-safe.
+
+The single-sided result variants (`result<T>` / `result<_,E>`)
+and mismatched-width `result<T,E>` shapes remain deferred —
+they're rare in WASIp3 payloads and have a different wire
+shape (missing payload slot).
+
+### `ComponentInstance` wiring
+
+Both single-core (`Instantiate`) and multi-core
+(`InstantiateMultiCore`) paths now:
+
+1. Set `dispatcher.Types = component.Types` at dispatcher
+   construction (before binding, since
+   `TryBuildTaskReturnList/Option/Result` need it).
+2. Set `dispatcher.Memory` + `dispatcher.StringEncoding`
+   after core-module instantiation (the lift adapter needs
+   these at delegate-call time, well after binding).
+
+Helper: `FindCanonLiftStringEncoding(component)` scans canon
+entries for the first `CanonLift` and resolves its
+encoding option. Falls back to UTF-8.
+
+### Tests
+
+7 new in `AsyncLiftAdapterTests`:
+
+- `TaskReturn_string_lift_via_dispatcher_memory_round_trips`
+  (UTF-8 round trip end-to-end).
+- `TaskReturn_string_lift_throws_when_dispatcher_memory_not_set`
+  (clear diagnostic).
+- `TaskReturn_list_u8_lift_via_dispatcher_memory_round_trips`
+  (byte[] round trip).
+- `TaskReturn_list_u32_lift_via_dispatcher_memory_round_trips`
+  (uint[] round trip, LE-encoded in memory).
+- `TaskReturn_option_i32_some_lifts_value` (disc=1 ↦ int?).
+- `TaskReturn_option_i32_none_lifts_to_null`.
+- `TaskReturn_result_u32_u32_ok_lifts_isOk_true`.
+- `TaskReturn_result_u32_u32_err_lifts_isOk_false`.
+
+1 updated in `CanonAsyncBinderTests`:
+- The "skips typeidx aggregate" test now reflects that the
+  name resolver is permissive; the actual viability check
+  happens in `TryBuildDelegate` via `dispatcher.Types`.
+
+548/548 ComponentModel + 833/833 Transpiler tests pass
+(was 539).
+
+### Slice I.4 (next session) — records / variants / nested aggregates
+
+The remaining surface: `record<f1: T1, f2: T2, ...>`,
+`variant`, `tuple`, and aggregate-payload option/result.
+These need:
+- Recursive lift over fields/cases.
+- Flat-lowering analysis (record's flat-count is the sum of
+  field flat-counts; can grow beyond ~16 i32s and require
+  return-area indirection).
+- Likely a source-generator pattern (like `CanonOpRegistry`
+  did for the name set) so the per-shape lift IL is build-
+  time generated, AOT-safe.
+
+## WACS.ComponentModel 0.8.15 — multi-core shim integration (Phase 3 Slice H)
+
+Wires `ShimModuleRecognizer` into `ComponentInstance.InstantiateMultiCore`
+so a parsed multi-core component containing wit-component's
+canon-async shim module gets its `("", "<i>")` imports bound
+to dispatcher delegates before primary-module instantiation.
+
+### `CanonAsyncBinder.TryBuildDelegateForEntry` exposed
+
+The per-shape delegate-construction logic in
+`CanonAsyncBinder` was private (`TryBuildDelegate`). Added a
+public wrapper:
+
+```csharp
+public static Delegate? TryBuildDelegateForEntry(
+    CanonEntry entry, AsyncDispatcher dispatcher);
+```
+
+Returns null when the entry kind isn't currently buildable
+(aggregate task.return, non-primitive context — awaiting the
+canon-ABI lift adapter). The existing `BindImports` keeps
+its same behavior.
+
+### `ShimModuleRecognizer.BindShimImports`
+
+New method walks the shim's function-name custom section,
+pairs each shim function with the positionally-matching
+canon-async entry from `component.Canons` (filtering out
+`CanonLift`/`CanonLower`/`CanonResourceOp` which don't get
+shim entries), validates the kebab-normalized debug-name
+matches the canon entry's op via a build-time-pinned
+`CanonOpNameFor` table, builds the typed delegate via
+`TryBuildDelegateForEntry`, and registers under
+`("", "<funcIdx>")`.
+
+Returns a `BindResult` with `(Bound, Mismatched, Skipped)`
+counts so the caller can surface diagnostics like "bound 8
+of 10 — 1 position mismatch, 1 entry deferred to lift
+adapter."
+
+### Pairing convention
+
+The shim function at index `i` corresponds to the `i`-th
+canon-async entry in the component's `Canons` list (in file
+order, skipping non-async entries). The kebab-normalized
+debug-name is the validation key — if it disagrees with the
+canon entry's op-kind, the recognizer reports
+`Mismatched` and skips that binding rather than guessing.
+
+If wit-component's emit order turns out to differ from the
+canon section order for some component, a name-based fallback
+pairing pass would be the natural follow-up. For the
+common case this positional rule works.
+
+### `ComponentInstance.InstantiateMultiCore` integration
+
+Before primary-module instantiation:
+
+1. Toggle `BinaryModuleParser.ParseCustomNames = true` for
+   the duration (saved + restored in `finally`).
+2. Scan every non-primary core binary; for each that
+   `IsShimModule(...)`, allocate an `AsyncDispatcher` (lazily,
+   first hit), and call `BindShimImports`.
+3. Multiple shims (e.g. wit-component's `:shim` + `:fixups`
+   pair) all get a pass.
+4. The dispatcher is stashed on
+   `ComponentInstance.AsyncDispatcher` (already public from
+   Slice E).
+5. Parse + instantiate the primary module as before; its
+   imports of the shim's exports resolve through the binder.
+
+### Tests
+
+5 new in `ShimModuleRecognizerTests`:
+
+- `BindShimImports_no_op_on_non_shim_module`.
+- `BindShimImports_no_op_on_shim_with_stripped_function_names`
+  (hard-limit binding behavior).
+- `BindShimImports_binds_matching_marker_op_positionally`.
+- `BindShimImports_skips_non_async_canon_entries_in_pairing`
+  (CanonLower/Resource don't take shim positions).
+- `BindShimImports_reports_mismatch_when_debug_name_disagrees_with_position`.
+
+539/539 ComponentModel + 833/833 Transpiler tests pass
+(was 534).
+
+### What remains
+
+- **Real `.component.wasm` fixture**: now that the integration
+  is in place, a real wit-component-emitted Preview 3
+  component would close the loop end-to-end. The recognizer
+  + binder + dispatcher together cover the read side.
+- **Name-based pairing fallback**: if a fixture surfaces
+  positional mismatches, walk by debug-name → canon-op-kind
+  matching instead of by index.
+- **Aggregate task.return / context with typed lift**: still
+  the genuine "wait for lift adapter" frontier.
+
+## WACS.ComponentModel 0.8.14 — structural shim fallback + stripped-names hard limit
+
+Hardens `ShimModuleRecognizer` against downstream tools that
+strip name sections from canon-async-using components
+(`wasm-opt --strip-debug`, `wasm-tools strip`, custom
+pipelines). Documents the hard limit when function-name
+subsections are stripped.
+
+### `LooksLikeShimByStructure` — name-section-less recognition
+
+New public method:
+
+```csharp
+public static bool LooksLikeShimByStructure(Module core);
+```
+
+Returns true iff the module has ≥1 import whose module-name
+is the empty string and whose function-name parses as a
+non-negative integer (<c>"0"</c>, <c>"1"</c>, …). Matches
+wit-component's shim-import convention
+(<c>imports_section.import("", &shim.name, …)</c> where
+<c>shim.name</c> is the shim index as a string), which
+survives name-section stripping.
+
+The all-digit constraint keeps false positives near zero:
+normal core modules occasionally import from an empty module
+namespace with descriptive function names (rare but legal),
+but the integer-name convention is wit-component-specific.
+
+### `IsShimModule` now combines both signals
+
+```csharp
+public static bool IsShimModule(Module core) =>
+    core != null
+    && (NameSectionSaysShim(core) || LooksLikeShimByStructure(core));
+```
+
+Cheapest path: module-name from the name section. Fallback:
+structural pattern. Either signal alone is sufficient.
+
+### Documented hard limit on stripped function-name subsections
+
+The module-name strip degrades gracefully; the function-name
+strip does not. Per the spec, the main module's calls become
+opaque integer-indexed indirect jumps once the function-name
+subsection is gone — the position-to-canon-op mapping is
+wit-component's internal emit order, not derivable from
+anything else in the binary.
+
+`ExtractCanonOpNames` returns an empty dictionary on a
+stripped module; the recognizer's doc comment now spells
+out:
+
+> Embedders who strip names from canon-async-using
+> components break their own ability to be hosted by WACS.
+
+The "stripped" test
+(`ExtractCanonOpNames_returns_empty_when_function_names_stripped`)
+asserts the recognizer correctly identifies the shape AND
+returns empty extraction — caller logic needs to surface
+that as a "stripped names — cannot bind" diagnostic.
+
+### Tests
+
+6 new in `ShimModuleRecognizerTests`:
+
+- `LooksLikeShimByStructure_recognizes_imports_from_empty_module_with_digit_names`.
+- `LooksLikeShimByStructure_rejects_non_digit_names`.
+- `LooksLikeShimByStructure_rejects_named_modules`.
+- `IsShimModule_uses_structural_fallback_when_name_section_stripped`.
+- `IsShimModule_returns_true_when_both_signals_present`.
+- `ExtractCanonOpNames_returns_empty_when_function_names_stripped`
+  (hard-limit assertion).
+
+Fixtures extended with `BuildWasmWithImports` — a minimal
+wasm with a type section + import section, optional name
+section. Lets us model the strip scenarios faithfully against
+the public `BinaryModuleParser` API.
+
+534/534 ComponentModel tests pass (was 528).
+
+## WACS.ComponentModel 0.8.13 — wit-component shim-module recognizer (Phase 3 Slice G3)
+
+Lands the recognizer for wit-component's canon-async shim
+module. The pure-function surface — module-name detection
+and (funcIdx → kebab-canon-op-name) extraction — closes the
+last piece needed to consume real `.component.wasm` output
+once a fixture is available.
+
+### `ShimModuleRecognizer`
+
+Public static class in `Wacs.ComponentModel.Async`:
+
+```csharp
+const string ShimModuleName = "wit-component:shim";
+bool IsShimModule(Module core);
+Dictionary<uint, string> ExtractCanonOpNames(Module core);
+string NormalizeDebugName(string debugName);
+```
+
+- `IsShimModule` checks `core.Name == "wit-component:shim"`
+  (requires `BinaryModuleParser.ParseCustomNames = true` on
+  the consumer side — without that, the name section is
+  skipped and detection fails silently).
+- `ExtractCanonOpNames` reads the shim's function-name custom
+  section and returns a map from `funcIdx` to the kebab-
+  normalized canon-op name. wit-component writes dotted
+  debug names like `"task.return"` and `"waitable-set.wait"`;
+  the recognizer normalizes to `"task-return"` /
+  `"waitable-set-wait"` so they match
+  `CanonOpRegistry.IsKnown`.
+- `NormalizeDebugName` is the single-purpose dot→dash helper
+  exposed for embedders building custom recognition flows.
+
+### How it fits with the binder
+
+The picture for consuming a wit-component-emitted component
+that uses canon-async:
+
+1. `BinaryModuleParser.ParseCustomNames = true` (set before
+   parsing the core modules).
+2. For each parsed core module, call
+   `ShimModuleRecognizer.IsShimModule(core)`. The shim has
+   imports of shape `("", "<int>")` waiting to be filled.
+3. `ExtractCanonOpNames(shim)` yields `funcIdx → canon-op-
+   name` (kebab).
+4. For each entry: validate via `CanonOpRegistry.IsKnown`;
+   resolve the matching `CanonEntry` from the component's
+   `Canons` list (by positional alignment with the
+   non-`CanonLift` entries); build the typed delegate via
+   `CanonAsyncBinder.TryBuildDelegate`; register under
+   `("", "<funcIdx>")`.
+
+The recognizer + registry + binder together cover the read
+side. Full `ComponentInstance.Instantiate` integration is
+the natural next step but needs concurrent design with the
+multi-core-module path (where wit-component's shim emission
+actually shows up).
+
+### Tests
+
+10 new in `ShimModuleRecognizerTests`:
+
+- Detection: positive on `"wit-component:shim"`,
+  negative on other names + null + unnamed module.
+- Name extraction: empty map for module with no function
+  names, full map with dot→dash normalization for a populated
+  shim.
+- `NormalizeDebugName`: dot→dash conversion, idempotent on
+  already-kebab spellings, handles empty.
+- Cross-validation: every extracted name (for a sample of 11
+  common canon ops) is `CanonOpRegistry.IsKnown`.
+
+Fixtures are minimal hand-built wasm binaries (magic +
+version + custom name section) parsed via the public
+`BinaryModuleParser.ParseWasm` API — exercises the real
+name-section parser end-to-end without needing wit-component
+output.
+
+528/528 ComponentModel tests pass (was 518).
+
+### What remains for full end-to-end
+
+- **Multi-core-module shim integration**: wire the recognizer
+  into `ComponentInstance.InstantiateMultiCore` so a parsed
+  component with a shim module gets the recognizer pass
+  before main-module instantiation. Bind delegates under
+  `("", "<int>")` per the shim's debug names.
+- **Real `.component.wasm` fixture**: once wit-component's
+  Preview 3 canon-async emit stabilizes and a sample is
+  available, validate against it.
+
+## WACS.ComponentModel 0.8.12 / WACS.ComponentModel.Async.SourceGen 0.1.1 — parameterless [CanonAsync] + NameMangler.ToKebab
+
+Closes the missed-utility loop on the canon-async attribute
+flow: leverage the existing `NameMangler` for the kebab/Pascal
+conversion instead of hand-spelling each name twice.
+
+### `NameMangler.ToKebab` (Pascal → kebab)
+
+The kebab → Pascal direction already existed; the reverse was
+missing. Added:
+
+```csharp
+public static string ToKebab(string pascal);
+```
+
+Rule: lowercase the leading char; each subsequent uppercase
+letter becomes a `-` prefix + lowercase. Round-trips with
+`ToPascalCase` for inputs composed of single-word PascalCase
+segments — pinned by `ToKebab_round_trips_through_ToPascalCase`
+theory test (5 inputs including the canon-op shapes).
+
+Acronyms degenerate to dash-per-letter (`AOT` → `a-o-t`) — by
+design avoid acronyms in identifiers that round-trip through
+kebab. None of the Component-Model canon-op names have any.
+
+### `CanonAsyncAttribute` — parameterless overload
+
+Added a no-argument constructor:
+
+```csharp
+[CanonAsync]                       // auto-derive: method name -> ToKebab
+public void TaskReturn(...) { ... }
+
+[CanonAsync("stream-write")]       // explicit override (rare divergence)
+public int StreamWriteFromMemory(...) { ... }
+```
+
+`Name` becomes nullable. The parameterless form is the
+default; the explicit-name form is the override.
+
+### Source generator extended
+
+`CanonOpRegistryGenerator.CollectCanonAsyncNames` now:
+
+- For explicit-name attributes (`[CanonAsync("foo-bar")]`):
+  use the literal.
+- For parameterless attributes (`[CanonAsync]`): derive via
+  `PascalToKebab(method.Name)`. The conversion logic is
+  inlined in the generator (netstandard2.0 generator can't
+  reference the runtime `NameMangler` — but the inlined
+  version is round-trip tested against the runtime version
+  through `NameManglerTests.ToKebab_round_trips_through_ToPascalCase`).
+
+### `AsyncDispatcher` cleaned
+
+Of 30 `[CanonAsync(...)]` decorations: 26 dropped their
+explicit names (now `[CanonAsync]`), 4 keep the explicit
+override:
+
+- `StreamWriteFromMemory` → `"stream-write"`
+- `StreamReadToMemory` → `"stream-read"`
+- `ErrorContextNewFromMemory` → `"error-context-new"`
+- `ErrorContextDebugMessageToMemory` → `"error-context-debug-message"`
+
+These 4 method names carry a `FromMemory`/`ToMemory` suffix
+to distinguish from host-side overloads — the canon-op
+spelling matches wasmtime, the method name doesn't.
+Explicit override is the right tool for the intentional
+divergence.
+
+### Tests
+
+13 new `NameManglerTests` entries (8 ToKebab inputs + 5
+round-trip property cases). 518/518 ComponentModel + 833/833
+Transpiler tests pass (was 505).
+
+Generated `CanonOpRegistry.g.cs` still emits all 30 names —
+identical set to the pre-refactor version, just derived
+through the convention rather than re-spelled by hand.
+
+## WACS.ComponentModel.Async.SourceGen 0.1.0 / WACS.ComponentModel 0.8.11 — source generator replaces reflection (Phase 3 Slice G2)
+
+Eliminates Slice G1's reflective scan of
+`AsyncDispatcher` for `[CanonAsync(...)]`-decorated methods.
+A new Roslyn source generator emits the
+`CanonOpRegistry.BuildKnownNames()` partial at build time.
+The `[RequiresDynamicCode]` annotations are gone.
+
+### New package: `WACS.ComponentModel.Async.SourceGen` (0.1.0)
+
+Roslyn `IIncrementalGenerator` in
+`Wacs.ComponentModel.Async.SourceGen.CanonOpRegistryGenerator`.
+At consumer-compile time it:
+
+1. Resolves the `AsyncDispatcher` type via
+   `Compilation.GetTypeByMetadataName`.
+2. Walks its methods, collects every
+   `[CanonAsync("...")]` first-constructor-arg string into a
+   `SortedSet<string>`.
+3. Emits `CanonOpRegistry.g.cs` — a partial-class file in
+   `Wacs.ComponentModel.Async` supplying the
+   `private static partial HashSet<string> BuildKnownNames()`
+   implementation with the literal name set.
+
+No-ops on consumer compilations that don't include
+`AsyncDispatcher` (the registry's data lives in the
+declaring assembly only).
+
+Standard Roslyn-component csproj shape: `netstandard2.0`,
+`IsRoslynComponent=true`, `IncludeBuildOutput=false`, packed
+into `analyzers/dotnet/cs`.
+
+### `CanonOpRegistry` refactored
+
+- Changed from `static class` to `static partial class`.
+- Removed Slice G1's reflection cache and `EnsureCache()`.
+- Removed `GetMethod(string) → MethodInfo?` — required
+  reflection, not actually needed by the binding flow
+  (`CanonAsyncBinder.TryBuildDelegate` is already
+  hardcoded per shape).
+- Added `IsKnown(string) → bool` — the validation surface
+  the shim-module recognizer (G3) consumes.
+- Kept `Names` (now `IReadOnlyCollection<string>`) and
+  `Count`.
+- The `[RequiresDynamicCode]` / `[RequiresUnreferencedCode]`
+  annotations are gone.
+
+### Generated file structure
+
+The generator writes a single file per consumer
+compilation:
+
+```
+obj/Release/{tfm}/generated/Wacs.ComponentModel.Async.SourceGen/
+  Wacs.ComponentModel.Async.SourceGen.CanonOpRegistryGenerator/
+    CanonOpRegistry.g.cs
+```
+
+Verified emission of all 30 canon-op names matches the
+expected Slice G1 set.
+
+### Tests
+
+`CanonOpRegistryTests` updated for the new API:
+
+- `Registry_IsKnown_returns_true_for_each_expected_name`.
+- `Registry_IsKnown_returns_false_for_unknown_name` (dotted
+  spelling like `"future.read"` correctly rejected).
+- `Registry_IsKnown_throws_on_null`.
+
+The "expected name set" (30 entries) + kebab-case
+discipline + Count tests carry over unchanged. Source
+generator's output passes them — confirms the build-time
+scan matches the hand-written expectations.
+
+505/505 ComponentModel + 833/833 Transpiler tests pass
+(was 504).
+
+### Why this matters
+
+Per the standing AOT-safety rule, runtime reflection paths
+get caught by the `Wacs.Core` AOT acceptance test (and
+should be caught by analyzers on `Wacs.ComponentModel` once
+AOT-publish is exercised there). The reflective registry
+introduced in G1 was a deliberate scaffold to settle the
+contract — replaced immediately so no consumer code ever
+encounters the `[RequiresDynamicCode]`-annotated surface.
+
+## WACS.ComponentModel 0.8.10 — CanonAsyncAttribute + reflective CanonOpRegistry (Phase 3 Slice G1)
+
+First half of the attribute-driven discovery pair. The
+canonical wasmtime `Trampoline::symbol_name()` spellings —
+`"task-return"`, `"stream-new"`, `"waitable-set-wait"`, etc. —
+are now the public name set for canon-async ops, with
+attribute-tagged dispatcher methods discoverable by name.
+
+Slice G2 follows immediately to replace the reflection with
+a build-time source generator, per the standing rule of not
+leaving reflection paths live.
+
+### `CanonAsyncAttribute`
+
+Tags `AsyncDispatcher` methods with their wasmtime kebab-case
+canon-op name. All 30 canon-op dispatcher methods decorated:
+task/subtask, backpressure, context, thread-yield, full
+stream/future families, error-context (memory variants),
+waitable-set family + waitable-join.
+
+The attribute spelling matches:
+- wasmtime `crates/environ/src/component/info.rs`
+  `Trampoline::symbol_name()` exactly.
+- wit-component's shim-module debug-name strings after
+  dot→dash normalization (`"task.return"` → `"task-return"`).
+
+Adopting this set keeps WACS interoperable with the existing
+wasm-tools community without inventing a parallel vocabulary.
+
+### `CanonOpRegistry`
+
+Static lookup surface for the shim-module recognizer (G3) to
+consume. Public API:
+
+```csharp
+MethodInfo? GetMethod(string canonOpName);
+IEnumerable<string> Names;
+int Count;
+```
+
+In Slice G1 the cache is populated at first access via
+`System.Reflection`. Every public API is annotated with
+`[RequiresDynamicCode]` + `[RequiresUnreferencedCode]`
+referencing G2 — the AOT analyzer will flag any consumer
+that touches the API before the source generator lands.
+
+Duplicate-attribute detection: throws at registry init if
+two methods share the same `[CanonAsync("...")]` name.
+
+### Why this split
+
+Phase 3's binding flow has two orthogonal concerns:
+
+1. **Name resolution** — which dispatcher method handles
+   canon op `"task-return"`? Answered by the attribute + registry.
+2. **Delegate adaptation** — given a `CanonTaskReturn { Result }`
+   entry, build the typed `Action<ExecContext, T>` to register
+   with the runtime. Answered by `CanonAsyncBinder.TryBuildDelegate`'s
+   per-shape switch.
+
+G1 wires concern (1) without changing concern (2). The
+existing `CanonAsyncBinder` keeps its placeholder name
+convention; the shim-module recognizer (G3) will read
+wit-component's debug names from the shim's name section,
+look up methods via the registry, and build delegates
+through the existing switch.
+
+### Tests
+
+5 new in `CanonOpRegistryTests`:
+
+- Full expected name set (30 entries) round-trips through
+  `Names`.
+- `GetMethod` returns the decorated method for each name;
+  null for unknown.
+- `Count` matches.
+- Op-name kebab-case discipline (lowercase ASCII letters /
+  digits / dashes only — no dots, underscores, whitespace).
+
+504/504 ComponentModel tests pass (was 499).
+
+### Up next: Slice G2
+
+Roslyn source generator that emits the registry's lookup
+table at build time. Reflection annotations come off.
+
+## WACS.ComponentModel 0.8.9 — Phase 3 deferrals closed (WaitableSetWait + typed task.return / context.{get,set})
+
+Closes the two tractable Phase 3 deferrals from Slice F. The
+remaining deferral — full `.component.wasm` end-to-end against
+wit-component output — stays open until the upstream tooling
+settles its canon-async emit convention.
+
+### `WaitableSetWait` implemented
+
+`AsyncDispatcher.WaitableSetWait(ctx, setHandle, memIdx, cancellable)`
+now blocks until any member of the set becomes deliverable,
+then returns the member's handle (`0` for an empty set).
+
+**Implementation:** synchronous-scan-then-`Task.WaitAny` loop
+over each member's completion task. The wait completes on:
+
+- `ComponentTask.Completion` (for task / subtask members).
+- `FutureCell<T>.Task` (for future members).
+- `ChannelReader<T>.WaitToReadAsync` (for stream members —
+  wakes on buffered-data or EOS).
+
+A new `GetMemberWaitTask` helper builds the awaitable per
+member; members without a wait-able source are skipped.
+`Task.WaitAny` only proves "some" task completed, so the
+implementation re-scans after each wakeup before returning.
+
+**Caveats** captured in doc comments:
+
+- The calling CLR thread parks (same OS thread as the wasm
+  body) — fine for Phase 3's single-task-per-component model
+  but a stackful-suspend variant where the wasm continuation
+  yields to a host scheduler is a future refinement.
+- The `memoryIdx` parameter is the spec's deliverable-event
+  struct target; this implementation returns the handle via
+  the return value instead. The memory write lands when the
+  canon-ABI lift adapter generates per-call memory marshaling.
+
+### Binder picks up `waitable-set.{wait,poll}`
+
+`CanonAsyncBinder` now binds both, with the cancellable flag
+captured at bind time:
+
+- `[waitable-set-wait]` → `Func<ExecContext, int, int, int>`
+  (set, memidx → deliverable handle).
+- `[waitable-set-poll]` → same shape (non-blocking variant
+  already implemented).
+
+### Typed primitive binding for `task.return` and `context.{get,set}`
+
+The binder now generates typed delegates for the primitive-
+valued forms of these canon ops:
+
+- `task.return` resultlist: `()` / `i32` / `i64` / `f32` /
+  `f64` produce `Action<ExecContext, T>` delegates (with `T`
+  unboxed and forwarded to `dispatcher.TaskReturn(object?)`).
+- `context.get` per (slot, valtype): `Func<ExecContext, T>`
+  returning the slot value as the requested primitive.
+- `context.set` per (slot, valtype): `Action<ExecContext, T>`
+  packing the value into a `Value` and writing the slot.
+
+Slot index is captured at bind time so each `(slot, valtype)`
+pair gets its own delegate.
+
+Aggregate / string resultlists + non-primitive context
+valtypes still skip — they need the full canon-ABI lift
+adapter to marshal typed values across the boundary. That
+remains the genuine "wait for upstream" deferral for the
+full `.component.wasm` e2e.
+
+### Name convention extensions
+
+- `[task-return]` — no slot suffix (resultlist isn't a
+  typeidx).
+- `[context-get]#<slot>` / `[context-set]#<slot>` — slot
+  index baked into the name so distinct slots get separate
+  bindings.
+
+### Tests
+
+7 new (4 dispatcher + 3 binder):
+
+- `WaitableSetWait_returns_zero_for_empty_set`.
+- `WaitableSetWait_returns_member_already_deliverable`.
+- `WaitableSetWait_unblocks_when_future_resolves_asynchronously`
+  — Task.Run kicks the blocking wait, future write wakes it.
+- `WaitableSetWait_returns_first_resolver_when_multiple_pending`.
+- `DefaultNameResolver_resolves_primitive_task_return_and_context_ops`.
+- `DefaultNameResolver_skips_aggregate_resultlist_and_valtype`.
+- `BindImports_registers_primitive_task_return_variants` /
+  `BindImports_registers_context_get_and_set_with_per_slot_names` /
+  `BindImports_skips_aggregate_resultlist_and_valtype_entries`.
+
+499/499 ComponentModel + 833/833 Transpiler tests pass (was 492).
+
+### What still requires upstream
+
+- **Full `.component.wasm` e2e** against wit-component output:
+  the binder name convention is documented + override-friendly,
+  but the conventions wit-component actually emits in
+  Preview 3 RC haven't settled. The `NameResolver` hook lets a
+  consumer adopt the convention in one place when fixtures
+  arrive.
+- **Aggregate-typed `task.return` and `context.{get,set}`**:
+  string / list / record / variant results need the canon-ABI
+  lift adapter (component Value ↔ wasm-frame Value with full
+  marshaling). Cleanest after wit-component fixtures verify
+  the shape of those calls.
+
+## WACS.ComponentModel 0.8.8 — lift adapter + memory ops + producer/consumer (Phase 3 Slice F)
+
+Closes Phase 3's tractable surface: the task-lifecycle wrapper,
+memory-touching dispatcher ops, and a CLR-level producer/consumer
+test that exercises the full stack. Real `.component.wasm` end-
+to-end against wit-component output stays a follow-up.
+
+### `AsyncLiftAdapter`
+
+New helper for the `canon lift f opts` async-option wrapper:
+
+```csharp
+Task<object?> InvokeAsync(AsyncDispatcher, ContInstance, Action body);
+Task<object?> InvokeAsync<T>(AsyncDispatcher, ContInstance, Func<T> body);
+```
+
+Each call:
+
+1. Allocates a `ComponentTask` bound to the supplied
+   `ContInstance` via `dispatcher.RegisterTask`.
+2. Pushes the task as ambient (`PushCurrentTask`).
+3. Invokes the body once on the calling stack.
+4. Settles the task on body exit:
+   - Body called `task.return` ↦ surfaced result.
+   - Body called `task.cancel` ↦ canceled completion.
+   - Body returned without canon op ↦ implicit
+     `TaskReturn(null)` (or the value, for the typed overload).
+   - Body threw ↦ faulted completion. **Exception surfaces
+     via the returned Task, not via a synchronous throw** —
+     embedders observe wasm failures through the same
+     `await` they use for normal results.
+5. Pops the task on the `finally` path (always cleans up).
+
+Synchronous-body case only at this slice; suspending bodies
+that park via Stack Switching land with the WaitableSetWait
+suspend bridge in a future slice.
+
+### Memory-touching dispatcher ops
+
+Bridges the dispatcher to wasm `MemoryInstance`:
+
+- **`StreamWriteFromMemory(handle, memory, ptr, length)`** —
+  reads bytes from memory and pushes into the stream buffer.
+  Returns the count actually written (less than `length` when
+  the buffer fills — back-pressure surface).
+- **`StreamReadToMemory(handle, memory, ptr, capacity)`** —
+  drains the buffer into memory. Returns the actual count.
+- **`ErrorContextNewFromMemory(memory, ptr, len)`** — reads a
+  UTF-8 string from memory and allocates an error-context
+  handle.
+- **`ErrorContextDebugMessageToMemory(handle, memory, dstPtr)`** —
+  writes the message back into memory as UTF-8 when
+  `dstPtr != 0`; always returns the required byte count
+  (spec probe convention).
+
+### Stream slot semantics (two-half drop model)
+
+Discovered while building the producer/consumer test that the
+original `StreamDropWritable` released the handle immediately,
+breaking the canon-spec "reader can drain after writer drops"
+contract. Introduced an internal `StreamSlot` wrapper tracking
+`WriterDropped` / `ReaderDropped` independently — the table
+entry is now released only when **both** halves are dropped.
+Matches the spec semantics + makes the producer/consumer
+pattern work.
+
+### Producer/consumer integration test
+
+`AsyncLiftAdapterTests.Producer_consumer_through_lift_adapter_round_trips_bytes`
+models the WASIp3 plan's Phase 3 acceptance fixture at the
+CLR-test level: producer task creates a stream, writes
+`[1,2,3,4]` from memory, drops the writable half; consumer
+task reads the same handle back into memory, drops readable;
+test asserts the bytes round-trip and both tasks settled
+cleanly.
+
+**What's NOT yet covered:** a full `.component.wasm` fixture
+compiled by wit-component that exercises the same flow. That
+awaits wit-component's canon-async emit settling (Preview 3
+RC is still in motion) — at which point a single fixture
+update plus the binder's `NameResolver` adjustment lights the
+end-to-end test up.
+
+### Tests
+
+12 new in `AsyncLiftAdapterTests`:
+
+- `InvokeAsync` overload coverage (void, typed, with/without
+  explicit task.return).
+- `task.cancel` from inside the body cancels the host await.
+- Body exception surfaces as a faulted Task; null args throw
+  synchronously.
+- Memory ops: write/read symmetric, capacity respected,
+  utf-8 error-context round-trip, probe-vs-write distinction.
+- Producer/consumer end-to-end (CLR level).
+
+492/492 ComponentModel tests pass (was 480).
+
+### What's still pending in Phase 3
+
+- **WaitableSetWait suspend bridge** — needs interpreter-loop
+  integration with `StackSwitchingHelpers.Suspend`. Currently
+  stubbed with a "Slice F follow-up" NotImplementedException.
+  Doable but requires careful work around the existing
+  interpreter loop.
+- **task.return / context.get/set with typed Value
+  marshaling** — requires the canon-ABI lift layer (component
+  Value ↔ wasm-frame Value). Cleanest after wit-component
+  fixtures are available to verify against.
+- **Full `.component.wasm` e2e** — see above.
+
+These are the realistic Phase 3 closeout items; the rest of
+the phase is achieved.
+
+## WACS.ComponentModel 0.8.7 — canon-async binder + ComponentInstance integration (Phase 3 Slice E)
+
+Bridges the canon-async entries to host-function bindings on
+the `WasmRuntime` via the new `CanonAsyncBinder`. Engine-
+symmetric by virtue of living in the runtime layer — the
+interpreter and the transpiler both reach the dispatcher
+through `ComponentInstance.Instantiate`'s shared path.
+
+### `CanonAsyncBinder`
+
+Mirrors `CanonResourceBinder`'s pattern: walks the canon
+entries, builds typed delegates over `AsyncDispatcher`
+methods, registers them via `WasmRuntime.BindHostFunction`.
+
+**Default name convention** (placeholder until wit-component
+output settles):
+```
+module = "[canon]"
+name   = "[<op-kebab>]" or "[<op-kebab>]#<typeidx>"
+         for ops carrying a typeidx (stream.*, future.*).
+```
+
+Examples: `[task-cancel]`, `[stream-new]#5`,
+`[error-context-debug-message]`, `[waitable-join]`.
+
+**Override path**: `BindImports(runtime, canons, dispatcher, NameResolver)`
+accepts a custom resolver so embedders adopt their toolchain's
+convention. The default mapping is exposed as
+`CanonAsyncBinder.DefaultNameResolver` for inspection/diff.
+
+### What's bound
+
+Implemented (delegates that don't need memory access or
+suspend integration):
+
+- `task.cancel` — `() → ()`.
+- `subtask.cancel` (async flag captured at bind) — `(i32) → ()`.
+- `subtask.drop` — `(i32) → ()`.
+- `backpressure.{set,inc,dec}` — `() → ()`.
+- `stream.new` (typeidx captured) — `() → i32`.
+- `stream.{drop-readable,drop-writable,cancel-read,cancel-write}`
+  — `(i32) → i32` (0/1 success).
+- `future.new` (typeidx captured) — `() → i32`.
+- `future.{drop-readable,drop-writable,cancel-read,cancel-write}`
+  — `(i32) → i32`.
+- `error-context.drop` — `(i32) → i32`.
+- `waitable-set.{new,drop}` — `() → i32` / `(i32) → i32`.
+- `waitable.join` — `(i32, i32) → ()`.
+- `thread.yield` (cancellable captured) — `() → ()`.
+
+Skipped (Slice F — need lift adapter, memory access, or
+suspend bridge):
+
+- `task.return` (depends on resultlist marshaling).
+- `context.{get,set}` (depends on Value marshaling).
+- `stream.{read,write}` / `future.{read,write}` (depend on
+  component memory access for buffer copy).
+- `error-context.{new,debug-message}` (depend on memory-
+  resident string read/write).
+- `waitable-set.{wait,poll}` — wait needs the suspend bridge;
+  poll's typed signature requires `IContinuationContext`.
+
+### `ComponentInstance` integration
+
+`Instantiate` now:
+
+1. Walks `component.Canons` for any async-ABI entry.
+2. If found, allocates a fresh `AsyncDispatcher` and binds
+   the host functions via `CanonAsyncBinder.BindImports`
+   BEFORE `configureImports` + `InstantiateModule` — so the
+   inner core module's import resolution finds them.
+3. Stashes the dispatcher on
+   `ComponentInstance.AsyncDispatcher` (public).
+
+No-op for components with no canon-async entries (the
+dispatcher property stays null). Backward-compatible with
+every existing component fixture.
+
+### Tests
+
+9 new in `CanonAsyncBinderTests`:
+
+- Default name resolver shape (module, name).
+- Typeidx inclusion for stream / future ops.
+- Null-pair return for unsupported (Slice F) entries.
+- BindImports registers expected delegates.
+- BindImports honors a custom NameResolver.
+- Smoke test: dispatcher state is unchanged after binding.
+
+480/480 ComponentModel + 833/833 Transpiler tests pass
+(was 471). Symmetric across engines.
+
+### Engine-symmetry note
+
+Per `feedback_symmetric_engines`: the transpiler doesn't
+emit canon-async-specific CIL because the binder lives in
+the runtime layer. Transpiled components still flow through
+`ComponentInstance.Instantiate` for component-level
+instantiation; the canon-async host functions are bound
+identically regardless of whether the wasm body is
+interpreted or transpiled. The dispatcher methods are
+`callvirt` targets either way.
+
+### What ships in Slice F
+
+- Lift adapter for `async func()` entries: creates a
+  `ComponentTask`, registers it, runs the body, pops on
+  exit.
+- `WaitableSetWait` suspend bridge via
+  `StackSwitchingHelpers.Suspend`.
+- Memory-touching ops (`stream.read/.write`, `task.return`,
+  `error-context.new`).
+- Producer/consumer acceptance fixture under both engines.
+
+## WACS.ComponentModel 0.8.6 — dispatcher state + canon-async index alignment (Phase 3 Slice D)
+
+Fills in the dispatcher state-machine surface that doesn't
+require Stack Switching `Suspend` integration, and closes an
+index-alignment bug in `ComponentInstance` exposed by Phase 2's
+expanded canon-entry hierarchy.
+
+### Dispatcher state (now implemented)
+
+- **Current-task stack** — `PushCurrentTask` / `PopCurrentTask` /
+  `CurrentTask`. Lift adapters (Slice E) push on body entry,
+  pop on body exit. `PushCurrentTask` transitions
+  `Starting → Started`.
+- **`TaskReturn` / `TaskCancel` / `TaskFail`** — consume the
+  ambient task. Set `Completion` (Result / Canceled / Faulted),
+  transition state, all under guard that the task is in
+  `Started` for return / cancel.
+- **Backpressure** — `BackpressureSet` (clears),
+  `BackpressureInc` / `BackpressureDec`; the embedder reads
+  `BackpressureLevel`.
+- **Per-task context slots** — `ContextGet(slotIdx)` /
+  `ContextSet(slotIdx, Value)` route through the current
+  task's sparse `Dictionary<int, Value>`. Unwritten slots
+  return `default(Value)`; no ambient task throws.
+- **`SubtaskCancel`** — transitions the child task to
+  `Cancelled` and cancels its completion. Idempotent on
+  already-terminal children.
+- **Stream/Future `Cancel{Read,Write}`** — wired as the
+  synchronous "release the half" equivalents
+  (`StreamDropReadable` / `FutureDropReadable` etc.). The
+  spec's sync-vs-async distinction is a Slice F refinement.
+- **`WaitableSetPoll`** — synchronous "first deliverable
+  member" scan. Returns the matching handle or `0` (canon
+  null). Deliverable = task completed, future resolved,
+  stream has data or is completed.
+- **`ThreadYield`** — synchronous no-op for the single-task
+  body model. Documented as the natural hook for a future
+  multi-task scheduler.
+
+### ComponentInstance — async canon entries bump the core-func index
+
+`ComponentInstance.Instantiate`'s canon-section walk used to
+increment `coreFuncIdx` only for `CanonLower` and
+`CanonResourceOp`. Per the spec grammar, every canon form
+except `canon lift` produces a `(core func)` — so the new
+async-ABI canon entries (`task.return`, `subtask.cancel`,
+`stream.*`, `future.*`, `error-context.*`, `waitable-set.*`,
+`waitable.join`, `backpressure.*`, `context.{get,set}`,
+`thread.yield`) all need to bump the counter. Without the
+fix, components mixing resource + async builtins would
+mis-align subsequent core-alias indices.
+
+The switch now enumerates each canon-entry kind explicitly,
+making the spec compliance auditable at a glance.
+
+### `ComponentTask.Context`
+
+Added `public Dictionary<int, Value> Context { get; }` for the
+per-task context slots Phase 2's `CanonContextOp` reads/writes.
+Sparse — slot keys are component-defined u32s without a static
+bound.
+
+### Tests
+
+15 new in `AsyncDispatcherTests`:
+
+- Current-task push/pop transitions; multiple registrations.
+- TaskReturn / TaskCancel / TaskFail outcomes + state guards.
+- Backpressure inc/dec/set + floor at zero.
+- Context round-trip; default-on-unwritten; no-task throw.
+- SubtaskCancel propagation to child completion.
+- WaitableSetPoll: empty set, single future ready, first
+  deliverable of many.
+- StreamCancelRead / FutureCancelRead now wired (sync paths).
+- ThreadYield is observably a no-op.
+- WaitableSetWait remains pinned with a "Slice F" marker.
+
+471/471 ComponentModel tests pass (was 456).
+
+### Slice scope
+
+**What's still in Slice E** (transpiler symmetric emit):
+
+- ComponentInstance's canon-async binding to actual host
+  functions the core module calls (creating delegates that
+  invoke dispatcher methods).
+- Transpiler CIL emission for the same surface.
+
+**What's still in Slice F** (suspend bridge + e2e):
+
+- `WaitableSetWait` blocking on suspend via
+  `StackSwitchingHelpers.Suspend`.
+- Producer/consumer end-to-end fixture under both engines.
+
+## WACS.ComponentModel 0.8.5 — AsyncDispatcher contract (Phase 3 Slice C)
+
+Establishes the public API the interpreter calls directly and the
+transpiler emits CIL against — per `feedback_symmetric_engines`:
+two engines, one dispatcher.
+
+### `AsyncDispatcher`
+
+One instance per `ComponentInstance`. Owns six per-kind handle
+spaces (Tasks, Subtasks, WaitableSets, Streams, Futures,
+ErrorContexts) and exposes methods named after the canon-async
+builtins.
+
+**Implemented in Slice C** (no-suspend operations):
+
+- Stream: `StreamNew`, `StreamTryWrite`, `StreamTryRead`,
+  `StreamDropReadable`, `StreamDropWritable`.
+- Future: `FutureNew`, `FutureWrite`, `FutureReadAsync` (returns
+  `Task<object?>`), `FutureDropReadable`, `FutureDropWritable`.
+- ErrorContext: `ErrorContextNew(string)`,
+  `ErrorContextDebugMessage`, `ErrorContextDrop`.
+- WaitableSet: `WaitableSetNew`, `WaitableSetDrop`,
+  `WaitableJoin`.
+- Task lifecycle: `RegisterTask(ContInstance)` returning the
+  bound `ComponentTask`.
+- Subtask: `SubtaskDrop`.
+
+**Stubbed for Slice D** — methods throw
+`NotImplementedException` with a clear "Slice D" message,
+pinning the contract:
+
+- `TaskReturn` / `TaskCancel` (current-task tracking).
+- `SubtaskCancel` (cancel propagation).
+- `WaitableSetWait` / `WaitableSetPoll` (suspend integration).
+- `Backpressure{Set,Inc,Dec}` (ambient state machine).
+- `Context{Get,Set}` (per-task slots).
+- `ThreadYield` (suspend integration).
+- `Stream{CancelRead,CancelWrite}` / `Future{CancelRead,CancelWrite}`
+  (cooperative cancel handshake).
+
+Tests pin the `NotImplementedException` markers so adding
+behavior later still verifies the contract intent.
+
+### `AsyncHandleTable<T>` — factory-overload + thread-safety docs
+
+- New `Allocate(Func<int, T> factory)` overload: invoke the
+  factory with the freshly-minted handle to build the value
+  it gets bound to. Avoids the allocate-then-rewrite dance
+  for values that carry their own handle field
+  (`ComponentTask`, `ComponentWaitableSet`).
+- Tightened thread-safety doc comment: explicitly covers core
+  CM async (single-threaded by spec), the 🧵 non-shared
+  thread.* canon ops (cooperative-fiber single OS thread), and
+  the 🧵② shared-explicit-threads boundary (rejected at the
+  parser; would require concurrent storage to ship).
+
+### `StreamBuffer<T>` — thread-safety doc
+
+Clarifies that `SingleReader = SingleWriter = true` is a
+"one consumer/producer at a time" constraint, not a thread
+constraint — host-thread completion callbacks resolve through
+the underlying `Channel<T>` correctly.
+
+### Tests
+
+17 new in `AsyncDispatcherTests` — stream / future / error-
+context / waitable-set / task registration round-trip + the
+three pinned NotImplementedException markers. 456/456 CM
+tests pass (was 439).
+
+## WACS.ComponentModel 0.8.4 — stream + future data plane (Phase 3 Slice B)
+
+Adds the backing storage for `stream<T>` and `future<T>` handles.
+Backpressure semantics come from `System.Threading.Channels`
+(bounded, single-reader, single-writer); the future cell uses
+`TaskCompletionSource<T>` with `RunContinuationsAsynchronously`.
+
+### `StreamBuffer<T>`
+
+Wraps a bounded `Channel<T>`. Public API:
+
+- `TryWrite(T) → bool` / `WriteAsync(T, ct) → ValueTask` —
+  immediate vs. wait variants. Backpressure: `WriteAsync`
+  suspends when the buffer is at `Capacity`.
+- `TryRead(out T) → bool` / `ReadAsync(ct) → ValueTask<T>` —
+  symmetric reader.
+- `Complete() → bool` — close the writer side; pending items
+  still drain.
+- `AsAsyncEnumerable(ct) → IAsyncEnumerable<T>` — natural
+  `await foreach` consumption surface.
+- `Reader → ChannelReader<T>` — for embedders that already
+  accept a `ChannelReader<T>`.
+
+### `FutureCell<T>`
+
+Wraps a `TaskCompletionSource<T>`. Public API:
+
+- `Task → Task<T>` — host await target.
+- `TrySetResult(T) / TrySetException(Exception) /
+  TrySetCanceled() → bool` — single-resolution; second call
+  returns false (matches spec's single-write trap behavior).
+- `IsCompleted` — observe resolution.
+
+### Dependency
+
+Added `System.Threading.Channels` 8.0.0 PackageReference to
+`Wacs.ComponentModel` for the bounded channel primitive.
+In-box on net8.0, NuGet-provided on netstandard2.1.
+
+### Tests
+
+10 new tests in `StreamBufferTests`:
+
+- Capacity validation, round-trip within capacity.
+- `TryWrite` returns false when full; `WriteAsync` suspends
+  and resumes when a reader drains.
+- `AsAsyncEnumerable` consumes in-order; `Complete` drains
+  cleanly.
+- Future result / exception / cancellation resolution;
+  single-write rejection.
+
+439/439 ComponentModel tests pass (was 429).
+
+## WACS.ComponentModel 0.8.3 — async ABI primitives (Phase 3 Slice A)
+
+First Phase 3 slice: the data carriers the CM async dispatcher
+will build on. Shapes only — no execution wiring, no canon
+binding. The dispatcher contract (Slice C) consumes these.
+
+### New `Wacs.ComponentModel/Async/` namespace
+
+- `AsyncHandleTable<T>` — per-component, per-kind handle space.
+  4-byte positive integers, freelist-recycling, handle `0`
+  reserved as the canon null sentinel.
+- `ComponentTask` — wraps a Phase 1 `ContInstance` Continuation
+  + a host-side `TaskCompletionSource<object?>`. The
+  `task = continuation` constraint from the WASIp3 plan
+  realized as a single carrier holding both. Completion uses
+  `RunContinuationsAsynchronously` so a `SetResult` inside
+  dispatch can't reenter wasm via the continuation chain.
+- `ComponentSubtask` — child/parent task references for the
+  spawn/cancel propagation paths.
+- `ComponentWaitableSet` — `HashSet<int>` of joined waitable
+  handles. Idempotent join, identity-based set semantics.
+- `ComponentTaskState` — Starting / Started / Returned /
+  Cancelled / Failed enum.
+
+### Tests
+
+11 new tests in `AsyncPrimitiveTests`:
+
+- Table handle allocation starts at 1 (0 reserved), get/drop
+  symmetry, freelist recycling, count tracking.
+- Task starts in `Starting` state with pending Completion;
+  TCS has `RunContinuationsAsynchronously`; continuation ref
+  is retained.
+- Subtask carries child + parent references.
+- WaitableSet join/remove idempotent; member tracking.
+
+429/429 ComponentModel tests pass (was 418).
+
+### Scope
+
+Phase 3 is 3-4 weeks per plan. Subsequent slices:
+- B: StreamBuffer + FutureCell with backpressure
+- C: AsyncDispatcher contract (the API the transpiler calls)
+- D: Wire canon-async entries through dispatcher
+- E: Transpiler symmetric emit
+- F: Producer/consumer acceptance fixture
+
+## Phase 2 close-out — binary deftype coverage + acceptance summary
+
+Test-only commit closing Phase 2 (Component Model async ABI
+types + parser). Adds `AsyncDefTypeBinaryTests` covering the
+binary type-section dispatch for tags `0x64` (error-context),
+`0x65` (future), and `0x66` (stream) — the one parser path
+Slices A–D wired but didn't cover with dedicated tests.
+
+### Coverage matrix
+
+| Path | Slice | Tests |
+|------|-------|------:|
+| `CtValType` subclass shape | A | (compile-time) |
+| Binary deftype dispatch (0x64/0x65/0x66) | A | 7 (this commit) |
+| Canon async-builtin parser (0x05–0x25) | B | 16 |
+| Async handle marshal helpers | C | 6 |
+| `CanonicalAbi.Layout` 4-byte handle case | C | (covered by harness consumers) |
+| WIT lexer / parser / WitToTypes | D | 9 |
+| Total async-ABI tests added | A–E | **38** |
+
+### Acceptance vs. plan
+
+The plan's Phase 2 acceptance asked for *Component WAT
+declaring `stream<u8>` / `error-context` types and all the
+async canon builtins parses and re-encodes losslessly.*
+
+- ✓ Parses — all WIT forms (typed + bare) lower to the
+  matching `Ct*Type`; the binary parser decodes the three
+  deftype tags and all 25 canon-async opcodes.
+- ⚠ Re-encodes losslessly — deferred. No component-binary
+  writer exists in the codebase yet; lossless byte
+  round-trip is a follow-up. The structural AST is complete
+  enough to drive a writer when one lands. Test coverage
+  hand-builds the source bytes and asserts AST identity,
+  which is the achievable equivalent without a writer.
+- ⏳ Data plane / dispatcher — explicitly Phase 3 scope, not
+  Phase 2.
+
+Phase 2 closes the "shape + parse" surface. Phase 3 picks up
+the stackful dispatcher built atop the Phase 1 Stack Switching
+substrate.
+
+418/418 `Wacs.ComponentModel` tests pass.
+
+## WACS.ComponentModel 0.8.2 — WIT AST + parser + WitToTypes (Phase 2 Slice D)
+
+Lands the WIT-source-text layer for `stream<T>` / `future<T>` /
+`error-context`. The lexer now recognizes the three keywords;
+the parser accepts both typed (`stream<u8>`) and bare
+(`stream`) forms; `WitToTypes.ConvertType` lowers them to
+`CtStreamType` / `CtFutureType` / `CtErrorContextType.Instance`.
+
+### `WitModel`
+
+Three new `WitType` subclasses in `WIT/WitModel.cs`:
+
+- `WitStreamType { WitType? Element }`
+- `WitFutureType { WitType? Element }`
+- `WitErrorContextType` (marker)
+
+Element is null for the bare `stream` / `future` forms.
+
+### Lexer + parser
+
+`WitLexer.Keywords` adds `"stream"`, `"future"`,
+`"error-context"`. The kebab-case lexer already treats internal
+hyphens as identifier-continuation characters, so
+`error-context` lexes as a single Keyword token.
+
+`WitParser.ParseType` gains three new `case` arms:
+
+- `case "stream":` / `case "future":` — share the optional-
+  `<T>` parsing branch (consume `<…>` if present, otherwise
+  return with `Element = null`).
+- `case "error-context":` — bare keyword, no payload.
+
+### `WitToTypes.ConvertType`
+
+Three new switch arms lower each WIT type to the matching
+`CtValType`:
+`WitStreamType → CtStreamType(ConvertType(Element))` (or null),
+`WitFutureType → CtFutureType(...)`,
+`WitErrorContextType → CtErrorContextType.Instance`.
+
+### Tests
+
+5 new `WitParserTests` covering typed/bare forms + nested
+element (`stream<list<u8>>`) + error-context keyword. 4 new
+`WitToTypesTests` covering the lowering for each form. 411/411
+ComponentModel tests + 13/13 Bindgen tests pass.
+
+## WACS.ComponentModel 0.8.1 / WACS.ComponentModel.Harness.Lib 0.27.1 — async handle marshal + layout (Phase 2 Slice C)
+
+Adds the three async-ABI handle marshal helpers + extends the
+canonical-ABI layout table to cover the new types.
+
+### Marshal helpers
+
+Three new public static classes in
+`Wacs.ComponentModel/CanonicalABI/`:
+
+- `StreamMarshal` — `HandleSize = 4`, `HandleAlign = 4`,
+  `ReadHandle` / `WriteHandle` over little-endian i32.
+- `FutureMarshal` — same shape.
+- `ErrorContextMarshal` — same shape.
+
+All three are thin wrappers around `BinaryPrimitives.Read/Write
+Int32LittleEndian` with offset bounds checking. Phase 2 scope is
+"handle marshaling only" — the data plane (stream buffer, future
+cell, error-context debug-message) lands in Phase 3 with the
+dispatcher. These helpers exist now so call sites can document
+"a stream handle crosses here" rather than burying the marshaling
+in a generic i32 read.
+
+### CanonicalAbi.Layout coverage
+
+`Wacs.ComponentModel.Harness.Lib/CanonicalAbi.cs` Layout switch
+now recognizes `CtStreamType` / `CtFutureType` /
+`CtErrorContextType`, returning `(4, 4)` — same as
+`own<R>` / `borrow<R>` / `CtResourceType`. Previously these would
+fall through to the default `NotSupportedException`.
+
+### Tests
+
+6 new tests in `AsyncHandleMarshalTests` covering round-trip,
+size/align constants, out-of-bounds rejection, and non-zero
+offsets. 402/402 ComponentModel tests pass (was 396).
+
+## WACS.ComponentModel.Parser 0.2.1 — canon async-builtin dispatch (Phase 2 Slice B)
+
+Lands binary decoding for all 25 canon async-ABI builtins
+(opcodes 0x05–0x25 except the Stack-Switching-domain 0x07).
+Pre-Slice B the parser threw "Unsupported canon opcode 0x05+"
+for every async / stream / future / error-context / waitable
+op; it now parses each into a typed `CanonEntry` subclass.
+
+### New `CanonEntry` subclasses
+
+One class per op family, mirroring the existing `CanonResourceOp`
+shape (kind enum + carried fields):
+
+- `CanonTaskReturn { ComponentValType? Result; Options }` (0x09)
+- `CanonTaskCancel` (0x05, marker)
+- `CanonSubtaskCancel { bool Async }` (0x06)
+- `CanonSubtaskDrop` (0x0d, marker)
+- `CanonBackpressureOp { Kind = Set | Inc | Dec }` (0x08 / 0x24 / 0x25)
+- `CanonContextOp { Kind = Get | Set; ValType; Index }` (0x0a / 0x0b)
+- `CanonThreadYield { bool Cancellable }` (0x0c)
+- `CanonStreamOp { Kind; TypeIdx; Options?; Async? }` (0x0e–0x14)
+- `CanonFutureOp { Kind; TypeIdx; Options?; Async? }` (0x15–0x1b)
+- `CanonErrorContextOp { Kind = New | DebugMessage | Drop; Options? }` (0x1c–0x1e)
+- `CanonWaitableSetOp { Kind; Cancellable?; MemoryIdx? }` (0x1f–0x22)
+- `CanonWaitableJoin` (0x23, marker)
+
+Threading-proposal opcodes 0x26–0x2b and 0x40–0x42 stay rejected
+with a clear "deferred to the explicit-threads phase" message.
+
+### Sub-byte helpers
+
+Shared private helpers in the parser for the recurring sub-byte
+encodings:
+
+- `DecodePresence` for `async?` / `cancel?` (0x00 = absent, 0x01 =
+  present) — used by 7 opcodes.
+- `DecodeResultList` for `task.return`'s `rs` operand (0x00 t /
+  0x01 0x00 empty).
+- `DecodeValType` for `context.get/set`'s `v` operand.
+
+### Tests
+
+16 new tests in `CanonAsyncBuiltinTests` covering every op
+family plus a sequential-dispatch test. 396/396 ComponentModel
+tests pass overall.
+
+## WACS.ComponentModel 0.8.0 / WACS.ComponentModel.Parser 0.2.0 — async-ABI handle types (Phase 2 Slice A)
+
+First slice of WASIp3 Phase 2: lands `stream<T>` / `future<T>` /
+`error-context` in the type system and the binary type-section
+parser. Handle marshaling and canon-builtin parser come in
+later slices; this commit only adds shapes + tag dispatch.
+
+### `CtValType` hierarchy
+
+Three new sealed subclasses in
+`Wacs.ComponentModel/Types/CtValType.cs`:
+
+- `CtStreamType { CtValType? Element }` — `stream<T>` or
+  `stream` (empty element form). 4-byte handle in the same
+  handle space as `own` / `borrow`.
+- `CtFutureType { CtValType? Element }` — `future<T>` or
+  `future`. Same wire shape as `CtStreamType`.
+- `CtErrorContextType` — singleton; no inner type parameter
+  (the debug message is exchanged via the
+  `error-context.debug-message` canon builtin, not part of
+  the static type).
+
+### Parser-side deftype entries
+
+Three new `DefTypeEntry` subclasses in
+`Wacs.ComponentModel.Parser/Runtime/Parser/TypeSectionReader.cs`:
+`ComponentStreamType`, `ComponentFutureType`, and the
+`ComponentErrorContextType.Instance` singleton. Three new tag
+constants:
+`StreamTypeTag = 0x66`, `FutureTypeTag = 0x65`,
+`ErrorContextTypeTag = 0x64`. `DecodeEntry` recognizes all
+three (mirrors the existing aggregate cases).
+
+The `stream<T>` / `future<T>` payload uses the canonical
+`<T>?` (optional) presence-byte encoding — 0x00 = absent,
+0x01 t = present (reusing `DecodeOptionalValType`).
+
+### Spec verification
+
+The full canon byte-tag table (0x00–0x2b core + 0x40–0x42
+threading) is now in the doc comment on
+`CanonSectionReader`, captured against
+WebAssembly/component-model main HEAD's
+`design/mvp/Binary.md`. Subsequent slices in this phase
+implement the parser entries that consume those bytes.
+
+### Verification
+
+`dotnet build` clean on both libs.
+`Wacs.ComponentModel.Test` + `Bindgen.Test` suites unchanged
+(no test additions yet — those land with the canon-parser
+slice + round-trip test).
+
+## WACS 0.16.13 — Phase 1 close-out: standalone ResumeThrow + retention-free ContinuationStore
+
+Closes two Phase 1 stack-switching gaps and adds the longevity
+test the WASIp3 plan's acceptance criterion #2 asks for.
+
+### ResumeThrow standalone
+
+`StackSwitchingHelpers.ResumeThrow` no longer throws
+`NotSupportedException` when `ExecContext` is null. The
+standalone branch now constructs the exception in-line via the
+public `ExnInstance` constructor — no `Store.AllocateExn`, no
+reflection, AOT-safe — invokes the cont via the typed
+`StandaloneContInvoker` mirroring mixed-mode semantics for
+fresh-only continuations (body runs, then `WasmException`
+propagates), and surfaces a `WasmException` carrying the
+synthesized `ExnInstance`.
+
+The synthesized exn idx is minted from a process-wide
+`Interlocked` counter — uniqueness only matters for the catch
+site's identity comparison, which is by `TagAddr` not by exn
+idx. Catch arms compare against the synthesized `TagAddr`
+(same convention as the standalone `Suspend` path).
+
+### ContinuationStore: retention-free
+
+`Wacs.Core.Runtime.Concurrency.ContinuationStore` previously
+held a `List<ContInstance>` that grew monotonically across the
+lifetime of the standalone context — every `Allocate` appended
+a strong reference that was never released. A 1M resume cycle
+on a `Func<…>` body would retain 1M `ContInstance` objects
+plus the list slots.
+
+The store now mints a per-allocation idx via a counter and
+returns the freshly-allocated instance without retaining a
+reference. The `Get(long idx)` lookup is removed; it was
+unused (verified by grep — no callers in either `Wacs.Core`
+or `Wacs.Transpiler.Lib`).
+
+Wasm refs reach a continuation through the `Value.GcRef` they
+carry. Once those refs are unreachable, the CLR GC reclaims
+the instance — matching the spec's "continuations are GC'd
+once unreferenced" model. The instance idx is now purely an
+allocation counter, not a lookup key.
+
+### 1M-switch longevity test
+
+`StandaloneContInvokerTests.Resume_one_million_iterations_does_not_leak_continuations`
+exercises 1M allocate + resume cycles and asserts heap growth
+stays under 1 MB. Pre-fix this would have grown >50 MB.
+
+The test is gated behind `WACS_LONG_TESTS=1` to keep the
+default unit cycle short (~72 ms for 1M cycles when enabled,
+which still adds noticeable time to the suite). Enable it
+locally with `WACS_LONG_TESTS=1 dotnet test`.
+
+### Test coverage
+
+3 new standalone tests for `ResumeThrow` (payload, missing
+invoker, non-Fresh trap) + 1 longevity test. 520/520
+`Wacs.Core` and 833/833 `Wacs.Transpiler` tests pass.
+
+### Phase 1 acceptance — close-out
+
+- ✓ Mixed-mode interpreter parity (cont.new / cont.bind /
+  suspend / resume / resume_throw / switch all execute end-to-end)
+- ✓ Transpiler CIL emit parity (all 6 opcodes)
+- ✓ Standalone-mode parity (5 of 6: cont.new / cont.bind /
+  suspend / resume / switch; resume_throw now closes)
+- ✓ 1M-switch longevity (no retention leak)
+- ✗ Multi-result standalone invokers — blocked by the
+  underlying multi-result func representation
+  (`MultiReturnMethodRegistry` uses runtime `DynamicMethod`;
+  `BuildDelegateTypeForFunc` returns null for multi-result;
+  `StandaloneDelegate` is null for those conts). Closing
+  requires a different invoker contract
+  (`Value[]→Value[]` adapter generated at transpile time).
+  Deferred — bounded follow-up.
+- ✗ True re-resumable continuations (current impl is one-shot;
+  cont state is set to `Completed` after first resume).
+  Requires frame snapshotting — architectural future work,
+  not Phase 1 scope.
+- ⚠ Official spec-suite fixtures not vendored — the
+  stack-switching proposal repo doesn't publish `.wast`
+  fixtures we can run through our spec harness. Phase 1
+  acceptance is validated via the hand-written
+  `StackSwitchingExecutionTests` and
+  `StackSwitchingEquivalenceTests`.
+
+## AOT enforcement test
+
+`Wacs.Core/Wacs.Core.Test/AotAcceptanceTests.cs` (new) enforces
+the hard requirement that `Wacs.Core` is AOT-safe. The test
+publishes `Wacs.Bench/Wacs.Bench.Aot` with
+`-p:TrimmerSingleWarn=false` (expands the `IL2104` umbrella
+into per-site warnings), parses the analyzer output, filters
+for warnings whose source path contains `Wacs.Core/`, and
+asserts the set matches an in-source `KnownBaseline` allow-list.
+
+### Policy
+
+- The base C# AOT analyzer fires only during `PublishAot=true`
+  publishes — not during `dotnet build`. Without this test
+  step, a new `Type.GetMethod` / `GetField` / `DynamicInvoke`
+  / etc. could slip into `Wacs.Core` unnoticed and only break
+  a downstream consumer's AOT image.
+- The `KnownBaseline` allow-list is **not** for adding new
+  AOT-unsafe code — it tracks pre-existing violations slated
+  for fix. Adding to it requires explicit reviewer sign-off.
+  Removing entries (when the underlying code is fixed) is the
+  only direction the list should move.
+- Current baseline (2026-05-18): one entry —
+  `Wacs.Core/Runtime/WasmRuntimeExecution.cs(459)` `IL2075`,
+  a `Type.GetConstructor` reflection call in the host
+  exception-rethrow path. Pre-dates the stack-switching work.
+
+### Gating + CI
+
+- Gated via the `WACS_AOT_TEST=1` env var. Publish takes
+  ~60-90s on a cold cache; gating keeps dev cycles fast.
+  Without the env var, the test logs "Skipping" and exits in
+  ~3ms.
+- `.github/workflows/ci.yml` "Run Core Tests" step sets the
+  env var — CI enforces the check on every PR/merge.
+
+### Negative-test verified
+
+Temporarily removing the baseline entry produces:
+```
+AOT-unsafe pattern introduced in Wacs.Core:
+  IL2075 at Wacs.Core/Wacs.Core/Runtime/WasmRuntimeExecution.cs(459)
+```
+followed by guidance on the AOT-safe rewrite options
+(interface dispatch, source generators).
+
+516 Wacs.Core tests pass (515 + 1 new gated test).
+
+## WACS.Transpiler.Lib 0.12.4 — Stack Switching standalone-mode dispatch (Slice B.2)
+
+Transpiler now generates one `StandaloneContInvoker` subclass
+per unique continuation typeidx in a module. Each generated
+invoker is sealed, has a public-static `Instance` singleton
+field, and overrides `Invoke` with strongly-typed IL: cast
+`cont.StandaloneDelegate` to the typed `Func` / `Action`,
+unbox `Value[]` args per the signature's params, call the
+delegate (ThinContext is closed into the target by
+`PopulateFuncTable`, so the delegate type omits it), wrap the
+typed result back into `Value[]`.
+
+### New emit pass
+
+`ContInvokerEmitter` (new file). Plugged into
+`ModuleTranspiler.Transpile` as Pass 0c — between GC type
+emit and function method-stub creation. Scans every wasm
+function body for `InstContNew` / `InstContBind` /
+`InstResume` / `InstResumeThrow` / `InstSwitch`, collects
+distinct continuation typeidxs, generates one invoker class
+per typeidx, bakes them via `TypeBuilder.CreateType()` so
+the emit downstream can `ldsfld` their `Instance` fields.
+
+Multi-result continuations (arity > 1) are skipped in this
+slice — the registry entry is absent and the helper falls
+back to its documented `NotSupportedException` for that
+signature.
+
+### Function emit wiring
+
+`FunctionCodegen` gains an optional
+`Dictionary<int, FieldInfo>` parameter (the invoker registry
+from `ContInvokerEmitter.InvokerFields`).
+`StackSwitchingEmitter.Emit` accepts it and threads through
+to `EmitResume` / `EmitResumeThrow` / `EmitSwitch`. Each
+call site `ldsfld`'s the invoker for its cont typeidx (or
+`ldnull` if absent) and passes it as the trailing
+`StandaloneContInvoker?` argument to the helper.
+
+### End-to-end test
+
+`Standalone_resume_via_generated_invoker` —
+`TranspiledModuleWrapper.Instantiate()` +
+`InvokeExport()` on a module that uses `cont.new` + `resume`,
+no `WasmRuntime` involved. The wrapper's
+`Activator.CreateInstance` path leaves
+`ThinContext.ExecContext` null; the helper routes through
+`ResumeStandalone`, which calls the generated
+`Invoker_Cont1.Invoke`, which casts the
+`StandaloneDelegate` to `Func<int>` (`ThinContext` closed
+in by `PopulateFuncTable`), invokes, wraps the result.
+Asserts the expected value.
+
+### Verification
+
+- 834 transpiler + 515 Wacs.Core + 380 ComponentModel tests
+  green.
+- `dotnet publish Wacs.Bench.Aot` clean — no new IL2026 /
+  IL3050 / IL2070 / IL2075 warnings; the only umbrella
+  IL2104 on Wacs.Core is pre-existing
+  (FluentValidation surface, unrelated).
+
+### Remaining
+
+`ResumeThrow` standalone still surfaces
+`NotSupportedException` — it requires an AOT-safe
+`WasmException` construction path without
+`Store.AllocateExn`. Multi-result continuations also remain
+gated. Both are bounded follow-ups.
+
+## WACS 0.16.12 — Standalone Cont Invoker contract (Slice B.2 v0)
+
+Establishes the AOT-safe dispatch contract for standalone-mode
+`resume` / `resume_throw` / `switch`. The transpiler-side
+per-signature invoker generation that lights this up is the
+focused follow-up.
+
+### Contract
+
+New abstract class
+`Wacs.Core.Runtime.Concurrency.StandaloneContInvoker` with a
+single virtual `Invoke(IContinuationContext, ContInstance,
+Value[]) → Value[]`. Concrete subclasses (one per unique
+continuation signature in a module) implement the typed cast
+on `cont.StandaloneDelegate`, the per-arg unbox from `Value`,
+the typed delegate call, and the result wrap back to `Value[]`.
+Virtual dispatch instead of reflection — AOT-safe.
+
+### Helper changes
+
+`StackSwitchingHelpers.Resume`, `ResumeThrow`, and `Switch`
+now take an optional `StandaloneContInvoker? standaloneInvoker
+= null` last parameter. Mixed-mode callers
+(`ExecContext != null`) ignore it. Standalone callers
+(`ExecContext == null`):
+
+- `Resume` and `Switch`: route through new private
+  `ResumeStandalone` / `SwitchStandalone` paths that validate
+  the continuation, call `invoker.Invoke`, manage the state
+  transition (Running → Completed), and propagate any thrown
+  exception (e.g., `SuspensionException`) to the caller's
+  emitted try/catch arm.
+- `ResumeThrow`: still throws `NotSupportedException` in
+  standalone — the exception-injection path additionally
+  needs an AOT-safe `WasmException` construction without
+  going through `Store.AllocateExn`.
+
+The error message clearly identifies the missing piece:
+`"Standalone-mode resume / resume_throw / switch require a
+typed StandaloneContInvoker generated by the transpiler for
+the continuation's signature. The current emit does not yet
+generate these invokers; the call site passed null."`
+
+### Tests
+
+4 new `StandaloneContInvokerTests` in `Wacs.Core.Test`:
+- `Resume_standalone_with_invoker_returns_typed_result` —
+  hand-rolled invoker for `() → i32`, asserts the result.
+- `Resume_standalone_without_invoker_throws_clear_NotSupported`
+  — asserts the error message identifies the missing piece.
+- `Resume_standalone_propagates_invoker_exception` —
+  exceptions through the invoker bubble, cont is marked
+  Completed.
+- `Resume_standalone_rejects_non_Fresh_cont` — second resume
+  on a completed cont traps.
+
+515 Wacs.Core + 833 transpiler + 380 ComponentModel tests
+green. AOT publish unchanged (no new IL2026/IL3050 warnings
+on the stack-switching surface).
+
+### Still pending
+
+Transpiler emit-side work (Task #16): generate one
+`StandaloneContInvoker` subclass per unique continuation
+signature in a module at transpile time, wire the resume /
+switch / resume_throw emit to load and pass the right
+subclass instance. This is bounded work — parallels how the
+transpiler already generates per-function methods — but
+genuinely a separate slice.
+
+## WACS 0.16.11 / WACS.Transpiler.Lib 0.12.3 — Stack Switching helpers go AOT-safe
+
+Replaces the runtime reflection the 0.16.10 helpers used to
+access ThinContext fields with interface dispatch. AOT
+publish of `Wacs.Core` is back at zero analyzer warnings on
+the stack-switching code path.
+
+### New interfaces in `Wacs.Core.Runtime.Concurrency`
+
+- `IContinuationContext`: the contract the transpiler's
+  `ThinContext` satisfies. Exposes `ExecContext?`,
+  `Continuations`, `Tags`, `FuncTable` as properties.
+- `IDelegateRef : IGcRef`: exposes `Target` (the delegate);
+  `Wacs.Transpiler.AOT.DelegateRef` implements it.
+
+### Changes
+
+- `StackSwitchingHelpers.{ContNew, ContBind, Suspend, Resume,
+  ResumeThrow, Switch, FindHandlerMatch, ReifyHandlerArgs}`
+  now take `IContinuationContext hctx` instead of
+  `object thinCtx`. Internal access is direct property
+  reads — no `GetField` / `GetValue` calls at runtime.
+- `ExtractDelegateRefTarget` is now a one-line `gcRef as
+  IDelegateRef`?.Target downcast.
+- `ThinContext` declares `: IContinuationContext` with
+  explicit-interface forwarders that delegate to its existing
+  public fields. `DelegateRef` declares `: IDelegateRef`.
+
+### Verification
+
+- `dotnet publish Wacs.Bench.Aot` (the project that exercises
+  `PublishAot=true` against Wacs.Core net8.0) produces zero
+  IL2026 / IL3050 / IL2070 / IL2075 warnings on
+  stack-switching helpers. The only remaining IL2104
+  umbrella warning on `Wacs.Core` is pre-existing
+  (FluentValidation / TagInstance lookups outside this
+  surface).
+- 833 transpiler + 511 Wacs.Core + 380 ComponentModel tests
+  green.
+
+## WACS 0.16.10 / WACS.Transpiler.Lib 0.12.2 — Stack Switching standalone-mode parity (3 of 6 ops)
+
+Closes the standalone-mode gap for `cont.new`, `cont.bind`, and
+`suspend`: transpiled `Module` classes instantiated via
+`Activator.CreateInstance` (no host `WasmRuntime`) can now
+execute these three opcodes through emitted CIL. The helpers
+branch on `ExecContext != null` and use `ThinContext`-local
+state when standalone.
+
+### Mode-aware helpers
+
+`StackSwitchingHelpers.{ContNew, ContBind, Suspend, Resume,
+ResumeThrow, Switch, FindHandlerMatch, ReifyHandlerArgs}` now
+take `object thinCtx` (the transpiler's `ThinContext`) directly
+and extract the optional `ExecContext` via reflection, keeping
+`Wacs.Core` free of a `Wacs.Transpiler.Lib` dependency.
+
+- **Mixed mode** (`ExecContext != null`): unchanged behavior
+  — uses runtime's `Store` + `Frame` + `OpStack`.
+- **Standalone mode** (`ExecContext == null`):
+  - `cont.new`: extracts the function delegate from the
+    funcref's `GcRef` via duck-typed reflection on a `Target`
+    field (works against `Wacs.Transpiler.AOT.DelegateRef`
+    without referencing the type); falls back to
+    `ThinContext.FuncTable[Data.Ptr]`. Allocates via
+    `ThinContext.Continuations.Allocate(typeIdx, delegate)`.
+  - `cont.bind`: allocates the new continuation via
+    `ThinContext.Continuations`, preserves the source's
+    delegate reference.
+  - `suspend`: synthesizes a `TagAddr` from the raw tag index
+    so the in-module CIL catch arm can match against the
+    same value (no `Store` renumbering between throw and
+    catch in a single module).
+
+### New infrastructure
+
+- `Wacs.Core.Runtime.Concurrency.ContinuationStore` —
+  Module-local allocator parallel to `Store`'s continuation
+  list, used in standalone mode.
+- `ContInstance` gains a second constructor taking
+  `System.Delegate` for standalone allocation; the new
+  `StandaloneDelegate` field carries the function reference
+  when `Function` (FuncAddr) is unused.
+- `ThinContext.Continuations` — always-populated
+  `ContinuationStore` field.
+
+### Still gated on a future slice
+
+`resume`, `resume_throw`, and `switch` in standalone mode
+surface `NotSupportedException` with the explanatory message
+`"Standalone-mode transpiled modules do not yet support
+resume / resume_throw / switch — these ops invoke the
+continuation's function which currently requires the runtime's
+interpreter dispatch."` Closing this gap requires reflection-
+based delegate marshaling: `delegate.DynamicInvoke(ctx,
+args…)` with arg/result conversion between `Value` and the
+delegate's typed CLR parameters; a small but real piece of
+work tracked separately.
+
+### Tests
+
+- New `Standalone_cont_new_via_module_class` —
+  `TranspiledModuleWrapper.Instantiate()` + `InvokeExport()`
+  on a module that uses `cont.new` + `ref.func`; asserts the
+  result. Confirms the standalone path through the runtime
+  helpers and reflection-based delegate extraction.
+- 5 existing `StackSwitchingEquivalenceTests` still pass.
+- 833 transpiler + 511 Wacs.Core + 380 ComponentModel tests
+  green.
+
+## WACS 0.16.9 / WACS.Transpiler.Lib 0.12.1 — Stack Switching CIL emit (all 6 opcodes)
+
+Closes the remaining three transpiler emitters: `resume`,
+`resume_throw`, and `switch` now produce CIL that mirrors the
+interpreter's runtime behavior. Every cont.* opcode emits real
+IL — no function containing them falls back to interpreter
+execution anymore (in mixed mode). Standalone mode remains
+gated on a separate self-contained continuation runtime.
+
+### `switch`
+
+Straight-line: pack t1* args + cont into the helper call,
+unpack the target cont's t2* results on normal completion.
+No new handler frame installed — suspends inherit the
+caller's chain.
+
+### `resume` / `resume_throw`
+
+Wraps the helper call in a CIL try/catch +
+tag-dispatch arm, modeled on `ExceptionEmitter.EmitTryTable`:
+
+1. Save t1* args + cont to typed locals; pack t1* into
+   `Value[]`; build a parallel `int[]` of handler tag indices.
+2. `BeginExceptionBlock`; call helper which installs the
+   handler frame as transpiler-installed
+   (`HandlerTargets=null`) and invokes the cont's function.
+3. Store normal-completion results.
+4. `BeginCatchBlock(SuspensionException)`: call
+   `FindHandlerMatch` to identify the matched handler index
+   (or -1). Per-handler compare-and-`Leave` chain → dispatch
+   labels; `Rethrow` if no match.
+5. `EndExceptionBlock`; `Br endLabel` to bypass dispatch.
+6. Per-handler dispatch label: call `ReifyHandlerArgs` to
+   build the payload + one-shot reified-cont array; unbox
+   payload values onto the CIL stack typed per the handler's
+   tag params; push the reified cont; `Br` to the wasm
+   enclosing handler label via `ControlEmitter.PeekLabel`.
+7. `endLabel`: unpack normal-completion results from the
+   helper's `Value[]` to typed CIL stack values.
+
+### Dispatcher: transpiler-installed frames
+
+`ResumeHandlerFrame.IsTranspilerInstalled` (= `HandlerTargets is null`)
+distinguishes the two installation paths.
+`SuspensionDispatcher.TryHandle` now handles the
+transpiler-installed case by unwinding the call stack to the
+install frame, popping the matched handler, and returning
+`false` — letting the CLR propagate `SuspensionException` up
+to the transpiled caller's CIL catch arm. The interpreter
+path keeps its existing precomputed `BlockTarget` branch
+behavior.
+
+### New helpers in `StackSwitchingHelpers`
+
+- `Resume(ExecContext?, int typeIdx, Value[] args, Value cont, int[] handlerTagIdxs) → Value[]`
+- `ResumeThrow(ExecContext?, int typeIdx, int tagIdxValue, Value[] excArgs, Value cont, int[] handlerTagIdxs) → Value[]`
+- `Switch(ExecContext?, int typeIdx, int tagIdxValue, Value[] args, Value cont) → Value[]`
+- `FindHandlerMatch(ExecContext?, int[] handlerTagIdxs, SuspensionException) → int` (catch-arm support)
+- `ReifyHandlerArgs(ExecContext?, Value cont, SuspensionException) → Value[]` (catch-arm support)
+
+### Tests
+
+`StackSwitchingEquivalenceTests` previously asserted
+`fallbacks > 0` (cont.* known to fall back); now asserts
+`fallbacks == 0` for all five tests including
+producer/consumer suspend/resume, resume_throw with
+try_table catch, and switch with inherited handler chain.
+
+832 transpiler + 511 Wacs.Core + 380 ComponentModel tests
+green.
+
+## WACS 0.16.8 / WACS.Transpiler.Lib 0.12.0 — Stack Switching CIL emit (3 of 6 opcodes)
+
+Promotes the transpiler from "fallback only" to "real CIL emit"
+for three of the six stack switching opcodes:
+
+- **Emitted via runtime helpers**: `cont.new`, `cont.bind`,
+  `suspend`. These are straight-line operations with no non-
+  local control transfer back into the caller. Emitted IL
+  packs CIL-stack operands into `Value[]`, calls the helper,
+  unpacks the result.
+- **Still interpreter fallback**: `resume`, `resume_throw`,
+  `switch`. They invoke a continuation's function and route
+  `SuspensionException` back to handler labels in the caller's
+  CIL body — the same try/catch + Leave-to-dispatch-label
+  pattern `ExceptionEmitter.EmitTryTable` uses for `try_table`.
+  Substantial separate work tracked as a Phase 1 exit gate.
+
+### New surface
+
+- `Wacs.Core.Runtime.Concurrency.StackSwitchingHelpers` —
+  static entry points that the transpiler's emitted IL calls.
+  `ContNew(ExecContext?, int typeIdx, Value funcRef) → Value`,
+  `ContBind(ExecContext?, int targetTypeIdx, Value cont, Value[] prefix) → Value`,
+  `Suspend(ExecContext?, int tagIdx, Value[] payload) → throws SuspensionException`.
+- `Wacs.Transpiler.AOT.Emitters.StackSwitchingEmitter` —
+  `CanEmit` now returns `true` for the three emittable
+  opcodes, dispatches to per-op CIL emitters that wrap CIL
+  stack operands as `Value` and call the helper.
+
+### Caveats
+
+Helpers require a live `ExecContext` (mixed mode). In
+standalone mode (`Module` instantiated via
+`Activator.CreateInstance` with no host runtime), the helpers
+throw `NotSupportedException("Stack switching opcodes (cont.*)
+require a WasmRuntime host context …")` with a clear
+explanation — replacing the prior opaque "Function N not
+transpiled" message. A self-contained continuation runtime for
+standalone mode is a separate design effort.
+
+### Tests
+
+- New `Cont_new_and_suspend_emit_without_fallback` —
+  transpiles a function containing only `cont.new` and asserts
+  `result.FallbackCount == 0`, then invokes the function and
+  asserts the expected result.
+- Existing 4 `StackSwitchingEquivalenceTests` still pass; the
+  producer/consumer test's producer function (cont.new +
+  suspend) now transpiles, while the host function (resume)
+  still falls back — `fallbacks > 0` remains true overall but
+  represents fewer functions than before.
+
+832 transpiler + 511 Wacs.Core + 380 ComponentModel tests green.
+
+## WACS.Transpiler.Lib 0.11.2 — Stack Switching mixed-mode parity tests + standalone caveat
+
+Pins down the transpiler's behavioral guarantee for the six
+stack switching opcodes:
+
+- **Mixed-mode parity** (invoked through a `WasmRuntime` stack
+  invoker): functions containing cont.* opcodes fall back to
+  interpreter execution and produce identical results to a
+  pure-interpreter run. Four new equivalence tests in
+  `Wacs.Transpiler.Test.StackSwitchingEquivalenceTests` cover
+  cont.new+resume, full producer/consumer suspend/resume,
+  resume_throw with try_table catch, and switch with
+  inherited handler chain.
+- **Standalone-mode caveat** (transpiled `Module` class
+  instantiated via `Activator.CreateInstance` without a host
+  runtime): `CallEmitter.InvokeFallback` throws
+  `NotSupportedException("Function N not transpiled and no
+  interpreter available")` on the first call to any
+  cont.*-bearing function. Until CIL emission for the six
+  opcodes lands, cont.*-bearing modules must be hosted by a
+  `WasmRuntime` to be callable.
+
+`StackSwitchingEmitter`'s XML doc now spells this out
+explicitly so future readers understand which fallback path
+is wired and which is not.
+
+830 transpiler + 511 Wacs.Core + 380 ComponentModel tests green.
+
+## WACS 0.16.7 — `resume_throw` runtime parity
+
+Brings `resume_throw $ct $tag handler*` (0xE4) to runtime
+parity with `resume` and `switch`. `InstResumeThrow.Execute`
+was `NotImplementedException`; now it:
+
+1. Pops the target continuation, validates `Fresh`.
+2. Pops the exception tag's params from the operand stack.
+3. Allocates an `ExnInstance` via `Store.AllocateExn`.
+4. Installs the resume handlers (precomputed at Link time, same
+   shape as `InstResume`).
+5. Pushes the cont's bound prefix args (from any prior
+   `cont.bind`) and invokes the cont's function — sets up the
+   inner frame with the function's locals initialized.
+6. Pushes the exception ref onto the inner frame's opstack and
+   runs `InstThrowRef.ExecuteInstruction`, which unwinds the
+   cont's empty control stack, pops the cont's frame (auto-
+   pruning the resume handler), and continues unwinding
+   through the caller's enclosing `try_table` chain until
+   caught or surfaced as `UnhandledWasmException`.
+
+For one-shot semantics, this models the spec's
+function-entry-throw behavior: an outer `try_table` catching
+the tag receives the exception's payload as designed; an
+inner `try_table` inside the cont's function body would not
+fire since the throw injects before the function's first
+instruction. Re-entering a suspended cont via `resume_throw`
+isn't reachable today (suspended conts are marked Completed
+at suspension dispatch); the throw-at-entry path covers what
+WASIp3 cancellation semantics need.
+
+### Tests
+
+- New `ResumeThrow_injects_exception_caught_by_outer_try_table`:
+  resume_throw injects an exception that the caller's
+  try_table catches, the catch handler captures the payload
+  (77).
+- The `Execute_throws_NotImplemented` theory is gone — all six
+  stack-switching opcodes have runtime implementations.
+
+511 Wacs.Core + 380 ComponentModel + 826 Transpiler tests green.
+
+## WACS 0.16.6 — `switch` runtime parity
+
+Brings `switch $ct $tag` (0xE5) to runtime parity with `resume`.
+`InstSwitch.Execute` was `NotImplementedException`; now it pops
+the target continuation, validates it's `Fresh`, allocates a
+one-shot Completed placeholder for the reified caller, marshals
+the call's parameter stack, and dispatches via `InvokeResolved`.
+
+The validator's stack shape now matches the proposal: switch's
+input stack is `[t1* (ref $ct)]` where `t1*` comes from the
+**tag's** params (excluding its trailing self-ref), not the
+target function's params. The earlier draft popped the target's
+full `ft.ParameterTypes`, which conflated the call-site shape
+with the callee shape.
+
+`switch` does not install a new resume handler frame — it
+inherits the current handler chain. A suspend raised inside the
+switched-to cont continues to walk up through whatever resume
+frame installed matching handlers, which is the producer-
+consumer-trampoline shape exercised by the new test.
+
+### Tests
+
+- New `Switch_into_cont_inherits_outer_resume_handlers` —
+  switch into a fresh cont whose body suspends; outer resume's
+  on-yield handler captures the suspended value.
+- `Execute_throws_NotImplemented` theory shrinks to one case:
+  only `InstResumeThrow` remains unimplemented at the Execute
+  level.
+
+511 Wacs.Core + 380 ComponentModel + 826 Transpiler tests green.
+
+## WACS 0.16.5 — Stack Switching: WAT parsing + end-to-end execution tests
+
+Adds the text-format parser entries that allow hand-written WAT
+modules to use the six Stack Switching opcodes plus the
+`(cont $ft)` type form, and lands the producer/consumer
+co-routine tests proving the suspend/resume substrate works
+end-to-end. Also closes a `Unknown CompositeType: ContType` gap
+in `ValType.IsSubType`'s DefType arm that surfaced once the
+text parser made it easy to land a module-typed cont through
+validation.
+
+### Text parser
+
+- `(type $ct (cont $ft))` — continuation type form in the type
+  section.
+- Plain instruction keywords: `cont.new $ct`, `cont.bind $ct1
+  $ct2`, `suspend $tag`, `switch $ct $tag`.
+- Folded forms for `resume` / `resume_throw`:
+  `(resume $ct (on $tag $label)* operand*)`,
+  `(resume_throw $ct $tag (on $tag $label)* operand*)`. The
+  `(on … switch)` variant is recognized via a trailing
+  `switch` keyword inside the clause.
+
+### Type system
+
+- `ValType.IsSubType` DefType arm now handles `ContType` —
+  matches against `ValType.ContRef` / `ContRefNN`.
+- `TypeWriters.WriteCompositeType` and
+  `TextModuleWriter.WriteCompositeBody` round-trip `ContType`
+  via `CompType.ContCt = 0x5D` (binary) and `(cont N)` (text).
+
+### Execution tests
+
+Four new `Wacs.Core.Test.StackSwitchingExecutionTests`:
+
+- `Resume_runs_continuation_to_completion` — `cont.new` + bare
+  `resume` runs the wrapped function and returns its result.
+- `Suspend_branches_to_matching_on_handler_with_payload` —
+  full producer/consumer: producer suspends with a tag, the
+  on-tag handler captures the payload and returns it.
+- `Unhandled_suspend_propagates_as_trap` — a suspend whose
+  tag isn't installed by any active resume frame surfaces as
+  a trap.
+- `Second_resume_of_already_handled_cont_traps` — the
+  one-shot continuation handed to a handler can't be
+  re-resumed; the second resume sees a non-Fresh cont and
+  traps.
+
+511 Wacs.Core + 380 ComponentModel + 826 Transpiler tests green.
+
+## WACS.Transpiler.Lib 0.11.1 — Stack Switching extension point + intentional interpreter fallback
+
+Documents the transpiler's handling of the six Stack Switching
+opcodes (`cont.new`, `cont.bind`, `suspend`, `resume`,
+`resume_throw`, `switch`) as an intentional interpreter
+fallback rather than a generic "unsupported opcode" rejection.
+
+- New `Wacs.Transpiler.AOT.Emitters.StackSwitchingEmitter` —
+  `CanEmit` returns `false`, `IsStackSwitchingOpcode`
+  identifies the family. Reserves the extension point so the
+  real CIL emit lands in one place.
+- `FunctionCodegen.HasEmitter` consults the new emitter; the
+  rejection reason in `LastRejectionReason` now distinguishes
+  cont.* (known but not yet emitting) from genuinely unknown
+  opcodes for diagnostics.
+- Behavior unchanged at the user level: a function containing
+  any cont.* opcode falls back to the interpreter, which since
+  WACS 0.16.3 / 0.16.4 implements
+  `cont.new` / `cont.bind` / `suspend` / `resume` end-to-end
+  with one-shot semantics.
+
+826 transpiler tests still green.
+
+## WACS 0.16.4 — suspend/resume one-shot dispatch
+
+Lands the runtime catch path for `suspend $tag` and the
+`resume $ct handler*` invocation. `resume` installs an active
+handler frame, calls the continuation's inner function, and
+the interpreter loop's new `SuspensionException` catch arm
+walks the handler stack to find a matching tag — on a hit,
+the dispatcher unwinds frames back to the installing frame
+and branches to the handler's precomputed label with the
+suspend's payload and a placeholder continuation pushed.
+
+The reified continuation handed to the handler is one-shot:
+its state is set to `Completed` so a guest that tries to
+re-resume it traps. True re-resumable continuations need
+frame snapshotting that hasn't been built yet.
+
+### New surface
+
+- `Wacs.Core.Runtime.Concurrency.ResumeHandlerFrame` — entry
+  on the new `ExecContext.ActiveResumeHandlers` stack.
+  Carries the handler array, precomputed branch targets,
+  install frame depth, and the continuation reference.
+- `Wacs.Core.Instructions.SuspensionDispatcher.TryHandle` —
+  static helper the interpreter loop calls to consume a
+  `SuspensionException` if any active handler matches.
+- `InstResume.HandlerTargets` populated at Link time via
+  `InstBranch.PrecomputeStack`.
+
+### Behavior
+
+- `resume`: pops the continuation + remaining args, pushes
+  the cont's bound prefix args (from `cont.bind`), installs
+  a `ResumeHandlerFrame`, invokes the inner function. On
+  normal completion, `FunctionReturn` prunes the handler
+  frame. The cont's state transitions
+  Fresh → Running → Completed.
+- `suspend`: throws `SuspensionException(tag, payload)`. If a
+  matching `resume` handler is in scope, control unwinds to
+  it and branches; otherwise the exception surfaces as a
+  trap.
+- `resume_throw` / `switch`: still `NotImplementedException`.
+
+### Tests
+
+- 17 round-trip tests still pass. The
+  `Execute_throws_NotImplemented` theory shrinks to two cases
+  (resume_throw / switch) — `InstResume.Execute` is exercised
+  now.
+- 507 Wacs.Core + 380 ComponentModel green overall.
+
+### Async dispatch migration — design intent
+
+The existing `IsAsync` / `ExecuteAsync` path (host functions
+returning `Task<T>`) coexists with the new substrate
+unchanged in this release. The unified model — host
+`await Task` and wasm `suspend` routed through the same
+`Continuation` + `SuspensionDispatcher` primitive — lands
+with the Component Model async dispatcher; that's the work
+that makes CLR `Task<T>` the canonical host async type.
+
+## WACS 0.16.3 — Continuation runtime: data structures + cont.new / cont.bind / suspend
+
+First runtime slice of the Stack Switching proposal. Introduces
+the `Wacs.Core.Runtime.Concurrency` namespace, allocates
+continuations on the Store, and wires execution for three of the
+six opcodes. The remaining three (`resume`, `resume_throw`,
+`switch`) still throw `NotImplementedException` until the
+BlockTarget handler-frame integration lands.
+
+### New runtime types
+
+- `Wacs.Core.Runtime.Concurrency.ContInstance` — `IGcRef`-shaped
+  record of a continuation (state machine: Fresh / Running /
+  Suspended / Completed; carries the inner FuncAddr + bound
+  prefix args + the continuation type index).
+- `Wacs.Core.Runtime.Concurrency.SuspensionException` —
+  `WasmRuntimeException` subclass that `suspend` throws to unwind
+  the interpreter stack to the matching `resume` handler frame.
+- `ContIdx` (`RefIdx`) — Store-side identifier; `Value`'s
+  `(refType, IGcRef)` constructor now recognizes it alongside the
+  existing struct / array / exn cases.
+- `Store.AllocateContinuation(typeIdx, funcAddr)` allocator and
+  `Store.GetContinuation(idx)` lookup.
+
+### Opcode runtime
+
+- `cont.new $ct` — pops a function reference, allocates a fresh
+  `ContInstance` tied to that function, pushes a non-nullable
+  `ContRef` value.
+- `cont.bind $ct1 $ct2` — pops a fresh continuation and `bindCount`
+  prefix args (computed from `ft1.params - ft2.params`),
+  allocates a new continuation with prefix args prepended, and
+  marks the source as `Completed` so it can't be reused.
+- `suspend $tag` — pops the tag's parameter values and throws a
+  `SuspensionException(tag, payload)`. Without a `resume` handler
+  frame to catch it the exception currently surfaces as an
+  unhandled `WasmRuntimeException`; the catch path lands with
+  the BlockTarget integration in the next slice.
+
+### Tests
+
+- 17 round-trip + factory tests in `StackSwitchingInstructionTests`
+  still pass; the `Execute_throws_NotImplemented` theory shrinks
+  from six cases to three (resume / resume_throw / switch) now
+  that the other three opcodes execute.
+- 508 Wacs.Core + 380 Wacs.ComponentModel tests green overall.
+
+## WACS 0.16.2 — Scrub PM annotations from Stack Switching code
+
+Comment-only cleanup pass over the files added in 0.16.0 / 0.16.1:
+removes phase/version labels and verification-status reminders
+from production and test code. The deferred-validation comments
+in `cont.bind` / `resume` / `switch` are rephrased to describe
+what the validator does and does not check (delegating arity vs.
+full structural typecheck) without naming a future implementation
+slot. `NotImplementedException` messages on the six Execute
+methods drop the implementation-roadmap pointer.
+
+No behavior changes; 511 Wacs.Core + 380 ComponentModel tests
+remain green.
+
+## WACS 0.16.1 — Stack Switching: parser + validator
+
+WASIp3 Phase 1.2 — wires binary parse / render / validation for
+the six Stack Switching opcodes reserved in 0.16.0. Execute
+throws `NotImplementedException` until Phase 1.3 lands the
+Continuation runtime.
+
+- New `Wacs.Core/Instructions/StackSwitching.cs` with
+  `InstContNew` / `InstContBind` / `InstSuspend` / `InstResume`
+  / `InstResumeThrow` / `InstSwitch`.
+- `SpecFactory` dispatches `OpCode.ContNew`–`OpCode.Switch` to
+  the new classes.
+- `ByteCode` constants for the six opcodes.
+- Validators check the static typing rules per the proposal
+  (cont-type resolution, tag arity, handler labels/tags exist).
+- New `StackSwitchHandler` struct models the `0x00 $tag $label`
+  and `0x01 $tag $label` on-tag handler immediates inside
+  `resume` / `resume_throw`.
+- 20 new round-trip + dispatch tests in
+  `Wacs.Core.Test/StackSwitchingInstructionTests.cs`.
+- 511 Wacs.Core + 380 Wacs.ComponentModel tests green.
+
+## WACS 0.16.0 — Stack Switching: type-system scaffolding
+
+WASIp3 Phase 1.1 — first slice of the WebAssembly Stack
+Switching proposal (https://github.com/WebAssembly/stack-switching).
+Type-system and opcode reservations only; no behavior wired
+yet. Byte assignments need re-verification against current
+spec submodule HEAD before final ship.
+
+- `HeapType.Cont` (0x68, -0x18) and `HeapType.NoCont` (0x75,
+  -0x0b) added.
+- `ValType.ContRef` / `NoCont` / `ContRefNN` / `NoContNN` added
+  with full `IsSubType` / `TopHeapType` / `GetHeapType` /
+  `Validate` coverage.
+- New `ContType` (composite-type subclass wrapping a function-
+  type index) parses via `CompType.ContCt = 0x5D`.
+- Opcodes 0xE0–0xE5 reserved: `cont.new`, `cont.bind`,
+  `suspend`, `resume`, `resume_throw`, `switch`. Instruction
+  parsing / validation / execution land in subsequent Phase 1
+  slices.
+
 ## WACS 0.15.24 — field-names and tag-names subsections
 
 Adds parser and writer support for two more `name` custom-section

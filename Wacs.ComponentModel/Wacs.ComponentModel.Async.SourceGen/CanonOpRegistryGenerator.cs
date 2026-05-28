@@ -1,0 +1,174 @@
+// Copyright 2026 Kelvin Nishikawa
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+
+using System;
+using System.Collections.Generic;
+using System.Collections.Immutable;
+using System.Linq;
+using System.Text;
+using Microsoft.CodeAnalysis;
+
+namespace Wacs.ComponentModel.Async.SourceGen
+{
+    /// <summary>
+    /// Emits the partial implementation of
+    /// <c>Wacs.ComponentModel.Async.CanonOpRegistry</c> that
+    /// supplies the static set of known canon-async op names —
+    /// derived at build time by scanning
+    /// <c>AsyncDispatcher</c> for methods decorated with
+    /// <c>[CanonAsync("...")]</c>.
+    ///
+    /// <para>Slice G1 (predecessor) used reflection at first
+    /// access; this generator replaces that path so the
+    /// registry has zero runtime reflection and matches the
+    /// WACS AOT-safety contract (no
+    /// <c>[RequiresDynamicCode]</c> on the registry's API).</para>
+    ///
+    /// <para>The generated file is namespace-scoped to
+    /// <c>Wacs.ComponentModel.Async</c> and provides the
+    /// <c>partial HashSet&lt;string&gt; BuildKnownNames()</c>
+    /// implementation that the hand-written registry declares.</para>
+    /// </summary>
+    [Generator]
+    public sealed class CanonOpRegistryGenerator : IIncrementalGenerator
+    {
+        private const string DispatcherFqn =
+            "Wacs.ComponentModel.Async.AsyncDispatcher";
+        private const string AttributeFqn =
+            "Wacs.ComponentModel.Async.CanonAsyncAttribute";
+
+        public void Initialize(IncrementalGeneratorInitializationContext context)
+        {
+            var namesProvider = context.CompilationProvider.Select(
+                static (compilation, _) => CollectCanonAsyncNames(compilation));
+
+            context.RegisterSourceOutput(namesProvider,
+                static (spc, names) =>
+                {
+                    // Only emit when AsyncDispatcher is part of
+                    // the current compilation — i.e. when the
+                    // generator runs against Wacs.ComponentModel
+                    // itself. Consumer assemblies get nothing,
+                    // which is the correct behavior (the
+                    // registry's partial implementation lives in
+                    // the declaring assembly).
+                    if (names.IsDefaultOrEmpty) return;
+                    var source = EmitRegistryPartial(names);
+                    spc.AddSource("CanonOpRegistry.g.cs", source);
+                });
+        }
+
+        private static ImmutableArray<string> CollectCanonAsyncNames(
+            Compilation compilation)
+        {
+            var dispatcher = compilation.GetTypeByMetadataName(DispatcherFqn);
+            if (dispatcher == null) return ImmutableArray<string>.Empty;
+            // Only emit when AsyncDispatcher is DECLARED in the
+            // current compilation — not just referenced. The partial
+            // method's defining declaration lives in
+            // Wacs.ComponentModel; emitting the impl from any other
+            // assembly produces CS0759 ("no defining declaration").
+            if (!SymbolEqualityComparer.Default.Equals(
+                    dispatcher.ContainingAssembly, compilation.Assembly))
+                return ImmutableArray<string>.Empty;
+            var attrType = compilation.GetTypeByMetadataName(AttributeFqn);
+            if (attrType == null) return ImmutableArray<string>.Empty;
+
+            var names = new SortedSet<string>(StringComparer.Ordinal);
+            foreach (var member in dispatcher.GetMembers())
+            {
+                if (member is not IMethodSymbol method) continue;
+                foreach (var attr in method.GetAttributes())
+                {
+                    if (!SymbolEqualityComparer.Default.Equals(
+                            attr.AttributeClass, attrType))
+                        continue;
+
+                    // Explicit-name form: [CanonAsync("foo-bar")].
+                    if (attr.ConstructorArguments.Length > 0
+                        && attr.ConstructorArguments[0].Value is string explicitName
+                        && !string.IsNullOrEmpty(explicitName))
+                    {
+                        names.Add(explicitName);
+                    }
+                    else
+                    {
+                        // Parameterless form: [CanonAsync]. Derive
+                        // the canon-op name from the method's
+                        // PascalCase identifier via the kebab
+                        // conversion that mirrors
+                        // NameMangler.ToKebab in the runtime.
+                        names.Add(PascalToKebab(method.Name));
+                    }
+                }
+            }
+            return names.ToImmutableArray();
+        }
+
+        // PascalCase → kebab-case, matching the rule in
+        // Wacs.ComponentModel.CSharpEmit.NameMangler.ToKebab.
+        // Inlined here because the generator targets netstandard2.0
+        // and can't reference the runtime assembly. Round-trip
+        // tested in NameManglerTests.
+        private static string PascalToKebab(string pascal)
+        {
+            if (string.IsNullOrEmpty(pascal)) return pascal;
+            var sb = new StringBuilder(pascal.Length + 4);
+            for (int i = 0; i < pascal.Length; i++)
+            {
+                var c = pascal[i];
+                if (char.IsUpper(c))
+                {
+                    if (i > 0) sb.Append('-');
+                    sb.Append(char.ToLowerInvariant(c));
+                }
+                else
+                {
+                    sb.Append(c);
+                }
+            }
+            return sb.ToString();
+        }
+
+        private static string EmitRegistryPartial(ImmutableArray<string> names)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("// <auto-generated>");
+            sb.AppendLine("// Source generator: " +
+                "Wacs.ComponentModel.Async.SourceGen.CanonOpRegistryGenerator");
+            sb.AppendLine("// Scans AsyncDispatcher for [CanonAsync(...)]-decorated methods");
+            sb.AppendLine("// and emits the static known-names set this partial supplies.");
+            sb.AppendLine("// </auto-generated>");
+            sb.AppendLine("#nullable enable");
+            sb.AppendLine();
+            sb.AppendLine("using System;");
+            sb.AppendLine("using System.Collections.Generic;");
+            sb.AppendLine();
+            sb.AppendLine("namespace Wacs.ComponentModel.Async");
+            sb.AppendLine("{");
+            sb.AppendLine("    partial class CanonOpRegistry");
+            sb.AppendLine("    {");
+            sb.AppendLine("        // Build-time enumeration of " +
+                "[CanonAsync(...)]-decorated methods on AsyncDispatcher.");
+            sb.AppendLine("        // Replaces Slice G1's runtime reflection. " +
+                "Updates when methods are added/removed/renamed.");
+            sb.AppendLine("        private static partial HashSet<string> BuildKnownNames()");
+            sb.AppendLine("        {");
+            sb.AppendLine("            return new HashSet<string>(StringComparer.Ordinal)");
+            sb.AppendLine("            {");
+            foreach (var name in names)
+            {
+                sb.Append("                \"");
+                sb.Append(name);
+                sb.AppendLine("\",");
+            }
+            sb.AppendLine("            };");
+            sb.AppendLine("        }");
+            sb.AppendLine("    }");
+            sb.AppendLine("}");
+            return sb.ToString();
+        }
+    }
+}

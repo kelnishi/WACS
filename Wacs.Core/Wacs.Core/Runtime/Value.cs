@@ -513,6 +513,7 @@ namespace Wacs.Core.Runtime
                 StructIdx sidx => sidx.Value,
                 ArrayIdx aidx => aidx.Value,
                 ExnIdx eidx => eidx.Value,
+                ContIdx cidx => cidx.Value,
                 _ => throw new ArgumentException($"Unknown RefValue:{refVal}")
             };
             GcRef = refVal;
