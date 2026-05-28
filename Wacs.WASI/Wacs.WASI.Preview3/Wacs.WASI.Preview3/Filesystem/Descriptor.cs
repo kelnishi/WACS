@@ -1048,7 +1048,13 @@ namespace Wacs.WASI.Preview3.Filesystem
                         throw new FilesystemException(
                             ErrorCode.Exist,
                             $"'{newPath}' already exists.");
+#if NET6_0_OR_GREATER
                     File.CreateSymbolicLink(newResolved, oldPath);
+#else
+                    throw new FilesystemException(
+                        ErrorCode.Unsupported,
+                        "symbolic-link creation requires net6.0 or greater");
+#endif
                 }
                 catch (Exception ex) { throw ToFilesystem(ex); }
             }, cancellationToken);
