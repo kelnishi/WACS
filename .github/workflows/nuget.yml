@@ -33,6 +33,20 @@ on:
       # All four versioned together; the wasi-gfx WIT proposal
       # is still at WASI Phase 2 so packages ship -preview.
       - 'WACS-WASI-GFX-v*.*.*'
+      # `WACS-WASI-Preview3-v*` publishes the WASI Preview 3
+      # family — host impls (canon-async dispatcher + stream /
+      # future / error-context handle tables) + the DI sibling.
+      # Pinned to the wasi-0.3.0-rc-2026-03-15 contract; ships
+      # alongside the stack-switching substrate.
+      - 'WACS-WASI-Preview3-v*.*.*'
+      # `WACS-Harness-v*` publishes the WIT-harness tooling trio:
+      # the IL emitter (Harness.Lib), the runtime primitives the
+      # emitted IL calls (Harness.Runtime), and the
+      # [AsyncComponentHarness] / [AsyncExport] / [SyncExport]
+      # Roslyn source generator (Async.SourceGen). Each csproj
+      # carries its own <Version>; --skip-duplicate covers the
+      # ones that didn't bump.
+      - 'WACS-Harness-v*.*.*'
 
 jobs:
   build-and-publish:
@@ -78,12 +92,16 @@ jobs:
             tag_prefix: WACS-Cli-v
 
           # `WACS-ComponentModel-v*` → component-model runtime +
-          # bindgen library (versioned together; both 0.1.0 today).
+          # bindgen library + AOT-safe parser split (the surface
+          # harness consumers reference under NativeAOT / IL2CPP).
           - path: Wacs.ComponentModel/Wacs.ComponentModel
             package_name: WACS.ComponentModel
             tag_prefix: WACS-ComponentModel-v
           - path: Wacs.ComponentModel/Wacs.ComponentModel.Bindgen.Lib
             package_name: WACS.ComponentModel.Bindgen.Lib
+            tag_prefix: WACS-ComponentModel-v
+          - path: Wacs.ComponentModel/Wacs.ComponentModel.Parser
+            package_name: WACS.ComponentModel.Parser
             tag_prefix: WACS-ComponentModel-v
 
           # `WACS-WASI-Preview2-v*` → typed WASI Preview 2 host
@@ -155,6 +173,34 @@ jobs:
           - path: Wacs.WASI/Wacs.WASI.GFX/Wacs.WASI.GFX.Silk
             package_name: WACS.WASI.GFX.Silk
             tag_prefix: WACS-WASI-GFX-v
+
+          # `WACS-WASI-Preview3-v*` → WASI Preview 3 family.
+          # Host impls + DI sibling. Pinned to
+          # wasi-0.3.0-rc-2026-03-15.
+          - path: Wacs.WASI/Wacs.WASI.Preview3/Wacs.WASI.Preview3
+            package_name: WACS.WASI.Preview3
+            tag_prefix: WACS-WASI-Preview3-v
+          - path: Wacs.WASI/Wacs.WASI.Preview3/Wacs.WASI.Preview3.DependencyInjection
+            package_name: WACS.WASI.Preview3.DependencyInjection
+            tag_prefix: WACS-WASI-Preview3-v
+
+          # `WACS-Harness-v*` → WIT-harness tooling trio. The IL
+          # emitter (Harness.Lib) produces typed {World}Harness +
+          # I{World} assemblies from a WIT directory; the emitted
+          # IL calls the runtime primitives in Harness.Runtime
+          # (MemoryHelpers / StringCoding / HarnessLoader.Load /
+          # Borrowed<T>). The Async.SourceGen Roslyn generator is
+          # the build-time equivalent of the IL emitter for
+          # consumers who prefer source-gen over emit-to-.dll.
+          - path: Wacs.ComponentModel/Wacs.ComponentModel.Harness.Lib
+            package_name: WACS.ComponentModel.Harness.Lib
+            tag_prefix: WACS-Harness-v
+          - path: Wacs.ComponentModel/Wacs.ComponentModel.Harness.Runtime
+            package_name: WACS.ComponentModel.Harness.Runtime
+            tag_prefix: WACS-Harness-v
+          - path: Wacs.ComponentModel/Wacs.ComponentModel.Async.SourceGen
+            package_name: WACS.ComponentModel.Async.SourceGen
+            tag_prefix: WACS-Harness-v
 
     steps:
       - name: Checkout code
