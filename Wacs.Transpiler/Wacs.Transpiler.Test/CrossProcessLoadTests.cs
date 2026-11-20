@@ -10,8 +10,11 @@ using System;
 using System.IO;
 using System.Reflection;
 using System.Runtime.Loader;
+using System.Threading.Tasks;
 using Wacs.Core;
 using Wacs.Core.Runtime;
+using Wacs.Core.Runtime.Types;
+using Wacs.Core.Text;
 using Wacs.Transpiler.AOT;
 using Xunit;
 
@@ -88,7 +91,7 @@ namespace Wacs.Transpiler.Test
         /// cross-process data-segment remap path specifically.
         /// Export "read" returns the byte at offset 0 as an i32.
         /// </summary>
-        private static byte[] BuildMemoryWasm()
+        private static byte[] BuildMemoryWasm(byte initialByte = 0x2A)
         {
             // (module
             //   (memory 1)
@@ -110,7 +113,7 @@ namespace Wacs.Transpiler.Test
                 //   no locals, i32.const 0, i32.load8_u align=0 offset=0, end
                 0x0A, 0x09, 0x01, 0x07, 0x00, 0x41, 0x00, 0x2D, 0x00, 0x00, 0x0B,
                 // Data section: 1 segment, memory 0, (i32.const 0), 1 byte 0x2A
-                0x0B, 0x07, 0x01, 0x00, 0x41, 0x00, 0x0B, 0x01, 0x2A,
+                0x0B, 0x07, 0x01, 0x00, 0x41, 0x00, 0x0B, 0x01, initialByte,
             };
         }
 
@@ -157,6 +160,103 @@ namespace Wacs.Transpiler.Test
 
             int b = (int)readMethod.Invoke(instance, Array.Empty<object>())!;
             Assert.Equal(0x2A, b);
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void IndependentlySavedModulesUseTheirOwnInitializationData(bool reverse)
+        {
+            var firstPath = Path.Combine(_tempDir, "first.dll");
+            var secondPath = Path.Combine(_tempDir, "second.dll");
+            ResetTranspilerRegistries();
+            TranspileAndSave(BuildMemoryWasm(42), firstPath, "Wacs.Xp.First");
+            // Model separate producer processes that both assign module ID zero.
+            ResetTranspilerRegistries();
+            TranspileAndSave(BuildMemoryWasm(77), secondPath, "Wacs.Xp.Second");
+            ResetTranspilerRegistries();
+
+            var first = LoadIsolated(firstPath).GetType("Wacs.Xp.First.WasmModule.Module", true)!;
+            var second = LoadIsolated(secondPath).GetType("Wacs.Xp.Second.WasmModule.Module", true)!;
+            if (reverse)
+            {
+                Assert.Equal(77, ReadByte(second));
+                Assert.Equal(42, ReadByte(first));
+            }
+            else
+            {
+                Assert.Equal(42, ReadByte(first));
+                Assert.Equal(77, ReadByte(second));
+            }
+        }
+
+        [Fact]
+        public void ParallelSavedModuleConstructorsPreserveActiveData()
+        {
+            var path = Path.Combine(_tempDir, "parallel.dll");
+            TranspileAndSave(BuildMemoryWasm(), path, "Wacs.Xp.Parallel");
+            ResetTranspilerRegistries();
+
+            var module = LoadIsolated(path).GetType("Wacs.Xp.Parallel.WasmModule.Module", true)!;
+            Parallel.For(0, 1024, new ParallelOptions { MaxDegreeOfParallelism = 8 },
+                _ => Assert.Equal(42, ReadByte(module)));
+        }
+
+        [Theory]
+        [InlineData(EmissionTarget.Standard)]
+        [InlineData(EmissionTarget.AotLinked)]
+        public void SavedModuleDropsOnlyItsOwnPassiveSegments(EmissionTarget emission)
+        {
+            var path = Path.Combine(_tempDir, "passive.dll");
+            var wasm = TextModuleParser.ParseWat(@"(module
+              (memory 1)
+              (table 1 funcref)
+              (data $payload ""A"")
+              (func $answer (result i32) i32.const 73)
+              (elem $entry func $answer)
+              (func (export ""read"") (result i32)
+                i32.const 0 i32.const 0 i32.const 1 memory.init $payload
+                i32.const 0 i32.load8_u)
+              (func (export ""from_table"") (result i32)
+                i32.const 0 i32.const 0 i32.const 1 table.init $entry
+                i32.const 0 call_indirect (result i32))
+              (func (export ""drop_segments"")
+                data.drop $payload
+                elem.drop $entry)
+              (func (export ""initialize_empty"")
+                i32.const 0 i32.const 0 i32.const 0 memory.init $payload
+                i32.const 0 i32.const 0 i32.const 0 table.init $entry))");
+            TranspileAndSaveModule(wasm, path, "Wacs.Xp.Passive", emission);
+            ResetTranspilerRegistries();
+
+            var type = LoadIsolated(path).GetType("Wacs.Xp.Passive.WasmModule.Module", true)!;
+            var first = Activator.CreateInstance(type)!;
+            var second = Activator.CreateInstance(type)!;
+            var read = type.GetMethod("read")!;
+            var fromTable = type.GetMethod("from_table")!;
+            Assert.Equal(65, (int)read.Invoke(first, null)!);
+            Assert.Equal(73, (int)fromTable.Invoke(first, null)!);
+
+            type.GetMethod("drop_segments")!.Invoke(first, null);
+            type.GetMethod("initialize_empty")!.Invoke(first, null);
+            Assert.IsType<TrapException>(Assert.Throws<TargetInvocationException>(() => read.Invoke(first, null)).InnerException);
+            Assert.IsType<TrapException>(Assert.Throws<TargetInvocationException>(() => fromTable.Invoke(first, null)).InnerException);
+            Assert.Equal(65, (int)read.Invoke(second, null)!);
+            Assert.Equal(73, (int)fromTable.Invoke(second, null)!);
+
+            var third = Activator.CreateInstance(type)!;
+            Assert.Equal(65, (int)read.Invoke(third, null)!);
+            Assert.Equal(73, (int)fromTable.Invoke(third, null)!);
+        }
+
+        private static int ReadByte(Type module)
+            => (int)module.GetMethod("read")!.Invoke(Activator.CreateInstance(module), null)!;
+
+        private static void ResetTranspilerRegistries()
+        {
+            InitRegistry.Reset();
+            ModuleInit.Reset();
+            MultiReturnMethodRegistry.Reset();
         }
 
         [Fact]
@@ -354,9 +454,14 @@ namespace Wacs.Transpiler.Test
         private static void TranspileAndSaveWithEmission(byte[] wasmBytes,
             string dllPath, string @namespace, EmissionTarget emission)
         {
-            var runtime = new WasmRuntime();
             using var ms = new MemoryStream(wasmBytes);
-            var module = BinaryModuleParser.ParseWasm(ms);
+            TranspileAndSaveModule(BinaryModuleParser.ParseWasm(ms), dllPath, @namespace, emission);
+        }
+
+        private static void TranspileAndSaveModule(Wacs.Core.Module module,
+            string dllPath, string @namespace, EmissionTarget emission)
+        {
+            var runtime = new WasmRuntime();
             var moduleInst = runtime.InstantiateModule(module);
 
             // Pin emission explicitly — most tests exercise Standard's
