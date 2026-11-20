@@ -276,20 +276,22 @@ namespace Wacs.Transpiler.AOT
             // needed. The linker replaces imported tag slots with the
             // exporter's fully-typed TagInstance before any throw/catch runs.
 
-            // Snapshot every referenced data-segment's bytes now, so the
-            // codec-encoded init-data embedded in the generated .dll carries
-            // the full payload. (The pre-phase-4 Initialize path only
-            // populated SavedDataSegments *after* PrepareInitData, which was
-            // fine for in-process since ModuleInit already had the bytes
-            // under the transpile-time IDs — but cross-process load starts
-            // with an empty ModuleInit, so the bytes must ride in the
-            // embedded resource.)
-            foreach (var (_, _, segId) in data.ActiveDataSegments)
+            // Keep the original bytes for initialization, linking and passive memory.init.
+            if (_dataEmitter != null)
             {
-                if (data.SavedDataSegments.ContainsKey(segId)) continue;
-                var segData = ModuleInit.GetDataSegmentData(segId);
-                if (segData != null && segData.Length > 0)
-                    data.SavedDataSegments[segId] = (byte[])segData.Clone();
+                for (int i = 0; i < _dataEmitter.Segments.Length; i++)
+                {
+                    var bytes = _dataEmitter.Segments[i].Data;
+                    if (bytes.Length > 0)
+                        data.SavedDataSegments[_dataSegmentBaseId + i] = bytes;
+                }
+            }
+
+            for (int i = 0; i < _wasmModule.Elements.Length; i++)
+            {
+                if (_wasmModule.Elements[i].Mode is WasmModule.ElementMode.PassiveMode
+                    && ModuleInit.GetElemSegment(_elemSegmentBaseId + i) is { Length: > 0 } values)
+                    data.PassiveElementSegments[i] = values;
             }
 
             _initDataId = InitRegistry.Register(data);
@@ -669,47 +671,13 @@ namespace Wacs.Transpiler.AOT
             // them as IL constants.
             EmitTypeHashArrays(il, ctxLocal, data);
 
-            // (5) Drop active data + element segments. WASM 3.0 §4.5.4:
-            // active segments are implicitly dropped at the end of
-            // instantiation, so subsequent `memory.init` / `table.init`
-            // referencing them must trap "uninitialized element /
-            // segment". Standard's InitializeFromData does this via
-            // ModuleInit.DropDataSegment / DropElemSegment; under
-            // AotLinked we inline the calls here. Only meaningful for
-            // in-process — cross-process AotLinked never repopulates
-            // ModuleInit so the drops are no-ops.
-            EmitActiveSegmentDrops(il, data);
-
-            // (6) Stash the segment base IDs onto ctx so post-Bake
-            // memory.init / table.init helpers can index correctly.
-            EmitSegmentBaseIds(il, ctxLocal, data);
-
-            // (7) Stamp ctx.InitDataId with the transpile-time id so
-            // MultiReturnMethodRegistry / GcTypeRegistry lookups —
-            // both keyed on (initDataId, funcIdx) / (initDataId,
-            // typeIdx) — find the entries the transpile-time IL
-            // registered. Standard's InitializeFromData does this
-            // via the int-overload of InitializeFromData; under
-            // AotLinked we set the field directly.
+            // Active/declarative segments start dropped. Passive slots are
+            // filled in the new context without touching another instance.
+            il.Emit(OpCodes.Ldloc, ctxLocal);
+            il.Emit(OpCodes.Call, typeof(ThinContext).GetMethod(nameof(ThinContext.UseInstanceSegments))!);
             EmitInitDataIdStamp(il, ctxLocal);
-
-            // (8) Register passive data segments into ModuleInit so
-            // `memory.init` instructions resolve them in cross-process
-            // loads (the in-process pre-pass already populated the
-            // registry under the same ids; RegisterDataSegmentAt is
-            // idempotent). Active segments aren't registered — their
-            // bytes ride RVA-mapped on __WACSAotData.Segment_N and
-            // get copied into linear memory directly via
-            // EmitDataSegmentCopies above.
-            EmitPassiveDataSegmentRegistrations(il, data);
-
-            // (9) Register passive element segments — same idempotent
-            // ModuleInit registration recipe as passive data, but the
-            // values are funcref / typed-null mix encoded as int[]
-            // (−1 = null; >=0 = funcIdx). The helper materializes the
-            // Value[] at runtime; transpile-time we only emit the
-            // compact int[] inline.
-            EmitPassiveElementSegmentRegistrations(il, data);
+            EmitPassiveDataSegmentRegistrations(il, ctxLocal, data);
+            EmitPassiveElementSegmentRegistrations(il, ctxLocal, data);
 
             // (10) Allocate ctx.Tags. Each local tag becomes a fresh
             // TagInstance (identity is reference-based, so DefType
@@ -754,9 +722,9 @@ namespace Wacs.Transpiler.AOT
         /// at transpile time, encode the entries as <c>int[]</c>
         /// (-1 = null funcref; >=0 = funcIdx), and emit IL that builds
         /// the array inline + calls
-        /// <see cref="BulkHelpers.RegisterPassiveElemSegment"/>.
+        /// <see cref="BulkHelpers.InitializePassiveElemSegment"/>.
         /// </summary>
-        private void EmitPassiveElementSegmentRegistrations(ILGenerator il, ModuleInitData data)
+        private void EmitPassiveElementSegmentRegistrations(ILGenerator il, LocalBuilder ctxLocal, ModuleInitData data)
         {
             // Active and declarative segments are in data.ActiveElemIndices
             // (active = also in data.ActiveElementSegments; declarative =
@@ -765,7 +733,7 @@ namespace Wacs.Transpiler.AOT
             var droppedSet = new HashSet<int>(data.ActiveElemIndices);
 
             var registerHelper = typeof(BulkHelpers).GetMethod(
-                nameof(BulkHelpers.RegisterPassiveElemSegment),
+                nameof(BulkHelpers.InitializePassiveElemSegment),
                 BindingFlags.Public | BindingFlags.Static)!;
 
             for (int localIdx = 0; localIdx < _wasmModule.Elements.Length; localIdx++)
@@ -787,8 +755,8 @@ namespace Wacs.Transpiler.AOT
                 }
                 if (!ok) continue;     // gate would have rejected such modules
 
-                int absoluteId = data.ElemSegmentBaseId + localIdx;
-                il.Emit(OpCodes.Ldc_I4, absoluteId);
+                il.Emit(OpCodes.Ldloc, ctxLocal);
+                il.Emit(OpCodes.Ldc_I4, localIdx);
                 il.Emit(OpCodes.Ldc_I4, n);
                 il.Emit(OpCodes.Newarr, typeof(int));
                 for (int j = 0; j < n; j++)
@@ -836,12 +804,9 @@ namespace Wacs.Transpiler.AOT
         /// For each passive data segment in the module, emit IL that
         /// materializes the RVA-mapped bytes via
         /// <c>RuntimeHelpers.CreateSpan&lt;byte&gt;</c> and calls
-        /// <c>BulkHelpers.RegisterPassiveDataSegment(id, span)</c>. The
-        /// helper does <c>span.ToArray()</c> + <c>ModuleInit.RegisterDataSegmentAt</c>;
-        /// the registry call is no-op when the id is already populated
-        /// (in-process pre-pass).
+        /// <see cref="BulkHelpers.InitializePassiveDataSegment"/> on the new context.
         /// </summary>
-        private void EmitPassiveDataSegmentRegistrations(ILGenerator il, ModuleInitData data)
+        private void EmitPassiveDataSegmentRegistrations(ILGenerator il, LocalBuilder ctxLocal, ModuleInitData data)
         {
             if (_dataEmitter == null) return;
 
@@ -855,7 +820,7 @@ namespace Wacs.Transpiler.AOT
                     BindingFlags.Public | BindingFlags.Static)!;
             var createSpanByte = createSpanOpen.MakeGenericMethod(typeof(byte));
             var registerHelper = typeof(BulkHelpers).GetMethod(
-                nameof(BulkHelpers.RegisterPassiveDataSegment),
+                nameof(BulkHelpers.InitializePassiveDataSegment),
                 BindingFlags.Public | BindingFlags.Static)!;
 
             for (int localIdx = 0; localIdx < _dataEmitter.Segments.Length; localIdx++)
@@ -871,7 +836,8 @@ namespace Wacs.Transpiler.AOT
                 // practice a segment is one or the other.
                 var segField = GetAotDataSegmentField(absoluteId, seg.Data);
 
-                il.Emit(OpCodes.Ldc_I4, absoluteId);
+                il.Emit(OpCodes.Ldloc, ctxLocal);
+                il.Emit(OpCodes.Ldc_I4, localIdx);
                 il.Emit(OpCodes.Ldtoken, segField);
                 il.Emit(OpCodes.Call, createSpanByte);
                 il.Emit(OpCodes.Call, registerHelper);
@@ -880,67 +846,10 @@ namespace Wacs.Transpiler.AOT
 
         private void EmitInitDataIdStamp(ILGenerator il, LocalBuilder ctxLocal)
         {
-            var initDataIdField = typeof(ThinContext).GetField(nameof(ThinContext.InitDataId));
-            if (initDataIdField == null) return;
             il.Emit(OpCodes.Ldloc, ctxLocal);
-            il.Emit(OpCodes.Ldc_I4, _initDataId);
-            il.Emit(OpCodes.Stfld, initDataIdField);
-        }
-
-        /// <summary>
-        /// Inline IL for <c>ModuleInit.DropDataSegment</c> /
-        /// <c>DropElemSegment</c> calls covering every active segment
-        /// the module declared. Mirrors the loop
-        /// <see cref="InitializationHelper.InitializeFromData"/> runs
-        /// after the codec round-trip.
-        /// </summary>
-        private void EmitActiveSegmentDrops(ILGenerator il, ModuleInitData data)
-        {
-            var dropDataMethod = typeof(ModuleInit).GetMethod(
-                nameof(ModuleInit.DropDataSegment),
-                BindingFlags.Public | BindingFlags.Static)!;
-            var dropElemMethod = typeof(ModuleInit).GetMethod(
-                nameof(ModuleInit.DropElemSegment),
-                BindingFlags.Public | BindingFlags.Static)!;
-
-            int dataBase = data.DataSegmentBaseId;
-            foreach (var localDataIdx in data.ActiveDataIndices)
-            {
-                il.Emit(OpCodes.Ldc_I4, dataBase + localDataIdx);
-                il.Emit(OpCodes.Call, dropDataMethod);
-            }
-
-            int elemBase = data.ElemSegmentBaseId;
-            foreach (var localElemIdx in data.ActiveElemIndices)
-            {
-                il.Emit(OpCodes.Ldc_I4, elemBase + localElemIdx);
-                il.Emit(OpCodes.Call, dropElemMethod);
-            }
-        }
-
-        /// <summary>
-        /// Set <c>ctx.DataSegmentBaseId</c> and <c>ctx.ElemSegmentBaseId</c>
-        /// to the transpile-time base IDs. Standard's <c>InitializeFromData</c>
-        /// derives these from the (possibly-remapped) cross-process registry;
-        /// AotLinked uses the static transpile-time values since segments
-        /// don't get re-registered.
-        /// </summary>
-        private void EmitSegmentBaseIds(ILGenerator il, LocalBuilder ctxLocal, ModuleInitData data)
-        {
-            var dataBaseField = typeof(ThinContext).GetField(nameof(ThinContext.DataSegmentBaseId));
-            var elemBaseField = typeof(ThinContext).GetField(nameof(ThinContext.ElemSegmentBaseId));
-            if (dataBaseField != null)
-            {
-                il.Emit(OpCodes.Ldloc, ctxLocal);
-                il.Emit(OpCodes.Ldc_I4, data.DataSegmentBaseId);
-                il.Emit(OpCodes.Stfld, dataBaseField);
-            }
-            if (elemBaseField != null)
-            {
-                il.Emit(OpCodes.Ldloc, ctxLocal);
-                il.Emit(OpCodes.Ldc_I4, data.ElemSegmentBaseId);
-                il.Emit(OpCodes.Stfld, elemBaseField);
-            }
+            il.Emit(OpCodes.Ldtoken, ModuleType!);
+            il.Emit(OpCodes.Call, typeof(InitRegistry).GetMethod(nameof(InitRegistry.GetModuleId))!);
+            il.Emit(OpCodes.Stfld, typeof(ThinContext).GetField(nameof(ThinContext.InitDataId))!);
         }
 
         /// <summary>
@@ -1641,7 +1550,7 @@ namespace Wacs.Transpiler.AOT
             // Three emission shapes:
             //   Auto:      AotLinked when feasible, else Standard. Default.
             //   Standard:  InitializationHelper.InitializeFromEmbedded(
-            //                __WACSInit.Data, _initDataId).
+            //                __WACSInit.Data, typeof(Module).TypeHandle).
             //   AotLinked: ThinContext ctor body inlined as IL constants;
             //              AssertAotLinkedFeasible throws if the module
             //              shape needs the codec stack.
@@ -1664,11 +1573,8 @@ namespace Wacs.Transpiler.AOT
                 // The generator embeds a codec-encoded ModuleInitData as
                 // RVA-mapped bytes on a sibling type (__WACSInit.Data, built
                 // below). The ctor materializes a ReadOnlySpan<byte> over
-                // the mapped pages via RuntimeHelpers.CreateSpan and hands
-                // that to InitializeFromEmbedded — which handles both
-                // in-process (ModuleInit registrations already exist) and
-                // cross-process (.dll loaded in a fresh process) via
-                // data-segment remapping.
+                // the mapped pages via RuntimeHelpers.CreateSpan. The loaded
+                // module type identifies the template in either load path.
                 var initDataField = EmitEmbeddedInitData();
 
                 // Build the closed-generic ReadOnlySpan<byte> CreateSpan
@@ -1686,12 +1592,12 @@ namespace Wacs.Transpiler.AOT
                     nameof(InitializationHelper.InitializeFromEmbedded),
                     BindingFlags.Public | BindingFlags.Static,
                     binder: null,
-                    types: new[] { typeof(ReadOnlySpan<byte>), typeof(int) },
+                    types: new[] { typeof(ReadOnlySpan<byte>), typeof(RuntimeTypeHandle) },
                     modifiers: null)!;
 
                 il.Emit(OpCodes.Ldtoken, initDataField);
                 il.Emit(OpCodes.Call, createSpanByte);
-                il.Emit(OpCodes.Ldc_I4, _initDataId);
+                il.Emit(OpCodes.Ldtoken, ModuleType!);
                 il.Emit(OpCodes.Call, initFromEmbedded);
                 il.Emit(OpCodes.Stloc, ctxLocal);
             }
@@ -1925,7 +1831,7 @@ namespace Wacs.Transpiler.AOT
                     // codegen-free. (The legacy
                     // MultiReturnMethodRegistry.Register path stays as
                     // public API for non-transpiler callers.)
-                    EmitMultiReturnShimAndRegister(il, mb, funcType, _importCount + i);
+                    EmitMultiReturnShimAndRegister(il, ctxLocal, mb, funcType, _importCount + i);
                     continue;
                 }
 
@@ -2065,7 +1971,7 @@ namespace Wacs.Transpiler.AOT
         /// has no Reflection.Emit dependency on the multi-return path.
         /// </summary>
         private void EmitMultiReturnShimAndRegister(
-            ILGenerator ctorIl, MethodBuilder target, Wacs.Core.Types.FunctionType funcType, int globalFuncIdx)
+            ILGenerator ctorIl, LocalBuilder ctxLocal, MethodBuilder target, Wacs.Core.Types.FunctionType funcType, int globalFuncIdx)
         {
             // The shim signature is (ThinContext, object[]) → object[].
             // Body: declare out-locals for each result beyond the first,
@@ -2162,7 +2068,8 @@ namespace Wacs.Transpiler.AOT
             var registerShim = typeof(MultiReturnMethodRegistry).GetMethod(
                 nameof(MultiReturnMethodRegistry.RegisterShim))!;
 
-            ctorIl.Emit(OpCodes.Ldc_I4, _initDataId);
+            ctorIl.Emit(OpCodes.Ldloc, ctxLocal);
+            ctorIl.Emit(OpCodes.Ldfld, typeof(ThinContext).GetField(nameof(ThinContext.InitDataId))!);
             ctorIl.Emit(OpCodes.Ldc_I4, globalFuncIdx);
             ctorIl.Emit(OpCodes.Ldnull);
             ctorIl.Emit(OpCodes.Ldftn, shim);

@@ -238,10 +238,17 @@ namespace Wacs.Transpiler.AOT
                         values[i] = ModuleTranspiler.EvaluateElemExprForBake(
                             inits[i], _gcTypeEmitterForReeval);
                     ModuleInit.UpdateElemSegment(segId, values);
+                    var initData = InitRegistry.Get(InitDataId);
+                    int segmentIndex = segId - initData.ElemSegmentBaseId;
+                    if (initData.PassiveElementSegments.ContainsKey(segmentIndex))
+                        initData.PassiveElementSegments[segmentIndex] = values;
                 }
                 _pendingElemReeval = null;
                 _gcTypeEmitterForReeval = null;
             }
+
+            if (InitDataId >= 0 && _moduleClass != null)
+                InitRegistry.AssociateLoadedModule(_moduleClass, InitDataId);
 
             _baked = true;
         }

@@ -15,6 +15,8 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Threading;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
 using Wacs.Core.Types;
@@ -116,11 +118,13 @@ namespace Wacs.Transpiler.AOT
         public List<(int dataSegIdx, Wacs.Core.Types.Expression offsetExpr)> DeferredDataOffsets { get; set; } = new();
 
         /// <summary>
-        /// Saved data segment bytes (keyed by segId) for linker re-apply.
-        /// Active data segments are dropped after initialization, but the linker
-        /// may need to re-copy them to shared imported memories.
+        /// Original bytes of active and passive data segments, keyed by segId.
+        /// Active segments are also needed when linking shared imported memories.
         /// </summary>
         public Dictionary<int, byte[]> SavedDataSegments { get; set; } = new();
+
+        /// <summary>Passive element templates indexed by module-local segment index.</summary>
+        public Dictionary<int, Value[]> PassiveElementSegments { get; set; } = new();
 
         /// <summary>Number of imported functions.</summary>
         public int ImportFuncCount { get; set; }
@@ -178,6 +182,49 @@ namespace Wacs.Transpiler.AOT
     {
         private static readonly List<ModuleInitData> _initData = new();
         private static readonly object _lock = new();
+        private static readonly ConditionalWeakTable<Type, ModuleRegistration> _modules = new();
+
+        private sealed class ModuleRegistration
+        {
+            internal int Id = -1;
+        }
+
+        internal static void AssociateLoadedModule(Type moduleType, int id)
+        {
+            var registration = _modules.GetValue(moduleType, static _ => new ModuleRegistration());
+            Volatile.Write(ref registration.Id, id);
+        }
+
+        // Called by AotLinked IL, which has inlined initialization data.
+        public static int GetModuleId(RuntimeTypeHandle moduleType)
+        {
+            var registration = _modules.GetValue(Type.GetTypeFromHandle(moduleType)!,
+                static _ => new ModuleRegistration());
+            int id = Volatile.Read(ref registration.Id);
+            if (id >= 0) return id;
+
+            lock (registration)
+            {
+                if (registration.Id < 0)
+                    Volatile.Write(ref registration.Id, Register(new ModuleInitData()));
+                return registration.Id;
+            }
+        }
+
+        internal static int GetEmbeddedModuleId(RuntimeTypeHandle moduleType, ReadOnlySpan<byte> bytes)
+        {
+            var registration = _modules.GetValue(Type.GetTypeFromHandle(moduleType)!,
+                static _ => new ModuleRegistration());
+            int id = Volatile.Read(ref registration.Id);
+            if (id >= 0) return id;
+
+            lock (registration)
+            {
+                if (registration.Id < 0)
+                    Volatile.Write(ref registration.Id, Register(InitDataCodec.Decode(bytes)));
+                return registration.Id;
+            }
+        }
 
         public static int Register(ModuleInitData data)
         {
@@ -189,7 +236,10 @@ namespace Wacs.Transpiler.AOT
             }
         }
 
-        public static ModuleInitData Get(int id) => _initData[id];
+        public static ModuleInitData Get(int id)
+        {
+            lock (_lock) { return _initData[id]; }
+        }
 
         /// <summary>True iff the given ID refers to a live registration.</summary>
         public static bool Contains(int id)
@@ -203,6 +253,7 @@ namespace Wacs.Transpiler.AOT
         public static void Reset()
         {
             lock (_lock) { _initData.Clear(); }
+            _modules.Clear();
         }
 
         /// <summary>
@@ -347,7 +398,7 @@ namespace Wacs.Transpiler.AOT
         /// Returns a fully initialized ThinContext ready for function execution.
         /// </summary>
         public static ThinContext Initialize(int initDataId)
-            => InitializeCore(InitRegistry.Get(initDataId), initDataId, remapSavedSegments: false);
+            => InitializeCore(InitRegistry.Get(initDataId), initDataId);
 
         /// <summary>
         /// Unified entry for the generated Module ctor. Chooses the fast
@@ -388,22 +439,16 @@ namespace Wacs.Transpiler.AOT
         }
 
         /// <summary>
-        /// Cross-process entry: call with a freshly-decoded <see cref="ModuleInitData"/>
-        /// (e.g. from <see cref="InitDataCodec.Decode"/>). The method registers the
-        /// embedded data segments into <see cref="ModuleInit"/> with fresh IDs (to
-        /// avoid cross-module collisions), rewrites <c>data.ActiveDataSegments</c>
-        /// and <c>data.DataSegmentBaseId</c> in place to match, then runs the
-        /// standard init. A fresh <see cref="InitRegistry"/> entry is allocated so
-        /// runtime-side callers that still use <c>ctx.InitDataId</c> see a valid
-        /// handle. Safe to call concurrently; multiple modules get disjoint ID
-        /// ranges.
+        /// Initialize a persisted module using the identity of its loaded CLR type.
+        /// The numeric IDs assigned by different transpiler processes can overlap.
         /// </summary>
+        public static ThinContext InitializeFromEmbedded(
+            ReadOnlySpan<byte> embeddedBytes, RuntimeTypeHandle moduleType)
+            => Initialize(InitRegistry.GetEmbeddedModuleId(moduleType, embeddedBytes));
+
         /// <summary>
-        /// Variant that takes a hint of the transpile-time <c>InitDataId</c>.
-        /// In-process callers (where GcTypeRegistry / MultiReturnMethodRegistry
-        /// were populated at that ID during the transpile run) pass the
-        /// original so GC / call_indirect-multi-return lookups resolve.
-        /// Cross-process callers pass -1 (no such entries exist).
+        /// Compatibility entry point for callers supplying a transpile-time ID.
+        /// New emitted IL uses the loaded module type instead.
         /// </summary>
         public static ThinContext InitializeFromData(ModuleInitData data, int transpileTimeInitDataId)
         {
@@ -415,70 +460,12 @@ namespace Wacs.Transpiler.AOT
 
         public static ThinContext InitializeFromData(ModuleInitData data)
         {
-            if (data == null) throw new ArgumentNullException(nameof(data));
-
-            // Detect in-process vs cross-process. In-process: the transpile
-            // step has already registered data segments in ModuleInit under
-            // their declared IDs, and side tables like MultiReturnMethodRegistry
-            // are keyed against the transpile-time InitDataId baked into the
-            // generated IL. Remapping would leave those side tables stale.
-            //
-            // Cross-process: ModuleInit starts empty, so we *must* register
-            // the saved segments and rewrite the IDs on the fly.
-            bool alreadyRegistered = false;
-            if (data.ActiveDataSegments.Length > 0)
-            {
-                var probe = ModuleInit.GetDataSegmentData(data.ActiveDataSegments[0].segId);
-                alreadyRegistered = probe != null;
-            }
-            else if (data.SavedDataSegments.Count > 0)
-            {
-                foreach (var kv in data.SavedDataSegments)
-                {
-                    alreadyRegistered = ModuleInit.GetDataSegmentData(kv.Key) != null;
-                    break;
-                }
-            }
-
-            if (!alreadyRegistered && data.SavedDataSegments.Count > 0)
-            {
-                var map = ModuleInit.RegisterDataSegmentsWithRemap(data.SavedDataSegments);
-
-                // Rewrite ActiveDataSegments' segId to the new IDs.
-                for (int i = 0; i < data.ActiveDataSegments.Length; i++)
-                {
-                    var entry = data.ActiveDataSegments[i];
-                    if (map.TryGetValue(entry.segId, out int newId))
-                        data.ActiveDataSegments[i] = (entry.memIdx, entry.offset, newId);
-                }
-
-                // Recompute DataSegmentBaseId as the min of the new IDs (all
-                // segments of one module share a contiguous range because
-                // RegisterDataSegmentsWithRemap iterates the dict in a
-                // single lock).
-                int newBase = int.MaxValue;
-                foreach (var id in map.Values) if (id < newBase) newBase = id;
-                data.DataSegmentBaseId = newBase == int.MaxValue ? 0 : newBase;
-
-                // Rebuild SavedDataSegments dict keyed by new IDs, so any
-                // downstream consumer that re-reads the bytes via the dict
-                // gets them at the same keys the ctx now carries.
-                var newDict = new Dictionary<int, byte[]>(data.SavedDataSegments.Count);
-                foreach (var kv in data.SavedDataSegments)
-                    newDict[map.TryGetValue(kv.Key, out var nid) ? nid : kv.Key] = kv.Value;
-                data.SavedDataSegments = newDict;
-            }
-
-            int newInitDataId = InitRegistry.Register(data);
-            return InitializeCore(data, newInitDataId, remapSavedSegments: false);
+            ArgumentNullException.ThrowIfNull(data);
+            return InitializeCore(data, InitRegistry.Register(data));
         }
 
-        private static ThinContext InitializeCore(ModuleInitData data, int initDataId, bool remapSavedSegments)
+        private static ThinContext InitializeCore(ModuleInitData data, int initDataId)
         {
-            // remapSavedSegments is reserved for a future path (currently
-            // handled by InitializeFromData before reaching Core). Kept as
-            // a parameter so the call sites document their intent.
-
             // 1. Allocate memories (as MemoryInstance for shared
             // growth). The host pins AmbientRuntime.MemoryStorage
             // before construction to opt into NativePointer storage;
@@ -524,35 +511,15 @@ namespace Wacs.Transpiler.AOT
                 }
             }
 
-            // 4a. Re-register segments from SavedDataSegments if a prior
-            //     instance of this Module class already ran and dropped
-            //     them from the global ModuleInit registry. Active data
-            //     segments are dropped after first init per spec §4.5.4
-            //     (so subsequent memory.init calls observe an empty
-            //     segment), but each Module instance still expects fresh
-            //     memory initialized from the original bytes — the saved
-            //     copies on `data` (populated in step 6 of the first
-            //     init) are the source of truth for that.
-            if (data.SavedDataSegments.Count > 0)
-            {
-                foreach (var (memIdx, offset, segId) in data.ActiveDataSegments)
-                {
-                    var live = ModuleInit.GetDataSegmentData(segId);
-                    if ((live == null || live.Length == 0)
-                        && data.SavedDataSegments.TryGetValue(segId, out var saved))
-                    {
-                        // RegisterDataSegmentAt is no-op-on-collision; the
-                        // dropped segment leaves an empty entry in the dict,
-                        // so we use the unconditional Restore variant.
-                        ModuleInit.RestoreDataSegment(segId, saved);
-                    }
-                }
-            }
-
-            // 4. Copy active data segments to memories
+            // Copy active segments directly from the immutable module template.
             foreach (var (memIdx, offset, segId) in data.ActiveDataSegments)
             {
-                ModuleInit.CopyDataSegment(memories, memIdx, offset, segId);
+                if (data.SavedDataSegments.TryGetValue(segId, out var bytes))
+                {
+                    var memory = memories[memIdx];
+                    if ((ulong)offset + (ulong)bytes.Length <= memory.ByteLength)
+                        bytes.AsSpan().CopyTo(memory.AsSpan(offset, bytes.Length));
+                }
             }
 
             // 5. Copy active element segments to tables
@@ -578,29 +545,20 @@ namespace Wacs.Transpiler.AOT
                 elemSegIdx++;
             }
 
-            // 6. Save data segment bytes for potential linker re-apply
-            // (the linker may need to re-apply data to imported shared memories
-            // after dropping — save copies keyed by segId before dropping)
-            foreach (var (memIdx, offset, segId) in data.ActiveDataSegments)
+            var ctx = new ThinContext(memories: memories, tables: tables, globals: globals);
+            ctx.UseInstanceSegments();
+
+            // Active and declarative segments start dropped. The live slots of a
+            // passive segment belong to this context; the payload is read-only.
+            foreach (var entry in data.SavedDataSegments)
             {
-                var segData = ModuleInit.GetDataSegmentData(segId);
-                if (segData != null && segData.Length > 0)
-                    data.SavedDataSegments[segId] = (byte[])segData.Clone();
+                int index = entry.Key - data.DataSegmentBaseId;
+                if (Array.IndexOf(data.ActiveDataIndices, index) < 0)
+                    ctx.SetDataSegment(index, entry.Value);
             }
+            foreach (var entry in data.PassiveElementSegments)
+                ctx.SetElementSegment(entry.Key, entry.Value);
 
-            // 7. Implicitly drop active segments per spec §4.5.4
-            foreach (var idx in data.ActiveElemIndices)
-                ModuleInit.DropElemSegment(data.ElemSegmentBaseId + idx);
-            foreach (var idx in data.ActiveDataIndices)
-                ModuleInit.DropDataSegment(data.DataSegmentBaseId + idx);
-
-            // Create context (MemoryInstance carries its own limits)
-            var ctx = new ThinContext(
-                memories: memories,
-                tables: tables,
-                globals: globals);
-            ctx.DataSegmentBaseId = data.DataSegmentBaseId;
-            ctx.ElemSegmentBaseId = data.ElemSegmentBaseId;
             ctx.InitDataId = initDataId;
             ctx.FuncTypeHashes = data.FuncTypeHashes;
             ctx.FuncTypeSuperHashes = data.FuncTypeSuperHashes;

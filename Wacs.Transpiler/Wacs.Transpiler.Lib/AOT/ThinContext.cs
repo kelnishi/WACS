@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Wacs.Core.Runtime;
 using Wacs.Core.Runtime.Types;
@@ -71,9 +72,47 @@ namespace Wacs.Transpiler.AOT
         // === Linear Memory ===
         public MemoryInstance[] Memories;
 
-        // Base offsets into the global ModuleInit registries.
+        // Legacy emitted modules use offsets into the global ModuleInit registries.
         public int DataSegmentBaseId;
         public int ElemSegmentBaseId;
+
+        private bool _useInstanceSegments;
+        private Dictionary<int, byte[]>? _dataSegments;
+        private Dictionary<int, Value[]>? _elementSegments;
+
+        public void UseInstanceSegments() => _useInstanceSegments = true;
+
+        internal void SetDataSegment(int index, byte[] bytes)
+            => (_dataSegments ??= new())[index] = bytes;
+
+        internal void SetElementSegment(int index, Value[] elements)
+            => (_elementSegments ??= new())[index] = elements;
+
+        internal byte[]? GetDataSegment(int index)
+            => _useInstanceSegments
+                ? _dataSegments?.GetValueOrDefault(index) ?? Array.Empty<byte>()
+                : ModuleInit.GetDataSegmentData(DataSegmentBaseId + index);
+
+        internal Value[]? GetElementSegment(int index)
+            => _useInstanceSegments
+                ? _elementSegments?.GetValueOrDefault(index) ?? Array.Empty<Value>()
+                : ModuleInit.GetElemSegment(ElemSegmentBaseId + index);
+
+        internal void DropDataSegment(int index)
+        {
+            if (_useInstanceSegments)
+                _dataSegments?.Remove(index);
+            else
+                ModuleInit.DropDataSegment(DataSegmentBaseId + index);
+        }
+
+        internal void DropElementSegment(int index)
+        {
+            if (_useInstanceSegments)
+                _elementSegments?.Remove(index);
+            else
+                ModuleInit.DropElemSegment(ElemSegmentBaseId + index);
+        }
 
         // === Tables ===
         // Indexed by tableidx. Elements are function references for call_indirect.

@@ -57,7 +57,7 @@ namespace Wacs.Transpiler.AOT
         /// Codec format version, minor. Additive — new optional sections
         /// bump this. A v1.N decoder reads v1.M files for any M ≤ N.
         /// </summary>
-        public const byte VersionMinor = 0;
+        public const byte VersionMinor = 1;
 
         // =================================================================
         // Section tags — see InitDataFormat.md
@@ -86,6 +86,7 @@ namespace Wacs.Transpiler.AOT
             GcGlobalInits          = 0x14,
             LocalTagTypes          = 0x15,
             DefTypeTable           = 0x16,
+            PassiveElementSegments = 0x17,
         }
 
         // =================================================================
@@ -133,6 +134,8 @@ namespace Wacs.Transpiler.AOT
             WriteSection(w, Section.GcGlobalInits,         bw => WriteGcGlobalInits(bw, data));
             WriteSection(w, Section.LocalTagTypes,         bw => WriteLocalTagTypes(bw, data));
             WriteSection(w, Section.DefTypeTable,          bw => WriteDefTypeTable(bw, data));
+            if (data.PassiveElementSegments.Count > 0)
+                WriteSection(w, Section.PassiveElementSegments, bw => WritePassiveElementSegments(bw, data));
 
             w.Flush();
             return ms.ToArray();
@@ -226,6 +229,7 @@ namespace Wacs.Transpiler.AOT
                     case Section.DeferredGlobalInits:   ReadDeferredGlobalInits(r, data); break;
                     case Section.DeferredDataOffsets:   ReadDeferredDataOffsets(r, data); break;
                     case Section.SavedDataSegments:     ReadSavedDataSegments(r, data); break;
+                    case Section.PassiveElementSegments: ReadPassiveElementSegments(r, data); break;
                     case Section.Counts:                ReadCounts(r, data); break;
                     case Section.GcGlobalInits:         ReadGcGlobalInits(r, data); break;
                     case Section.LocalTagTypes:         ReadLocalTagTypes(r, data); break;
@@ -560,6 +564,31 @@ namespace Wacs.Transpiler.AOT
         }
 
         // ---- SavedDataSegments --------------------------------------------
+        private static void WritePassiveElementSegments(BinaryWriter writer, ModuleInitData data)
+        {
+            WriteVarUInt32(writer, (uint)data.PassiveElementSegments.Count);
+            foreach (var entry in data.PassiveElementSegments)
+            {
+                WriteVarInt32(writer, entry.Key);
+                WriteVarUInt32(writer, (uint)entry.Value.Length);
+                foreach (var value in entry.Value)
+                    WriteValue(writer, value);
+            }
+        }
+
+        private static void ReadPassiveElementSegments(BinaryReader reader, ModuleInitData data)
+        {
+            int count = (int)ReadVarUInt32(reader);
+            for (int i = 0; i < count; i++)
+            {
+                int index = ReadVarInt32(reader);
+                var values = new Value[(int)ReadVarUInt32(reader)];
+                for (int j = 0; j < values.Length; j++)
+                    values[j] = ReadValue(reader);
+                data.PassiveElementSegments.Add(index, values);
+            }
+        }
+
         internal static void WriteSavedDataSegments(BinaryWriter w, ModuleInitData data)
         {
             WriteVarUInt32(w, (uint)data.SavedDataSegments.Count);

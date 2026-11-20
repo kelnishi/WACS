@@ -1157,8 +1157,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             }
             else
             {
-                int segId = ctx.DataSegmentBaseId + dataIdx;
-                segData = ModuleInit.GetDataSegmentData(segId);
+                segData = ctx.GetDataSegment(dataIdx);
             }
             if (segData == null)
                 throw new TrapException("data segment not found");
@@ -1214,8 +1213,7 @@ namespace Wacs.Transpiler.AOT.Emitters
                 }
                 return result;
             }
-            int segId = ctx.ElemSegmentBaseId + elemIdx;
-            var values = ModuleInit.GetElemSegment(segId);
+            var values = ctx.GetElementSegment(elemIdx);
             if (values == null)
                 throw new TrapException("element segment not found");
             if ((long)(uint)offset + (long)(uint)length > values.Length)
@@ -1457,8 +1455,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             }
             else
             {
-                int segId = ctx.DataSegmentBaseId + dataIdx;
-                segData = ModuleInit.GetDataSegmentData(segId);
+                segData = ctx.GetDataSegment(dataIdx);
             }
             if (segData == null) throw new TrapException("data segment not found");
             var field = target.GetType().GetField("elements");
@@ -1499,8 +1496,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             }
             else
             {
-                int segId = ctx.ElemSegmentBaseId + elemIdx;
-                values = ModuleInit.GetElemSegment(segId);
+                values = ctx.GetElementSegment(elemIdx);
             }
             if (values == null) throw new TrapException("element segment not found");
             var field = target.GetType().GetField("elements");

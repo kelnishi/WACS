@@ -193,6 +193,15 @@ namespace Wacs.Transpiler.AOT.Emitters
         /// element values are gated out by the feasibility check.
         /// </summary>
         public static void RegisterPassiveElemSegment(int id, int[] encodedFuncIndices)
+            => ModuleInit.RegisterElemSegmentAt(id, DecodeFunctionReferences(encodedFuncIndices));
+
+        public static void InitializePassiveDataSegment(ThinContext ctx, int index, ReadOnlySpan<byte> bytes)
+            => ctx.SetDataSegment(index, bytes.ToArray());
+
+        public static void InitializePassiveElemSegment(ThinContext ctx, int index, int[] encodedFuncIndices)
+            => ctx.SetElementSegment(index, DecodeFunctionReferences(encodedFuncIndices));
+
+        private static Value[] DecodeFunctionReferences(int[] encodedFuncIndices)
         {
             var values = new Value[encodedFuncIndices.Length];
             for (int j = 0; j < encodedFuncIndices.Length; j++)
@@ -202,7 +211,7 @@ namespace Wacs.Transpiler.AOT.Emitters
                     ? new Value(Wacs.Core.Types.Defs.ValType.FuncRef)
                     : new Value(Wacs.Core.Types.Defs.ValType.FuncRef, idx);
             }
-            ModuleInit.RegisterElemSegmentAt(id, values);
+            return values;
         }
 
         public static void MemoryCopy(ThinContext ctx, int dstMemIdx, int srcMemIdx,
@@ -256,7 +265,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             else
             {
                 // Standalone: use registered data segments with base offset
-                segData = ModuleInit.GetDataSegmentData(ctx.DataSegmentBaseId + dataIdx)
+                segData = ctx.GetDataSegment(dataIdx)
                     ?? Array.Empty<byte>();
             }
 
@@ -282,8 +291,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             }
             else
             {
-                // Standalone: replace segment with empty array in registry
-                ModuleInit.DropDataSegment(ctx.DataSegmentBaseId + dataIdx);
+                ctx.DropDataSegment(dataIdx);
             }
         }
 
@@ -306,8 +314,8 @@ namespace Wacs.Transpiler.AOT.Emitters
             }
             else
             {
-                // Standalone mode: use registered element segments with base offset
-                var elemData = ModuleInit.GetElemSegment(ctx.ElemSegmentBaseId + elemIdx);
+                // Standalone mode: the context holds the live segment slots.
+                var elemData = ctx.GetElementSegment(elemIdx);
                 if (elemData == null)
                     throw new TrapException("out of bounds table access");
                 if ((long)(uint)src + (long)(uint)len > elemData.Length ||
@@ -328,7 +336,7 @@ namespace Wacs.Transpiler.AOT.Emitters
             }
             else
             {
-                ModuleInit.DropElemSegment(ctx.ElemSegmentBaseId + elemIdx);
+                ctx.DropElementSegment(elemIdx);
             }
         }
 

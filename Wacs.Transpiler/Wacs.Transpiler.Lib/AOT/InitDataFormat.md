@@ -10,18 +10,11 @@ decoders reject v2+ files, but a v2 decoder reads v1 files.
 
 ## Resource location
 
-The codec bytes live in a generated class's static `byte[]` field:
-
-```csharp
-public static class __WACSInitResource
-{
-    public static readonly byte[] Data = new byte[] { /* codec output */ };
-}
-```
-
-`ModuleClassGenerator` emits this class per-module. The module
-constructor reads the field and calls `InitDataCodec.Decode` to
-reconstruct `ModuleInitData`.
+The Standard emitter stores the codec bytes in the RVA-backed `Data` field
+of its generated `__WACSInit` type. The constructor passes a read-only span
+over those bytes and the loaded module type handle to the runtime. Each
+loaded module type has its own decoded template. Each instance creates
+live segment slots from the template.
 
 ## Wire format
 
@@ -33,7 +26,7 @@ All integers are little-endian. Variable-length integers (`varuint32`,
 ```
 "WACSINIT"          8 bytes   magic
 version_major       uint8     currently 1
-version_minor       uint8     currently 0
+version_minor       uint8     currently 1
 reserved            uint16    must be 0
 ```
 
@@ -71,7 +64,7 @@ default to their zero value.
 | 0x0A | GC_ELEMENT_VALUES         | `varuint32 count`, then `count × { varint32 segIdx, varint32 slotIdx, value v }`.                                                                                                                                                                                                                                                                                  |
 | 0x0B | DEFERRED_ELEM_GLOBALS     | `varuint32 count`, then `count × { varint32 elemSegIdx, varint32 slotIdx, varint32 globalIdx }`.                                                                                                                                                                                                                                                                   |
 | 0x0C | START_FUNC_INDEX          | `varint32 index` (-1 = no start function).                                                                                                                                                                                                                                                                                                                          |
-| 0x0D | SEGMENT_BASE_IDS          | `varint32 dataBase, varint32 elemBase` — legacy; overwritten by the load-time registration in the host. Retained for in-process parity.                                                                                                                                                                                                                           |
+| 0x0D | SEGMENT_BASE_IDS          | `varint32 dataBase, varint32 elemBase`. The data base normalizes saved segment IDs to module-local indices. |
 | 0x0E | ACTIVE_ELEM_INDICES       | `varuint32 count`, then `count × varint32`.                                                                                                                                                                                                                                                                                                                        |
 | 0x0F | ACTIVE_DATA_INDICES       | `varuint32 count`, then `count × varint32`.                                                                                                                                                                                                                                                                                                                        |
 | 0x10 | DEFERRED_GLOBAL_INITS     | `varuint32 count`, then `count × { varint32 globalIdx, expression initializer }`.                                                                                                                                                                                                                                                                                  |
@@ -81,6 +74,7 @@ default to their zero value.
 | 0x14 | GC_GLOBAL_INITS           | `varuint32 count`, then `count × { varint32 globalIndex, varint32 typeIndex, varint32 initKind, varuint32 pCount, pCount × varint64 param, varint32 elementValType }`.                                                                                                                                                                                             |
 | 0x15 | LOCAL_TAG_TYPES           | `varuint32 count`, then `count × { uint8 present, deftypeRef? defType }` — `deftypeRef` is a 0-based index into the inline DEFTYPE_TABLE section.                                                                                                                                                                                                                   |
 | 0x16 | DEFTYPE_TABLE             | Flat list of unique `DefType`s referenced by LOCAL_TAG_TYPES (or future DefType-bearing sections). Encoded topologically so each entry's `SuperTypes` index its predecessors. `varuint32 count`, then `count × { recursiveType, varuint32 projection, varint32 defIndex, varuint32 superCount, superCount × varuint32 superIdx }`. See DEFTYPE_ENCODING below.     |
+| 0x17 | PASSIVE_ELEMENT_SEGMENTS | `varuint32 count`, then `count × { varint32 moduleLocalIndex, varuint32 valueCount, valueCount × value }`. Optional. |
 
 ### Primitive encodings
 
